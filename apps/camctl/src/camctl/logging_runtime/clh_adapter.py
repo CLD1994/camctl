@@ -252,10 +252,14 @@ class _TrackingHandler(ConcurrentRotatingFileHandler):
         self.resource_close_error = self.resource_close_error or _failure_description(error)
 
     def _remember_control(self, error):
-        if self._failure_error is None:
-            self._failure_error = error
+        self._remember_failure(error)
         if not isinstance(error, Exception) and self._control_error is None:
             self._control_error = error
+
+    def _remember_failure(self, error):
+        """副本错误保存上下文，不占用独立文件操作的控制异常责任。"""
+        if self._failure_error is None:
+            self._failure_error = error
 
     def _sync_directory(self, path, *, synced=None):
         if os.name != "posix" or not hasattr(os, "O_DIRECTORY"):
@@ -461,6 +465,21 @@ def _add_copy_close_notes(primary: BaseException,
             return
 
 
+def _supplement_failure(primary, secondary, result, label):
+    """保存未被选为主异常的原事实；附属操作不替换已选主对象。"""
+    _attach_write_result(secondary, result)
+    try:
+        if (primary.__context__ is None and secondary.__context__ is not primary
+                and secondary.__cause__ is not primary):
+            primary.__context__ = secondary
+    except BaseException:
+        pass
+    try:
+        primary.add_note(f"{label}: {_failure_description(secondary)}")
+    except BaseException:
+        pass
+
+
 def _raise_copy_failure(
     primary: BaseException | None,
     close_errors: tuple[BaseException, ...],
@@ -661,7 +680,6 @@ class FileChannel:
                     handler._record_file_failure(error)
                 except BaseException as error:
                     handler._remember_control(error)
-                    primary_copy_error = error
                     file_io_failed = True
                 if not file_io_failed:
                     try:
@@ -672,20 +690,20 @@ class FileChannel:
                         target.flush()
                         os.fsync(target.fileno())
                     except BaseException as error:
-                        handler._remember_control(error)
+                        handler._remember_failure(error)
                         primary_copy_error = error
                     finally:
                         if target is not None:
                             try:
                                 target.close()
                             except BaseException as error:
-                                handler._remember_control(error)
+                                handler._remember_failure(error)
                                 target_close_exception = error
                         if source is not None:
                             try:
                                 source.close()
                             except BaseException as error:
-                                handler._remember_control(error)
+                                handler._remember_failure(error)
                                 source_close_exception = error
             finally:
                 try:
@@ -728,19 +746,31 @@ class FileChannel:
                     copy_error = _raise_copy_failure(primary_copy_error, close_errors, write_result)
                 except BaseException as error:
                     self._finish_result(write_result, error, propagate=True)
-            return (self._finish_result(write_result), copy_error)
+            copy_context = (primary_copy_error if primary_copy_error is not None
+                            else close_errors[0] if close_errors else None)
+            return (self._finish_result(write_result, copy_context), copy_error)
 
     def _finish_result(self, result, primary=None, *, propagate=False):
-        """所有出口先交付真实事实，再传播本次操作的原首控制异常。"""
+        """先形成真实事实，再合并独立操作控制与副本有序选择的主异常。"""
         handler = self._handler
-        if primary is not None:
+        if primary is not None and not propagate:
             handler._remember_control(primary)
-        # 副本端口已经按操作及句柄关闭次序选定主异常，不再改选。
-        error = primary if propagate else handler._control_error
+        operation_control = handler._control_error
+        if not propagate:
+            error = operation_control
+        elif operation_control is None or operation_control is primary:
+            error = primary
+        elif isinstance(primary, Exception):
+            error = operation_control
+            _supplement_failure(error, primary, result, "日志副本错误")
+        else:
+            # 文件阶段控制会阻止副本启动；此处副本原控制早于解锁和收场控制。
+            error = primary
+            _supplement_failure(error, operation_control, result, "文件通道后续控制异常")
         if error is not None:
             original = handler._failure_error
             try:
-                if (original is not None and original is not error
+                if (not propagate and original is not None and original is not error
                         and error.__cause__ is None and error.__context__ is None):
                     error.__context__ = original
             except BaseException:

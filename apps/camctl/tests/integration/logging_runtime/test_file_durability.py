@@ -815,3 +815,99 @@ def test_actual_path_resolution_failure_preserves_append_and_reports_directory_s
         assert messages(path) == ["trigger"]
     finally:
         channel.close()
+
+
+@pytest.mark.parametrize("scenario", ["copy_error", "close_errors", "copy_control", "close_control", "close_group", "file_control"])
+def test_copy_selection_and_independent_operation_control_use_separate_responsibility(tmp_path, monkeypatch, scenario):
+    import builtins
+    import fcntl
+    import portalocker.portalocker as portalocker_api
+    import shutil
+
+    path, destination = tmp_path / "camctl.log", tmp_path / "copy.log"
+    path.touch()
+    channel = FileChannel(path, max_bytes=4096, file_count=3)
+    operation_control = asyncio.CancelledError("independent unlock control")
+    copy_control = asyncio.CancelledError("earlier copy control")
+    file_control = asyncio.CancelledError("earlier file sync control")
+    copy_error = RuntimeError("copy operation failed")
+    target_error = RuntimeError("target close failed") if scenario == "close_errors" else OSError("target close failed")
+    source_error = RuntimeError("source close failed") if scenario == "close_group" else asyncio.CancelledError("source close control")
+    original_open, original_copy, original_flock, original_sync = builtins.open, shutil.copyfileobj, fcntl.flock, os.fsync
+    copy_started, unlock_interrupted = [], False
+
+    class Stream:
+        def __init__(self, wrapped, error):
+            self.wrapped, self.error = wrapped, error
+
+        def __getattr__(self, name):
+            return getattr(self.wrapped, name)
+
+        def close(self):
+            self.wrapped.close()
+            raise self.error
+
+    def open_file(name, mode="r", *args, **kwargs):
+        value = original_open(name, mode, *args, **kwargs)
+        if scenario in ("close_errors", "close_control", "close_group"):
+            if name == path and mode == "rb":
+                return Stream(value, source_error)
+            if name == destination and mode == "wb":
+                return Stream(value, target_error)
+        return value
+
+    def copy(source, target):
+        copy_started.append(True)
+        if scenario == "copy_error":
+            raise copy_error
+        if scenario == "copy_control":
+            raise copy_control
+        return original_copy(source, target)
+
+    def flock(fd, flags):
+        nonlocal unlock_interrupted
+        value = original_flock(fd, flags)
+        if flags == fcntl.LOCK_UN and not unlock_interrupted:
+            unlock_interrupted = True
+            raise operation_control
+        return value
+
+    def fsync(fd):
+        if scenario == "file_control" and stat.S_ISREG(os.fstat(fd).st_mode):
+            raise file_control
+        return original_sync(fd)
+
+    monkeypatch.setattr(builtins, "open", open_file)
+    monkeypatch.setattr(shutil, "copyfileobj", copy)
+    monkeypatch.setattr(portalocker_api, "LOCKER", flock)
+    monkeypatch.setattr(os, "fsync", fsync)
+    try:
+        with pytest.raises(BaseException) as raised:
+            channel.copy_with_write(record(), destination)
+        expected = (copy_control if scenario == "copy_control" else
+                    source_error if scenario == "close_control" else
+                    file_control if scenario == "file_control" else operation_control)
+        assert raised.value is expected
+        result = expected.write_result
+        assert result.appended and result.durable is (scenario != "file_control")
+        assert result.coordination_error and channel.disabled
+        if scenario in ("copy_control", "close_control"):
+            assert operation_control.write_result is result
+            assert any("independent unlock control" in note for note in expected.__notes__)
+        elif scenario == "file_control":
+            assert not copy_started and not destination.exists()
+            assert result.failure_stage is WriteFailureStage.FILE_SYNC
+        else:
+            context = expected.__context__
+            if scenario == "copy_error":
+                assert context is copy_error
+            elif scenario == "close_errors":
+                assert context is target_error
+                assert any("source close control" in note for note in target_error.__notes__)
+            else:
+                assert isinstance(context, ExceptionGroup)
+                assert context.exceptions == (target_error, source_error)
+        if scenario == "close_control":
+            assert source_error.__cause__ is target_error
+    finally:
+        channel.close()
