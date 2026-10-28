@@ -46,6 +46,17 @@
 
 四种曝光模式、八种白平衡模式、手动色温两端、MF 不移动／正向／负向、AF-S，以及 ISO、光圈边界均经过真实设置或拍摄。不能把分支见证扩展为全部离散快门、ISO、光圈的逐档设备验收；0.000667 秒的工具回显也不能替代准确曝光读回。
 
+机器允许域以环境中的 `device-capabilities.json` 为现场导出，以[单张参数规格](../superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md)为仓库权威定义。实际证据索引如下；`01`—`49` 是此前安装版本的真实业务记录，不能自动替代 `a9023ec0` 后续复验。
+
+| 功能面 | 实际见证及范围 |
+| --- | --- |
+| 曝光 M/A/S/P | `10-parameter-matrix/` 的四种模式均完成拍摄；A/P/S/M 分别覆盖手动色温 2000 K、10000 K、fluorescent 与 tungsten。相机自动决定的曝光量没有独立回读。 |
+| 白平衡 | `01` auto、`02` manual 5500 K、`03` daylight、`04` cloudy、`10` manual 两端／fluorescent／tungsten／shade、`22` flash 覆盖八种模式；失败组只按已到达的设置步骤计证据。手动色温上下界均在第 10 组拍摄成功。 |
+| 对焦 | `01` MF 不移动、`23` MF +5、`25` MF -5 和 `22` AF-S 有真实见证；第 2 组 AF-S 曾失败，第 15 组未到 autofocus，不能把它们算作成功。焦点距离及成像清晰度没有实测读回。 |
+| 图片格式与正式源 | `01` 等旧组记录 HOST/RAW，`29` HOST/JPEG、`30` DEVICE/JPEG；当前 `44`—`47` 又覆盖 HOST/JPEG、DEVICE/JPEG、HOST/RAW、DEVICE/RAW，其中 HOST/RAW 失败，三种其余组合成功。格式域是 RAW（3FR）与 JPEG。 |
+
+快门、ISO、光圈允许值分别见能力文件与规格；端点设置已有真实见证。完整 34 档快门目录在第 43、48 组逐档以 PREPARE 尝试受理；这不等同于每档实际曝光验证，其他组中个别快门值的真实拍摄结果仍按各自记录判定。文件操作和恢复见后文 50、56—60 组，均不把设置命令成功扩展成实际曝光或对焦准确性。
+
 ## 未知活动、重启与有限失败
 
 初始发行物的可用性 check 1／2 分别由动作 10／16 触发，成功尝试为 operation_attempt 9／14；真实 `list → info → doctor` 完整成功后，旧 activity 3／5 的占用从 HELD 变为 RELEASED，活动仍为 UNKNOWN。其旧动作 7／13 的失败和 `device_execution.status=end_unconfirmed` 保持，原 JPEG 工作文件保留。
@@ -64,14 +75,14 @@
 
 两个被初始程序拒绝的 JPEG 原图均可用 `ffmpeg -v error -xerror -i <file> -frames:v 1 -f null -` 解码，尺寸为 11656×8742；配对预览为 3888×2918。最后一个 EOI 后分别有 875 和 2647 字节；这两份样本不能被描述为“不可解码”。独立下载 `B0000273.JPG` 后，原图与拍摄副本均为 7,086,080 字节，SHA-256 均为 `412f60a3e77ffe213264e4a61eb804a66d825813fe0bf33e48732c70ae6deb5b`。
 
-DEVICE 预览的现场内容保证未通过：
+早期 DEVICE 预览同步副本的完整内容一致性未通过：
 
 | 来源 | 拍摄时固定的主机预览 | 独立下载结果 | 结论 |
 | --- | --- | --- | --- |
 | `B0000273.JPG` | 376,511 字节，SHA-256 `93795e9f4a9204a27ccd31873c5e319eab391ffb5cc7ace03df4252caf15764d` | 376,832 字节，SHA-256 `49aa9fbd3c803dc074a493c9348800d3667dd97930cb1db69db11b5531f7c05f` | 拍摄预览恰为下载文件前缀，但完整文件不相同；不能截短下载后称原完整内容一致。 |
 | `B0000275.3FR` | 642,889 字节，固定摘要 `0bf7be69907ab1687df33a2ab1952a8f71f46b8366a5baedf29d8ba50c9201eb` | 两次均为 237,568 字节，SHA-256 均为 `36776b78a745699a7a2aab5906e34a9b64ba73d0ea77210c0ec99a8411cf5144`，下载内容可解码 | 下载本身稳定，但不等于拍摄时固定的源内容；camctl 的长度拒绝符合原契约。 |
 
-完整下载命令、原始 stdout／stderr、文件与解码结果位于 `validation/16-tool-content-diagnosis/`。这些事实尚不能定位相机、USB、厂商工具的内部根因。没有重定义源摘要、忽略多余字节或把视觉相似记为通过。
+完整下载命令、原始 stdout／stderr、文件与解码结果位于 `validation/16-tool-content-diagnosis/`。这些早期副本及其失败仍原样保留，不能定位相机、USB 或厂商工具的内部根因。后续来源调整版另行按真实角色观察决定使用主机同步副本还是重新读取机内来源；新的 DEVICE/JPEG 与 DEVICE/RAW 交付均通过摘要核对，见后文。没有重定义源摘要、忽略多余字节或把视觉相似记为通过。
 
 ## 软件修复及后续复验
 
@@ -132,33 +143,54 @@ HOST 以主机正式源为准，不为登记、取回或恢复归档向相机核
 
 2026-10-28 将源码 `a9023ec07348a7a4138625dd29f6358337fbc8e8` 构建并安装到同一环境，收据为 `validation/51-cold-recovery-install/receipt.json`。wheel SHA-256 为 `a123bac055308d07cf58b2a2f1a659f05d4412c65ea3e16ac8fe379c456bac0a`，安装退出 0；392 个包文件与源码及实际安装逐项一致，安装前后 103 个受保护文件的摘要保持一致，另留有一致状态库备份。锁定依赖、SQL 结构资源、枚举及公共能力契约未变，包内权威资源仅更新事件转换登记；沿用既有配置、数据库、C host 和客户端文件，没有执行 `init` 或迁移。
 
-安装版 `describe` 与依赖检查均退出 0，能力说明与原文件按精确数字解析比较一致，10 个依赖兼容；元信息核对后配置、数据库、WAL、客户端能力文件及 host 可执行文件摘要仍未变。完整结果见同目录 `metadata-check.json`，发行物及构建核对见 `build-verification.json`。本次没有启动 `run`、host 或客户端，没有调用设备或运行软件集成测试。第 49 组离线 HOST 证据属于前述 `0962121e` 安装版，不计为本安装版已经重跑；真实冷重启、新版四组合及其他 H6 待验范围保持。
+安装版 `describe` 与依赖检查均退出 0，能力说明与原文件按精确数字解析比较一致，10 个依赖兼容；元信息核对后配置、数据库、WAL、客户端能力文件及 host 可执行文件摘要仍未变。完整结果见同目录 `metadata-check.json`，发行物及构建核对见 `build-verification.json`。安装核对本身没有启动 `run`、host 或客户端，没有调用设备或运行软件集成测试。第 49 组离线 HOST 证据属于前述 `0962121e` 安装版。后文 44—60 组是 `a9023ec0` 安装后的独立在线业务见证；受控供电时序、恢复晚于窗口及未列出的 H6 组合仍保持待验。
 
-## 充电期间的离线收口
+## 合并修复版的在线来源、媒体与恢复验证
 
-相机充电期间未调用设备。再次审计现有证据，45 份报告均通过公共 Schema 与文件名 SHA-256 核对；18 条 delivery 中有 14 份实际交付文件，大小与固定摘要全部相符，另外 4 条对应此前失败且未发布的预览交付。17 份不同 JPEG 内容中 8 份可解码，其余继续保留实际失败，不以传输字节相同替代媒体有效。SQLite `integrity_check` 为 `ok`，`foreign_key_check` 为空。结果和旧审计副本分别位于 `validation/audit/result.json`、`result-before-source-authority.json`。
+`validation/52-online-preflight/` 再次核对了 USB 身份和 doctor；序列号仍为 `64010904`，doctor PASS。随后以 `a9023ec0` 安装版执行四种来源／格式组合。详见各组的 `result.json`、`source-verification.json` 及汇总 `validation/source-authority-verification.json`。
 
-下一轮四种来源／格式及后到重复取回的生成入口已准备为环境内 `validation/source_authority_cases.py`；默认只列组名，尚未执行新组或发起设备调用。实际执行时生成新请求和有效窗口，DEVICE 同计划放置每角色两个独立等待取回，再以新请求取回同一来源，结合实际历史核对 H、缓存选择和后到设备读取。新来源修复完成、独立审查及重新安装后，才安排这轮真机流程。
+| 组名 | 实际结果 |
+| --- | --- |
+| `44-host-jpeg-authority` 与 `44-host-jpeg-authority-later` | HOST/JPEG 拍摄成功；两轮共 4 份交付，全部大小与 SHA-256 匹配。HOST 以主机正式源完成交付。 |
+| `45-device-jpeg-authority` 与 `45-device-jpeg-authority-later` | DEVICE/JPEG 拍摄成功；共 6 份交付全部匹配。原图同步副本匹配，取回选择同步副本；预览同步副本不匹配，取回改用机内来源。 |
+| `46-host-raw-authority` | HOST/RAW 的 `capture` 正常退出，形成 210,771,968 字节原图及 404,599 字节 JPEG 预览；预览无效，`verify_files` 以源媒体错误拒绝整次拍摄，未发布取回交付。动作 37 的原图和工作文件保留，没有重拍；原图后经 rawpy／LibRaw 确认可解码。 |
+| `47-device-raw-authority` 与 `47-device-raw-authority-later` | DEVICE/RAW 拍摄成功；共 6 份交付全部匹配。原图同步副本匹配并被选择；无效预览副本未被选用，取回改用机内来源。后到原图第一次 READ 超时并由 SIGTERM 收场，同一 copy 的第二次尝试成功，预览一次成功；本轮耗时 205.32 秒。 |
+
+设备来源审计记录：每个 DEVICE 角色只观察一次来源页；在 H 时四个动作仍为 RUNNING、选择仍为 PENDING，之后完成的取回选回对应相机来源。两轮中匹配的原图选用同步副本，不匹配或无效的预览选用相机来源；DEVICE/JPEG 与 DEVICE/RAW 的四份缓存及其 capture-work 均在终态清理。此结果证明当前安装版的 DEVICE 来源选择与角色交付流程成功，不能把旧的同步副本内容差异改写成已修复或把早期失败输出改写成成功。HOST/RAW 的失败也不影响 DEVICE/RAW 对相机原图及预览角色的成功交付。
+
+`validation/53-source-media/result.json` 中五份有效 JPEG 内容实际解码退出码为 0；HOST/RAW 的无效预览解码退出 69。`validation/54-source-raw-decode/result.json` 使用独立环境的 rawpy 0.27.1／LibRaw 0.22.1 解码新交付 DEVICE/RAW `32.3FR` 与 HOST/RAW 失败后保留的原图 `37`，两者有效传感器数组均为 8750×11664，内嵌 JPEG 也能解码。诊断未修改原文件，也未向生产环境增加依赖。它证明原图可解码，不把 HOST/RAW 的失败动作改记为成功。
+
+## 参数、进程中断、幂等与清理复验
+
+`validation/43-parameter-catalog-summary.json` 与 `validation/48-parameter-summary.json` 合并覆盖规格中的 34 档快门 PREPARE：32 档被接受，`.000333` 与 `.00025` 两档被拒绝，所有组的 START 总数为 0。旧证据中对 `.000667` 秒请求的工具回显为 `1/1000`；这不是实际曝光读回。这些 PREPARE 结果不证明实际曝光准确性。32 秒拍摄的动作 31 仍为失败／结果未知；第 21 组只在恢复检查后释放旧限制，没有重拍动作 31。
+
+`50-device-results-camctl-interrupted/` 在真实 DEVICE 下载进行中 SIGKILL camctl；host 回收进程组，重启后没有自动执行原计划。原 START 仅成功一次；一个 RESULTS 结果按 `local_result_recovery` 保持 UNKNOWN，另一结果成功；activity 60 为 ENDED／RELEASED。RESULTS 未知不表示 START 未知。
+
+`56-device-start-camctl-interrupted/` 在真实 `capture` 进行中 SIGKILL camctl。原 START 按 `local_control_recovery` 保存为 UNKNOWN，未重放；activity 61 保持 UNKNOWN／HELD。后续第 57 组新 JPEG 拍摄、原图和预览取回均成功；检查 11 的第 1 次尝试通过 `list`、`info`、`doctor` 释放了 activity 61 的占用。activity 仍 UNKNOWN，旧 attempts 未变，空工作目录仍在；本次没有形成可信文件，不能据此声称有新媒体字节得到保留。恢复报告仍保留旧动作 failed 与 `end_unconfirmed`，见 `56-device-start-camctl-interrupted/after-followup-report.json`。
+
+第 58 组把第 45 组的原 request 重送，七类业务计数均不变，没有新增 operation 或 attempt。第 59 组成功清理 HOST 原图 output 27；对 DEVICE 预览 output 30 的清理失败，未产生任何 DEVICE `DELETE_FILE` 尝试，机内 output 6 仍为 PRESENT，完成事实及摘要保持。第 60 组在 `devices={}` 配置下再次取回该 HOST 来源：已清理原图失败，配对预览成功；先前已发布的 delivery 22—25 文件仍全部存在。具体记录分别见 `58-idempotent-device-request/verification.json`、`59-mode-specific-delete/verification.json` 和 `60-host-after-source-delete/result.json`。
+
+本轮最终轻量审计见 `validation/final-online-audit.json`：80 份报告的 Schema 与文件名摘要错误均为 0；40 条 delivery 中，36 个实际文件全部匹配记录大小和 SHA-256。缺席的 output 6、8、9、15 均对应旧失败且未发布的预览 delivery；没有已发布文件缺失。SQLite `integrity_check` 为 `ok`，`foreign_key_check` 为空。交付摘要审计不等同于媒体解码，媒体结论仍以第 53／54 组为准。
 
 ## 当前验收边界
 
-H6 尚未勾选。DEVICE 预览的完整内容一致性、32 秒拍摄的可靠行为及准确快门参数仍未通过；受控断电时间、恢复晚于窗口、物理断电持久性、第二机身及多设备数量分区、ARM64 目标主机均没有实际见证。未知 START 返回丢失的真实进程中断未到达原故障点，HA-01—HA-12 的全部软件交错、事务故障及历史重建组合也未执行。客户端按用户要求不在本次范围。
+H6 尚未勾选。`a9023ec0` 安装版已经有 HOST/JPEG、DEVICE/JPEG、DEVICE/RAW 的在线业务见证；HOST/RAW 因主机预览无效而失败，不能把四种组合写成全通过。RAW 原图本身经独立诊断可解码。完整 34 档快门目录均有 PREPARE 受理尝试，且两档被拒绝；这不等于逐档实际曝光验证。`.000667` 秒请求的工具回显为 `1/1000`，没有实际曝光读回；32 秒实际拍摄失败。曝光准确性未获验证。camctl 在 DEVICE 下载和真实 `capture` 中的两类 SIGKILL 已覆盖，但不能替代所有事务故障点。用户明确暂缓受控物理供电时序；ARM64 与第二机身目前没有目标。HA-01—HA-12 的完整软件交错、事务提交未知与三路径历史重建组合仍未执行；本轮未新增或运行软件集成测试。客户端仍不在本次范围。
 
-下表把现有现场分支映射到[完整 HA 验收契约](hasselblad-availability-recovery.md#实施责任与联合验收)，不将一个分支的成功记为整项通过。软件组合、真实相机和物理供电各自保留证据边界；来源规则调整后需要重新安装并执行相关现场流程。
+下表把现有现场分支映射到[完整 HA 验收契约](hasselblad-availability-recovery.md#实施责任与联合验收)，不将一个分支的成功记为整项通过。软件组合、真实相机和物理供电各自保留证据边界；新来源规则已安装并执行其真实在线流程。
 
 | 条目 | 已有现场分支 | 尚缺的主要见证 |
 | --- | --- | --- |
-| HA-01 原责任先收场 | 旧 UNKNOWN 活动在新检查后释放，原动作和工作文件保持。 | 原 START 返回丢失及 RESULTS 在途的真实进程中断；第 11 组没有到达原中断点。 |
-| HA-02 完整检查分类 | 原机身身份与 doctor PASS、绑定不符拒绝、真实 USB 访问失败。 | 零台、多台、身份与输出异常、退出和整次期限的完整分类组合。 |
-| HA-03 原子释放与报告 | 释放后旧活动 UNKNOWN、原失败和 `end_unconfirmed` 保持。 | 多目标、提交失败或未知、部分放行拒绝及对应报告边界。 |
-| HA-04 多活动与共享预算 | 有限检查和 READ 各自累计，终态检查不重开，同请求重送不新增操作。 | 多目标和多候选跨页共享、独立动作、耗尽及重启的完整组合。 |
-| HA-05 并发与其他设备 | 本次仅串行使用单台 Hasselblad。 | 正式七行交错矩阵及其他设备同时推进的组合；未执行。 |
-| HA-06 取消与窗口 | 准备前取消成功，真实 START 在途取消被拒绝，原拍摄继续。 | 创建、派发、完整返回及释放提交两侧的取消、时间变化和迟到返回组合。 |
-| HA-07 故障与历史 | 受理重送幂等，绑定恢复后旧终态和旧文件不改写。 | 原进程中断、各事务提交未知、三路径历史重建及固定报告字节。 |
-| HA-08 HOST 路径 | 原版本 RAW/JPEG 取回、无绑定取回、指定原图清理和配对独立保留；安装版第 49 组离线取回三项成功，大小与 SHA-256 均匹配，记录了三条 `READ_FILE`，零新设备检查和诊断工具调用。 | 新版四种来源／格式组合的完整 HOST 行为，以及缺失成功返回时的归档恢复。 |
-| HA-09 DEVICE 路径 | 原版本原图独立重复取回成功，预览实际长度／内容差异按原预算失败。 | 新版首次来源观察、两角色正式登记、一次副本决定、固定等待者复用及后到相机读取。 |
-| HA-10 DEVICE 失败与取消 | 可用性检查耗尽后读取项有限失败，零 READ，源存在性保持。 | 新来源下载中的真实错误、超时或取消收场、部分成功及跨运行恢复。 |
-| HA-11 诊断与关闭 | 保存真实工具双流和错误，普通 host 退出后无残留设备进程。 | 队列压力、保存失败、真实工具中断、SIGTERM 升级及终态独立收场组合。 |
-| HA-12 结构与环境隔离 | 独立环境、旧实例保留；合并及冷恢复修复版安装核对 392 个包文件和 103 个受保护文件，元信息检查通过。此前来源调整版另有离线 HOST 成功证据。 | 不支持结构拒绝和样本保持；ARM64 另需目标主机。 |
+| HA-01 原责任先收场 | 第 50 组下载中断后未自动重跑计划；原 START 只成功一次，RESULTS 一项为 `local_result_recovery` UNKNOWN、一项成功，activity 已 ENDED／RELEASED。第 56 组真实 START 中断后为 `local_control_recovery` UNKNOWN 且未重放。 | 其余 START／保存／RESULTS 事务边界及跨运行责任组合仍待验；第 11 组本身仍未到达原门闩。 |
+| HA-02 完整检查分类 | 原机身身份与 doctor PASS、绑定不符拒绝、真实 USB 访问失败；第 56 组真实检查通过并释放占用。 | 零台、多台、身份与输出异常、退出和整次期限的完整分类组合。 |
+| HA-03 原子释放与报告 | 第 50 组 activity 60 为 ENDED／RELEASED；第 56 组后续检查释放 activity 61 的占用，活动仍 UNKNOWN，动作失败和 `end_unconfirmed` 保持。 | 多目标、提交失败或未知、部分放行拒绝及对应报告边界。 |
+| HA-04 多活动与共享预算 | 同请求重送不增加七类业务计数、operation 或 attempt；检查和 READ 次数分开记录。 | 多目标和多候选跨页共享、独立动作、耗尽及重启的完整组合。 |
+| HA-05 并发与其他设备 | 本轮串行使用单台 Hasselblad。 | 正式七行交错矩阵及其他设备同时推进的组合；未执行。 |
+| HA-06 取消与窗口 | 准备前取消成功，真实 START 在途取消被拒绝；实际进程中断结果按未知保持。 | 创建、派发、完整返回及释放提交两侧的取消、时间变化和迟到返回组合。 |
+| HA-07 故障与历史 | 第 50／56 组真实 SIGKILL 分别覆盖 DEVICE RESULTS 与真实 START；58 重送幂等，原失败报告及未知活动保留。 | 各事务提交未知、三路径历史重建及固定报告字节的完整组合。 |
+| HA-08 HOST 路径 | HOST/JPEG 四份交付摘要匹配；HOST/RAW 本地源媒体检查失败且未交付。第 60 组证明指定原图清理后原图不可取回、配对预览仍可成功交付，旧 delivery 保持。 | HOST/RAW 预览有效的完整成功路径及缺失成功返回时的归档恢复。 |
+| HA-09 DEVICE 路径 | 新 DEVICE/JPEG 与 DEVICE/RAW 各六份交付摘要匹配；每角色来源观察一次，缓存选择与后到相机读取有真实见证，缓存及工作目录清理。 | 其他身份、源内容及未完成事务分区仍待验；旧输出同步副本差异作为原始失败保留。 |
+| HA-10 DEVICE 失败与取消 | 第 47-later 的原图 READ 超时并由 SIGTERM 收场后第二次尝试成功；预览一次成功。 | 最终失败／取消、部分成功和跨运行恢复的组合。 |
+| HA-11 诊断与关闭 | 第 47 组有真实 READ 超时及 SIGTERM；第 50／56 组 SIGKILL 后 host 进程组收场。 | 队列压力、保存失败、SIGTERM 升级及终态独立收场组合。 |
+| HA-12 结构与环境隔离 | `a9023ec0` 安装核对 392 个包文件和 103 个受保护文件，元信息检查通过；52 在线身份检查通过。 | 不支持结构拒绝和样本保持；ARM64 当前无目标主机。 |
 
-已通过的单个参数分支、原图传输、doctor、动作状态及文件摘要各自只支持其记录范围。来源调整版已安装，离线 HOST 取回证据已记录；新版设备流程与真实媒体结果仍须另外核对，不能仅凭旧计划成功、静态资源相同、交付摘要匹配或隔离单元通过宣布完整功能验收完成。
+已通过的单个参数分支、原图传输、doctor、动作状态及文件摘要各自只支持其记录范围。当前安装版的三种来源／格式成功路径、HOST/RAW 实际失败、RAW 原图独立解码和两类进程中断均已分别记录；不能仅凭这些分支、旧计划成功、静态资源相同或隔离单元通过宣布 H6 完成。
