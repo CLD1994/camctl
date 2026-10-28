@@ -1310,6 +1310,9 @@ async def _copy_delivery(
     try:
         prepared = await copies.prepare(facts["id"])
     except (CopyPreparationError, ConsistencyError) as error:
+        if photo_cache and (facts["id"], "copy_reset") in runtime.pending_read_business:
+            # 原重置保存尚未可靠确认，保留原申请和 READ 尝试。
+            raise
         return InputStep(InputPhase.PREPARE_FAILED, copy_id=facts["id"],
                          error=error)
     # 冷恢复也从原 READ_END 与已保存的重拷事实接回照片缓存失败，不再次读取缓存。
