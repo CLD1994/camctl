@@ -2233,6 +2233,20 @@ def _operation_finish_guard(event, context) -> None:
                 copy = context.state_rows.get("file_copies", {}).get(after.get("copy_id"))
                 unknown = last[1] == int(_ATTEMPT_STATUS.UNKNOWN)
                 if unknown and copy is not None:
+                    protected = {"file_copies", "actions", "deliveries", "recording_processing",
+                                 "segment_inspections", "device_files", "intermediate_files", "obtain_items"}
+                    for previous in context.validated_events:
+                        for change in previous.envelope.rows:
+                            if (change.table in protected
+                                    and (change.row_id in context.state_rows.get(change.table, {})
+                                         or change.table == "obtain_items")):
+                                _fail("未知读取耗尽不能越过同事务前序资格变化")
+                            if change.table == "operation_attempts":
+                                facts = context.state_rows.get("operation_attempts", {}).get(change.row_id, {})
+                                if (change.before.values.get("run_id") == row.row_id
+                                        or change.after.values.get("run_id") == row.row_id
+                                        or facts.get("run_id") == row.row_id):
+                                    _fail("未知读取耗尽不能越过同事务前序尝试变化")
                     from .outputs import _internal_input_requirement, _read_is_due, _read_owner_eligible, _slot_owner_action
                     from camctl.outputs.read_discovery import read_copy_dispatch_eligible
                     owner = _slot_owner_action(context, copy)

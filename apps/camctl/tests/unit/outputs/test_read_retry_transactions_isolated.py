@@ -647,7 +647,7 @@ class ExhaustGuardTests(unittest.TestCase):
         reads = Reads()
         copy = {"id": 9, "source_device_file_id": None, "delivery_id": None, "processing_id": 8}
         processing = {"reason": None}
-        context = SimpleNamespace(retry_wait_reads=reads, state_rows={"file_copies": {9: copy},
+        context = SimpleNamespace(retry_wait_reads=reads, validated_events=(), state_rows={"file_copies": {9: copy},
             "recording_processing": {8: processing}})
         modules = {m.__name__: m for m in (reads_module, outputs, discovery)}
         guard = namespace["_operation_finish_guard"]
@@ -663,6 +663,15 @@ class ExhaustGuardTests(unittest.TestCase):
             with self.assertRaises(ValueError): guard(event, context)
             copy_ready[0] = False
             reads.valid = False
+            with self.assertRaises(ValueError): guard(event, context)
+            reads.valid = True
+            changed = SimpleNamespace(table="file_copies", row_id=9,
+                before=SimpleNamespace(values={}), after=SimpleNamespace(values={}))
+            context.validated_events = (SimpleNamespace(envelope=SimpleNamespace(rows=(changed,))),)
+            with self.assertRaises(ValueError): guard(event, context)
+            changed.table = "operation_attempts"
+            changed.row_id = 14
+            changed.after.values["run_id"] = 7
             with self.assertRaises(ValueError): guard(event, context)
 
     def test_settled_failure_requires_matching_attempt_reference(self):
