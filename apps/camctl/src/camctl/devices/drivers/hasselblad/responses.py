@@ -48,6 +48,16 @@ class CaptureResponse:
     camera_locator: CameraFileLocator
 
 
+@dataclass(frozen=True, slots=True)
+class DeviceCaptureResponse:
+    """可靠相机定位与独立解释的同步文件记录。"""
+
+    camera_locator: CameraFileLocator
+    original: CapturedFile | None
+    preview: CapturedFile | None
+    host_records_error: str | None
+
+
 _DEVICE_LINE = re.compile(
     r"vid=0x([0-9a-fA-F]{4}) pid=0x([0-9a-fA-F]{4})[ \t]+"
     r"bus=[ \t]*([0-9]+) addr=[ \t]*([0-9]+)"
@@ -324,3 +334,41 @@ def parse_capture(
             "capture 输出包含无法解释的额外记录", code=CaptureParseErrorCode.INVALID_RESPONSE
         )
     return CaptureResponse(original=original, preview=preview, camera_locator=locator)
+
+
+def parse_device_capture(
+    output: bytes, stderr: bytes, *, output_complete: bool,
+    capture_format: CaptureFormat, output_directory: str,
+) -> DeviceCaptureResponse:
+    """独立确认相机控制与定位；本地文件记录只决定同步候选。"""
+    if output_complete is not True or type(output) is not bytes or type(stderr) is not bytes:
+        raise CliParseError("capture 必须取得完整且独立的 stdout/stderr")
+    if not isinstance(capture_format, CaptureFormat):
+        raise CliParseError("capture_format 必须是已登记的格式")
+    _canonical_absolute_directory(output_directory)
+    lines = output.split(b"\n")
+    if lines and lines[-1] == b"":
+        lines.pop()
+    if not lines or lines[0] != b"capture: OK" or sum(line == b"capture: OK" for line in lines) != 1:
+        raise CliParseError("capture 输出必须以唯一的 capture: OK 开始")
+    if any(line.startswith(b"capture:") and line not in
+           (b"capture: OK", _UNREPORTED_CAMERA_FILE_LINE.encode()) for line in lines):
+        raise CliParseError("capture 输出包含冲突的控制结果")
+    locator_records = [line for line in (*lines, *stderr.split(b"\n"))
+                       if line.startswith(b"camera file") or
+                       line == _UNREPORTED_CAMERA_FILE_LINE.encode()]
+    if len(locator_records) != 1:
+        raise CliParseError("capture 机内定位缺失、重复或冲突")
+    locator_line = _decode(locator_records[0], "capture camera locator")
+    if locator_line == _UNREPORTED_CAMERA_FILE_LINE:
+        raise CliParseError("相机正式源缺少机内定位")
+    locator = _camera_locator(locator_line, CAPTURE_FORMATS[capture_format])
+
+    local_lines = [line for line in lines[1:] if line not in locator_records]
+    try:
+        local = b"capture: OK\n" + b"\n".join(local_lines) + b"\n" + locator_records[0] + b"\n"
+        parsed = parse_capture(local, b"", output_complete=True, capture_format=capture_format,
+                               output_directory=output_directory)
+    except CliParseError as error:
+        return DeviceCaptureResponse(locator, None, None, str(error))
+    return DeviceCaptureResponse(locator, parsed.original, parsed.preview, None)
