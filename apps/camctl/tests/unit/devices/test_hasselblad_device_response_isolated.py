@@ -1,8 +1,9 @@
 """DEVICE 响应分类的资源隔离反例。"""
 
+import importlib
 import importlib.util
 import sys
-from enum import StrEnum
+from enum import Enum
 from types import ModuleType, SimpleNamespace
 from pathlib import Path
 
@@ -11,38 +12,56 @@ import pytest
 
 @pytest.fixture
 def responses(monkeypatch):
-    # 真实定位类型本身保持原路径约束；它的其他协作者在导入前隔离。
-    identity = ModuleType("camctl.devices.drivers.hasselblad.identity")
-    identity.CameraIdentity = lambda *args: None
-    definitions = ModuleType("camctl.devices.drivers.hasselblad.definitions")
-    definitions.DRIVER_ID = "hasselblad_cfv100c"
-    monkeypatch.setitem(sys.modules, identity.__name__, identity)
-    monkeypatch.setitem(sys.modules, definitions.__name__, definitions)
+    parent = importlib.import_module("camctl.devices.drivers.hasselblad")
+    names = ("identity", "definitions", "files", "parameters")
+    missing = object()
+    before_modules = {name: sys.modules.get(parent.__name__ + "." + name, missing) for name in names}
+    before_attrs = {name: getattr(parent, name, missing) for name in names}
     source = Path(__file__).parents[3] / "src/camctl/devices/drivers/hasselblad"
-    file_name = "camctl.devices.drivers.hasselblad._isolated_files"
-    file_spec = importlib.util.spec_from_file_location(file_name, source / "files.py")
-    files = importlib.util.module_from_spec(file_spec)
-    monkeypatch.setitem(sys.modules, file_name, files)
-    file_spec.loader.exec_module(files)
-    monkeypatch.setattr(files, "json_equal", lambda left, right: left == right)
-    parameters = ModuleType("camctl.devices.drivers.hasselblad.parameters")
-    class Format(StrEnum):
-        RAW = "raw"
-        JPEG = "jpeg"
-    parameters.CaptureFormat = Format
-    parameters.CaptureFormatDescription = object
-    parameters.CAPTURE_FORMATS = {
-        Format.RAW: SimpleNamespace(original_extension=".3fr", original_media_type="image/x-hasselblad-3fr", preview_extension=".jpg", preview_media_type="image/jpeg"),
-        Format.JPEG: SimpleNamespace(original_extension=".jpg", original_media_type="image/jpeg", preview_extension=".jpg", preview_media_type="image/jpeg"),
-    }
-    monkeypatch.setitem(sys.modules, files.__name__, files)
-    monkeypatch.setitem(sys.modules, parameters.__name__, parameters)
-    name = "camctl.devices.drivers.hasselblad._isolated_responses"
-    spec = importlib.util.spec_from_file_location(name, source / "responses.py")
-    module = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, name, module)
-    spec.loader.exec_module(module)
-    return module, Format
+    with monkeypatch.context() as isolated:
+        definitions = ModuleType(parent.__name__ + ".definitions")
+        definitions.DRIVER_ID = "hasselblad_cfv100c"
+        isolated.setitem(sys.modules, definitions.__name__, definitions)
+        isolated.setattr(parent, "definitions", definitions, raising=False)
+        identity_name = parent.__name__ + "._isolated_identity"
+        identity_spec = importlib.util.spec_from_file_location(identity_name, source / "identity.py")
+        identity = importlib.util.module_from_spec(identity_spec)
+        isolated.setitem(sys.modules, identity_name, identity)
+        identity_spec.loader.exec_module(identity)
+        isolated.setitem(sys.modules, parent.__name__ + ".identity", identity)
+        isolated.setattr(parent, "identity", identity, raising=False)
+        file_name = parent.__name__ + "._isolated_files"
+        file_spec = importlib.util.spec_from_file_location(file_name, source / "files.py")
+        files = importlib.util.module_from_spec(file_spec)
+        isolated.setitem(sys.modules, file_name, files)
+        file_spec.loader.exec_module(files)
+        isolated.setattr(files, "json_equal", lambda left, right: left == right)
+        isolated.setitem(sys.modules, parent.__name__ + ".files", files)
+        isolated.setattr(parent, "files", files, raising=False)
+        models = ModuleType("camctl.host_files.models")
+        models.FilePurpose = Enum("FilePurpose", {"CAPTURE_ORIGINAL": 1, "CAPTURE_PREVIEW": 2})
+        isolated.setitem(sys.modules, models.__name__, models)
+        formats_name = "camctl.host_files._isolated_photo_formats"
+        formats_source = source.parents[2] / "host_files/photo_formats.py"
+        formats_spec = importlib.util.spec_from_file_location(formats_name, formats_source)
+        formats = importlib.util.module_from_spec(formats_spec)
+        isolated.setitem(sys.modules, formats_name, formats)
+        formats_spec.loader.exec_module(formats)
+        parameters = ModuleType(parent.__name__ + ".parameters")
+        parameters.CaptureFormat = formats.CaptureFormat
+        parameters.CaptureFormatDescription = formats.CaptureFormatDescription
+        parameters.CAPTURE_FORMATS = formats.CAPTURE_FORMATS
+        isolated.setitem(sys.modules, parameters.__name__, parameters)
+        isolated.setattr(parent, "parameters", parameters, raising=False)
+        name = parent.__name__ + "._isolated_responses"
+        spec = importlib.util.spec_from_file_location(name, source / "responses.py")
+        module = importlib.util.module_from_spec(spec)
+        isolated.setitem(sys.modules, name, module)
+        spec.loader.exec_module(module)
+        yield module, formats.CaptureFormat
+    for name in names:
+        assert sys.modules.get(parent.__name__ + "." + name, missing) is before_modules[name]
+        assert getattr(parent, name, missing) is before_attrs[name]
 
 
 
@@ -247,3 +266,12 @@ def test_photo_page_decode_keeps_real_role_without_claiming_directory_scan(page_
     assert page.next_cursor == next_cursor
     assert not page.scan_complete and not page.set_finalized
     assert api.decode_result_cursor(next_cursor.as_json()) == next_cursor
+
+
+@pytest.mark.parametrize("serial,product_id", [("", 10), ("bad\x00serial", 10), ("serial", 0), ("serial", 65536), ("serial", True)])
+def test_photo_source_identity_rejects_invalid_real_camera_identity(responses, serial, product_id):
+    files = sys.modules["camctl.devices.drivers.hasselblad.files"]
+    binding = files.DeviceBinding("camera", "hasselblad_cfv100c")
+    with pytest.raises(ValueError):
+        files.CameraFileIdentity(binding, "/mnt/a.3FR", "a.3FR",
+            files.DownloadVariant.ORIGINAL, "a" * 64, serial, product_id, 100)
