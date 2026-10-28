@@ -129,7 +129,7 @@ def diagnostic_module():
          LogChannel=type("LogChannel", (), {}), LogRecord=LogRecord, admission_result_for=lambda error: None)
     stub("camctl.logging_runtime.formatting", log_metadata=lambda level: {})
     stub("camctl.operations.error_diagnostics", DiagnosticError=type("DiagnosticError", (Exception,), {}),
-         exception_diagnostic=lambda error: {"type": type(error).__name__, "message": str(error)})
+         exception_diagnostic=lambda error, **kwargs: {"type": type(error).__name__, "message": str(error)})
     stub("camctl.operations.models", AttemptTicket=AttemptTicket, CallOutcome=CallOutcome, ErrorValue=ErrorValue)
     stub("camctl.operations.process", RawToolOutcome=RawToolOutcome)
     stub("camctl.operations.result_format", error_document=lambda error: {
