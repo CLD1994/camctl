@@ -7978,7 +7978,7 @@
             "cancel",
             "read_permission"
           ],
-          "evidence": []
+          "evidence": ["canceled_publication"]
         },
         "WITHDRAW": {
           "reason": 7,

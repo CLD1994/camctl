@@ -5445,6 +5445,7 @@ class SettleCanceledObtain:
     action_id: int
     occurred_at: int
     item_ids: tuple[int, ...]
+    publishing_staging: tuple[tuple[int, int, int], ...] = ()
 
     def __post_init__(self) -> None:
         ObjectId(self.action_id)
@@ -5455,6 +5456,15 @@ class SettleCanceledObtain:
             ObjectId(identity)
         if tuple(sorted(set(self.item_ids))) != self.item_ids:
             raise ValueError("取消取回的固定成员必须按身份升序且不重复")
+        if not isinstance(self.publishing_staging, tuple):
+            raise TypeError("发布中断的原副本身份必须使用元组")
+        for member in self.publishing_staging:
+            if not isinstance(member, tuple) or len(member) != 3:
+                raise ValueError("发布中断身份必须包含交付、拷贝和目标文件")
+            for identity in member:
+                ObjectId(identity)
+        if tuple(sorted(set(self.publishing_staging))) != self.publishing_staging:
+            raise ValueError("发布中断身份必须按序且不重复")
 
 
 @dataclass(frozen=True)
@@ -5578,8 +5588,19 @@ class _SettleCanceledObtainCommand:
         if any(attempt["status"] == 1 or attempt["result_json"] is None
                for attempt in self._state["operation_attempts"].values()):
             return (), CanceledObtainSettlement(False)
-        if any(delivery["status"] == int(_DELIVERY_STATUS.PUBLISHING)
-               for delivery in self._state["deliveries"].values()):
+        publishing = {delivery_id: (copy_id, self._state["file_copies"][copy_id]["target_file_id"])
+                      for _, delivery_id, copy_id, _ in self._members
+                      if delivery_id is not None and self._state["deliveries"][delivery_id]["status"]
+                      == int(_DELIVERY_STATUS.PUBLISHING)}
+        observed = {delivery: (copy, file) for delivery, copy, file in self._command.publishing_staging}
+        if len(observed) != len(self._command.publishing_staging):
+            raise ConsistencyError("发布中断观察不能重复交付身份")
+        if any(publishing.get(delivery) != pair for delivery, pair in observed.items()):
+            raise ConsistencyError("发布中断观察不属于原交付、拷贝及目标文件")
+        if any(self._state["deliveries"][delivery]["publication_intent_event_id"] is None
+               for delivery in observed):
+            raise ConsistencyError("发布中断观察缺少原发布意图")
+        if set(publishing) != set(observed):
             return (), CanceledObtainSettlement(False)
         templates, first_files = [], []
         for item_id, delivery_id, copy_id, run_id in self._members:
@@ -5626,6 +5647,19 @@ class _SettleCanceledObtainCommand:
                 {"status": plan["status"]}, {"status": _PLAN_COMPLETE}),)))
         return tuple(templates), CanceledObtainSettlement(True, tuple(sorted(first_files)))
 
+    def _canceled_publication_evidence(self, kind, reason, rows):
+        if kind != _DELIVERY_CHANGED_EVENT or reason != 6:
+            return {}
+        identities = {delivery: (copy, file)
+                      for delivery, copy, file in self._command.publishing_staging}
+        if len(rows) != 1 or rows[0].table != "deliveries":
+            raise ConsistencyError("取消交付事件必须对应一份原交付")
+        pair = identities.get(rows[0].row_id)
+        if pair is None:
+            return {}
+        return {"canceled_publication": {"delivery_id": rows[0].row_id,
+            "copy_id": pair[0], "file_id": pair[1], "location": "staging"}}
+
     def plan(self, scope):
         saved = saved_transaction_events(scope.connection, self._key)
         action = self._facts(scope.connection)
@@ -5640,7 +5674,8 @@ class _SettleCanceledObtainCommand:
             return self._decision(result)
         allocation = scope.allocate(len(templates))
         events = tuple(_envelope(allocation.first_event_id + index, allocation.txn_id,
-            kind, reason, rows, self._command.occurred_at)
+            kind, reason, rows, self._command.occurred_at,
+            self._canceled_publication_evidence(kind, reason, rows))
             for index, (kind, reason, rows) in enumerate(templates))
         return CommandPlan(events=events, owners=self._owners, state_rows=self._state,
             read_coverage=ReadCoverage(self._ranges), result=result)
@@ -5680,7 +5715,8 @@ class _SettleCanceledObtainCommand:
                 "before": {"exists": row.before.exists, "values": dict(row.before.values)},
                 "after": {"exists": row.after.exists, "values": dict(row.after.values)}} for row in rows]
             if (event["type"] != kind or event["reason"] != reason
-                    or event["body"]["evidence"] != {}
+                    or not json_equal(event["body"]["evidence"],
+                        self._canceled_publication_evidence(kind, reason, rows))
                     or not json_equal(event["body"]["rows"], expected)):
                 raise TransactionError("原取消取回的身份、阶段或完整输入不同")
         return self._decision(result)
@@ -5699,7 +5735,17 @@ class _SettleCanceledObtainCommand:
             return self._decision(CanceledObtainSettlement(True))
         saved = saved_transaction_events(scope.connection, OperationKey(original[0]))
         assert saved is not None
-        self._command = replace(self._command, occurred_at=saved[0]["occurred_at"])
+        staging = []
+        for event in saved:
+            evidence = event["body"]["evidence"].get("canceled_publication")
+            if evidence is None:
+                continue
+            if (set(evidence) != {"delivery_id", "copy_id", "file_id", "location"}
+                    or evidence["location"] != "staging"):
+                raise ConsistencyError("原取消取回的发布中断依据不可解释")
+            staging.append((evidence["delivery_id"], evidence["copy_id"], evidence["file_id"]))
+        self._command = replace(self._command, occurred_at=saved[0]["occurred_at"],
+                                publishing_staging=tuple(sorted(staging)))
         return self._reuse(scope, saved)
 
 
@@ -6610,6 +6656,35 @@ def _delivery_guard(event, context) -> None:
                     or after.get("published_event_id") != event.event_id:
                 raise EventValidationError(
                     "交接完成必须推进到 PUBLISHED 并引用本完成事件")
+            _require_publishable_copy(context, row.row_id)
+    elif event.event_type == _DELIVERY_CHANGED_EVENT and event.reason == 6:
+        evidence = event.evidence.get("canceled_publication")
+        for row in event.rows:
+            if row.table != "deliveries":
+                continue
+            publishing = row.before.values.get("status") == int(_DELIVERY_STATUS.PUBLISHING)
+            if not publishing:
+                if evidence is not None:
+                    raise EventValidationError("非发布中交付不能携带发布对账依据")
+                continue
+            if (not isinstance(evidence, Mapping)
+                    or set(evidence) != {"delivery_id", "copy_id", "file_id", "location"}
+                    or evidence.get("location") != "staging"
+                    or evidence.get("delivery_id") != row.row_id):
+                raise EventValidationError("取消发布中交付缺少原副本观察依据")
+            delivery = context.state_rows.get("deliveries", {}).get(row.row_id)
+            copy = context.state_rows.get("file_copies", {}).get(evidence["copy_id"])
+            target = context.state_rows.get("intermediate_files", {}).get(evidence["file_id"])
+            action = None if delivery is None else context.state_rows.get("actions", {}).get(delivery["action_id"])
+            if (delivery is None or delivery.get("publication_intent_event_id") is None
+                    or action is None or action.get("type") != _OBTAIN_TYPE
+                    or action.get("cancel_requested") != 1
+                    or copy is None or copy.get("delivery_id") != row.row_id
+                    or sum(candidate.get("delivery_id") == row.row_id for candidate
+                           in context.state_rows.get("file_copies", {}).values()) != 1
+                    or copy.get("target_file_id") != evidence["file_id"]
+                    or target is None or target.get("owner_delivery_id") != row.row_id):
+                raise EventValidationError("取消发布中交付的原责任或文件身份不一致")
             _require_publishable_copy(context, row.row_id)
     elif event.event_type == _DELIVERY_CHANGED_EVENT \
             and event.reason == _DELIVERY_FAIL_REASON:
