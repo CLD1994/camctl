@@ -969,11 +969,11 @@ class CompletionContext:
     occurred_at: int
     digest: SourceDigestReader | None = None
     max_recopies: int | None = 1
-    allow_recopy: bool = True
     key: OperationKey | None = None
     executor: FileTaskExecutor | None = None
     save_business: Callable | None = None
     diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
+    allow_recopy: bool = True
 
 
 class CompletionPhase(Enum):
