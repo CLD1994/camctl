@@ -71,11 +71,6 @@ def pending_capture_candidates(connection, request, *, batch_size=128):
         raise ValueError("该选择入口只适用于 Hasselblad")
     if type(batch_size) is not int or not 1 <= batch_size <= 128:
         raise ValueError("拍摄候选批量必须为 1 至 128")
-    from camctl.persistence.retry_wait_structure import verify_retry_wait_index
-    try:
-        verify_retry_wait_index(connection, "actions_pending_capture_selection")
-    except ValueError as error:
-        raise ConsistencyError("拍摄选择索引缺失或定义不符") from error
     photo = int(enum_for("actions.type").CAMERA_TAKE_PHOTO)
     pending = int(enum_for("actions.status").PENDING)
     start = int(enum_for("operation_runs.kind").START)

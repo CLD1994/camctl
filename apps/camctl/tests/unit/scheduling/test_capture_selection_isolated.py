@@ -54,9 +54,7 @@ def selection(monkeypatch):
     monkeypatch.setattr(enums, "enum_for", lambda name: definitions[name])
     driver = ModuleType("camctl.devices.drivers.hasselblad.definitions")
     driver.DRIVER_ID = DRIVER_ID
-    structure = ModuleType("camctl.persistence.retry_wait_structure")
-    structure.verify_retry_wait_index = lambda connection, name: None
-    with patch.dict(sys.modules, {driver.__name__: driver, structure.__name__: structure}):
+    with patch.dict(sys.modules, {driver.__name__: driver}):
         from camctl.devices.drivers.hasselblad.identity import CameraIdentity
         path = Path(__file__).parents[3] / "src/camctl/persistence/repositories/capture_selection.py"
         spec = importlib.util.spec_from_file_location("camctl.persistence.repositories._capture_selection_test", path)
@@ -104,16 +102,6 @@ def test_saved_selection_input_round_trips_and_requires_complete_facts(selection
     document.pop("identity")
     with pytest.raises(module.ConsistencyError):
         module.CaptureSelectionInput.from_document(document)
-
-
-def test_missing_selection_index_is_a_state_error(selection, monkeypatch):
-    module, _ = selection
-    structure = sys.modules["camctl.persistence.retry_wait_structure"]
-    def missing(*args):
-        raise ValueError("missing")
-    monkeypatch.setattr(structure, "verify_retry_wait_index", missing)
-    with pytest.raises(module.ConsistencyError, match="索引缺失"):
-        list(module.pending_capture_candidates(Connection([]), request(selection, 0)))
 
 
 def test_selection_skips_candidates_without_resource_qualification(selection, monkeypatch):
