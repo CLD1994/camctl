@@ -7,6 +7,7 @@ Schema 全部来自包内权威资源，相互引用按兄弟文件名解析；�
 
 from __future__ import annotations
 
+from copy import deepcopy
 from decimal import Decimal
 from functools import lru_cache
 from typing import Any, Iterator
@@ -92,13 +93,19 @@ def _check_schema(schema: Any) -> None:
         pending.extend((child, False) for child in resource.subresources())
 
 
+@lru_cache(maxsize=len(_SCHEMA_RESOURCES))
+def _checked_schema(contents: bytes) -> Any:
+    document = parse_exact_json(contents.decode("utf-8"))
+    _check_schema(document)
+    return document
+
+
 def load_schema(name: str) -> Any:
     """精确读取登记的 Schema；不可用资源及非法 JSON 属于规则错误。"""
     if name not in _SCHEMA_RESOURCES:
         raise SchemaRuleError(f"未打包的公共 Schema: {name}")
     try:
-        document = parse_exact_json(resource_bytes(name).decode("utf-8"))
-        _check_schema(document)
+        document = deepcopy(_checked_schema(resource_bytes(name)))
     except (ResourceError, OSError, UnicodeDecodeError, JsonParseError, SchemaError) as error:
         raise SchemaRuleError(f"Schema 规则不可用: {name}: {error}") from error
     return document
