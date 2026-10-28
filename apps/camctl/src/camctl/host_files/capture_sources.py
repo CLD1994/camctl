@@ -151,6 +151,15 @@ class CapturedArtifact:
 
 
 @dataclass(frozen=True)
+class PhotoSyncObservation:
+    """一次同步候选观察；错误保留原异常供所属结果诊断。"""
+
+    status: str
+    artifact: CapturedArtifact | None = None
+    error: CaptureFileError | None = None
+
+
+@dataclass(frozen=True)
 class _FileFacts:
     size_bytes: int
     sha256: str
@@ -200,6 +209,32 @@ async def verify_capture_files(
             )
         names.add(spec.original_name)
     return await _run_file_io(_verify_capture_files, roots, path, specs)
+
+
+async def inspect_capture_candidate(roots: BoundDirectories, activity_id: str,
+                                    spec: CaptureFileSpec) -> PhotoSyncObservation:
+    """只观察 START 可信记录指定的直接文件，不枚举或猜测名称。"""
+    if not isinstance(spec, CaptureFileSpec):
+        raise CaptureFileError("spec_validation", detail="同步候选必须使用原文件规格")
+    workspace = workspace_path(roots, activity_id)
+    try:
+        artifact = await _run_file_io(_inspect_capture_candidate, roots, workspace, spec)
+    except CaptureFileError as error:
+        status = "invalid" if error.stage in ("source_type", "source_size", "source_media") else "unconfirmed"
+        return PhotoSyncObservation(status, error=error)
+    return PhotoSyncObservation("missing" if artifact is None else "complete", artifact=artifact)
+
+
+def _inspect_capture_candidate(roots: BoundDirectories, workspace: Path,
+                               spec: CaptureFileSpec) -> CapturedArtifact | None:
+    with _workspace_directory(roots, workspace) as workspace_fd:
+        path = workspace / spec.original_name
+        if _stat_entry(workspace_fd, spec.original_name, path, "source_observe") is None:
+            return None
+        facts = _read_file_facts_at(workspace_fd, spec.original_name, path, spec.media_type,
+            expected_size=spec.size_bytes, expected_sha256=None, file_kind="source")
+        _sync_directory_fd(workspace_fd, workspace, "workspace_sync")
+        return CapturedArtifact(spec.original_name, facts.size_bytes, facts.sha256, spec.media_type)
 
 
 async def archive_capture_file(

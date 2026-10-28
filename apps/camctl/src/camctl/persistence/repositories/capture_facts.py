@@ -199,7 +199,7 @@ class PhotoResultReads:
         from camctl.capture.files import file_identity_key
         from camctl.contracts.json_values import json_equal
         from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
-        from camctl.devices.drivers.hasselblad.files import CameraFileIdentity
+        from camctl.devices.drivers.hasselblad.files import CameraFileIdentity, decide_photo_cache
         from camctl.devices.drivers.hasselblad.responses import parse_devices, parse_serial
         from camctl.capture.photo_format import saved_photo_format
         from camctl.host_files.photo_formats import CAPTURE_FORMATS
@@ -216,7 +216,7 @@ class PhotoResultReads:
             action, activity_id, before_event_id=attempt["intent_event_id"])
         outcome = page.page.outcome
         observations = [item for item in outcome.observations if item.type == "result_files_listed" and item.version == 3]
-        attempts = [item for item in outcome.observations if item.type == "photo_result_attempt" and item.version == 1]
+        attempts = [item for item in outcome.observations if item.type == "photo_result_attempt" and item.version in (1, 2)]
         if (outcome.status is not AttemptStatus.SUCCEEDED or outcome.effect is not EffectState.CONFIRMED
                 or outcome.error is not None or len(observations) != 1 or len(attempts) != 1
                 or len(page.page.entries) != 1):
@@ -275,6 +275,44 @@ class PhotoResultReads:
                 or entry.original_name != expected_name or entry.media_type != expected_media
                 or not json_equal(entry.locator, identity.locator())):
             raise ConsistencyError("照片来源完整字节事实与原角色结果不一致")
+        if attempts[0].version == 2:
+            comparison = detail.get("comparison")
+            if not isinstance(comparison, dict) or set(comparison) != {"status", "selected", "sync_artifact", "sync_error"}:
+                raise ConsistencyError("照片角色页缺少单次同步副本决定")
+            role_name = "original" if identity.variant.value == "original" else "preview"
+            candidate, candidate_error = start[role_name], start[role_name + "_error"]
+            actual_sync = comparison["sync_artifact"]
+            try:
+                if actual_sync is not None:
+                    actual_sync = CapturedArtifact.from_json(actual_sync)
+                    if (candidate is None or candidate_error is not None
+                            or actual_sync.original_name != candidate["host_name"]
+                            or actual_sync.size_bytes != candidate["size"]
+                            or actual_sync.media_type != candidate["media_type"]):
+                        raise ValueError("同步副本内容与原 START 记录不符")
+                    status = "complete"
+                else:
+                    status = comparison["status"]
+                    if candidate is None:
+                        if (status != "unconfirmed" or comparison["sync_error"] != candidate_error
+                                or not isinstance(candidate_error, str) or not candidate_error):
+                            raise ValueError("无可信记录不能授予同步副本资格")
+                    elif status == "missing":
+                        if comparison["sync_error"] is not None:
+                            raise ValueError("可靠缺失不能携带读取错误")
+                    elif status in ("invalid", "unconfirmed"):
+                        if not isinstance(comparison["sync_error"], dict):
+                            raise ValueError("同步副本失败须保存原错误")
+                    else:
+                        raise ValueError("同步副本分类无效")
+                decision = decide_photo_cache(identity, status=status,
+                    size_bytes=None if actual_sync is None else actual_sync.size_bytes,
+                    sha256=None if actual_sync is None else actual_sync.sha256)
+                if ((decision.comparison, decision.selected) != (comparison["status"], comparison["selected"])
+                        or actual_sync is not None and comparison["sync_error"] is not None):
+                    raise ValueError("同步副本决定与原事实不符")
+            except (KeyError, TypeError, ValueError) as error:
+                raise ConsistencyError("照片同步副本决定与原事实不符") from error
         if identity.variant.value == "original" and entry.paired_identity is not None:
             raise ConsistencyError("照片原图结果不能携带预览配对")
         if identity.variant.value == "thumbnail" and entry.paired_identity is not None:

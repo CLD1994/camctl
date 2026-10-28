@@ -350,6 +350,8 @@ class HasselbladPhotoListing:
             "capture_format": action["effective_params_json"]["capture_format"],
             "role": role.value, "cursor": None if cursor is None else cursor.as_json(),
             "original_identity": original if role is DownloadVariant.THUMBNAIL else None,
+            "sync_candidate": start["original" if role is DownloadVariant.ORIGINAL else "preview"],
+            "sync_error": start["original_error" if role is DownloadVariant.ORIGINAL else "preview_error"],
         }, ticket=ticket, timeout_s=timeout_s)
         result = await self._driver.list_results(request, 1)
         if result.outcome is None:

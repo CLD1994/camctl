@@ -32,7 +32,10 @@ from camctl.host_files.capture_sources import (
     CapturedArtifact,
     prepare_capture_workspace,
     verify_capture_files,
+    inspect_capture_candidate,
+    workspace_path,
 )
+from camctl.logging_runtime.diagnostics import record_error
 from camctl.logging_runtime.events import log_context, measure_stage
 from camctl.operations.models import (
     AttemptStatus,
@@ -71,7 +74,7 @@ from .responses import (
     parse_serial,
     doctor_passed,
 )
-from .files import CameraFileIdentity, CameraFileLocator, CameraLocatorStatus, DownloadVariant, PhotoResultCursor
+from .files import CameraFileIdentity, CameraFileLocator, CameraLocatorStatus, DownloadVariant, PhotoResultCursor, decide_photo_cache
 
 __all__ = ["AvailabilityCall", "AvailabilityCancelled", "AvailabilityResult", "EVIDENCE", "HasselbladDriver"]
 
@@ -122,6 +125,10 @@ _PHOTO_RESULT_ATTEMPT = EvidenceContract(
     "photo_result_attempt", 1, "result", frozenset({"activity_id", "role", "steps"}),
     identity_field="activity_id",
 )
+_PHOTO_RESULT_COMPARISON = EvidenceContract(
+    "photo_result_attempt", 2, "result", frozenset({"activity_id", "role", "steps", "comparison"}),
+    identity_field="activity_id",
+)
 EVIDENCE = EvidenceRegistry((
     _PHOTO_TAKEN, _DEVICE_PHOTO_TAKEN, _OPERATION_RETURNED, _DISPATCH_PREVENTED, ENTERED, PREVENTED,
     CAPTURE_PREPARATION_COMPLETED, _PHOTO_PREPARATION_STEPS,
@@ -132,7 +139,7 @@ EVIDENCE = EvidenceRegistry((
     EvidenceContract("local_availability_recovery", 1, "availability", frozenset()),
     _AVAILABILITY, _AVAILABILITY_RETURNED, _AVAILABILITY_NOT_DISPATCHED,
     RESULT_PHOTO_PAGE_CONTRACT, _PHOTO_RESULT_RETURNED, _PHOTO_RESULT_NOT_DISPATCHED,
-    _PHOTO_RESULT_ATTEMPT,
+    _PHOTO_RESULT_ATTEMPT, _PHOTO_RESULT_COMPARISON,
 ))
 
 _VENDOR_ID = 0x2756
@@ -520,7 +527,7 @@ class HasselbladDriver:
         params = request.params
         if not isinstance(params, Mapping) or set(params) != {
                 "activity_id", "camera_identity", "camera_locator", "capture_format", "role", "cursor",
-                "original_identity"}:
+                "original_identity", "sync_candidate", "sync_error"}:
             raise ValueError("照片来源观察申请成员不完整")
         if params["activity_id"] != ticket.target_id:
             raise ValueError("照片来源观察改变原活动")
@@ -538,6 +545,13 @@ class HasselbladDriver:
                 or not isinstance(original_identity, str) or not original_identity)):
             raise ValueError("照片来源配对身份只能属于预览角色")
         capture_format = CaptureFormat(params["capture_format"])
+        candidate, sync_error = params["sync_candidate"], params["sync_error"]
+        if candidate is None:
+            if not isinstance(sync_error, str) or not sync_error:
+                raise ValueError("同步副本缺少可信记录时须保留原诊断")
+        elif (not isinstance(candidate, Mapping) or set(candidate) != {"host_path", "host_name", "size", "media_type"}
+              or sync_error is not None):
+            raise ValueError("同步副本记录无效")
         cursor = None if params["cursor"] is None else PhotoResultCursor.from_json(params["cursor"])
         if cursor is not None and (cursor.binding != request.binding or cursor.activity_id != ticket.target_id
                                    or role is not cursor.role):
@@ -548,10 +562,12 @@ class HasselbladDriver:
         steps, calls = [], []
         last_raw = None
         in_call = False
+        comparison = None
 
         def result(*, error=None, entries=()):
-            observed = [DeviceObservation("photo_result_attempt", 1, {
-                "activity_id": ticket.target_id, "role": role.value, "steps": list(steps)})]
+            observed = [DeviceObservation("photo_result_attempt", 2, {
+                "activity_id": ticket.target_id, "role": role.value, "steps": list(steps),
+                "comparison": comparison})]
             if entries:
                 following = (PhotoResultCursor(request.binding, ticket.target_id, DownloadVariant.THUMBNAIL)
                              if role is DownloadVariant.ORIGINAL else None)
@@ -617,6 +633,27 @@ class HasselbladDriver:
             steps[-1]["artifact"] = artifact.as_json()
             identity = CameraFileIdentity(request.binding, locator.camera_path, locator.camera_name, role,
                 artifact.sha256, fixed_camera.serial, fixed_camera.product_id, artifact.size_bytes)
+            if candidate is None:
+                sync_status, sync_artifact, sync_failure = "unconfirmed", None, sync_error
+                record_error(sync_error, stage="capture.photo_sync_candidate",
+                             context={"ticket": ticket, "role": role.value})
+            else:
+                spec = CaptureFileSpec(candidate["host_name"], candidate["size"], candidate["media_type"])
+                if (candidate["host_path"] != str(workspace_path(self.roots, ticket.target_id) / spec.original_name)
+                        or spec.media_type != media):
+                    raise ValueError("同步副本记录改变原角色工作目录或媒体类型")
+                sync = await inspect_capture_candidate(self.roots, ticket.target_id, spec)
+                sync_status, sync_artifact = sync.status, sync.artifact
+                sync_failure = None if sync.error is None else exception_diagnostic(sync.error)
+                if sync.error is not None:
+                    record_error(sync.error, stage="capture.photo_sync_candidate",
+                                 context={"ticket": ticket, "role": role.value})
+            selected = decide_photo_cache(identity, status=sync_status,
+                size_bytes=None if sync_artifact is None else sync_artifact.size_bytes,
+                sha256=None if sync_artifact is None else sync_artifact.sha256)
+            comparison = {"status": selected.comparison, "selected": selected.selected,
+                "sync_artifact": None if sync_artifact is None else sync_artifact.as_json(),
+                "sync_error": sync_failure}
             original_name = (locator.camera_name if role is DownloadVariant.ORIGINAL
                              else locator.camera_name + ".thumbnail" + description.preview_extension)
             entry = {"identity": identity.file_identity, "locator": identity.locator(),

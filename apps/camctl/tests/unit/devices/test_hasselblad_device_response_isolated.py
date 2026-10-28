@@ -360,7 +360,9 @@ def photo_driver_api(responses, monkeypatch):
             "ReadPreparationSettlement": SimpleNamespace(SETTLED=SimpleNamespace(value="settled"))},
         "camctl.host_files.downloads": {"DownloadWorkspace": object, "ResultDownloadWorkspace": SourceWorkspace},
         "camctl.host_files.capture_sources": {"CaptureFileError": type("CaptureFileError", (ValueError,), {}), "CaptureFileSpec": object,
-            "CapturedArtifact": object, "prepare_capture_workspace": None, "verify_capture_files": None},
+            "CapturedArtifact": object, "prepare_capture_workspace": None, "verify_capture_files": None,
+            "inspect_capture_candidate": None, "workspace_path": lambda roots, activity: roots.staging / "capture-work" / activity},
+        "camctl.logging_runtime.diagnostics": {"record_error": lambda *args, **kwargs: None},
         "camctl.logging_runtime.events": {"log_context": lambda **kwargs: nullcontext(), "measure_stage": lambda *args, **kwargs: nullcontext()},
         "camctl.operations.models": {"AttemptStatus": AttemptStatus, "CallInfo": lambda **kwargs: SimpleNamespace(**kwargs), "CallOutcome": CallOutcome,
             "EffectState": EffectState, "ErrorValue": ErrorValue, "EvidenceValue": EvidenceValue,
@@ -421,7 +423,8 @@ def test_photo_source_runs_identity_and_download_with_one_decreasing_deadline(ph
     locator = files.CameraFileLocator(files.CameraLocatorStatus.PATH, f"/mnt/a.{extension}", f"a.{extension}")
     request = SimpleNamespace(operation="result", ticket=ticket, timeout_s=Decimal(10), binding=binding,
         params={"activity_id": "7", "camera_identity": {"serial": "serial", "product_id": 10},
-            "camera_locator": locator.as_json(), "capture_format": capture_format, "role": role, "cursor": None, "original_identity": None})
+            "camera_locator": locator.as_json(), "capture_format": capture_format, "role": role, "cursor": None, "original_identity": None,
+            "sync_candidate": None, "sync_error": "主机记录不可用"})
     result = _finish_immediate(driver.observe_photo_source(request))
     assert [item[0] for item in calls] == ["list", "info", "download"]
     assert [item[2] for item in calls] == [Decimal(9), Decimal(8), Decimal(7)]
@@ -429,6 +432,11 @@ def test_photo_source_runs_identity_and_download_with_one_decreasing_deadline(ph
     assert result.outcome.status is api.AttemptStatus.SUCCEEDED
     observed = next(item for item in result.outcome.observations if item.type == "result_files_listed")
     assert observed.data["role"] == role and observed.data["entries"][0]["size_bytes"] == 100
+    attempt = next(item for item in result.outcome.observations if item.type == "photo_result_attempt")
+    assert attempt.data["comparison"] == {
+        "status": "unconfirmed", "selected": "camera", "sync_artifact": None,
+        "sync_error": "主机记录不可用",
+    }
     assert workspace.instances[-1].released
 
 
@@ -456,7 +464,8 @@ def test_photo_source_timeout_stops_before_download_and_preserves_role_error(pho
     locator = files.CameraFileLocator(files.CameraLocatorStatus.PATH, "/mnt/a.3FR", "a.3FR")
     request = SimpleNamespace(operation="result", ticket=ticket, timeout_s=Decimal(10), binding=binding,
         params={"activity_id": "7", "camera_identity": {"serial": "serial", "product_id": 10},
-            "camera_locator": locator.as_json(), "capture_format": "raw", "role": "original", "cursor": None, "original_identity": None})
+            "camera_locator": locator.as_json(), "capture_format": "raw", "role": "original", "cursor": None, "original_identity": None,
+            "sync_candidate": None, "sync_error": "主机记录不可用"})
     result = _finish_immediate(driver.observe_photo_source(request))
     assert calls == ["list", "info"]
     assert result.outcome.status is api.AttemptStatus.FAILED
@@ -464,6 +473,55 @@ def test_photo_source_timeout_stops_before_download_and_preserves_role_error(pho
     assert result.outcome.error.details["reason"] == "source_call_timeout"
     assert all(item.type != "result_files_listed" for item in result.outcome.observations)
     assert workspace.instances[-1].released
+
+
+@pytest.mark.parametrize("status,digest,expected,selected", [
+    ("complete", "a" * 64, "matched", "sync"),
+    ("complete", "b" * 64, "mismatch", "camera"),
+    ("missing", None, "missing", "camera"),
+    ("invalid", None, "invalid", "camera"),
+    ("unconfirmed", None, "unconfirmed", "camera"),
+])
+def test_photo_source_records_one_actual_sync_comparison(photo_driver_api, status, digest, expected, selected):
+    from decimal import Decimal
+    api, files, _, Raw = photo_driver_api
+    driver = object.__new__(api.HasselbladDriver)
+    driver.roots = SimpleNamespace(staging=Path("/staging"))
+    driver.monotonic_ns = lambda: 0
+    driver._binding_config = lambda binding: SimpleNamespace(serial="serial", product_id=10)
+    async def run(*, config, name, args, timeout_s, steps):
+        steps.append({"name": name, "local_exit_code": 0, "local_signal": None,
+            "transport_error": None, "output_failure": None})
+        raw = Raw()
+        raw.output = {"list": b"vid=0x2756 pid=0x000a bus=1 addr=2\n", "info": b"serial : serial\n", "download": b""}[name]
+        raw.stderr, raw.output_failure, raw.error = b"", None, None
+        raw.exit = SimpleNamespace(exit_code=0, signal=None)
+        return raw
+    driver._run_step = run
+    api.CaptureFileSpec = lambda name, size, media: SimpleNamespace(original_name=name, size_bytes=size, media_type=media)
+    observed = []
+    async def inspect(roots, activity_id, spec):
+        observed.append((activity_id, spec.original_name))
+        artifact = None if digest is None else SimpleNamespace(size_bytes=100, sha256=digest,
+            as_json=lambda: {"original_name": "local.3FR", "size_bytes": 100, "sha256": digest,
+                             "media_type": "image/x-hasselblad-3fr"})
+        failure = ValueError("sync failed") if status in ("invalid", "unconfirmed") else None
+        return SimpleNamespace(status=status, artifact=artifact, error=failure)
+    api.inspect_capture_candidate = inspect
+    binding = files.DeviceBinding("camera", "hasselblad_cfv100c")
+    ticket = SimpleNamespace(operation="result", target_id="7", responsibility_key="results/7", run_id=9, attempt_id=2)
+    locator = files.CameraFileLocator(files.CameraLocatorStatus.PATH, "/mnt/a.3FR", "a.3FR")
+    request = SimpleNamespace(operation="result", ticket=ticket, timeout_s=Decimal(10), binding=binding,
+        params={"activity_id": "7", "camera_identity": {"serial": "serial", "product_id": 10},
+            "camera_locator": locator.as_json(), "capture_format": "raw", "role": "original", "cursor": None,
+            "original_identity": None, "sync_candidate": {"host_path": "/staging/capture-work/7/local.3FR",
+                "host_name": "local.3FR", "size": 100, "media_type": "image/x-hasselblad-3fr"}, "sync_error": None})
+    outcome = _finish_immediate(driver.observe_photo_source(request)).outcome
+    comparison = next(item for item in outcome.observations if item.type == "photo_result_attempt").data["comparison"]
+    assert outcome.status is api.AttemptStatus.SUCCEEDED
+    assert observed == [("7", "local.3FR")]
+    assert (comparison["status"], comparison["selected"]) == (expected, selected)
+    assert (comparison["sync_error"] is not None) == (status in ("invalid", "unconfirmed"))
 
 
 def test_photo_source_does_not_dispatch_to_changed_camera_binding(photo_driver_api):
@@ -478,7 +536,8 @@ def test_photo_source_does_not_dispatch_to_changed_camera_binding(photo_driver_a
     locator = files.CameraFileLocator(files.CameraLocatorStatus.PATH, "/mnt/a.3FR", "a.3FR")
     request = SimpleNamespace(operation="result", ticket=ticket, timeout_s=Decimal(10), binding=binding,
         params={"activity_id": "7", "camera_identity": {"serial": "serial", "product_id": 10},
-            "camera_locator": locator.as_json(), "capture_format": "raw", "role": "original", "cursor": None, "original_identity": None})
+            "camera_locator": locator.as_json(), "capture_format": "raw", "role": "original", "cursor": None, "original_identity": None,
+            "sync_candidate": None, "sync_error": "主机记录不可用"})
     result = _finish_immediate(driver.observe_photo_source(request))
     assert result.outcome.status is api.AttemptStatus.FAILED
     assert result.outcome.error.code == "device_binding_unavailable"
@@ -568,16 +627,21 @@ def test_photo_source_guard_rejects_artifact_that_differs_from_actual_page(photo
     request = SimpleNamespace(operation="result", ticket=ticket, timeout_s=Decimal(10), binding=binding,
         params={"activity_id": "7", "camera_identity": {"serial": "serial", "product_id": 10},
             "camera_locator": locator.as_json(), "capture_format": "raw", "role": "original", "cursor": None,
-            "original_identity": None})
+            "original_identity": None, "sync_candidate": None, "sync_error": "主机记录不可用"})
     outcome = _finish_immediate(driver.observe_photo_source(request)).outcome
     page = page_api.page_from_outcome(ticket, outcome, binding=binding)
     saved = SimpleNamespace(page=page, ref=SimpleNamespace(ticket=ticket, page_no=1, event_id=40))
     reader = guard.PhotoResultReads(object())
     reader.read_device_start = lambda action, activity_id, before_event_id: (
-        12, {"camera_identity": {"serial": "serial", "product_id": 10}}, locator)
+        12, {"camera_identity": {"serial": "serial", "product_id": 10},
+             "original": None, "original_error": "主机记录不可用"}, locator)
     _, identity = reader.verify_device_page(1, 7, 5, saved)
     assert identity.sha256 == "a" * 64
     attempt = next(item for item in outcome.observations if item.type == "photo_result_attempt")
+    attempt.data["comparison"]["selected"] = "sync"
+    with pytest.raises(ValueError):
+        reader.verify_device_page(1, 7, 5, saved)
+    attempt.data["comparison"]["selected"] = "camera"
     attempt.data["steps"][-1]["artifact"]["sha256"] = "b" * 64
     with pytest.raises(ValueError):
         reader.verify_device_page(1, 7, 5, saved)
@@ -678,3 +742,30 @@ def test_host_start_confirms_only_after_local_pair_validation(photo_driver_api):
     assert result.outcome.status is api.AttemptStatus.SUCCEEDED
     assert validated == [("a.3FR", "a.3FR.thumbnail.jpg")]
     assert next(item for item in result.outcome.observations if item.type == "photo_taken").version == 1
+
+
+@pytest.mark.parametrize("status,size,digest,expected,selected", [
+    ("complete", 100, "a" * 64, "matched", "sync"),
+    ("complete", 99, "a" * 64, "mismatch", "camera"),
+    ("complete", 100, "b" * 64, "mismatch", "camera"),
+    ("missing", None, None, "missing", "camera"),
+    ("invalid", None, None, "invalid", "camera"),
+    ("unconfirmed", None, None, "unconfirmed", "camera"),
+])
+def test_single_photo_comparison_decides_unique_cache(responses, status, size, digest, expected, selected):
+    files = sys.modules["camctl.devices.drivers.hasselblad.files"]
+    binding = files.DeviceBinding("camera", "hasselblad_cfv100c")
+    source = files.CameraFileIdentity(binding, "/mnt/a.3FR", "a.3FR",
+        files.DownloadVariant.ORIGINAL, "a" * 64, "serial", 10, 100)
+    result = files.decide_photo_cache(source, status=status, size_bytes=size, sha256=digest)
+    assert result.comparison == expected and result.selected == selected
+
+
+@pytest.mark.parametrize("status,size,digest", [("complete", 0, "a" * 64),
+    ("complete", 100, "bad"), ("invalid", 100, "a" * 64), ("unknown", None, None)])
+def test_photo_comparison_rejects_unreliable_or_contradictory_content(responses, status, size, digest):
+    files = sys.modules["camctl.devices.drivers.hasselblad.files"]
+    source = files.CameraFileIdentity(files.DeviceBinding("camera", "hasselblad_cfv100c"),
+        "/mnt/a.3FR", "a.3FR", files.DownloadVariant.ORIGINAL, "a" * 64, "serial", 10, 100)
+    with pytest.raises(ValueError):
+        files.decide_photo_cache(source, status=status, size_bytes=size, sha256=digest)

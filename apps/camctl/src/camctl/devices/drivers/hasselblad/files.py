@@ -227,3 +227,25 @@ def validate_photo_result_page(data: object, *, activity_id: str,
     if next_cursor != expected:
         raise ValueError("照片来源结果页后续角色不一致")
     return next_cursor
+
+
+@dataclass(frozen=True, slots=True)
+class PhotoCacheDecision:
+    comparison: str
+    selected: str
+
+
+def decide_photo_cache(source: CameraFileIdentity, *, status: str,
+                       size_bytes: int | None, sha256: str | None) -> PhotoCacheDecision:
+    """一次比较只以可靠相机来源和本次同步副本事实决定缓存。"""
+    if not isinstance(source, CameraFileIdentity):
+        raise ValueError("照片缓存决定缺少可靠相机来源")
+    if status == "complete":
+        if (type(size_bytes) is not int or size_bytes <= 0 or not isinstance(sha256, str)
+                or re.fullmatch(r"[0-9a-f]{64}", sha256) is None):
+            raise ValueError("完整同步副本缺少实际大小或摘要")
+        matched = size_bytes == source.size_bytes and sha256 == source.sha256
+        return PhotoCacheDecision("matched" if matched else "mismatch", "sync" if matched else "camera")
+    if status not in ("missing", "invalid", "unconfirmed") or size_bytes is not None or sha256 is not None:
+        raise ValueError("同步副本分类或内容事实无效")
+    return PhotoCacheDecision(status, "camera")
