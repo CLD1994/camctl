@@ -102,7 +102,7 @@ DEVICE 预览的现场内容保证未通过：
 | `41-device-read-releases-old-unknown` | 新 DEVICE JPEG 原图请求触发 check 9，成功尝试 80 释放 activity 21 后完成读取交付；activity 仍 UNKNOWN，原动作 60 的失败及未知报告保持，工作文件摘要相同，旧 check 8 不重开。 |
 | `42-device-source-binding-rejected` | DEVICE 正式源固定机身与本次配置不符，逐项绑定失败，零工具调用。 |
 
-随后按能力说明生成逐档参数准备核验：取同源的 10 档 ISO、13 档光圈与 34 档快门，交错组合而不生成笛卡尔积；仅进行 PREPARE，准备成功后提交正式取消计划，启动时间留有独立余量。用户准备给相机充电时停止该批次，已完成 12 组、START 数量 0；剩余参数项保留待验，不将准备设置成功等同实际曝光。停机后核对所有 host-demo、camctl、hb_cli 已退出，状态库无 pending/running 动作。结果位于 `validation/43-parameter-catalog-summary.json`。
+随后按能力说明生成逐档参数准备核验：取同源的 10 档 ISO、13 档光圈与 34 档快门，交错组合而不生成笛卡尔积；仅进行 PREPARE，准备成功后提交正式取消计划，启动时间留有独立余量。用户准备给相机充电时停止该批次，原摘要保存 12 组完整回执、START 数量 0。离线另确认第 13 项（ISO200、f/32、0.5 秒）的 PREPARE 尝试 94 成功，原拍摄及独立取消请求均已正常取消／成功，仍为零 START；生成脚本在轮询期间被中断，没有写出该组 `result.json`。现存公开报告与只读数据库证据另存 `validation/43-catalog-13/recovered-evidence.json`，原 host 退出码及耗时保持未知，不将补充证据冒充完整运行回执。全批次已见证 13 档快门的准备，剩余 21 档待验；这不等同实际曝光。停机后核对所有 host-demo、camctl、hb_cli 已退出，状态库无 pending/running 动作。原摘要保持于 `validation/43-parameter-catalog-summary.json`。
 
 ## 正式源与同步副本的后续调整
 
