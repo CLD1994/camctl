@@ -202,7 +202,7 @@ class RecordingInputCopies:
                  occurred_at: Callable[[], int], *,
                  max_recopies: int = 1,
                  file_executor: FileTaskExecutor | None = None,
-                 read_runtime=None,
+                 read_runtime=None, hold_reset: bool = False,
                  read_discovery_batch_size: int | None = None) -> None:
         self.database = database
         self.roots = roots
@@ -210,6 +210,7 @@ class RecordingInputCopies:
         self.max_recopies = max_recopies
         self.file_executor = file_executor
         self.read_runtime = read_runtime
+        self.hold_reset = hold_reset
         self.repository = OutputsRepository() if read_discovery_batch_size is None else OutputsRepository(read_discovery_batch_size)
 
     @staticmethod
@@ -237,9 +238,14 @@ class RecordingInputCopies:
             description="内部输入副本状态")
 
     async def prepare(self, copy_id: int):
+        async def save_reset(request):
+            from camctl.outputs.read_attempts import save_read_business
+            return await save_read_business(self.read_runtime, copy_id, "copy_reset", request,
+                                            self.repository.reset_copy_target)
         return await prepare_copy(copy_id, CopyContext(
             repository=self.repository, database=self.database, roots=self.roots,
-            occurred_at=self.occurred_at(), executor=self.file_executor))
+            occurred_at=self.occurred_at(), executor=self.file_executor,
+            save_reset=save_reset if self.hold_reset else None))
 
     async def transfer(self, copy_id: int, session, segment_size: int):
         return await copy_next_segment(copy_id, SegmentContext(

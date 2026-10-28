@@ -4178,9 +4178,14 @@ class _ReadSourceFallbackCommand:
                 or attempt["error_json"].get("code") != "local_read_failed"
                 or attempt["error_json"].get("stage") != "source_read"
                 or not isinstance(attempt["error_json"].get("details"), Mapping)
-                or attempt["error_json"]["details"].get("source_failed") is not True
                 or attempt["result_event_id"] is None):
             raise ConsistencyError("读取换源没有可确认的原本地读取失败结果")
+        details = attempt["error_json"]["details"]
+        if details.get("source_failed") is not True and (
+                not photo or details.get("photo_cache_checksum_mismatch") is not True
+                or copy["reset_state"] != int(_RESET_STATE.READY)
+                or _photo_cache_recopy_proof(connection, copy, attempt, require_reset=True) is None):
+            raise ConsistencyError("读取换源缺少原照片缓存摘要不符及重置事实")
         if not _copy_round_chain_proven(
                 connection, copy["id"], attempt["copy_round"], copy["round"],
                 attempt["intent_event_id"], attempt["result_event_id"],
@@ -6743,6 +6748,126 @@ def _require_publishable_copy(context, delivery_id: int) -> None:
         raise EventValidationError("副本字节未完整保存不能准备或发布")
 
 
+def _photo_cache_recopy_proof(connection, copy, attempt, *, require_reset=False):
+    """从原 READ_END、实际摘要不符及已登记新轮，证明照片缓存交付未完成。"""
+    from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+    from camctl.devices.read_session import ReadEnd
+    from camctl.history.validators import validate_event_structure
+    from camctl.persistence.fact_reads import read_event
+
+    if (copy is None or attempt is None or copy.get("source_intermediate_file_id") is None
+            or copy.get("source_device_file_id") is not None or copy.get("delivery_id") is None
+            or attempt.get("copy_round") is None or copy.get("round") != attempt["copy_round"] + 1):
+        return None
+    with closing(connection.execute(
+        "SELECT a.driver_id,a.type,a.execution_spec_json,o.device_file_id,f.owner_action_id,o.source_action_id"
+        " FROM deliveries d JOIN outputs o ON o.id=d.output_id JOIN actions a ON a.id=o.source_action_id"
+        " JOIN intermediate_files f ON f.id=? WHERE d.id=?",
+        (copy["source_intermediate_file_id"], copy["delivery_id"]))) as cursor:
+        source = cursor.fetchone()
+    if source is None:
+        return None
+    spec = source[2] if isinstance(source[2], Mapping) else parse_exact_json(source[2])
+    if (source[0] != DRIVER_ID or source[1] != int(_ACTION_TYPE.CAMERA_TAKE_PHOTO)
+            or not isinstance(spec, Mapping) or spec.get("output_storage") != "device"
+            or source[3] is None or source[4] != source[5]):
+        return None
+    end_limit = attempt.get("result_event_id") or (1 << 63) - 1
+    with closing(connection.execute(
+        "SELECT id FROM history_events WHERE event_type=? AND json_extract(body_json,'$.reason')=?"
+        " AND id>? AND id<? AND json_extract(body_json,'$.rows[0].table')='file_copies'"
+        " AND json_extract(body_json,'$.rows[0].id')=?"
+        " AND json_extract(body_json,'$.rows[0].after.values.round')=? ORDER BY id LIMIT 2",
+        (_COPY_CHANGED_EVENT, _RECOPY_REASON, attempt["intent_event_id"], end_limit,
+         copy["id"], copy["round"]))) as cursor:
+        rows = cursor.fetchall()
+    if len(rows) != 1:
+        return None
+    recopy = read_event(connection, rows[0][0])
+    if (validate_event_structure(recopy.event)[:2] != ("COPY_CHANGED", "RECOPY")
+            or len(recopy.event.rows) != 1):
+        raise ConsistencyError("照片缓存重拷缺少原完整事件")
+    row = recopy.event.rows[0]
+    before, after = row.before.values, row.after.values
+    end_id = before.get("read_end_event_id")
+    target_hash = before.get("target_sha256")
+    if (row.table != "file_copies" or row.row_id != copy["id"] or not row.before.exists or not row.after.exists
+            or before.get("round") != attempt["copy_round"] or after.get("round") != copy["round"]
+            or before.get("committed_bytes") != copy["source_size"] or after.get("committed_bytes") != 0
+            or before.get("verification_state") != int(_VERIFICATION.MISMATCHED)
+            or after.get("verification_state") != int(_VERIFICATION.NOT_PERFORMED)
+            or before.get("reset_state") != int(_RESET_STATE.READY)
+            or after.get("reset_state") != int(_RESET_STATE.RESET_PENDING)
+            or before.get("recopies_used") != copy["round"] - 2
+            or after.get("recopies_used") != copy["round"] - 1
+            or type(end_id) is not int or not isinstance(target_hash, str)
+            or not isinstance(copy.get("source_sha256"), str) or target_hash == copy["source_sha256"]):
+        raise ConsistencyError("照片缓存重拷与实际摘要不符或原轮次不一致")
+    end_record = read_event(connection, end_id)
+    end_event = end_record.event
+    document = end_event.evidence.get("read_end")
+    if (validate_event_structure(end_event)[:2] != ("COPY_CHANGED", "READ_END")
+            or end_record.transaction.last_event_id >= recopy.transaction.first_event_id
+            or not isinstance(document, Mapping) or not isinstance(document.get("ticket"), Mapping)
+            or document["ticket"] != {"run_id": attempt["run_id"], "attempt_no": attempt["attempt_no"],
+                "operation": "read", "target_id": str(copy["id"]), "responsibility_key": f"read/{copy['id']}"}
+            or document.get("copy_round") != attempt["copy_round"]
+            or document.get("source_intermediate_file_id") != copy["source_intermediate_file_id"]
+            or document.get("source_device_file_id") is not None
+            or document.get("target_file_id") != copy["target_file_id"]
+            or document.get("source_size") != copy["source_size"]
+            or document.get("committed_bytes") != copy["source_size"]
+            or document.get("reset_state") != int(_RESET_STATE.READY)
+            or len(end_event.rows) != 1 or end_event.rows[0].row_id != copy["id"]
+            or end_event.rows[0].table != "file_copies"
+            or end_event.rows[0].after.values.get("read_end_event_id") != end_id):
+        raise ConsistencyError("照片缓存重拷缺少原读取实际收场事实")
+    actual_end = document.get("end")
+    if (not isinstance(actual_end, Mapping) or set(actual_end) != {"stopped", "bytes_read", "error"}
+            or actual_end["stopped"] is not True or actual_end["error"] is not None
+            or type(actual_end["bytes_read"]) is not int or not 0 <= actual_end["bytes_read"] <= copy["source_size"]):
+        raise ConsistencyError("照片缓存重拷的原读取结束不完整")
+    with closing(connection.execute(
+        "SELECT id FROM history_events WHERE event_type=? AND json_extract(body_json,'$.reason')=?"
+        " AND id>? AND id<? AND json_extract(body_json,'$.rows[0].table')='file_copies'"
+        " AND json_extract(body_json,'$.rows[0].id')=?"
+        " AND json_extract(body_json,'$.rows[0].after.values.verification_state')=?"
+        " AND json_extract(body_json,'$.rows[0].after.values.target_sha256')=? ORDER BY id DESC LIMIT 1",
+        (_COPY_CHANGED_EVENT, _VERIFY_REASON, end_id, recopy.event.event_id, copy["id"],
+         int(_VERIFICATION.MISMATCHED), target_hash))) as cursor:
+        mismatch = cursor.fetchone()
+    if mismatch is None:
+        raise ConsistencyError("照片缓存重拷缺少原实际摘要不符事件")
+    verification = read_event(connection, mismatch[0])
+    if (validate_event_structure(verification.event)[:2] != ("COPY_CHANGED", "VERIFY")
+            or len(verification.event.rows) != 1
+            or verification.event.rows[0].table != "file_copies"
+            or verification.event.rows[0].row_id != copy["id"]
+            or verification.event.rows[0].after.values.get("verification_state") != int(_VERIFICATION.MISMATCHED)
+            or verification.event.rows[0].after.values.get("target_sha256") != target_hash
+            or (verification.transaction.txn_id != recopy.transaction.txn_id
+                and verification.transaction.last_event_id >= recopy.transaction.first_event_id)):
+        raise ConsistencyError("照片缓存原摘要不符事件与重拷事务不一致")
+    if require_reset:
+        with closing(connection.execute(
+            "SELECT id FROM history_events WHERE event_type=? AND json_extract(body_json,'$.reason')=?"
+            " AND id>? AND id<? AND json_extract(body_json,'$.rows[0].table')='file_copies'"
+            " AND json_extract(body_json,'$.rows[0].id')=? ORDER BY id LIMIT 2",
+            (_COPY_CHANGED_EVENT, _RESET_REASON, recopy.transaction.last_event_id, end_limit,
+             copy["id"]))) as cursor:
+            resets = cursor.fetchall()
+        if len(resets) != 1:
+            raise ConsistencyError("照片缓存重拷缺少原目标重置事件")
+        reset = read_event(connection, resets[0][0])
+        if (validate_event_structure(reset.event)[:2] != ("COPY_CHANGED", "RESET")
+                or len(reset.event.rows) != 1 or reset.event.rows[0].table != "file_copies"
+                or reset.event.rows[0].row_id != copy["id"]
+                or reset.event.rows[0].before.values.get("reset_state") != int(_RESET_STATE.RESET_PENDING)
+                or reset.event.rows[0].after.values.get("reset_state") != int(_RESET_STATE.READY)):
+            raise ConsistencyError("照片缓存原目标重置事件不完整")
+    return ReadEnd(**actual_end)
+
+
 def _copy_round_chain_proven(
         connection, copy_id, initial_round, current_round,
         intent_event_id, result_event_id, source_size) -> bool:
@@ -6861,7 +6986,6 @@ def _copy_guard(event, context) -> None:
                 or not isinstance(attempt.get("error_json"), Mapping)
                 or attempt["error_json"].get("code") != "local_read_failed"
                 or not isinstance(attempt["error_json"].get("details"), Mapping)
-                or attempt["error_json"]["details"].get("source_failed") is not True
                 or run.get("responsibility_key") != f"read/{row.row_id}"
                 or run.get("delivery_id") != delivery.get("id")
                 or run.get("status") != int(_RUN_STATUS.ACTIVE)
@@ -6869,6 +6993,12 @@ def _copy_guard(event, context) -> None:
                 or run.get("attempts_used", 0) >= run.get("max_attempts_used", 0)):
             raise EventValidationError("读取换源必须沿用仍有余量的原本地失败读取预算")
         reads = context.current_reads
+        details = attempt["error_json"]["details"]
+        if details.get("source_failed") is not True:
+            if (reads is None or details.get("photo_cache_checksum_mismatch") is not True
+                    or copy.get("reset_state") != int(_RESET_STATE.READY)
+                    or _photo_cache_recopy_proof(reads.connection, copy, attempt, require_reset=True) is None):
+                raise EventValidationError("照片缓存换源缺少原摘要不符、读取收场及目标重置")
         if (reads is None or not _copy_round_chain_proven(
                 reads.connection, row.row_id, attempt.get("copy_round"),
                 copy.get("round"), attempt.get("intent_event_id"),
@@ -7349,7 +7479,8 @@ def _source_fallback_retry_attempt(copy, run, attempts, connection):
     if (error.get("code") != "local_read_failed"
             or error.get("stage") != "source_read"
             or not isinstance(details, Mapping)
-            or details.get("source_failed") is not True):
+            or (details.get("source_failed") is not True
+                and details.get("photo_cache_checksum_mismatch") is not True)):
         return None
     if not _copy_round_chain_proven(
             connection, copy.get("id"), attempt.get("copy_round"),

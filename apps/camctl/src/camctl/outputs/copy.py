@@ -428,6 +428,7 @@ class CopyContext:
     occurred_at: int
     reset_key: OperationKey | None = None
     executor: FileTaskExecutor | None = None
+    save_reset: Callable | None = None
 
 
 class SegmentSaveDisposition(Enum):
@@ -653,11 +654,14 @@ async def _prepare_copy(copy_id, context, facts) -> CopyStep:
         await asyncio.to_thread(_prepare_target, ref, context.roots, decision)
     reset: TargetResetOutcome | None = None
     if decision.outcome is ResumeOutcome.RESET_TARGET:
-        key = context.reset_key if context.reset_key is not None else new_operation_key()
         request = TargetResetRequest(copy_id=copy_id, occurred_at=context.occurred_at)
-        outcome = await context.database.write(
-            lambda owned: context.repository.reset_copy_target(request, key, owned),
-            key=key, description="拷贝目标重置保存")
+        if context.save_reset is None:
+            key = context.reset_key if context.reset_key is not None else new_operation_key()
+            outcome = await context.database.write(
+                lambda owned: context.repository.reset_copy_target(request, key, owned),
+                key=key, description="拷贝目标重置保存")
+        else:
+            outcome = await context.save_reset(request)
         if outcome.kind is not DbOutcomeKind.COMPLETED:
             raise CopyPreparationError(
                 "reset_save_failed", str(outcome.error),

@@ -1297,10 +1297,12 @@ async def _copy_delivery(
         read_end: ReadEnd | None = None, on_read_end=None, on_read_start=None,
 ) -> InputStep:
     """复用资格、续传、分段与完整性事务推进交付拷贝。"""
+    photo_cache = (isinstance(sessions, LocalReadSessions) and await runtime.database.read(
+        lambda owned: _is_photo_cache_source(owned.connection, facts)))
     copies: RecordingCopies = RecordingInputCopies(
         runtime.database, BoundDirectories(staging=runtime.directories.staging),
         runtime.occurred_at, max_recopies=max_recopies, file_executor=runtime.file_executor,
-        read_runtime=runtime)
+        read_runtime=runtime, hold_reset=photo_cache)
     state = await copies.copy_state(facts["id"])
     if (state.verification_state in _VERIFICATION_DONE
             and state.target_sha256 is not None):
@@ -1310,6 +1312,16 @@ async def _copy_delivery(
     except (CopyPreparationError, ConsistencyError) as error:
         return InputStep(InputPhase.PREPARE_FAILED, copy_id=facts["id"],
                          error=error)
+    # 冷恢复也从原 READ_END 与已保存的重拷事实接回照片缓存失败，不再次读取缓存。
+    ticket = getattr(sessions, "_ticket", None)
+    if photo_cache and ticket is not None:
+        config = await runtime.database.read(lambda owned: _stored_read_attempt_config(owned.connection, facts["id"]))
+        if ticket.attempt_id < config.max_attempts:
+            end = await runtime.database.read(lambda owned: _photo_recopy_end(owned.connection, facts["id"], ticket))
+            if end is not None:
+                return InputStep(InputPhase.RECOPY_PENDING, copy_id=facts["id"],
+                    reason="photo_cache_checksum_mismatch", read_end=end,
+                    stop_requested=True, content_complete=True)
     if prepared.decision.outcome is ResumeOutcome.VERIFY and (read_end is not None or on_read_end is None):
         return replace(await _complete_copy(copies, facts["id"], digest), read_end=read_end,
                        stop_requested=read_end is not None, content_complete=read_end is not None)
@@ -1819,6 +1831,19 @@ def _stored_read_attempt_config(connection, copy_id: int) -> AttemptConfig:
     return AttemptConfig(int(row[0]), timeout, retry_interval)
 
 
+def _photo_recopy_end(connection, copy_id, ticket):
+    from camctl.persistence.repositories.outputs import _photo_cache_recopy_proof
+    from camctl.persistence.transaction import row_facts
+    with closing(connection.execute(
+        "SELECT id FROM operation_attempts WHERE run_id=? AND attempt_no=?",
+        (ticket.run_id, ticket.attempt_id))) as cursor:
+        row = cursor.fetchone()
+    if row is None:
+        raise ConsistencyError("照片缓存重拷缺少原读取尝试")
+    return _photo_cache_recopy_proof(connection, row_facts(connection, "file_copies", copy_id),
+                                     row_facts(connection, "operation_attempts", row[0]))
+
+
 def _failed_inspection_read_request(connection, facts: Mapping):
     """恢复已有的本地源失败事实；只返回仍有预算的可靠终态尝试。"""
     with closing(connection.execute(
@@ -1851,9 +1876,17 @@ def _failed_inspection_read_request(connection, facts: Mapping):
     details = error.get("details")
     if (error.get("code") != "local_read_failed"
             or error.get("stage") != "source_read"
-            or not isinstance(details, Mapping)
-            or details.get("source_failed") is not True):
+            or not isinstance(details, Mapping)):
         return None
+    if details.get("source_failed") is not True:
+        from camctl.persistence.repositories.outputs import _photo_cache_recopy_proof
+        from camctl.persistence.transaction import row_facts
+        copy = row_facts(connection, "file_copies", facts["id"])
+        attempt = row_facts(connection, "operation_attempts", attempt_id)
+        if (details.get("photo_cache_checksum_mismatch") is not True
+                or copy["reset_state"] != int(enum_for("file_copies.reset_state").READY)
+                or _photo_cache_recopy_proof(connection, copy, attempt, require_reset=True) is None):
+            return None
     return ReadSourceFallback(
         copy_id=int(facts["id"]), failed_attempt_id=int(attempt_id),
         occurred_at=int(occurred_at))
@@ -1917,17 +1950,34 @@ async def _finish_local_attempt_phase(
 
     if not require_preparation_settled(step):
         return
+    photo_mismatch = False
     if step.phase is InputPhase.RECOPY_PENDING:
-        # 新轮次已登记且本地文件任务已收场；原 READ_FILE attempt 继续负责。
+        # 保留原尝试和实际结束，先可靠重置已授权的新轮目标。
         runtime.pending_read_ends.pop(facts["id"], None)
         from camctl.outputs.read_attempts import ReadContinuation
         runtime.continuing_read_tickets[facts["id"]] = ReadContinuation(ticket, False, step, runtime.occurred_at(), evidence=_LOCAL_READ_EVIDENCE)
-        runtime.retry_gate.cleared(f"read/{facts['id']}")
-        return
+        actual_end = None
+        if ticket.attempt_id < config.max_attempts and await runtime.database.read(
+                lambda owned: _is_photo_cache_source(owned.connection, facts)):
+            actual_end = await runtime.database.read(lambda owned: _photo_recopy_end(owned.connection, facts["id"], ticket))
+        if actual_end is None:
+            runtime.retry_gate.cleared(f"read/{facts['id']}")
+            return
+        copies = RecordingInputCopies(runtime.database, BoundDirectories(staging=runtime.directories.staging),
+            runtime.occurred_at, file_executor=runtime.file_executor, read_runtime=runtime, hold_reset=True)
+        await copies.prepare(facts["id"])
+        from camctl.persistence.transaction import row_facts
+        reset_ready = await runtime.database.read(lambda owned: row_facts(
+            owned.connection, "file_copies", facts["id"])["reset_state"])
+        if reset_ready != int(enum_for("file_copies.reset_state").READY):
+            raise ConsistencyError("照片缓存重拷目标尚未可靠重置")
+        step = replace(step, reason="photo_cache_checksum_mismatch", read_end=actual_end,
+                       stop_requested=True, content_complete=True)
+        photo_mismatch = True
     checksum_failed = step.phase is InputPhase.CHECKSUM_EXHAUSTED
     succeeded = step.phase is InputPhase.INPUT_READY or checksum_failed
     exhausted = ticket.attempt_id >= config.max_attempts
-    fallback_after_source_failure = step.source_failed and not exhausted
+    fallback_after_source_failure = (step.source_failed or photo_mismatch) and not exhausted
     outcome = CallOutcome(
         status=(AttemptStatus.SUCCEEDED if succeeded
                 else AttemptStatus.FAILED),
@@ -1936,6 +1986,7 @@ async def _finish_local_attempt_phase(
             details={
                 "phase": step.phase.value,
                 "source_failed": step.source_failed,
+                **({"photo_cache_checksum_mismatch": True} if photo_mismatch else {}),
                 **read_failure_details(step)}),
         effect=EffectState.UNKNOWN,
         settlement=Settlement(
