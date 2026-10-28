@@ -444,6 +444,7 @@ async def _delivery_candidate(
             raise ConsistencyError(f"取回条目的产物或来源动作缺失: {output_id}")
         source_action_id, device_file_id = row[:2]
         bound = None
+        photo_bound = None
         if device_file_id is not None:
             from camctl.persistence.repositories.segment_selections import is_segmented_source
             from camctl.outputs.segment_copy_reuse import read_bound_check_copy
@@ -452,12 +453,26 @@ async def _delivery_candidate(
                     source_action_id=int(source_action_id),
                     source_device_file_id=int(device_file_id),
                     obtain_action_id=int(action["id"]), selection_id=selection_id, owned=owned)
-        return row, bound
-    row, bound = await runtime.database.read(inputs)
+            else:
+                from camctl.outputs.photo_cache_reuse import read_bound_photo_cache
+                photo_bound = read_bound_photo_cache(output_id=output_id,
+                    obtain_action_id=int(action["id"]), selection_id=selection_id, owned=owned)
+        return row, bound, photo_bound
+    row, bound, photo_bound = await runtime.database.read(inputs)
     (source_action_id, device_file_id, intermediate_file_id, original_name,
      source_action_name, plan_name) = row
 
     if device_file_id is not None:
+        if photo_bound is not None and runtime.file_executor is not None:
+            stem = _original_stem(original_name)
+            extension = _extension_of(original_name)
+            return FileCandidate(action_id=action["id"], item_id=item_id, processing_id=None,
+                output_id=output_id, source_device_file_id=None,
+                source_intermediate_file_id=photo_bound.intermediate_file_id,
+                target_extension="part", delivery_extension=extension,
+                delivery_display_name=f"{stem}-{plan_name}-{source_action_name}.{extension}",
+                config=await _inspection_copy_read_config(runtime, int(device_file_id)), occurred_at=now,
+                reuse_photo_page_event_id=photo_bound.result_page_event_id)
         from camctl.outputs.segment_copy_reuse import check_copy_is_locally_usable
         if (bound is not None and runtime.file_executor is not None
                 and await check_copy_is_locally_usable(
@@ -1622,14 +1637,16 @@ class LocalReadSessions:
             raise ConsistencyError("主机读取会话缺少已保存的尝试票据")
         def read(owned):
             with closing(owned.connection.execute(
-                "SELECT relative_path FROM intermediate_files WHERE id = ?",
+                "SELECT relative_path,size_bytes FROM intermediate_files WHERE id = ?",
                 (source_intermediate_file_id,))) as cursor:
                 row = cursor.fetchone()
             qualification = read_dispatch_qualification(owned, self._ticket,
                 source_intermediate_file_id, device_source=False)
-            return row, qualification
+            facts = _read_facts(owned.connection, int(self._ticket.target_id))
+            photo = _is_photo_cache_source(owned.connection, facts)
+            return row, qualification, photo
         try:
-            row, qualification = await self._database.read(read)
+            row, qualification, photo = await self._database.read(read)
             if row is None:
                 raise ConsistencyError(f"中间文件缺失: {source_intermediate_file_id}")
         except Exception as error:
@@ -1642,6 +1659,11 @@ class LocalReadSessions:
         path = self._directories.staging / str(row[0])
         if on_start is not None:
             on_start()
+        if photo:
+            from camctl.host_files.downloads import DownloadWorkspace
+            from camctl.host_files.io import OwnedPhotoCacheReader
+            owner = DownloadWorkspace(self._directories.staging, self._ticket)
+            return _LocalReadSession(OwnedPhotoCacheReader(path, offset, row[1], owner))
         return _LocalReadSession(LocalSourceReader(path, offset))
 
 
@@ -1688,7 +1710,7 @@ async def _advance_local_read(
         facts = _read_facts(owned.connection, copy_id)
         if facts is None or facts["verification_state"] in _VERIFICATION_DONE:
             return facts, False, None
-        return (facts, _is_inspection_copy_source(owned.connection, facts),
+        return (facts, _is_reusable_device_cache_source(owned.connection, facts),
                 _stored_read_attempt_config(owned.connection, copy_id))
     facts, is_inspection_source, config = await runtime.database.read(inputs)
     if facts is None or facts["verification_state"] in _VERIFICATION_DONE:
@@ -1756,6 +1778,30 @@ def _is_inspection_copy_source(connection, facts: Mapping) -> bool:
     if len(rows) > 1:
         raise ConsistencyError(f"检查输入文件存在重复读取拷贝: {source_id}")
     return bool(rows and rows[0][0] is not None)
+
+
+def _is_reusable_device_cache_source(connection, facts: Mapping) -> bool:
+    """识别检查副本或照片角色缓存；换源资格仍由独立事务守卫核对。"""
+    if _is_inspection_copy_source(connection, facts):
+        return True
+    return _is_photo_cache_source(connection, facts)
+
+
+def _is_photo_cache_source(connection, facts: Mapping) -> bool:
+    source_id, output_id = facts["source_intermediate_file_id"], facts.get("output_id")
+    if source_id is None or output_id is None:
+        return False
+    from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+    with closing(connection.execute(
+        "SELECT a.driver_id,a.execution_spec_json,o.device_file_id,f.owner_action_id,o.source_action_id"
+        " FROM outputs o JOIN actions a ON a.id=o.source_action_id"
+        " JOIN intermediate_files f ON f.id=? WHERE o.id=?", (source_id, output_id))) as cursor:
+        row = cursor.fetchone()
+    if row is None:
+        return False
+    spec = row[1] if isinstance(row[1], Mapping) else parse_exact_json(row[1])
+    return (row[0] == DRIVER_ID and isinstance(spec, Mapping) and spec.get("output_storage") == "device"
+            and row[2] is not None and row[3] == row[4])
 
 
 def _stored_read_attempt_config(connection, copy_id: int) -> AttemptConfig:
@@ -1920,7 +1966,7 @@ async def _finish_local_attempt_phase(
     if exhausted:
         return
     if fallback_after_source_failure and await runtime.database.read(
-            lambda owned: _is_inspection_copy_source(owned.connection, facts)):
+            lambda owned: _is_reusable_device_cache_source(owned.connection, facts)):
         await _retry_failed_local_source_fallback(runtime, facts)
 
 

@@ -165,6 +165,8 @@ HOST 原图和预览的完整字节事实共同保存。DEVICE 角色缓存按[�
 
 `file_copies` 通过 `delivery_id` 或 `processing_id` 指定唯一用途，两者恰好一个非空；前者关联普通交付，后者关联录像内部处理。`source_device_file_id` 或 `source_intermediate_file_id` 恰好一个非空，`target_file_id` 必填且不能等于本地主机源文件。唯一读取流程通过 `operation_runs.copy_id` 单向引用该拷贝；读取次数与尝试只由公共操作表保存。
 
+DEVICE 照片的有限复用交付也使用 `source_intermediate_file_id` 指向按角色保存的缓存，正式 `outputs.device_file_id` 仍指向同一原相机文件。资格依据原输出所在完整事务 H、H 时已运行且来源选择待定的取回动作，以及更早的角色缓存事件和原 RESULTS 页重算；不使用视频的 `inspection_id`。本地源实际读取失败且原 READ_FILE 仍有预算时，同一交付拷贝可切回对应 `source_device_file_id`，保留原读取流程、尝试次数及目标文件。缓存读取保持原角色文件的直接普通文件身份检查及受管文件任务资格，交付仍按各自目标大小与摘要完成校验。
+
 | 字段 | 含义与初始值 |
 | --- | --- |
 | `source_size`、`source_sha256` | 首次形成读取责任时确认的固定源长度和已知源摘要；摘要未知时为空，后来取得后保存实际依据，不能将查询失败当成不支持 |

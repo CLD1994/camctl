@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import stat
 import sys
 from dataclasses import dataclass
 from enum import Enum
@@ -195,6 +196,50 @@ class LocalSourceReader:
             return
         self._closed = True
         _close(self._fd)
+
+
+class OwnedPhotoCacheReader(LocalSourceReader):
+    """固定角色缓存的直接普通文件与未确认关闭责任。"""
+
+    def __init__(self, path: Path, offset: int, expected_size: int, owner) -> None:
+        from camctl.devices.read_session import ReadPreparationError, ReadPreparationSettlement
+        if type(offset) is not int or offset < 0 or type(expected_size) is not int or expected_size <= 0:
+            raise FileIoError("照片缓存读取位置或完整大小无效")
+        if not owner.claim():
+            raise ReadPreparationError("原照片缓存读取仍有文件拥有者",
+                                       settlement=ReadPreparationSettlement.WAITING)
+        self._owner = owner
+        try:
+            flags = os.O_RDONLY | _BINARY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+            self._fd = os.open(path, flags)
+            owner.fd = self._fd
+            opened = os.fstat(self._fd)
+            named = os.stat(path, follow_symlinks=False)
+            if (not stat.S_ISREG(opened.st_mode) or not stat.S_ISREG(named.st_mode)
+                    or opened.st_size != expected_size
+                    or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)):
+                raise FileIoError("照片缓存不是原直接普通文件或完整大小不同")
+            os.lseek(self._fd, offset, os.SEEK_SET)
+        except BaseException as error:
+            try:
+                owner.close_file()
+            except BaseException as close_error:
+                raise ReadPreparationError("照片缓存读取准备的文件关闭未确认",
+                    settlement=ReadPreparationSettlement.UNCONFIRMED) from BaseExceptionGroup(
+                        "照片缓存读取准备及关闭失败", [error, close_error])
+            finally:
+                owner.release()
+            raise
+        self._position, self._bytes_read, self._closed = offset, 0, False
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        try:
+            self._owner.close_file()
+        finally:
+            self._owner.release()
+        self._closed = True
 
 
 def _sync_directory(path: Path) -> tuple[DirectorySyncStage, str | None]:

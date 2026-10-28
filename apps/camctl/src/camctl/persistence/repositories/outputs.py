@@ -1818,6 +1818,8 @@ class _GrantFileCommand:
             int(_OUTPUT_KIND.PREVIEW): int(_DEVICE_FILE_ROLE.PREVIEW),
         }.get(output["kind"])
         reuse_check_copy = command.reuse_inspection_id is not None
+        reuse_photo_cache = command.reuse_photo_page_event_id is not None
+        reuse_device_cache = reuse_check_copy or reuse_photo_cache
         if (
             action["type"] != _OBTAIN_TYPE
             or action["source_resolution_state"] != int(_RESOLUTION_STATE.FIXED)
@@ -1826,10 +1828,10 @@ class _GrantFileCommand:
             or selection["status"] != int(_SELECTION_STATUS.FIXED)
             or item["output_id"] != command.output_id
             or dependency["depends_on_action_id"] != output["source_action_id"]
-            or (not reuse_check_copy and (
+            or (not reuse_device_cache and (
                 output["device_file_id"] != command.source_device_file_id
                 or output["intermediate_file_id"] != command.source_intermediate_file_id))
-            or (reuse_check_copy and (
+            or (reuse_device_cache and (
                 command.source_device_file_id is not None
                 or command.source_intermediate_file_id is None
                 or output["device_file_id"] is None
@@ -1875,6 +1877,14 @@ class _GrantFileCommand:
                 or source_file["relative_path"] != bound.copy.input_relative_path
             ):
                 raise ConsistencyError("分段检查副本的保存责任与正式来源不一致")
+        elif reuse_photo_cache:
+            from camctl.outputs.photo_cache_reuse import read_bound_photo_cache
+            bound = read_bound_photo_cache(output_id=output["id"], obtain_action_id=command.action_id,
+                                           selection_id=selection["id"], owned=SimpleNamespace(connection=connection))
+            if (bound is None or bound.result_page_event_id != command.reuse_photo_page_event_id
+                    or bound.intermediate_file_id != command.source_intermediate_file_id):
+                raise ConsistencyError("正式取回无权复用该照片原角色缓存")
+            self._required(connection, "device_files", output["device_file_id"])
         elif command.source_device_file_id is not None:
             if (source_role is None or source_file["role"] != source_role
                     or output["source_action_id"] != source_file["source_action_id"]):
@@ -1890,7 +1900,7 @@ class _GrantFileCommand:
             or source_file["size_bytes"] is None
         ):
             raise ConsistencyError("主机产物必须关联来源动作已提升的完整角色文件")
-        if command.source_intermediate_file_id is not None and not reuse_check_copy:
+        if command.source_intermediate_file_id is not None and not reuse_device_cache:
             try:
                 validate_relative_file_path(
                     FilePurpose[_host_source_purpose(output["kind"], source_action["type"]).name], command.source_intermediate_file_id,
@@ -1935,7 +1945,8 @@ class _GrantFileCommand:
                 raise ConsistencyError("产物可用性与设备文件存在事实不一致")
 
         details = {"output_id": str(output["id"])}
-        if self._command.reuse_inspection_id is not None:
+        if (self._command.reuse_inspection_id is not None
+                or self._command.reuse_photo_page_event_id is not None):
             if availability == _AVAILABILITY.CLEANED:
                 details["availability"] = availability.name.lower()
                 return self._reject_item(scope, _OUTPUT_UNAVAILABLE_CODE, details)
@@ -4107,6 +4118,11 @@ class _ReadSourceFallbackCommand:
         dependency = self._required(
             connection, "action_dependencies", selection["dependency_id"])
         action = self._required(connection, "actions", delivery["action_id"])
+        source_action = self._required(connection, "actions", int(output["source_action_id"]))
+        from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+        photo = (source_action["driver_id"] == DRIVER_ID
+                 and source_action["type"] == int(_ACTION_TYPE.CAMERA_TAKE_PHOTO)
+                 and source_action["execution_spec_json"].get("output_storage") == "device")
 
         if (item["delivery_id"] != delivery["id"]
                 or item["output_id"] != output["id"]
@@ -4114,7 +4130,8 @@ class _ReadSourceFallbackCommand:
                 or delivery["action_id"] != action["id"]
                 or dependency["action_id"] != action["id"]
                 or dependency["depends_on_action_id"] != output["source_action_id"]
-                or output["kind"] != int(_OUTPUT_KIND.ORIGINAL)
+                or output["kind"] not in ((int(_OUTPUT_KIND.ORIGINAL), int(_OUTPUT_KIND.PREVIEW))
+                                          if photo else (int(_OUTPUT_KIND.ORIGINAL),))
                 or output["device_file_id"] is None
                 or output["intermediate_file_id"] is not None):
             raise ConsistencyError("读取换源的交付、固定项、来源或原片身份不一致")
@@ -4122,59 +4139,22 @@ class _ReadSourceFallbackCommand:
         current_file_id = int(copy["source_intermediate_file_id"])
         input_file = self._required(
             connection, "intermediate_files", current_file_id)
-        check_copies = self._find_rows(
-            connection, "file_copies", "target_file_id=?", (current_file_id,))
-        if len(check_copies) != 1:
-            raise ConsistencyError("读取换源的主机来源不是唯一检查副本")
-        check_copy = self._required(
-            connection, "file_copies", int(check_copies[0][0]))
-        if check_copy.get("inspection_id") is None:
-            raise ConsistencyError("读取换源的主机来源不是检查副本")
-        inspection = self._required(
-            connection, "segment_inspections", int(check_copy["inspection_id"]))
-        from camctl.persistence.repositories.segment_inspections import (
-            read_inspection_for_member,
-        )
-
-        bound = read_inspection_for_member(
-            int(inspection["action_id"]), int(inspection["member_id"]), self._owned)
-        if (bound.inspection is None or bound.copy is None
-                or bound.inspection.inspection_id != inspection["id"]
-                or bound.copy.copy_id != check_copy["id"]
-                or bound.copy.target_file_id != current_file_id
-                or bound.copy.source_device_file_id != output["device_file_id"]
-                or bound.copy.inspection_state != int(_SEGMENT_INSPECTION_STATE.COMPLETED)
-                or bound.copy.verification_state not in (
-                    int(_VERIFICATION.MATCHED),
-                    int(_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE))
-                or bound.copy.retention_state != int(_RETENTION.REQUIRED)
-                or bound.copy.cleanup_state != int(_FILE_CLEANUP.NOT_NEEDED)):
-            raise ConsistencyError("读取换源没有完整、已校验且仍受保留保护的检查副本事实")
-
-        source = self._required(
-            connection, "device_files", int(output["device_file_id"]))
-        source_action = self._required(
-            connection, "actions", int(output["source_action_id"]))
-        from camctl.devices.tasks import CaptureResultPolicy
-
-        if (source["source_action_id"] != output["source_action_id"]
-                or source["role"] != int(_DEVICE_FILE_ROLE.ORIGINAL)
-                or source["completion_state"] != int(_COMPLETION.COMPLETE)
-                or source_action["type"] not in (
-                    int(_ACTION_TYPE.CAMERA_RECORD),
-                    int(_ACTION_TYPE.CAMERA_TIMELAPSE))
-                or source_action["execution_spec_json"].get("result_policy")
-                != CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value
-                or input_file["owner_action_id"] != output["source_action_id"]
-                or input_file["owner_delivery_id"] is not None
-                or input_file["purpose"] != int(_PURPOSE.RECORDING_INPUT)
-                or input_file["retention_state"] != int(_RETENTION.REQUIRED)
-                or input_file["cleanup_state"] != int(_FILE_CLEANUP.NOT_NEEDED)
-                or input_file["relative_path"] != bound.copy.input_relative_path
-                or input_file["size_bytes"] != bound.copy.source_size
-                or input_file["sha256"] != bound.copy.target_sha256
-                or bound.copy.source_size != copy["source_size"]):
-            raise ConsistencyError("读取换源的设备文件不是检查副本所属完整原片")
+        source = self._required(connection, "device_files", int(output["device_file_id"]))
+        if photo:
+            from camctl.outputs.photo_cache_reuse import read_bound_photo_cache
+            bound = read_bound_photo_cache(output_id=output["id"], obtain_action_id=action["id"],
+                                           selection_id=selection["id"], owned=self._owned)
+            expected_role = (int(_DEVICE_FILE_ROLE.ORIGINAL) if output["kind"] == int(_OUTPUT_KIND.ORIGINAL)
+                             else int(_DEVICE_FILE_ROLE.PREVIEW))
+            if (bound is None or bound.intermediate_file_id != current_file_id
+                    or source["source_action_id"] != output["source_action_id"]
+                    or source["role"] != expected_role or source["completion_state"] != int(_COMPLETION.COMPLETE)
+                    or input_file["owner_action_id"] != output["source_action_id"]
+                    or input_file["size_bytes"] != copy["source_size"]
+                    or input_file["sha256"] != copy["source_sha256"]):
+                raise ConsistencyError("读取换源没有同一照片角色的原缓存与相机来源")
+        else:
+            self._verify_inspection_fallback(connection, copy, output, input_file, source, source_action)
 
         run_rows = self._find_rows(
             connection, "operation_runs", "copy_id=? AND kind=?",
@@ -4246,6 +4226,59 @@ class _ReadSourceFallbackCommand:
             result=ReadSourceFallbackOutcome(ReadSourceFallbackDisposition.SWITCHED),
             plan_read_scope=PlanReadScope(action["plan_id"], 1),
         )
+
+    def _verify_inspection_fallback(self, connection, copy, output, input_file, source, source_action):
+        current_file_id = input_file["id"]
+        check_copies = self._find_rows(
+            connection, "file_copies", "target_file_id=?", (current_file_id,))
+        if len(check_copies) != 1:
+            raise ConsistencyError("读取换源的主机来源不是唯一检查副本")
+        check_copy = self._required(
+            connection, "file_copies", int(check_copies[0][0]))
+        if check_copy.get("inspection_id") is None:
+            raise ConsistencyError("读取换源的主机来源不是检查副本")
+        inspection = self._required(
+            connection, "segment_inspections", int(check_copy["inspection_id"]))
+        from camctl.persistence.repositories.segment_inspections import (
+            read_inspection_for_member,
+        )
+
+        bound = read_inspection_for_member(
+            int(inspection["action_id"]), int(inspection["member_id"]), self._owned)
+        if (bound.inspection is None or bound.copy is None
+                or bound.inspection.inspection_id != inspection["id"]
+                or bound.copy.copy_id != check_copy["id"]
+                or bound.copy.target_file_id != current_file_id
+                or bound.copy.source_device_file_id != output["device_file_id"]
+                or bound.copy.inspection_state != int(_SEGMENT_INSPECTION_STATE.COMPLETED)
+                or bound.copy.verification_state not in (
+                    int(_VERIFICATION.MATCHED),
+                    int(_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE))
+                or bound.copy.retention_state != int(_RETENTION.REQUIRED)
+                or bound.copy.cleanup_state != int(_FILE_CLEANUP.NOT_NEEDED)):
+            raise ConsistencyError("读取换源没有完整、已校验且仍受保留保护的检查副本事实")
+
+        from camctl.devices.tasks import CaptureResultPolicy
+
+        if (source["source_action_id"] != output["source_action_id"]
+                or source["role"] != int(_DEVICE_FILE_ROLE.ORIGINAL)
+                or source["completion_state"] != int(_COMPLETION.COMPLETE)
+                or source_action["type"] not in (
+                    int(_ACTION_TYPE.CAMERA_RECORD),
+                    int(_ACTION_TYPE.CAMERA_TIMELAPSE))
+                or source_action["execution_spec_json"].get("result_policy")
+                != CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value
+                or input_file["owner_action_id"] != output["source_action_id"]
+                or input_file["owner_delivery_id"] is not None
+                or input_file["purpose"] != int(_PURPOSE.RECORDING_INPUT)
+                or input_file["retention_state"] != int(_RETENTION.REQUIRED)
+                or input_file["cleanup_state"] != int(_FILE_CLEANUP.NOT_NEEDED)
+                or input_file["relative_path"] != bound.copy.input_relative_path
+                or input_file["size_bytes"] != bound.copy.source_size
+                or input_file["sha256"] != bound.copy.target_sha256
+                or bound.copy.source_size != copy["source_size"]):
+            raise ConsistencyError("读取换源的设备文件不是检查副本所属完整原片")
+
 
     def _required(self, connection, table, identity):
         facts = row_facts(connection, table, identity)
@@ -5529,9 +5562,17 @@ class _SettleCanceledObtainCommand:
                         raise ConsistencyError("取消取回的原副本与交付归属不一致")
                     output = self._load(connection, "outputs", delivery["output_id"])
                     dependency = self._state["action_dependencies"][dependency_id]
+                    photo_cache = False
+                    if (output["device_file_id"] is not None and copy["source_device_file_id"] is None
+                            and copy["source_intermediate_file_id"] is not None):
+                        from camctl.outputs.photo_cache_reuse import read_bound_photo_cache
+                        bound = read_bound_photo_cache(output_id=output["id"], obtain_action_id=action_id,
+                            selection_id=selection_id, owned=SimpleNamespace(connection=connection))
+                        photo_cache = (bound is not None
+                                       and bound.intermediate_file_id == copy["source_intermediate_file_id"])
                     if (dependency["depends_on_action_id"] != output["source_action_id"]
-                            or output["device_file_id"] != copy["source_device_file_id"]
-                            or output["intermediate_file_id"] != copy["source_intermediate_file_id"]):
+                            or (not photo_cache and (output["device_file_id"] != copy["source_device_file_id"]
+                            or output["intermediate_file_id"] != copy["source_intermediate_file_id"]))):
                         raise ConsistencyError("取消取回的原来源、产物与副本关联不一致")
                     try:
                         validate_relative_file_path(_target_purpose_model(copy, target),
@@ -6831,12 +6872,16 @@ def _copy_guard(event, context) -> None:
         output = context.state_rows.get("outputs", {}).get(delivery.get("output_id"))
         source = context.state_rows.get("device_files", {}).get(
             after["source_device_file_id"])
+        source_role = (None if output is None else {
+            int(_OUTPUT_KIND.ORIGINAL): int(_DEVICE_FILE_ROLE.ORIGINAL),
+            int(_OUTPUT_KIND.PREVIEW): int(_DEVICE_FILE_ROLE.PREVIEW),
+        }.get(output.get("kind")))
         if (output is None or source is None
                 or output.get("id") != item.get("output_id")
-                or output.get("kind") != int(_OUTPUT_KIND.ORIGINAL)
+                or source_role is None
                 or output.get("device_file_id") != source.get("id")
                 or source.get("source_action_id") != output.get("source_action_id")
-                or source.get("role") != int(_DEVICE_FILE_ROLE.ORIGINAL)
+                or source.get("role") != source_role
                 or source.get("completion_state") != int(_COMPLETION.COMPLETE)
                 or source.get("presence_state") != int(_PRESENCE.PRESENT)
                 or output.get("availability") != int(_AVAILABILITY.AVAILABLE)):
@@ -6844,6 +6889,23 @@ def _copy_guard(event, context) -> None:
 
         original_action = context.state_rows.get("actions", {}).get(
             output.get("source_action_id"))
+        from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+        if (original_action is not None and original_action.get("driver_id") == DRIVER_ID
+                and original_action.get("type") == int(_ACTION_TYPE.CAMERA_TAKE_PHOTO)
+                and original_action.get("execution_spec_json", {}).get("output_storage") == "device"):
+            from camctl.outputs.photo_cache_reuse import read_bound_photo_cache
+            if context.current_reads is None:
+                raise EventValidationError("照片读取换源缺少独立原事务读取")
+            try:
+                bound = read_bound_photo_cache(output_id=output["id"], obtain_action_id=delivery["action_id"],
+                    selection_id=item["selection_id"], owned=SimpleNamespace(connection=context.current_reads.connection))
+            except (ValueError, TypeError, KeyError) as error:
+                raise EventValidationError("照片读取换源的原来源或 H 无效") from error
+            if (bound is None or bound.intermediate_file_id != before["source_intermediate_file_id"]
+                    or bound.source_device_file_id != source["id"] or bound.size_bytes != copy["source_size"]
+                    or bound.sha256 != copy["source_sha256"]):
+                raise EventValidationError("照片读取换源必须回到 H 上固定的同一角色")
+            return
         from camctl.devices.tasks import CaptureResultPolicy
 
         check_copies = [
@@ -6874,6 +6936,7 @@ def _copy_guard(event, context) -> None:
                 or input_file.get("sha256") != check_copy.get("target_sha256")):
             raise EventValidationError("读取换源的检查副本与固定 Action6 原片不一致")
         if (original_action is None
+                or output.get("kind") != int(_OUTPUT_KIND.ORIGINAL)
                 or original_action.get("type") not in (
                     int(_ACTION_TYPE.CAMERA_RECORD),
                     int(_ACTION_TYPE.CAMERA_TIMELAPSE))
@@ -7026,6 +7089,30 @@ def _copy_guard(event, context) -> None:
             parent = context.association_rows.get("deliveries", {}).get(values["delivery_id"])
         if parent is None:
             raise EventValidationError("新建拷贝缺少发起责任的固定关联")
+        if values.get("delivery_id") is not None and values.get("source_intermediate_file_id") is not None:
+            output = context.state_rows.get("outputs", {}).get(parent.get("output_id"))
+            source_action = (None if output is None else
+                context.state_rows.get("actions", {}).get(output.get("source_action_id")))
+            if output is None or (output.get("device_file_id") is not None and source_action is None):
+                raise EventValidationError("本地复用交付缺少原产物或来源动作")
+            from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+            if (output.get("device_file_id") is not None
+                    and source_action.get("driver_id") == DRIVER_ID
+                    and source_action.get("execution_spec_json", {}).get("output_storage") == "device"):
+                members = [item for item in context.association_rows.get("obtain_items", {}).values()
+                           if item.get("delivery_id") == values["delivery_id"]]
+                if len(members) != 1 or context.current_reads is None:
+                    raise EventValidationError("照片缓存交付缺少原取回项及独立事务读取")
+                from camctl.outputs.photo_cache_reuse import read_bound_photo_cache
+                try:
+                    bound = read_bound_photo_cache(output_id=output["id"],
+                        obtain_action_id=parent["action_id"], selection_id=members[0]["selection_id"],
+                        owned=SimpleNamespace(connection=context.current_reads.connection))
+                except (TypeError, ValueError, KeyError) as error:
+                    raise EventValidationError("照片缓存交付的原来源或 H 无效") from error
+                if (bound is None or bound.intermediate_file_id != values["source_intermediate_file_id"]
+                        or bound.size_bytes != values["source_size"] or bound.sha256 != values["source_sha256"]):
+                    raise EventValidationError("照片缓存交付不属于 H 时固定等待者的原角色")
         _guard_read_owner(event, context, parent.get("action_id"))
 
 
