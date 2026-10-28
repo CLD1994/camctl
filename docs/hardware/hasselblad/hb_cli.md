@@ -66,10 +66,12 @@ udev 按规则文件名顺序处理设备；系统默认规则会设置 USB 节�
 ./hb_cli set drive-mode single    # single / continuous / self-timer / interval / exposure-bracketing / focus-bracketing
 ./hb_cli set iso 100              # ISO
 ./hb_cli set aperture 8           # 光圈 f/8
-./hb_cli set shutter 0.008        # 快门秒数，小数格式；0.008 约为 1/125 秒
+./hb_cli set shutter 1/125       # 快门使用分数形式，表示 1/125 秒
 ./hb_cli set capture-format raw   # RAW（3FR）
 ./hb_cli set capture-format jpeg  # JPEG（固件允许时）
 ```
+
+camctl 的 `shutter_s` 使用相同的分数字符串，例如 `"1/125"` 和 `"32/1"`；允许档位由[单张参数规格](../../superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md#快门档位与分数字符串)定义。
 
 读取参数：
 
