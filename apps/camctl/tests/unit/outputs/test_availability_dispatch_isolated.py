@@ -15,6 +15,7 @@ def read_module(monkeypatch):
     monkeypatch.setattr(resources, "resource_bytes", lambda *_: pytest.fail("不能读取包资源"))
     monkeypatch.setattr(enums, "resource_bytes", lambda *_: pytest.fail("不能读取包资源"))
     enums_by_column = {"operation_runs.status": SimpleNamespace(PENDING=1, ACTIVE=2),
+                       "operation_runs.kind": SimpleNamespace(READ_FILE=3),
                        "operation_attempts.status": SimpleNamespace(RUNNING=1)}
     monkeypatch.setattr(enums, "enum_for", lambda name: enums_by_column[name])
 
@@ -78,7 +79,7 @@ class _Connection:
     def execute(self, sql, args=()):
         if "history_events" in sql:
             return _Cursor((99,))
-        return _Cursor((2, 0, 2, 1, 1, None, 9, None, "camera", 17, 1, 1))
+        return _Cursor((2, 0, 2, 1, 1, None, 9, None, "camera", 17, 1, 1, 3, 50, None))
 
 
 @pytest.mark.parametrize("check_running", [False, True])
@@ -123,3 +124,11 @@ def test_dispatch_rejects_slot_from_a_different_source_binding(read_module):
     with pytest.raises(read_module.ConsistencyError, match="原来源绑定"):
         read_module.read_dispatch_qualification(SimpleNamespace(connection=connection), ticket, 9,
                                                 device_source=True, never_dispatched=True)
+
+
+def test_dispatch_rejects_wrong_read_responsibility(read_module):
+    ticket = SimpleNamespace(operation="read", attempt_id=1, run_id=3,
+                             target_id="2", responsibility_key="read/other")
+    with pytest.raises(read_module.ConsistencyError):
+        read_module.read_dispatch_qualification(SimpleNamespace(connection=_Connection(False)), ticket, 9,
+                                                device_source=True)

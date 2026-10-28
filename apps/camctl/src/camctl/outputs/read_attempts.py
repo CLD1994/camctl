@@ -71,7 +71,8 @@ def read_dispatch_qualification(owned, ticket, source_id, *, device_source,
     with closing(owned.connection.execute(
         "SELECT a.status,a.cancel_requested,r.status,r.attempts_used,"
         "t.status,t.result_json,c.source_device_file_id,c.source_intermediate_file_id,"
-        "c.slot_device_id,t.id,t.copy_round,c.round FROM operation_runs r JOIN actions a ON a.id=r.action_id"
+        "c.slot_device_id,t.id,t.copy_round,c.round,r.kind,t.intent_event_id,t.result_event_id"
+        " FROM operation_runs r JOIN actions a ON a.id=r.action_id"
         " JOIN file_copies c ON c.id=r.copy_id"
         " JOIN operation_attempts t ON t.run_id=r.id AND t.attempt_no=?"
         " WHERE r.id=? AND c.id=? AND r.responsibility_key=?",
@@ -80,8 +81,12 @@ def read_dispatch_qualification(owned, ticket, source_id, *, device_source,
         row = cursor.fetchone()
     if row is None:
         raise ConsistencyError("实际读取入口缺少原票据的业务归属")
-    status, canceled, run_status, used, attempt_status, result, device_id, host_id, slot, attempt_id, copy_round, current_round = row
-    if ticket.operation != "read" or (never_dispatched and copy_round != current_round):
+    (status, canceled, run_status, used, attempt_status, result, device_id, host_id, slot,
+     attempt_id, copy_round, current_round, kind, intent_event_id, result_event_id) = row
+    if (ticket.operation != "read" or ticket.responsibility_key != f"read/{int(ticket.target_id)}"
+            or kind != int(enum_for("operation_runs.kind").READ_FILE) or intent_event_id is None
+            or (attempt_status == int(enum_for("operation_attempts.status").RUNNING) and result_event_id is not None)
+            or (never_dispatched and copy_round != current_round)):
         raise ConsistencyError("实际读取票据或未派发拷贝轮次不一致")
     runs, attempts = enum_for("operation_runs.status"), enum_for("operation_attempts.status")
     if (run_status not in (int(runs.PENDING), int(runs.ACTIVE))
