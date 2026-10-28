@@ -34,8 +34,14 @@ class ResultRequest:
 
 
 class Shared:
-    def retry_failed(self): pass
-    async def run(self, callback): return await callback()
+    def __init__(self): self.task = None
+    def retry_failed(self):
+        if self.task is not None and self.task.done() and (self.task.cancelled() or self.task.exception() is not None):
+            self.task = None
+    async def run(self, callback):
+        if self.task is None:
+            self.task = asyncio.create_task(callback())
+        return await asyncio.shield(self.task)
 
 
 class Values(SimpleNamespace):
@@ -103,7 +109,6 @@ class InspectionScopeTests(unittest.TestCase):
                 return actual
             async def read_one(database, sql, params):
                 return (None, 8) if "processing_id" in sql else (4,)
-            def forget(flow, value): flow.pending_read_results.pop((7, 1), None)
             async def retry_business(flow): pass
             ns.update({"PendingReadResult": type(pending), "PendingStoppedRead": type("Stopped", (), {}),
                 "OperationRepository": lambda: object(), "OutputsRepository": Outputs,
@@ -120,17 +125,19 @@ class InspectionScopeTests(unittest.TestCase):
                 "_result_document": lambda metric, **kwargs: {"metric": metric, **kwargs},
                 "new_operation_key": lambda: "original-inspection-key", "db_outcome_errors": lambda outcome: (),
                 "record_error": lambda *args, **kwargs: None, "ConsistencyError": ValueError,
-                "save_read_result": save_read_result, "_read_one": read_one, "forget_read_result": forget,
+                "save_read_result": save_read_result, "_read_one": read_one,
                 "retry_read_business": retry_business, "save_read_business": save_business,
                 "SlotRequest": SlotRequest, "SlotOutcome": SimpleNamespace(RELEASED="released", ALREADY_RELEASED="already")})
             segment = ROOT / "segment_inspections.py"
             media = ROOT / "media_flow.py"
+            ns["forget_read_result"] = load(ROOT.parent / "outputs/read_attempts.py", "forget_read_result", ns)
             for name in ("_save_result", "settle_inspection_read_failure", "settle_terminal_inspection_read_slot", "resume_pending_inspection_results"):
                 ns[name] = load(segment, name, ns)
             for name in ("internal_read_scope", "_save_internal_read_result", "_save_internal_read_and_settle", "resume_prepared_internal_reads"):
                 ns[name] = load(media, name, ns)
+            continuations = {9: SimpleNamespace(ticket=ticket)}
             args = dict(pending_read_results=original_results, pending_read_business={}, pending_read_ends={},
-                        continuing_read_tickets={}, pending_segment_inspection_results=inspections, occurred_at=lambda: 20)
+                        continuing_read_tickets=continuations, pending_segment_inspection_results=inspections, occurred_at=lambda: 20)
             with self.assertRaisesRegex(RuntimeError, "read receipt unknown"):
                 await ns["resume_prepared_internal_reads"](Database(), **args)
             self.assertIn((7, 1), original_results)
@@ -138,9 +145,12 @@ class InspectionScopeTests(unittest.TestCase):
             self.assertEqual(read_keys, ["original-read-key", "original-read-key"])
             self.assertEqual([key for _, key in writes], ["original-inspection-key", "original-inspection-key"])
             self.assertFalse(inspections)
+            self.assertFalse(original_results)
+            self.assertFalse(continuations)
             self.assertEqual(len(releases), 1)
             await ns["resume_prepared_internal_reads"](Database(), **args)
             self.assertFalse(original_results)
+            self.assertEqual(read_keys, ["original-read-key", "original-read-key"])
             self.assertEqual(len(releases), 1)
         asyncio.run(run())
 

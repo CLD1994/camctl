@@ -1108,7 +1108,16 @@ async def _save_internal_read_result(flow, pending, *, retry=False):
 
             copy_id = int(ticket.target_id)
             if not await settle_inspection_read_failure(flow, copy_id, pending.finish.occurred_at):
-                return
+                if row[1] in flow.pending_segment_inspection_results:
+                    forget_read_result(flow, pending)
+                    return
+                owner = await _read_one(flow.database,
+                    "SELECT a.cancel_requested FROM segment_inspections s"
+                    " JOIN actions a ON a.id=s.action_id WHERE s.id=?", (row[1],))
+                if owner is not None and owner[0] == 1:
+                    forget_read_result(flow, pending)
+                    return
+                raise ConsistencyError("原检查结果尚未建立独立保存责任")
             # 读取尝试先可靠保存，检查结果再可靠保存；只有这两项都完成后
             # 才可解除检查读取机会。结果未知时保留同一 AttemptFinish 与结果键。
             forget_read_result(flow, pending)
