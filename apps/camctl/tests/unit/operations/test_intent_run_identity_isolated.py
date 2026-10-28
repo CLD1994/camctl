@@ -32,7 +32,7 @@ def guard():
         modules[name] = module
     values = SimpleNamespace(START=1, READ_FILE=3, RESOLVE_OUTPUT_SCOPE=11,
                              CHECK_CAPTURE_RESULTS=7, PREPARE_CAPTURE=10, RUNNING=1,
-                             UNKNOWN=1, STOP=2, STOP_RESIDUAL=8)
+                             UNKNOWN=1, STOP=2, STOP_RESIDUAL=8, CHECK_DEVICE_AVAILABILITY=12)
     modules["camctl.contracts.enums"].enum_for = lambda _: values
     modules["camctl.history.validators"].EventValidationError = ValueError
     path = Path(__file__).parents[3] / "src/camctl/persistence/repositories/operations.py"

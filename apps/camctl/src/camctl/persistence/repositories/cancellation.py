@@ -216,6 +216,12 @@ class _StartCancelCommand:
             result=CancelStartResult(disposition=CancelStartDisposition.SAVED))
 
 
+def _cancel_origin_abandoned(action):
+    return (action is not None and action['type'] == _CANCEL_ACTION_TYPE
+            and action['target_selection_state'] == _TARGET_PENDING
+            and (action['cancel_requested'] or action['status'] in (3, 4, 5, 6)))
+
+
 class _FixCancelTargetsCommand:
     """固定取消动作的完整目标集合（TARGETS_FIXED.CANCEL）。
 
@@ -243,6 +249,8 @@ class _FixCancelTargetsCommand:
             raise ConsistencyError(f"取消动作不存在: {command.action_id}")
         if action["type"] != _CANCEL_ACTION_TYPE:
             raise ConsistencyError("取消目标固定要求取消动作")
+        if _cancel_origin_abandoned(action):
+            return CommandPlan((), {}, {}, CancelTargetsSaved(CancelTargetsDisposition.ABANDONED), read_only=True)
         if action["target_selection_state"] == _TARGET_FAILED:
             raise TransactionError("目标集合已失败，不重新固定")
         if action["target_selection_state"] == _TARGET_FIXED:
@@ -2140,6 +2148,9 @@ class _FixPhotoEntriesCommand:
                 raise TransactionError('原入口取消复合申请内容不同')
             result = _FixCancelTargetsCommand(self.command, self.key)._reuse(scope.connection, fixed)
             return result
+        origin = row_facts(scope.connection, 'actions', self.command.action_id)
+        if _cancel_origin_abandoned(origin):
+            return CommandPlan((), {}, {}, CancelTargetsSaved(CancelTargetsDisposition.ABANDONED), read_only=True)
         plans = []
         sub = _CompositeScope(scope, scope.max_event_id + 1)
         for block in self.command.entry_blocks:

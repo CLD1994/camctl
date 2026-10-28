@@ -289,7 +289,7 @@ async def _members(repository, ref, runtime):
         cursor = page.next_cursor
 
 
-def _control_facts(runtime, action, activity):
+def _control_facts(runtime, action, activity, *, strict_overrun=False):
     elapsed = activity["control_elapsed_ns"]
     if elapsed is None:
         return EvidenceState.UNKNOWN, EvidenceState.UNKNOWN
@@ -299,10 +299,10 @@ def _control_facts(runtime, action, activity):
     )
     lower = timing.recording_lower_bound_ns(elapsed)
     complete = lower >= timing.duration_ms * 1_000_000
-    # 正常控制的轻微余量沿既有异常多录门槛处理。
-    overrun = lower > (
-        timing.duration_ms * 1_000_000 + runtime.repair_margin_s * 1_000_000_000
-    )
+    threshold = timing.duration_ms * 1_000_000
+    if not strict_overrun:
+        threshold += runtime.repair_margin_s * 1_000_000_000
+    overrun = lower > threshold
     return (
         EvidenceState.CONFIRMED if complete else EvidenceState.UNKNOWN,
         EvidenceState.CONFIRMED if overrun else EvidenceState.UNKNOWN,
@@ -351,7 +351,7 @@ async def advance_segmented_recording(runtime, action, decision):
     activity = await runtime.database.read(lambda owned: row_facts(
         owned.connection, "device_activities", activity_id,
     ))
-    control, overrun = _control_facts(runtime, action, activity)
+    control, overrun = _control_facts(runtime, action, activity, strict_overrun=True)
     from camctl.persistence.repositories.segment_current import current_decision
 
     if ref is None:

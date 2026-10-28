@@ -32,6 +32,7 @@ class _RunKind(IntEnum):
     START = 1
     READ_FILE = 2
     PREPARE_CAPTURE = 3
+    CHECK_DEVICE_AVAILABILITY = 4
 
 
 class _RunStatus(IntEnum):
@@ -110,10 +111,18 @@ class _GuardContext:
     def __init__(self, state_rows, preparation_reads=None):
         self.state_rows = state_rows
         self.preparation_reads = preparation_reads
+        self.retry_wait_reads = _SettledReads()
+        self.validated_events = ()
 
     def complete_rows(self, table, column, identity):
         assert (table, column, identity) == ("operation_attempts", "run_id", 31)
         return {}
+
+
+class _SettledReads:
+    def no_unsettled_attempts(self, run_id, validated):
+        assert (run_id, validated) == (31, ())
+        return True
 
 
 def _cursor(row=None, rows=()):
@@ -172,6 +181,8 @@ def production(monkeypatch):
     operations = ModuleType("camctl.persistence.repositories.operations")
     for name in ("BeginAttemptCommand", "FinishAttemptCommand", "_FinishStaleRunsCommand"):
         setattr(operations, name, type(name, (), {}))
+    retry_reads = ModuleType("camctl.persistence.repositories.retry_wait_reads")
+    retry_reads.RetryWaitReads = _SettledReads
 
     obtain_summary = ModuleType("camctl.outputs.obtain_summary")
     for name in (
@@ -199,6 +210,7 @@ def production(monkeypatch):
     monkeypatch.setitem(sys.modules, "camctl.host_files.paths", paths)
     monkeypatch.setitem(sys.modules, "camctl.outputs.obtain_summary", obtain_summary)
     monkeypatch.setitem(sys.modules, "camctl.persistence.repositories.operations", operations)
+    monkeypatch.setitem(sys.modules, retry_reads.__name__, retry_reads)
 
     monkeypatch.setattr(events, "resource_bytes", forbidden_resource)
     monkeypatch.setattr(events, "load_event_registry", lambda: {
@@ -264,7 +276,7 @@ def _read_command(outputs, *, slot=None):
 
 def _grant_inputs(outputs, connection, *, slot=None):
     scope = SimpleNamespace(connection=connection)
-    copy = {"id": 11, "slot_device_id": slot}
+    copy = {"id": 11, "slot_device_id": slot, "source_device_file_id": 41, "read_end_event_id": None}
     run = {
         "id": 31, "status": int(outputs._RUN_STATUS.ACTIVE),
         "retry_wait_required": 0,
@@ -288,7 +300,11 @@ def test_new_camera_slot_waits_for_in_flight_start_without_event(monkeypatch, pr
     )
     scope, copy, run, action = _grant_inputs(outputs, connection)
 
-    plan = _read_command(outputs)._grant(scope, copy, "camera-a", run, action)
+    copy["source_device_file_id"] = 41
+    command = _read_command(outputs)
+    command._state.update({"device_files": {41: {"observer_action_id": 22}},
+                           "actions": {22: {"driver_id": "driver-a"}}})
+    plan = command._grant(scope, copy, "camera-a", run, action)
 
     assert plan.result == outputs.SlotDecision(outputs.SlotOutcome.WAIT, "device_busy")
     assert plan.read_only and plan.events == ()
@@ -307,6 +323,71 @@ def test_existing_slot_stays_held_while_start_is_in_flight(monkeypatch, producti
     assert plan.result.outcome is outputs.SlotOutcome.HELD
     assert plan.events == ()
     connection.execute.assert_not_called()
+
+
+def test_new_camera_slot_waits_for_in_flight_check(monkeypatch, production):
+    outputs = production.outputs
+    connection = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
+    monkeypatch.setattr(outputs._SlotChangeCommand, "_device_holder", lambda *_: None)
+    monkeypatch.setattr(production.preparation.PreparationReads, "availability_in_flight", lambda *args: True)
+    monkeypatch.setattr(outputs._SlotChangeCommand, "_first_candidate",
+                        lambda *_args, **_kwargs: pytest.fail("在途检查必须先阻止授予"))
+    scope, copy, run, action = _grant_inputs(outputs, connection)
+    copy["source_device_file_id"] = 41
+    command = _read_command(outputs)
+    command._state.update({"device_files": {41: {"observer_action_id": 22}},
+                           "actions": {22: {"driver_id": "driver-a"}}})
+    plan = command._grant(scope, copy, "camera-a", run, action)
+    assert plan.result == outputs.SlotDecision(outputs.SlotOutcome.WAIT, "device_busy")
+    assert plan.read_only and plan.events == ()
+
+
+def test_new_hasselblad_slot_waits_for_selected_capture(monkeypatch, production):
+    outputs = production.outputs
+    connection = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
+    monkeypatch.setattr(outputs._SlotChangeCommand, "_device_holder", lambda *_: None)
+    scope, copy, run, action = _grant_inputs(outputs, connection)
+    scope.max_event_id = 99
+    command = _read_command(outputs)
+    command._request = SimpleNamespace(copy_id=11, occurred_at=1, capture_selection=object())
+    command._state.update({"device_files": {41: {"observer_action_id": 22, "source_action_id": 22}},
+                           "actions": {22: {"driver_id": "hasselblad_cfv100c"}}})
+    definitions = ModuleType("camctl.devices.drivers.hasselblad.definitions")
+    definitions.DRIVER_ID = "hasselblad_cfv100c"
+    alias = ModuleType("camctl.persistence.repositories.physical_alias")
+    alias.source_physical_alias_conflict = lambda *args: False
+    alias.source_physical_identity = lambda *args: "identity"
+    selection = ModuleType("camctl.persistence.repositories.capture_selection")
+    selection.read_capture_priority = lambda *args, **kwargs: SimpleNamespace(action_id=7)
+    for dependency in (definitions, alias, selection):
+        monkeypatch.setitem(sys.modules, dependency.__name__, dependency)
+    result = command._grant(scope, copy, "camera-a", run, action)
+    assert result.result == outputs.SlotDecision(outputs.SlotOutcome.WAIT, "capture_priority")
+    assert result.events == ()
+
+
+def test_slot_guard_rejects_selected_capture(monkeypatch, production):
+    outputs = production.outputs
+    definitions = ModuleType("camctl.devices.drivers.hasselblad.definitions")
+    definitions.DRIVER_ID = "hasselblad_cfv100c"
+    alias = ModuleType("camctl.persistence.repositories.physical_alias")
+    alias.source_physical_alias_conflict = lambda *args: False
+    alias.source_physical_identity = lambda *args: "identity"
+    selection = ModuleType("camctl.persistence.repositories.capture_selection")
+    selection.CaptureSelectionInput = SimpleNamespace(from_document=lambda value: value)
+    selection.read_capture_priority = lambda *args, **kwargs: SimpleNamespace(action_id=7)
+    for dependency in (definitions, alias, selection):
+        monkeypatch.setitem(sys.modules, dependency.__name__, dependency)
+    reads = production.preparation.PreparationReads(object())
+    monkeypatch.setattr(reads, "device_start_in_flight", lambda *_: False)
+    context = _guard_context(outputs, reads=reads)
+    context.state_rows["actions"][22]["driver_id"] = "hasselblad_cfv100c"
+    context.state_rows["actions"][23]["driver_id"] = "hasselblad_cfv100c"
+    context.transaction = SimpleNamespace(first_event_id=100)
+    event = _slot_event(outputs, None, "camera-a")
+    event.evidence = {"capture_selection": {}}
+    with pytest.raises(production.validation_error, match="已选中的拍摄"):
+        outputs._read_slot_guard(event, context)
 
 
 def _slot_event(outputs, before, after):
@@ -360,9 +441,19 @@ def test_slot_guard_reads_start_state_and_rejects_only_in_flight_start(productio
         else:
             outputs._read_slot_guard(event, context)
 
-        sql, parameters = connection.execute.call_args.args
+        sql, parameters = connection.execute.call_args_list[0].args
         assert "a.device_id=?" in sql
         assert parameters == (int(outputs._RUN_KIND.START), "camera-a")
+
+
+def test_slot_guard_independently_rejects_in_flight_check(production, monkeypatch):
+    connection = create_autospec(sqlite3.Connection, instance=True, spec_set=True)
+    connection.execute.return_value = _cursor(None)
+    monkeypatch.setattr(production.preparation.PreparationReads, "availability_in_flight", lambda *args: True)
+    reads = production.preparation.PreparationReads(connection)
+    with pytest.raises(production.validation_error):
+        production.outputs._read_slot_guard(_slot_event(production.outputs, None, "camera-a"),
+                                            _guard_context(production.outputs, reads=reads))
 
 
 def test_host_source_never_gets_a_camera_slot(production):

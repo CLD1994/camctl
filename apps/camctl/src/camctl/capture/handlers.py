@@ -1162,8 +1162,27 @@ class CaptureRuntime(_FileObservationSaves):
         )
         permit = None
         if is_hasselblad_photo(action):
-            permit = self.start_entries.prepare(self.database.metadata.instance_id, action["id"])
+            existing = self.start_entries.get(self.database.metadata.instance_id, action["id"])
+            if existing is not None:
+                pending = self.start_entries.pending_grants.get((existing.database_id, existing.action_id))
+                if pending is not None:
+                    return await pending()
+                if existing.phase in (EntryPhase.RESERVED, EntryPhase.BLOCKED):
+                    return None, "canceled"
+                if existing.phase is EntryPhase.READY and existing.ticket is not None:
+                    return existing.ticket, None
+                if existing.phase is not EntryPhase.READY:
+                    raise ConsistencyError("原 START 入口许可仍承担责任")
+                if existing.cancel_origins:
+                    await _refresh_photo_cancel_origins(self, existing)
+                    if existing.phase is not EntryPhase.READY or existing.cancel_origins:
+                        return None, "canceled"
+                permit = existing
+            else:
+                permit = self.start_entries.prepare(self.database.metadata.instance_id, action["id"])
+            permit.phase = EntryPhase.GRANTING
         key = new_operation_key()
+        shared = SharedSave()
         async def save_and_apply():
             _delivery_error = None
             try:
@@ -1186,15 +1205,22 @@ class CaptureRuntime(_FileObservationSaves):
             if result.outcome.value != "granted":
                 if permit is not None:
                     del self.start_entries.permits[(permit.database_id, permit.action_id)]
+                    self.start_entries.pending_grants.pop((permit.database_id, permit.action_id), None)
                 if _delivery_error is not None:
                     raise _delivery_error
                 return None, result.reason
             if permit is not None:
                 permit.bind(self.database.metadata.instance_id, result.ticket)
+                self.start_entries.pending_grants.pop((permit.database_id, permit.action_id), None)
             if _delivery_error is not None:
                 raise _delivery_error
             return result.ticket, None
-        return await settle_required(save_and_apply())
+        async def resume():
+            shared.retry_failed()
+            return await shared.run(save_and_apply)
+        if permit is not None:
+            self.start_entries.pending_grants[(permit.database_id, permit.action_id)] = resume
+        return await resume()
 
     async def finish(self, ticket, outcome: CallOutcome, *,
                end_run: RunOutcome | None = None,
@@ -1810,6 +1836,44 @@ def _prepared_start_ticket(runtime, action):
     return ticket
 
 
+async def _refresh_photo_cancel_origins(runtime, permit):
+    """只保留仍在固定目标的取消发起者；新的并发申请不会被清除。"""
+    origins = tuple(permit.cancel_origins)
+    if not origins:
+        return
+    def read(owned):
+        inactive = []
+        for origin in origins:
+            with closing(owned.connection.execute(
+                    "SELECT type,status,cancel_requested,target_selection_state FROM actions WHERE id=?",
+                    (origin,))) as cursor:
+                row = cursor.fetchone()
+            if (row is None or row[0] != 6 or row[1] not in (1, 2, 3, 4, 5, 6)
+                    or row[2] not in (0, 1) or row[3] not in (1, 2, 3)):
+                raise ConsistencyError("START 等待的取消发起者缺失或类型不符")
+            if row[1] not in (1, 2) or row[2] or row[3] != 1:
+                inactive.append(origin)
+        return tuple(inactive)
+    inactive = await runtime.database.read(read, description="读取 START 等待的取消发起者")
+    permit.cancel_origins.difference_update(inactive)
+
+
+async def _expire_unentered_photo(runtime, action, ticket, permit):
+    """原票据未进入驱动时，按实际窗口保存未派发与动作过期。"""
+    from camctl.devices.start_entry import PREVENTED
+    if permit.phase is not EntryPhase.READY or permit.ticket != ticket or permit.active:
+        raise ConsistencyError("过期单张缺少原未进入许可")
+    permit.phase = EntryPhase.BLOCKED
+    now = runtime.wall_us()
+    outcome = CallOutcome(status=AttemptStatus.FAILED, effect=EffectState.NO_EFFECT,
+        error=ErrorValue("window_ended", "dispatch"),
+        settlement=Settlement(SettlementBasis.NOT_DISPATCHED, EvidenceValue.of(PREVENTED)))
+    await runtime.finish(ticket, outcome, end_run=RunOutcome.EXPIRED,
+        activity=ActivityObservationSave(action["id"], now, dispatch_state=int(_DISPATCH_STATE.NOT_DISPATCHED)),
+        expiration=ExpireActionRequest(action["id"], now, now), occurred_at=now,
+        returned_ns=runtime.monotonic_ns())
+
+
 def _require_result_port(runtime, message: str) -> None:
     """只在旧拍摄已通过本轮启动资格检查后拒绝缺少结果端口。"""
     if runtime.results is None:
@@ -1853,10 +1917,36 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
     if is_hasselblad_photo(action):
         if permit is None or permit.ticket != ticket:
             raise ConsistencyError("原 START 缺少匹配的会话入口许可，不能调用驱动")
-        if permit.phase is EntryPhase.BLOCKED and (await runtime.action(action["id"]))["cancel_requested"]:
+        await _refresh_photo_cancel_origins(runtime, permit)
+        if permit.cancel_origins or permit.phase in (EntryPhase.RESERVED, EntryPhase.BLOCKED):
             return HandlerOutcome("not_granted", "canceled")
         if permit.phase is not EntryPhase.READY:
             raise ConsistencyError("原 START 入口许可尚未核实或已使用，不能调用驱动")
+        from camctl.persistence.repositories.preparation import recheck_start_availability
+        blocked = await runtime.database.read(lambda owned: recheck_start_availability(owned, ticket),
+                                              description="复核启动设备检查占用")
+        if permit.cancel_origins or permit.phase is not EntryPhase.READY:
+            return HandlerOutcome("not_granted", "canceled")
+        if blocked is not None:
+            from camctl.devices.start_entry import PREVENTED
+            permit.phase = EntryPhase.BLOCKED
+            occurred = runtime.wall_us()
+            outcome = CallOutcome(status=AttemptStatus.FAILED, effect=EffectState.NO_EFFECT,
+                error=ErrorValue("device_error", "dispatch", {"reason": blocked}),
+                settlement=Settlement(SettlementBasis.NOT_DISPATCHED, EvidenceValue.of(PREVENTED)))
+            await runtime.finish(ticket, outcome, end_run=RunOutcome.FAILED, run_error=outcome.error,
+                activity=ActivityObservationSave(action["id"], occurred,
+                    dispatch_state=int(_DISPATCH_STATE.NOT_DISPATCHED)),
+                occurred_at=occurred, returned_ns=runtime.monotonic_ns())
+            return HandlerOutcome("call_failed", "device_error")
+        reason = await _capture_dispatch_check(runtime, action["id"])
+        if permit.cancel_origins or permit.phase is not EntryPhase.READY:
+            return HandlerOutcome("not_granted", "canceled")
+        if reason == "window_ended":
+            await _expire_unentered_photo(runtime, action, ticket, permit)
+            return HandlerOutcome("not_granted", reason)
+        if reason is not None:
+            return HandlerOutcome("not_granted", reason)
     try:
         with measure_stage("capture.start", action_id=action["id"],
                 device_id=action["device_id"], activity_id=ticket.target_id,
@@ -3127,19 +3217,157 @@ async def _closed_capture_is_local(
     return await runtime.database.read(read, description="读取拍摄当前责任")
 
 
+async def _resume_bound_local_read(runtime, action, copy_id, ticket, saved_end):
+    """绑定异常下只推进已结束的本机读取，其他设备责任仍由动作处理。"""
+    if saved_end[0] != ticket:
+        raise ConsistencyError("本机恢复的读取结束与原票据不一致")
+    if runtime.recovery_evidence_for is None:
+        return
+    source = await runtime.database.read(lambda owned: owned.connection.execute(
+        "SELECT c.processing_id,c.inspection_id,c.source_device_file_id,ob.device_id,ob.driver_id"
+        " FROM file_copies c JOIN device_files f ON f.id=c.source_device_file_id"
+        " JOIN actions ob ON ob.id=f.observer_action_id WHERE c.id=?", (copy_id,)).fetchone())
+    if source is None:
+        raise ConsistencyError("本机恢复缺少内部拷贝的固定来源")
+    processing_id, inspection_id, source_id, device_id, driver_id = source
+    evidence = runtime.recovery_evidence_for(DeviceBinding(device_id, driver_id), "read")
+    if evidence is None:
+        return
+    from camctl.outputs.read_attempts import (HeldReadEnd, canceled_complete_read_result,
+                                              current_local_read_end, run_owned_read)
+    from camctl.capture.media_flow import _save_internal_read_and_settle
+
+    held = runtime.pending_read_ends.get(copy_id)
+    if held is not None and (held.ticket != ticket or held.end != saved_end[1]):
+        raise ConsistencyError("本机恢复与原拥有者持有的读取结束不一致")
+    if held is None:
+        held = HeldReadEnd(ticket, saved_end[1], saved_end[2], evidence=evidence)
+        runtime.pending_read_ends[copy_id] = held
+    if runtime.media is None:
+        if runtime.roots is None:
+            raise ConsistencyError("本机恢复缺少固定工作目录")
+        flow = MediaFlow(database=runtime.database, roots=runtime.roots, sessions=None,
+            tools=None, policy=None, occurred_at=runtime.wall_us, digest_supported=False,
+            max_recopies=None, evidence=evidence, file_executor=runtime.file_executor,
+            operations=runtime.operations, retry_gate=runtime.retry_gate,
+            pending_read_results=runtime.pending_read_results,
+            pending_read_business=runtime.pending_read_business,
+            pending_read_ends=runtime.pending_read_ends,
+            continuing_read_tickets=runtime.continuing_read_tickets)
+    else:
+        flow = replace(runtime.media, evidence=evidence)
+    if action["cancel_requested"]:
+        async def settle_canceled(_control):
+            if not await current_local_read_end(flow, copy_id, held):
+                return
+            pending = await canceled_complete_read_result(flow, ticket, evidence)
+            if pending is not None:
+                await _save_internal_read_and_settle(flow, pending)
+        if held.resume is None:
+            held = replace(held, resume=lambda current, value:
+                _resume_bound_local_read(replace(runtime, database=current.database), action,
+                                         copy_id, ticket, saved_end))
+            runtime.pending_read_ends[copy_id] = held
+        await run_owned_read(flow, copy_id, settle_canceled)
+    else:
+        from camctl.capture.input_copy import InputContext, OperationConfig
+        from camctl.capture.media_flow import _resume_local_internal_end
+
+        input_context = InputContext(
+            action_id=action["id"], processing_id=processing_id,
+            inspection_id=inspection_id, source_device_file_id=source_id,
+            target_extension=None,
+            config=OperationConfig(flow.max_read_attempts, flow.read_idle_timeout_s,
+                                   flow.retry_interval_s),
+            segment_size=flow.segment_size, staging=flow.roots.staging,
+            copies=flow.copies(), sessions=flow.sessions,
+            occurred_at=runtime.wall_us(), read_end=saved_end[1])
+        async def finish_missing_config(current_flow, value):
+            from camctl.outputs.read_attempts import PendingReadBusiness, held_binding_read_result
+
+            binding_result = runtime.binding_check(DeviceBinding(device_id, driver_id))
+            details = binding_failure_details(binding_result)
+            if details is None or details["reason"] != "missing":
+                raise ConsistencyError("读取摘要不一致缺少原设备配置缺失依据")
+            request = await _binding_failure_request(runtime, action, details, excluded_run_id=ticket.run_id)
+            business = PendingReadBusiness(runtime.capture.finish_binding_failure, request, new_operation_key())
+            pending = await held_binding_read_result(current_flow, copy_id, binding_result, business)
+            if pending is not None:
+                await _save_internal_read_and_settle(current_flow, pending)
+
+        if held.resume is None:
+            held = replace(held, resume=lambda current, value:
+                _resume_local_internal_end(current, value, flow, input_context,
+                                           on_missing_config=finish_missing_config))
+            runtime.pending_read_ends[copy_id] = held
+        await _resume_local_internal_end(flow, held, flow, input_context,
+                                         on_missing_config=finish_missing_config)
+
+
+async def _saved_internal_binding_failure(runtime, action):
+    """恢复内部 READ 已保存的原绑定失败，不查询本次设备配置。"""
+    from camctl.persistence.repositories.binding_read_cancel import load_saved_binding_read_failure
+
+    def read(owned):
+        with closing(owned.connection.execute(
+            "SELECT c.id,r.error_json FROM operation_runs r JOIN file_copies c ON c.id=r.copy_id"
+            " WHERE r.action_id=? AND r.kind=3 AND r.status=4 AND c.delivery_id IS NULL"
+            " AND json_extract(r.error_json,'$.code')='device_binding_unavailable' LIMIT 2",
+            (action["id"],),
+        )) as cursor:
+            rows = cursor.fetchall()
+        if not rows:
+            return None
+        if len(rows) != 1:
+            raise ConsistencyError("拍摄存在多个未收场的原读取绑定失败")
+        copy_id, stored = rows[0]
+        error = parse_exact_json(stored)
+        key, identity, _occurred_at = load_saved_binding_read_failure(
+            owned.connection, action["id"], copy_id, error)
+        return copy_id, error["details"], key, identity
+
+    return await runtime.database.read(read, description="读取原内部读取绑定失败")
+
+
 async def _handle_binding_failure(
     runtime: CaptureRuntime, action: Mapping[str, Any],
 ) -> bool:
     """异常绑定不产生新调用；原结果可靠保存后共同保存业务收场。"""
-    if (await _closed_capture_is_local(runtime, action)):
-        return False
-    if runtime.binding_check is None:
-        return False
-    binding_result = runtime.binding_check(_binding(action))
-    details = binding_failure_details(binding_result)
+    saved_read = await _saved_internal_binding_failure(runtime, action)
+    if saved_read is None:
+        if (await _closed_capture_is_local(runtime, action)):
+            return False
+        if runtime.binding_check is None:
+            return False
+        binding_result = runtime.binding_check(_binding(action))
+        details = binding_failure_details(binding_result)
+    else:
+        from camctl.devices.bindings import BindingStatus
+        copy_id, details, _key, identity = saved_read
+        statuses = {"missing": BindingStatus.DEVICE_MISSING, "mismatch": BindingStatus.DRIVER_MISMATCH,
+                    "physical_identity_mismatch": BindingStatus.PHYSICAL_IDENTITY_MISMATCH,
+                    "physical_identity_conflict": BindingStatus.PHYSICAL_IDENTITY_CONFLICT}
+        status = statuses.get(details.get("reason"))
+        if status is None:
+            raise ConsistencyError("原内部读取绑定失败原因不属于已登记分区")
+        binding_result = BindingResult(status, _binding(action), details.get("actual_driver_id"), identity)
+    if details is None:
+        from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+        if action.get("driver_id") == DRIVER_ID and action.get("type") == 1:
+            from camctl.devices.bindings import BindingStatus
+            from camctl.persistence.repositories.physical_alias import action_physical_identity, physical_alias_conflict
+            def read_alias(owned):
+                fixed = action_physical_identity(owned.connection, action["id"])
+                if fixed != runtime.fixed_camera_identity:
+                    return False
+                return physical_alias_conflict(owned.connection, action["device_id"], fixed)
+            if await runtime.database.read(read_alias, description="读取原机身的未完成责任"):
+                binding_result = BindingResult(BindingStatus.PHYSICAL_IDENTITY_CONFLICT,
+                                               _binding(action), None)
+                details = binding_failure_details(binding_result)
     if details is None:
         return False
-    if (await _local_recording_listing(runtime, action)) is not None:
+    if saved_read is None and (await _local_recording_listing(runtime, action)) is not None:
         return False
     def read(owned, parameters=(action["id"], int(_ATTEMPT_STATUS.RUNNING))):
         with closing(owned.connection.execute("SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id = t.run_id"
@@ -3174,6 +3402,11 @@ async def _handle_binding_failure(
                 from camctl.outputs.read_attempts import PendingReadBusiness, held_binding_read_result
                 from camctl.capture.media_flow import _save_internal_read_and_settle
 
+                from camctl.persistence.repositories.read_end import load_read_end
+                saved_end = await runtime.database.read(lambda owned: load_read_end(copy_id, owned))
+                if saved_end is not None and saved_end[3] is None:
+                    await _resume_bound_local_read(runtime, action, copy_id, ticket, saved_end)
+                    return True
                 if copy_id in read_scope.pending_read_ends:
                     request = (await _binding_failure_request(runtime, action, details, excluded_run_id=ticket.run_id))
                     business = PendingReadBusiness(runtime.capture.finish_binding_failure, request, new_operation_key())
@@ -3226,6 +3459,16 @@ async def _handle_binding_failure(
             return False
     from camctl.outputs.read_attempts import save_read_business
 
+    if saved_read is not None:
+        copy_id, details, key, _identity = saved_read
+        request = replace(await _binding_failure_request(runtime, action, details),
+                          read_result_key=key, read_copy_id=copy_id)
+        receipt = await save_read_business(_read_result_scope(runtime), action["id"],
+            "capture_binding_failure", request, runtime.capture.finish_binding_failure)
+        if receipt.kind is not DbOutcomeKind.COMPLETED:
+            raise db_failure(ConsistencyError, f"原内部读取绑定失败收场未可靠保存: {receipt.error}", receipt)
+        return receipt.value.disposition is not FinishDisposition.RETIRED
+
     from camctl.devices.tasks import CaptureResultPolicy
 
     if action["execution_spec_json"].get("result_policy") in {
@@ -3276,6 +3519,8 @@ async def _handle_binding_failure(
             raise db_failure(ConsistencyError, f"拍摄绑定失败的完整事务未完成（{receipt.kind.value}）: {receipt.error}", receipt)
     else:
         (await runtime.save_capture_completion(request))
+    if details["reason"] == "physical_identity_conflict" and (await runtime.action(action["id"]))["status"] == 2:
+        return False
     (await runtime.resume_baselines(action["id"]))
     runtime.timelapse_deadlines.pop(action["id"], None)
     runtime.natural_wait_states.pop(action["id"], None)

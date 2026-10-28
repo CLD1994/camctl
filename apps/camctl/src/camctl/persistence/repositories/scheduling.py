@@ -209,6 +209,7 @@ def _new_activity_values(action, capabilities, identity):
         "dispatch_state": int(_DISPATCH_STATE.NOT_DISPATCHED),
         "activity_state": 1,
         "occupancy_state": 1,
+        "availability_release_attempt_id": None,
         "sent_at": None,
         "started_at": None,
         "result_wait_margin_ms": None,
@@ -299,6 +300,13 @@ class StartActionCommand:
 
         capabilities = activity_capabilities(
             literal, self._decoded_spec(action["execution_spec_json"]))
+        from .preparation import PreparationReads
+        if PreparationReads(connection).availability_in_flight(action["device_id"], request.expected_identity):
+            return self._rejected("device_busy")
+        if action["driver_id"] == HASSELBLAD_DRIVER_ID:
+            from .physical_alias import physical_alias_conflict
+            if physical_alias_conflict(connection, action["device_id"], request.expected_identity):
+                return self._rejected("physical_identity_conflict")
         preparation_holder = current_preparation_holder(connection, action["device_id"])
         if preparation_holder is not None and preparation_holder.action_id != action["id"]:
             return self._rejected("device_busy")
@@ -922,8 +930,14 @@ class GrantStartCommand:
                 raise ConsistencyError("原活动资源键与固定机身身份不符")
             if request.current_identity != original:
                 return self._rejected("physical_identity_mismatch")
+            from .physical_alias import physical_alias_conflict
+            if physical_alias_conflict(connection, action["device_id"], original):
+                return self._rejected("physical_identity_conflict")
         elif request.current_identity is not None:
             raise TransactionError("其他驱动不能提供 Hasselblad 身份")
+        from .preparation import PreparationReads
+        if PreparationReads(connection).availability_in_flight(action["device_id"], request.current_identity):
+            return self._rejected("device_busy")
         preparation_reason = baseline_start_reason(activity, action)
         if preparation_reason is not None:
             return self._rejected(preparation_reason)
@@ -1076,7 +1090,7 @@ class GrantStartCommand:
         action_id = self._request.action_id
         return {"action_id": action_id, "delivery_id": None, "kind": int(_RUN_KIND.START),
                 "query_purpose": None, "responsibility_key": f"start/{action_id}",
-                "activity_id": activity_id, "copy_id": None, "cleanup_item_id": None, "obtain_item_id": None, "session_key": None}
+                "activity_id": activity_id, "copy_id": None, "cleanup_item_id": None, "obtain_item_id": None, "availability_check_id": None, "session_key": None}
 
     def _verify_start_run(self, run: dict, activity_id: int) -> dict[str, Any]:
         identity = self._start_run_identity(activity_id)
@@ -1366,29 +1380,49 @@ class ReservePreparationCommand:
             activity = row_facts(connection, "device_activities", existing)
             _verify_prepared_activity(activity, action, capabilities, request.expected_identity)
             return result(ReservePreparationOutcome.ALREADY, existing)
+        if action["driver_id"] == HASSELBLAD_DRIVER_ID:
+            from .physical_alias import physical_alias_conflict
+            if physical_alias_conflict(connection, action["device_id"], request.expected_identity):
+                return result(ReservePreparationOutcome.REJECTED, reason="physical_identity_conflict")
+        from .preparation import PreparationReads
+        if PreparationReads(connection).availability_in_flight(action["device_id"], request.expected_identity):
+            return result(ReservePreparationOutcome.REJECTED, reason="device_busy")
         # 已持有活动和读取机会均由原拥有者先完成，准备不打断原工作。
         with closing(connection.execute(
                 "SELECT 1 FROM device_activities d JOIN actions a ON a.id=d.action_id"
                 " WHERE a.device_id=? AND d.occupancy_state=1 LIMIT 1", (action["device_id"],))) as cursor:
             if cursor.fetchone() is not None:
                 return result(ReservePreparationOutcome.REJECTED, reason="device_busy")
-        with closing(connection.execute("SELECT 1 FROM file_copies WHERE slot_device_id=? LIMIT 1",
-                                        (action["device_id"],))) as cursor:
-            if cursor.fetchone() is not None:
+        from .retry_wait_reads import read_reservation_blocks_control
+        if (read_reservation_blocks_control(connection, action["device_id"], allow_unstarted=True)
+                if action["driver_id"] == HASSELBLAD_DRIVER_ID else
+                read_reservation_blocks_control(connection, action["device_id"])):
+            return result(ReservePreparationOutcome.REJECTED, reason="device_busy")
+        if request.trusted_wall_now < action["scheduled_at"]:
+            from camctl.outputs.read_discovery import device_holder
+            if device_holder(connection, action["device_id"]) is not None:
                 return result(ReservePreparationOutcome.REJECTED, reason="device_busy")
-        mine = (action["scheduled_at"], action["plan_id"], action["input_index"])
-        with closing(connection.execute(
-                "SELECT scheduled_at,plan_id,input_index,max_delay_ms FROM actions"
-                f" WHERE device_id=? AND type IN ({_CAPTURE_TYPE_PLACEHOLDERS})"
-                " AND status=1 AND execution_started=0"
-                " AND cancel_requested=0 ORDER BY scheduled_at,plan_id,input_index",
-                (action["device_id"], *CAPTURE_ACTION_TYPES))) as cursor:
-            for scheduled, plan_id, index, delay in cursor:
-                if (scheduled, plan_id, index) >= mine:
-                    break
-                if (Decimal(scheduled) - request.prepare_lead_s * 1_000_000
-                        <= request.trusted_wall_now <= scheduled + delay * 1000):
-                    return result(ReservePreparationOutcome.REJECTED, reason="not_first_candidate")
+        if action["driver_id"] == HASSELBLAD_DRIVER_ID:
+            from .capture_selection import CaptureSelectionInput, selected_pending_capture
+            selection = CaptureSelectionInput(action["device_id"], action["driver_id"],
+                request.expected_identity, request.prepare_lead_s, request.trusted_wall_now)
+            selected = selected_pending_capture(connection, selection, scope.max_event_id)
+            if selected is None or selected.action_id != action["id"]:
+                return result(ReservePreparationOutcome.REJECTED, reason="not_first_candidate")
+        else:
+            mine = (action["scheduled_at"], action["plan_id"], action["input_index"])
+            with closing(connection.execute(
+                    "SELECT scheduled_at,plan_id,input_index,max_delay_ms FROM actions"
+                    f" WHERE device_id=? AND type IN ({_CAPTURE_TYPE_PLACEHOLDERS})"
+                    " AND status=1 AND execution_started=0"
+                    " AND cancel_requested=0 ORDER BY scheduled_at,plan_id,input_index",
+                    (action["device_id"], *CAPTURE_ACTION_TYPES))) as cursor:
+                for scheduled, plan_id, index, delay in cursor:
+                    if (scheduled, plan_id, index) >= mine:
+                        break
+                    if (Decimal(scheduled) - request.prepare_lead_s * 1_000_000
+                            <= request.trusted_wall_now <= scheduled + delay * 1000):
+                        return result(ReservePreparationOutcome.REJECTED, reason="not_first_candidate")
         allocation = scope.allocate(1)
         identity = _next_id(connection, "device_activities")
         values = _new_activity_values(action, capabilities, request.expected_identity)

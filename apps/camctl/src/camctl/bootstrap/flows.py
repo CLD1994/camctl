@@ -153,8 +153,9 @@ class CaptureFlow:
 
     def __init__(self, capture_factory, *, resume_media_results=None,
                  resume_file_observations=None, resume_read_results=None,
-                 read_discovery_batch_size=DEFAULT_BATCH_SIZE):
+                 read_discovery_batch_size=DEFAULT_BATCH_SIZE, availability=None):
         self._factory = capture_factory
+        self._availability = availability
         self._resume_media = resume_media_results
         self._resume_files = resume_file_observations
         self._resume_reads = resume_read_results
@@ -170,7 +171,8 @@ class CaptureFlow:
 
     def next_wakeup_at(self, now, margin_s):
         recording = self._recording_wakeups.next_at(now, margin_s)
-        deadlines = [at for at in (recording, self._preparation_at) if at is not None]
+        availability = None if self._availability is None else self._availability.coordinator.next_wakeup_at(now, margin_s)
+        deadlines = [at for at in (recording, self._preparation_at, availability) if at is not None]
         return min(deadlines, default=None)
 
     def owns_device(self, device_id):
@@ -211,6 +213,8 @@ class CaptureFlow:
                 if device in self._devices and self._devices[device].unconsumed_task is task}
 
     async def __call__(self, context):
+        if self._availability is not None:
+            self._availability.coordinator.wake = context.wake
         self.check_completed()
         if self._stopping:
             return
@@ -323,8 +327,26 @@ class CaptureFlow:
                     if self._stopping:
                         return
                     from camctl.capture.residual import _original_binding_failure
-                    if await _original_binding_failure(runtime, await runtime.action(action_id)) is not None:
+                    action = await runtime.action(action_id)
+                    binding_failure = await _original_binding_failure(runtime, action)
+                    if binding_failure is not None:
+                        if binding_failure["reason"] == "physical_identity_conflict":
+                            from camctl.capture.preparation import _end, session_setup_budget
+                            from camctl.devices.capture_preparation import preparation_lead_s
+                            current = context.clock.utc_micros()
+                            lead = preparation_lead_s(runtime.prepare_lead_s, session_setup_budget(runtime, action))
+                            if (action["status"] == 1 and not action["cancel_requested"]
+                                    and action["scheduled_at"] - lead * 1_000_000 <= current
+                                    <= action["scheduled_at"] + action["max_delay_ms"] * 1000):
+                                await _end(runtime, action_id, "fail_binding_preparation",
+                                    FailBindingPreparationRequest(action_id, current, current, binding_failure,
+                                        prepare_lead_s=lead, current_identity=runtime.fixed_camera_identity))
+                                wakeup_required |= (await runtime.action(action_id))["status"] == 4
                         continue
+                    if self._availability is not None:
+                        from camctl.operations.availability import AvailabilityProgress
+                        if await self._availability.capture(runtime, action) is not AvailabilityProgress.READY:
+                            continue
                     prepared = await advance_preparation(runtime, action_id)
                     wakeup_required |= prepared.wakeup_required
                     if prepared.phase is PreparationPhase.READY:
@@ -350,6 +372,10 @@ class CaptureFlow:
                         continue
                     if (preparation_ready is not None and action_id not in preparation_ready
                             and await _original_binding_failure(runtime, await runtime.action(action_id)) is None):
+                        if self._availability is not None:
+                            from camctl.operations.availability import AvailabilityProgress
+                            if await self._availability.capture(runtime, await runtime.action(action_id)) is not AvailabilityProgress.READY:
+                                continue
                         prepared = await advance_preparation(runtime, action_id)
                         wakeup_required |= prepared.wakeup_required
                         if prepared.phase is not PreparationPhase.READY:
@@ -369,7 +395,7 @@ class CaptureFlow:
                         await _end(runtime, action_id, "fail_binding_preparation",
                             FailBindingPreparationRequest(action_id, current, current, binding_failure,
                                 current_identity=(runtime.fixed_camera_identity
-                                    if binding_failure["reason"] == "physical_identity_mismatch" else None)))
+                                    if binding_failure["reason"] in ("physical_identity_mismatch", "physical_identity_conflict") else None)))
                         wakeup_required |= (await runtime.action(action_id))["status"] == 4
                         continue
                 outcome = await _save_command(database, scheduling.start_action,
@@ -378,6 +404,7 @@ class CaptureFlow:
                 if outcome.kind is not DbOutcomeKind.COMPLETED:
                     raise db_failure(StateDbFailure, f"动作开始事务未完成（{outcome.kind.value}）: {outcome.error}", outcome)
                 wakeup_required |= outcome.value.outcome is StartOutcome.STARTED
+                wakeup_required |= outcome.value.reason == "physical_identity_conflict"
             if runtime is None or self._stopping:
                 return FlowWakeup.RECHECK if wakeup_required else FlowWakeup.IDLE
             now = context.clock.utc_micros()
@@ -407,11 +434,11 @@ class CaptureFlow:
 
 def capture_flow(capture_factory: Callable[[Any, str], Any], *, resume_media_results=None,
                  resume_file_observations=None, resume_read_results=None,
-                 read_discovery_batch_size=DEFAULT_BATCH_SIZE) -> CaptureFlow:
+                 read_discovery_batch_size=DEFAULT_BATCH_SIZE, availability=None) -> CaptureFlow:
     """构造按设备独立推进的拍摄拥有者；工厂返回 None 表示能力未装配。"""
     return CaptureFlow(capture_factory, resume_media_results=resume_media_results,
                        resume_file_observations=resume_file_observations, resume_read_results=resume_read_results,
-                       read_discovery_batch_size=read_discovery_batch_size)
+                       read_discovery_batch_size=read_discovery_batch_size, availability=availability)
 
 
 @dataclass(frozen=True)
@@ -496,6 +523,14 @@ def _due_cancel_actions(owned: Any, now_us: int | None) -> list[tuple[int, int, 
                 for row in cursor.fetchall()]
 
 
+async def _current_cancel_origin(database, action_id):
+    rows = await _query_rows(database, "SELECT type,status,cancel_requested FROM actions WHERE id=?", (action_id,))
+    if (len(rows) != 1 or rows[0][0] != 6 or rows[0][1] not in (1, 2, 3, 4, 5, 6)
+            or rows[0][2] not in (0, 1)):
+        raise StateDbFailure("取消发起者当前状态不可可靠核实")
+    return rows[0][1], bool(rows[0][2])
+
+
 def _cancel_target_from_input(spec_json: str):
     """从已受理取消动作的原始输入重建寻址对象；形态不可靠按状态库错误。"""
     from camctl.cancellation.models import CancelTarget
@@ -556,6 +591,7 @@ def _withdrawal_position(database, ready: Path, processing: Path):
 
 async def _fix_cancel_request(database, repository, request, key, entries):
     """入口许可在主协程封住，工作线程只消费固定的许可事实。"""
+    from camctl.cancellation.models import CancelTargetsDisposition
     from camctl.devices.start_entry import EntryPhase
     snapshots = []
     for block in request.entry_blocks:
@@ -569,7 +605,12 @@ async def _fix_cancel_request(database, repository, request, key, entries):
             for block in request.entry_blocks:
                 permit = entries.get(block.database_id, block.action_id)
                 if permit is not None and permit.ticket == block.ticket:
-                    permit.phase = EntryPhase.BLOCKED
+                    if outcome.value.disposition is CancelTargetsDisposition.ABANDONED:
+                        if permit.phase is EntryPhase.RESERVED:
+                            permit.phase = EntryPhase.READY
+                        permit.cancel_origins.discard(request.action_id)
+                    else:
+                        permit.phase = EntryPhase.BLOCKED
             entries.pending_cancels.pop(request.action_id, None)
         return outcome
     return await settle_required(save_and_apply())
@@ -585,6 +626,7 @@ def cancel_flow(
     resume_capture_completions=None,
     cleanup_pending=None,
     preparation_pending=None,
+    availability_owner=None,
 ) -> Callable[[Any], Any]:
     """推进原取消集合；设备及文件等待不占用数据库线程。"""
     from camctl.host_files.tasks import FileTaskExecutor
@@ -638,6 +680,7 @@ def cancel_flow(
             occurred_at=occurred, work_files=work_files,
             withdrawal_execute=execute_withdrawal, withdrawal_resume=resume_withdrawal,
             cleanup_pending=cleanup_pending, preparation_pending=preparation_pending,
+            availability_owner=availability_owner,
             pending_origin_settlements=pending_origin_settlements)
         cancellation_runtime = CancellationRuntime(
             database=database, repository=repository, settlement=settlement,
@@ -651,6 +694,14 @@ def cancel_flow(
         now_us = None if unscheduled_only else occurred()
         due = await database.read(lambda owned: _due_cancel_actions(owned, now_us))
         for action_id, status, spec_json in due:
+            status, canceled = await _current_cancel_origin(database, action_id)
+            if status in (3, 4, 5, 6):
+                continue
+            if canceled:
+                resumed = await settle_origin_cancel(OriginSettle(action_id), cancellation_runtime)
+                if resumed.kind is not DbOutcomeKind.COMPLETED:
+                    raise db_failure(StateDbFailure, f"取消发起者收场仍未完成: {resumed.error}", resumed)
+                continue
             item_ids = await database.read(lambda owned: _fixed_cancel_items(owned, action_id))
             if item_ids is None:
                 if status == 1:
@@ -728,11 +779,16 @@ async def _resolve_and_fix(
                 tuple(candidates))
     inputs, auto_candidates, candidates = await database.read(read)
     direct = []
+    deferred_entries = {}
     for identity, loaded in inputs:
         entry = None if start_entries is None else start_entries.get(
             database.metadata.instance_id, identity)
-        facts = current_eligibility_facts(
-            loaded, None if entry is None else entry.phase)
+        if entry is not None:
+            from camctl.devices.start_entry import EntryPhase
+            if entry.phase in (EntryPhase.GRANTING, EntryPhase.UNKNOWN, EntryPhase.RESERVED):
+                deferred_entries[identity] = entry
+        facts = current_eligibility_facts(loaded, EntryPhase.READY if identity in deferred_entries
+                                          else None if entry is None else entry.phase)
         direct.append(TargetFacts(
             action_id=identity, terminal=facts.terminal,
             may_cancel=may_link_auto_preview(
@@ -744,11 +800,21 @@ async def _resolve_and_fix(
         return None
     blocks = []
     selected = {target.action_id for target in fixed.targets}
+    deferred = [entry for identity, entry in deferred_entries.items() if identity in selected]
+    if deferred:
+        for entry in deferred:
+            entry.cancel_origins.add(action_id)
+        for entry in deferred:
+            pending = start_entries.pending_grants.get((entry.database_id, entry.action_id))
+            if entry.phase is EntryPhase.UNKNOWN and pending is not None:
+                await pending()
+        return None
     if start_entries is not None:
         for identity, no_intent in candidates:
             if identity not in selected:
                 continue
-            permit = start_entries.reserve(database.metadata.instance_id, identity, no_intent=no_intent)
+            permit = start_entries.reserve(database.metadata.instance_id, identity, no_intent=no_intent,
+                                           origin_action_id=action_id)
             if permit is not None:
                 blocks.append(EntryBlock(permit.database_id, permit.action_id, permit.ticket))
     request = FixCancelTargets(action_id, fixed, occurred(), tuple(blocks))
@@ -758,6 +824,8 @@ async def _resolve_and_fix(
     saved = await _fix_cancel_request(database, repository, request, key, start_entries)
     if saved.kind is not DbOutcomeKind.COMPLETED:
         raise db_failure(StateDbFailure, f"取消目标固定事务未完成（{saved.kind.value}）: {saved.error}", saved)
+    if saved.value.disposition is CancelTargetsDisposition.ABANDONED:
+        return None
     if saved.value.disposition is CancelTargetsDisposition.SAVED:
         record_event("cancel.targets", event="fixed",
             database_id=database.metadata.instance_id, action_id=action_id,

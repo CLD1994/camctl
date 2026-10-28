@@ -38,6 +38,7 @@ _DELIVERY_ITEM_PENDING, _DELIVERY_ITEM_WITHDRAWN = 1, 2
 _DELIVERY_ITEM_NOT_RETRACTABLE, _DELIVERY_ITEM_FAILED = 3, 4
 _RUN = enum_for("operation_runs.status")
 _KIND = enum_for("operation_runs.kind")
+_ATTEMPT = enum_for("operation_attempts.status")
 
 
 class TargetSettlement:
@@ -52,6 +53,7 @@ class TargetSettlement:
                  cleanup_pending: Callable[
                      [BusinessDatabase, int], Awaitable[bool]] | None = None,
                  preparation_pending: Callable[[int], bool] | None = None,
+                 availability_owner: Any = None,
                  pending_origin_settlements: dict | None = None) -> None:
         self._database = database
         self._outputs = outputs
@@ -62,12 +64,16 @@ class TargetSettlement:
         self._withdrawal_resume = withdrawal_resume
         self._cleanup_pending = cleanup_pending
         self._preparation_pending = preparation_pending
+        self._availability_owner = availability_owner
         self._pending_origin_settlements = (
             {} if pending_origin_settlements is None
             else pending_origin_settlements)
 
     async def settle(self, target_action_id: int) -> SettlementOutcome:
         """按动作类型推进本次取消所需的有限收场。"""
+        if self._availability_owner is not None and self._availability_owner.pending(target_action_id):
+            self._availability_owner.cancel_action(target_action_id)
+            return SettlementOutcome(complete=False)
         row = await self._database.read(
             lambda owned: _fetchone(
                 owned.connection,
@@ -78,6 +84,12 @@ class TargetSettlement:
         if row is None:
             raise ValueError(f"取消目标动作不存在: {target_action_id}")
         kind, status = row
+        if kind in _CAPTURE_TYPES or kind == _OBTAIN_TYPE:
+            pending = await self._database.read(
+                lambda owned: _availability_attempt_pending(owned.connection, target_action_id),
+                description="读取设备检查取消收场事实")
+            if pending:
+                return SettlementOutcome(complete=False)
         if kind in _CAPTURE_TYPES:
             return await self._settle_capture(target_action_id, status)
         if kind == _OBTAIN_TYPE:
@@ -389,6 +401,14 @@ class TargetSettlement:
             database=self._database, repository=self._cancellations,
             settlement=self, occurred_at=self._occurred_at,
             pending_origin_settlements=self._pending_origin_settlements)
+
+
+def _availability_attempt_pending(connection, action_id):
+    return _fetchone(connection,
+        "SELECT 1 FROM operation_runs r JOIN operation_attempts t ON t.run_id=r.id"
+        " WHERE r.action_id=? AND r.kind=? AND (t.status=? OR t.result_event_id IS NULL"
+        " OR t.result_json IS NULL) LIMIT 1",
+        (action_id, int(_KIND.CHECK_DEVICE_AVAILABILITY), int(_ATTEMPT.RUNNING))) is not None
 
 
 def _fetchone(connection, sql: str, parameters: tuple):

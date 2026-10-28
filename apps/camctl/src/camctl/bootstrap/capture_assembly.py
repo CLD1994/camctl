@@ -125,6 +125,15 @@ def _device_attempts(
     return value if isinstance(value, int) and not isinstance(value, bool) \
         else default
 
+
+def query_attempt_config(declaration):
+    """状态查询与独立设备检查使用同一组设备配置。"""
+    return AttemptConfig(
+        max_attempts=_device_attempts(declaration, "query", 3),
+        timeout_s=_device_seconds(declaration, "query", "timeout_s", Decimal("10")),
+        retry_interval_s=_device_seconds(declaration, "query", "retry_interval_s", _DEFAULT_RETRY_INTERVAL_S),
+    )
+
 #: 源端摘要观察的契约类型与版本（devices 契约测试共用同一形态）。
 _DIGEST_TYPE = "file_digest"
 _DIGEST_VERSION = 1
@@ -910,6 +919,10 @@ def session_capture_assembly(
                 read_discovery_batch_size=read_discovery_batch_size)
             if media_enabled else None)
         if media is not None:
+            if driver_id == HASSELBLAD_DRIVER_ID:
+                from camctl.persistence.repositories.capture_selection import CaptureSelectionInput
+                media.capture_selection = lambda now: CaptureSelectionInput(
+                    device_id, str(driver_id), _hasselblad_identity(declaration), preparation_leads[device_id], now)
             media.segment_size = segment_size
             media.recovery_boundary = recovery_boundary
             media.recovery_max_event_id = fixed_recovery_boundary()
@@ -1023,15 +1036,7 @@ def session_capture_assembly(
                     _DEFAULT_RETRY_INTERVAL_S,
                 ),
             ),
-            query_config=AttemptConfig(
-                max_attempts=_device_attempts(declaration, "query", 3),
-                timeout_s=_device_seconds(
-                    declaration, "query", "timeout_s", Decimal("10")
-                ),
-                retry_interval_s=_device_seconds(
-                    declaration, "query", "retry_interval_s", _DEFAULT_RETRY_INTERVAL_S
-                ),
-            ),
+            query_config=query_attempt_config(declaration),
             residual_config=AttemptConfig(
                 max_attempts=_device_attempts(declaration, "residual_stop", 3),
                 timeout_s=_device_seconds(

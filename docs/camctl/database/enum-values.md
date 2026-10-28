@@ -461,6 +461,7 @@
 | 9 | `EMERGENCY_STOP` |
 | 10 | `PREPARE_CAPTURE` |
 | 11 | `RESOLVE_OUTPUT_SCOPE` |
+| 12 | `CHECK_DEVICE_AVAILABILITY` |
 
 ### `operation_runs.query_purpose`
 

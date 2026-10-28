@@ -18,7 +18,8 @@ def reader_module(monkeypatch):
 
     monkeypatch.setattr(resources, "resource_bytes", lambda *_: pytest.fail("不能读取包资源"))
     monkeypatch.setattr(enums, "resource_bytes", lambda *_: pytest.fail("不能读取包资源"))
-    definitions = {"operation_runs.kind": SimpleNamespace(START=1, READ_FILE=3),
+    definitions = {"operation_runs.kind": SimpleNamespace(START=1, READ_FILE=3, CHECK_DEVICE_AVAILABILITY=12),
+                   "operation_runs.status": SimpleNamespace(PENDING=1, ACTIVE=2),
                    "operation_attempts.status": SimpleNamespace(RUNNING=1)}
     monkeypatch.setattr(enums, "enum_for", lambda name: definitions[name])
     from camctl.scheduling import resources as scheduling_resources
@@ -27,12 +28,15 @@ def reader_module(monkeypatch):
     preparation.CAPTURE_ACTION_TYPES = ()
     capture_facts = ModuleType("camctl.persistence.repositories.capture_facts")
     capture_facts.preparation_calls_resolved = lambda *args, **kwargs: True
+    hasselblad = ModuleType("camctl.devices.drivers.hasselblad.definitions")
+    hasselblad.DRIVER_ID = "hasselblad_cfv100c"
     transaction = ModuleType("camctl.persistence.transaction")
     transaction.row_facts = lambda connection, table, identity: connection.rows.get((table, identity))
     path = Path(__file__).parents[3] / "src/camctl/persistence/repositories/preparation.py"
     spec = importlib.util.spec_from_file_location("camctl.persistence.repositories._flight_test", path)
     module = importlib.util.module_from_spec(spec)
     with patch.dict(sys.modules, {preparation.__name__: preparation, capture_facts.__name__: capture_facts,
+                                  hasselblad.__name__: hasselblad,
                                   transaction.__name__: transaction}):
         spec.loader.exec_module(module)
         yield module
@@ -59,7 +63,18 @@ class Database:
     def execute(self, sql, parameters):
         attempts = [row for (table, _), row in self.rows.items()
                     if table == "operation_attempts" and row["status"] == 1]
-        if "c.slot_device_id=?" in sql or "r.copy_id=?" in sql:
+        if "SELECT id FROM operation_attempts WHERE run_id=? AND attempt_no=?" in sql:
+            run_id, attempt_no = parameters
+            found = [(a["id"],) for a in attempts if a["run_id"] == run_id and a["attempt_no"] == attempt_no]
+        elif "FROM device_availability_checks c" in sql:
+            kind, running, device, resource, _ = parameters
+            found = [(a["id"],) for a in attempts
+                     if a["status"] == running
+                     and (r := self.rows.get(("operation_runs", a["run_id"])))
+                     and r["kind"] == kind
+                     and (c := self.rows.get(("device_availability_checks", r["availability_check_id"])))
+                     and (c["device_id"] == device or resource is not None and c["resource_key"] == resource)]
+        elif "c.slot_device_id=?" in sql or "r.copy_id=?" in sql:
             kind, device = parameters
             found = [(a["id"],) for a in attempts
                      if (r := self.rows.get(("operation_runs", a["run_id"])))
@@ -187,3 +202,79 @@ def test_unrelated_running_attempt_with_known_run_is_ignored(reader_module):
     event = accepted(change("operation_runs", 3, {"kind": 4}),
                      change("operation_attempts", 5, {"run_id": 3, "status": 1}))
     assert not reader_module.PreparationReads(Database(), [event]).device_start_in_flight("camera")
+
+
+def _availability_facts(device="camera", serial="SERIAL"):
+    from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+    identity = CameraIdentity(serial, 10)
+    check = {"id": 31, "action_id": 7, "device_id": device,
+             "expected_identity_json": {"serial": serial, "product_id": 10}, "resource_key": identity.resource_key}
+    return identity, check
+
+
+def test_running_check_blocks_same_logical_device_and_physical_alias(reader_module):
+    identity, check = _availability_facts()
+    db = Database([("device_availability_checks", check),
+                   ("operation_runs", {"id": 3, "kind": 12, "action_id": 7, "availability_check_id": 31}),
+                   ("operation_attempts", {"id": 5, "run_id": 3, "status": 1})])
+    reads = reader_module.PreparationReads(db)
+    assert reads.availability_in_flight("camera")
+    assert reads.availability_in_flight("alias", identity)
+    assert not reads.availability_in_flight("other")
+
+
+def test_waiting_check_without_running_attempt_does_not_block(reader_module):
+    identity, check = _availability_facts()
+    db = Database([("device_availability_checks", check),
+                   ("operation_runs", {"id": 3, "kind": 12, "action_id": 7, "availability_check_id": 31,
+                                       "status": 2, "retry_wait_required": 1})])
+    assert not reader_module.PreparationReads(db).availability_in_flight("camera", identity)
+
+
+def test_validated_prior_check_intent_is_visible_before_projection_write(reader_module):
+    identity, check = _availability_facts("alias")
+    events = [accepted(change("device_availability_checks", 31, {k: v for k, v in check.items() if k != "id"}),
+        change("operation_runs", 3, {"kind": 12, "action_id": 7, "availability_check_id": 31}),
+        change("operation_attempts", 5, {"run_id": 3, "status": 1}))]
+    assert reader_module.PreparationReads(Database(), events).availability_in_flight("camera", identity)
+
+
+def test_validated_prior_check_result_removes_original_running_attempt(reader_module):
+    identity, check = _availability_facts()
+    db = Database([("device_availability_checks", check),
+                   ("operation_runs", {"id": 3, "kind": 12, "action_id": 7, "availability_check_id": 31}),
+                   ("operation_attempts", {"id": 5, "run_id": 3, "status": 1})])
+    result = accepted(change("operation_attempts", 5, {"status": 2}, exists=True))
+    assert not reader_module.PreparationReads(db, [result]).availability_in_flight("camera", identity)
+
+
+def test_forged_saved_identity_is_a_state_error(reader_module):
+    identity, check = _availability_facts()
+    check["expected_identity_json"] = {"serial": "OTHER", "product_id": 10}
+    db = Database([("device_availability_checks", check),
+                   ("operation_runs", {"id": 3, "kind": 12, "action_id": 7, "availability_check_id": 31}),
+                   ("operation_attempts", {"id": 5, "run_id": 3, "status": 1})])
+    with pytest.raises(ConsistencyError):
+        reader_module.PreparationReads(db).availability_in_flight("camera", identity)
+
+
+def test_actual_start_rechecks_original_ticket_and_alias(reader_module, monkeypatch):
+    identity, check = _availability_facts("other-device")
+    db = Database([("device_availability_checks", check),
+        ("operation_runs", {"id": 3, "kind": 12, "action_id": 7, "availability_check_id": 31}),
+        ("operation_attempts", {"id": 5, "run_id": 3, "status": 1}),
+        ("actions", {"id": 10, "device_id": "camera", "driver_id": "hasselblad_cfv100c"}),
+        ("device_activities", {"id": 20, "action_id": 10, "expected_identity_json": {
+            "serial": identity.serial, "product_id": identity.product_id}, "resource_key": identity.resource_key}),
+        ("operation_runs", {"id": 4, "kind": 1, "action_id": 10, "activity_id": 20,
+                            "responsibility_key": "start/10", "attempts_used": 1, "status": 2}),
+        ("operation_attempts", {"id": 6, "run_id": 4, "attempt_no": 1, "status": 1, "result_event_id": None})])
+    models = ModuleType("camctl.operations.models")
+    models.AttemptTicket = type("AttemptTicket", (), {})
+    monkeypatch.setitem(sys.modules, models.__name__, models)
+    ticket = models.AttemptTicket()
+    ticket.run_id, ticket.attempt_id, ticket.operation = 4, 1, "control"
+    ticket.responsibility_key, ticket.target_id = "start/10", "20"
+    assert reader_module.recheck_start_availability(SimpleNamespace(connection=db), ticket) == "device_busy"
+    db.rows[("operation_attempts", 5)]["status"] = 2
+    assert reader_module.recheck_start_availability(SimpleNamespace(connection=db), ticket) is None

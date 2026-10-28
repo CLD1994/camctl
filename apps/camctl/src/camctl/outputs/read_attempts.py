@@ -1,13 +1,13 @@
 """设备文件读取的原尝试选择；连接恢复不消耗新的读取次数。"""
 
 from contextlib import closing
-from dataclasses import dataclass, field
-from typing import Any, Callable
+from dataclasses import dataclass, field, replace
+from typing import Any, Callable, Mapping
 
 from camctl.capture.recovery import RecoveryBoundary, RecoveryBlockedReason, RecoveryDiagnostic
 from camctl.contracts.values import ConsistencyError, OperationKey, new_operation_key
 from camctl.operations.attempts import (
-    AttemptFinish, BeginDisposition, ReadResumeDisposition, ReadResumeRequest, RunFinish, RunOutcome,
+    AttemptFinish, BeginDisposition, FinishDisposition, ReadResumeDisposition, ReadResumeRequest, RunFinish, RunOutcome, RunStatus,
 )
 from camctl.operations.models import (
     AttemptStatus, AttemptTicket, CallOutcome, EffectState, ErrorValue,
@@ -49,6 +49,7 @@ class ReadContinuation:
     occurred_at: int | None = None
     result_key: OperationKey | None = None
     evidence: Any = None
+    inspection_cancel_recovery: bool = False
 
 
 @dataclass(frozen=True)
@@ -60,7 +61,8 @@ class ReadDispatchPrevented:
     terminal: bool = False
 
 
-def read_dispatch_qualification(owned, ticket, source_id, *, device_source):
+def read_dispatch_qualification(owned, ticket, source_id, *, device_source,
+                                capture_selection=None, never_dispatched=False):
     """在源事实所属callback内复核原票据、当前来源和业务资格。"""
     from camctl.persistence.repositories.outputs import _read_owner_eligible
     from camctl.outputs.read_discovery import read_copy_dispatch_eligible
@@ -69,7 +71,8 @@ def read_dispatch_qualification(owned, ticket, source_id, *, device_source):
     with closing(owned.connection.execute(
         "SELECT a.status,a.cancel_requested,r.status,r.attempts_used,"
         "t.status,t.result_json,c.source_device_file_id,c.source_intermediate_file_id,"
-        "c.slot_device_id FROM operation_runs r JOIN actions a ON a.id=r.action_id"
+        "c.slot_device_id,t.id,t.copy_round,c.round,r.kind,t.intent_event_id,t.result_event_id"
+        " FROM operation_runs r JOIN actions a ON a.id=r.action_id"
         " JOIN file_copies c ON c.id=r.copy_id"
         " JOIN operation_attempts t ON t.run_id=r.id AND t.attempt_no=?"
         " WHERE r.id=? AND c.id=? AND r.responsibility_key=?",
@@ -78,7 +81,13 @@ def read_dispatch_qualification(owned, ticket, source_id, *, device_source):
         row = cursor.fetchone()
     if row is None:
         raise ConsistencyError("实际读取入口缺少原票据的业务归属")
-    status, canceled, run_status, used, attempt_status, result, device_id, host_id, slot = row
+    (status, canceled, run_status, used, attempt_status, result, device_id, host_id, slot,
+     attempt_id, copy_round, current_round, kind, intent_event_id, result_event_id) = row
+    if (ticket.operation != "read" or ticket.responsibility_key != f"read/{int(ticket.target_id)}"
+            or kind != int(enum_for("operation_runs.kind").READ_FILE) or intent_event_id is None
+            or (attempt_status == int(enum_for("operation_attempts.status").RUNNING) and result_event_id is not None)
+            or (never_dispatched and copy_round != current_round)):
+        raise ConsistencyError("实际读取票据或未派发拷贝轮次不一致")
     runs, attempts = enum_for("operation_runs.status"), enum_for("operation_attempts.status")
     if (run_status not in (int(runs.PENDING), int(runs.ACTIVE))
             or attempt_status != int(attempts.RUNNING) or result is not None):
@@ -95,6 +104,45 @@ def read_dispatch_qualification(owned, ticket, source_id, *, device_source):
         return ReadDispatchPrevented("read_slot_not_held")
     if not device_source and slot is not None:
         raise ConsistencyError("主机源读取不能持有相机机会")
+    if device_source:
+        from camctl.persistence.transaction import row_facts
+        from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+        source = row_facts(owned.connection, "device_files", source_id)
+        if source is None:
+            raise ConsistencyError("实际读取缺少原设备文件")
+        observer = row_facts(owned.connection, "actions", source["observer_action_id"])
+        origin = row_facts(owned.connection, "actions", source["source_action_id"])
+        if observer is None or origin is None:
+            raise ConsistencyError("实际读取缺少原设备绑定")
+        if slot != observer["device_id"] or (observer["device_id"], observer["driver_id"]) != (
+                origin["device_id"], origin["driver_id"]):
+            raise ConsistencyError("实际读取机会与原来源绑定不一致")
+        identity = None
+        if observer["driver_id"] == DRIVER_ID:
+            from camctl.persistence.repositories.physical_alias import source_physical_alias_conflict, source_physical_identity
+            if source_physical_alias_conflict(owned.connection, source, observer, origin):
+                return ReadDispatchPrevented("physical_identity_conflict")
+            identity = source_physical_identity(owned.connection, source, observer, origin)
+            if never_dispatched:
+                from camctl.persistence.repositories.capture_selection import read_capture_priority
+                if capture_selection is None:
+                    raise ConsistencyError("未派发读取缺少本次拍摄选择输入")
+                with closing(owned.connection.execute("SELECT COALESCE(MAX(id),0) FROM history_events")) as cursor:
+                    boundary = cursor.fetchone()[0]
+                selected = read_capture_priority(owned.connection, capture_selection, boundary,
+                    device_id=observer["device_id"], identity=identity,
+                    occurred_at=capture_selection.trusted_wall_now, exclude_read_attempt_id=attempt_id)
+                if selected is not None:
+                    return ReadDispatchPrevented("capture_priority")
+        from camctl.persistence.repositories.preparation import PreparationReads
+        preparation = PreparationReads(owned.connection)
+        if preparation.availability_in_flight(observer["device_id"], identity):
+            return ReadDispatchPrevented("device_busy")
+        if observer["driver_id"] == DRIVER_ID:
+            from camctl.scheduling.resources import current_preparation_holder
+            if (current_preparation_holder(owned.connection, observer["device_id"]) is not None
+                    or preparation.capture_holds_device(observer["device_id"])):
+                return ReadDispatchPrevented("capture_priority")
     if not read_copy_dispatch_eligible(owned.connection, int(ticket.target_id)):
         return ReadDispatchPrevented("read_input_not_needed")
     return None
@@ -190,6 +238,9 @@ class PendingReadResult:
     business_saves: dict[tuple[int, str], "PendingReadBusiness"] = field(
         default_factory=dict, compare=False, repr=False)
     diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
+    preserved_run_terminal: bool = False
+    binding_read: bool = False
+    binding_identity: Mapping | None = None
 
 
 @dataclass(frozen=True)
@@ -205,11 +256,31 @@ def hold_read_end(runtime, ticket, end, complete, *, resume=None, evidence=None)
     if end.stopped is True and end.error is None and complete:
         copy_id = int(ticket.target_id)
         held = runtime.pending_read_ends.get(copy_id)
-        if held is not None and held.ticket != ticket:
-            raise ConsistencyError("原完整读取结束事实属于其他尝试")
-        runtime.pending_read_ends[copy_id] = HeldReadEnd(ticket, end, runtime.occurred_at(),
+        if held is not None and (held.ticket != ticket or held.end != end):
+            raise ConsistencyError("原完整读取结束事实与已持有的返回不一致")
+        runtime.pending_read_ends[copy_id] = HeldReadEnd(ticket, end,
+            held.occurred_at if held is not None else runtime.occurred_at(),
             resume if resume is not None else (held.resume if held is not None else None),
             evidence if evidence is not None else (held.evidence if held is not None else None))
+
+
+async def persist_read_end(runtime, ticket, end, complete, *, state, source_device_file_id,
+                           source_intermediate_file_id, resume=None, evidence=None):
+    """先持有原返回，再沿同一申请及操作键可靠保存。"""
+    hold_read_end(runtime, ticket, end, complete, resume=resume, evidence=evidence)
+    copy_id = int(ticket.target_id)
+    held = runtime.pending_read_ends.get(copy_id)
+    if held is None or held.ticket != ticket or held.end != end:
+        return
+    from camctl.persistence.repositories.read_end import SaveReadEnd, save_read_end
+
+    pending = runtime.pending_read_business.get((copy_id, "read_end"))
+    if pending is None:
+        original = SaveReadEnd(ticket, state.round, source_device_file_id,
+            source_intermediate_file_id, state.target.file_id, state.source_size, end, held.occurred_at)
+    else:
+        original = pending.request
+    await save_read_business(runtime, copy_id, "read_end", original, save_read_end, retry=pending is not None)
 
 
 async def retry_read_ends(runtime):
@@ -237,6 +308,26 @@ async def retry_read_ends(runtime):
         if held.resume is None:
             raise ConsistencyError("原实际读取结束缺少本地校验续接责任")
         await held.resume(runtime, held)
+
+
+async def current_local_read_end(runtime, copy_id, held, *, allow_held_slot=False):
+    """取得文件资格后重新核对原票据及当前轮次的本机结束依据。"""
+    from camctl.persistence.repositories.read_end import load_read_end
+
+    def read(owned):
+        original = running_read_ticket(owned, copy_id)
+        if original is None:
+            return False
+        if original[0] != held.ticket:
+            raise ConsistencyError("本机续接的原读取票据已经改变")
+        saved = load_read_end(copy_id, owned)
+        if saved is None:
+            return False
+        if saved[0] != held.ticket or saved[1] != held.end:
+            raise ConsistencyError("本机续接的当前轮结束依据已经改变")
+        return allow_held_slot or saved[3] is None
+
+    return await runtime.database.read(read)
 
 
 async def source_verification_run_finish(runtime, ticket, step, *, output_id=None):
@@ -325,6 +416,7 @@ class PendingReadBusiness:
     on_completed: Callable[[Any], None] | None = None
     shared: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
     diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
+    inspection_cancel_recovery: list = field(default_factory=list, compare=False, repr=False)
 
 
 async def retry_read_business(runtime):
@@ -349,6 +441,7 @@ async def save_read_business(runtime, copy_id, operation, request, save, *, on_c
 
 
 async def _save_pending_read_business(runtime, identity, pending, *, retry=False):
+    hold_prepared_read_business(runtime, identity[0], identity[1], pending)
     _record_read_business_error(pending)
     # 已完成的控制错误也属于原回执；只有仍未收场的业务责任可以重新核实。
     if retry and runtime.pending_read_business.get(identity) is pending:
@@ -406,35 +499,102 @@ async def save_prepared_read_business(runtime, copy_id, operation, pending, *, r
     return await _save_pending_read_business(runtime, identity, pending, retry=retry)
 
 
+def hold_prepared_read_business(runtime, copy_id, operation, pending):
+    """在交接诊断和释放原结果前持有原业务申请。"""
+    identity = (copy_id, operation)
+    held = runtime.pending_read_business.get(identity)
+    if held is not None and held is not pending:
+        raise ConsistencyError("原读取结束所属申请与已持有的申请不同")
+    runtime.pending_read_business[identity] = pending
+
+
 async def held_binding_read_result(runtime, copy_id, binding_result, business):
     """可靠源实际完成、必要源摘要未取得时分别记录调用成功和绑定失败。"""
-    from camctl.devices.bindings import binding_failure_details
+    from camctl.contracts.enums import enum_for
+    from camctl.devices.bindings import BindingStatus, binding_failure_details
     from camctl.outputs.copy import SourceChecksumSupport
     from camctl.persistence.repositories.outputs import OutputsRepository
 
+    def determined():
+        matches = [pending for pending in runtime.pending_read_results.values()
+                   if int((pending.ticket if isinstance(pending, PendingStoppedRead)
+                           else pending.finish.ticket).target_id) == copy_id]
+        if len(matches) > 1:
+            raise ConsistencyError("同一读取具有多个已确定结束申请")
+        return matches[0] if matches else None
+
+    pending = determined()
+    if pending is not None:
+        return pending
     held = runtime.pending_read_ends.get(copy_id)
     if held is None:
         return None
     facts = await runtime.database.read(lambda owned: OutputsRepository().load_copy_state(copy_id, owned))
-    if (facts.committed_bytes != facts.source_size or facts.source_support is not SourceChecksumSupport.SUPPORTED
-            or facts.source_sha256 is not None):
-        return None
+    pending = determined()
+    if pending is not None:
+        return pending
     original = await runtime.database.read(lambda owned: running_read_ticket(owned, copy_id))
+    pending = determined()
+    if pending is not None:
+        return pending
     if original is None or original[0] != held.ticket or held.end.stopped is not True or held.end.error is not None:
         raise ConsistencyError("原必要摘要绑定失败缺少可靠原读取结束")
     if held.evidence is None:
         raise ConsistencyError("原实际读取结束缺少原驱动结果契约")
-    details = binding_failure_details(binding_result)
-    if details is None:
-        raise ConsistencyError("必要摘要绑定失败必须具有原绑定异常事实")
-    status = await read_one(runtime.database, "SELECT status FROM operation_runs WHERE id=?", (held.ticket.run_id,))
-    if status is None or status[0] not in (1, 2):
-        raise ConsistencyError("原必要摘要绑定处置尚未确定，保留原读取流程终态")
+    status = await read_one(runtime.database,
+        "SELECT r.status,a.cancel_requested FROM operation_runs r JOIN actions a ON a.id=r.action_id"
+        " WHERE r.id=? AND r.copy_id=?", (held.ticket.run_id, copy_id))
+    pending = determined()
+    if pending is not None:
+        return pending
+    if runtime.pending_read_ends.get(copy_id) is not held:
+        return None
+    if status is None or status[0] not in (1, 2, 3, 4, 5, 6, 7) or status[1] not in (0, 1):
+        raise ConsistencyError("原完整读取的流程状态或取消事实不可解释")
+    if facts.committed_bytes != facts.source_size:
+        return None
+    mismatch = (getattr(binding_result, "status", None) is BindingStatus.DEVICE_MISSING
+        and facts.verification_state == int(enum_for("file_copies.verification_state").MISMATCHED)
+        and facts.source_sha256 is not None and facts.target_sha256 is not None
+        and facts.source_sha256 != facts.target_sha256)
+    missing_digest = (facts.source_support is SourceChecksumSupport.SUPPORTED
+                      and facts.source_sha256 is None)
+    binding_read = False
+    if status[0] not in (1, 2):
+        run_finish, selected_business = None, None
+    elif status[1] == 1 and not missing_digest and not mismatch:
+        run_finish, selected_business = RunFinish(RunOutcome.CANCELED), None
+    else:
+        if not missing_digest and not mismatch:
+            return None
+        details = binding_failure_details(binding_result)
+        if details is None:
+            raise ConsistencyError("必要摘要绑定失败必须具有原绑定异常事实")
+        run_finish = RunFinish(RunOutcome.FAILED, ErrorValue("device_binding_unavailable", "execution", details))
+        selected_business = business
+        binding_read = True
     outcome = CallOutcome(status=AttemptStatus.SUCCEEDED, effect=EffectState.UNKNOWN,
         settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("read_returned", 1, {})))
-    finish = AttemptFinish(held.ticket, validate_outcome(held.ticket, outcome, held.evidence), runtime.occurred_at(),
-        run_finish=RunFinish(RunOutcome.FAILED, ErrorValue("device_binding_unavailable", "execution", details)))
-    return hold_read_result(runtime, finish, business=business)
+    finish = AttemptFinish(held.ticket, validate_outcome(held.ticket, outcome, held.evidence),
+        held.occurred_at if binding_read else runtime.occurred_at(),
+        run_finish=run_finish)
+    key = new_operation_key()
+    if binding_read and isinstance(selected_business, PendingReadBusiness):
+        from camctl.persistence.repositories.outputs import FailReadBinding
+        from camctl.persistence.repositories.capture import FinishBindingFailure
+        request = selected_business.request
+        if isinstance(request, FailReadBinding):
+            request = replace(request, read_result_key=key)
+        elif isinstance(request, FinishBindingFailure):
+            request = replace(request, read_result_key=key, read_copy_id=copy_id)
+        else:
+            raise ConsistencyError("原读取绑定业务申请类型不符")
+        selected_business = replace(selected_business, request=request)
+    return hold_read_result(runtime, finish, business=selected_business, key=key,
+                            preserved_run_terminal=status[0] not in (1, 2),
+                            binding_read=binding_read, suppress_diagnostic=binding_read,
+                            binding_identity=(dict(binding_result.current_identity)
+                                if binding_read and getattr(binding_result, "current_identity", None) is not None else None))
 
 
 @dataclass(frozen=True)
@@ -510,14 +670,16 @@ async def _prepare_stopped_read(runtime, pending):
 
 
 def hold_read_result(runtime, finish, *, business=None, key=None,
-                     context=None, diagnostic_error=None, diagnostic_stage=None, suppress_diagnostic=False):
+                     context=None, diagnostic_error=None, diagnostic_stage=None, suppress_diagnostic=False,
+                     preserved_run_terminal=False, binding_read=False, binding_identity=None):
     identity = (finish.ticket.run_id, finish.ticket.attempt_id)
     if identity in runtime.pending_read_results:
         raise ConsistencyError("同一原读取已有待保存结果，不能覆盖")
     diagnostic = (business.diagnostic if business is not None else
                   diagnostic_state_for(diagnostic_error) or DiagnosticState())
     pending = PendingReadResult(finish, new_operation_key() if key is None else key, business,
-        diagnostic=diagnostic)
+        diagnostic=diagnostic, preserved_run_terminal=preserved_run_terminal, binding_read=binding_read,
+        binding_identity=binding_identity)
     runtime.pending_read_ends.pop(int(finish.ticket.target_id), None)
     runtime.pending_read_results[identity] = pending
     details = {"copy_id": int(finish.ticket.target_id), **(context or {})}
@@ -547,11 +709,41 @@ async def save_read_result(runtime, pending, *, retry=False):
             prepared = await _prepare_stopped_read(runtime, pending)
         if prepared is None:
             return None
-        outcome = await runtime.database.write(
-            lambda owned: runtime.operations.finish_attempt(prepared.finish, prepared.key, owned), key=prepared.key)
+        control_error = None
+        try:
+            outcome = await runtime.database.write(
+                lambda owned: (runtime.operations.finish_binding_read(prepared.finish, prepared.key, owned,
+                    current_identity=prepared.binding_identity)
+                    if prepared.binding_read else runtime.operations.finish_attempt(prepared.finish, prepared.key, owned)), key=prepared.key)
+        except BaseException as error:
+            outcome = db_outcome_for(error)
+            if outcome is None or outcome.kind is not DbOutcomeKind.COMPLETED:
+                raise
+            control_error = error
         if outcome.kind is not DbOutcomeKind.COMPLETED:
             raise db_failure(ConsistencyError,
                 f"原读取结果未可靠保存（{outcome.kind.value}）: {outcome.error}", outcome)
+        result = outcome.value
+        if result is None:
+            raise ConsistencyError("原读取结果缺少可靠事务回执")
+        if prepared.binding_read and not result.run_was_terminal and result.disposition is not FinishDisposition.ALREADY_ENDED:
+            if result.run_status is RunStatus.CANCELED:
+                if control_error is None:
+                    prepared = replace(prepared, finish=replace(prepared.finish, run_finish=RunFinish(RunOutcome.CANCELED)), business=None)
+            elif result.run_status is not RunStatus.FAILED:
+                raise ConsistencyError("绑定读取结果回执缺少已保存的流程处置")
+            identity = (prepared.finish.ticket.run_id, prepared.finish.ticket.attempt_id)
+            if runtime.pending_read_results.get(identity) is pending:
+                runtime.pending_read_results[identity] = prepared
+            if result.run_status is RunStatus.FAILED and prepared.business is not None:
+                _record_read_business_error(prepared.business)
+        if result.run_was_terminal or result.disposition is FinishDisposition.ALREADY_ENDED:
+            prepared = replace(prepared, preserved_run_terminal=True)
+            identity = (prepared.finish.ticket.run_id, prepared.finish.ticket.attempt_id)
+            if runtime.pending_read_results.get(identity) is pending:
+                runtime.pending_read_results[identity] = prepared
+        if control_error is not None:
+            raise control_error
         return prepared
 
     return await pending.result_save.run(save)
@@ -625,6 +817,19 @@ def running_read_ticket(owned, copy_id: int):
     return AttemptTicket(attempt_no, "read", str(copy_id), responsibility, run_id), intent_event_id
 
 
+def unfinished_read_end(owned, copy_id):
+    """按原未结束票据读取当前轮结束依据；不存在尝试时不读取旧结束引用。"""
+    from camctl.persistence.repositories.read_end import load_read_end
+
+    original = running_read_ticket(owned, copy_id)
+    if original is None:
+        return None
+    saved = load_read_end(copy_id, owned)
+    if saved is not None and saved[0] != original[0]:
+        raise ConsistencyError("当前轮读取结束与原未完成票据不一致")
+    return original[0], saved
+
+
 def record_read_diagnostic(runtime, reason, ticket):
     diagnostic = RecoveryDiagnostic(reason, ticket.run_id, ticket.attempt_id)
     if diagnostic != runtime.last_recovery_diagnostic:
@@ -676,11 +881,24 @@ async def acquire_read_attempt(runtime, intent):
                 return None, "run_ended"
             runtime.last_recovery_diagnostic = None
             return ticket, None
+    granted_by_save = None
     def remember(value):
+        nonlocal granted_by_save
         if value.disposition is BeginDisposition.GRANTED:
-            runtime.continuing_read_tickets[copy_id] = ReadContinuation(value.ticket, True)
-    outcome = await save_read_business(runtime, copy_id, "read_intent", intent,
-        runtime.operations.begin_attempt, on_completed=remember, retry=pending_begin is not None)
+            granted_by_save = value.ticket
+            original = runtime.pending_read_business.get((copy_id, "read_intent"))
+            runtime.continuing_read_tickets[copy_id] = ReadContinuation(
+                value.ticket, True, inspection_cancel_recovery=(
+                    original is not None and bool(original.inspection_cancel_recovery)))
+    try:
+        outcome = await save_read_business(runtime, copy_id, "read_intent", intent,
+            runtime.operations.begin_attempt, on_completed=remember, retry=pending_begin is not None)
+    except BaseException:
+        continuation = runtime.continuing_read_tickets.get(copy_id)
+        if (granted_by_save is not None and continuation is not None
+                and continuation.ticket == granted_by_save and continuation.never_dispatched):
+            runtime.continuing_read_tickets[copy_id] = replace(continuation, inspection_cancel_recovery=True)
+        raise
     if outcome.value.disposition is BeginDisposition.GRANTED:
         return outcome.value.ticket, None
     return None, outcome.value.reason
@@ -700,6 +918,23 @@ async def recover_unavailable_read(runtime, copy_id: int, binding, now: int) -> 
     if original is None:
         return True
     ticket, intent_id = original
+    from camctl.persistence.repositories.read_end import load_read_end
+    saved_end = await runtime.database.read(lambda owned: load_read_end(copy_id, owned))
+    if saved_end is not None:
+        saved_ticket, end, occurred_at, slot = saved_end
+        if saved_ticket != ticket:
+            raise ConsistencyError("已保存读取结束与原未完成尝试不一致")
+        evidence = (None if runtime.recovery_evidence_for is None
+                    else runtime.recovery_evidence_for(binding, "read"))
+        if evidence is None:
+            record_read_diagnostic(runtime, RecoveryBlockedReason.EVIDENCE_UNAVAILABLE, ticket)
+            return False
+        held = runtime.pending_read_ends.get(copy_id)
+        if held is not None and (held.ticket != ticket or held.end != end):
+            raise ConsistencyError("已保存读取结束与当前拥有者持有的返回不一致")
+        if held is None and slot is not None:
+            runtime.pending_read_ends[copy_id] = HeldReadEnd(ticket, end, occurred_at, evidence=evidence)
+        return False
     if copy_id in runtime.pending_read_ends:
         raise ConsistencyError("原实际读取结束已持有，仍需设备摘要或重拷输入；保留原责任")
     if not read_host_boundary(runtime, ticket, intent_id, continuing=False):

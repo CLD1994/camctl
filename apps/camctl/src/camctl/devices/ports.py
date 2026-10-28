@@ -72,6 +72,8 @@ class DriverDeclaration:
     local_read_recovery_supported: bool = False
     #: 仅结束旧本地 control 责任，不证明独立设备效果。
     local_control_recovery_supported: bool = False
+    #: 仅结束旧本地可用性检查责任，不推断相机状态。
+    local_availability_recovery_supported: bool = False
     #: 按文件身份查询存在性；独立于拍摄活动状态查询。
     file_query_supported: bool = False
     #: 提供按固件验证门槛使能的操作系统重启及准备端口。

@@ -3,13 +3,14 @@ CREATE TABLE operation_runs (
     id INTEGER PRIMARY KEY CHECK (id > 0),
     action_id INTEGER NOT NULL REFERENCES actions(id) DEFERRABLE INITIALLY DEFERRED,
     delivery_id INTEGER REFERENCES deliveries(id) DEFERRABLE INITIALLY DEFERRED,
-    kind INTEGER NOT NULL CHECK (kind BETWEEN 1 AND 11),
+    kind INTEGER NOT NULL CHECK (kind BETWEEN 1 AND 12),
     query_purpose INTEGER CHECK (query_purpose IS NULL OR query_purpose IN (1,2,3,4,5)),
     responsibility_key TEXT NOT NULL UNIQUE CHECK (length(responsibility_key) > 0),
     activity_id INTEGER REFERENCES device_activities(id) DEFERRABLE INITIALLY DEFERRED,
     copy_id INTEGER REFERENCES file_copies(id) DEFERRABLE INITIALLY DEFERRED,
     cleanup_item_id INTEGER REFERENCES cleanup_items(id) DEFERRABLE INITIALLY DEFERRED,
     obtain_item_id INTEGER REFERENCES obtain_items(id) DEFERRABLE INITIALLY DEFERRED,
+    availability_check_id INTEGER REFERENCES device_availability_checks(id) DEFERRABLE INITIALLY DEFERRED,
     session_key TEXT CHECK (session_key IS NULL OR (length(session_key) = 32 AND session_key NOT GLOB '*[^0-9a-f]*')),
     status INTEGER NOT NULL CHECK (status BETWEEN 1 AND 7),
     attempts_used INTEGER NOT NULL CHECK (attempts_used >= 0),
@@ -19,7 +20,9 @@ CREATE TABLE operation_runs (
     retry_wait_required INTEGER NOT NULL CHECK (retry_wait_required IN (0,1)),
     error_json TEXT CHECK (error_json IS NULL OR (json_valid(error_json) AND json_type(error_json) = 'object')),
     CHECK ((kind = 6 AND query_purpose IS NOT NULL) OR (kind <> 6 AND query_purpose IS NULL)),
-    CHECK ((kind IN (1,2,7,8,9,10,11) AND activity_id IS NOT NULL AND copy_id IS NULL AND cleanup_item_id IS NULL AND obtain_item_id IS NULL)
+    CHECK ((kind = 12 AND availability_check_id IS NOT NULL) OR (kind <> 12 AND availability_check_id IS NULL)),
+    CHECK ((kind = 12 AND activity_id IS NULL AND copy_id IS NULL AND cleanup_item_id IS NULL AND obtain_item_id IS NULL)
+        OR (kind IN (1,2,7,8,9,10,11) AND activity_id IS NOT NULL AND copy_id IS NULL AND cleanup_item_id IS NULL AND obtain_item_id IS NULL)
         OR (kind = 6 AND query_purpose = 1 AND activity_id IS NULL AND copy_id IS NULL AND cleanup_item_id IS NULL AND obtain_item_id IS NULL)
         OR (kind = 6 AND query_purpose IN (2,3,4,5) AND activity_id IS NOT NULL AND copy_id IS NULL AND cleanup_item_id IS NULL AND obtain_item_id IS NULL)
         OR (kind = 3 AND activity_id IS NULL AND copy_id IS NOT NULL AND cleanup_item_id IS NULL AND obtain_item_id IS NULL)
@@ -39,12 +42,14 @@ CREATE TABLE operation_runs (
         END),
     CHECK (kind <> 7 OR responsibility_key = 'results/' || activity_id),
     CHECK (kind <> 11 OR responsibility_key = 'scope/' || activity_id),
+    CHECK (kind <> 12 OR responsibility_key = 'availability/' || availability_check_id),
     CHECK (kind NOT IN (6,7,11) OR (timeout_s_json IS NOT NULL AND retry_interval_s_json IS NOT NULL)),
     CHECK ((kind IN (9,10) AND session_key IS NOT NULL) OR (kind NOT IN (9,10) AND session_key IS NULL)),
     CHECK (kind <> 10 OR (responsibility_key = 'prepare/' || activity_id || '/' || session_key
         AND max_attempts_used = 1 AND attempts_used <= 1 AND timeout_s_json IS NOT NULL
         AND retry_interval_s_json IS NULL AND retry_wait_required = 0)),
-    CHECK (max_attempts_used IS NOT NULL OR (kind = 9 AND attempts_used = 0)),
+    CHECK (max_attempts_used IS NOT NULL OR (kind IN (9,12) AND attempts_used = 0)),
+    CHECK (kind <> 12 OR attempts_used = 0 OR (timeout_s_json IS NOT NULL AND retry_interval_s_json IS NOT NULL)),
     CHECK (kind <> 9 OR responsibility_key = 'emergency/' || session_key || '/' || activity_id),
     CHECK (kind <> 9 OR max_attempts_used IS NULL OR attempts_used <= max_attempts_used),
     CHECK (kind <> 9 OR attempts_used = 0 OR (timeout_s_json IS NOT NULL AND retry_interval_s_json IS NOT NULL)),
@@ -53,7 +58,7 @@ CREATE TABLE operation_runs (
         OR (status = 6 AND attempts_used > 0 AND error_json IS NOT NULL)),
     CHECK (delivery_id IS NULL OR kind = 3),
     CHECK (status NOT IN (4,6) OR error_json IS NOT NULL),
-    CHECK (status <> 7 OR kind IN (1,10) OR (kind = 8 AND attempts_used = 0)),
+    CHECK (status <> 7 OR kind IN (1,10,12) OR (kind = 8 AND attempts_used = 0)),
     CHECK (kind <> 8 OR status <> 5 OR attempts_used = 0),
     CHECK (status IN (1,2) OR retry_wait_required = 0)
 ) STRICT;
@@ -61,8 +66,38 @@ CREATE INDEX operations_action ON operation_runs(action_id, id);
 CREATE INDEX operations_delivery ON operation_runs(delivery_id, id) WHERE delivery_id IS NOT NULL;
 CREATE INDEX operations_activity ON operation_runs(activity_id, kind, id) WHERE activity_id IS NOT NULL;
 CREATE UNIQUE INDEX one_read_flow ON operation_runs(copy_id) WHERE kind = 3;
+CREATE INDEX open_read_runs ON operation_runs(id, copy_id) WHERE kind = 3 AND status IN (1,2);
 CREATE UNIQUE INDEX one_obtain_check_flow ON operation_runs(obtain_item_id, kind) WHERE kind = 5 AND obtain_item_id IS NOT NULL;
 CREATE UNIQUE INDEX one_cleanup_flow ON operation_runs(cleanup_item_id, kind) WHERE kind IN (4,5);
+CREATE UNIQUE INDEX one_availability_flow ON operation_runs(availability_check_id) WHERE kind = 12;
+
+CREATE TABLE device_availability_checks (
+    id INTEGER PRIMARY KEY CHECK (id > 0),
+    action_id INTEGER NOT NULL REFERENCES actions(id) DEFERRABLE INITIALLY DEFERRED,
+    trigger_copy_id INTEGER REFERENCES file_copies(id) DEFERRABLE INITIALLY DEFERRED,
+    device_id TEXT NOT NULL CHECK (length(device_id) > 0),
+    driver_id TEXT NOT NULL CHECK (length(driver_id) > 0),
+    expected_identity_json TEXT NOT NULL CHECK (json_valid(expected_identity_json) AND json_type(expected_identity_json) = 'object'),
+    resource_key TEXT NOT NULL CHECK (length(resource_key) > 0),
+    rule_version INTEGER NOT NULL CHECK (rule_version = 1),
+    target_boundary_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    UNIQUE (id, action_id)
+) STRICT;
+CREATE INDEX availability_checks_resource ON device_availability_checks(resource_key, id);
+CREATE INDEX availability_checks_device ON device_availability_checks(device_id, id);
+CREATE INDEX availability_checks_action ON device_availability_checks(action_id, id);
+
+CREATE TABLE device_availability_targets (
+    id INTEGER PRIMARY KEY CHECK (id > 0),
+    check_id INTEGER NOT NULL REFERENCES device_availability_checks(id) DEFERRABLE INITIALLY DEFERRED,
+    action_id INTEGER NOT NULL REFERENCES actions(id) DEFERRABLE INITIALLY DEFERRED,
+    activity_id INTEGER NOT NULL REFERENCES device_activities(id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (check_id, action_id) REFERENCES device_availability_checks(id, action_id) DEFERRABLE INITIALLY DEFERRED,
+    UNIQUE (action_id, activity_id),
+    UNIQUE (check_id, activity_id)
+) STRICT;
+CREATE INDEX availability_targets_check ON device_availability_targets(check_id, id);
+CREATE INDEX availability_targets_activity ON device_availability_targets(activity_id, check_id);
 
 CREATE TABLE operation_attempts (
     id INTEGER PRIMARY KEY CHECK (id > 0),
@@ -90,6 +125,9 @@ CREATE TABLE operation_attempts (
     CHECK (status NOT IN (3,4) OR error_json IS NOT NULL),
     CHECK (status <> 2 OR (result_json IS NOT NULL AND error_json IS NULL))
 ) STRICT;
+
+CREATE INDEX operation_attempts_run_status ON operation_attempts(run_id, status);
+CREATE INDEX operation_attempts_without_result ON operation_attempts(run_id) WHERE result_json IS NULL;
 
 CREATE TABLE result_page_files (
     id INTEGER PRIMARY KEY CHECK (id > 0),
@@ -136,6 +174,7 @@ CREATE TABLE device_activities (
     dispatch_state INTEGER NOT NULL CHECK (dispatch_state IN (1,2,3,4)),
     activity_state INTEGER NOT NULL CHECK (activity_state IN (1,2,3)),
     occupancy_state INTEGER NOT NULL CHECK (occupancy_state IN (1,2)),
+    availability_release_attempt_id INTEGER REFERENCES operation_attempts(id) DEFERRABLE INITIALLY DEFERRED,
     sent_at INTEGER,
     started_at INTEGER,
     result_wait_margin_ms INTEGER CHECK (result_wait_margin_ms IS NULL OR result_wait_margin_ms >= 0),
@@ -167,10 +206,13 @@ CREATE TABLE device_activities (
     CHECK (completion_basis IS NOT 3 OR (completion_mode = 2 AND dispatch_state = 3
         AND activity_state IN (1,3) AND sent_at IS NOT NULL AND expected_check_at IS NOT NULL
         AND wait_completed_event_id IS NOT NULL AND result_set_state = 3)),
+    CHECK (availability_release_attempt_id IS NULL OR (occupancy_state = 2 AND activity_state IN (1,3))),
     CHECK (occupancy_state <> 2 OR dispatch_state IN (1,4) OR activity_state = 3
-        OR COALESCE(completion_basis = 3, 0))
+        OR COALESCE(completion_basis = 3, 0) OR availability_release_attempt_id IS NOT NULL)
 ) STRICT;
 CREATE INDEX activities_occupancy ON device_activities(action_id, id) WHERE occupancy_state = 1;
+CREATE INDEX activities_held_resource ON device_activities(resource_key, id) WHERE occupancy_state = 1;
+CREATE INDEX activities_resource ON device_activities(resource_key, id) WHERE resource_key IS NOT NULL;
 
 CREATE TABLE baseline_read_calls (
     id INTEGER PRIMARY KEY CHECK (id > 0),

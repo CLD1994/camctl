@@ -440,6 +440,7 @@ async def advance_host_photo(runtime, action_id: int) -> None:
         _conclude_activity,
         _finish_canceled_capture,
         _handle_binding_failure,
+        _expire_unentered_photo,
     )
     from camctl.scheduling.rules import WindowPhase, window_phase
 
@@ -500,10 +501,29 @@ async def advance_host_photo(runtime, action_id: int) -> None:
     # 次尝试，不能生成另一个 START。
     if saved.result_json is None:
         if saved.status == int(_ATTEMPT.RUNNING):
-            (await runtime.recover_attempt(saved.ticket))
-            saved = (await _saved_start(runtime, action_id))
-            if saved is None or saved.result_json is None:
+            from camctl.devices.start_entry import EntryPhase
+            entry = runtime.start_entries.get(runtime.database.metadata.instance_id, action_id)
+            local_ready = (entry is not None and entry.ticket == saved.ticket and entry.phase is EntryPhase.READY
+                           and not entry.active and not action["cancel_requested"])
+            phase = window_phase(runtime.window_of(action), runtime.wall_us()) if local_ready else None
+            if local_ready and phase is WindowPhase.AFTER_WINDOW:
+                await _expire_unentered_photo(runtime, action, saved.ticket, entry)
                 return
+            if local_ready and phase is WindowPhase.IN_WINDOW:
+                step = await _control_call(runtime, action, "take_photo", "photo_taken",
+                    activity_facts=lambda confirmed: (
+                        {"sent_at": runtime.wall_us()}
+                        | ({"started_at": runtime.wall_us(), "activity_state": 2} if confirmed else {})))
+                if step.phase == "not_granted":
+                    return
+                saved = (await _saved_start(runtime, action_id))
+                if saved is None:
+                    raise ConsistencyError("原单张 START 结果保存后责任缺失")
+            if saved.result_json is None:
+                (await runtime.recover_attempt(saved.ticket))
+                saved = (await _saved_start(runtime, action_id))
+                if saved is None or saved.result_json is None:
+                    return
         else:
             raise ConsistencyError("主机单张 START 的结果事件缺失但尝试已终态")
 

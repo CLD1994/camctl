@@ -225,25 +225,33 @@ async def _original_binding_failure(runtime: Any, action: Mapping[str, Any]):
         return None
     from camctl.devices.drivers.hasselblad.identity import CameraIdentity
     from camctl.persistence.transaction import row_facts
-    def read(owned):
-        found = owned.connection.execute(
-            "SELECT id FROM device_activities WHERE action_id=?", (action["id"],)).fetchone()
-        return None if found is None else row_facts(owned.connection, "device_activities", found[0])
-    activity = await runtime.database.read(read, description="读取固定机身身份")
-    if activity is None:
-        return None
-    try:
-        original = CameraIdentity(**activity["expected_identity_json"])
-    except (TypeError, ValueError, KeyError) as error:
-        raise ConsistencyError("原活动缺少可靠固定机身身份") from error
-    if activity["resource_key"] != original.resource_key:
-        raise ConsistencyError("原活动资源键与固定机身身份不符")
+    from camctl.persistence.repositories.physical_alias import physical_alias_conflict
     current = runtime.fixed_camera_identity
     if not isinstance(current, CameraIdentity):
         raise ConsistencyError("当前 Hasselblad 配置缺少固定机身身份")
-    if current != original:
+    def read(owned):
+        found = owned.connection.execute(
+            "SELECT id FROM device_activities WHERE action_id=?", (action["id"],)).fetchone()
+        activity = None if found is None else row_facts(owned.connection, "device_activities", found[0])
+        conflict = (action["status"] == 1 and action["execution_started"] == 0
+                    and physical_alias_conflict(owned.connection, action["device_id"], current))
+        return activity, conflict
+    activity, conflict = await runtime.database.read(read, description="读取固定机身身份")
+    if activity is None:
+        original = None
+    else:
+        try:
+            original = CameraIdentity(**activity["expected_identity_json"])
+        except (TypeError, ValueError, KeyError) as error:
+            raise ConsistencyError("原活动缺少可靠固定机身身份") from error
+        if activity["resource_key"] != original.resource_key:
+            raise ConsistencyError("原活动资源键与固定机身身份不符")
+        if current != original:
+            return {"device_id": action["device_id"], "expected_driver_id": DRIVER_ID,
+                    "reason": "physical_identity_mismatch"}
+    if conflict:
         return {"device_id": action["device_id"], "expected_driver_id": DRIVER_ID,
-                "reason": "physical_identity_mismatch"}
+                "reason": "physical_identity_conflict"}
     return None
 
 

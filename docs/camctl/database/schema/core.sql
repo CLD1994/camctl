@@ -82,3 +82,7 @@ CREATE INDEX actions_plan_members ON actions(plan_id, id);
 CREATE INDEX actions_group_members ON actions(plan_id, group_name, id) WHERE group_name IS NOT NULL;
 CREATE INDEX actions_schedule ON actions(scheduled_at, id) WHERE status IN (1,2);
 CREATE INDEX actions_device_active ON actions(device_id, scheduled_at, id) WHERE status IN (1,2) AND device_id IS NOT NULL;
+CREATE INDEX actions_device_all ON actions(device_id, id) WHERE device_id IS NOT NULL;
+CREATE INDEX actions_pending_capture_selection
+    ON actions(device_id, driver_id, scheduled_at, plan_id, input_index, id)
+    WHERE status = 1 AND execution_started = 0 AND cancel_requested = 0;

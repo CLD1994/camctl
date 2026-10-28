@@ -46,6 +46,32 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/capture/
 
 ## H2：固定身份和证据类别
 
+2026-10-28，在独立工作区 `/tmp/camctl-h2-stage-audit-20261028` 的基线 `a0174202`，使用 CPython 3.11.17 定向核对 H2。以下命令退出码均为 0，前台输出未另存：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 /workspaces/camctl/apps/camctl/.venv311/bin/python -m unittest discover -s apps/camctl/tests/unit/devices -p 'test_h2_availability_port_isolated.py' -v
+PYTHONDONTWRITEBYTECODE=1 /workspaces/camctl/apps/camctl/.venv311/bin/python -m unittest discover -s apps/camctl/tests/unit/history -p 'test_h2_availability_history_isolated.py' -v
+PYTHONDONTWRITEBYTECODE=1 /workspaces/camctl/apps/camctl/.venv311/bin/python -m unittest discover -s apps/camctl/tests/unit/operations -p 'test_h2_target_guard_isolated.py' -v
+PYTHONPATH=apps/camctl/src PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /workspaces/camctl/apps/camctl/.venv311/bin/python -c 'import camctl.resources as r; r.resource_bytes = lambda *a, **k: (_ for _ in ()).throw(AssertionError("real resource blocked")); r.available_resources = r.resource_bytes; import camctl.contracts.enums as e; e.resource_bytes = r.resource_bytes; import pytest; raise SystemExit(pytest.main(["apps/camctl/tests/unit/persistence/test_device_activity_structure_isolated.py", "-q", "--tb=short", "-p", "no:cacheprovider"]))'
+```
+
+四条命令分别通过 5、2、2、6 项。前三组在导入前阻断真实 `camctl` 包并以源码抽取及内存协作者执行；最后一组在测试导入前阻断真实资源读取，连接与结构检查使用替身。活动结构测试恢复对旧活动定义的原断言，新增的读取结束结构和重试索引检查只作为非被测协作者隔离。
+
+| H2 项目 | 实现核对与隔离证据 |
+| --- | --- |
+| 1. 检查结构与登记 | 当前 SQL 登记检查、固定目标、唯一关系、原流程及释放引用；旧活动结构拒绝分区由 6 项结构测试覆盖。真实初始化及 SQL 约束执行未在本次运行。 |
+| 2. 历史与归属 | 历史仓储包含检查和目标的动作归属；2 项隔离测试对触发动作与旧动作分别检查正向、快照起点及逆向行值，拒绝不一致的释放引用。未执行真实数据库历史回放。 |
+| 3. 释放合法性 | 原活动资格与目标页守卫已实现；隔离测试覆盖活动仍在执行、公共范围、已有引用、缺失身份、跨逻辑设备、机身不一致及伪造或不完整目标页。检查结果与真实事务的联合守卫另行验证。 |
+| 4. 创建、意图与结果事务 | 创建、意图、真实结果、目标释放、无调用终结和失败交付已有生产命令；目标页测试验证完整固定集合，其他提交、原键和全批原子性按代码及既有专项记录核对，本次未执行真实事务。 |
+| 5. 固定身份与别名 | 活动和 DEVICE 源保存原身份，`physical_alias` 核对未完成责任；此次目标和驱动入口测试分别覆盖缺失、错误机身与绑定不符，不以当前配置补造旧身份。 |
+| 6. 检查驱动 | 5 项隔离测试执行公开检查方法，覆盖 `list → info → doctor`、共享期限、绑定不符、失败和取消，并检查结果转换保留原步骤输出；解析器及受管工具使用替身，未验证真实进程。 |
+| 7. DEVICE 正式源 | `CameraFileIdentity` 固定原绑定、路径、种类、长度和摘要；`open_read` 核对来源与固定机身、长度及偏移。此项本次为静态入口核对，文件来源登记与实际读取组合另行验证。 |
+| 8. 错误与报告 | 公共登记包含拍摄检查失败、来源设备不可用及物理绑定原因，失败事务消费登记的错误与原检查次数；此项本次为静态核对，真实报告登记与交付组合未运行。 |
+
+这些结果不证明真实资源、数据库事务、受管进程、安装版或设备行为。公开检查和事务的跨组件验证、历史持久化回放及真实设备验收分别按计划跟踪。
+
+将 H2 交付 `cb02382f` 合入包含 H1 的 `d30fda8f` 后，在主工作区 `/workspaces/camctl` 用同一 Python 3.11.17 及 `PYTHONDONTWRITEBYTECODE=1`，运行上述三个 unittest 文件和 H1 的 `test_h1_recovery_boundaries_isolated.py`，将 `-v` 改为 `-q`；四条命令退出码均为 0，分别为 5、2、2、11 项通过。此轮用于核对合并后的实际源码，未扩大到真实资源、数据库或设备。Sol 对固定 H2 源码的八项责任审查未发现生产阻断，所指出的结构测试前置协作者隔离已在交付中修正。
+
 2026-10-28，在独立工作区 `/tmp/camctl-h2-availability-storage-20261028`，使用 CPython 3.11.17 执行：
 
 ```bash

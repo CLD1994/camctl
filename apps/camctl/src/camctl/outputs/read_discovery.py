@@ -87,7 +87,7 @@ _ACTIVE_COPY = (
 _ELIGIBLE = (
     " a.status=2 AND a.cancel_requested=0 AND a.scheduled_at<=?"
     " AND r.status IN (1,2) AND r.retry_wait_required=0"
-    " AND df.completion_state=3 AND fc.slot_device_id IS NULL"
+    " AND df.completion_state=3 AND fc.slot_device_id IS NULL AND fc.read_end_event_id IS NULL"
     " AND fc.verification_state NOT IN (3,5)"
     " AND (fc.delivery_id IS NULL OR d.status IN (1,2))"
 )
@@ -102,7 +102,8 @@ _READ_COPY_ELIGIBLE = (
 def read_copy_dispatch_eligible(connection, copy_id):
     """实际开源前复核原副本仍属于有限发现允许推进的输入分区。"""
     with closing(connection.execute(
-        "SELECT 1" + _READ_FROM + " WHERE fc.id=? AND " + _READ_COPY_ELIGIBLE + " LIMIT 1",
+        "SELECT 1" + _READ_FROM + " WHERE fc.id=? AND fc.read_end_event_id IS NULL AND "
+        + _READ_COPY_ELIGIBLE + " LIMIT 1",
         (copy_id,),
     )) as cursor:
         return cursor.fetchone() is not None
@@ -181,6 +182,9 @@ class ReadCandidate:
     driver_id: str | None
     source_file_id: int | None
     held: bool
+    attempts_used: int = 0
+    retry_wait_required: int = 0
+    read_end_event_id: int | None = None
 
     def __post_init__(self):
         for identity in (self.copy_id, self.action_id, self.plan_id):
@@ -228,7 +232,7 @@ def read_candidates(connection, scope, cursor=None, *, limit):
     parameters.append(limit)
     with closing(connection.execute(
         "SELECT fc.id,a.id,a.scheduled_at,a.plan_id,a.input_index,ob.device_id,ob.driver_id,"
-        "fc.source_device_file_id,fc.slot_device_id IS NOT NULL" + _READ_FROM
+        "fc.source_device_file_id,fc.slot_device_id IS NOT NULL,r.attempts_used,r.retry_wait_required,fc.read_end_event_id" + _READ_FROM
         + " WHERE " + condition + " ORDER BY " + key_sql + " LIMIT ?", parameters,
     )) as result:
         items = tuple(ReadCandidate(*row) for row in result.fetchall())
@@ -253,6 +257,8 @@ class ReadDiscoveryOwner:
             "reads",
             "local",
             "failed",
+            "canceled_read_ends",
+            "ready_read_ends",
             "capture",
             "residual",
             "software_recovery",
