@@ -148,6 +148,12 @@ env PYTHONPATH=apps/camctl/src PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /workspaces/camc
 env PYTHONPATH=apps/camctl/src PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /workspaces/camctl/apps/camctl/.venv311/bin/python -B -c 'import sys, types; r=types.ModuleType("camctl.resources"); r.resource_bytes=lambda *a, **k: (_ for _ in ()).throw(AssertionError("禁止真实包资源")); r.available_resources=r.resource_bytes; r.ResourceError=RuntimeError; r.ResourceName=str; sys.modules["camctl.resources"]=r; import pytest; raise SystemExit(pytest.main(["--noconftest", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "-q", "apps/camctl/tests/unit/outputs/test_availability_dispatch_isolated.py"]))'
 ```
 
+在相同隔离环境补充成功结果的两个参数分区，退出码为 0，2 项通过。测试实际执行检查协调器的派发复核和成功结果保存回调，分别验证拍摄与 DEVICE 读取都把原票据交给完整释放事务；驱动和事务均为替身。
+
+```bash
+env PYTHONPATH=apps/camctl/src PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /workspaces/camctl/apps/camctl/.venv311/bin/python -B -c 'import sys, types; r=types.ModuleType("camctl.resources"); r.resource_bytes=lambda *a, **k: (_ for _ in ()).throw(AssertionError("禁止真实包资源")); r.available_resources=r.resource_bytes; r.ResourceError=RuntimeError; r.ResourceName=str; sys.modules["camctl.resources"]=r; import pytest; raise SystemExit(pytest.main(["--noconftest", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "-q", "apps/camctl/tests/unit/operations/test_availability_coordinator_isolated.py::test_successful_check_delivers_original_result_to_release_transaction"]))'
+```
+
 | H3 责任 | 当前生产入口与验证范围 |
 | --- | --- |
 | 1. 共同检查与预算 | `AvailabilityCoordinator` 使用目标设备 query 配置、独立检查流程和共享原调用；协调单元覆盖共同等待、原键重送、耗尽及恢复。 |
