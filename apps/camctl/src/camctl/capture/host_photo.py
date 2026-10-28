@@ -168,6 +168,99 @@ async def _save_complete(runtime, action_id: int, request: HostPhotoComplete) ->
     return await settle_required(save_and_apply())
 
 
+async def _save_photo_cache(runtime, action_id, role, request=None):
+    """沿角色原申请与原键完成缓存字节保存。"""
+    from camctl.history.photo_cache_request import PhotoCacheComplete
+    repository, _ = _owned_repository(runtime, action_id)
+    identity = (action_id, role)
+    pending = runtime.pending_host_photo_completions.get(identity)
+    if pending is None:
+        if not isinstance(request, PhotoCacheComplete):
+            raise ConsistencyError("照片缓存缺少原完整申请")
+        pending = PendingHostPhotoRequest(new_operation_key(), request)
+        runtime.pending_host_photo_completions[identity] = pending
+    elif request is not None and pending.request != request:
+        raise ConsistencyError("照片缓存原完整申请不可替换")
+    try:
+        result = await _request_result(runtime, repository, pending, repository.save_photo_cache_complete)
+    except BaseException as error:
+        receipt = db_outcome_for(error)
+        if receipt is not None and receipt.kind is DbOutcomeKind.COMPLETED:
+            runtime.pending_host_photo_completions.pop(identity, None)
+        raise
+    runtime.pending_host_photo_completions.pop(identity, None)
+    return result
+
+
+async def archive_device_photo_cache(runtime, action_id, saved, device_file_id):
+    """归档已固定选择；缓存本地失败不改变可靠相机来源。"""
+    from camctl.history.photo_cache_request import PhotoCacheComplete
+    from camctl.host_files.capture_sources import CaptureFileError, archive_photo_cache
+    from camctl.host_files.downloads import ResultDownloadWorkspace
+    from camctl.host_files.tasks import AsyncFileTask, FileTaskError, FileTaskId
+    from camctl.logging_runtime.diagnostics import record_error
+    from camctl.operations.error_diagnostics import exception_diagnostic
+
+    attempts = [item for item in saved.page.outcome.observations
+                if item.type == "photo_result_attempt" and item.version == 2]
+    if len(attempts) != 1 or not isinstance(attempts[0].data.get("comparison"), Mapping):
+        return
+    detail = attempts[0].data
+    role, decision = detail["role"], detail["comparison"]
+    selected = decision["selected"]
+    identity = (action_id, role)
+    if identity in runtime.pending_host_photo_completions:
+        await _save_photo_cache(runtime, action_id, role)
+        return
+    files = await _prepare_files(runtime, action_id)
+    prepared = files.original if role == "original" else files.preview
+    facts = await runtime.database.read(lambda owned: row_facts(owned.connection, "intermediate_files", prepared.file_id),
+                                        description="读取照片缓存原责任")
+    entry = saved.page.entries[0]
+    raw_artifact = decision["sync_artifact"] if selected == "sync" else detail["steps"][-1]["artifact"]
+    artifact = CapturedArtifact.from_json(raw_artifact)
+    if facts["last_error_json"] is not None:
+        return
+    if facts["size_bytes"] is not None or facts["sha256"] is not None:
+        if facts["size_bytes"] != entry.size_bytes or facts["sha256"] != artifact.sha256:
+            raise ConsistencyError("照片缓存原完整大小与来源不同")
+        return
+    if runtime.file_executor is None:
+        return
+    _, roots = _owned_repository(runtime, action_id)
+    action = await runtime.action(action_id)
+    owner = ResultDownloadWorkspace(roots.staging, saved.ref.ticket, role)
+    if not owner.claim():
+        raise ConsistencyError("照片缓存原文件操作仍由其他拥有者持有")
+    async def work(_control):
+        try:
+            await archive_photo_cache(roots, saved.ref.ticket.target_id, saved.ref.ticket, role,
+                selected, artifact, _file_ref(prepared, roots.staging), purpose=prepared.purpose,
+                capture_format=saved_photo_format(action), owner=owner)
+            request = PhotoCacheComplete(action_id, prepared.file_id, device_file_id, saved.ref.event_id,
+                selected, artifact.size_bytes, artifact.sha256, runtime.wall_us(), None)
+            await _save_photo_cache(runtime, action_id, role, request)
+        except CaptureFileError as error:
+            if not owner.files_closed:
+                raise
+            record_error(error, stage="capture.photo_cache_archive",
+                         context={"action_id": action_id, "role": role})
+            request = PhotoCacheComplete(action_id, prepared.file_id, device_file_id, saved.ref.event_id,
+                selected, artifact.size_bytes, artifact.sha256, runtime.wall_us(), exception_diagnostic(error))
+            await _save_photo_cache(runtime, action_id, role, request)
+        finally:
+            owner.release()
+    try:
+        await runtime.file_executor.run_owned_async_file_task(AsyncFileTask(
+            FileTaskId(f"photo_cache/{new_operation_key()}"), (prepared.file_id,),
+            "photo_cache", "照片来源缓存归档", work))
+    except FileTaskError as error:
+        record_error(error, stage="capture.photo_cache_archive",
+                     context={"action_id": action_id, "role": role})
+    finally:
+        owner.release()
+
+
 async def _saved_start(runtime, action_id: int) -> SavedPhotoReturn | None:
     responsibility = f"start/{action_id}"
     def read(owned, parameters=(responsibility,)):

@@ -127,6 +127,8 @@ Action6 分段普通录像的可靠正常到时 STOP，在原 `ATTEMPT_RESULT` �
 
 单张拍摄的主机原图与预览使用 `INTERMEDIATE_FILE_CHANGED.CREATE` 共同保存两份文件责任。HOST 使用专用 `HOST_PHOTO_COMPLETE` 分支共同保存两份完整大小与 SHA-256。准备申请恰有 `action_id`、`occurred_at`；完整字节申请还包含 `original_file_id`、`original_size_bytes`、`original_sha256`、`preview_file_id`、`preview_size_bytes`、`preview_sha256`。解码器要求专用完成分支携带申请，并按事件自身的时刻、文件身份、大小和摘要核对两行变化。通用 `LIFECYCLE` 分支仍保留原来的用途变化、提升、清理和完整字节变更契约，不根据行数推断主机拍摄。原键重送逐项比较原申请；提交结果未知时，先结束原写连接上的未决事务，再通过启用 `query_only` 的独立只读连接核实原键对应的完整事务，不从写入重试推断提交结果。核实按原完整事务边界恢复两份字节事实；后来已提升的保留状态不能改写原准备或完整字节结果。文件提升仍由同事务先行的正式产物登记授权。
 
+DEVICE 单张的每个缓存角色独立使用 `INTERMEDIATE_FILE_CHANGED.LIFECYCLE`，`photo_cache_request` 恰含 `action_id`、`file_id`、`device_file_id`、`result_page_event_id`、`selected`、`size_bytes`、`sha256`、`occurred_at`、`archive_error`。前四个身份为正整数；`selected` 为原比较决定中的 `sync` 或 `camera`；大小和摘要为原相机来源的完整事实；`archive_error` 为 `null` 或实际归档异常的结构化诊断。成功事件更新该角色的大小和摘要；失败事件只保存该角色的归档错误，不赋予完整缓存资格。事件守卫回查原设备文件完成依据、START、RESULTS 角色页和一次选择；原键重送按原完整事务边界核对，不重新选择同步副本。
+
 DEVICE 角色缓存沿各自可靠相机观察和一次决定保存完整字节事实及来源引用，不借用 HOST 双文件共同完成申请。已合格原图不要求预览成功才能保存；失败角色保留自己的实际错误，不补造另一份摘要。各角色、原页、缓存及一次决定的历史依据须能独立核验，具体生命周期见[正式源与同步副本](../hasselblad-source-authority.md)。
 
 拥有者终态后的伴随收场（`OPERATION_CONFIGURED.FINISH` 中由 `finish_stale_runs` 产生的部分）必须使用专属成员 `stale_run_request` 保存完整申请依据，结构恰好为 `{"kind": "stale_run_finish", "responsibility_keys": 唯一非空字符串数组, "status": 流程状态整数编号, "error": 完整结构化错误或显式 null}`。数组保存申请的全部责任键，包含当时已结束或不存在的键；实际结束的流程只是其中当时仍开放的子集。同一申请的每个结束事件携带相同依据；原操作键重送逐项核对依据、时刻、阶段及实际结束集合与原事务边界开放的流程一致，子集、替换或借用的其他结束事务键均整组拒绝。尝试结果事务自带的流程处置事件不携带该成员，也不作为伴随收场重送。该依据不改变流程状态转换，也不进入对外报告。

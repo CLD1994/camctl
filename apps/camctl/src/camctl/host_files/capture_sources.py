@@ -279,6 +279,32 @@ async def archive_capture_file(
     )
 
 
+async def archive_photo_cache(roots: BoundDirectories, activity_id: str, ticket, role: str,
+                              selected: str, artifact: CapturedArtifact, target: FileRef,
+                              *, purpose: FilePurpose, capture_format: CaptureFormat, owner) -> None:
+    """归档本角色原决定选中的直接副本；调用者持有文件任务和原工作区。"""
+    from camctl.host_files.downloads import result_download_path
+
+    if selected not in ("sync", "camera") or role not in ("original", "thumbnail"):
+        raise CaptureFileError("target_role", detail="照片缓存来源或角色无效")
+    expected_purpose = FilePurpose.CAPTURE_ORIGINAL if role == "original" else FilePurpose.CAPTURE_PREVIEW
+    if purpose is not expected_purpose or target.purpose is not purpose:
+        raise CaptureFileError("target_role", detail="照片缓存用途与原角色不符")
+    if not isinstance(artifact, CapturedArtifact):
+        raise CaptureFileError("artifact_validation", detail="照片缓存缺少原完整文件事实")
+    if (artifact.media_type != photo_media_type(purpose, capture_format)
+            or target.relative_path != relative_file_path(purpose, target.file_id,
+                photo_file_extension(purpose, capture_format))):
+        raise CaptureFileError("target_path", detail="照片缓存目标与原角色格式不符")
+    if ticket.target_id != activity_id:
+        raise CaptureFileError("activity_id", detail="照片缓存活动与原结果票据不同")
+    workspace = (workspace_path(roots, activity_id) if selected == "sync"
+                 else result_download_path(roots.staging, ticket, role))
+    target_path = resolve_file(target, roots).path
+    await _run_file_io(_archive_capture_file, roots, workspace, artifact, target_path,
+                       selected == "camera", owner)
+
+
 async def _run_file_io(
     function: Callable[..., _Result], *args: Any
 ) -> _Result:
@@ -382,10 +408,13 @@ def _archive_capture_file(
     workspace: Path,
     artifact: CapturedArtifact,
     target_path: Path,
+    result_workspace: bool = False,
+    owner=None,
 ) -> None:
-    with _workspace_directory(roots, workspace) as workspace_fd:
+    directory = (_result_workspace_directory if result_workspace else _workspace_directory)
+    with directory(roots, workspace, owner=owner) as workspace_fd:
         with _open_directory(
-            target_path.parent, "target_directory_open"
+            target_path.parent, "target_directory_open", owner=owner
         ) as target_directory_fd:
             source_stat = _stat_entry(
                 workspace_fd,
@@ -415,7 +444,7 @@ def _archive_capture_file(
                     artifact.media_type,
                     expected_size=artifact.size_bytes,
                     expected_sha256=artifact.sha256,
-                    file_kind="source",
+                    file_kind="source", owner=owner,
                 )
 
             if target_stat is not None:
@@ -426,7 +455,7 @@ def _archive_capture_file(
                     artifact.media_type,
                     expected_size=artifact.size_bytes,
                     expected_sha256=artifact.sha256,
-                    file_kind="target",
+                    file_kind="target", owner=owner,
                 )
                 if source_facts is not None:
                     _unlink_source(
@@ -460,7 +489,7 @@ def _archive_capture_file(
                     artifact.media_type,
                     expected_size=artifact.size_bytes,
                     expected_sha256=artifact.sha256,
-                    file_kind="target",
+                    file_kind="target", owner=owner,
                 )
             except OSError as failure:
                 raise CaptureFileError(
@@ -761,6 +790,16 @@ def _workspace_directory(
                 path,
                 "workspace_open", owner=owner,
             ) as workspace_fd:
+                yield workspace_fd
+
+
+@contextmanager
+def _result_workspace_directory(roots: BoundDirectories, path: Path, *, owner=None) -> Iterator[int]:
+    with _open_directory(roots.staging, "staging_open", owner=owner) as staging_fd:
+        with _open_directory_at(staging_fd, "result-downloads", path.parent,
+                                "result_workspace_parent_open", owner=owner) as parent_fd:
+            with _open_directory_at(parent_fd, path.name, path,
+                                    "result_workspace_open", owner=owner) as workspace_fd:
                 yield workspace_fd
 
 

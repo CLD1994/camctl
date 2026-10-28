@@ -93,3 +93,31 @@ def test_actual_facts_read_tracks_open_and_failed_close(api, content, stage):
             expected_size=4, expected_sha256=None, file_kind="source", owner=owner)
     assert caught.value.stage == stage
     assert tracked == [("open", 17), ("close", 17, failure)]
+
+
+@pytest.mark.parametrize("selected,expected_workspace,is_result", [
+    ("sync", "/staging/capture-work/7", False),
+    ("camera", "/staging/result-downloads/9-2-original", True),
+])
+def test_cache_archives_only_fixed_selected_workspace(api, monkeypatch, selected, expected_workspace, is_result):
+    downloads = ModuleType("camctl.host_files.downloads")
+    downloads.result_download_path = lambda staging, ticket, role: staging / "result-downloads" / f"{ticket.run_id}-{ticket.attempt_id}-{role}"
+    monkeypatch.setitem(sys.modules, downloads.__name__, downloads)
+    api.photo_media_type = lambda purpose, capture_format: "image/x-hasselblad-3fr"
+    api.photo_file_extension = lambda purpose, capture_format: "3fr"
+    api.relative_file_path = lambda purpose, file_id, extension: "original/1.3fr"
+    api.resolve_file = lambda target, roots: SimpleNamespace(path=Path("/staging/original/1.3fr"))
+    calls = []
+    async def run(*args): calls.append(args)
+    api._run_file_io = run
+    roots = SimpleNamespace(staging=Path("/staging"))
+    ticket = SimpleNamespace(target_id="7", run_id=9, attempt_id=2)
+    purpose = api.FilePurpose.CAPTURE_ORIGINAL
+    target = SimpleNamespace(purpose=purpose, file_id=1, relative_path="original/1.3fr")
+    artifact = api.CapturedArtifact("actual.3FR", 4, "a" * 64, "image/x-hasselblad-3fr")
+    owner = object()
+    immediate(api.archive_photo_cache(roots, "7", ticket, "original", selected, artifact, target,
+        purpose=purpose, capture_format=api.CaptureFormat.RAW, owner=owner))
+    assert len(calls) == 1 and calls[0][0] is api._archive_capture_file
+    assert calls[0][2] == Path(expected_workspace)
+    assert calls[0][-2:] == (is_result, owner)

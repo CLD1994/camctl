@@ -142,3 +142,66 @@ def test_binding_failure_remains_distinct_and_closes_original_result(api):
     assert drafts == ("original",) and failure.code == "device_binding_unavailable"
     assert failure.details == details
     assert calls == [("finish", {"end_run": run_status.FAILED, "run_error": error}), ("conclude", 1)]
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_role_cache_archives_selected_source_and_persists_actual_outcome(api, monkeypatch, fails):
+    module, _, _, _ = api
+    calls = []
+    class ArchiveError(ValueError): pass
+    async def archive(*args, **kwargs):
+        calls.append(("archive", args[4]))
+        if fails: raise ArchiveError("archive failed")
+    class Artifact:
+        size_bytes, sha256 = 100, "a" * 64
+        @classmethod
+        def from_json(cls, raw): return cls()
+    module.CapturedArtifact = Artifact
+    module.new_operation_key = lambda: "test-key"
+    module._file_ref = lambda prepared, root: prepared
+    async def prepare(runtime, action_id):
+        return SimpleNamespace(original=SimpleNamespace(file_id=2, purpose="original"), preview=None)
+    async def save(runtime, action_id, role, request=None): calls.append(("save", role, request))
+    module._prepare_files, module._save_photo_cache = prepare, save
+    module._owned_repository = lambda runtime, action_id: (object(), SimpleNamespace(staging=Path("/staging")))
+    module.row_facts = lambda *args: {"size_bytes": None, "sha256": None, "last_error_json": None}
+    cache = ModuleType("camctl.history.photo_cache_request")
+    cache.PhotoCacheComplete = lambda *args: args
+    sources = sys.modules["camctl.host_files.capture_sources"]
+    sources.CaptureFileError, sources.archive_photo_cache = ArchiveError, archive
+    downloads = ModuleType("camctl.host_files.downloads")
+    class Owner:
+        files_closed = True
+        def __init__(self, *args): pass
+        def claim(self): return True
+        def release(self): calls.append(("release",))
+    downloads.ResultDownloadWorkspace = Owner
+    tasks = ModuleType("camctl.host_files.tasks")
+    tasks.AsyncFileTask = lambda *args: SimpleNamespace(body=args[-1])
+    tasks.FileTaskId = lambda value: value
+    tasks.FileTaskError = type("FileTaskError", (ValueError,), {})
+    diagnostics = ModuleType("camctl.logging_runtime.diagnostics")
+    diagnostics.record_error = lambda *args, **kwargs: calls.append(("diagnostic",))
+    errors = ModuleType("camctl.operations.error_diagnostics")
+    errors.exception_diagnostic = lambda error: {"message": str(error)}
+    for stub in (cache, downloads, tasks, diagnostics, errors):
+        monkeypatch.setitem(sys.modules, stub.__name__, stub)
+    class Database:
+        async def read(self, function, **kwargs): return function(SimpleNamespace(connection=object()))
+    class Executor:
+        async def run_owned_async_file_task(self, task): await task.body(None)
+    class Runtime:
+        database, file_executor, pending_host_photo_completions = Database(), Executor(), {}
+        wall_us = lambda self: 500
+        async def action(self, action_id): return {}
+    outcome = SimpleNamespace(observations=(SimpleNamespace(type="photo_result_attempt", version=2,
+        data={"role": "original", "comparison": {"selected": "camera", "sync_artifact": None},
+              "steps": [{"artifact": {}}]}),))
+    ticket = SimpleNamespace(target_id="7")
+    saved = SimpleNamespace(page=SimpleNamespace(outcome=outcome, entries=(SimpleNamespace(size_bytes=100),)),
+                            ref=SimpleNamespace(ticket=ticket, event_id=4))
+    immediate(module.archive_device_photo_cache(Runtime(), 1, saved, 3))
+    assert calls[0] == ("archive", "camera")
+    result = next(item for item in calls if item[0] == "save")
+    assert result[1] == "original" and result[2][-1] == ({"message": "archive failed"} if fails else None)
+    assert (any(item[0] == "diagnostic" for item in calls)) is fails

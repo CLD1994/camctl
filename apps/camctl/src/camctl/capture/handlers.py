@@ -1031,7 +1031,7 @@ class CaptureRuntime(_FileObservationSaves):
     pending_capture_completions: dict[int, PendingCaptureCompletion] = field(default_factory=dict)
     #: 主机单张文件责任及完整字节请求；UNKNOWN 时保留原请求与键。
     pending_host_photo_prepares: dict[int, Any] = field(default_factory=dict)
-    pending_host_photo_completions: dict[int, Any] = field(default_factory=dict)
+    pending_host_photo_completions: dict[int | tuple[int, str], Any] = field(default_factory=dict)
     #: 主机正式文件归档使用已固定 staging 根目录和专用仓储。
     roots: BoundDirectories | None = None
     host_capture: Any = None
@@ -2467,6 +2467,8 @@ async def _register_photo_result_page(runtime, action_id: int, page_ref: ResultP
     pending.registration_shared.retry_failed()
     await pending.registration_shared.run(lambda: _apply_observed(
         runtime, action_id, pending.entries, pending.registered_files, pending.registration))
+    from camctl.capture.host_photo import archive_device_photo_cache
+    await archive_device_photo_cache(runtime, action_id, saved, file_id)
 
 
 async def _resume_saved_photo_sources(runtime, action_id, ticket):

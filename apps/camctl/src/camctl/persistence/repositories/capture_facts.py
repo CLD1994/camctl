@@ -462,6 +462,35 @@ class PhotoResultReads:
                 or (check_sha and sha256 != identity.sha256)):
             raise ConsistencyError("照片设备文件事实与原实际来源页不一致")
 
+    def verify_cache(self, request, *, before_event_id):
+        """核对缓存来自原角色页中已固定的同一相机内容及一次选择。"""
+        from .result_pages import _at
+        from camctl.persistence.fact_reads import read_event
+
+        file = row_facts(self.connection, "device_files", request.device_file_id)
+        completion = None if file is None else file.get("completion_evidence_json")
+        if (file is None or file["source_action_id"] != request.action_id
+                or file["completion_state"] != 3 or file["size_bytes"] != request.size_bytes
+                or file["sha256"] != request.sha256 or not isinstance(completion, Mapping)):
+            raise ConsistencyError("照片缓存没有原完成设备文件及固定字节事实")
+        observation = completion.get("observation")
+        self.verify_device_file(request.device_file_id, observation, before_event_id=before_event_id,
+                                role=file["role"], size_bytes=request.size_bytes, check_size=True,
+                                sha256=request.sha256, check_sha=True)
+        reference = observation["photo_source"]
+        if reference["result_page_event_id"] != request.result_page_event_id:
+            raise ConsistencyError("照片缓存申请改变原角色页")
+        record = read_event(self.connection, request.result_page_event_id)
+        if record.transaction.last_event_id >= before_event_id:
+            raise ConsistencyError("照片缓存引用尚未完成的原角色页")
+        saved, _ = _at(self.connection, request.result_page_event_id)
+        attempts = [item for item in saved.page.outcome.observations
+                    if item.type == "photo_result_attempt" and item.version == 2]
+        comparison = None if len(attempts) != 1 else attempts[0].data.get("comparison")
+        if not isinstance(comparison, Mapping) or comparison.get("selected") != request.selected:
+            raise ConsistencyError("照片缓存申请改变原单次选择")
+        return reference["role"]
+
     def verify(self, action, sources, *, before_event_id):
         from camctl.contracts.json_values import json_equal, parse_exact_json
         from camctl.devices.drivers.hasselblad.files import CameraFileIdentity, CameraFileLocator, CameraLocatorStatus

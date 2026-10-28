@@ -822,7 +822,7 @@ def session_capture_assembly(
     pending_segment_writes: dict | None = None,
     pending_segment_inspection_results: dict | None = None,
     pending_host_photo_prepares: dict[int, Any] | None = None,
-    pending_host_photo_completions: dict[int, Any] | None = None,
+    pending_host_photo_completions: dict[int | tuple[int, str], Any] | None = None,
     start_entries=None,
     read_discovery_batch_size: int | None = None,
     preparation_cache=None,
