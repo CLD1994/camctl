@@ -41,6 +41,7 @@ camctl 是嵌入式主机上的 Python CLI，负责计划受理、调度、设�
 
 | 文档 | 用途 |
 | --- | --- |
+| [错误日志内容与诊断责任修复](../superpowers/plans/2026-10-28-error-log-projection-and-ownership.md) | ERROR 内容投影、同记录和跨记录引用、会话收场诊断及隔离验证。 |
 | [拍摄结果保存与交付恢复修复](../superpowers/plans/2026-10-28-capture-result-and-publication-recovery.md) | 首次配对事务边界、调用结果消费者处置、普通交付发现及取消收场的修复与隔离单元验证。 |
 | [空业务会话的后台收场与退出](../superpowers/plans/2026-10-26-idle-session-exit.md) | 数据库空闲后的原后台任务消费、关闭事务重查、错误及取消交付。 |
 | [全局错误诊断接入](../superpowers/plans/2026-10-26-global-error-diagnostics.md) | 全部错误结果、异常和第三方 ERROR 的接纳、原事实交付、取消与收场及覆盖验收。 |

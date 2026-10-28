@@ -191,7 +191,7 @@ class DiagnosticConsumerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(document["error"]["message"], "transport did not settle")
         self.assertEqual(document["details"]["reason"], "transport_failed")
         self.assertEqual(document["details"]["calls"][0]["outcome"]["exit"]["exit_code"], 0)
-        self.assertEqual(document["details"]["calls"][1]["error"]["message"], "transport did not settle")
+        self.assertEqual(document["details"]["calls"][1]["error"], {"$ref": "#/error"})
         calls = document["diagnostics"]["calls"]
         self.assertEqual([bytes.fromhex(call["stdout"]["hex"]) for call in calls], [b"old output", b"partial"])
         self.assertEqual([bytes.fromhex(call["stderr"]["hex"]) for call in calls], [b"", b"failure"])
