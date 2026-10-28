@@ -672,11 +672,20 @@ async def publish_delivery(
     if state.target.file_id in executor.unfinished_files():
         return DeliveryResult(DeliveryPhase.HELD, DeliveryDecision(
             DeliveryHandoffOutcome.HOLD, error="file_in_use"))
+    async def body(_control):
+        current = await context.database.read(
+            lambda owned: context.repository.load_delivery_state(delivery_id, owned),
+            description="持有原文件资格后核对交付状态")
+        if (current.action_id != state.action_id or current.target.file_id != state.target.file_id
+                or current.target.relative_path != state.target.relative_path
+                or current.file_name != state.file_name):
+            raise ConsistencyError("取得文件资格后原交付身份发生变化")
+        return await _publish_delivery(delivery_id, context, current)
+
     with log_context(delivery_id=delivery_id):
         return await executor.run_owned_async_file_task(AsyncFileTask(
             FileTaskId(f"delivery/{delivery_id}/{new_operation_key()}"), (state.target.file_id,),
-            "delivery_publication", "副本发布及实际结果保存",
-            lambda _control: _publish_delivery(delivery_id, context, state), resources=("state_db",)))
+            "delivery_publication", "副本发布及实际结果保存", body, resources=("state_db",)))
 
 
 def _record_location_errors(delivery_id, decision) -> None:

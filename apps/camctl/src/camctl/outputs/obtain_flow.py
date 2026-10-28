@@ -655,10 +655,12 @@ def _unpublished_deliveries(connection, action_id: int, *, limit: int, read_succ
 
 def _obtain_running(connection, action_id: int) -> bool:
     with closing(connection.execute(
-        "SELECT 1 FROM actions WHERE id=? AND type=4 AND status=2 AND cancel_requested=0",
-        (action_id,),
+        "SELECT type,status,cancel_requested FROM actions WHERE id=?", (action_id,),
     )) as cursor:
-        return cursor.fetchone() is not None
+        row = cursor.fetchone()
+    if row is None or row[0] != 4:
+        raise ConsistencyError("发布收场缺少原取回动作")
+    return row[1] == 2 and row[2] == 0
 
 
 async def _publish_delivery(

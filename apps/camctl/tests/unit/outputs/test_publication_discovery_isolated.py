@@ -115,8 +115,8 @@ class Connection:
         self.active = active
 
     def execute(self, sql, parameters):
-        if sql.startswith('SELECT 1 FROM actions'):
-            return Cursor([(1,)] if self.active else [])
+        if sql.startswith('SELECT type,status,cancel_requested FROM actions'):
+            return Cursor([(4, 2, 0) if self.active else (4, 6, 1)])
         action, *statuses, limit = parameters
         if 'd.status IN' not in sql:
             assert len(statuses) == 1

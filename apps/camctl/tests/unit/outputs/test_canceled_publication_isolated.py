@@ -992,3 +992,38 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0][0].code, 'withdrawal_unconfirmed')
         self.assertIs(records[0][1]['details']['observation_errors'][0], original_error)
+
+    async def test_normal_publication_reloads_canceled_state_inside_file_ownership(self):
+        from contextlib import nullcontext
+        module = load_handoff()
+        class Task:
+            def __init__(self, task_id, file_ids, stage, business, body, **kwargs): self.body = body
+        module.AsyncFileTask = Task
+        module.FileTaskId = lambda value: value
+        module.new_operation_key = lambda: 'key'
+        module.log_context = lambda **kwargs: nullcontext()
+        old = SimpleNamespace(action_id=7, file_name='name', target=SimpleNamespace(file_id=23, relative_path='file'),
+                              facts=SimpleNamespace(status=Status.PUBLISHING))
+        current = SimpleNamespace(action_id=7, file_name='name', target=SimpleNamespace(file_id=23, relative_path='file'),
+                                  facts=SimpleNamespace(status=Status.CANCELED))
+        class Repository:
+            count = 0
+            def load_delivery_state(self, identity, owned):
+                self.count += 1
+                return old if self.count == 1 else current
+        class Database:
+            async def read(self, callback, **kwargs): return callback(None)
+        class Executor:
+            def unfinished_files(self): return ()
+            async def run_owned_async_file_task(self, task): return await task.body(None)
+        seen = []
+        async def publish(identity, context, facts):
+            seen.append(facts.facts.status)
+            return module.DeliveryResult(module.DeliveryPhase.NOT_ACTIVE,
+                module.DeliveryDecision(module.DeliveryHandoffOutcome.NOT_ACTIVE))
+        module._publish_delivery = publish
+        context = module.DeliveryContext(repository=Repository(), database=Database(), directories=object(),
+                                         occurred_at=100, executor=Executor())
+        result = await module.publish_delivery(19, context)
+        self.assertEqual(result.phase, module.DeliveryPhase.NOT_ACTIVE)
+        self.assertEqual(seen, [Status.CANCELED])
