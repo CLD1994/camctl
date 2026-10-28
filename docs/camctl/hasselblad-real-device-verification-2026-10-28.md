@@ -112,7 +112,11 @@ HOST 以主机正式源为准，不为登记、取回或恢复归档向相机核
 
 当前程序尚需按这一来源规则调整 DEVICE 来源事实与副本复用责任。既有分段视频检查副本的有限复用规则已经定位；Hasselblad 的原图、预览及同步工作区需要接入相应的结果责任和清理。相机按用户安排用于充电，软件调整期间保持零设备调用，之后再安排新规则的真机复验。
 
-来源生产链的阶段快照为 `c9627f55f6186ad3275a6f45f9d7ae5220782e48`，包含冻结模式、DEVICE 控制结果、真实 RESULTS 角色端口、页后文件责任及来源结果处理。主代理在独立固定副本、Python 3.11.17 上复跑四组隔离单元：`test_hasselblad_device_response_isolated.py`、`test_hasselblad_frozen_storage_isolated.py`、`test_hasselblad_device_results_isolated.py`、`test_photo_result_workspace_isolated.py`，57 项通过，退出 0；日志为 `.local/verification/h6-real-device-20261028/source-c9627f55-unit.log`。命令设置 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`、`PYTHONDONTWRITEBYTECODE=1`，显式使用该副本的源码 `PYTHONPATH`、部署版本解释器及 `pytest -p no:cacheprovider`。运行前已静态核对导入前的资源与协作者隔离。独立完整评审仍在进行，一次比较、H 等待者缓存和原工作目录维护尚未完成；本快照未合入或安装，不代表真实事务、完整来源链或设备验收通过。
+来源生产链的阶段快照为 `c9627f55f6186ad3275a6f45f9d7ae5220782e48`，包含冻结模式、DEVICE 控制结果、真实 RESULTS 角色端口、页后文件责任及来源结果处理。主代理在独立固定副本、Python 3.11.17 上复跑四组隔离单元：`test_hasselblad_device_response_isolated.py`、`test_hasselblad_frozen_storage_isolated.py`、`test_hasselblad_device_results_isolated.py`、`test_photo_result_workspace_isolated.py`，57 项通过，退出 0；日志为 `.local/verification/h6-real-device-20261028/source-c9627f55-unit.log`。命令设置 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`、`PYTHONDONTWRITEBYTECODE=1`，显式使用该副本的源码 `PYTHONPATH`、部署版本解释器及 `pytest -p no:cacheprovider`。运行前已静态核对导入前的资源与协作者隔离。该快照的独立评审发现绑定派发、文件关闭责任和角色前序三项问题，随后按 H6 修复矩阵补齐。该阶段未实现一次比较、H 等待者缓存及原目录维护，也未合入或安装；隔离结果不代表真实事务、完整来源链或设备验收通过。
+
+后续来源与单角色归档修复覆盖了原准备引用、实际关闭拥有者、原页子责任、重复角色拒绝、绑定变化及多关闭错误诊断；独立审查另发现归档结论的独立守卫缺少完整前状态，已在 `e682ab95` 修复并复核。主代理使用固定快照 `e37776fa23f07d4985f189fa2994eee5a5385eee`（`e682ab95` 加两个既有 JPEG 替身的 `owner=` 参数兼容）分进程复跑必要隔离范围：来源与归档七文件组 102 项、缓存事件前状态 5 项、JPEG 边界 101 项均通过、退出 0。三个日志分别为 `.local/verification/h6-real-device-20261028/source-e37776fa-unit.log`、`cache-guard-e37776fa-unit.log`、`jpeg-e37776fa-unit.log`；解释器和隔离参数同前。既有 JPEG 断言及参数矩阵保持。
+
+开发分支的 H 复用与同一交付回退已形成接线快照，当前仍在补齐摘要不符的回退门禁、源端 READ 的释放保护、用途目录读取边界及原目录维护。目标环境安装仍为前述 `61e73c8a`，未安装这些开发快照；真实事务、完整调度、文件操作和新规则真机结果均未由隔离通过替代。
 
 ## 充电期间的离线收口
 
