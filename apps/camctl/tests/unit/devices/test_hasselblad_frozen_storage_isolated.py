@@ -1,8 +1,9 @@
 """准备凭据必须保留原受理的来源模式，导入时隔离资源协作者。"""
-import importlib
+import importlib.util
 import sys
 from enum import IntEnum
 from types import ModuleType, SimpleNamespace
+from pathlib import Path
 
 import pytest
 
@@ -25,11 +26,14 @@ def cache_api(monkeypatch):
         stub = ModuleType(name)
         stub.__dict__.update(attributes)
         monkeypatch.setitem(sys.modules, name, stub)
-    name = "camctl.devices.capture_preparation"
-    monkeypatch.delitem(sys.modules, name, raising=False)
-    module = importlib.import_module(name)
-    yield module
-    monkeypatch.delitem(sys.modules, name, raising=False)
+    name = "camctl.devices._isolated_capture_preparation"
+    source = Path(__file__).parents[3] / "src/camctl/devices/capture_preparation.py"
+    spec = importlib.util.spec_from_file_location(name, source)
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, name, module)
+    spec.loader.exec_module(module)
+    return module
+
 
 
 def test_prepared_capture_cannot_change_frozen_storage(cache_api):

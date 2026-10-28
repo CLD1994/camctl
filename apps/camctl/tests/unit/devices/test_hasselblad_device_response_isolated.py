@@ -1,27 +1,29 @@
 """DEVICE 响应分类的资源隔离反例。"""
 
-import importlib
+import importlib.util
 import sys
-from dataclasses import dataclass
 from enum import StrEnum
 from types import ModuleType, SimpleNamespace
+from pathlib import Path
 
 import pytest
 
 
 @pytest.fixture
 def responses(monkeypatch):
-    files = ModuleType("camctl.devices.drivers.hasselblad.files")
-    class Status(StrEnum):
-        PATH = "path"
-        EXPLICIT_MISSING = "explicit_missing"
-    @dataclass(frozen=True)
-    class Locator:
-        status: Status
-        camera_path: str | None = None
-        camera_name: str | None = None
-    files.CameraLocatorStatus = Status
-    files.CameraFileLocator = Locator
+    # 真实定位类型本身保持原路径约束；它的其他协作者在导入前隔离。
+    identity = ModuleType("camctl.devices.drivers.hasselblad.identity")
+    identity.CameraIdentity = lambda *args: None
+    definitions = ModuleType("camctl.devices.drivers.hasselblad.definitions")
+    definitions.DRIVER_ID = "hasselblad_cfv100c"
+    monkeypatch.setitem(sys.modules, identity.__name__, identity)
+    monkeypatch.setitem(sys.modules, definitions.__name__, definitions)
+    source = Path(__file__).parents[3] / "src/camctl/devices/drivers/hasselblad"
+    file_name = "camctl.devices.drivers.hasselblad._isolated_files"
+    file_spec = importlib.util.spec_from_file_location(file_name, source / "files.py")
+    files = importlib.util.module_from_spec(file_spec)
+    monkeypatch.setitem(sys.modules, file_name, files)
+    file_spec.loader.exec_module(files)
     parameters = ModuleType("camctl.devices.drivers.hasselblad.parameters")
     class Format(StrEnum):
         RAW = "raw"
@@ -34,11 +36,13 @@ def responses(monkeypatch):
     }
     monkeypatch.setitem(sys.modules, files.__name__, files)
     monkeypatch.setitem(sys.modules, parameters.__name__, parameters)
-    name = "camctl.devices.drivers.hasselblad.responses"
-    monkeypatch.delitem(sys.modules, name, raising=False)
-    module = importlib.import_module(name)
-    yield module, Format
-    monkeypatch.delitem(sys.modules, name, raising=False)
+    name = "camctl.devices.drivers.hasselblad._isolated_responses"
+    spec = importlib.util.spec_from_file_location(name, source / "responses.py")
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, name, module)
+    spec.loader.exec_module(module)
+    return module, Format
+
 
 
 @pytest.mark.parametrize("saved", [
@@ -113,3 +117,40 @@ def test_invalid_preview_record_does_not_remove_independently_valid_original(res
     assert result.original_error is None
     assert result.preview is None
     assert result.preview_error is not None
+
+
+@pytest.mark.parametrize("stderr", [b"capture: ERROR\n", b"capture: OK\n"])
+def test_device_rejects_conflicting_capture_results_in_stderr(responses, stderr):
+    api, fmt = responses
+    with pytest.raises(api.CliParseError):
+        api.parse_device_capture(b"capture: OK\ncamera file: /mnt/a.3FR\n", stderr,
+            output_complete=True, capture_format=fmt.RAW, output_directory="/workspace")
+
+
+@pytest.mark.parametrize("path", ["/mnt/../a.3FR", "/mnt//a.3FR", "relative/a.3FR", "/mnt/./a.3FR"])
+def test_device_rejects_noncanonical_camera_locator(responses, path):
+    api, fmt = responses
+    with pytest.raises(api.CliParseError):
+        api.parse_device_capture(f"capture: OK\ncamera file: {path}\n".encode(), b"",
+            output_complete=True, capture_format=fmt.RAW, output_directory="/workspace")
+
+
+def test_jpeg_pair_can_have_thumbnail_suffix_in_original_name(responses):
+    api, fmt = responses
+    result = api.parse_device_capture(
+        b"capture: OK\nsaved /workspace/a.thumbnail.jpg (10 bytes)\n"
+        b"saved /workspace/a.thumbnail.jpg.thumbnail.jpg (2 bytes)\n"
+        b"camera file: /mnt/a.jpg\n", b"", output_complete=True,
+        capture_format=fmt.JPEG, output_directory="/workspace")
+    assert result.original.host_name == "a.thumbnail.jpg"
+    assert result.preview.host_name == "a.thumbnail.jpg.thumbnail.jpg"
+
+
+def test_single_jpeg_thumbnail_named_record_has_ambiguous_role(responses):
+    api, fmt = responses
+    result = api.parse_device_capture(
+        b"capture: OK\nsaved /workspace/a.jpg.thumbnail.jpg (10 bytes)\n"
+        b"camera file: /mnt/a.jpg\n", b"", output_complete=True,
+        capture_format=fmt.JPEG, output_directory="/workspace")
+    assert result.original is None and result.preview is None
+    assert result.original_error and result.preview_error

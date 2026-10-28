@@ -356,6 +356,9 @@ def parse_device_capture(
     if any(line.startswith(b"capture:") and line not in
            (b"capture: OK", _UNREPORTED_CAMERA_FILE_LINE.encode()) for line in lines):
         raise CliParseError("capture 输出包含冲突的控制结果")
+    if any(line.startswith(b"capture:") and line != _UNREPORTED_CAMERA_FILE_LINE.encode()
+           for line in stderr.split(b"\n")):
+        raise CliParseError("capture 双流包含冲突的控制结果")
     locator_records = [line for line in (*lines, *stderr.split(b"\n"))
                        if line.startswith(b"camera file") or
                        line == _UNREPORTED_CAMERA_FILE_LINE.encode()]
@@ -367,6 +370,17 @@ def parse_device_capture(
     locator = _camera_locator(locator_line, CAPTURE_FORMATS[capture_format])
 
     local_lines = [line for line in lines[1:] if line not in locator_records]
+    # 完整配对优先按原响应规则判定，避免 JPEG 原图名称本身以
+    # thumbnail.jpg 结尾时被误认为预览。
+    if len(local_lines) == 2:
+        try:
+            local = b"capture: OK\n" + b"\n".join(local_lines) + b"\n" + locator_records[0] + b"\n"
+            paired = parse_capture(local, b"", output_complete=True, capture_format=capture_format,
+                                   output_directory=output_directory)
+        except CliParseError:
+            pass
+        else:
+            return DeviceCaptureResponse(locator, paired.original, paired.preview, None)
     # 各角色分别判断；一个可安全定位的文件不能因另一角色缺失被丢弃。
     candidates: dict[str, list[_SavedFile]] = {"original": [], "preview": []}
     invalid: dict[str, str] = {}
@@ -374,6 +388,8 @@ def parse_device_capture(
     suffix = ".thumbnail" + description.preview_extension
     def role_for(name):
         if name.endswith(suffix):
+            if description.original_extension.casefold() == description.preview_extension.casefold():
+                return None
             original_name = name[:-len(suffix)]
             return "preview" if original_name.casefold().endswith(
                 description.original_extension.casefold()) else None
