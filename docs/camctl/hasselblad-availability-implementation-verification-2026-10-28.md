@@ -203,3 +203,13 @@ PYTHONPATH=apps/camctl/src /workspaces/camctl/apps/camctl/.venv311/bin/python -m
 ```
 
 目录测试后只增加了不完整或不可用流的测试分区并调整测试夹具，生产代码未再修改；集成目录有一条 pytest 标记警告。
+
+## H5：发行物构建与权威资源静态核对
+
+2026-10-28，在独立 worktree `/tmp/camctl-h5-package-validation-20261028`、提交 `1cf7cc435573724bd6fe1a2ee04ccb77e4980fe7` 上使用 Python 3.11.17、uv 0.13.5 和 wheel 元数据记录的 hatchling 1.33.0 执行一次 wheel 构建。`uv build --project apps/camctl --wheel --python /workspaces/camctl/apps/camctl/.venv311/bin/python --out-dir /workspaces/camctl/.local/delivery/hasselblad-recovery-20261028 --no-progress` 退出码为 0，生成 `camctl-0.1.0-py3-none-any.whl`（1,805,758 字节）。
+
+`uv export --project apps/camctl --frozen --no-dev --no-emit-project --python /workspaces/camctl/apps/camctl/.venv311/bin/python --output-file /workspaces/camctl/.local/delivery/hasselblad-recovery-20261028/requirements.txt --no-progress` 退出码为 0，导出 9 项版本与 SHA-256 均锁定的运行依赖。worktree 内执行 `/workspaces/camctl/apps/camctl/.venv311/bin/python apps/camctl/scripts/sync_resources.py --check` 退出码为 0。静态 ZIP 核对确认同步映射的 27 项资源与仓库权威源逐字节一致，386 个 `src/camctl` 文件与 wheel 内容逐字节一致；对 wheel 中 360 个 Python 文件执行 `compile` 语法编译但未执行代码。发行物元数据声明 `>=3.11` 及规格中的三个直接运行依赖。
+
+wheel 的 SHA-256 为 `74b8beaa213c3b6572f82e0874449b8a3d6fdabc592a83a361a85375b4c92c55`。忽略目录 `.local/delivery/hasselblad-recovery-20261028/` 保存 wheel、依赖导出、27 项逐资源 SHA-256 的 `resource-manifest.json` 和覆盖三项交付文件的 `SHA256SUMS`；清单校验退出码为 0。协调者对比 `831e17e0..1cf7cc43` 后确认公共错误登记变化没有伴随 `status-report.schema.json` 变化，客户端生成报告类型依赖该 Schema，因此无需重生成客户端或 C 资源。
+
+本轮没有安装或运行 camctl，没有初始化数据库、导入 camctl 业务模块或运行测试；Linux x86_64 wheel 构建不代表目标安装版、ARM64／其他平台或真实设备验收，这些范围仍待分别核验。
