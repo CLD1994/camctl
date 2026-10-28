@@ -3954,11 +3954,14 @@ class FailReadBinding:
     source_device_file_id: int
     binding_result: BindingResult
     occurred_at: int
+    read_result_key: OperationKey | None = None
 
     def __post_init__(self) -> None:
         ObjectId(self.copy_id)
         ObjectId(self.source_device_file_id)
         UtcMicros(self.occurred_at)
+        if self.read_result_key is not None:
+            OperationKey(self.read_result_key)
         if not isinstance(self.binding_result, BindingResult):
             raise TypeError("读取绑定失败必须携带 BindingResult")
         if binding_failure_details(self.binding_result) is None:
@@ -4384,9 +4387,18 @@ class _ReadBindingFailCommand(_DeliveryPublicationMixin):
     def plan(self, scope) -> CommandPlan:
         saved = saved_transaction_events(scope.connection, self._key)
         facts = self._facts(scope.connection)
+        copy, delivery, action, item, run, details = facts
+        if self._command.read_result_key is not None:
+            from .binding_read_cancel import saved_binding_read_failure
+            saved_binding_read_failure(scope.connection, self._command.read_result_key, action["id"], copy["id"],
+                {"code": "device_binding_unavailable", "stage": "execution", "details": details})
         if saved is not None:
             return self._reuse(scope, saved, facts)
-        copy, delivery, action, item, run, details = facts
+        if delivery["status"] in (6, 7, 8) or copy["verification_state"] in (3, 5):
+            return self._decision(FailureSaveOutcome(FailureSaveDisposition.ALREADY), read_only=True)
+        if self._command.read_result_key is not None and action["cancel_requested"]:
+            if action["status"] in (2, 6):
+                return self._decision(FailureSaveOutcome(FailureSaveDisposition.RETIRED), read_only=True)
         if details["reason"] == "physical_identity_mismatch":
             from .physical_alias import read_mismatch_can_finish, verify_source_identity_mismatch
             source = self._state["device_files"][self._command.source_device_file_id]
@@ -4405,8 +4417,6 @@ class _ReadBindingFailCommand(_DeliveryPublicationMixin):
             origin = self._state["actions"][source["source_action_id"]]
             if not source_physical_alias_conflict(scope.connection, source, observer, origin):
                 return self._decision(FailureSaveOutcome(FailureSaveDisposition.RETIRED), read_only=True)
-        if delivery["status"] in (6, 7, 8) or copy["verification_state"] in (3, 5):
-            return self._decision(FailureSaveOutcome(FailureSaveDisposition.ALREADY), read_only=True)
         if (delivery["status"] not in (1, 2) or not _read_owner_eligible(action)
                 or not self._run_can_close(run, details) or item["source_dependency"] != 1):
             raise TransactionError("绑定失败不能重开原交付或读取终态")

@@ -372,9 +372,16 @@ class FinishBindingFailure:
     check_config: AttemptConfig | None = None
     drafts: tuple[OutputDraft, ...] = ()
     catalog_facts: OutputCatalogFacts | None = None
+    read_result_key: OperationKey | None = None
+    read_copy_id: int | None = None
 
     def __post_init__(self) -> None:
         ObjectId(self.action_id)
+        if (self.read_result_key is None) != (self.read_copy_id is None):
+            raise ValueError("读取结果键与原拷贝身份必须共同提供")
+        if self.read_result_key is not None:
+            OperationKey(self.read_result_key)
+            ObjectId(self.read_copy_id)
         if self.failure.code != "device_binding_unavailable":
             raise ValueError("绑定失败事务只保存设备绑定异常")
         validate_error_details(self.failure.code, self.failure.details)
@@ -4594,6 +4601,11 @@ class _FinishBindingFailureCommand:
     def plan(self, scope) -> CommandPlan:
         connection = scope.connection
         saved = saved_transaction_events(connection, self._key)
+        if self._request.read_result_key is not None:
+            from .binding_read_cancel import saved_binding_read_failure
+            saved_binding_read_failure(connection, self._request.read_result_key, self._request.action_id,
+                self._request.read_copy_id, {"code": "device_binding_unavailable", "stage": "execution",
+                                             "details": self._request.failure.details})
         if saved is not None:
             return self._reuse(scope, saved)
         request = self._request
@@ -4601,6 +4613,13 @@ class _FinishBindingFailureCommand:
         if action is None:
             raise TransactionError("绑定失败动作不存在")
         self._verify_binding(action)
+        if request.read_result_key is not None and action["cancel_requested"] and action["status"] in (2, 6):
+            plan = row_facts(connection, "plans", action["plan_id"])
+            if plan is None:
+                raise ConsistencyError("原动作缺少所属计划")
+            return CommandPlan(events=(), owners={}, read_only=True,
+                state_rows={"actions": {action["id"]: action}, "plans": {plan["id"]: plan}},
+                result=CaptureResult(action["status"], plan["status"], (), FinishDisposition.RETIRED))
         if action["status"] in _ACTION_TERMINAL:
             return self._capture_command()._recover(connection, action)
         if bool(action["cancel_requested"]) != request.canceled:
