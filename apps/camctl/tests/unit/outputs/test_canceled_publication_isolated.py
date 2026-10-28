@@ -156,6 +156,7 @@ class CancelSettlementTests(unittest.TestCase):
         repo._ACTION_TERMINAL = (3, 4, 5, 6)
         repo._ITEM_STATUS = SimpleNamespace(UNRESOLVED=1, SELECTED=2, DELIVERY_CREATED=3, FAILED=4, CANCELED=5)
         repo._RUN_TERMINAL = {3}
+        repo._WITHDRAWAL = SimpleNamespace(UNKNOWN=6)
         repo.plan_complete = lambda siblings, action: False
         command = object.__new__(repo._SettleCanceledObtainCommand)
         command._command = SimpleNamespace(action_id=7, publishing_staging=((19, 21, 23),))
@@ -163,7 +164,7 @@ class CancelSettlementTests(unittest.TestCase):
         command._state = {'actions': {7: {'id': 7, 'plan_id': 1, 'status': 2, 'cancel_requested': 1}},
             'plans': {1: {'id': 1, 'status': 2}},
             'obtain_items': {8: {'status': 3, 'source_dependency': 0}},
-            'deliveries': {19: {'status': 4, 'publication_intent_event_id': 90}},
+            'deliveries': {19: {'status': 4, 'publication_intent_event_id': 90, 'withdrawal_state': 1}},
             'file_copies': {21: {'target_file_id': 23, 'slot_device_id': None}},
             'operation_runs': {22: {'status': 3, 'retry_wait_required': 0}}, 'operation_attempts': {}}
         command._command.publishing_staging = ()
@@ -293,3 +294,153 @@ class CancelWaiterTests(unittest.IsolatedAsyncioTestCase):
         target = object.__new__(settlement.TargetSettlement)
         target._database = Database()
         self.assertEqual(await target._pending_withdrawal_items(7), (19,))
+
+    def test_waiter_creation_requires_active_parent_and_original_delivery(self):
+        repo = load_repository()
+        command = object.__new__(repo._EnsureWithdrawalWaiterCommand)
+        command._command = SimpleNamespace(delivery_id=19, cancel_item_id=40)
+        repo._OBTAIN_TYPE = 4
+        repo._CANCEL_ACTION_TYPE = 6
+        repo._ACTION_STATUS = SimpleNamespace(RUNNING=2)
+        repo._WITHDRAWAL = SimpleNamespace(UNKNOWN=6)
+        delivery = {'id': 19, 'action_id': 7, 'status': 5, 'withdrawal_state': 1}
+        target = {'id': 7, 'type': 4, 'cancel_requested': 1}
+        parent = {'id': 40, 'action_id': 50, 'target_action_id': 7, 'status': 2}
+        origin = {'id': 50, 'type': 6, 'status': 2, 'cancel_requested': 0}
+        self.assertTrue(command._eligible(delivery, target, parent, origin))
+        delivery.update(status=4, withdrawal_state=1)
+        self.assertFalse(command._eligible(delivery, target, parent, origin))
+        delivery['withdrawal_state'] = 6
+        self.assertTrue(command._eligible(delivery, target, parent, origin))
+        delivery['status'] = 5
+        origin['status'] = 6
+        self.assertFalse(command._eligible(delivery, target, parent, origin))
+        origin['status'] = 2
+        parent['target_action_id'] = 8
+        self.assertFalse(command._eligible(delivery, target, parent, origin))
+
+    def test_new_waiter_saves_original_pair_and_reuses_existing_pair(self):
+        repo = load_repository()
+        repo._OBTAIN_TYPE, repo._CANCEL_ACTION_TYPE = 4, 6
+        repo._ACTION_STATUS = SimpleNamespace(RUNNING=2)
+        request = repo.EnsureWithdrawalWaiter(40, 19, 123)
+        rows = {('deliveries', 19): {'id': 19, 'action_id': 7, 'status': 5},
+                ('actions', 7): {'id': 7, 'type': 4, 'cancel_requested': 1},
+                ('cancel_items', 40): {'id': 40, 'action_id': 50, 'target_action_id': 7, 'status': 2},
+                ('actions', 50): {'id': 50, 'type': 6, 'status': 2, 'cancel_requested': 0}}
+        repo.row_facts = lambda connection, table, identity: rows[(table, identity)]
+        repo.saved_transaction_events = lambda connection, key: None
+        repo.next_row_id = lambda connection, table: 60
+        repo._row = lambda table, identity, values: (table, identity, values)
+        repo._envelope = lambda *args: args
+        repo.CommandPlan = lambda **kwargs: SimpleNamespace(**kwargs)
+        class Cursor:
+            def __init__(self, existing): self.existing = existing
+            def fetchall(self): return self.existing
+            def close(self): pass
+        class Scope:
+            existing = []
+            connection = SimpleNamespace(execute=lambda sql, args: Cursor(scope.existing))
+            def allocate(self, count): return SimpleNamespace(first_event_id=100, txn_id=10)
+        scope = Scope()
+        plan = repo._EnsureWithdrawalWaiterCommand(request, 'key').plan(scope)
+        self.assertEqual(plan.events[0][4], (('cancel_delivery_items', 60, {
+            'cancel_item_id': 40, 'delivery_id': 19, 'status': 1,
+            'error_code': None, 'error_details_json': None}),))
+        scope.existing = [(60,)]
+        self.assertTrue(repo._EnsureWithdrawalWaiterCommand(request, 'key').plan(scope).read_only)
+
+    def test_waiter_replay_rejects_different_original_pair(self):
+        repo = load_repository()
+        command = object.__new__(repo._EnsureWithdrawalWaiterCommand)
+        command._command = SimpleNamespace(cancel_item_id=40, delivery_id=19, occurred_at=123)
+        event = {'type': 23, 'reason': 7, 'occurred_at': 123, 'body': {'evidence': {}, 'rows': [{
+            'table': 'cancel_delivery_items', 'id': 60, 'before': {'exists': False, 'values': {}},
+            'after': {'exists': True, 'values': {'cancel_item_id': 41, 'delivery_id': 19,
+                'status': 1, 'error_code': None, 'error_details_json': None}}}]}}
+        with self.assertRaises(repo.TransactionError):
+            command._reuse(None, [event])
+
+    def test_waiter_replay_uses_original_boundary_after_parent_finishes(self):
+        repo = load_repository()
+        repo._OBTAIN_TYPE, repo._CANCEL_ACTION_TYPE = 4, 6
+        repo._ACTION_STATUS = SimpleNamespace(RUNNING=2)
+        repo.CommandPlan = lambda **kwargs: SimpleNamespace(**kwargs)
+        repo.HistoryBoundary = lambda txn, event: (txn, event)
+        repo.read_transaction_range = lambda conn, txn: SimpleNamespace(txn_id=9, last_event_id=99)
+        command = object.__new__(repo._EnsureWithdrawalWaiterCommand)
+        command._command = SimpleNamespace(cancel_item_id=40, delivery_id=19, occurred_at=123)
+        rows = {('cancel_delivery_items', 60): {'id': 60, 'cancel_item_id': 40, 'delivery_id': 19, 'status': 2},
+                ('cancel_items', 40): {'id': 40, 'action_id': 50, 'target_action_id': 7, 'status': 3},
+                ('deliveries', 19): {'id': 19, 'action_id': 7, 'status': 8},
+                ('actions', 7): {'id': 7, 'type': 4, 'status': 6, 'cancel_requested': 1},
+                ('actions', 50): {'id': 50, 'type': 6, 'status': 3, 'cancel_requested': 0}}
+        repo.row_facts = lambda connection, table, identity: dict(rows[(table, identity)])
+        def original(connection, *, table, row_id, **kwargs):
+            return {('cancel_items', 40): {'status': 2}, ('deliveries', 19): {'status': 5},
+                    ('actions', 7): {'status': 2, 'cancel_requested': 1},
+                    ('actions', 50): {'status': 2, 'cancel_requested': 0}}[(table, row_id)]
+        repo.read_row_values_at_boundary = original
+        event = {'type': 23, 'reason': 7, 'occurred_at': 123,
+            'transaction': SimpleNamespace(txn_id=10), 'body': {'evidence': {}, 'rows': [{
+                'table': 'cancel_delivery_items', 'id': 60, 'before': {'exists': False, 'values': {}},
+                'after': {'exists': True, 'values': {'cancel_item_id': 40, 'delivery_id': 19,
+                    'status': 1, 'error_code': None, 'error_details_json': None}}}]}}
+        scope = SimpleNamespace(connection=object(), max_txn_id=12, max_event_id=120)
+        self.assertTrue(command._reuse(scope, [event]).result)
+
+    def test_unknown_position_cancels_without_claiming_cleanup_of_unlocated_file(self):
+        repo = load_repository()
+        repo._ACTION_STATUS = SimpleNamespace(RUNNING=2, CANCELED=6)
+        repo._ACTION_TERMINAL = (3, 4, 5, 6)
+        repo._ITEM_STATUS = SimpleNamespace(UNRESOLVED=1, SELECTED=2, DELIVERY_CREATED=3, FAILED=4, CANCELED=5)
+        repo._RUN_TERMINAL = {3}
+        repo._WITHDRAWAL = SimpleNamespace(UNKNOWN=6)
+        repo.plan_complete = lambda siblings, action: False
+        command = object.__new__(repo._SettleCanceledObtainCommand)
+        command._command = SimpleNamespace(action_id=7, publishing_staging=())
+        command._members = [(8, 19, 21, 22)]
+        command._state = {'actions': {7: {'id': 7, 'plan_id': 1, 'status': 2, 'cancel_requested': 1}},
+            'plans': {1: {'id': 1, 'status': 2}},
+            'obtain_items': {8: {'status': 3, 'source_dependency': 0}},
+            'deliveries': {19: {'status': 4, 'publication_intent_event_id': 90, 'withdrawal_state': 6}},
+            'file_copies': {21: {'target_file_id': 23, 'slot_device_id': None}},
+            'operation_runs': {22: {'status': 3, 'retry_wait_required': 0}}, 'operation_attempts': {}}
+        events, result = command._templates()
+        self.assertTrue(result.complete)
+        self.assertEqual(result.file_ids, ())
+        self.assertTrue(any(row[:2] == ('deliveries', 19) and row[3]['status'] == 7
+                            for _, _, rows in events for row in rows))
+
+
+def load_withdrawal():
+    names = ('camctl.contracts.enums', 'camctl.contracts.values', 'camctl.host_files.handoff',
+             'camctl.host_files.tasks', 'camctl.outputs.handoff', 'camctl.persistence.business',
+             'camctl.persistence.models', 'camctl.logging_runtime.models')
+    modules = {}
+    for name in names:
+        module = ModuleType(name)
+        module.__getattr__ = lambda name: Stub
+        modules[name] = module
+    modules['camctl.contracts.enums'].enum_for = lambda name: (
+        Status if name == 'deliveries.status' else SimpleNamespace(UNKNOWN=6))
+    modules['camctl.contracts.values'].ConsistencyError = type('ConsistencyError', (Exception,), {})
+    name = 'camctl.outputs._isolated_withdrawal'
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).parents[3] / 'src/camctl/outputs/withdrawal.py')
+    module = importlib.util.module_from_spec(spec)
+    modules[name] = module
+    with patch.dict(sys.modules, modules): spec.loader.exec_module(module)
+    return module
+
+
+class UnknownWithdrawalTests(unittest.IsolatedAsyncioTestCase):
+    async def test_canceled_unknown_retains_original_result_without_implying_publication(self):
+        module = load_withdrawal()
+        module._identity_rows = lambda identity, owned: [(7, 'file', 7, 6, '{}', 23, 19)]
+        class Database:
+            async def read(self, callback, **kwargs): return callback(None)
+        context = SimpleNamespace(database=Database(), ready='ready', processing='processing')
+        self.assertEqual((await module._identity(19, context))[2:4], (7, 6))
+        module._identity_rows = lambda identity, owned: [(7, 'file', 7, 1, None, 23, 19)]
+        with self.assertRaises(module.ConsistencyError):
+            await module._identity(19, context)

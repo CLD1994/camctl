@@ -8026,6 +8026,15 @@
             },
             {
               "table": "cancel_delivery_items",
+              "op": "create",
+              "after": {
+                "status": [1],
+                "error_code": [null],
+                "error_details_json": [null]
+              }
+            },
+            {
+              "table": "cancel_delivery_items",
               "op": "update",
               "columns": [
                 "status",

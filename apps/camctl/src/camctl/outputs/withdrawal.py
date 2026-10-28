@@ -61,8 +61,10 @@ async def _identity(delivery_id: int, context: WithdrawalContext):
         description="交付撤回身份读取")
     if len(rows) != 1 or rows[0][6] != delivery_id:
         raise ConsistencyError("交付撤回缺少原交付的唯一目标文件归属")
-    if rows[0][2] not in (int(_DELIVERY.PUBLISHED), int(_DELIVERY.WITHDRAWN)):
-        raise ConsistencyError("交付撤回要求可靠的原发布事实")
+    if (rows[0][2] not in (int(_DELIVERY.PUBLISHED), int(_DELIVERY.WITHDRAWN))
+            and not (rows[0][2] == int(_DELIVERY.CANCELED)
+                     and rows[0][3] == int(_WITHDRAWAL.UNKNOWN))):
+        raise ConsistencyError("交付撤回要求可靠的原发布事实或已保存的位置未知结论")
     HandoffIdentity(context.ready, rows[0][1])
     return rows[0]
 

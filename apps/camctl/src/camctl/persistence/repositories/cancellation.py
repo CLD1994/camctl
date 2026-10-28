@@ -85,6 +85,8 @@ _ACTION_STARTED_REASON = 1
 
 _ACTION_STATUS = enum_for("actions.status")
 _SYNC_STATUS = enum_for("state_syncs.status")
+_DELIVERY_STATUS = enum_for("deliveries.status")
+_WITHDRAWAL_STATUS = enum_for("deliveries.withdrawal_state")
 _TARGET_PENDING, _TARGET_FIXED, _TARGET_FAILED = 1, 2, 3
 #: 动作终态集合。
 _ACTION_TERMINAL = (3, 4, 5, 6)
@@ -761,9 +763,10 @@ class _ApplyCancelTargetCommand:
             return ()
         next_item = next_row_id(connection, "cancel_delivery_items")
         with closing(connection.execute(
-            "SELECT id FROM deliveries WHERE action_id = ? AND status = ?"
-            " ORDER BY id",
-            (target["id"], _DELIVERY_PUBLISHED),
+            "SELECT id FROM deliveries WHERE action_id = ? AND (status = ?"
+            " OR (status = ? AND withdrawal_state = ?)) ORDER BY id",
+            (target["id"], _DELIVERY_PUBLISHED, int(_DELIVERY_STATUS.CANCELED),
+             int(_WITHDRAWAL_STATUS.UNKNOWN)),
         )) as cursor:
             delivery_ids = tuple(int(row[0]) for row in cursor.fetchall())
         rows = []
@@ -2086,6 +2089,23 @@ def _withdrawal_guard(event, context) -> None:
                 "target_action_id"):
             raise EventValidationError(
                 f"撤回明细的交付不属于目标取回: {values.get('delivery_id')!r}")
+        if event.event_type == 23 and event.reason == 7:
+            origin = context.state_rows.get("actions", {}).get(item.get("action_id"))
+            target = context.state_rows.get("actions", {}).get(item.get("target_action_id"))
+            if (values.get("status") != 1 or values.get("error_code") is not None
+                    or values.get("error_details_json") is not None
+                    or item.get("status") != _ITEM_RUNNING
+                    or origin is None or origin.get("type") != _CANCEL_ACTION_TYPE
+                    or origin.get("status") != int(_ACTION_STATUS.RUNNING)
+                    or origin.get("cancel_requested") != 0
+                    or target is None or target.get("type") != _OBTAIN_TARGET_TYPE
+                    or target.get("cancel_requested") != 1
+                    or not (delivery.get("status") in (int(_DELIVERY_STATUS.PUBLISHED),
+                                                        int(_DELIVERY_STATUS.WITHDRAWN))
+                            or delivery.get("status") in (int(_DELIVERY_STATUS.PUBLISHING),
+                                                          int(_DELIVERY_STATUS.CANCELED))
+                            and delivery.get("withdrawal_state") == int(_WITHDRAWAL_STATUS.UNKNOWN))):
+                raise EventValidationError("撤回明细必须属于仍有效的原取消责任")
 
 
 def register_cancellation_guards() -> None:

@@ -5600,7 +5600,11 @@ class _SettleCanceledObtainCommand:
         if any(self._state["deliveries"][delivery]["publication_intent_event_id"] is None
                for delivery in observed):
             raise ConsistencyError("发布中断观察缺少原发布意图")
-        if set(publishing) != set(observed):
+        unknown = {delivery for delivery in publishing
+                   if self._state["deliveries"][delivery]["withdrawal_state"] == int(_WITHDRAWAL.UNKNOWN)}
+        if set(observed) & unknown:
+            raise ConsistencyError("同一交付不能同时确认 staging 并保持位置未知")
+        if set(publishing) != set(observed) | unknown:
             return (), CanceledObtainSettlement(False)
         templates, first_files = [], []
         for item_id, delivery_id, copy_id, run_id in self._members:
@@ -5635,7 +5639,7 @@ class _SettleCanceledObtainCommand:
                 templates.append((_COPY_CHANGED_EVENT, _SLOT_REASON, (_update("file_copies", copy_id,
                     {"slot_device_id": copy["slot_device_id"]}, {"slot_device_id": None}),)))
                 new_responsibility = True
-            if new_responsibility:
+            if new_responsibility and delivery_id not in unknown:
                 first_files.append(copy["target_file_id"])
         templates.append((_ACTION_FINISHED_EVENT, 4, (_update("actions", action["id"],
             {"status": action["status"]}, {"status": int(_ACTION_STATUS.CANCELED)}),)))
@@ -5654,11 +5658,21 @@ class _SettleCanceledObtainCommand:
                       for delivery, copy, file in self._command.publishing_staging}
         if len(rows) != 1 or rows[0].table != "deliveries":
             raise ConsistencyError("取消交付事件必须对应一份原交付")
-        pair = identities.get(rows[0].row_id)
+        delivery_id = rows[0].row_id
+        pair = identities.get(delivery_id)
+        location = "staging"
         if pair is None:
-            return {}
-        return {"canceled_publication": {"delivery_id": rows[0].row_id,
-            "copy_id": pair[0], "file_id": pair[1], "location": "staging"}}
+            delivery = self._state["deliveries"][delivery_id]
+            if (delivery["status"] != int(_DELIVERY_STATUS.PUBLISHING)
+                    or delivery["withdrawal_state"] != int(_WITHDRAWAL.UNKNOWN)):
+                return {}
+            matching = [(copy_id, self._state["file_copies"][copy_id]["target_file_id"])
+                        for _, item_delivery, copy_id, _ in self._members if item_delivery == delivery_id]
+            if len(matching) != 1:
+                raise ConsistencyError("未知交接结论缺少唯一原拷贝")
+            pair, location = matching[0], "unknown"
+        return {"canceled_publication": {"delivery_id": delivery_id,
+            "copy_id": pair[0], "file_id": pair[1], "location": location}}
 
     def plan(self, scope):
         saved = saved_transaction_events(scope.connection, self._key)
@@ -5741,9 +5755,10 @@ class _SettleCanceledObtainCommand:
             if evidence is None:
                 continue
             if (set(evidence) != {"delivery_id", "copy_id", "file_id", "location"}
-                    or evidence["location"] != "staging"):
+                    or evidence["location"] not in ("staging", "unknown")):
                 raise ConsistencyError("原取消取回的发布中断依据不可解释")
-            staging.append((evidence["delivery_id"], evidence["copy_id"], evidence["file_id"]))
+            if evidence["location"] == "staging":
+                staging.append((evidence["delivery_id"], evidence["copy_id"], evidence["file_id"]))
         self._command = replace(self._command, occurred_at=saved[0]["occurred_at"],
                                 publishing_staging=tuple(sorted(staging)))
         return self._reuse(scope, saved)
@@ -6271,6 +6286,9 @@ class OutputsRepository:
         return self._cleanup_item_outcome(commit_operation(
             _CleanupBindingFailCommand(command, key), key, owned))
 
+    def ensure_withdrawal_waiter(self, command, key, owned):
+        return _outcome_of(commit_operation(_EnsureWithdrawalWaiterCommand(command, key), key, owned))
+
     def advance_withdrawal(
         self, command: AdvanceWithdrawal, key: OperationKey,
         owned: OwnedConnection,
@@ -6669,7 +6687,7 @@ def _delivery_guard(event, context) -> None:
                 continue
             if (not isinstance(evidence, Mapping)
                     or set(evidence) != {"delivery_id", "copy_id", "file_id", "location"}
-                    or evidence.get("location") != "staging"
+                    or evidence.get("location") not in ("staging", "unknown")
                     or evidence.get("delivery_id") != row.row_id):
                 raise EventValidationError("取消发布中交付缺少原副本观察依据")
             delivery = context.state_rows.get("deliveries", {}).get(row.row_id)
@@ -6685,6 +6703,12 @@ def _delivery_guard(event, context) -> None:
                     or copy.get("target_file_id") != evidence["file_id"]
                     or target is None or target.get("owner_delivery_id") != row.row_id):
                 raise EventValidationError("取消发布中交付的原责任或文件身份不一致")
+            if (evidence["location"] == "unknown"
+                    and delivery.get("withdrawal_state") != int(_WITHDRAWAL.UNKNOWN)):
+                raise EventValidationError("未知位置结论必须已经可靠保存")
+            if (evidence["location"] == "staging"
+                    and delivery.get("withdrawal_state") == int(_WITHDRAWAL.UNKNOWN)):
+                raise EventValidationError("未知位置不能作为 staging 副本处理")
             _require_publishable_copy(context, row.row_id)
     elif event.event_type == _DELIVERY_CHANGED_EVENT \
             and event.reason == _DELIVERY_FAIL_REASON:
@@ -10068,6 +10092,122 @@ class _FinishCanceledCleanupCommand:
         )
 
 
+
+
+@dataclass(frozen=True)
+class EnsureWithdrawalWaiter:
+    """为仍有效的取消目标登记一份原交付撤回明细。"""
+
+    cancel_item_id: int
+    delivery_id: int
+    occurred_at: int
+
+    def __post_init__(self):
+        ObjectId(self.cancel_item_id)
+        ObjectId(self.delivery_id)
+        UtcMicros(self.occurred_at)
+
+
+class _EnsureWithdrawalWaiterCommand:
+    """按原取消成员和交付登记唯一明细；已结束父责任不再创建。"""
+
+    def __init__(self, command, key):
+        if not isinstance(command, EnsureWithdrawalWaiter):
+            raise TypeError("撤回等待明细申请必须使用 EnsureWithdrawalWaiter")
+        self._command, self._key = command, key
+
+    def _eligible(self, delivery, target, parent, origin):
+        return (delivery["id"] == self._command.delivery_id
+                and parent["id"] == self._command.cancel_item_id
+                and delivery["action_id"] == target["id"] == parent["target_action_id"]
+                and target["type"] == _OBTAIN_TYPE and target["cancel_requested"] == 1
+                and (delivery["status"] in (int(_DELIVERY_STATUS.PUBLISHED), int(_DELIVERY_STATUS.WITHDRAWN))
+                     or delivery["status"] in (int(_DELIVERY_STATUS.PUBLISHING), int(_DELIVERY_STATUS.CANCELED))
+                     and delivery["withdrawal_state"] == int(_WITHDRAWAL.UNKNOWN))
+                and origin["id"] == parent["action_id"] and origin["type"] == _CANCEL_ACTION_TYPE
+                and origin["status"] == int(_ACTION_STATUS.RUNNING)
+                and origin["cancel_requested"] == 0 and parent["status"] == 2)
+
+    def plan(self, scope):
+        connection = scope.connection
+        saved = saved_transaction_events(connection, self._key)
+        if saved is not None:
+            return self._reuse(scope, saved)
+        parent = row_facts(connection, "cancel_items", self._command.cancel_item_id)
+        delivery = row_facts(connection, "deliveries", self._command.delivery_id)
+        if parent is None or delivery is None:
+            raise ConsistencyError("撤回等待明细缺少原取消成员或交付")
+        target = row_facts(connection, "actions", delivery["action_id"])
+        origin = row_facts(connection, "actions", parent["action_id"])
+        if target is None or origin is None:
+            raise ConsistencyError("撤回等待明细缺少原动作")
+        if (delivery["action_id"] != parent["target_action_id"]
+                or target["type"] != _OBTAIN_TYPE or origin["type"] != _CANCEL_ACTION_TYPE):
+            raise ConsistencyError("撤回等待明细的原取消目标与交付不一致")
+        if not self._eligible(delivery, target, parent, origin):
+            return CommandPlan(events=(), owners={}, state_rows={}, read_only=True, result=False)
+        with closing(connection.execute(
+            "SELECT id FROM cancel_delivery_items WHERE cancel_item_id=? AND delivery_id=?",
+            (parent["id"], delivery["id"]),
+        )) as cursor:
+            existing = cursor.fetchall()
+        if len(existing) > 1:
+            raise ConsistencyError("撤回等待明细的原关联不唯一")
+        if existing:
+            return CommandPlan(events=(), owners={}, state_rows={}, read_only=True, result=True)
+        identity = next_row_id(connection, "cancel_delivery_items")
+        values = {"cancel_item_id": parent["id"], "delivery_id": delivery["id"],
+                  "status": 1, "error_code": None, "error_details_json": None}
+        allocation = scope.allocate(1)
+        event = _envelope(allocation.first_event_id, allocation.txn_id,
+            _DELIVERY_CHANGED_EVENT, 7, (_row("cancel_delivery_items", identity, values),),
+            self._command.occurred_at)
+        state = {"actions": {target["id"]: target, origin["id"]: origin},
+                 "cancel_items": {parent["id"]: parent}, "deliveries": {delivery["id"]: delivery},
+                 "cancel_delivery_items": {}}
+        return CommandPlan(events=(event,), state_rows=state,
+            owners={("cancel_delivery_items", identity): ("action", origin["id"])}, result=True)
+
+    def _reuse(self, scope, saved):
+        if (len(saved) != 1 or saved[0]["type"] != _DELIVERY_CHANGED_EVENT
+                or saved[0]["reason"] != 7 or saved[0]["occurred_at"] != self._command.occurred_at
+                or saved[0]["body"]["evidence"] != {}):
+            raise TransactionError("原操作不是相同的撤回等待明细申请")
+        rows = saved[0]["body"]["rows"]
+        expected = {"cancel_item_id": self._command.cancel_item_id,
+                    "delivery_id": self._command.delivery_id, "status": 1,
+                    "error_code": None, "error_details_json": None}
+        if (len(rows) != 1 or rows[0]["table"] != "cancel_delivery_items"
+                or rows[0]["before"] != {"exists": False, "values": {}}
+                or not rows[0]["after"]["exists"] or rows[0]["after"]["values"] != expected):
+            raise TransactionError("原撤回等待明细与本申请不同")
+        connection = scope.connection
+        created = row_facts(connection, "cancel_delivery_items", rows[0]["id"])
+        parent = row_facts(connection, "cancel_items", self._command.cancel_item_id)
+        delivery = row_facts(connection, "deliveries", self._command.delivery_id)
+        if (created is None or parent is None or delivery is None
+                or created["cancel_item_id"] != parent["id"]
+                or created["delivery_id"] != delivery["id"]):
+            raise ConsistencyError("原撤回等待明细的固定关联不一致")
+        target = row_facts(connection, "actions", delivery["action_id"])
+        origin = row_facts(connection, "actions", parent["action_id"])
+        if target is None or origin is None:
+            raise ConsistencyError("原撤回等待明细缺少原动作")
+        transaction = saved[0]["transaction"]
+        prior = read_transaction_range(connection, transaction.txn_id - 1) if transaction.txn_id > 1 else None
+        boundary = HistoryBoundary(0, 0) if prior is None else HistoryBoundary(prior.txn_id, prior.last_event_id)
+        current = HistoryBoundary(scope.max_txn_id, scope.max_event_id)
+        for table, facts, owner, columns in (
+                ("deliveries", delivery, ("delivery", delivery["id"]), ("status", "withdrawal_state")),
+                ("actions", target, ("action", target["id"]), ("status", "cancel_requested")),
+                ("cancel_items", parent, ("action", origin["id"]), ("status",)),
+                ("actions", origin, ("action", origin["id"]), ("status", "cancel_requested"))):
+            facts.update(read_row_values_at_boundary(connection, owner=owner, table=table,
+                row_id=facts["id"], columns=frozenset(columns), current_values=facts,
+                boundary=boundary, current_boundary=current))
+        if not self._eligible(delivery, target, parent, origin):
+            raise TransactionError("原撤回等待明细创建时父责任不符合资格")
+        return CommandPlan(events=(), owners={}, state_rows={}, read_only=True, result=True)
 
 
 class _AdvanceWithdrawalCommand:
