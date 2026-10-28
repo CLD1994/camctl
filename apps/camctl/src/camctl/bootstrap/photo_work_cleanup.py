@@ -29,6 +29,8 @@ _CURSOR = ".photo-work-cleanup-cursor"
 _TEMP = ".photo-work-cleanup-cursor.tmp"
 _HOST_CURSOR = ".photo-host-work-cleanup-cursor"
 _HOST_TEMP = ".photo-host-work-cleanup-cursor.tmp"
+_TURN = ".download-cleanup-turn"
+_TURN_TEMP = ".download-cleanup-turn.tmp"
 
 
 def _load_cursor(staging, name=_CURSOR):
@@ -434,6 +436,7 @@ class DownloadCleanupChain:
 
     def __init__(self, read_cleanup, photo_cleanup, host_cleanup):
         self.read_cleanup, self.photo_cleanup, self.host_cleanup = read_cleanup, photo_cleanup, host_cleanup
+        self.finished = False
 
     async def initialize(self, database, *, horizon):
         await self.read_cleanup.initialize(database, horizon=horizon)
@@ -441,6 +444,24 @@ class DownloadCleanupChain:
         await self.host_cleanup.initialize(database, horizon=horizon)
 
     async def run(self, database):
-        await self.read_cleanup.run(database)
-        used = await self.photo_cleanup.run(database, limit=self.read_cleanup.remaining)
-        await self.host_cleanup.run(database, limit=self.read_cleanup.remaining - used)
+        if self.finished:
+            return
+        # 共享总额度，但每次从下一类开始，避免永久历史候选饿死其他类。
+        first = (await settled_file_io(_load_cursor, self.photo_cleanup.staging, _TURN)) % 3
+        remaining = self.read_cleanup.limit
+        try:
+            for kind in ((first + offset) % 3 for offset in range(3)):
+                if remaining <= 0:
+                    break
+                if kind == 0:
+                    self.read_cleanup.remaining = remaining
+                    await self.read_cleanup.run(database)
+                    remaining = self.read_cleanup.remaining
+                elif kind == 1:
+                    remaining -= await self.photo_cleanup.run(database, limit=remaining)
+                else:
+                    remaining -= await self.host_cleanup.run(database, limit=remaining)
+            self.finished = True
+        finally:
+            await settled_file_io(_save_cursor, self.photo_cleanup.staging,
+                                  (first + 1) % 3, _TURN, _TURN_TEMP)
