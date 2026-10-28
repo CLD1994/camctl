@@ -30,3 +30,36 @@ def saved_photo_page_refs(connection, *, action_id, activity_id, run_id):
         roles.add(role)
         refs.append(saved.ref)
     return tuple(refs)
+
+
+class PhotoBindingListing:
+    """只在下一次实际角色调用前核绑定，绑定失败形成可靠未派发结果。"""
+
+    def __init__(self, port, check_binding, next_role):
+        self.port, self.check_binding, self.next_role = port, check_binding, next_role
+        self._dispatched = False
+
+    def close_scan(self, ticket):
+        if self.port is not None and self._dispatched:
+            self.port.close_scan(ticket)
+
+    async def list_page(self, ticket, *, cursor, **kwargs):
+        error = await self.check_binding(ticket)
+        if error is None:
+            if self.port is None:
+                raise ConsistencyError("原照片绑定匹配但没有来源读取端口")
+            self._dispatched = True
+            return await self.port.list_page(ticket, cursor=cursor, **kwargs)
+        from camctl.capture.result_inputs import page_from_outcome
+        from camctl.devices.evidence import DeviceObservation
+        from camctl.operations.models import (
+            AttemptStatus, CallOutcome, EffectState, EvidenceValue, Settlement, SettlementBasis,
+        )
+
+        role = await self.next_role(ticket, cursor)
+        outcome = CallOutcome(status=AttemptStatus.FAILED, effect=EffectState.NO_EFFECT, error=error,
+            settlement=Settlement(SettlementBasis.NOT_DISPATCHED,
+                                  EvidenceValue("photo_result_not_dispatched", 1, {})),
+            observations=(DeviceObservation("photo_result_attempt", 2, {
+                "activity_id": ticket.target_id, "role": role, "steps": [], "comparison": None}),))
+        return page_from_outcome(ticket, outcome, cursor=cursor)

@@ -60,3 +60,49 @@ def test_saved_duplicate_role_cannot_authorize_another_source(api):
     saved.update({10: page(10, "original"), 20: page(20, "original")})
     with pytest.raises(ValueError):
         module.saved_photo_page_refs(FakeConnection([(10,), (20,)]), action_id=1, activity_id=7, run_id=9)
+
+
+def immediate(coroutine):
+    with pytest.raises(StopIteration) as finished:
+        coroutine.send(None)
+    return finished.value.value
+
+
+def test_binding_failure_returns_local_not_dispatched_without_port_call(api, monkeypatch):
+    module, _ = api
+    models = ModuleType("camctl.operations.models")
+    models.AttemptStatus = SimpleNamespace(FAILED="failed")
+    models.EffectState = SimpleNamespace(NO_EFFECT="no_effect")
+    models.SettlementBasis = SimpleNamespace(NOT_DISPATCHED="not_dispatched")
+    models.CallOutcome = lambda **kwargs: SimpleNamespace(**kwargs)
+    models.Settlement = lambda *args: args
+    models.EvidenceValue = lambda *args: args
+    evidence = ModuleType("camctl.devices.evidence")
+    evidence.DeviceObservation = lambda *args: args
+    inputs = ModuleType("camctl.capture.result_inputs")
+    inputs.page_from_outcome = lambda ticket, outcome, cursor: outcome
+    for stub in (models, evidence, inputs):
+        monkeypatch.setitem(sys.modules, stub.__name__, stub)
+    async def check(ticket): return SimpleNamespace(code="device_binding_unavailable")
+    async def role(ticket, cursor): return "thumbnail"
+    class Forbidden:
+        async def list_page(self, *args, **kwargs): raise AssertionError("must not dispatch")
+    listing = module.PhotoBindingListing(Forbidden(), check, role)
+    outcome = immediate(listing.list_page(SimpleNamespace(target_id="7"), cursor=None))
+    assert outcome.error.code == "device_binding_unavailable"
+    assert outcome.settlement[0] == "not_dispatched"
+    assert outcome.observations[0][2]["role"] == "thumbnail"
+
+
+def test_matching_binding_invokes_original_port_once(api):
+    module, _ = api
+    calls = []
+    async def check(ticket): return None
+    async def role(ticket, cursor): raise AssertionError("matching binding needs no synthetic result")
+    class Port:
+        async def list_page(self, ticket, **kwargs):
+            calls.append((ticket, kwargs))
+            return "actual page"
+    listing = module.PhotoBindingListing(Port(), check, role)
+    assert immediate(listing.list_page("ticket", cursor=None, timeout_s=3)) == "actual page"
+    assert calls == [("ticket", {"cursor": None, "timeout_s": 3})]
