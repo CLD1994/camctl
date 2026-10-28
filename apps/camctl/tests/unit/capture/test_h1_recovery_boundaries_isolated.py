@@ -257,17 +257,15 @@ class OriginalSaveTests(unittest.IsolatedAsyncioTestCase):
         identity = (8, 1)
         pending = {identity: prepared}
         writes = []
-        async def first_save():
-            writes.append((prepared.key, prepared.observation))
+        async def first_save(request):
+            writes.append((request.key, request.observation))
             raise RuntimeError("receipt unknown")
         with self.assertRaises(RuntimeError):
-            await original.shared.run(first_save)
-        current = original.retry_if_owned(pending, identity)
-        self.assertIs(current, prepared)
-        async def retry_save():
-            writes.append((current.key, current.observation))
+            await prepared.save(pending, identity, first_save)
+        async def retry_save(request):
+            writes.append((request.key, request.observation))
             return "saved"
-        self.assertEqual(await current.shared.run(retry_save), "saved")
+        self.assertEqual(await original.save(pending, identity, retry_save, retry=True), "saved")
         self.assertEqual(writes, [("original-key", {"result": "frozen"})] * 2)
 
     async def test_stale_owner_does_not_replay_applied_save_after_delivery_error(self):
@@ -276,19 +274,17 @@ class OriginalSaveTests(unittest.IsolatedAsyncioTestCase):
         identity = (8, 1)
         pending = {identity: owner}
         writes = []
-        async def save():
-            writes.append(owner.key)
+        async def save(request):
+            writes.append(request.key)
             pending.pop(identity)
             raise RuntimeError("receipt delivery failed")
         with self.assertRaises(RuntimeError):
-            await owner.shared.run(save)
-        owner.retry_if_owned(pending, identity)
+            await owner.save(pending, identity, save)
         with self.assertRaises(RuntimeError):
-            await owner.shared.run(save)
+            await owner.save(pending, identity, save, retry=True)
         pending[identity] = pending_type("new-key", SimpleNamespace(ticket=object()), None)
-        owner.retry_if_owned(pending, identity)
         with self.assertRaises(RuntimeError):
-            await owner.shared.run(save)
+            await owner.save(pending, identity, save, retry=True)
         self.assertEqual(writes, ["original-key"])
 
     async def test_derived_original_result_keeps_owner_ticket_and_key(self):
@@ -303,40 +299,47 @@ class OriginalSaveTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(original.retry_if_owned({(8, 1): prepared}, (8, 1)), prepared)
 
     async def test_active_save_has_one_owner_and_original_key(self):
-        shared = shared_save_type()()
+        owner = pending_result_type()("original-key", SimpleNamespace(ticket=object()), None)
+        identity = (8, 1)
+        pending = {identity: owner}
         entered, release = asyncio.Event(), asyncio.Event()
         writes = []
         original = ("start/21", 8, 1, "original-key")
-        async def save():
+        async def save(request):
+            self.assertEqual(request.key, original[-1])
             writes.append(original)
             entered.set()
             await release.wait()
+            pending.pop(identity)
             return "saved"
-        first = asyncio.create_task(shared.run(save))
+        first = asyncio.create_task(owner.save(pending, identity, save))
         await entered.wait()
-        second = asyncio.create_task(shared.run(save))
+        second = asyncio.create_task(owner.save(pending, identity, save, retry=True))
         await asyncio.sleep(0)
         self.assertEqual(writes, [original])
         release.set()
         self.assertEqual(await asyncio.gather(first, second), ["saved", "saved"])
         self.assertEqual(writes, [original])
+        self.assertNotIn(identity, pending)
 
     async def test_unknown_receipt_is_rechecked_with_original_key(self):
-        shared = shared_save_type()()
+        owner = pending_result_type()("original-key", SimpleNamespace(ticket=object()), None)
+        identity = (8, 1)
+        pending = {identity: owner}
         writes = []
         original = ("start/21", 8, 1, "original-key")
-        async def save():
+        async def save(request):
+            self.assertEqual(request.key, original[-1])
             writes.append(original)
             if len(writes) == 1:
                 raise RuntimeError("receipt unknown")
             return "saved"
         with self.assertRaises(RuntimeError):
-            await shared.run(save)
+            await owner.save(pending, identity, save)
         with self.assertRaises(RuntimeError):
-            await shared.run(save)
+            await owner.save(pending, identity, save)
         self.assertEqual(writes, [original])
-        shared.retry_failed()
-        self.assertEqual(await shared.run(save), "saved")
+        self.assertEqual(await owner.save(pending, identity, save, retry=True), "saved")
         self.assertEqual(writes, [original, original])
 
 

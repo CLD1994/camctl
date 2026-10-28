@@ -336,6 +336,10 @@ class PendingCallResult:
             return current
         return self
 
+    async def save(self, pending_results, identity, save_and_apply, *, retry=False):
+        pending = self.retry_if_owned(pending_results, identity) if retry else self
+        return await pending.shared.run(lambda: save_and_apply(pending))
+
 
 # 启动装配和既有调用方使用同一个公共责任集合。
 PendingStartResult = PendingCallResult
@@ -1376,11 +1380,8 @@ class CaptureRuntime(_FileObservationSaves):
 
     async def _save_call_result(self, identity, pending: PendingCallResult, *, retry=False) -> None:
         """最多重送一次原事务；可靠回滚与提交后错误使用同一身份。"""
-        if retry:
-            pending = pending.retry_if_owned(self.pending_start_results, identity)
         # 校验不进入有限 DB 重送循环；本次失败不自动重复校验。
-        async def save_and_apply():
-            nonlocal pending
+        async def save_and_apply(pending):
             pending = self._validate_call_result(identity, pending)
             for _ in range(2):
                 try:
@@ -1454,7 +1455,7 @@ class CaptureRuntime(_FileObservationSaves):
             if receipt is not None:
                 raise db_failure(ConsistencyError, f"原调用结果未可靠保存，原结果仍持有: {error}", receipt)
             raise ConsistencyError(f"原调用结果未可靠保存，原结果仍持有: {error}") from error
-        return await pending.shared.run(save_and_apply)
+        return await pending.save(self.pending_start_results, identity, save_and_apply, retry=retry)
 
     async def resume_start_results(self, action_id: int) -> bool:
         """同会话原真实结果优先保存，包括动作已经终态的分区。"""
