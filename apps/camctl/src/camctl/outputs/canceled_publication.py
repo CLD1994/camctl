@@ -104,6 +104,17 @@ def _waiter_ids(owned, action_id, delivery_id, limit):
         return tuple(int(row[0]) for row in cursor.fetchall())
 
 
+def _locked_state(owned, repository, delivery_id):
+    state = repository.load_delivery_state(delivery_id, owned)
+    with closing(owned.connection.execute(
+        "SELECT status,withdrawal_state FROM deliveries WHERE id=?", (delivery_id,),
+    )) as cursor:
+        row = cursor.fetchone()
+    if row is None or row[0] != state.facts.status:
+        raise ConsistencyError("交付状态与原文件事实不一致")
+    return state, int(row[0]), int(row[1])
+
+
 async def reconcile_canceled_obtain(action_id: int, context: CanceledPublicationContext):
     """核实原发布中的各份文件；文件仍被占用时保留本轮责任。"""
     for identity, pending in tuple(context.pending.items()):
@@ -190,6 +201,14 @@ async def reconcile_canceled_obtain(action_id: int, context: CanceledPublication
             withdrawal_needed.append(identity)
 
         async def body(_control):
+            nonlocal state, status, withdrawal_state
+            state, status, withdrawal_state = await context.database.read(
+                lambda owned: _locked_state(owned, context.repository, int(delivery_id)),
+                description="持有原文件资格后核对取消发布状态")
+            if state.action_id != action_id or state.target.file_id != file_id:
+                raise ConsistencyError("持有文件资格后的交付身份发生变化")
+            if status not in (int(_DELIVERY.PUBLISHING), int(_DELIVERY.PUBLISHED)):
+                return None
             if status == int(_DELIVERY.PUBLISHED) or withdrawal_state == int(_WITHDRAWAL.UNKNOWN):
                 if not await waiters(int(delivery_id)):
                     return False

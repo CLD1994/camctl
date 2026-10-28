@@ -624,6 +624,7 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
         class Cursor:
             def __init__(self, sql): self.sql = sql
             def fetchall(self): return [(19, 21, 23, 1, 4)] if 'SELECT d.id' in self.sql else []
+            def fetchone(self): return (4, 1)
             def close(self): pass
         class Database:
             async def read(self, callback, **kwargs):
@@ -666,6 +667,7 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
         class Cursor:
             def __init__(self, sql): self.sql = sql
             def fetchall(self): return [(19, 21, 23, 1, 4)] if 'SELECT d.id' in self.sql else []
+            def fetchone(self): return (4, 1)
             def close(self): pass
         class Database:
             async def read(self, callback, **kwargs):
@@ -717,6 +719,7 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
             def fetchall(self):
                 after, limit = self.args[1], self.args[-1]
                 return [(i, i + 10, i + 100, 1, 4) for i in (1, 2, 3) if i > after][:limit]
+            def fetchone(self): return (4, 1)
             def close(self): pass
         class Database:
             async def read(self, callback, **kwargs):
@@ -786,3 +789,35 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
         context = module.CanceledPublicationContext(Database(), object(), object(), object(), Executor(), lambda: 100, {})
         with patch.dict(sys.modules, modules):
             self.assertIsNone(await module.reconcile_canceled_obtain(7, context))
+
+    async def test_file_owner_reloads_publication_after_inflight_operation_finishes(self):
+        module, handoff, modules = load_canceled_runtime()
+        calls = []
+        old = SimpleNamespace(action_id=7, target=SimpleNamespace(file_id=23), facts=handoff.DeliveryFacts(
+            19, Status.PUBLISHING, publication_intent_event_id=90, prepared_size=4, prepared_sha256='a' * 64))
+        current = SimpleNamespace(action_id=7, target=SimpleNamespace(file_id=23), facts=handoff.DeliveryFacts(
+            19, Status.PUBLISHED, publication_intent_event_id=90, published_event_id=91))
+        class Executor:
+            def unfinished_files(self): return ()
+            async def run_owned_async_file_task(self, task): return await task.body(None)
+        class Repository:
+            count = 0
+            def load_delivery_state(self, identity, owned):
+                self.count += 1
+                return old if self.count == 1 else current
+        async def withdraw(identity, context):
+            calls.append(identity)
+            return True
+        module.withdraw_delivery = withdraw
+        class Cursor:
+            def __init__(self, sql): self.sql = sql
+            def fetchall(self): return [(19, 21, 23, 1, 4)] if 'SELECT d.id' in self.sql else []
+            def fetchone(self): return (5, 1)
+            def close(self): pass
+        class Database:
+            async def read(self, callback, **kwargs):
+                return callback(SimpleNamespace(connection=SimpleNamespace(execute=lambda sql, args: Cursor(sql))))
+        context = module.CanceledPublicationContext(Database(), Repository(), object(), object(), Executor(), lambda: 100, {})
+        with patch.dict(sys.modules, modules):
+            self.assertEqual(await module.reconcile_canceled_obtain(7, context), ())
+        self.assertEqual(calls, [19])

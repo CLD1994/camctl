@@ -163,7 +163,7 @@ async def test_cancel_action_records_only_first_saved_start_and_finish(mocker, d
     channel = create_autospec(LogChannel, instance=True, spec_set=True)
 
     with event_logging(channel):
-        await cancel_flow(ready=Path("/ready"), processing=Path("/processing"))(state.context)
+        await cancel_flow(staging=Path("/staging"), ready=Path("/ready"), processing=Path("/processing"))(state.context)
 
     records = _records(channel)
     assert [record["event"] for record in records] == (
@@ -184,7 +184,7 @@ async def test_resending_original_cancel_fix_does_not_repeat_stage(mocker):
     channel = create_autospec(LogChannel, instance=True, spec_set=True)
 
     with event_logging(channel):
-        await cancel_flow(ready=Path("/ready"), processing=Path("/processing"),
+        await cancel_flow(staging=Path("/staging"), ready=Path("/ready"), processing=Path("/processing"),
             start_entries=entries)(state.context)
 
     repository.fix_cancel_targets.assert_called_once()
@@ -218,7 +218,7 @@ async def test_cancel_target_fix_records_only_first_save(mocker, disposition):
     channel = create_autospec(LogChannel, instance=True, spec_set=True)
 
     with event_logging(channel):
-        await cancel_flow(ready=Path("/ready"), processing=Path("/processing"))(state.context)
+        await cancel_flow(staging=Path("/staging"), ready=Path("/ready"), processing=Path("/processing"))(state.context)
 
     records = _records(channel)
     assert [(record["stage"], record["event"]) for record in records] == (
