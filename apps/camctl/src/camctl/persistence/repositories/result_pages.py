@@ -1102,7 +1102,8 @@ def _verify_append_difference(event, context, page, raw, reads, action, activity
              if item.type == RESULT_LISTED_TYPE and item.version == 3]
     if photo:
         from .capture_facts import PhotoResultReads
-        PhotoResultReads(reads.connection).verify_device_page(action["id"], activity["id"], attempt["id"], page)
+        PhotoResultReads(reads.connection).verify_device_page(action["id"], activity["id"], attempt["id"], page,
+            before_page_event_id=context.transaction.first_event_id)
     _verify_attempt_transition(event, attempt)
     if (activity["ownership_mode"] == _OWNERSHIP.BASELINE_COMPARISON
             and activity["baseline_state"] != enum_for("device_activities.baseline_state").FIXED):

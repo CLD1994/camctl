@@ -2469,6 +2469,19 @@ async def _register_photo_result_page(runtime, action_id: int, page_ref: ResultP
         runtime, action_id, pending.entries, pending.registered_files, pending.registration))
 
 
+async def _resume_saved_photo_sources(runtime, action_id, ticket):
+    """先接回所有原角色页的子责任，不能以未完成状态授权再次下载。"""
+    action = await runtime.action(action_id)
+    if not is_hasselblad_photo(action) or action["execution_spec_json"].get("output_storage") != "device":
+        return
+    from camctl.capture.photo_result_recovery import saved_photo_page_refs
+    refs = await runtime.database.read(lambda owned: saved_photo_page_refs(owned.connection,
+        action_id=action_id, activity_id=int(ticket.target_id), run_id=ticket.run_id),
+        description="读取原照片角色页子责任")
+    for ref in refs:
+        await _register_photo_result_page(runtime, action_id, ref)
+
+
 async def _apply_observed(runtime, action_id, entries, saved_files, registration):
     """沿原发现请求完成整批派生事实与调用结果应用。"""
     file_ids = {identity: item[1] for identity, item in registration.pairing_files.items()}
@@ -5722,6 +5735,7 @@ async def _continue_result_scan(runtime: CaptureRuntime, pending: PendingResultS
     async def can_read():
         if read_allowed is not None and not await read_allowed():
             return False
+        await _resume_saved_photo_sources(runtime, action_id, pending.ticket)
         action = (await runtime.action(action_id))
         if (not pending.scope_only and source.kind is ResultSourceKind.NATURAL and action["cancel_requested"]
                 and (await runtime.last_attempt(f"stop/{action_id}")) is None):
@@ -5940,6 +5954,9 @@ async def _listing_round_input(runtime: CaptureRuntime, action_id: int) -> Listi
     if (await runtime.retry_wait_remaining(responsibility, runtime.check_config.retry_interval_s,
                                     maximum=runtime.check_config.max_attempts)) is not None:
         return ListingRound(ListingPhase.RETRY_WAIT)
+    original_ticket = await _original_ticket(runtime, responsibility, "result")
+    if original_ticket is not None:
+        await _resume_saved_photo_sources(runtime, action_id, original_ticket)
     if runtime.results is None:
         def read(owned, parameters=(responsibility,)):
             with closing(owned.connection.execute("SELECT status,attempts_used FROM operation_runs WHERE responsibility_key=?", parameters)) as cursor:

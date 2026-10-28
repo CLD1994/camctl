@@ -49,6 +49,27 @@ class PhotoResultReads:
     def __init__(self, connection):
         self.connection = connection
 
+    def _prior_role_pages(self, *, action_id, activity_id, run_id, role, before_event_id):
+        """从原流程的有界角色索引取得事务前已可靠保存的来源页。"""
+        from .result_pages import _at
+        with closing(self.connection.execute(
+            "SELECT p.page_event_id FROM result_page_files p"
+            " JOIN operation_runs r ON r.id=p.run_id"
+            " WHERE p.action_id=? AND r.activity_id=? AND r.id=? AND p.created_event_id<?"
+            " AND CASE WHEN json_valid(p.identity) THEN json_extract(p.identity,'$[0]') END='hb-download-v3'"
+            " AND CASE WHEN json_valid(p.identity) THEN json_extract(p.identity,'$[5]') END=?"
+            " ORDER BY p.page_event_id LIMIT 2",
+            (action_id, activity_id, run_id, before_event_id, role))) as cursor:
+            rows = cursor.fetchall()
+        for event_id, in rows:
+            saved, _ = _at(self.connection, event_id)
+            if (saved.ref.ticket.run_id != run_id or saved.ref.ticket.target_id != str(activity_id)
+                    or len(saved.page.entries) != 1
+                    or not any(item.type == "result_files_listed" and item.version == 3
+                               and item.data.get("role") == role for item in saved.page.outcome.observations)):
+                raise ConsistencyError("照片原角色索引与可靠来源页不同")
+        return tuple(row[0] for row in rows)
+
     def read_device_start(self, action, activity_id, *, before_event_id, output_directory=None):
         """从原连接和完整历史核对 DEVICE 单张 START 的真实结果。"""
         import hashlib
@@ -205,7 +226,7 @@ class PhotoResultReads:
             _require_sync_start_response(response, data)
         return attempt["result_event_id"], data, locator
 
-    def verify_device_page(self, action_id, activity_id, attempt_id, page):
+    def verify_device_page(self, action_id, activity_id, attempt_id, page, *, before_page_event_id=None):
         """从原连接核对角色页、原 START、固定机身和实际工具结果。"""
         import hashlib
         from pathlib import PurePosixPath
@@ -244,6 +265,12 @@ class PhotoResultReads:
                 or detail.get("activity_id") != str(activity_id)
                 or detail.get("role") != data.get("role") or identity.variant.value != data.get("role")):
             raise ConsistencyError("照片来源角色、原机身或机内定位不一致")
+        if before_page_event_id is None:
+            from camctl.persistence.fact_reads import read_event
+            before_page_event_id = read_event(self.connection, page.ref.event_id).transaction.first_event_id
+        if self._prior_role_pages(action_id=action_id, activity_id=activity_id,
+                run_id=page.ref.ticket.run_id, role=identity.variant.value, before_event_id=before_page_event_id):
+            raise ConsistencyError("照片角色已有可靠来源页，不能形成第二次来源观察")
         steps = detail.get("steps")
         diagnostics = outcome.diagnostics
         if (not isinstance(steps, list) or len(steps) != 3 or diagnostics is None

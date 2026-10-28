@@ -691,16 +691,21 @@ def test_photo_source_guard_rejects_artifact_that_differs_from_actual_page(photo
     reader.read_device_start = lambda action, activity_id, before_event_id, output_directory=None: (
         12, {"camera_identity": {"serial": "serial", "product_id": 10},
              "original": None, "original_error": "主机记录不可用"}, locator)
-    _, identity = reader.verify_device_page(1, 7, 5, saved)
+    reader._prior_role_pages = lambda **kwargs: ()
+    _, identity = reader.verify_device_page(1, 7, 5, saved, before_page_event_id=40)
     assert identity.sha256 == "a" * 64
+    reader._prior_role_pages = lambda **kwargs: (38,)
+    with pytest.raises(ValueError):
+        reader.verify_device_page(1, 7, 5, saved, before_page_event_id=40)
+    reader._prior_role_pages = lambda **kwargs: ()
     attempt = next(item for item in outcome.observations if item.type == "photo_result_attempt")
     attempt.data["comparison"]["selected"] = "sync"
     with pytest.raises(ValueError):
-        reader.verify_device_page(1, 7, 5, saved)
+        reader.verify_device_page(1, 7, 5, saved, before_page_event_id=40)
     attempt.data["comparison"]["selected"] = "camera"
     attempt.data["steps"][-1]["artifact"]["sha256"] = "b" * 64
     with pytest.raises(ValueError):
-        reader.verify_device_page(1, 7, 5, saved)
+        reader.verify_device_page(1, 7, 5, saved, before_page_event_id=40)
 
 
 def test_sync_candidate_must_equal_actual_start_response(photo_page_guard_api):
