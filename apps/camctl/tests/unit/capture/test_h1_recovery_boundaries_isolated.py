@@ -249,6 +249,27 @@ def pending_result_type():
 
 
 class OriginalSaveTests(unittest.IsolatedAsyncioTestCase):
+    async def test_retry_uses_current_derived_request_not_stale_snapshot(self):
+        pending_type = pending_result_type()
+        original = pending_type("original-key", SimpleNamespace(ticket=object()), None,
+                                preparation="original preparation")
+        prepared = replace(original, preparation=None, observation={"result": "frozen"})
+        identity = (8, 1)
+        pending = {identity: prepared}
+        writes = []
+        async def first_save():
+            writes.append((prepared.key, prepared.observation))
+            raise RuntimeError("receipt unknown")
+        with self.assertRaises(RuntimeError):
+            await original.shared.run(first_save)
+        current = original.retry_if_owned(pending, identity)
+        self.assertIs(current, prepared)
+        async def retry_save():
+            writes.append((current.key, current.observation))
+            return "saved"
+        self.assertEqual(await current.shared.run(retry_save), "saved")
+        self.assertEqual(writes, [("original-key", {"result": "frozen"})] * 2)
+
     async def test_stale_owner_does_not_replay_applied_save_after_delivery_error(self):
         pending_type = pending_result_type()
         owner = pending_type("original-key", SimpleNamespace(ticket=object()), None)
@@ -279,6 +300,7 @@ class OriginalSaveTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(prepared.shared, original.shared)
         self.assertIs(prepared.finish.ticket, ticket)
         self.assertEqual(prepared.key, "original-key")
+        self.assertIs(original.retry_if_owned({(8, 1): prepared}, (8, 1)), prepared)
 
     async def test_active_save_has_one_owner_and_original_key(self):
         shared = shared_save_type()()
