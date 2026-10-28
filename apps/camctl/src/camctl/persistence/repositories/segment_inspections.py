@@ -169,6 +169,32 @@ def _result_requires_read(state, document):
             or isinstance(failure, Mapping) and failure.get("code") == "probe_failed")
 
 
+def _binding_read_error(document):
+    failure = document.get("failure")
+    error = failure.get("read_error") if isinstance(failure, Mapping) else None
+    if not isinstance(error, Mapping) or error.get("code") != "device_binding_unavailable":
+        return None
+    if failure.get("code") != "read_failed":
+        raise ConsistencyError("绑定读取失败必须归属于原检查读取")
+    return error
+
+
+def _binding_read_result(connection, inspection, document):
+    """检查失败若源于绑定，核验同一副本的原真实读取结果。"""
+    error = _binding_read_error(document)
+    if error is None:
+        return False
+    with closing(connection.execute(
+        "SELECT id FROM file_copies WHERE inspection_id=? LIMIT 2", (inspection["id"],),
+    )) as cursor:
+        rows = cursor.fetchall()
+    if len(rows) != 1:
+        raise ConsistencyError("绑定失败缺少唯一检查副本")
+    from camctl.persistence.repositories.binding_read_cancel import load_saved_binding_read_failure
+    load_saved_binding_read_failure(connection, inspection["action_id"], rows[0][0], error)
+    return True
+
+
 def _validate_member(connection, request: InspectionCreate) -> tuple[dict, dict, dict, dict]:
     member = row_facts(connection, "segment_members", request.member_id)
     if member is None:
@@ -310,6 +336,9 @@ class _SaveInspectionResultCommand:
                     and json_equal(inspection["result_json"], dict(self.request.result_json))):
                 return self._decision(_inspection_ref(inspection), read_only=True)
             raise ConsistencyError("已结束的分段检查不能替换其结果")
+        if _binding_read_result(connection, inspection, self.request.result_json):
+            if action["cancel_requested"] or action["status"] != 2:
+                return self._decision(_inspection_ref(inspection), read_only=True)
         if (_result_requires_read(self.request.state, self.request.result_json)
                 and not inspection_input_read_succeeded(connection, inspection)):
             raise ConsistencyError("媒体检查结果要求原读取流程可靠成功")
@@ -522,9 +551,15 @@ def _segment_inspection_guard(event, context) -> None:
                 raise EventValidationError("分段检查结果只能结束 PENDING 责任")
             if values.get("result_event_id") != event.event_id or values.get("result_json") is None:
                 raise EventValidationError("分段检查结果必须引用自身可靠保存事件")
+            reads = context.retry_wait_reads
+            from camctl.persistence.repositories.retry_wait_reads import RetryWaitReads
+            if _binding_read_error(values["result_json"]) is not None:
+                if type(reads) is not RetryWaitReads:
+                    raise EventValidationError("检查绑定失败缺少原读取核验")
+                _binding_read_result(reads.connection, current, values["result_json"])
+                if action["cancel_requested"] or action["status"] != 2:
+                    raise EventValidationError("已取消或终态动作不能新增检查绑定失败结果")
             if _result_requires_read(values.get("state"), values["result_json"]):
-                reads = context.retry_wait_reads
-                from camctl.persistence.repositories.retry_wait_reads import RetryWaitReads
                 if (type(reads) is not RetryWaitReads
                         or not inspection_input_read_succeeded(reads.connection, current)):
                     raise EventValidationError("媒体检查结果要求原读取流程可靠成功")

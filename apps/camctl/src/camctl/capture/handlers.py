@@ -3310,7 +3310,7 @@ async def _saved_internal_binding_failure(runtime, action):
 
     def read(owned):
         with closing(owned.connection.execute(
-            "SELECT c.id,r.error_json FROM operation_runs r JOIN file_copies c ON c.id=r.copy_id"
+            "SELECT c.id,r.error_json,c.processing_id,c.inspection_id FROM operation_runs r JOIN file_copies c ON c.id=r.copy_id"
             " WHERE r.action_id=? AND r.kind=3 AND r.status=4 AND c.delivery_id IS NULL"
             " AND json_extract(r.error_json,'$.code')='device_binding_unavailable' LIMIT 2",
             (action["id"],),
@@ -3320,11 +3320,13 @@ async def _saved_internal_binding_failure(runtime, action):
             return None
         if len(rows) != 1:
             raise ConsistencyError("拍摄存在多个未收场的原读取绑定失败")
-        copy_id, stored = rows[0]
+        copy_id, stored, processing_id, inspection_id = rows[0]
+        if (processing_id is None) == (inspection_id is None):
+            raise ConsistencyError("原内部读取绑定失败缺少唯一处理或检查归属")
         error = parse_exact_json(stored)
-        key, identity, _occurred_at = load_saved_binding_read_failure(
+        key, identity, occurred_at = load_saved_binding_read_failure(
             owned.connection, action["id"], copy_id, error)
-        return copy_id, error["details"], key, identity
+        return copy_id, error["details"], key, identity, occurred_at, inspection_id
 
     return await runtime.database.read(read, description="读取原内部读取绑定失败")
 
@@ -3343,7 +3345,7 @@ async def _handle_binding_failure(
         details = binding_failure_details(binding_result)
     else:
         from camctl.devices.bindings import BindingStatus
-        copy_id, details, _key, identity = saved_read
+        copy_id, details, _key, identity, _occurred_at, _inspection_id = saved_read
         statuses = {"missing": BindingStatus.DEVICE_MISSING, "mismatch": BindingStatus.DRIVER_MISMATCH,
                     "physical_identity_mismatch": BindingStatus.PHYSICAL_IDENTITY_MISMATCH,
                     "physical_identity_conflict": BindingStatus.PHYSICAL_IDENTITY_CONFLICT}
@@ -3460,7 +3462,27 @@ async def _handle_binding_failure(
     from camctl.outputs.read_attempts import save_read_business
 
     if saved_read is not None:
-        copy_id, details, key, _identity = saved_read
+        copy_id, details, key, _identity, occurred_at, inspection_id = saved_read
+        if inspection_id is not None:
+            from types import SimpleNamespace
+            from camctl.capture.segment_inspections import (
+                settle_inspection_read_failure, settle_terminal_inspection_read_slot,
+            )
+            flow = runtime.media or SimpleNamespace(
+                database=runtime.database, occurred_at=runtime.wall_us,
+                pending_segment_inspection_results=runtime.pending_segment_inspection_results,
+                pending_read_business=runtime.pending_read_business,
+                pending_read_results=runtime.pending_read_results, pending_read_ends=runtime.pending_read_ends,
+                continuing_read_tickets=runtime.continuing_read_tickets,
+                operations=runtime.operations, evidence=runtime.evidence,
+                file_executor=runtime.file_executor,
+            )
+            if not await settle_inspection_read_failure(flow, copy_id, occurred_at):
+                current_action = await runtime.action(action["id"])
+                return not bool(current_action["cancel_requested"])
+            if not await settle_terminal_inspection_read_slot(flow, copy_id, runtime.wall_us()):
+                return True
+            return False
         request = replace(await _binding_failure_request(runtime, action, details),
                           read_result_key=key, read_copy_id=copy_id)
         receipt = await save_read_business(_read_result_scope(runtime), action["id"],

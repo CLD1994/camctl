@@ -140,7 +140,7 @@ async def _save_result(flow: MediaFlow, request: InspectionResultSave) -> bool:
     outcome = await flow.database.write(lambda owned: SegmentInspectionRepository().save_result(pending[0], pending[1], owned), key=pending[1])
     if outcome.kind is DbOutcomeKind.COMPLETED:
         del flow.pending_segment_inspection_results[identity]
-        return True
+        return outcome.value.state != int(_INSPECTION_STATE.PENDING)
     if any(not isinstance(error, asyncio.CancelledError) for error in db_outcome_errors(outcome)):
         record_error(db_failure(ConsistencyError, "原分段检查结果保存未可靠完成", outcome),
             stage="capture.segment_save", context={"inspection_id": identity})
