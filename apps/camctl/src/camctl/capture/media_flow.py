@@ -143,32 +143,49 @@ class DriverReadSessions:
     """
 
     def __init__(self, database: BusinessDatabase, driver: ReadDriver,
-                 ticket: Any, *, idle_timeout_s: Decimal = _READ_TIMEOUT_S, control=None) -> None:
+                 ticket: Any, *, idle_timeout_s: Decimal = _READ_TIMEOUT_S, control=None,
+                 capture_selection=None, continuations=None, occurred_at=None) -> None:
         self._database = database
         self._driver = driver
         self._ticket = ticket
         self._control = control
+        self._capture_selection = capture_selection
+        self._continuations = continuations
+        self._occurred_at = occurred_at
         self.idle_timeout_s = idle_timeout_s
 
-    def for_attempt(self, ticket, *, idle_timeout_s: Decimal, control=None):
+    def for_attempt(self, ticket, *, idle_timeout_s: Decimal, control=None,
+                    capture_selection=None, continuations=None, occurred_at=None):
         """为已可靠保存的原尝试构造本次读取会话入口。"""
         return DriverReadSessions(self._database, self._driver, ticket,
-                                  idle_timeout_s=idle_timeout_s, control=control)
+            idle_timeout_s=idle_timeout_s, control=control,
+            capture_selection=capture_selection if capture_selection is not None else self._capture_selection,
+            continuations=continuations if continuations is not None else self._continuations,
+            occurred_at=occurred_at if occurred_at is not None else self._occurred_at)
 
     async def open_session(self, source_device_file_id: int, offset: int, *, on_start=None):
         from camctl.outputs.read_attempts import read_dispatch_qualification, read_dispatch_gate
 
         if self._ticket is None:
             raise ConsistencyError("设备读取会话缺少已保存的尝试票据")
+        continuation = (None if self._continuations is None else
+                        self._continuations.get(int(self._ticket.target_id)))
+        never_dispatched = (continuation is not None and continuation.ticket == self._ticket
+                            and continuation.never_dispatched)
         def read(owned):
+            now = None if self._occurred_at is None else self._occurred_at()
+            selection = None if self._capture_selection is None or now is None else self._capture_selection(now)
             return (load_confirmed_source(owned, source_device_file_id),
-                read_dispatch_qualification(owned, self._ticket, source_device_file_id, device_source=True))
+                read_dispatch_qualification(owned, self._ticket, source_device_file_id, device_source=True,
+                    capture_selection=selection, never_dispatched=never_dispatched))
         try:
             source, qualification = await self._database.read(read, description="媒体读取源事实")
         except Exception as error:
             from camctl.devices.read_session import ReadPreparationError, ReadPreparationSettlement
             raise ReadPreparationError("设备读取源事实未取得，原尝试尚未调用",
                 settlement=ReadPreparationSettlement.UNCONFIRMED) from error
+        if never_dispatched and self._continuations.get(int(self._ticket.target_id)) is not continuation:
+            raise ConsistencyError("读取派发前原未派发事实已经变化")
         prevented = read_dispatch_gate(qualification, self._control)
         if prevented is not None:
             return prevented
@@ -633,7 +650,8 @@ async def run_recording_media(
     from camctl.outputs.read_attempts import hold_read_end
 
     sessions = flow.sessions if ticket is None else flow.sessions.for_attempt(
-        ticket, idle_timeout_s=flow.read_idle_timeout_s)
+        ticket, idle_timeout_s=flow.read_idle_timeout_s, capture_selection=flow.capture_selection,
+        continuations=flow.continuing_read_tickets, occurred_at=flow.occurred_at)
     context = InputContext(
         action_id=action_id,
         processing_id=processing_id,

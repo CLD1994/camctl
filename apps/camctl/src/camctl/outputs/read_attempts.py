@@ -61,7 +61,8 @@ class ReadDispatchPrevented:
     terminal: bool = False
 
 
-def read_dispatch_qualification(owned, ticket, source_id, *, device_source):
+def read_dispatch_qualification(owned, ticket, source_id, *, device_source,
+                                capture_selection=None, never_dispatched=False):
     """在源事实所属callback内复核原票据、当前来源和业务资格。"""
     from camctl.persistence.repositories.outputs import _read_owner_eligible
     from camctl.outputs.read_discovery import read_copy_dispatch_eligible
@@ -70,7 +71,7 @@ def read_dispatch_qualification(owned, ticket, source_id, *, device_source):
     with closing(owned.connection.execute(
         "SELECT a.status,a.cancel_requested,r.status,r.attempts_used,"
         "t.status,t.result_json,c.source_device_file_id,c.source_intermediate_file_id,"
-        "c.slot_device_id FROM operation_runs r JOIN actions a ON a.id=r.action_id"
+        "c.slot_device_id,t.id,t.copy_round,c.round FROM operation_runs r JOIN actions a ON a.id=r.action_id"
         " JOIN file_copies c ON c.id=r.copy_id"
         " JOIN operation_attempts t ON t.run_id=r.id AND t.attempt_no=?"
         " WHERE r.id=? AND c.id=? AND r.responsibility_key=?",
@@ -79,7 +80,9 @@ def read_dispatch_qualification(owned, ticket, source_id, *, device_source):
         row = cursor.fetchone()
     if row is None:
         raise ConsistencyError("实际读取入口缺少原票据的业务归属")
-    status, canceled, run_status, used, attempt_status, result, device_id, host_id, slot = row
+    status, canceled, run_status, used, attempt_status, result, device_id, host_id, slot, attempt_id, copy_round, current_round = row
+    if ticket.operation != "read" or (never_dispatched and copy_round != current_round):
+        raise ConsistencyError("实际读取票据或未派发拷贝轮次不一致")
     runs, attempts = enum_for("operation_runs.status"), enum_for("operation_attempts.status")
     if (run_status not in (int(runs.PENDING), int(runs.ACTIVE))
             or attempt_status != int(attempts.RUNNING) or result is not None):
@@ -106,12 +109,26 @@ def read_dispatch_qualification(owned, ticket, source_id, *, device_source):
         origin = row_facts(owned.connection, "actions", source["source_action_id"])
         if observer is None or origin is None:
             raise ConsistencyError("实际读取缺少原设备绑定")
+        if slot != observer["device_id"] or (observer["device_id"], observer["driver_id"]) != (
+                origin["device_id"], origin["driver_id"]):
+            raise ConsistencyError("实际读取机会与原来源绑定不一致")
         identity = None
         if observer["driver_id"] == DRIVER_ID:
             from camctl.persistence.repositories.physical_alias import source_physical_alias_conflict, source_physical_identity
             if source_physical_alias_conflict(owned.connection, source, observer, origin):
                 return ReadDispatchPrevented("physical_identity_conflict")
             identity = source_physical_identity(owned.connection, source, observer, origin)
+            if never_dispatched:
+                from camctl.persistence.repositories.capture_selection import read_capture_priority
+                if capture_selection is None:
+                    raise ConsistencyError("未派发读取缺少本次拍摄选择输入")
+                with closing(owned.connection.execute("SELECT COALESCE(MAX(id),0) FROM history_events")) as cursor:
+                    boundary = cursor.fetchone()[0]
+                selected = read_capture_priority(owned.connection, capture_selection, boundary,
+                    device_id=observer["device_id"], identity=identity,
+                    occurred_at=capture_selection.trusted_wall_now, exclude_read_attempt_id=attempt_id)
+                if selected is not None:
+                    return ReadDispatchPrevented("capture_priority")
         from camctl.persistence.repositories.preparation import PreparationReads
         if PreparationReads(owned.connection).availability_in_flight(observer["device_id"], identity):
             return ReadDispatchPrevented("device_busy")

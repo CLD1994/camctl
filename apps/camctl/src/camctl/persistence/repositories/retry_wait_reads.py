@@ -7,7 +7,7 @@ from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import ConsistencyError
 
 
-def read_reservation_blocks_control(connection, device_id):
+def read_reservation_blocks_control(connection, device_id, *, exclude_attempt_id=None):
     """读取顺序保留仅在原失败调用可靠收场后允许控制工作通过。"""
     with closing(connection.execute(
         "SELECT c.id,r.id,r.status,r.attempts_used,r.retry_wait_required FROM file_copies c"
@@ -20,10 +20,33 @@ def read_reservation_blocks_control(connection, device_id):
         return False
     if len(rows) != 1 or rows[0][1] is None:
         raise ConsistencyError("读取机会缺少唯一的原流程")
-    _, run_id, status, used, waiting = rows[0]
+    copy_id, run_id, status, used, waiting = rows[0]
     runs = enum_for("operation_runs.status")
-    if status not in (int(runs.PENDING), int(runs.ACTIVE)) or not used or waiting not in (0, 1):
+    if status not in (int(runs.PENDING), int(runs.ACTIVE)) or waiting not in (0, 1):
         return True
+    if exclude_attempt_id is not None:
+        if waiting != 0:
+            raise ConsistencyError("未派发读取不能同时保留重试等待")
+        with closing(connection.execute(
+            "SELECT t.id,t.attempt_no,t.status,t.result_event_id,t.result_json,t.copy_round,c.round"
+            " FROM operation_attempts t JOIN file_copies c ON c.id=?"
+            " WHERE t.id=? AND t.run_id=?", (copy_id, exclude_attempt_id, run_id),
+        )) as cursor:
+            attempt = cursor.fetchone()
+        if (attempt is None or attempt[1] != used
+                or attempt[2] != int(enum_for("operation_attempts.status").RUNNING)
+                or attempt[3] is not None or attempt[4] is not None or attempt[5] != attempt[6]):
+            raise ConsistencyError("未派发读取排除与原票据或拷贝轮次不符")
+        with closing(connection.execute(
+            "SELECT 1 FROM operation_attempts WHERE run_id=? AND id<>?"
+            " AND (status=? OR result_event_id IS NULL OR result_json IS NULL) LIMIT 1",
+            (run_id, exclude_attempt_id, int(enum_for("operation_attempts.status").RUNNING)),
+        )) as cursor:
+            return cursor.fetchone() is not None
+    if not used:
+        if waiting != 0 or not RetryWaitReads(connection).no_attempts(run_id):
+            raise ConsistencyError("零次读取责任与已保存尝试或等待矛盾")
+        return False
     reads = RetryWaitReads(connection)
     if reads.last_attempt(run_id, used) is None:
         return True

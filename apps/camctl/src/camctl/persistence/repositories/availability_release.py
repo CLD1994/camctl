@@ -37,14 +37,16 @@ def _release_pages(connection, check):
         yield tuple(page)
 
 
-def _no_conflicts(connection, check, attempt_id):
+def _no_conflicts(connection, check, attempt_id, *, exclude_read_attempt_id=None):
     from camctl.devices.drivers.hasselblad.identity import CameraIdentity
     from camctl.capture.software_recovery import recovery_locked
     from camctl.scheduling.resources import device_read_in_flight, device_start_in_flight
     from .physical_alias import physical_alias_conflict
     identity = CameraIdentity(**check["expected_identity_json"])
+    read_in_flight = (device_read_in_flight(connection, check["device_id"]) if exclude_read_attempt_id is None else
+                      device_read_in_flight(connection, check["device_id"], exclude_attempt_id=exclude_read_attempt_id))
     if (recovery_locked(connection, check["device_id"])
-            or device_read_in_flight(connection, check["device_id"])
+            or read_in_flight
             or device_start_in_flight(connection, check["device_id"])
             or physical_alias_conflict(connection, check["device_id"], identity)):
         raise AvailabilityTargetBlocked("原设备仍有其他实际调用")
@@ -68,7 +70,8 @@ def _no_conflicts(connection, check, attempt_id):
             if cursor.fetchone() is not None:
                 raise AvailabilityTargetBlocked("原设备仍有其他未收场责任")
     from .retry_wait_reads import read_reservation_blocks_control
-    if read_reservation_blocks_control(connection, check["device_id"]):
+    if (read_reservation_blocks_control(connection, check["device_id"]) if exclude_read_attempt_id is None else
+            read_reservation_blocks_control(connection, check["device_id"], exclude_attempt_id=exclude_read_attempt_id)):
         raise AvailabilityTargetBlocked("原设备读取调用尚未收场")
 
 

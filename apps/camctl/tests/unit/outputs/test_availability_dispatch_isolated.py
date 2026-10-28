@@ -75,13 +75,51 @@ class _Connection:
                      ("actions", 10): {"device_id": "camera", "driver_id": "other"},
                      ("actions", 11): {"device_id": "camera", "driver_id": "other"}}
 
-    def execute(self, sql, args):
-        return _Cursor((2, 0, 2, 1, 1, None, 9, None, "camera"))
+    def execute(self, sql, args=()):
+        if "history_events" in sql:
+            return _Cursor((99,))
+        return _Cursor((2, 0, 2, 1, 1, None, 9, None, "camera", 17, 1, 1))
 
 
 @pytest.mark.parametrize("check_running", [False, True])
 def test_actual_device_read_is_blocked_only_by_running_check(read_module, check_running):
     connection = _Connection(check_running)
-    ticket = SimpleNamespace(attempt_id=1, run_id=3, target_id="2", responsibility_key="read/2")
+    ticket = SimpleNamespace(operation="read", attempt_id=1, run_id=3, target_id="2", responsibility_key="read/2")
     result = read_module.read_dispatch_qualification(SimpleNamespace(connection=connection), ticket, 9, device_source=True)
     assert (None if result is None else result.reason) == ("device_busy" if check_running else None)
+
+
+@pytest.mark.parametrize("never_dispatched", [False, True])
+def test_only_original_unentered_read_is_excluded_for_capture(read_module, monkeypatch, never_dispatched):
+    connection = _Connection(False)
+    for action in (10, 11):
+        connection.rows[("actions", action)]["driver_id"] = "hasselblad_cfv100c"
+    alias = ModuleType("camctl.persistence.repositories.physical_alias")
+    alias.source_physical_alias_conflict = lambda *args: False
+    alias.source_physical_identity = lambda *args: "identity"
+    selection = ModuleType("camctl.persistence.repositories.capture_selection")
+    checked = []
+    def priority(*args, **kwargs):
+        checked.append(kwargs["exclude_read_attempt_id"])
+        return SimpleNamespace(action_id=42)
+    selection.read_capture_priority = priority
+    monkeypatch.setitem(sys.modules, alias.__name__, alias)
+    monkeypatch.setitem(sys.modules, selection.__name__, selection)
+    ticket = SimpleNamespace(operation="read", attempt_id=1, run_id=3,
+                             target_id="2", responsibility_key="read/2")
+    result = read_module.read_dispatch_qualification(SimpleNamespace(connection=connection), ticket, 9,
+        device_source=True, capture_selection=SimpleNamespace(trusted_wall_now=10),
+        never_dispatched=never_dispatched)
+    assert (None if result is None else result.reason) == ("capture_priority" if never_dispatched else None)
+    assert checked == ([17] if never_dispatched else [])
+
+
+def test_dispatch_rejects_slot_from_a_different_source_binding(read_module):
+    connection = _Connection(False)
+    connection.rows[("actions", 10)]["device_id"] = "other"
+    connection.rows[("actions", 11)]["device_id"] = "other"
+    ticket = SimpleNamespace(operation="read", attempt_id=1, run_id=3,
+                             target_id="2", responsibility_key="read/2")
+    with pytest.raises(read_module.ConsistencyError, match="原来源绑定"):
+        read_module.read_dispatch_qualification(SimpleNamespace(connection=connection), ticket, 9,
+                                                device_source=True, never_dispatched=True)

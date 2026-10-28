@@ -972,7 +972,10 @@ async def _run_read_and_save(runtime, assembly, facts, ticket, now, *, control=N
     step = await _copy_delivery(
         runtime,
         DriverReadSessions(runtime.database, assembly.driver, ticket=ticket,
-                           idle_timeout_s=assembly.read_idle_timeout_s, control=control),
+            idle_timeout_s=assembly.read_idle_timeout_s, control=control,
+            capture_selection=(None if runtime.availability is None else
+                lambda now: runtime.availability.capture_selection(assembly.binding.device_id, now)),
+            continuations=runtime.continuing_read_tickets, occurred_at=runtime.occurred_at),
         facts, digest, max_recopies=assembly.max_recopies,
         read_end=(runtime.pending_read_ends[facts["id"]].end if facts["id"] in runtime.pending_read_ends else None),
         on_read_end=lambda end, complete: hold_read_end(runtime, ticket, end, complete,

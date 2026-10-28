@@ -111,7 +111,8 @@ def pending_capture_candidates(connection, request, *, batch_size=128):
             return
 
 
-def selected_pending_capture(connection, request, boundary, *, exclude_attempt_id=None):
+def selected_pending_capture(connection, request, boundary, *, exclude_attempt_id=None,
+                             exclude_read_attempt_id=None):
     """从原连接逐项核对无活动拍摄的检查或普通准备资格。"""
     from camctl.persistence.transaction import row_facts
     from .availability_create import CreateAvailabilityCheck, _qualify
@@ -126,7 +127,7 @@ def selected_pending_capture(connection, request, boundary, *, exclude_attempt_i
             request.trusted_wall_now, request.prepare_lead_s, request.trusted_wall_now)
         try:
             _qualify(connection, check_request, boundary, exclude_attempt_id=exclude_attempt_id,
-                     check_candidate_order=False)
+                     check_candidate_order=False, exclude_read_attempt_id=exclude_read_attempt_id)
         except AvailabilityTargetNotRequired:
             return candidate
         except AvailabilityTargetReuse as reuse:
@@ -146,7 +147,7 @@ def selected_pending_capture(connection, request, boundary, *, exclude_attempt_i
             try:
                 _qualify(connection, check_request, check["target_boundary_event_id"],
                          existing_check=check, exclude_attempt_id=exclude_attempt_id,
-                         check_candidate_order=False)
+                         check_candidate_order=False, exclude_read_attempt_id=exclude_read_attempt_id)
             except AvailabilityTargetNotRequired:
                 return candidate
             except (AvailabilityTargetBlocked, AvailabilityTargetIdentityMismatch):
@@ -158,7 +159,8 @@ def selected_pending_capture(connection, request, boundary, *, exclude_attempt_i
     return None
 
 
-def read_capture_priority(connection, request, boundary, *, device_id, identity, occurred_at):
+def read_capture_priority(connection, request, boundary, *, device_id, identity, occurred_at,
+                          exclude_read_attempt_id=None):
     """核对当前读取与实际采用的同机选择输入，再由原连接选择。"""
     from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
 
@@ -166,4 +168,5 @@ def read_capture_priority(connection, request, boundary, *, device_id, identity,
             or request.driver_id != DRIVER_ID or request.identity != identity
             or request.trusted_wall_now != occurred_at):
         raise ConsistencyError("读取的拍摄选择输入与实际机身或时刻不符")
-    return selected_pending_capture(connection, request, boundary)
+    return selected_pending_capture(connection, request, boundary,
+                                    exclude_read_attempt_id=exclude_read_attempt_id)
