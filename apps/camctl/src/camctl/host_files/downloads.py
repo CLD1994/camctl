@@ -276,17 +276,6 @@ class ResultDownloadWorkspace(DownloadWorkspace):
         self._observed_fds = set()
         self._close_errors = []
 
-    def claim(self):
-        with _ACTIVE_LOCK:
-            if self.claimed:
-                return True
-            capture_path = self.path.parent.parent / "capture-work" / str(self.ticket.target_id)
-            if self.path in _ACTIVE or capture_path in _ACTIVE:
-                return False
-            _ACTIVE[self.path] = self
-            self.claimed = True
-            return True
-
     @property
     def files_closed(self):
         return not self._observed_fds

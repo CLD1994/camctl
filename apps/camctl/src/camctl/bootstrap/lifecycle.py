@@ -860,11 +860,15 @@ def _report_assembly(
     availability = AvailabilityAssembly(availability_owner, deps.config.devices, drivers, preparation_leads)
     from camctl.bootstrap.work_file_assembly import WorkFileRuntime
     from camctl.bootstrap.download_cleanup import ReadDownloadCleanup
+    from camctl.bootstrap.photo_work_cleanup import DownloadCleanupChain, HostCaptureWorkCleanup, PhotoWorkCleanup
     from camctl.outputs.work_files import WorkFileLimits
     deps.work_files = WorkFileRuntime(
         staging=staging, pending_media_results=deps.capture_media_results,
-        download_cleanup=ReadDownloadCleanup(staging,
+        download_cleanup=DownloadCleanupChain(ReadDownloadCleanup(staging,
             limit=deps.config.cleanup.work_file_limit_per_run, boundary=deps.recovery_boundary),
+            PhotoWorkCleanup(staging, boundary=deps.recovery_boundary,
+                pending_scans=deps.capture_result_scans, pending_results=deps.capture_call_results),
+            HostCaptureWorkCleanup(staging)),
         limits=WorkFileLimits(
             batch_size=deps.config.cleanup.work_file_batch_size,
             limit_per_run=deps.config.cleanup.work_file_limit_per_run))
