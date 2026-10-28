@@ -135,8 +135,14 @@ def read_dispatch_qualification(owned, ticket, source_id, *, device_source,
                 if selected is not None:
                     return ReadDispatchPrevented("capture_priority")
         from camctl.persistence.repositories.preparation import PreparationReads
-        if PreparationReads(owned.connection).availability_in_flight(observer["device_id"], identity):
+        preparation = PreparationReads(owned.connection)
+        if preparation.availability_in_flight(observer["device_id"], identity):
             return ReadDispatchPrevented("device_busy")
+        if observer["driver_id"] == DRIVER_ID and never_dispatched:
+            from camctl.scheduling.resources import current_preparation_holder
+            if (current_preparation_holder(owned.connection, observer["device_id"]) is not None
+                    or preparation.capture_holds_device(observer["device_id"])):
+                return ReadDispatchPrevented("capture_priority")
     if not read_copy_dispatch_eligible(owned.connection, int(ticket.target_id)):
         return ReadDispatchPrevented("read_input_not_needed")
     return None

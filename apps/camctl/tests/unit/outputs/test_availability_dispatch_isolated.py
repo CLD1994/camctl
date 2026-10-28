@@ -49,7 +49,10 @@ def read_module(monkeypatch):
     facts.row_facts = lambda connection, table, identity: connection.rows[(table, identity)]
     preparation = stub("camctl.persistence.repositories.preparation", ("PreparationReads",))
     preparation.PreparationReads = lambda connection: SimpleNamespace(
-        availability_in_flight=lambda device, identity: connection.check_running)
+        availability_in_flight=lambda device, identity: connection.check_running,
+        capture_holds_device=lambda device: getattr(connection, "capture_held", False))
+    scheduling = stub("camctl.scheduling.resources", ("current_preparation_holder",))
+    scheduling.current_preparation_holder = lambda connection, device: None
     source = find_spec("camctl.outputs.read_attempts")
     spec = spec_from_file_location("camctl.outputs._isolated_availability_dispatch", source.origin)
     module = module_from_spec(spec)
@@ -132,3 +135,25 @@ def test_dispatch_rejects_wrong_read_responsibility(read_module):
     with pytest.raises(read_module.ConsistencyError):
         read_module.read_dispatch_qualification(SimpleNamespace(connection=_Connection(False)), ticket, 9,
                                                 device_source=True)
+
+
+def test_prepared_capture_blocks_only_an_unentered_read(read_module, monkeypatch):
+    connection = _Connection(False)
+    connection.capture_held = True
+    for action in (10, 11):
+        connection.rows[("actions", action)]["driver_id"] = "hasselblad_cfv100c"
+    alias = ModuleType("camctl.persistence.repositories.physical_alias")
+    alias.source_physical_alias_conflict = lambda *args: False
+    alias.source_physical_identity = lambda *args: "identity"
+    selection = ModuleType("camctl.persistence.repositories.capture_selection")
+    selection.read_capture_priority = lambda *args, **kwargs: None
+    monkeypatch.setitem(sys.modules, alias.__name__, alias)
+    monkeypatch.setitem(sys.modules, selection.__name__, selection)
+    ticket = SimpleNamespace(operation="read", attempt_id=1, run_id=3,
+                             target_id="2", responsibility_key="read/2")
+    current = SimpleNamespace(trusted_wall_now=10)
+    unentered = read_module.read_dispatch_qualification(SimpleNamespace(connection=connection), ticket, 9,
+        device_source=True, capture_selection=current, never_dispatched=True)
+    assert unentered.reason == "capture_priority"
+    assert read_module.read_dispatch_qualification(SimpleNamespace(connection=connection), ticket, 9,
+        device_source=True, capture_selection=current, never_dispatched=False) is None
