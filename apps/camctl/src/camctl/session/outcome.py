@@ -9,7 +9,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
+
+if TYPE_CHECKING:
+    from camctl.logging_runtime.diagnostics import DiagnosticState
 
 __all__ = ["SessionOutcome"]
 
@@ -31,8 +34,8 @@ class SessionOutcome:
     needs_run: bool | None = None
     reason: str | None = None
     details: Mapping[str, Any] = field(default_factory=_empty_details)
-    # 快照与原异常只供日志投影使用，不属于机器结果或持久化内容。
-    _diagnostic_sources: tuple[tuple[Mapping[str, Any] | None, BaseException], ...] = field(
+    # 快照与原异常或诊断状态只供日志投影使用，不属于机器结果或持久化内容。
+    _diagnostic_sources: tuple[tuple[Mapping[str, Any] | None, BaseException | DiagnosticState], ...] = field(
         default=(), repr=False, compare=False)
 
     def __post_init__(self) -> None:

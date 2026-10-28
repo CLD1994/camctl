@@ -513,14 +513,18 @@ def _attach_session_diagnostic_error(target: BaseException, label: str, error: B
 
 def _failed_outcome_message(deps: RuntimeDeps, outcome: SessionOutcome) -> str:
     """单独投影日志，机器结果及异常快照保持原样。"""
-    from camctl.logging_runtime.diagnostics import diagnostic_snapshot
+    from camctl.logging_runtime.diagnostics import diagnostic_reference_for, diagnostic_snapshot
     from camctl.logging_runtime.formatting import encode_record
     from camctl.logging_runtime.models import LogLevel
 
     def project(value):
-        for snapshot, error in outcome._diagnostic_sources:
+        for snapshot, source in outcome._diagnostic_sources:
             if snapshot is value and snapshot is not None:
-                return error
+                reference = diagnostic_reference_for(source)
+                if reference is not None:
+                    return reference
+                if isinstance(source, BaseException):
+                    return source
         if isinstance(value, Mapping):
             return {key: project(item) for key, item in value.items()}
         if isinstance(value, (tuple, list)):
@@ -1449,16 +1453,18 @@ async def _execute_command(
             if worker is None:
                 return
             stopped = await worker.stop()
-            if stopped.state_failure is not None:
+            failure = (stopped.state_failure if stopped.state_failure is not None
+                       else stopped.configuration_failure)
+            if failure is not None:
+                worker_details = _worker_failure_details(failure)
                 if outcome is not None:
-                    outcome = _shutdown_state_outcome(outcome, stopped.state_failure)
+                    build_outcome = (_shutdown_state_outcome if stopped.state_failure is not None
+                                     else _shutdown_configuration_outcome)
+                    outcome = build_outcome(outcome, failure, worker_details=worker_details)
                 from camctl.logging_runtime.diagnostics import record_error
-                record_error(_worker_failure_details(stopped.state_failure), stage="report_shutdown")
-            elif stopped.configuration_failure is not None:
+                state = record_error(worker_details, stage="report_shutdown")
                 if outcome is not None:
-                    outcome = _shutdown_configuration_outcome(outcome, stopped.configuration_failure)
-                from camctl.logging_runtime.diagnostics import record_error
-                record_error(_worker_failure_details(stopped.configuration_failure), stage="report_shutdown")
+                    outcome = _attach_worker_diagnostic(outcome, worker_details, state)
 
         for worker in (supervisor, restricted_supervisor):
             try:
@@ -1613,13 +1619,18 @@ def _worker_failure_details(failure: ResultFailureMessage) -> dict:
     return {**vars(failure), "error_kind": failure.error_kind.value}
 
 
+def _attach_worker_diagnostic(outcome: SessionOutcome, snapshot: dict, state: Any) -> SessionOutcome:
+    return replace(outcome, _diagnostic_sources=(
+        *outcome._diagnostic_sources, (snapshot, state)))
+
+
 def _shutdown_state_outcome(
-    outcome: SessionOutcome, failure: ResultFailureMessage,
+    outcome: SessionOutcome, failure: ResultFailureMessage, *, worker_details: dict,
 ) -> SessionOutcome:
     """收场的状态库错误主导普通报告错误，其他已有致命错误保持并附加诊断。"""
     details = {"stage": "shutdown",
                "message": f"{failure.error_code}: {failure.error_message}",
-               "worker_failure": _worker_failure_details(failure)}
+               "worker_failure": worker_details}
     if outcome.succeeded:
         return SessionOutcome(succeeded=False, reason="state_db_error", details=details,
                               _diagnostic_sources=outcome._diagnostic_sources)
@@ -1635,11 +1646,11 @@ def _shutdown_state_outcome(
 
 
 def _shutdown_configuration_outcome(
-    outcome: SessionOutcome, failure: ResultFailureMessage,
+    outcome: SessionOutcome, failure: ResultFailureMessage, *, worker_details: dict,
 ) -> SessionOutcome:
     """配置前提错误主导普通报告错误，保留已有致命主错误及诊断。"""
     details = {"stage": "shutdown", "message": failure.error_message,
-               "worker_failure": _worker_failure_details(failure)}
+               "worker_failure": worker_details}
     if outcome.succeeded:
         return SessionOutcome(succeeded=False, reason="configuration_error", details=details,
                               _diagnostic_sources=outcome._diagnostic_sources)

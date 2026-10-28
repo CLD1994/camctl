@@ -299,7 +299,7 @@ async def test_actual_session_failure_is_fully_logged_and_rethrows_the_same_obje
 
     assert caught.value is failure
     assert len(records) == 1
-    _assert_complete(_document(records[0].message), kind)
+    _assert_complete(json.loads(records[0].message)["exception"], kind)
 
 
 @pytest.mark.asyncio
@@ -315,7 +315,7 @@ async def test_failed_outcome_log_retains_the_existing_details(monkeypatch, star
 
     assert await lifecycle.execute_command(deps, None, flows={}) is outcome
     assert len(records) == 1
-    assert json.loads(records[0].message.split("诊断详情: ", 1)[1]) == details
+    assert json.loads(records[0].message)["details"] == details
 
 
 @pytest.mark.asyncio

@@ -651,6 +651,18 @@ def _merge_cleanup_errors(
         seen.update(
             id(source) for source in _error_identity_objects(error)
         )
+        if original is not None:
+            from camctl.logging_runtime.diagnostics import record_error
+            try:
+                record_error(error, stage=stage)
+            except BaseException as diagnostic_error:
+                if not isinstance(diagnostic_error, Exception) and isinstance(original, Exception):
+                    _RequiredPhaseWaiter.attach_exception_notes(
+                        diagnostic_error, "此前会话异常", original)
+                    original = diagnostic_error
+                else:
+                    _RequiredPhaseWaiter.attach_exception_notes(
+                        original, "收场诊断异常", diagnostic_error)
         if not isinstance(error, Exception):
             if original is None or isinstance(original, Exception):
                 previous = original
