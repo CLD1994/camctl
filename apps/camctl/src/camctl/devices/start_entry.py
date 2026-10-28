@@ -83,6 +83,8 @@ class StartEntryCoordinator:
             return None
         if permit is None or permit.phase is not EntryPhase.READY:
             return None
+        if origin_action_id is not None:
+            permit.cancel_origins.add(ObjectId(origin_action_id))
         permit.phase = EntryPhase.RESERVED
         return permit
 

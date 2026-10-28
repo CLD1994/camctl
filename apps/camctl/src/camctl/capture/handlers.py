@@ -1159,8 +1159,15 @@ class CaptureRuntime(_FileObservationSaves):
                     return None, "canceled"
                 if existing.phase is EntryPhase.READY and existing.ticket is not None:
                     return existing.ticket, None
-                raise ConsistencyError("原 START 入口许可仍承担责任")
-            permit = self.start_entries.prepare(self.database.metadata.instance_id, action["id"])
+                if existing.phase is not EntryPhase.READY:
+                    raise ConsistencyError("原 START 入口许可仍承担责任")
+                if existing.cancel_origins:
+                    await _refresh_photo_cancel_origins(self, existing)
+                    if existing.phase is not EntryPhase.READY or existing.cancel_origins:
+                        return None, "canceled"
+                permit = existing
+            else:
+                permit = self.start_entries.prepare(self.database.metadata.instance_id, action["id"])
             permit.phase = EntryPhase.GRANTING
         key = new_operation_key()
         shared = SharedSave()
@@ -1832,10 +1839,12 @@ async def _refresh_photo_cancel_origins(runtime, permit):
     def read(owned):
         inactive = []
         for origin in origins:
-            row = owned.connection.execute(
-                "SELECT type,status,cancel_requested,target_selection_state FROM actions WHERE id=?",
-                (origin,)).fetchone()
-            if row is None or row[0] != 6:
+            with closing(owned.connection.execute(
+                    "SELECT type,status,cancel_requested,target_selection_state FROM actions WHERE id=?",
+                    (origin,))) as cursor:
+                row = cursor.fetchone()
+            if (row is None or row[0] != 6 or row[1] not in (1, 2, 3, 4, 5, 6)
+                    or row[2] not in (0, 1) or row[3] not in (1, 2, 3)):
                 raise ConsistencyError("START 等待的取消发起者缺失或类型不符")
             if row[1] not in (1, 2) or row[2] or row[3] != 1:
                 inactive.append(origin)

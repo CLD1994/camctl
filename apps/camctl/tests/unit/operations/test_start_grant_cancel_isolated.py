@@ -2,6 +2,7 @@
 
 import ast
 import asyncio
+from enum import Enum
 from importlib.util import find_spec, module_from_spec, spec_from_file_location
 from pathlib import Path
 import sys
@@ -11,6 +12,17 @@ from unittest.mock import AsyncMock
 import pytest
 
 from camctl import resources
+
+
+def test_abandoned_disposition_belongs_to_target_fixing():
+    path = Path(__file__).parents[3] / "src/camctl/cancellation/models.py"
+    tree = ast.parse(path.read_text())
+    classes = [node for node in tree.body if isinstance(node, ast.ClassDef)
+               and node.name in ("CancelStartDisposition", "CancelTargetsDisposition")]
+    namespace = {"Enum": Enum}
+    exec(compile(ast.fix_missing_locations(ast.Module(body=classes, type_ignores=[])), str(path), "exec"), namespace)
+    assert namespace["CancelTargetsDisposition"].ABANDONED.value == "abandoned"
+    assert not hasattr(namespace["CancelStartDisposition"], "ABANDONED")
 
 
 @pytest.fixture
@@ -120,8 +132,9 @@ async def test_cancel_waits_for_grant_and_unknown_receipt_reuses_key(entries, un
 
 
 @pytest.mark.asyncio
-async def test_cancel_selection_uses_unentered_fact_while_grant_is_pending(entries, monkeypatch):
-    module, _ = entries
+@pytest.mark.parametrize("phase", ["GRANTING", "RESERVED"])
+async def test_cancel_selection_uses_unentered_fact_while_grant_is_pending(entries, monkeypatch, phase):
+    module, ticket_type = entries
     monkeypatch.setitem(sys.modules, "camctl.devices.start_entry", module)
     path = Path(__file__).parents[3] / "src/camctl/bootstrap/flows.py"
     tree = ast.parse(path.read_text())
@@ -160,7 +173,12 @@ async def test_cancel_selection_uses_unentered_fact_while_grant_is_pending(entri
     exec(compile(ast.fix_missing_locations(program), str(path), "exec"), namespace)
     coordinator = module.StartEntryCoordinator()
     permit = coordinator.prepare("db", 1)
-    permit.phase = module.EntryPhase.GRANTING
+    if phase == "RESERVED":
+        ticket = ticket_type()
+        ticket.operation, ticket.responsibility_key = "control", "start/1"
+        permit.bind("db", ticket)
+        permit.cancel_origins.add(9)
+    permit.phase = module.EntryPhase[phase]
     async def read(callback):
         return callback(SimpleNamespace(connection=object()))
     database = SimpleNamespace(read=read, metadata=SimpleNamespace(instance_id="db"))
@@ -169,7 +187,8 @@ async def test_cancel_selection_uses_unentered_fact_while_grant_is_pending(entri
 
     assert result is None
     assert phases == [module.EntryPhase.READY]
-    assert permit.cancel_origins == {8} and permit.ticket is None
+    assert permit.cancel_origins == ({8} if phase == "GRANTING" else {8, 9})
+    assert (permit.ticket is None) == (phase == "GRANTING")
 
 
 @pytest.mark.asyncio
@@ -187,11 +206,13 @@ async def test_cancel_origin_refresh_clears_only_finished_origins(entries):
     facts = {8: (6, 6, 1, 1), 9: (6, 2, 0, 1)}
     class Connection:
         def execute(self, sql, args):
-            return SimpleNamespace(fetchone=lambda: facts[args[0]])
+            return SimpleNamespace(fetchone=lambda: facts[args[0]], close=lambda: None)
     async def read(callback, **kwargs):
         value = callback(SimpleNamespace(connection=Connection()))
         permit.cancel_origins.add(10)
         return value
+    from contextlib import closing
+    namespace["closing"] = closing
     runtime = SimpleNamespace(database=SimpleNamespace(read=read))
 
     await namespace["_refresh_photo_cancel_origins"](runtime, permit)
@@ -243,3 +264,109 @@ async def test_photo_revisits_original_unentered_ticket(entries, monkeypatch, ex
     else:
         control.assert_awaited_once()
     runtime.recover_attempt.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("abandoned", [False, True])
+async def test_fixed_request_preserves_or_releases_reserved_permit(entries, monkeypatch, abandoned):
+    module, ticket_type = entries
+    monkeypatch.setitem(sys.modules, "camctl.devices.start_entry", module)
+    path = Path(__file__).parents[3] / "src/camctl/bootstrap/flows.py"
+    tree = ast.parse(path.read_text())
+    method = next(node for node in tree.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "_fix_cancel_request")
+    program = ast.Module(body=[method], type_ignores=[])
+    dispositions = SimpleNamespace(ABANDONED="abandoned", SAVED="saved")
+    models = ModuleType("camctl.cancellation.models")
+    models.CancelTargetsDisposition = dispositions
+    monkeypatch.setitem(sys.modules, models.__name__, models)
+    async def settle(awaitable): return await awaitable
+    namespace = {"DbOutcomeKind": SimpleNamespace(COMPLETED="completed"), "settle_required": settle}
+    exec(compile(ast.fix_missing_locations(program), str(path), "exec"), namespace)
+    ticket = ticket_type()
+    ticket.operation, ticket.responsibility_key = "control", "start/1"
+    coordinator = module.StartEntryCoordinator()
+    permit = coordinator.prepare("db", 1)
+    permit.bind("db", ticket)
+    permit.cancel_origins.update((8, 9))
+    permit.phase = module.EntryPhase.RESERVED
+    block = SimpleNamespace(database_id="db", action_id=1, ticket=ticket)
+    request = SimpleNamespace(action_id=8, entry_blocks=(block,))
+    coordinator.pending_cancels[8] = (request, "key")
+    outcome = SimpleNamespace(kind="completed", value=SimpleNamespace(
+        disposition=dispositions.ABANDONED if abandoned else dispositions.SAVED))
+    repository = SimpleNamespace(fix_cancel_targets=lambda *args, **kwargs: outcome)
+    async def write(callback, **kwargs): return callback("owned")
+
+    assert await namespace["_fix_cancel_request"](SimpleNamespace(write=write), repository, request, "key", coordinator) is outcome
+    assert permit.phase is (module.EntryPhase.READY if abandoned else module.EntryPhase.BLOCKED)
+    assert permit.cancel_origins == ({9} if abandoned else {8, 9})
+    assert 8 not in coordinator.pending_cancels
+
+
+@pytest.mark.parametrize("status,canceled", [(2, 1), (6, 1)])
+def test_canceled_origin_abandons_uncommitted_entry_transaction(entries, monkeypatch, status, canceled):
+    module, _ = entries
+    module.PREVENTED = object()
+    monkeypatch.setitem(sys.modules, "camctl.devices.start_entry", module)
+    path = Path(__file__).parents[3] / "src/camctl/persistence/repositories/cancellation.py"
+    tree = ast.parse(path.read_text())
+    cls = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "_FixPhotoEntriesCommand")
+    method = next(node for node in cls.body if isinstance(node, ast.FunctionDef) and node.name == "plan")
+    program = ast.Module(body=[method], type_ignores=[])
+    module_map = {
+        "camctl.devices.evidence": ("EvidenceRegistry",),
+        "camctl.operations.models": ("CallOutcome", "AttemptStatus", "EffectState", "ErrorValue", "Settlement", "SettlementBasis", "EvidenceValue"),
+        "camctl.operations.attempts": ("AttemptFinish",),
+        "camctl.operations.validation": ("validate_outcome",),
+        "camctl.persistence.repositories.capture": ("_CompositeScope", "_FinishStartResultCommand", "ActivityObservationSave", "_merged_state_rows"),
+    }
+    for name, names in module_map.items():
+        fake = ModuleType(name)
+        for symbol in names:
+            setattr(fake, symbol, object())
+        monkeypatch.setitem(sys.modules, name, fake)
+    class Result:
+        def __init__(self, disposition): self.disposition = disposition
+    dispositions = SimpleNamespace(ABANDONED="abandoned")
+    namespace = {"saved_transaction_events": lambda *args: None,
+        "row_facts": lambda *args: {"type": 6, "status": status, "cancel_requested": canceled,
+                                     "target_selection_state": 1},
+        "_CANCEL_ACTION_TYPE": 6, "_TARGET_PENDING": 1,
+        "CancelTargetsSaved": Result, "CancelTargetsDisposition": dispositions,
+        "CommandPlan": lambda *args, **kwargs: SimpleNamespace(result=args[3], read_only=kwargs["read_only"])}
+    exec(compile(ast.fix_missing_locations(program), str(path), "exec"), namespace)
+    command = SimpleNamespace(command=SimpleNamespace(action_id=8), key="key")
+
+    plan = namespace["plan"](command, SimpleNamespace(connection=object()))
+
+    assert plan.read_only and plan.result.disposition == dispositions.ABANDONED
+
+
+@pytest.mark.asyncio
+async def test_expired_unentered_ticket_saves_prevented_result(entries, monkeypatch):
+    module, ticket_type = entries
+    monkeypatch.setitem(sys.modules, "camctl.devices.start_entry", module)
+    path = Path(__file__).parents[3] / "src/camctl/capture/handlers.py"
+    tree = ast.parse(path.read_text())
+    method = next(node for node in tree.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "_expire_unentered_photo")
+    program = ast.Module(body=[method], type_ignores=[])
+    namespace = {"EntryPhase": module.EntryPhase, "ConsistencyError": ValueError,
+        "AttemptStatus": SimpleNamespace(FAILED="failed"), "EffectState": SimpleNamespace(NO_EFFECT="none"),
+        "ErrorValue": lambda *args: args, "SettlementBasis": SimpleNamespace(NOT_DISPATCHED="not-dispatched"),
+        "EvidenceValue": SimpleNamespace(of=lambda value: value), "Settlement": lambda *args: args,
+        "CallOutcome": lambda **kwargs: SimpleNamespace(**kwargs), "RunOutcome": SimpleNamespace(EXPIRED="expired"),
+        "ActivityObservationSave": lambda *args, **kwargs: (args, kwargs),
+        "_DISPATCH_STATE": SimpleNamespace(NOT_DISPATCHED=1), "ExpireActionRequest": lambda *args: args}
+    exec(compile(ast.fix_missing_locations(program), str(path), "exec"), namespace)
+    ticket = ticket_type()
+    ticket.operation, ticket.responsibility_key = "control", "start/1"
+    permit = module.StartEntryCoordinator().prepare("db", 1)
+    permit.bind("db", ticket)
+    runtime = SimpleNamespace(wall_us=lambda: 100, monotonic_ns=lambda: 10, finish=AsyncMock())
+
+    await namespace["_expire_unentered_photo"](runtime, {"id": 1}, ticket, permit)
+
+    assert permit.phase is module.EntryPhase.BLOCKED
+    args, kwargs = runtime.finish.await_args
+    assert args[0] is ticket and args[1].settlement[0] == "not-dispatched"
+    assert kwargs["end_run"] == "expired" and kwargs["expiration"] == (1, 100, 100)

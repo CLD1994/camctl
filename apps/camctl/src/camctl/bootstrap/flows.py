@@ -583,6 +583,7 @@ def _withdrawal_position(database, ready: Path, processing: Path):
 
 async def _fix_cancel_request(database, repository, request, key, entries):
     """入口许可在主协程封住，工作线程只消费固定的许可事实。"""
+    from camctl.cancellation.models import CancelTargetsDisposition
     from camctl.devices.start_entry import EntryPhase
     snapshots = []
     for block in request.entry_blocks:
@@ -596,7 +597,12 @@ async def _fix_cancel_request(database, repository, request, key, entries):
             for block in request.entry_blocks:
                 permit = entries.get(block.database_id, block.action_id)
                 if permit is not None and permit.ticket == block.ticket:
-                    permit.phase = EntryPhase.BLOCKED
+                    if outcome.value.disposition is CancelTargetsDisposition.ABANDONED:
+                        if permit.phase is EntryPhase.RESERVED:
+                            permit.phase = EntryPhase.READY
+                        permit.cancel_origins.discard(request.action_id)
+                    else:
+                        permit.phase = EntryPhase.BLOCKED
             entries.pending_cancels.pop(request.action_id, None)
         return outcome
     return await settle_required(save_and_apply())
@@ -763,7 +769,7 @@ async def _resolve_and_fix(
             database.metadata.instance_id, identity)
         if entry is not None:
             from camctl.devices.start_entry import EntryPhase
-            if entry.phase in (EntryPhase.GRANTING, EntryPhase.UNKNOWN):
+            if entry.phase in (EntryPhase.GRANTING, EntryPhase.UNKNOWN, EntryPhase.RESERVED):
                 deferred_entries[identity] = entry
         facts = current_eligibility_facts(loaded, EntryPhase.READY if identity in deferred_entries
                                           else None if entry is None else entry.phase)
@@ -802,6 +808,8 @@ async def _resolve_and_fix(
     saved = await _fix_cancel_request(database, repository, request, key, start_entries)
     if saved.kind is not DbOutcomeKind.COMPLETED:
         raise db_failure(StateDbFailure, f"取消目标固定事务未完成（{saved.kind.value}）: {saved.error}", saved)
+    if saved.value.disposition is CancelTargetsDisposition.ABANDONED:
+        return None
     if saved.value.disposition is CancelTargetsDisposition.SAVED:
         record_event("cancel.targets", event="fixed",
             database_id=database.metadata.instance_id, action_id=action_id,

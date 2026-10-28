@@ -2140,6 +2140,11 @@ class _FixPhotoEntriesCommand:
                 raise TransactionError('原入口取消复合申请内容不同')
             result = _FixCancelTargetsCommand(self.command, self.key)._reuse(scope.connection, fixed)
             return result
+        origin = row_facts(scope.connection, 'actions', self.command.action_id)
+        if (origin is not None and origin['type'] == _CANCEL_ACTION_TYPE
+                and origin['target_selection_state'] == _TARGET_PENDING
+                and (origin['cancel_requested'] or origin['status'] in (3, 4, 5, 6))):
+            return CommandPlan((), {}, {}, CancelTargetsSaved(CancelTargetsDisposition.ABANDONED), read_only=True)
         plans = []
         sub = _CompositeScope(scope, scope.max_event_id + 1)
         for block in self.command.entry_blocks:
