@@ -1727,8 +1727,16 @@ async def _advance_local_read(
     facts, is_inspection_source, config = await runtime.database.read(inputs)
     if facts is None or facts["verification_state"] in _VERIFICATION_DONE:
         return
-    if is_inspection_source and await _retry_failed_local_source_fallback(runtime, facts):
-        return
+    if is_inspection_source:
+        if await _retry_failed_local_source_fallback(runtime, facts):
+            return
+        # 照片缓存已有可靠失败而相机暂不可用时，继续等待原换源；
+        # 不能在同一 copy 上重新打开已经失败的本地缓存。
+        pending_photo_fallback = await runtime.database.read(lambda owned:
+            _is_photo_cache_source(owned.connection, facts)
+            and _failed_inspection_read_request(owned.connection, facts) is not None)
+        if pending_photo_fallback:
+            return
     if is_inspection_source and runtime.file_executor is None:
         return
 
