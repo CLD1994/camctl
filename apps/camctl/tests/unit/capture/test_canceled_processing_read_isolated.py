@@ -14,6 +14,7 @@ ROOT = Path(__file__).parents[3] / "src/camctl"
 OUTPUTS = ROOT / "persistence/repositories/outputs.py"
 CANCELED = ROOT / "capture/canceled_internal_reads.py"
 LIFECYCLE = ROOT / "bootstrap/lifecycle.py"
+HANDLERS = ROOT / "capture/handlers.py"
 
 
 class StripImports(ast.NodeTransformer):
@@ -36,6 +37,27 @@ class Cursor:
 
 
 class ProcessingCancelTests(unittest.TestCase):
+    def test_cancel_handler_waits_for_original_processing_before_terminal(self):
+        async def run(ready):
+            calls = []
+            async def action(action_id):
+                return {"id": action_id, "type": 2, "execution_started": 1, "execution_spec_json": {}}
+            async def settle(scope, action_id):
+                calls.append("read_settlement")
+                return ready
+            async def save(request): calls.append("cancel_finish")
+            runtime = SimpleNamespace(pending_baselines={}, action=action, save_capture_completion=save, wall_us=lambda: 20)
+            policy = SimpleNamespace(ACTION6_VIDEO_SEGMENTS_V1=SimpleNamespace(value="action6"),
+                OSMO360II_RECORD_SEGMENTS_V1=SimpleNamespace(value="osmo"),
+                OSMO_EMPTY_TAIL_CLASSIFICATION_V1=SimpleNamespace(value="empty"))
+            ns = {"CaptureResultPolicy": policy, "_ACTION_TYPE": SimpleNamespace(CAMERA_RECORD=2),
+                "_read_result_scope": lambda value: value, "settle_canceled_processing_read": settle,
+                "FinishCanceledCapture": lambda **kwargs: kwargs}
+            await load(HANDLERS, "_finish_canceled_capture", ns)(runtime, 4)
+            return calls
+        self.assertEqual(asyncio.run(run(False)), ["read_settlement"])
+        self.assertEqual(asyncio.run(run(True)), ["read_settlement", "cancel_finish"])
+
     def test_release_transaction_waits_for_other_original_call(self):
         current = [False]
         ns = {"_RUN_STATUS": SimpleNamespace(PENDING=1), "_RUN_KIND": SimpleNamespace(READ_FILE=3),
