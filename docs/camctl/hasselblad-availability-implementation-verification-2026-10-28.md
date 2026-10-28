@@ -124,7 +124,43 @@ PYTHONPATH=apps/camctl/src apps/camctl/.venv311/bin/python -m pytest apps/camctl
 
 内部 READ 耗尽接线在独立工作区 `/tmp/camctl-unknown-read-exhaustion-20261028` 误运行了一次不符合本轮限制的测试：`UV_PROJECT_ENVIRONMENT=/tmp/camctl-unknown-read-exhaustion-20261028/apps/camctl/.venv311 uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests/unit/capture/test_unknown_read_exhaustion.py -q`。该命令退出码为 0，输出 3 项通过；但测试直接导入真实 `camctl` 模块并调用真实枚举登记，按项目分类跨越集成边界，违反本轮禁止运行集成测试的要求。它没有访问真实数据库或设备，结果不作为本轮合规的单元验证证据。负责人收到提醒后停止运行该测试并改用隔离替身。
 
-该分支仍需处理完整 READ 已结束后的机会交接、尚未建立活动的拍摄与 READ 的选中竞争、合法 UNKNOWN 耗尽后的有限终结，以及取消与绑定失败的先后语义。顾问已分析前两项读取结束和 UNKNOWN 耗尽的规格边界，相关选择尚待用户答复；这些未完成事项不得以现有局部测试通过替代。
+完整 READ 结束后的机会交接、拍摄与 READ 的共同选择、UNKNOWN 耗尽及取消与绑定失败的先后处理已在后续提交中合入；当前入口及验证范围如下。
+
+### H3 当前入口与隔离验证
+
+2026-10-28，在独立工作区 `/tmp/camctl-read-end-persist-20261028` 的源码 `ffa3157e` 核对 H3。STOP 分支合并提交为 `88c5effc`；该合并保留 H1 的原保存拥有者。以下命令使用 Python 3.11，退出码均为 0，前台输出未另存：
+
+```bash
+env PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /workspaces/camctl/apps/camctl/.venv311/bin/python -B -m pytest --noconftest -p no:cacheprovider -q apps/camctl/tests/unit/capture/test_normal_recording_stop_isolated.py apps/camctl/tests/unit/capture/test_segment_completion_recovery_isolated.py
+python3.11 -B -m unittest discover -s apps/camctl/tests/unit/capture -p test_h1_recovery_boundaries_isolated.py -q
+python3.11 -B apps/camctl/tests/unit/capture/test_saved_internal_binding_recovery_isolated.py
+python3.11 -B apps/camctl/tests/unit/capture/test_internal_inspection_scope_isolated.py
+python3.11 -B apps/camctl/tests/unit/capture/test_canceled_processing_read_isolated.py
+```
+
+上述命令分别通过 62、11、5、1、7 项。测试从源码抽取目标行为并替换协作者，不导入实际包资源或连接数据库。最后两项分别核对原 READ 与检查保存的共享责任、原键和 UNKNOWN 重送，以及取消后的文件拥有者、事务提案、独立守卫和终态分页发现。原 READY 或 FAILED 等状态均由受控替身提供，不能据此推断真实数据库组合。
+
+在合并 H1、H2 的 `ebf3b336` 后，以下三条命令在导入受测模块之前将 `camctl.resources` 替换为禁止实际读取的替身，并禁用自动插件加载；各通过 7 项。测试数据库、驱动和其余协作者均使用替身：
+
+```bash
+env PYTHONPATH=apps/camctl/src PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /workspaces/camctl/apps/camctl/.venv311/bin/python -B -c 'import sys, types; r=types.ModuleType("camctl.resources"); r.resource_bytes=lambda *a, **k: (_ for _ in ()).throw(AssertionError("禁止真实包资源")); r.available_resources=r.resource_bytes; r.ResourceError=RuntimeError; r.ResourceName=str; sys.modules["camctl.resources"]=r; import pytest; raise SystemExit(pytest.main(["--noconftest", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "-q", "apps/camctl/tests/unit/operations/test_availability_assembly_isolated.py"]))'
+env PYTHONPATH=apps/camctl/src PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /workspaces/camctl/apps/camctl/.venv311/bin/python -B -c 'import sys, types; r=types.ModuleType("camctl.resources"); r.resource_bytes=lambda *a, **k: (_ for _ in ()).throw(AssertionError("禁止真实包资源")); r.available_resources=r.resource_bytes; r.ResourceError=RuntimeError; r.ResourceName=str; sys.modules["camctl.resources"]=r; import pytest; raise SystemExit(pytest.main(["--noconftest", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "-q", "apps/camctl/tests/unit/operations/test_availability_coordinator_isolated.py"]))'
+env PYTHONPATH=apps/camctl/src PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /workspaces/camctl/apps/camctl/.venv311/bin/python -B -c 'import sys, types; r=types.ModuleType("camctl.resources"); r.resource_bytes=lambda *a, **k: (_ for _ in ()).throw(AssertionError("禁止真实包资源")); r.available_resources=r.resource_bytes; r.ResourceError=RuntimeError; r.ResourceName=str; sys.modules["camctl.resources"]=r; import pytest; raise SystemExit(pytest.main(["--noconftest", "-p", "no:cacheprovider", "-p", "pytest_asyncio.plugin", "-q", "apps/camctl/tests/unit/outputs/test_availability_dispatch_isolated.py"]))'
+```
+
+| H3 责任 | 当前生产入口与验证范围 |
+| --- | --- |
+| 1. 共同检查与预算 | `AvailabilityCoordinator` 使用目标设备 query 配置、独立检查流程和共享原调用；协调单元覆盖共同等待、原键重送、耗尽及恢复。 |
+| 2. 正常拍摄 | `CaptureFlow` 在原准备流程前调用 `AvailabilityAssembly.capture`；装配单元覆盖未建活动的检查申请。 |
+| 3. DEVICE 读取 | `advance_obtain` 按候选调用同一 `AvailabilityAssembly.read`，再进入原机会与实际派发；装配和派发守卫单元覆盖原来源、持槽与在途限制。 |
+| 4. 资源和派发资格 | 准备、检查、READ 意图和实际派发分别核对资源事实；上述派发测试和 H2 目标守卫使用连接替身。 |
+| 5. 让位、等待与恢复 | 已结束 READ 保存当前轮原 `ReadEnd`；等待计时、原预算和文件顺序由既有重试与共同选择代码持有。相关阶段提交及隔离测试分别核对等待清除、UNKNOWN 耗尽和原结束恢复。 |
+| 6. 唤醒和关闭 | 协调器持有检查调用、待保存结果和重试截止；会话装配恢复终态后的原检查，并接入关闭收场。协调单元覆盖等待与原结果拥有者，不替代真实会话组合。 |
+| 7. 取消和竞争 | 检查及 READ 保留原实际结果和保存键；分段检查与普通录像分别恢复原所属责任。取消单元覆盖原结果、检查 UNKNOWN、文件拥有者、slot 与原键。 |
+| 8. 错误和诊断 | 检查耗尽分别交给拍摄或读取失败事务；原绑定、调用结果和诊断保持独立。公共诊断消费者与报告组合仍按 H4 和联合验收单独核对。 |
+| 9. HOST 和 DEVICE | HOST 本地拷贝不申请相机机会；DEVICE 读取按原固定绑定和驱动证据恢复。HOST、DEVICE 的真实归档、下载及报告组合未在本轮执行。 |
+
+Sol 分别复核了 STOP 原事实、检查 UNKNOWN 交接和普通录像取消后处理，未发现各自范围内需要继续修复的问题。此记录不证明真实初始化、状态库事务、工具进程、跨组件报告、安装版或相机验收；本轮没有新增或运行集成测试，也没有访问真实数据库、设备或现场环境。
 
 ## H4：公共诊断消费者
 
