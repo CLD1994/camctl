@@ -607,7 +607,7 @@ async def _publish_and_finish(
 
     def inputs(owned):
         facts = load_obtain_facts(owned.connection, action_id)
-        deliveries = (_prepared_deliveries(owned.connection, action_id, limit=publish_limit, read_succeeded=True)
+        deliveries = (_unpublished_deliveries(owned.connection, action_id, limit=publish_limit, read_succeeded=True)
                       if publish_limit else ())
         return facts, deliveries
     facts, deliveries = await runtime.database.read(inputs)
@@ -619,7 +619,7 @@ async def _publish_and_finish(
         if not await runtime.database.read(lambda owned: delivery_read_succeeded(owned.connection, delivery_id)):
             continue
         await _publish_delivery(runtime, int(delivery_id), now)
-    if await runtime.database.read(lambda owned: _prepared_deliveries(owned.connection, action_id, limit=1)):
+    if await runtime.database.read(lambda owned: _unpublished_deliveries(owned.connection, action_id, limit=1)):
         return len(deliveries)
     outcome = await _save_repository(runtime, runtime.outputs.finish_obtain, FinishObtain(action_id=action_id, occurred_at=now), new_operation_key())
     if outcome.kind is not DbOutcomeKind.COMPLETED:
@@ -634,18 +634,19 @@ async def _publish_and_finish(
     return len(deliveries)
 
 
-def _prepared_deliveries(connection, action_id: int, *, limit: int, read_succeeded: bool = False) -> list[int]:
+def _unpublished_deliveries(connection, action_id: int, *, limit: int, read_succeeded: bool = False) -> list[int]:
     """汇总确定后仍待发布的成功交付。"""
     with closing(connection.execute(
         "SELECT d.id FROM deliveries d"
         " JOIN obtain_items i ON i.delivery_id = d.id"
         " JOIN obtain_source_selections s ON s.id = i.selection_id"
         " JOIN action_dependencies dep ON dep.id = s.dependency_id"
-        " WHERE dep.action_id = ? AND d.status = ?"
+        " WHERE dep.action_id = ? AND d.status IN (?, ?)"
         + (" AND EXISTS (SELECT 1 FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id"
            " WHERE c.delivery_id=d.id AND r.kind=3 AND r.status=3)" if read_succeeded else "")
         + " ORDER BY d.id LIMIT ?",
-        (action_id, int(_DELIVERY_STATUS.PREPARED), limit),
+        (action_id, int(_DELIVERY_STATUS.PREPARED),
+         int(_DELIVERY_STATUS.PUBLISHING), limit),
     )) as cursor:
         return [int(row[0]) for row in cursor.fetchall()]
 
