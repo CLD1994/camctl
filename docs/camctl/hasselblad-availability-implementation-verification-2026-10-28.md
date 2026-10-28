@@ -84,6 +84,8 @@ PYTHONPATH=apps/camctl/src apps/camctl/.venv311/bin/python -m pytest apps/camctl
 
 在独立工作区 `/tmp/camctl-h3-availability-coordinator-20261028` 的提交 `ae2bab45`，负责人报告定向隔离单元测试为 247 项及 12 个子测试通过，`git diff --check c3bb1b8f HEAD` 通过。该分支接入检查协调、拍摄与 DEVICE 读取、检查事务和取消恢复，但尚未合入当前分支。测试使用受控枚举和协作者替身，未运行集成测试，未读取真实包资源或访问真实数据库及设备；上述结果不能证明组件组合、历史回放、跨会话恢复或真机行为。
 
+内部 READ 耗尽接线在独立工作区 `/tmp/camctl-unknown-read-exhaustion-20261028` 误运行了一次不符合本轮限制的测试：`UV_PROJECT_ENVIRONMENT=/tmp/camctl-unknown-read-exhaustion-20261028/apps/camctl/.venv311 uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests/unit/capture/test_unknown_read_exhaustion.py -q`。该命令退出码为 0，输出 3 项通过；但测试直接导入真实 `camctl` 模块并调用真实枚举登记，按项目分类跨越集成边界，违反本轮禁止运行集成测试的要求。它没有访问真实数据库或设备，结果不作为本轮合规的单元验证证据。负责人收到提醒后停止运行该测试并改用隔离替身。
+
 该分支仍需处理完整 READ 已结束后的机会交接、尚未建立活动的拍摄与 READ 的选中竞争、合法 UNKNOWN 耗尽后的有限终结，以及取消与绑定失败的先后语义。顾问已分析前两项读取结束和 UNKNOWN 耗尽的规格边界，相关选择尚待用户答复；这些未完成事项不得以现有局部测试通过替代。
 
 ## H4：公共诊断消费者
