@@ -26,6 +26,18 @@ def load(name, namespace):
 
 
 class CanceledRecoveryTests(unittest.TestCase):
+    def test_device_evidence_uses_original_driver_after_rebinding(self):
+        namespace = {"DeviceBinding": lambda device, driver: (device, driver)}
+        evidence = load("_original_read_evidence", namespace)
+        calls = []
+        flow = SimpleNamespace(devices={"camera": SimpleNamespace(binding=("camera", "new"), evidence="new-evidence")},
+            recovery_evidence_for=lambda binding, operation: calls.append((binding, operation)) or "old-evidence")
+        self.assertEqual(evidence(flow, "camera", "old"), "old-evidence")
+        self.assertEqual(calls, [(("camera", "old"), "read")])
+        self.assertEqual(evidence(flow, "camera", "new"), "new-evidence")
+        flow.recovery_evidence_for = None
+        self.assertIsNone(evidence(flow, "camera", "old"))
+
     def test_binding_failure_recovery_preserves_original_identity_and_key(self):
         async def run(reason, identity):
             calls = []
@@ -76,6 +88,7 @@ class CanceledRecoveryTests(unittest.TestCase):
             namespace = {"unfinished_read_end": lambda owned, copy_id: (ticket, (ticket, end, 100, slot)) if saved else (ticket, None),
                 "HeldReadEnd": lambda ticket, end, occurred_at, **kwargs: SimpleNamespace(ticket=ticket, end=end, **kwargs),
                 "_LOCAL_READ_EVIDENCE": "local", "_stored_read_attempt_config": lambda connection, copy_id: "config",
+                "_original_read_evidence": lambda runtime, device, driver: "device",
                 "_resume_local_host_end": resume, "_resume_local_delivery_end": resume,
                 "DeviceBinding": lambda *args: args, "ConsistencyError": ValueError}
             await load("_settle_ready_read_ends", namespace)(flow, 100)
@@ -139,6 +152,7 @@ class CanceledRecoveryTests(unittest.TestCase):
             namespace = {"unfinished_read_end": lambda owned, copy_id: (ticket, (ticket, end, 100, None)) if saved else (ticket, None),
                 "HeldReadEnd": lambda ticket, end, occurred_at, **kwargs: SimpleNamespace(ticket=ticket, end=end, **kwargs),
                 "_LOCAL_READ_EVIDENCE": "local", "_resume_canceled_delivery_end": resume,
+                "_original_read_evidence": lambda runtime, device, driver: "device" if device in runtime.devices else None,
                 "DeviceBinding": lambda *args: args, "ConsistencyError": ValueError}
             await load("_settle_canceled_read_ends", namespace)(flow, 100)
             self.assertIn("a.cancel_requested=1", discovery.query)
