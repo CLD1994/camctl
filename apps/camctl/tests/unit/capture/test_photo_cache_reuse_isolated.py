@@ -18,10 +18,15 @@ def api(monkeypatch):
     class Status(IntEnum): SUCCEEDED = 3; FAILED = 4; CANCELED = 5
     class Retention(IntEnum): REQUIRED = 1
     class Cleanup(IntEnum): NOT_NEEDED = 1
+    class RunKind(IntEnum): CHECK_CAPTURE_RESULTS = 4
+    class Role(IntEnum): ORIGINAL = 1; PREVIEW = 2
+    class Completion(IntEnum): COMPLETE = 3
     enums = ModuleType("camctl.contracts.enums")
     enums.enum_for = lambda name: {"actions.type": ActionType, "outputs.kind": OutputKind,
         "intermediate_files.purpose": Purpose, "actions.status": Status,
-        "intermediate_files.retention_state": Retention, "intermediate_files.cleanup_state": Cleanup}[name]
+        "intermediate_files.retention_state": Retention, "intermediate_files.cleanup_state": Cleanup,
+        "operation_runs.kind": RunKind, "device_files.role": Role,
+        "device_files.completion_state": Completion}[name]
     @dataclass(frozen=True)
     class Boundary:
         txn_id: int
@@ -44,12 +49,20 @@ def api(monkeypatch):
     reuse._read_scope = lambda connection: nullcontext()
     reuse._selection_is_bound_at_boundary = lambda **kwargs: (seen.append(kwargs) or (kwargs["boundary"], True))
     capture = ModuleType("camctl.persistence.repositories.capture_facts")
-    capture.PhotoResultReads = lambda connection: SimpleNamespace(verify_cache=lambda request, **kwargs: "original")
+    pages = ModuleType("camctl.persistence.repositories.result_pages")
+    entry = SimpleNamespace(identity="identity", size_bytes=100, locator={"camera": "original"})
+    observations = (SimpleNamespace(type="result_files_listed", version=3, data={"role": "original"}),
+        SimpleNamespace(type="photo_result_attempt", version=2,
+                        data={"role": "original", "comparison": {"selected": "sync"}}))
+    page = SimpleNamespace(ref=SimpleNamespace(ticket=SimpleNamespace(run_id=10)),
+        page=SimpleNamespace(entries=(entry,), outcome=SimpleNamespace(observations=observations)),
+        file_ids=(("identity", 3),))
+    pages.read_saved_page = lambda connection, event_id: (page, {})
     source_transactions = ModuleType("camctl.persistence.repositories.source_transactions")
     source_transactions._created_before = lambda *args: "1"
     definitions = ModuleType("camctl.devices.drivers.hasselblad.definitions")
     definitions.DRIVER_ID = "hasselblad_cfv100c"
-    for stub in (enums, history, json_values, values, requests, validators, facts, transaction, reuse, capture, definitions, source_transactions):
+    for stub in (enums, history, json_values, values, requests, validators, facts, transaction, reuse, capture, pages, definitions, source_transactions):
         monkeypatch.setitem(sys.modules, stub.__name__, stub)
     path = Path(__file__).parents[3] / "src/camctl/outputs/photo_cache_reuse.py"
     name = "camctl.outputs._isolated_photo_cache_reuse"
@@ -82,7 +95,12 @@ def test_photo_h_uses_whole_transaction_when_output_event_is_inside_it(api):
               "kind": 1, "created_event_id": 11}
     file = {"id": 2, "retention_state": 1, "cleanup_state": 1, "size_bytes": 100,
             "sha256": "a" * 64, "relative_path": "cache/2.3fr", "last_error_json": None}
-    states.update({("actions", 1): action, ("outputs", 4): output, ("intermediate_files", 2): file})
+    device = {"source_action_id": 1, "role": 1, "completion_state": 3, "size_bytes": 100,
+              "sha256": "a" * 64, "locator_json": {"camera": "original"},
+              "completion_evidence_json": {"observation": {"photo_source": {
+                  "result_page_event_id": 7, "role": "original"}}}}
+    states.update({("actions", 1): action, ("outputs", 4): output, ("intermediate_files", 2): file,
+                   ("device_files", 3): device, ("operation_runs", 10): {"action_id": 1, "kind": 4}})
     row = SimpleNamespace(table="outputs", row_id=4, before=SimpleNamespace(exists=False),
         after=SimpleNamespace(exists=True, values=output))
     output_event = SimpleNamespace(kind=("OUTPUT_REGISTERED", "ORIGINAL"), rows=(row,))
@@ -92,13 +110,15 @@ def test_photo_h_uses_whole_transaction_when_output_event_is_inside_it(api):
                                   events=(SimpleNamespace(event=finish), SimpleNamespace(event=output_event)))
     records[11] = SimpleNamespace(event=output_event, transaction=transaction)
     request = {"archive_error": None, "action_id": 1, "file_id": 2, "device_file_id": 3,
-               "size_bytes": 100, "sha256": "a" * 64, "result_page_event_id": 7, "occurred_at": 88}
+               "size_bytes": 100, "sha256": "a" * 64, "result_page_event_id": 7, "selected": "sync", "occurred_at": 88}
     cache_row = SimpleNamespace(table="intermediate_files", row_id=2,
         before=SimpleNamespace(exists=True, values={"size_bytes": None, "sha256": None}),
         after=SimpleNamespace(exists=True, values={"size_bytes": 100, "sha256": "a" * 64}))
     cache_event = SimpleNamespace(kind=("INTERMEDIATE_FILE_CHANGED", "LIFECYCLE"), event_id=8,
                                   evidence={"photo_cache_request": request}, rows=(cache_row,), occurred_at=88)
-    records[8] = SimpleNamespace(event=cache_event, transaction=SimpleNamespace(last_event_id=8))
+    records[8] = SimpleNamespace(event=cache_event, transaction=SimpleNamespace(first_event_id=8, last_event_id=8))
+    records[7] = SimpleNamespace(event=SimpleNamespace(kind=("RESULT_PAGE", "APPEND")),
+                                 transaction=SimpleNamespace(last_event_id=7))
     result = module.read_bound_photo_cache(output_id=4, obtain_action_id=5, selection_id=6,
                                            owned=SimpleNamespace(connection=Connection()))
     assert result.intermediate_file_id == 2
