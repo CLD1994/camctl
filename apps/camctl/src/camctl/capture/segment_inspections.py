@@ -398,17 +398,21 @@ async def _obtain_input(flow: MediaFlow, request: SegmentInspectionRequest,
                 interval_s=config.retry_interval_s,
                 now_ns=read_flow.monotonic_ns()) is not None:
             return InputStep(InputPhase.RETRY_WAITING, copy_id=copy_id)
-        request_slot, slot_key = SlotRequest(copy_id, read_flow.occurred_at()), new_operation_key()
+        current = read_flow.occurred_at()
+        selection = None if read_flow.capture_selection is None else read_flow.capture_selection(current)
+        request_slot, slot_key = SlotRequest(copy_id, current, capture_selection=selection), new_operation_key()
         slot = await read_flow.database.write(lambda owned: copies.repository.grant_read_slot(request_slot, slot_key, owned), key=slot_key)
         if slot.kind is not DbOutcomeKind.COMPLETED:
             raise db_failure(ConsistencyError, f"分段检查读取机会未可靠保存: {slot.error}", slot)
         if slot.value.outcome in (SlotOutcome.WAIT, SlotOutcome.FINISHED):
             return InputStep(InputPhase.WAITING, copy_id=copy_id, reason=slot.value.reason)
+        current = read_flow.occurred_at()
+        selection = None if read_flow.capture_selection is None else read_flow.capture_selection(current)
         ticket, reason = (await __import__("camctl.capture.media_flow", fromlist=["acquire_read_attempt"]).acquire_read_attempt(
             read_flow, AttemptIntent("read", request.action_id, OperationKind.READ_FILE,
                 AttemptTarget(copy_id=copy_id), None,
                 AttemptConfig(config.max_attempts, config.timeout_s, config.retry_interval_s),
-                read_flow.occurred_at(), copy_round=state.round)))
+                current, copy_round=state.round, capture_selection=selection)))
         if ticket is None:
             return InputStep(InputPhase.WAITING, copy_id=copy_id, reason=reason)
     else:
@@ -416,7 +420,8 @@ async def _obtain_input(flow: MediaFlow, request: SegmentInspectionRequest,
 
     from camctl.outputs.read_attempts import hold_read_end
     sessions = read_flow.sessions if ticket is None else read_flow.sessions.for_attempt(
-        ticket, idle_timeout_s=config.timeout_s)
+        ticket, idle_timeout_s=config.timeout_s, capture_selection=read_flow.capture_selection,
+        continuations=read_flow.continuing_read_tickets, occurred_at=read_flow.occurred_at)
     context: InputContext
     context = InputContext(
         action_id=request.action_id, processing_id=None,
