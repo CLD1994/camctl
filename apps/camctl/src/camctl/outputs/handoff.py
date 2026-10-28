@@ -298,6 +298,49 @@ def decide_handoff(facts: DeliveryFacts, files: DeliveryLocations) -> DeliveryDe
     )
 
 
+class CanceledPublicationChoice(Enum):
+    """取消生效后对原发布意图的文件观察结论。"""
+
+    CANCEL_STAGING = "cancel_staging"
+    CONFIRM_HANDOFF = "confirm_handoff"
+    UNKNOWN = "unknown"
+    NOT_ACTIVE = "not_active"
+
+
+def decide_canceled_publication(
+    facts: DeliveryFacts, files: DeliveryLocations,
+) -> CanceledPublicationChoice:
+    """分类原发布责任，取消生效后不再移动 staging 副本。"""
+    if not isinstance(facts, DeliveryFacts) or not isinstance(files, DeliveryLocations):
+        raise TypeError("取消对账必须使用原交付事实和三位置观察")
+    if facts.status in (int(_DELIVERY_STATUS.PUBLISHED), int(_DELIVERY_STATUS.FAILED),
+                        int(_DELIVERY_STATUS.CANCELED), int(_DELIVERY_STATUS.WITHDRAWN)):
+        return CanceledPublicationChoice.NOT_ACTIVE
+    if facts.status != int(_DELIVERY_STATUS.PUBLISHING) or facts.publication_intent_event_id is None:
+        raise ConsistencyError("取消对账要求原发布意图")
+    if facts.withdrawal_requested:
+        return CanceledPublicationChoice.NOT_ACTIVE
+    if facts.published_event_id is not None or facts.prepared_size is None or facts.prepared_sha256 is None:
+        raise ConsistencyError("取消对账缺少一致的原准备及发布事实")
+    if any(not files.at(place).observed for place in HandoffPlace):
+        return CanceledPublicationChoice.UNKNOWN
+    delivered = [place for place in (HandoffPlace.READY, HandoffPlace.PROCESSING)
+                 if files.at(place).present]
+    if len(delivered) > 1 or delivered and files.staging.present:
+        return CanceledPublicationChoice.UNKNOWN
+    if delivered:
+        place = delivered[0]
+        if not _confirm_prepared_copy(facts, files.at(place), place):
+            return CanceledPublicationChoice.UNKNOWN
+        return CanceledPublicationChoice.CONFIRM_HANDOFF
+    staging = files.staging
+    if not staging.present or staging.length != facts.prepared_size:
+        return CanceledPublicationChoice.UNKNOWN
+    if staging.sha256 is not None and staging.sha256 != facts.prepared_sha256:
+        return CanceledPublicationChoice.UNKNOWN
+    return CanceledPublicationChoice.CANCEL_STAGING
+
+
 # ---- 仓储输入与结果 ----
 
 
