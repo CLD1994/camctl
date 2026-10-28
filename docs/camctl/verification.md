@@ -4,6 +4,35 @@
 
 [关键阶段与命令日志验证（2026-10-26）](operational-logging-validation-2026-10-26.md)记录统一 JSON、INFO 阶段与实际命令、DEBUG 耗时明细的最终单元和定向集成结果，以及现有真机验证环境的安装一致性；扩大检查中的旧测试失配单独保留。
 
+## 错误日志投影与诊断复用的软件验证（2026-10-28）
+
+[修复计划](../superpowers/plans/2026-10-28-error-log-projection-and-ownership.md)完成成功设置 stdout 摘要、同记录重复错误引用、会话最终摘要复用原诊断，以及报告内部通信的异常图边界保存。实际调用结果、数据库证据、机器会话 reason/details 保持各自的原编码；新收场错误及诊断登记失败仍交付完整适用事实。
+
+受测源码为 `1345a4291822db9686828bcd04be80c37b4db932`，环境为 Linux 开发容器、CPython 3.11.17，工作目录为 `/home/cld/.codex/worktrees/7426/camctl`，解释器为 `apps/camctl/.venv311/bin/python`。使用显式源码路径，禁用插件自动加载及字节码写入；旧异步用例只显式启用 pytest-asyncio。单元替身隔离包资源、业务文件、数据库、网络、线程和子进程，被测源码加载保留。各范围按进程可变模块状态分别执行。
+
+| 范围 | 结果 |
+| --- | --- |
+| 公共投影、会话来源及控制选择、最终格式函数使用实际纯投影、H4 原调用消费者，共 4 个隔离文件 | 128 项通过，6.43 秒，退出 0。 |
+| 7 个既有日志单元文件、异常图编码器、CLI JSON 诊断和本地收场异常图，共 10 个文件 | 217 项通过，1.43 秒，退出 0；资源、线程、数据库及子进程禁止器触发次数为 0。 |
+
+执行命令为：
+
+```bash
+env -u PYTHONHOME -u PYTEST_ADDOPTS -u CAMCTL_TIMING_REPO -u CAMCTL_TIMING_DATA PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=apps/camctl/src:apps/camctl/tests apps/camctl/.venv311/bin/python -m pytest -p no:cacheprovider apps/camctl/tests/unit/logging_runtime/test_projection_isolated.py apps/camctl/tests/unit/session/test_outcome_diagnostic_sources_isolated.py apps/camctl/tests/unit/bootstrap/test_error_projection_handoff_isolated.py apps/camctl/tests/unit/operations/test_h4_diagnostic_consumer_isolated.py -q --tb=short
+env -u PYTHONHOME -u PYTEST_ADDOPTS -u CAMCTL_TIMING_REPO -u CAMCTL_TIMING_DATA PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=apps/camctl/src:apps/camctl/tests apps/camctl/.venv311/bin/python tmp/error-log-repair-20261028/run_audited_units.py
+```
+
+第二组入口只包含 `operations/test_error_diagnostics.py`，日志目录的 `test_diagnostics.py`、`test_log_diagnostics.py`、`test_diagnostic_durability.py`、`test_diagnostic_reservations.py`、`test_diagnostic_write_receipts.py`、`test_logger.py`、`test_standard_logging.py`，以及 bootstrap 的 `test_cli_json_diagnostics.py` 和 `test_local_work_error_diagnostics.py`。完整禁止器、命令、源码、进程回执和日志收据保存在 `tmp/error-log-repair-20261028/`。
+
+既有布局断言已迁移到可解析引用、稳定诊断身份和结构化摘要，原错误字节、完整异常组、共享回执、顺序和控制对象断言保留。旧 `test_session_terminal_diagnostics.py` 仍因顶层导入真实登记资源而未运行；其中六种直接异常与两种失败结果分区，已由隔离的实际会话入口承接，保留 23 成员宽异常组、16 层深异常组及取消对象身份。新增最终格式函数单元使用真实纯投影函数，实际文件通道、队列、进程和数据库均使用替身。
+
+独立静态评审覆盖投影、预编码及嵌套异常图、报告编码与解码、stderr 回退、会话来源合并、报告 worker 收场、诊断登记失败和后到控制异常。处理确定问题后复核未发现剩余阻塞。17 个变更 Python 文件的 AST 解析与差异空白检查通过。部署依赖、配置和能力说明不变，部署脚本按原目录复制源码，工作规则及部署脚本不需调整。
+
+受控的 16 次成功设置、1 次失败设置样本，原始展开为 418568 字节，日志投影为 2977 字节；该用例另行输出体积收据并退出 0，已包含在上述通过数内。测试同时证明源对象不变。此数值只表示合成 JSON 输入的投影变化，不代表客户日志重跑、目标吞吐或真实相机验证。
+
+本次没有新增、修改或运行集成测试，也未执行全量单元套件、真实报告进程通信、安装包、TX2、真实设备及物理断电验收。文件日志和 stderr 都不可用时继续保留原控制传播及停止重试边界，不能保证诊断输出。
+
+
 ## 拍摄结果与普通交付恢复的软件验证（2026-10-28）
 
 [修复计划](../superpowers/plans/2026-10-28-capture-result-and-publication-recovery.md)完成首次配对的事务内边界固定、原 RESULTS 结果与业务处置共同保存，以及普通 PUBLISHING 的发现和取消收场。公共路径覆盖 Action6、OSMO 360 II 与 Hasselblad；Hasselblad 主机照片继续使用原 START 及文件恢复依据。
