@@ -2633,7 +2633,7 @@ def _activity_id_of_connection(connection, action_id: int) -> int:
 
 @owned_tool_call
 async def _stop_call(runtime: CaptureRuntime, action,
-                     operation: str = "stop_recording") -> HandlerOutcome:
+                     operation: str = "stop_recording", *, normal_recording=False) -> HandlerOutcome:
     """按原停止预算发起一次设备停止调用并保存尝试结果。
 
     意图先提交才派发；可靠确认结束停止流程，调用错误单独保存；
@@ -2681,6 +2681,33 @@ async def _stop_call(runtime: CaptureRuntime, action,
     if outcome.value.disposition is not BeginDisposition.GRANTED:
         return HandlerOutcome("stop_not_granted", outcome.value.reason)
     ticket = outcome.value.ticket
+    normal_source = None
+    if (normal_recording and segmented_recording
+            and action["execution_spec_json"].get("result_policy")
+            == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value
+            and stop_state.anchor_from_current_session and stop_state.stop_target_ns is not None
+            and stop_state.stop_attempts_used == 0
+            and not (await runtime.action(action["id"]))["cancel_requested"]):
+        def read_start(owned):
+            with closing(owned.connection.execute(
+                "SELECT a.result_event_id FROM operation_runs r JOIN operation_attempts a ON a.run_id=r.id "
+                "WHERE r.responsibility_key=? AND r.activity_id=? AND a.status=? "
+                "AND a.effect_state=? AND a.error_json IS NULL AND a.result_event_id IS NOT NULL "
+                "ORDER BY a.attempt_no DESC LIMIT 1",
+                (f"start/{action['id']}", int(ticket.target_id), int(_ATTEMPT_STATUS.SUCCEEDED),
+                 int(_EFFECT_STATE.CONFIRMED)),
+            )) as cursor:
+                return cursor.fetchone()
+        start = await runtime.database.read(read_start, description="读取正常录像原启动结果")
+        elapsed = runtime.monotonic_ns() - (stop_state.stop_target_ns - (
+            _target_duration_ms(action) + action["execution_spec_json"].get("startup_margin_ms", 0)
+        ) * 1_000_000)
+        if start is not None and elapsed >= (
+            _target_duration_ms(action) + action["execution_spec_json"].get("startup_margin_ms", 0)
+        ) * 1_000_000:
+            from camctl.capture.models import NormalRecordingStop
+
+            normal_source = NormalRecordingStop(start[0], elapsed)
     with measure_stage("capture.stop", action_id=action["id"],
             device_id=action["device_id"], activity_id=ticket.target_id,
             run_id=ticket.run_id, attempt_id=ticket.attempt_id, operation=operation):
@@ -2711,7 +2738,9 @@ async def _stop_call(runtime: CaptureRuntime, action,
                         + action["execution_spec_json"].get("startup_margin_ms", 0)
                     ) * 1_000_000
                     elapsed = returned_ns - (state.stop_target_ns - duration_ns)
-                host_stop = HostTimerStopSave(elapsed)
+                host_stop = HostTimerStopSave(elapsed, normal_source if (
+                    call.status is AttemptStatus.SUCCEEDED and call.error is None
+                ) else None)
             if (action["type"] == int(_ACTION_TYPE.CAMERA_TIMELAPSE)
                     and action["execution_spec_json"]["end_control"] == int(EndControl.HOST_TIMER)):
                 deadline = runtime.timelapse_deadlines.get(action["id"])
@@ -3906,7 +3935,7 @@ async def _record_handler(action_id: int, context: CaptureRuntime) -> HandlerOut
         if await _confirm_stop_by_query(context, action):
             # 停止核实本轮已收场或占用：重入按已保存事实推进。
             return
-        step = await _stop_call(context, action)
+        step = await _stop_call(context, action, normal_recording=not canceled)
         if step.phase == "confirmed":
             # 停止确认：活动以可靠停止事实收场，重入进入终态分支。
             (await _conclude_activity(context, action_id))
