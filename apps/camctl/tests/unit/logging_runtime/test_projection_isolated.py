@@ -24,6 +24,7 @@ EXCEPTION_SOURCE = Path(__file__).parents[3] / 'src/camctl/operations/error_diag
 LOGGER_SOURCE = Path(__file__).parents[3] / 'src/camctl/logging_runtime/logger.py'
 HB_SOURCE = Path(__file__).parents[3] / 'src/camctl/devices/drivers/hasselblad/driver.py'
 COPY_SOURCE = Path(__file__).parents[3] / 'src/camctl/outputs/copy.py'
+MESSAGES_SOURCE = Path(__file__).parents[3] / 'src/camctl/reporting/messages.py'
 
 @dataclass(frozen=True)
 class ErrorValue:
@@ -105,6 +106,7 @@ def isolated():
         logger_source = LOGGER_SOURCE.read_text(encoding='utf-8')
         hb_source = HB_SOURCE.read_text(encoding='utf-8')
         copy_source = COPY_SOURCE.read_text(encoding='utf-8')
+        messages_source = MESSAGES_SOURCE.read_text(encoding='utf-8')
         with patch.object(builtins, 'open', forbidden), patch.object(Path, 'open', forbidden):
             exec(compile(exception_source, str(EXCEPTION_SOURCE), 'exec'), modules['camctl.operations.error_diagnostics'].__dict__)
             exec(compile(source, str(SOURCE), 'exec'), module.__dict__)
@@ -115,6 +117,10 @@ def isolated():
             module.test_logger = logger
             module.test_error_diagnostics = modules['camctl.operations.error_diagnostics']
             module.test_producer_sources = (hb_source, copy_source)
+            messages = ModuleType('isolated_report_messages')
+            sys.modules[messages.__name__] = messages
+            exec(compile(messages_source, str(MESSAGES_SOURCE), 'exec'), messages.__dict__)
+            module.test_messages = messages
             yield module
 
 def document(module, fn):
@@ -601,3 +607,54 @@ def test_real_hasselblad_and_copy_error_producers_keep_resolvable_graphs():
             graph = details[path[0]][path[1]]
             assert graph['cause']['message'] == 'specific child'
             assert resolve(doc, graph['context']) == graph['cause']
+
+
+def test_report_failure_wire_roundtrip_retains_marked_graph_and_business_data():
+    with isolated() as m:
+        messages = m.test_messages
+        error = graph_root()
+        graph = m.exception_diagnostic(error)
+        graph['diagnostic_details'] = {'user': {'$ref': '#/external'}}
+        message = messages.ResultFailureMessage(job_id='job-1', instance_id='a'*32,
+            error_kind=messages.ErrorKind.REPORT, error_code='test', error_message='failure', diagnostic=graph)
+        wire = messages.encode_message(message)
+        payload = json.loads(wire)
+        assert payload['diagnostic'] == json.loads(json.dumps(graph))
+        assert payload['diagnostic_graphs']['version'] == 1
+        restored = messages.decode_message(wire)
+        assert vars(restored) == vars(message)
+        assert 'diagnostic_graphs' not in vars(restored)
+        doc = m.diagnostic_snapshot({'worker_failure': vars(restored)})
+        node = doc['worker_failure']['diagnostic']
+        assert resolve(doc, node['context']) == node['cause']
+        assert node['cause']['message'] == 'specific child'
+        assert node['diagnostic_details']['user'] == {'$ref': '#/external'}
+
+def test_report_startup_plain_diagnostic_ref_is_not_reinterpreted():
+    with isolated() as m:
+        messages = m.test_messages
+        diagnostic = {'reason': 'failure', 'user': {'$ref': '#/business'}}
+        message = messages.StartupFailedMessage(phase=messages.StartupPhase.WORK_LOCK,
+                                                 reason='error', diagnostic=diagnostic)
+        payload = json.loads(messages.encode_message(message))
+        assert 'diagnostic_graphs' not in payload
+        restored = messages.decode_message(json.dumps(payload).encode())
+        doc = m.diagnostic_snapshot({'startup': restored.diagnostic})
+        assert doc['startup'] == diagnostic
+
+@pytest.mark.parametrize('sidecar', [
+    None, {}, {'version': 2, 'graphs': [], 'references': []},
+    {'version': 1, 'graphs': [{'path': '#/missing', 'root': '#'}], 'references': []},
+    {'version': 1, 'graphs': [{'path': '#', 'root': '#'}], 'references': ['#/missing']},
+    {'version': 1, 'graphs': [{'path': '#', 'root': '#'}, {'path': '#', 'root': '#'}], 'references': []},
+    {'version': 1, 'graphs': [{'path': '#/~2', 'root': '#'}], 'references': []},
+])
+def test_report_rejects_invalid_graph_sidecar(sidecar):
+    with isolated() as m:
+        messages = m.test_messages
+        message = messages.ResultFailureMessage(job_id='job-1', instance_id='a'*32,
+            error_kind=messages.ErrorKind.REPORT, error_code='test', error_message='failure', diagnostic={'reason':'x'})
+        payload = json.loads(messages.encode_message(message))
+        payload['diagnostic_graphs'] = sidecar
+        with pytest.raises(messages.MessageProtocolError):
+            messages.decode_message(json.dumps(payload).encode())
