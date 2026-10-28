@@ -629,10 +629,12 @@ def _attach_ordered_error_notes(
 
 @dataclass(frozen=True)
 class _PendingCleanupDiagnostic:
-    error: BaseException
+    error: Any
     stage: str
     attach_error_on_failure: bool = False
     only_if_original_selected: bool = False
+    context: Mapping[str, Any] | None = None
+    on_record: Callable[[Any], None] | None = None
 
 
 def _merge_cleanup_errors(
@@ -729,25 +731,37 @@ def _deliver_cleanup_diagnostics(
         return original
     from camctl.logging_runtime.diagnostics import record_error
     deferred = []
+    failures = list(getattr(original, "_camctl_cleanup_diagnostic_failures", ()))
     for item in pending:
         if item.only_if_original_selected and original is None:
             deferred.append(item)
             continue
         try:
-            record_error(item.error, stage=item.stage)
+            if item.context is None:
+                state = record_error(item.error, stage=item.stage)
+            else:
+                state = record_error(item.error, stage=item.stage, context=item.context)
+            if item.on_record is not None:
+                item.on_record(state)
         except BaseException as diagnostic_error:
+            failure = {"stage": item.stage, "error": item.error,
+                       "diagnostic_error": diagnostic_error}
+            failures.append(failure)
             if original is None:
                 original = diagnostic_error
             elif not isinstance(diagnostic_error, Exception) and isinstance(original, Exception):
+                failure["previous_error"] = original
                 _RequiredPhaseWaiter.attach_exception_notes(
                     diagnostic_error, "此前会话异常", original)
                 original = diagnostic_error
             else:
                 _RequiredPhaseWaiter.attach_exception_notes(
                     original, "收场诊断异常", diagnostic_error)
-            if item.attach_error_on_failure:
+            if item.attach_error_on_failure and isinstance(item.error, BaseException):
                 _RequiredPhaseWaiter.attach_exception_notes(
                     original, "未交付的收场错误", item.error)
+    if original is not None and failures:
+        original._camctl_cleanup_diagnostic_failures = tuple(failures)
     if original is not None and deferred:
         original = _deliver_cleanup_diagnostics(original, deferred)
     return original

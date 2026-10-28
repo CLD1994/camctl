@@ -636,3 +636,238 @@ def test_late_handoff_diagnostic_control_also_delivers_prior_ordinary_result(mod
     assert selected is control and outcome.reason == "state_db_error"
     assert calls == [handoff, ordinary]
     assert any("handoff" in note for note in selected.__notes__)
+
+
+@pytest.mark.parametrize("handoff", [False, True])
+@pytest.mark.parametrize("diagnostic_control", [False, True])
+def test_prepared_primary_still_outputs_new_cleanup_and_diagnostic_failures(terminal_world, modules, handoff, diagnostic_control):
+    _, service, _ = modules
+    _, lifecycle, actual, asyncio, deps, delivered = terminal_world
+    primary = asyncio.CancelledError("prepared primary")
+    cleanup = OSError("new handoff failure" if handoff else "new cleanup failure")
+    diagnostic = (asyncio.CancelledError("diagnostic interrupted") if diagnostic_control
+                  else OSError("diagnostic write failed"))
+    diagnostics = sys.modules["camctl.logging_runtime.diagnostics"]
+    diagnostics.diagnostic_reference_for = lambda error: ({"diagnostic_ref": "primary-id"} if error is primary else None)
+    diagnostics.diagnostic_snapshot = lambda value: _project(value, actual.exception_diagnostic)
+    def fail(*args, **kwargs):
+        raise diagnostic
+    diagnostics.record_error = fail
+    async def session(*args):
+        if handoff:
+            pending = [service._PendingCleanupDiagnostic(cleanup, "diagnostic_result_handoff", True)]
+            selected = service._deliver_cleanup_diagnostics(primary, pending)
+        else:
+            _, selected = service._merge_cleanup_errors(None, primary, [(cleanup, "shutdown", "state_db_error")])
+        raise selected
+    lifecycle.run_session = session
+    with pytest.raises(asyncio.CancelledError) as caught:
+        _run(lifecycle._execute_command(deps, None, flows={}, restricted_flows={}, wake=None,
+            poll_interval_s=None, finish_command=lambda **kwargs: None))
+    assert caught.value is primary
+    assert len(delivered) == 1 and delivered[0][1] is True
+    document = delivered[0][0]
+    assert document["exception"] == {"diagnostic_ref": "primary-id"}
+    failure = document["cleanup_diagnostic_failures"][0]
+    assert failure["error"]["message"] == str(cleanup)
+    assert failure["diagnostic_error"]["message"] == str(diagnostic)
+    assert failure["stage"] == ("diagnostic_result_handoff" if handoff else "shutdown")
+
+
+def test_new_prepared_diagnostic_control_keeps_the_previous_ordinary_error(terminal_world, modules):
+    _, service, _ = modules
+    _, lifecycle, actual, asyncio, deps, delivered = terminal_world
+    previous, cleanup = RuntimeError("original failure"), OSError("cleanup failure")
+    selected_control = asyncio.CancelledError("prepared diagnostic control")
+    diagnostics = sys.modules["camctl.logging_runtime.diagnostics"]
+    diagnostics.diagnostic_reference_for = lambda error: ({"diagnostic_ref": "diagnostic-id"}
+        if error is selected_control else None)
+    diagnostics.diagnostic_snapshot = lambda value: _project(value, actual.exception_diagnostic)
+    def fail(*args, **kwargs):
+        raise selected_control
+    diagnostics.record_error = fail
+    async def session(*args):
+        _, selected = service._merge_cleanup_errors(None, previous, [(cleanup, "shutdown", "state_db_error")])
+        raise selected
+    lifecycle.run_session = session
+    with pytest.raises(asyncio.CancelledError) as caught:
+        _run(lifecycle._execute_command(deps, None, flows={}, restricted_flows={}, wake=None,
+            poll_interval_s=None, finish_command=lambda **kwargs: None))
+    assert caught.value is selected_control
+    document = delivered[0][0]
+    assert document["exception"] == {"diagnostic_ref": "diagnostic-id"}
+    assert document["cleanup_diagnostic_failures"][0]["previous_error"]["message"] == "original failure"
+
+
+@pytest.mark.parametrize("channel_state", ["missing", "failed"])
+def test_prepared_primary_new_failures_use_remaining_stderr_channel(modules, channel_state):
+    import asyncio
+    _, service, lifecycle = modules
+    actual = _load("camctl.operations._isolated_exception_diagnostics", ROOT / "operations" / "error_diagnostics.py")
+    original, cleanup, failure = asyncio.CancelledError("primary"), OSError("cleanup"), OSError("diagnostic prepare")
+    diagnostics = sys.modules["camctl.logging_runtime.diagnostics"]
+    diagnostics.diagnostic_reference_for = lambda value: ({"diagnostic_ref": "primary-id"}
+        if value is original else None)
+    diagnostics.diagnostic_snapshot = lambda value: _project(value, actual.exception_diagnostic)
+    def fail_record(*args, **kwargs):
+        raise failure
+    diagnostics.record_error = fail_record
+    _, selected = service._merge_cleanup_errors(None, original, [(cleanup, "shutdown", "state_db_error")])
+    assert selected is original
+    message = lifecycle._direct_exception_message(SimpleNamespace(mode=SimpleNamespace(value="run")), selected)
+    captured = []
+    lifecycle._write_stderr_diagnostic = lambda deps, text: captured.append(text)
+    async def fail_delivery(record):
+        raise OSError("log channel write failed")
+    deps = SimpleNamespace(log_path_unsafe=False, log_runtime=None if channel_state == "missing" else
+        SimpleNamespace(channel=SimpleNamespace(deliver_important=fail_delivery)))
+    sys.modules["camctl.logging_runtime.service"].LogRecord = lambda **kwargs: SimpleNamespace(**kwargs)
+    sys.modules["camctl.logging_runtime.service"].admission_result_for = lambda error: None
+    _run(lifecycle._emit_session_error(deps, message, structured=True))
+    assert len(captured) == 1
+    summary = json.loads(captured[0].split("\n", 1)[0])
+    assert summary["exception"] == {"diagnostic_ref": "primary-id"}
+    assert summary["cleanup_diagnostic_failures"][0]["error"]["message"] == "cleanup"
+    assert summary["cleanup_diagnostic_failures"][0]["diagnostic_error"]["message"] == "diagnostic prepare"
+    if channel_state == "failed":
+        assert "log channel write failed" in captured[0]
+
+
+def test_bootstrap_cleanup_diagnostic_failure_does_not_interrupt_other_closures(terminal_world):
+    _, lifecycle, actual, asyncio, deps, delivered = terminal_world
+    primary, cleanup = asyncio.CancelledError("primary"), OSError("cache close")
+    diagnostic = asyncio.CancelledError("diagnostic canceled")
+    events = []
+    async def session(*args):
+        raise primary
+    lifecycle.run_session = session
+    class Pending:
+        in_call = False
+        def __init__(self, name, error=None): self.name, self.error = name, error
+        def close(self):
+            events.append(self.name)
+            if self.error is not None:
+                raise self.error
+    deps.capture_baselines = {"first": Pending("first", cleanup), "second": Pending("second")}
+    deps.background_flows = ()
+    diagnostics = sys.modules["camctl.logging_runtime.diagnostics"]
+    diagnostics.diagnostic_reference_for = lambda error: ({"diagnostic_ref": "primary-id"} if error is primary else None)
+    diagnostics.diagnostic_snapshot = lambda value: _project(value, actual.exception_diagnostic)
+    def fail_record(error, **kwargs):
+        events.append("record")
+        raise diagnostic
+    diagnostics.record_error = fail_record
+    with pytest.raises(asyncio.CancelledError) as caught:
+        _run(lifecycle._execute_command(deps, None, flows={}, restricted_flows={}, wake=None,
+            poll_interval_s=None, finish_command=lambda **kwargs: None))
+    assert caught.value is primary
+    assert events == ["first", "second", "record"]
+    assert delivered[0][0]["exception"] == {"diagnostic_ref": "primary-id"}
+    extra = delivered[0][0]["cleanup_diagnostic_failures"][0]
+    assert extra["error"]["message"] == "cache close"
+    assert extra["diagnostic_error"]["message"] == "diagnostic canceled"
+
+
+def test_bootstrap_new_cleanup_without_primary_keeps_failed_diagnostic(terminal_world):
+    outcome_type, lifecycle, actual, _, deps, delivered = terminal_world
+    cleanup, diagnostic = OSError("cache close"), OSError("diagnostic failed")
+    async def session(*args):
+        return outcome_type.SessionOutcome(succeeded=True)
+    lifecycle.run_session = session
+    class Pending:
+        in_call = False
+        def close(self):
+            raise cleanup
+    deps.capture_baselines = {"first": Pending()}
+    deps.background_flows = ()
+    diagnostics = sys.modules["camctl.logging_runtime.diagnostics"]
+    diagnostics.diagnostic_reference_for = lambda error: ({"diagnostic_ref": "cleanup-id"} if error is cleanup else None)
+    diagnostics.diagnostic_snapshot = lambda value: _project(value, actual.exception_diagnostic)
+    def fail_record(*args, **kwargs):
+        raise diagnostic
+    diagnostics.record_error = fail_record
+    with pytest.raises(OSError) as caught:
+        _run(lifecycle._execute_command(deps, None, flows={}, restricted_flows={}, wake=None,
+            poll_interval_s=None, finish_command=lambda **kwargs: None))
+    assert caught.value is cleanup
+    assert len(delivered) == 1
+    assert delivered[0][0]["exception"] == {"diagnostic_ref": "cleanup-id"}
+    assert delivered[0][0]["cleanup_diagnostic_failures"][0]["diagnostic_error"]["message"] == "diagnostic failed"
+
+
+def test_worker_record_and_state_link_happen_after_business_control_selection(modules):
+    import asyncio
+    outcome_type, service, lifecycle = modules
+    failure = SimpleNamespace(error_code="db", error_message="worker failed",
+        error_kind=SimpleNamespace(value="db"), raw="original worker facts")
+    snapshot = lifecycle._worker_failure_details(failure)
+    outcome = lifecycle._shutdown_state_outcome(outcome_type.SessionOutcome(succeeded=True),
+                                                failure, worker_details=snapshot)
+    state, events = object(), []
+    diagnostics = sys.modules["camctl.logging_runtime.diagnostics"]
+    def record(error, **kwargs):
+        events.append(("record", error))
+        return state
+    diagnostics.record_error = record
+    diagnostics.diagnostic_reference_for = lambda value: {"diagnostic_ref": "worker"} if value is state else None
+    diagnostics.diagnostic_snapshot = _project
+    def attach(value):
+        nonlocal outcome
+        events.append(("link", value))
+        outcome = lifecycle._attach_worker_diagnostic(outcome, snapshot, value)
+    pending = [service._PendingCleanupDiagnostic(snapshot, "report_shutdown", on_record=attach)]
+    control = asyncio.CancelledError("business control")
+    events.append(("close", control))
+    _, selected = service._merge_cleanup_errors(None, None, [(control, "shutdown", "state_db_error")],
+                                                  pending_diagnostics=pending)
+    assert service._deliver_cleanup_diagnostics(selected, pending) is control
+    assert events == [("close", control), ("record", snapshot), ("link", state)]
+    document = json.loads(lifecycle._failed_outcome_message(SimpleNamespace(mode=SimpleNamespace(value="run")), outcome))
+    assert document["details"]["worker_failure"] == {"diagnostic_ref": "worker"}
+    assert outcome.details["worker_failure"]["raw"] == "original worker facts"
+
+
+def test_worker_record_failure_preserves_original_mapping_in_terminal_summary(terminal_world, modules):
+    _, service, _ = modules
+    _, lifecycle, actual, asyncio, deps, delivered = terminal_world
+    primary, diagnostic = asyncio.CancelledError("primary"), OSError("worker diagnostic failed")
+    snapshot = {"error_message": "worker failed", "raw": "complete facts"}
+    diagnostics = sys.modules["camctl.logging_runtime.diagnostics"]
+    diagnostics.diagnostic_reference_for = lambda error: ({"diagnostic_ref": "primary-id"} if error is primary else None)
+    diagnostics.diagnostic_snapshot = lambda value: _project(value, actual.exception_diagnostic)
+    def fail(*args, **kwargs): raise diagnostic
+    diagnostics.record_error = fail
+    async def session(*args):
+        raise service._deliver_cleanup_diagnostics(primary, [service._PendingCleanupDiagnostic(snapshot, "report_shutdown")])
+    lifecycle.run_session = session
+    with pytest.raises(asyncio.CancelledError) as caught:
+        _run(lifecycle._execute_command(deps, None, flows={}, restricted_flows={}, wake=None,
+            poll_interval_s=None, finish_command=lambda **kwargs: None))
+    assert caught.value is primary
+    detail = delivered[0][0]["cleanup_diagnostic_failures"][0]
+    assert detail["error"] == snapshot
+    assert detail["diagnostic_error"]["message"] == "worker diagnostic failed"
+
+
+def test_stderr_control_failure_after_log_close_keeps_original_control(terminal_world):
+    _, lifecycle, actual, asyncio, deps, _ = terminal_world
+    primary = asyncio.CancelledError("primary control")
+    close_error, diagnostic = OSError("log close"), OSError("diagnostic prepare")
+    stderr_control = asyncio.CancelledError("stderr canceled")
+    async def session(*args): raise primary
+    async def close(*args, **kwargs): raise close_error
+    lifecycle.run_session = session
+    lifecycle._close_log_runtime = close
+    def stderr(*args): raise stderr_control
+    lifecycle._write_stderr_diagnostic = stderr
+    deps.log_runtime = object()
+    diagnostics = sys.modules["camctl.logging_runtime.diagnostics"]
+    diagnostics.diagnostic_reference_for = lambda error: ({"diagnostic_ref": "primary-id"} if error is primary else None)
+    diagnostics.diagnostic_snapshot = lambda value: _project(value, actual.exception_diagnostic)
+    def fail(*args, **kwargs): raise diagnostic
+    diagnostics.record_error = fail
+    with pytest.raises(asyncio.CancelledError) as caught:
+        _run(lifecycle._execute_command(deps, None, flows={}, restricted_flows={}, wake=None,
+            poll_interval_s=None, finish_command=lambda **kwargs: None))
+    assert caught.value is primary
+    assert any("stderr canceled" in note for note in primary.__notes__)

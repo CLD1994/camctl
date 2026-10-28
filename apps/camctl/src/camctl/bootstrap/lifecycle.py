@@ -48,7 +48,8 @@ from camctl.session.clock import ClockCheckInput, register_clock_guard
 from camctl.session.locks import acquire_admission, acquire_session, lock_file_paths
 from camctl.session.outcome import SessionOutcome
 from camctl.session.service import (
-    SessionContext, SessionPaths, _trigger_failure_log, run_session,
+    SessionContext, SessionPaths, _PendingCleanupDiagnostic, _deliver_cleanup_diagnostics,
+    _trigger_failure_log, run_session,
 )
 from camctl.session.work import WorkFacts
 from camctl.operations.error_diagnostics import exception_diagnostic
@@ -546,12 +547,15 @@ def _direct_exception_message(deps: RuntimeDeps, error: BaseException) -> str | 
     from camctl.logging_runtime.formatting import encode_record
     from camctl.logging_runtime.models import LogLevel
 
-    if diagnostic_reference_for(error) is not None:
+    reference = diagnostic_reference_for(error)
+    failures = getattr(error, "_camctl_cleanup_diagnostic_failures", ())
+    if reference is not None and not failures:
         return None
-    return encode_record(LogLevel.ERROR, diagnostic_snapshot({
-        "event": "session_exception", "command": deps.mode.value,
-        "exception": error,
-    }))
+    document = {"event": "session_exception", "command": deps.mode.value,
+                "exception": reference if reference is not None else error}
+    if failures:
+        document["cleanup_diagnostic_failures"] = failures
+    return encode_record(LogLevel.ERROR, diagnostic_snapshot(document))
 
 
 async def _emit_log_diagnostic(
@@ -1399,6 +1403,7 @@ async def _execute_command(
             else None
         )
         cleanup_errors: list[tuple[str, BaseException]] = []
+        pending_cleanup_diagnostics: list[_PendingCleanupDiagnostic] = []
         seen_cleanup_errors: set[int] = set()
         noted_cleanup_errors: set[int] = (
             set() if selected_control is None else {id(selected_control)}
@@ -1419,9 +1424,9 @@ async def _execute_command(
                 seen_cleanup_errors.add(id(error))
                 cleanup_errors.append((label, error))
                 if isinstance(error, Exception):
-                    from camctl.logging_runtime.diagnostics import record_error
-
-                    record_error(error, stage="shutdown", context={"resource": label})
+                    pending_cleanup_diagnostics.append(_PendingCleanupDiagnostic(
+                        error, "shutdown", attach_error_on_failure=True,
+                        context={"resource": label}))
             if isinstance(error, Exception):
                 if selected_control is not None:
                     attach_cleanup_error(selected_control, label, error)
@@ -1461,10 +1466,12 @@ async def _execute_command(
                     build_outcome = (_shutdown_state_outcome if stopped.state_failure is not None
                                      else _shutdown_configuration_outcome)
                     outcome = build_outcome(outcome, failure, worker_details=worker_details)
-                from camctl.logging_runtime.diagnostics import record_error
-                state = record_error(worker_details, stage="report_shutdown")
-                if outcome is not None:
-                    outcome = _attach_worker_diagnostic(outcome, worker_details, state)
+                def attach_worker_state(state):
+                    nonlocal outcome
+                    if outcome is not None:
+                        outcome = _attach_worker_diagnostic(outcome, worker_details, state)
+                pending_cleanup_diagnostics.append(_PendingCleanupDiagnostic(
+                    worker_details, "report_shutdown", on_record=attach_worker_state))
 
         for worker in (supervisor, restricted_supervisor):
             try:
@@ -1499,10 +1506,27 @@ async def _execute_command(
                         scan.close()
                     except BaseException as error:
                         remember_cleanup_error("结果读取缓存关闭异常", error)
+        # 先结束实际资源责任，再登记诊断并保持最早的业务控制对象。
+        prior_error = selected_control or primary_error or (
+            cleanup_errors[0][1] if cleanup_errors else None)
+        diagnostic_selection = _deliver_cleanup_diagnostics(prior_error, pending_cleanup_diagnostics)
+        pending_cleanup_diagnostics.clear()
+        if diagnostic_selection is not None and diagnostic_selection is not prior_error:
+            selected_control = diagnostic_selection
         # 所有必要业务与资源收场先结束，文件接纳不能成为它们的前置。
         try:
             if primary_error is not None:
                 message = _direct_exception_message(deps, primary_error)
+                if message is not None:
+                    await _emit_session_error(deps, message, structured=True)
+            if selected_control is not None and selected_control is not primary_error:
+                message = _direct_exception_message(deps, selected_control)
+                if message is not None:
+                    await _emit_session_error(deps, message, structured=True)
+            if (diagnostic_selection is not None and diagnostic_selection is not primary_error
+                    and diagnostic_selection is not selected_control
+                    and getattr(diagnostic_selection, "_camctl_cleanup_diagnostic_failures", ())):
+                message = _direct_exception_message(deps, diagnostic_selection)
                 if message is not None:
                     await _emit_session_error(deps, message, structured=True)
             if outcome is not None and not outcome.succeeded:
@@ -1525,6 +1549,25 @@ async def _execute_command(
                 )
             except BaseException as error:
                 remember_cleanup_error("共享日志收场异常", error)
+        if pending_cleanup_diagnostics:
+            prior_error = selected_control or primary_error or cleanup_errors[0][1]
+            previous_failures = len(getattr(prior_error, "_camctl_cleanup_diagnostic_failures", ()))
+            diagnostic_selection = _deliver_cleanup_diagnostics(prior_error, pending_cleanup_diagnostics)
+            if diagnostic_selection is not None and diagnostic_selection is not prior_error:
+                selected_control = diagnostic_selection
+            if (diagnostic_selection is not None and len(getattr(
+                    diagnostic_selection, "_camctl_cleanup_diagnostic_failures", ())) > previous_failures):
+                message = _direct_exception_message(deps, diagnostic_selection)
+                if message is not None:
+                    try:
+                        _write_stderr_diagnostic(deps, message)
+                    except BaseException as error:
+                        if selected_control is None and not isinstance(error, Exception):
+                            _attach_runtime_close_note(error, "此前会话异常", diagnostic_selection)
+                            selected_control = error
+                        else:
+                            _attach_runtime_close_note(
+                                selected_control or diagnostic_selection, "stderr 诊断异常", error)
         if selected_control is not None and selected_control is not primary_error:
             raise selected_control.with_traceback(
                 selected_control.__traceback__)
