@@ -10,13 +10,18 @@ _FACTS_ATTRIBUTE = "_camctl_exception_diagnostic_facts"
 class ExceptionDiagnosticGraph(dict):
     """内存中标识独立异常图边界；JSON 内容与普通字典一致。"""
 
-    def __init__(self, *args, root_path: str = "#", **kwargs) -> None:
+    def __init__(self, *args, root_path: str = "#", _scope=None, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.root_path = root_path
+        self._scope = object() if _scope is None else _scope
 
 
 class ExceptionDiagnosticReference(dict):
     """只标识编码器生成的图内引用，不解释调用方的普通字典。"""
+
+    def __init__(self, *args, _scope=None, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._scope = _scope
 
 
 def attach_diagnostic_facts(error: BaseException, facts: Mapping) -> None:
@@ -53,7 +58,7 @@ def exception_diagnostic(error: BaseException | None, *, include_message: bool =
             return None
         previous = seen.get(id(original))
         if previous is not None:
-            return ExceptionDiagnosticReference({"$ref": previous})
+            return ExceptionDiagnosticReference({"$ref": previous}, _scope=result._scope)
         if reference_for is not None:
             external = reference_for(original, path)
             if external is not None:
@@ -66,12 +71,12 @@ def exception_diagnostic(error: BaseException | None, *, include_message: bool =
     def facts_document(value, path):
         if isinstance(value, ExceptionDiagnosticGraph):
             # 已编码的独立图有自己的引用根，复制内容时保留该边界。
-            result = ExceptionDiagnosticGraph(root_path=value.root_path)
-            result.update({name: facts_document(item, path + "/" + str(name).replace("~", "~0").replace("/", "~1"))
+            copy = ExceptionDiagnosticGraph(root_path=value.root_path, _scope=value._scope)
+            copy.update({name: facts_document(item, path + "/" + str(name).replace("~", "~0").replace("/", "~1"))
                            for name, item in value.items()})
-            return result
+            return copy
         if isinstance(value, ExceptionDiagnosticReference):
-            return ExceptionDiagnosticReference(value)
+            return ExceptionDiagnosticReference(value, _scope=value._scope)
         if isinstance(value, BaseException):
             return reference(value, path)
         if isinstance(value, Mapping):

@@ -25,6 +25,7 @@ LOGGER_SOURCE = Path(__file__).parents[3] / 'src/camctl/logging_runtime/logger.p
 HB_SOURCE = Path(__file__).parents[3] / 'src/camctl/devices/drivers/hasselblad/driver.py'
 COPY_SOURCE = Path(__file__).parents[3] / 'src/camctl/outputs/copy.py'
 MESSAGES_SOURCE = Path(__file__).parents[3] / 'src/camctl/reporting/messages.py'
+WORKER_SOURCE = Path(__file__).parents[3] / 'src/camctl/reporting/worker.py'
 
 @dataclass(frozen=True)
 class ErrorValue:
@@ -107,6 +108,7 @@ def isolated():
         hb_source = HB_SOURCE.read_text(encoding='utf-8')
         copy_source = COPY_SOURCE.read_text(encoding='utf-8')
         messages_source = MESSAGES_SOURCE.read_text(encoding='utf-8')
+        worker_source = WORKER_SOURCE.read_text(encoding='utf-8')
         with patch.object(builtins, 'open', forbidden), patch.object(Path, 'open', forbidden):
             exec(compile(exception_source, str(EXCEPTION_SOURCE), 'exec'), modules['camctl.operations.error_diagnostics'].__dict__)
             exec(compile(source, str(SOURCE), 'exec'), module.__dict__)
@@ -121,6 +123,7 @@ def isolated():
             sys.modules[messages.__name__] = messages
             exec(compile(messages_source, str(MESSAGES_SOURCE), 'exec'), messages.__dict__)
             module.test_messages = messages
+            module.test_worker_source = worker_source
             yield module
 
 def document(module, fn):
@@ -645,7 +648,7 @@ def test_report_startup_plain_diagnostic_ref_is_not_reinterpreted():
 @pytest.mark.parametrize('sidecar', [
     None, {}, {'version': 2, 'graphs': [], 'references': []},
     {'version': 1, 'graphs': [{'path': '#/missing', 'root': '#'}], 'references': []},
-    {'version': 1, 'graphs': [{'path': '#', 'root': '#'}], 'references': ['#/missing']},
+    {'version': 1, 'graphs': [{'path': '#', 'root': '#'}], 'references': [{'path': '#/missing', 'graph': '#'}]},
     {'version': 1, 'graphs': [{'path': '#', 'root': '#'}, {'path': '#', 'root': '#'}], 'references': []},
     {'version': 1, 'graphs': [{'path': '#/~2', 'root': '#'}], 'references': []},
 ])
@@ -658,3 +661,148 @@ def test_report_rejects_invalid_graph_sidecar(sidecar):
         payload['diagnostic_graphs'] = sidecar
         with pytest.raises(messages.MessageProtocolError):
             messages.decode_message(json.dumps(payload).encode())
+
+
+def test_wire_nested_graphs_and_user_ref_remain_distinct():
+    with isolated() as m:
+        messages = m.test_messages
+        graph = m.exception_diagnostic(graph_root())
+        graph['diagnostic_details'] = {'a/~': m.exception_diagnostic(graph_root()),
+                                       'user': {'$ref': '#/cause'}}
+        message = messages.StartupFailedMessage(phase=messages.StartupPhase.WORK_LOCK,
+                                                 reason='error', diagnostic=graph)
+        payload = json.loads(messages.encode_message(message))
+        assert len(payload['diagnostic_graphs']['graphs']) == 2
+        assert len(payload['diagnostic_graphs']['references']) == 2
+        result = messages.decode_message(json.dumps(payload).encode())
+        assert result.diagnostic == graph
+        doc = m.diagnostic_snapshot({'startup': result.diagnostic})
+        outer = doc['startup']
+        inner = outer['diagnostic_details']['a/~']
+        assert resolve(doc, outer['context']) == outer['cause']
+        assert resolve(doc, inner['context']) == inner['cause']
+        assert inner['cause']['message'] == 'specific child'
+        assert outer['diagnostic_details']['user'] == {'$ref': '#/cause'}
+
+@pytest.mark.parametrize('sidecar', [
+    {'version': 1, 'graphs': [{'path': '#', 'root': '#'}], 'references': [{'path': '#/context', 'graph': '#'}, {'path': '#/context', 'graph': '#'}]},
+    {'version': 1, 'graphs': [{'path': '#', 'root': '#'}], 'references': [{'path': '#/cause', 'graph': '#'}]},
+    {'version': 1, 'graphs': [{'path': '#', 'root': '#'}], 'references': [{'path': '#/context/absent', 'graph': '#'}]},
+    {'version': True, 'graphs': [{'path': '#', 'root': '#'}], 'references': []},
+    {'version': 1, 'graphs': [{'path': '#', 'root': '#'}], 'references': [], 'extra': 1},
+])
+def test_wire_rejects_bad_metadata_for_actual_graph(sidecar):
+    with isolated() as m:
+        messages = m.test_messages
+        message = messages.StartupFailedMessage(phase=messages.StartupPhase.WORK_LOCK,
+                                                 reason='error', diagnostic=m.exception_diagnostic(graph_root()))
+        payload = json.loads(messages.encode_message(message))
+        payload['diagnostic_graphs'] = sidecar
+        with pytest.raises(messages.MessageProtocolError):
+            messages.decode_message(json.dumps(payload).encode())
+
+def test_wire_reference_requires_a_real_target():
+    with isolated() as m:
+        messages = m.test_messages
+        message = messages.StartupFailedMessage(phase=messages.StartupPhase.WORK_LOCK,
+                                                 reason='error', diagnostic=m.exception_diagnostic(graph_root()))
+        payload = json.loads(messages.encode_message(message))
+        payload['diagnostic']['context']['$ref'] = '#/absent'
+        with pytest.raises(messages.MessageProtocolError):
+            messages.decode_message(json.dumps(payload).encode())
+
+def test_wire_marker_overflow_uses_worker_original_stderr_fallback():
+    from dataclasses import replace
+    with isolated() as m:
+        messages = m.test_messages
+        graph = m.exception_diagnostic(graph_root())
+        message = messages.ResultFailureMessage(job_id='job-1', instance_id='a'*32,
+            error_kind=messages.ErrorKind.REPORT, error_code='test', error_message='failure')
+        plain = json.loads(json.dumps(graph))
+        baseline = len(messages.encode_message(replace(message, diagnostic=plain)))
+        graph['padding'] = 'x' * (messages.MAX_MESSAGE_BYTES - baseline - 20)
+        assert len(messages.encode_message(replace(message, diagnostic=json.loads(json.dumps(graph))))) <= messages.MAX_MESSAGE_BYTES
+        with pytest.raises(messages.MessageCapacityError):
+            messages.encode_message(replace(message, diagnostic=graph))
+        delivered = []
+        namespace = {'replace': replace, 'encode_message': messages.encode_message,
+                     'MessageCapacityError': messages.MessageCapacityError, 'json': json,
+                     '_write_diagnostic_stderr': delivered.append, '_diagnostic_context': lambda _: {'job_id':'job-1'}}
+        tree = ast.parse(m.test_worker_source)
+        node = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == '_with_diagnostic')
+        unit = ast.Module(body=[ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0), node], type_ignores=[])
+        exec(compile(ast.fix_missing_locations(unit), '<isolated worker>', 'exec'), namespace)
+        fallback = namespace['_with_diagnostic'](message, graph)
+        assert fallback.diagnostic is None and fallback.diagnostic_fallback == 'stderr'
+        assert delivered[0]['diagnostic'] == graph
+        assert fallback.diagnostic_size_bytes == len(json.dumps(graph, sort_keys=True, separators=(',', ':'), ensure_ascii=True).encode())
+
+def test_nested_preencoded_graph_fact_can_reference_outer_graph_node():
+    with isolated() as m:
+        child = ValueError('outer fact child')
+        inner = m.DiagnosticError('inner', diagnostic_details={'child': child})
+        nested_graph = m.exception_diagnostic(inner)
+        outer = RuntimeError('outer')
+        m.test_error_diagnostics.attach_diagnostic_facts(outer, {'first': child, 'nested': nested_graph})
+        graph = m.exception_diagnostic(outer)
+        _, doc = document(m, lambda: m.record_error({'graph': graph}, stage='test'))
+        facts = doc['error']['graph']['diagnostic_facts']
+        reference = facts['nested']['diagnostic_details']['child']
+        assert resolve(doc, reference) == facts['first']
+        assert facts['first']['message'] == 'outer fact child'
+
+
+def test_wire_nested_graph_reference_can_target_outer_owner():
+    with isolated() as m:
+        messages = m.test_messages
+        child = ValueError('outer child')
+        nested = m.exception_diagnostic(m.DiagnosticError('inner', diagnostic_details={'child': child}))
+        original = RuntimeError('outer')
+        m.test_error_diagnostics.attach_diagnostic_facts(original, {'first': child, 'nested': nested})
+        graph = m.exception_diagnostic(original)
+        message = messages.StartupFailedMessage(phase=messages.StartupPhase.WORK_LOCK,
+                                                 reason='error', diagnostic=graph)
+        payload = json.loads(messages.encode_message(message))
+        reference = next(ref for ref in payload['diagnostic_graphs']['references']
+                         if ref['path'].endswith('/diagnostic_details/child'))
+        assert reference['graph'] == '#'
+        result = messages.decode_message(json.dumps(payload).encode())
+        assert result.diagnostic == graph
+        doc = m.diagnostic_snapshot({'worker': result.diagnostic})
+        facts = doc['worker']['diagnostic_facts']
+        assert resolve(doc, facts['nested']['diagnostic_details']['child']) == facts['first']
+        assert facts['first']['message'] == 'outer child'
+
+def test_cross_graph_owner_survives_deepcopy_and_wire():
+    from copy import deepcopy
+    with isolated() as m:
+        messages = m.test_messages
+        child = ValueError('source')
+        inner = m.exception_diagnostic(m.DiagnosticError('inner', diagnostic_details={'child': child}))
+        outer = RuntimeError('outer')
+        m.test_error_diagnostics.attach_diagnostic_facts(outer, {'first': child, 'inner': inner})
+        graph = deepcopy(m.exception_diagnostic(outer))
+        message = messages.StartupFailedMessage(phase=messages.StartupPhase.WORK_LOCK, reason='error', diagnostic=graph)
+        restored = messages.decode_message(messages.encode_message(message))
+        doc = m.diagnostic_snapshot({'root': restored.diagnostic})
+        facts = doc['root']['diagnostic_facts']
+        assert resolve(doc, facts['inner']['diagnostic_details']['child']) == facts['first']
+        assert facts['first']['message'] == 'source'
+
+def test_worker_stderr_fallback_rebases_exception_graph_and_preserves_bytes():
+    with isolated() as m:
+        graph = m.exception_diagnostic(graph_root())
+        delivered = []
+        def write(fd, data):
+            assert fd == 2
+            delivered.append(bytes(data))
+            return len(data)
+        namespace = {'json': json, 'os': SimpleNamespace(write=write)}
+        tree = ast.parse(m.test_worker_source)
+        node = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == '_write_diagnostic_stderr')
+        unit = ast.Module(body=[ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0), node], type_ignores=[])
+        exec(compile(ast.fix_missing_locations(unit), '<isolated worker>', 'exec'), namespace)
+        namespace['_write_diagnostic_stderr']({'stage': 'report_worker', 'diagnostic': graph})
+        doc = json.loads(b''.join(delivered))
+        assert resolve(doc, doc['diagnostic']['context']) == doc['diagnostic']['cause']
+        assert doc['diagnostic']['cause']['message'] == 'specific child'

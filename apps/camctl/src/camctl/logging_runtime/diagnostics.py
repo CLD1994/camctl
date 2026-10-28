@@ -600,7 +600,7 @@ def _record(payload: Mapping, state: DiagnosticState | None, *,
 
 def _document(value, *, name: str | None = None, structured: bool = True,
               non_media_diagnostics: ToolDiagnostics | None = None, tool_stdout: bool = False,
-              _seen=None, _path="#", _exception_graph=None):
+              _seen=None, _path="#", _exception_graph=()):
     """复用原结构形成独立快照，并给已有 stderr 字节编码补可读文本。"""
     if _seen is None:
         _seen = {}
@@ -613,9 +613,12 @@ def _document(value, *, name: str | None = None, structured: bool = True,
                          _exception_graph=_exception_graph)
 
     if isinstance(value, ExceptionDiagnosticGraph):
-        _exception_graph = (value.root_path, _path)
-    elif isinstance(value, ExceptionDiagnosticReference) and _exception_graph is not None:
-        source, target = _exception_graph
+        _exception_graph = (*_exception_graph, (value.root_path, _path, value._scope))
+    elif isinstance(value, ExceptionDiagnosticReference) and _exception_graph:
+        matching = [graph for graph in _exception_graph if graph[2] is value._scope]
+        if value._scope is not None and not matching:
+            raise ValueError("诊断引用的所属图不在当前路径中")
+        source, target, _ = (matching[-1] if matching else _exception_graph[-1])
         reference = value.get("$ref")
         if isinstance(reference, str) and (reference == source or reference.startswith(source + "/")):
             return {"$ref": target + reference[len(source):]}

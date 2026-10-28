@@ -379,6 +379,8 @@ def _send_result(
 
 
 def _write_diagnostic_stderr(document: dict) -> None:
+    from camctl.logging_runtime.diagnostics import diagnostic_snapshot
+    document = diagnostic_snapshot(document)
     data = json.dumps(document, sort_keys=True, separators=(",", ":"),
                       ensure_ascii=True).encode("utf-8") + b"\n"
     remaining = memoryview(data)
