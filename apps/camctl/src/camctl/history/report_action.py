@@ -58,7 +58,8 @@ def open_report_history(repository, entity, identity, boundary, *,
     phase = 'finite' if request is None else request.phase
     with repository._read_connection() as connection:
         seed = repository._object_seed(connection, entity, identity, boundary,
-            event_batch_size=event_batch_size, primary_only=True, metadata_only=True)
+            event_batch_size=event_batch_size, primary_only=True, metadata_only=True,
+            _bound_instance=True)
     handle = ReportHistoryHandle(repository, seed, entity=entity,
         tables=_required_tables(entity, seed.primary_table, phase=phase), phase=phase,
         event_batch_size=event_batch_size, row_batch_size=row_batch_size)
@@ -226,7 +227,7 @@ class ReportHistoryHandle(SegmentHistoryHandle):
         from camctl.persistence.repositories.history import _table_row
         specs = []
         with self.repository._read_connection() as connection:
-            self.repository._boundary(connection)
+            self.repository._boundary_within(connection)
             with closing(connection.execute('SELECT format_version FROM database_metadata WHERE id=1')) as cursor:
                 database_format = cursor.fetchone()[0]
             available = business_tables_for_format(database_format)
@@ -243,7 +244,7 @@ class ReportHistoryHandle(SegmentHistoryHandle):
             previous, actual = 0, 0
             while previous < maximum:
                 with self.repository._read_connection() as connection:
-                    upper = self.repository._boundary(connection)
+                    upper = self.repository._boundary_within(connection)
                     with closing(connection.execute(
                             f'SELECT id FROM ({sql}) WHERE id>? AND id<=? ORDER BY id LIMIT ?',
                             (*parameters, previous, maximum, self.batch_size))) as cursor:
@@ -264,9 +265,10 @@ class ReportHistoryHandle(SegmentHistoryHandle):
                 raise ConsistencyError('报告候选计数与永久身份范围不符')
             self.stats['projection_rows'] += actual
         with self.repository._read_connection() as connection:
-            maximum = self.repository._boundary(connection)
+            maximum = self.repository._boundary_within(connection)
             head = self.repository._object_seed(connection, self.entity, self.seed.ref[1], maximum,
-                event_batch_size=self.event_batch_size, include_snapshot=False, primary_only=True)
+                event_batch_size=self.event_batch_size, include_snapshot=False, primary_only=True,
+                _current_boundary=maximum)
         return maximum, head.head
 
     def _load_snapshot(self):

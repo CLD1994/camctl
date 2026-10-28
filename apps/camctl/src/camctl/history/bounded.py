@@ -361,7 +361,7 @@ class SegmentHistoryHandle:
         bounds={}
         # C0固定完整永久候选目录。count/max与所有分支来自同一视图。
         with self.repository._read_connection() as connection:
-            self.repository._boundary(connection)
+            self.repository._boundary_within(connection)
             from camctl.history.events import business_tables_for_format
             with closing(connection.execute("SELECT format_version FROM database_metadata WHERE id=1")) as metadata:
                 database_format = metadata.fetchone()[0]
@@ -391,7 +391,7 @@ class SegmentHistoryHandle:
                     previous=0
                     while previous < bounds[current]:
                         with self.repository._read_connection() as connection:
-                            upper=self.repository._boundary(connection)
+                            upper=self.repository._boundary_within(connection)
                             with closing(connection.execute(f'SELECT id FROM {current} WHERE {conditions} ORDER BY id LIMIT ?',
                                     (owner,previous,bounds[current],self.batch_size))) as cursor:
                                 ids=cursor.fetchall()
@@ -413,9 +413,10 @@ class SegmentHistoryHandle:
                 raise ConsistencyError('C0候选计数与永久身份范围不符')
             self.stats['projection_rows']+=actual
         with self.repository._read_connection() as connection:
-            maximum=self.repository._boundary(connection)
+            maximum=self.repository._boundary_within(connection)
             head=self.repository._object_seed(connection,'action',self.action_id,maximum,
-                event_batch_size=self.event_batch_size,include_snapshot=False,primary_only=True)
+                event_batch_size=self.event_batch_size,include_snapshot=False,primary_only=True,
+                _current_boundary=maximum)
         return maximum,head.head
 
     def _events(self, lower, upper, first, end, forward):

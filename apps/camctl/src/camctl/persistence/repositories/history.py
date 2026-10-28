@@ -214,7 +214,7 @@ class HistoryRepository:
 
     def current_boundary(self) -> HistoryBoundary:
         with self._read_connection() as connection:
-            return self._boundary(connection)
+            return self._boundary_within(connection)
 
     @contextmanager
     def _read_connection(self) -> Iterator[sqlite3.Connection]:
@@ -390,7 +390,7 @@ class HistoryRepository:
         if not isinstance(request, ReportScopeRequest):
             raise ConsistencyError('报告选择必须提供固定范围请求')
         with self._read_connection() as connection:
-            current = self._boundary(connection)
+            current = self._boundary_within(connection)
             boundary = request.boundary
             if boundary.txn_id > current.txn_id or boundary.last_event_id > current.last_event_id:
                 raise ConsistencyError('报告选择 H 晚于可靠当前边界')
@@ -477,7 +477,8 @@ class HistoryRepository:
             seed = self._object_seed(connection, "action", action_id, boundary,
                                      event_batch_size=event_batch_size, primary_only=True,
                                      include_snapshot=strategy != "initial",
-                                     allow_current_snapshot=strategy == "snapshot", metadata_only=True)
+                                     allow_current_snapshot=strategy == "snapshot", metadata_only=True,
+                                     _bound_instance=True)
         if strategy == "auto":
             choice = seed.snapshot
             strategy = ("snapshot" if choice is not None and
@@ -597,7 +598,8 @@ class HistoryRepository:
         """主行及至多一份内部处理/拷贝引用，均为固定容量。"""
         with self._read_connection() as connection:
             seed = self._object_seed(connection, entity, entity_id, boundary,
-                event_batch_size=event_batch_size, include_snapshot=False, primary_only=True)
+                event_batch_size=event_batch_size, include_snapshot=False, primary_only=True,
+                _bound_instance=True)
             rows = dict(seed.rows)
             if include_file_refs:
                 with closing(connection.execute("SELECT id FROM recording_processing WHERE action_id=? LIMIT 2",(entity_id,))) as cursor:
@@ -657,7 +659,7 @@ class HistoryRepository:
         """
         with self._read_connection() as connection:
             seed = self._object_seed(connection, entity, entity_id, boundary,
-                event_batch_size=event_batch_size, metadata_only=True)
+                event_batch_size=event_batch_size, metadata_only=True, _bound_instance=True)
             snapshot = seed.snapshot
             forward = (snapshot is not None and seed.head[1] != seed.floor[1] and
                        (snapshot.boundary == boundary or
@@ -717,6 +719,7 @@ class HistoryRepository:
             entity_id: int, boundary: HistoryBoundary, *, event_batch_size: int,
             include_snapshot: bool = True, primary_only: bool = False,
             allow_current_snapshot: bool = False, metadata_only: bool = False,
+            _bound_instance: bool = False, _current_boundary: HistoryBoundary | None = None,
     ) -> _ObjectSeed:
         from camctl.persistence.row_history import _anchor
 
@@ -726,7 +729,13 @@ class HistoryRepository:
         spec = load_enum_registry()["history_objects"].get(entity)
         if spec is None:
             raise ConsistencyError(f"未知历史对象类型: {entity!r}")
-        current_boundary = self._boundary(connection)
+        # 仅仓储自有只读事务传入绑定或同一事务刚读取的完整边界。
+        if _current_boundary is not None:
+            current_boundary = _current_boundary
+        elif _bound_instance:
+            current_boundary = self._boundary_within(connection)
+        else:
+            current_boundary = self._boundary(connection)
         if (boundary.txn_id > current_boundary.txn_id
                 or boundary.last_event_id > current_boundary.last_event_id):
             raise ConsistencyError("恢复目标边界晚于可靠当前边界")
@@ -951,7 +960,7 @@ class HistoryRepository:
         owner_table = (
             "deliveries" if column == "owner_delivery_id" else "actions")
         with self._read_connection() as connection:
-            current = self._boundary(connection)
+            current = self._boundary_within(connection)
             if (request.boundary.txn_id > current.txn_id
                     or request.boundary.last_event_id > current.last_event_id):
                 raise ConsistencyError("关联文件查询边界晚于可靠当前边界")
