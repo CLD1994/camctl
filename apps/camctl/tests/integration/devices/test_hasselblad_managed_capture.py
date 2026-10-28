@@ -15,6 +15,8 @@ import textwrap
 
 import pytest
 
+from apps.camctl.tests.integration.jpeg_fixture import JPEG_IMAGE
+
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID, PARAMETER_TYPE
 from camctl.devices.drivers.hasselblad.driver import HasselbladDriver
@@ -28,9 +30,9 @@ _DEVICE_ID = "camera-1"
 _SERIAL = "CFV100C-001"
 _ORIGINAL_NAME = "fixture_capture.3FR"
 _PREVIEW_NAME = f"{_ORIGINAL_NAME}.thumbnail.jpg"
-# 仅用于验证已观察的 TIFF/JPEG 文件签名，不是可解码的相机媒体样本。
+# RAW 替身只用于验证已观察的 TIFF 文件签名。
 _ORIGINAL_BYTES = b"II*\x00small integration fixture"
-_PREVIEW_BYTES = b"\xff\xd8small preview fixture\xff\xd9"
+_PREVIEW_BYTES = JPEG_IMAGE + b"small preview fixture"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="可执行脚本 shebang 按 POSIX 部署边界运行")

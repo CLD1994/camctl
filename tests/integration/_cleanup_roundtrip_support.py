@@ -23,6 +23,7 @@ import pytest
 
 from _osmo_builtin_clock import format_utc, read_clock, set_frozen, whole_second_utc_us
 from _wsl_host_demo import HostDemo
+from apps.camctl.tests.integration.jpeg_fixture import JPEG_IMAGE
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.schemas import validate_document
@@ -36,7 +37,7 @@ OSV = "/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.OSV"
 LRF = "/mnt/media_rw/emulated/DCIM/OSMO_0001/VID_0001.LRF"
 SERIAL = "r6-osmo-serial"
 RAW = b"II*\x00small integration fixture"
-PREVIEW = b"\xff\xd8small preview fixture\xff\xd9"
+PREVIEW = JPEG_IMAGE + b"small preview fixture"
 
 
 def _hasselblad_photo_sample_params():

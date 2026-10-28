@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from apps.camctl.tests.integration.jpeg_fixture import JPEG_IMAGE
+
 import camctl.host_files.capture_sources as capture_sources
 from camctl.host_files.capture_sources import (
     CaptureFileError,
@@ -27,7 +29,7 @@ from camctl.host_files.models import BoundDirectories, FilePurpose, FileRef
 pytestmark = pytest.mark.asyncio
 
 _RAW = b"II*\x00" + b"3fr-payload"
-_JPEG = b"\xff\xd8" + b"jpeg-payload" + b"\xff\xd9"
+_JPEG = JPEG_IMAGE + b"jpeg-payload"
 _RAW_SPEC = CaptureFileSpec("Hasselblad Original 1.3FR", len(_RAW), "image/x-hasselblad-3fr")
 _JPEG_SPEC = CaptureFileSpec("Hasselblad Preview 1.JPG", len(_JPEG), "image/jpeg")
 
@@ -443,8 +445,8 @@ async def test_archive_requires_target_role_to_match_media_type(tmp_path: Path) 
 
 async def test_archive_uses_explicit_role_for_two_jpegs(tmp_path):
     roots, workspace = await _prepared_workspace(tmp_path)
-    original_bytes = b"\xff\xd8original\xff\xd9"
-    preview_bytes = b"\xff\xd8preview\xff\xd9"
+    original_bytes = JPEG_IMAGE + b"original"
+    preview_bytes = JPEG_IMAGE + b"preview"
     original = CapturedArtifact("capture.jpg", len(original_bytes), hashlib.sha256(original_bytes).hexdigest(), "image/jpeg")
     preview = CapturedArtifact("capture.jpg.thumbnail.jpg", len(preview_bytes), hashlib.sha256(preview_bytes).hexdigest(), "image/jpeg")
     (workspace / original.original_name).write_bytes(original_bytes)

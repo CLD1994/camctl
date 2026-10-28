@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from apps.camctl.tests.integration.jpeg_fixture import JPEG_IMAGE
+
 from camctl.acceptance.input import ParsedInput
 from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.cleanup_assembly import session_cleanup_assembly
@@ -61,7 +63,7 @@ from camctl.outputs.cleanup_flow import (
 
 _NOW = int(datetime(2026, 1, 15, 9, tzinfo=timezone.utc).timestamp() * 1_000_000)
 _ORIGINAL = b"history-recovery-original"
-_PREVIEW = b"\xff\xd8history-recovery-preview\xff\xd9"
+_PREVIEW = JPEG_IMAGE + b"history-recovery-preview"
 
 register_acceptance_guards()
 register_window_guard()
@@ -127,7 +129,7 @@ async def _save_file_snapshot(path: Path, entity_id: int, entity_type: int) -> N
 async def test_real_accepted_host_photo_history_restores_complete_boundaries_and_forward_snapshot(
     tmp_path: Path, monkeypatch, capture_format,
 ):
-    original_bytes = b"\xff\xd8history-original\xff\xd9" if capture_format == "jpeg" else _ORIGINAL
+    original_bytes = JPEG_IMAGE + b"history-original" if capture_format == "jpeg" else _ORIGINAL
     config = _config(tmp_path)
     database = Path(config.paths.state_db)
     initialized = initialize_state(config, database)

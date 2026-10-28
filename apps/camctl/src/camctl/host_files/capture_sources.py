@@ -15,6 +15,7 @@ from typing import Any, Callable, Iterator, Mapping, TypeVar
 
 from camctl.contracts.values import parse_object_id
 from camctl.host_files.models import BoundDirectories, FilePurpose, FileRef
+from camctl.host_files.jpeg_boundary import JpegBoundary
 from camctl.host_files.paths import relative_file_path, resolve_file
 from camctl.host_files.photo_formats import (
     CAPTURE_FORMATS, CaptureFormat, photo_file_extension, photo_media_type,
@@ -492,7 +493,7 @@ def _read_file_facts_at(
         digest = hashlib.sha256()
         bytes_read = 0
         header = bytearray()
-        trailer = b""
+        jpeg_boundary = JpegBoundary() if media_type == "image/jpeg" else None
         while True:
             try:
                 block = os.read(fd, DEFAULT_CHUNK_SIZE_BYTES)
@@ -506,7 +507,8 @@ def _read_file_facts_at(
             bytes_read += len(block)
             if len(header) < 4:
                 header.extend(block[: 4 - len(header)])
-            trailer = (trailer + block)[-2:]
+            if jpeg_boundary is not None:
+                jpeg_boundary.feed(block)
 
         if bytes_read != expected_size:
             raise _file_error(
@@ -515,7 +517,7 @@ def _read_file_facts_at(
                 path,
                 f"读取长度 {bytes_read}，期望 {expected_size}",
             )
-        _validate_media_signature(media_type, bytes(header), trailer, bytes_read, path, file_kind)
+        _validate_media_signature(media_type, bytes(header), jpeg_boundary, path, file_kind)
         sha256 = digest.hexdigest()
         if expected_sha256 is not None and sha256 != expected_sha256:
             raise _file_error(
@@ -605,8 +607,7 @@ def _open_regular_file_at(
 def _validate_media_signature(
     media_type: str,
     header: bytes,
-    trailer: bytes,
-    size: int,
+    jpeg_boundary: JpegBoundary | None,
     path: Path,
     file_kind: str,
 ) -> None:
@@ -614,8 +615,8 @@ def _validate_media_signature(
         valid = header in (b"II*\x00", b"MM\x00*")
         description = "文件头不是已观察的 TIFF 字节序与 magic"
     else:
-        valid = size >= 4 and header.startswith(b"\xff\xd8") and trailer.endswith(b"\xff\xd9")
-        description = "JPEG 文件缺少 SOI 文件头或 EOI 文件尾"
+        valid = jpeg_boundary is not None and jpeg_boundary.complete
+        description = "JPEG 文件头或外层标记边界无效，或缺少外层 EOI"
     if not valid:
         raise _file_error(file_kind, "media", path, description)
 

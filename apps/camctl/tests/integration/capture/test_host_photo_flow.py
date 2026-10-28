@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from apps.camctl.tests.integration.jpeg_fixture import JPEG_IMAGE
+
 from camctl.acceptance.input import ParsedInput
 from camctl.acceptance.ports import ParameterDefinition
 from camctl.acceptance.service import CommandMode
@@ -103,8 +105,8 @@ pytestmark = pytest.mark.asyncio
 
 _NOW = 1_750_000_000_000_000
 _ORIGINAL = b"II*\x00hasselblad-raw"
-_PREVIEW = b"\xff\xd8preview\xff\xd9"
-_JPEG_ORIGINAL = b"\xff\xd8jpeg-original\xff\xd9"
+_PREVIEW = JPEG_IMAGE + b"preview"
+_JPEG_ORIGINAL = JPEG_IMAGE + b"jpeg-original"
 _RETURNED = EvidenceRegistry((
     ENTERED,
     EvidenceContract("operation_returned", 1, "control", frozenset()),

@@ -33,6 +33,8 @@ from pathlib import Path
 from types import MappingProxyType
 
 import pytest
+
+from apps.camctl.tests.integration.jpeg_fixture import JPEG_IMAGE
 from camctl.host_files.photo_formats import CAPTURE_FORMATS, CaptureFormat
 from camctl.devices.drivers.hasselblad.parameters import PHOTO_COMMANDS as _PHOTO_COMMANDS, PHOTO_FIELDS
 
@@ -205,8 +207,8 @@ def _production_cli(installed: _Installed, *args: str) -> subprocess.CompletedPr
 
 
 _HASSELBLAD_ORIGINAL_BYTES = b"II*\x00small integration fixture"
-_HASSELBLAD_JPEG_ORIGINAL_BYTES = b"\xff\xd8small jpeg original fixture\xff\xd9"
-_HASSELBLAD_PREVIEW_BYTES = b"\xff\xd8small preview fixture\xff\xd9"
+_HASSELBLAD_JPEG_ORIGINAL_BYTES = JPEG_IMAGE + b"small jpeg original fixture"
+_HASSELBLAD_PREVIEW_BYTES = JPEG_IMAGE + b"small preview fixture"
 
 
 def _hasselblad_capture_fixture(capture_format: str) -> dict[str, object]:

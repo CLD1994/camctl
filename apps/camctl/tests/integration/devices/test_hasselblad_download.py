@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from apps.camctl.tests.integration.jpeg_fixture import JPEG_IMAGE
+
 from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
 from camctl.devices.drivers.hasselblad.driver import HasselbladDriver
 from camctl.devices.read_session import SourceFile
@@ -21,7 +23,7 @@ from camctl.operations.process import LocalExit, RawToolOutcome
 
 
 RAW = b"II*\x00fixed camera original content"
-PREVIEW = b"\xff\xd8fixed capture preview\xff\xd9"
+PREVIEW = JPEG_IMAGE + b"fixed capture preview"
 NAME = "capture_123.3FR"
 CAMERA_PATH = f"/mnt/media/DCIM/{NAME}"
 TICKET = AttemptTicket(1, "read", "22", "read/22", 31)
