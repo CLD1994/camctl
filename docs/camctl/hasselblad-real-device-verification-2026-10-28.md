@@ -124,7 +124,7 @@ HOST 以主机正式源为准，不为登记、取回或恢复归档向相机核
 
 安装前的 `validation/source-config-adjustment/` 记录了显式增加 `devices.hasselblad.result_check.call_timeout_s = 180`；其他配置保持一致，调整时没有活动进程。安装收据记录本次安装没有运行 `init`、客户端、设备调用或软件集成测试。
 
-安装后，真实 C host 在相机离线配置下完成 `validation/49-host-offline-after-source-update/`。请求 `1793193801992735` 的 host 退出码为 0，耗时约 10.10 秒；动作 95、96、97 分别取回原 RAW、RAW 预览及 JPEG 预览，三项均成功。交付 19、20、21 的本地目标文件大小和 SHA-256 均与验证记录中的交付摘要一致：原 RAW 为 210,767,872 字节、摘要 `4e86ce1f506d8a0c6c2bb2c94c37611b0f701002e7a63ee00d0b2e65c666859d`；RAW 预览为 642,889 字节、摘要 `cab68fd80cc7dc77d7ffd660aa8ccb57c3c313824706df121af186385c47627d`；JPEG 预览为 241,846 字节、摘要 `33c0d952431e4f9524881f4bb70e39f9cd3c469eef78674504a7039ceef0d78`。
+安装后，真实 C host 在相机离线配置下完成 `validation/49-host-offline-after-source-update/`。请求 `1793193801992735` 的 host 退出码为 0，耗时约 10.10 秒；动作 95、96、97 分别取回原 RAW、RAW 预览及 JPEG 预览，三项均成功。交付 19、20、21 的本地目标文件大小和 SHA-256 均与验证记录中的交付摘要一致：原 RAW 为 210,767,872 字节、摘要 `4e86ce1f506d8a0c6c2bb2c94c37611b0f701002e7a63ee00d0b2e65c666859d`；RAW 预览为 642,889 字节、摘要 `cab68fd80cc7dc77d7ffd660aa8ccb57c3c313824706df121af186385c47627d`；JPEG 预览为 241,846 字节、摘要 `33c0d952431e4f9524881d4fbb70e39f9cd3c469eef78674504a7039ceef0d78`。
 
 `verification.json` 显示三项均读取本地中间文件，新增设备检查为 0，诊断工具调用为 0；同时保留了三条成功的 `READ_FILE` 操作记录。因此本组证明新版 HOST 可离线读取并交付这些既有文件，不能表述为“没有 READ”。RAW 预览交付摘要仍与此前记录的预览相同；这次验证只证明字节传输一致，不改变该预览已有的媒体解码失败结论，也不替代新版四种来源／格式组合、有限复用、后到读取及进程中断等 H6 验收。
 
