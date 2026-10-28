@@ -26,7 +26,8 @@ def coordinator_module(monkeypatch):
     keys = itertools.count(1)
     stub("camctl.contracts.values", ConsistencyError=ValueError, new_operation_key=lambda: next(keys))
     stub("camctl.logging_runtime.diagnostics", DiagnosticState=type("DiagnosticState", (), {}),
-         record_call_outcome=lambda *args, **kwargs: None)
+         record_call_outcome=lambda *args, **kwargs: None,
+         record_availability_error=lambda *args, **kwargs: None)
     class RunOutcome(Enum):
         SUCCEEDED = 1
         FAILED = 2
@@ -107,7 +108,8 @@ def coordinator_module(monkeypatch):
     stub("camctl.persistence.business", SharedSave=SharedSave)
     stub("camctl.persistence.models", DbOutcomeKind=OutcomeKind,
          db_failure=lambda kind, message, receipt: RuntimeError(message), db_outcome_for=lambda error: None)
-    stub("camctl.persistence.repositories.operations", OperationRepository=type("Repository", (), {}))
+    stub("camctl.persistence.repositories.operations", OperationRepository=type(
+        "Repository", (), {"finish_attempt": lambda self, *args: None}))
     for name, module in modules.items():
         monkeypatch.setitem(sys.modules, name, module)
     source = find_spec("camctl.operations.availability")
@@ -298,8 +300,8 @@ async def test_successful_check_delivers_original_result_to_release_transaction(
         occurred_at: int
         trusted_wall_now: int
     request = CheckRequest(**vars(request))
-    outcome = module.CallOutcome(status=module.AttemptStatus.SUCCEEDED, effect=module.EffectState.UNKNOWN)
-    actual = SimpleNamespace(to_device_result=lambda identity: SimpleNamespace(outcome=outcome, diagnostic_error=None))
+    outcome = module.CallOutcome(status=module.AttemptStatus.SUCCEEDED, effect=module.EffectState.UNKNOWN, error=None)
+    actual = SimpleNamespace(settled=True, to_device_result=lambda identity: SimpleNamespace(outcome=outcome, diagnostic_error=None))
     driver = SimpleNamespace(check_availability=AsyncMock(return_value=actual))
     binding = SimpleNamespace(device_id="camera")
     config = SimpleNamespace(max_attempts=2, timeout_s=5)

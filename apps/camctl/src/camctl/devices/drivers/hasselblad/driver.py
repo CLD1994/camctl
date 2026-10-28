@@ -140,14 +140,30 @@ class AvailabilityResult:
     started_monotonic_ns: int
     finished_monotonic_ns: int
 
+    def tool_diagnostics(self) -> ToolDiagnostics:
+        """按实际取得的字节保留各步骤输出，不声明调用已经收场。"""
+        diagnostics = []
+        for index, call in enumerate(self.calls, 1):
+            raw = call.outcome
+            complete = (raw is not None and raw.output is not None and raw.stderr is not None
+                        and raw.output_failure is None)
+
+            def stream(data):
+                state = ToolStreamState.UNAVAILABLE if data is None else (
+                    ToolStreamState.COMPLETE if complete else ToolStreamState.UNCONFIRMED)
+                return ToolStream(state, data)
+
+            diagnostics.append(ToolCallOutput(index, call.name,
+                stream(None if raw is None else raw.output), stream(None if raw is None else raw.stderr)))
+        return ToolDiagnostics(3, tuple(diagnostics))
+
     def to_device_result(self, check_id: str) -> DeviceCallResult:
         """将已收场事实交给原结果拥有者；未知收场不能伪造成票据。"""
         parse_object_id(check_id)
         if not self.settled:
             raise ValueError("检查实际收场尚未确认")
         steps = []
-        diagnostics = []
-        for index, call in enumerate(self.calls, 1):
+        for call in self.calls:
             raw = call.outcome
             error = None if raw is None else raw.error
             if error is not None or call.error is not None:
@@ -164,16 +180,6 @@ class AvailabilityResult:
                     for failure in raw.signal_failures],
                 "output_failure": None if raw is None else raw.output_failure,
             })
-            complete = (raw is not None and raw.output is not None and raw.stderr is not None
-                        and raw.output_failure is None)
-
-            def stream(data):
-                state = ToolStreamState.UNAVAILABLE if data is None else (
-                    ToolStreamState.COMPLETE if complete else ToolStreamState.UNCONFIRMED)
-                return ToolStream(state, data)
-
-            diagnostics.append(ToolCallOutput(index, call.name,
-                stream(None if raw is None else raw.output), stream(None if raw is None else raw.stderr)))
         observation = DeviceObservation(_AVAILABILITY.type, _AVAILABILITY.version, {
             "check_id": check_id, "expected_serial": self.expected_serial,
             "expected_product_id": self.expected_product_id,
@@ -191,7 +197,7 @@ class AvailabilityResult:
             error=error, effect=EffectState.NO_EFFECT,
             settlement=Settlement(SettlementBasis.OBSERVED if dispatched else SettlementBasis.NOT_DISPATCHED,
                                   EvidenceValue.of(settlement_contract)),
-            observations=(observation,), diagnostics=ToolDiagnostics(3, tuple(diagnostics)),
+            observations=(observation,), diagnostics=self.tool_diagnostics(),
         )
         diagnostic_error = next((call.error for call in self.calls if call.error is not None), None)
         return DeviceCallResult(outcome.observations, DeviceCallResult._error_view(outcome), outcome,

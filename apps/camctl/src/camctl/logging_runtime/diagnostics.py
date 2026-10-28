@@ -28,7 +28,7 @@ from camctl.operations.result_format import error_document
 from camctl.operations.tool_diagnostics import ToolDiagnostics, ToolStream, encode_diagnostics
 
 __all__ = [
-    "DiagnosticState", "DiagnosticStatus", "record_error", "record_call_outcome",
+    "DiagnosticState", "DiagnosticStatus", "record_error", "record_call_outcome", "record_availability_error",
     "error_diagnostics_context", "diagnostic_scope", "flush_diagnostics", "diagnostic_state_for",
     "diagnostic_record_for", "acknowledge_diagnostic", "acknowledge_diagnostic_record",
     "DiagnosticReservation", "reserve_diagnostic", "adopt_diagnostic", "release_diagnostic",
@@ -475,6 +475,20 @@ def release_diagnostic(reservation: DiagnosticReservation | None) -> None:
     else:
         _enqueue(target.root, state)
         _notify(target)
+
+
+def record_availability_error(error, *, ticket, diagnostics, context=None, details=None, state=None):
+    """交付未确认收场的检查错误及原工具字节，不生成调用结果。"""
+    if not isinstance(ticket, AttemptTicket) or ticket.operation != "availability":
+        raise ValueError("可用性诊断必须属于原检查票据")
+    if not isinstance(diagnostics, ToolDiagnostics):
+        raise TypeError("可用性诊断必须使用原工具诊断结构")
+    state = _record({"stage": "availability", "error": error, "ticket": ticket,
+                     "diagnostics": diagnostics, "context": context, "details": details}, state,
+                    non_media_diagnostics=diagnostics)
+    if isinstance(error, BaseException) and state.status is not DiagnosticStatus.NEW:
+        error._camctl_diagnostic_state = state
+    return state
 
 
 def record_call_outcome(

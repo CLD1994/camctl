@@ -170,6 +170,27 @@ Sol 分别复核了 STOP 原事实、检查 UNKNOWN 交接和普通录像取消�
 
 ## H4：公共诊断消费者
 
+2026-10-28，在独立工作区 `/tmp/camctl-h4-diagnostics-history-20261028`、基线 `6d483acd`，使用 CPython 3.11.17 执行以下定向验证。四条命令最终退出码均为 0，分别通过 5、2、6、9 项；前台输出未另存。
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 /workspaces/camctl/apps/camctl/.venv311/bin/python -m unittest discover -s apps/camctl/tests/unit/operations -p 'test_h4_diagnostic_consumer_isolated.py' -v
+PYTHONDONTWRITEBYTECODE=1 /workspaces/camctl/apps/camctl/.venv311/bin/python -m unittest discover -s apps/camctl/tests/unit/history -p 'test_h4_availability_ownership_isolated.py' -v
+PYTHONDONTWRITEBYTECODE=1 /workspaces/camctl/apps/camctl/.venv311/bin/python -m unittest discover -s apps/camctl/tests/unit/devices -p 'test_h2_availability_port_isolated.py' -v
+PYTHONPATH=apps/camctl/src PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /workspaces/camctl/apps/camctl/.venv311/bin/python -c 'import camctl.resources as r; r.resource_bytes = lambda *a, **k: (_ for _ in ()).throw(AssertionError("real resource blocked")); r.available_resources = r.resource_bytes; import camctl.contracts.enums as e; e.resource_bytes = r.resource_bytes; import pytest; raise SystemExit(pytest.main(["apps/camctl/tests/unit/operations/test_availability_coordinator_isolated.py", "-q", "--tb=short", "-p", "pytest_asyncio.plugin", "-p", "no:cacheprovider"]))'
+```
+
+前三组只抽取目标源码或阻断真实包导入，使用受控登记、日志通道、数据库与设备协作者；第四组在测试收集前阻断资源读取。协调器测试首次执行有两项装配失败，原因是测试仓储替身缺少真实接口的 `finish_attempt`；补齐后另有两项因结果替身缺少正式 `error` 字段失败。补齐替身并保留原断言后，最终 9 项通过。
+
+| H4 责任 | 生产入口与单元证据 |
+| --- | --- |
+| 创建、意图、派发与结果交接 | `AvailabilityCoordinator`、`AvailabilityAttemptOwner` 和独立事务守卫沿原检查、票据和键推进；H3 已记录协调器的原键重送、共同等待和成功交付测试，本轮对受影响协调器重新验证。 |
+| HA-05 交错及取消/窗口 | 创建和意图守卫核对选中拍摄、原读取资格及在途持有者；目标页和释放守卫处理已解除、部分不合格及新限制。H2/H3 已记录目标、资源、读取等待和取消单元，真实调度交错留待独立组合验收。 |
+| 分页、预算与历史 | 目标和结果事务沿固定页与原责任推进，等待终结按取消、窗口和当前预算分类；本轮直接核对检查和目标归触发动作、释放归原动作，补充 H2 的正逆行值恢复测试。 |
+| 原诊断与关闭 | 已收场错误在动作分类读库之前交给原诊断状态；实际收场未确认时只交付原异常、步骤与双流，保留未保存责任，不构造结束结果。隔离单元覆盖读库失败、原申请重送、诊断去重、部分字节、通道失败降级及取消后原结果继续持有。 |
+| DEVICE 原责任 | 检查、来源身份、读取预算和原票据沿 H2/H3 的现有实现；本轮受影响驱动单元补充未收场传输时保留原步骤字节并拒绝生成已收场结果。 |
+
+Sol 对当前 H4 生产差异作只读复核，未发现新的必须修复问题。本轮没有运行集成测试、真实日志线程或进程、真实资源、数据库、设备或现场数据；跨组件历史回放、真实报告和安装版验证仍按各自验收项跟踪。
+
 在 `/tmp/camctl-h4-diagnostics` 的提交 `0316cb2c` 上，使用 CPython 3.11.17 执行日志单元目录和组件集成目录，分别为 366 项和 296 项通过；补充测试后，受影响单元文件 51 项、集成文件 8 项通过。原始输出分别位于 `/tmp/camctl-h4-diagnostics-unit.log`、`/tmp/camctl-h4-diagnostics-integration.log`、`/tmp/camctl-h4-diagnostics-unit-final.log` 和 `/tmp/camctl-h4-diagnostics-integration-final.log`；集成提交为 `cd7282fb`。测试覆盖公共消费者、原双流、重复交付、满队列和非检查媒体输出隐藏。检查的实际结果拥有者尚未接入该入口，真实设备收场和 HA-11 联合验收尚未完成。
 
 四次命令使用 `/workspaces/camctl/apps/camctl/.venv311/bin/python`，退出码均为 0：
