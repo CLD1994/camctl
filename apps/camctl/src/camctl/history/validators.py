@@ -557,8 +557,7 @@ def _check_evidence_member(event_id: int, member: str, value: Any, reason: int) 
                     or set(value["cancel_event"]) != {"event_id", "transaction_id", "occurred_at"}
                     or any(not is_json_integer(value["cancel_event"][name]) or value["cancel_event"][name] <= 0
                            for name in ("event_id", "transaction_id"))
-                    or not is_json_integer(value["cancel_event"]["occurred_at"])
-                    or value["cancel_event"]["occurred_at"] < 0))):
+                    or not is_json_integer(value["cancel_event"]["occurred_at"])))):
             _fail("绑定读取结果必须包含原绑定失败")
     elif member == "read_current_identity":
         from camctl.devices.drivers.hasselblad.identity import CameraIdentity
