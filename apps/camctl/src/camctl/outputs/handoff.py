@@ -623,20 +623,31 @@ async def _save_publication(delivery_id: int, context: DeliveryContext) -> None:
 
 async def _save_unconfirmed(
     delivery_id: int, failure: DeliveryFailure, context: DeliveryContext, *, publish_error=None,
-) -> None:
-    """保存终局未知失败；不安排自动重投。"""
-    record_error(ErrorValue(failure.code, failure.stage, dict(failure.details)),
-        stage=failure.stage, context={"delivery_id": delivery_id}, state=failure.diagnostic,
-        details=None if publish_error is None else {"publish_error": publish_error})
+) -> FailureSaveDisposition:
+    """保存终局未知失败；取消已生效时交给原取消责任。"""
+    def diagnose():
+        record_error(ErrorValue(failure.code, failure.stage, dict(failure.details)),
+            stage=failure.stage, context={"delivery_id": delivery_id}, state=failure.diagnostic,
+            details=None if publish_error is None else {"publish_error": publish_error})
+
     key = new_operation_key()
     request = UnconfirmedFailureSave(
         delivery_id=delivery_id, failure=failure,
         occurred_at=context.occurred_at)
-    outcome = await context.database.write(
-        lambda owned: context.repository.save_unconfirmed_failure(request, key, owned),
-        key=key, description="交付未知结论保存")
+    try:
+        outcome = await context.database.write(
+            lambda owned: context.repository.save_unconfirmed_failure(request, key, owned),
+            key=key, description="交付未知结论保存")
+    except BaseException:
+        diagnose()
+        raise
+    if (outcome.kind is DbOutcomeKind.COMPLETED and outcome.value.disposition in
+            (FailureSaveDisposition.CANCELED, FailureSaveDisposition.RETIRED)):
+        return outcome.value.disposition
+    diagnose()
     _require_completed(
         outcome, "unconfirmed_save_failed", "unconfirmed_save_unknown")
+    return outcome.value.disposition
 
 
 def _decide_again(
@@ -723,7 +734,10 @@ async def _publish_delivery(delivery_id, context, state) -> DeliveryResult:
         return DeliveryResult(DeliveryPhase.PUBLISHED, decision)
     if decision.outcome is DeliveryHandoffOutcome.UNCONFIRMED_FINAL:
         assert decision.failure is not None
-        await _save_unconfirmed(delivery_id, decision.failure, context)
+        disposition = await _save_unconfirmed(delivery_id, decision.failure, context)
+        if disposition in (FailureSaveDisposition.CANCELED, FailureSaveDisposition.RETIRED):
+            return DeliveryResult(DeliveryPhase.NOT_ACTIVE,
+                                  DeliveryDecision(DeliveryHandoffOutcome.NOT_ACTIVE))
         return DeliveryResult(DeliveryPhase.FAILED_FINAL, decision)
     await _save_intent(delivery_id, context)
     ref, roots, directories = _staging_ref(state, context.directories)
@@ -750,7 +764,10 @@ async def _publish_delivery(delivery_id, context, state) -> DeliveryResult:
             return DeliveryResult(DeliveryPhase.PUBLISHED, retry)
         if retry.outcome is DeliveryHandoffOutcome.UNCONFIRMED_FINAL:
             assert retry.failure is not None
-            await _save_unconfirmed(delivery_id, retry.failure, context, publish_error=publish.error)
+            disposition = await _save_unconfirmed(delivery_id, retry.failure, context, publish_error=publish.error)
+            if disposition in (FailureSaveDisposition.CANCELED, FailureSaveDisposition.RETIRED):
+                return DeliveryResult(DeliveryPhase.NOT_ACTIVE,
+                                      DeliveryDecision(DeliveryHandoffOutcome.NOT_ACTIVE))
             return DeliveryResult(DeliveryPhase.FAILED_FINAL, retry)
         raise DeliveryHandoffError("publish_move_failed", publish.error or "") from retry.cause
     raise DeliveryHandoffError(

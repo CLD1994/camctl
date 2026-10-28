@@ -3955,6 +3955,11 @@ class _UnconfirmedFailureCommand(_DeliveryPublicationMixin):
         if saved is not None:
             return self._reuse(saved)
         delivery, _copy = self._load_delivery(connection, self._request.delivery_id)
+        action = self._owner_action(connection, delivery)
+        if action["cancel_requested"]:
+            return self._decision(FailureSaveOutcome(FailureSaveDisposition.CANCELED), read_only=True)
+        if not _read_owner_eligible(action):
+            return self._decision(FailureSaveOutcome(FailureSaveDisposition.RETIRED), read_only=True)
         status = delivery["status"]
         if status == int(_DELIVERY_STATUS.PUBLISHED):
             raise ConsistencyError("已保存的完成事实不能改判终局失败")
@@ -6726,11 +6731,14 @@ def _delivery_guard(event, context) -> None:
                 raise EventValidationError("交付终局失败必须保存结构化错误")
             code, stage = error.get("code"), error.get("stage")
             details = error.get("details")
-            if code in ("read_attempts_exhausted", "checksum_mismatch", "source_file_unconfirmed"):
+            if code in ("read_attempts_exhausted", "checksum_mismatch", "source_file_unconfirmed",
+                        "delivery_handoff_unconfirmed"):
                 delivery = context.state_rows.get("deliveries", {}).get(row.row_id)
                 action = None if delivery is None else context.state_rows.get("actions", {}).get(delivery.get("action_id"))
                 if action is None or action.get("cancel_requested") != 0:
-                    raise EventValidationError("读取失败交付要求发起动作的取消尚未生效")
+                    raise EventValidationError("交付失败要求发起动作的取消尚未生效")
+                if code == "delivery_handoff_unconfirmed" and action.get("status") != int(_ACTION_STATUS.RUNNING):
+                    raise EventValidationError("交接未知失败要求原取回仍在执行")
             try:
                 spec = registered_error(code)
                 if stage != spec["stage"]:

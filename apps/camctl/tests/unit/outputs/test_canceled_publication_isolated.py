@@ -1035,3 +1035,123 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
         state = SimpleNamespace(facts=module.DeliveryFacts(19, Status.CANCELED))
         result = await module._publish_delivery(19, object(), state)
         self.assertEqual(result.phase, module.DeliveryPhase.NOT_ACTIVE)
+
+    def test_unconfirmed_delivery_result_is_handed_to_cancel_when_cancel_wins(self):
+        repo = load_repository()
+        repo.saved_transaction_events = lambda connection, key: None
+        repo.FailureSaveDisposition = SimpleNamespace(CANCELED='canceled')
+        repo.FailureSaveOutcome = lambda disposition: SimpleNamespace(disposition=disposition)
+        command = object.__new__(repo._UnconfirmedFailureCommand)
+        command._key = 'key'
+        command._request = SimpleNamespace(delivery_id=19)
+        command._load_delivery = lambda connection, identity: ({'id': 19, 'status': 4}, None)
+        command._owner_action = lambda connection, delivery: {'status': 2, 'cancel_requested': 1}
+        command._decision = lambda result, **kwargs: SimpleNamespace(result=result, read_only=True)
+        result = command.plan(SimpleNamespace(connection=object()))
+        self.assertTrue(result.read_only)
+        self.assertEqual(result.result.disposition, 'canceled')
+
+    def test_unconfirmed_failure_guard_rejects_canceled_owner(self):
+        repo = load_repository()
+        repo.EventValidationError = type('EventError', (Exception,), {})
+        repo.registered_error = lambda code: {'stage': 'publication'}
+        repo.validate_error_details = lambda code, details: None
+        row = SimpleNamespace(table='deliveries', row_id=19,
+            after=SimpleNamespace(values={'status': 6, 'error_json': {
+                'code': 'delivery_handoff_unconfirmed', 'stage': 'publication', 'details': {'delivery_id': '19'}}}))
+        event = SimpleNamespace(event_type=23, reason=5, rows=(row,))
+        context = SimpleNamespace(state_rows={'deliveries': {19: {'id': 19, 'action_id': 7}},
+                                               'actions': {7: {'id': 7, 'status': 2, 'cancel_requested': 1}}})
+        with self.assertRaises(repo.EventValidationError):
+            repo._delivery_guard(event, context)
+        repo._ACTION_STATUS = SimpleNamespace(RUNNING=2)
+        context.state_rows['actions'][7]['cancel_requested'] = 0
+        repo._delivery_guard(event, context)
+
+    async def test_missing_copy_result_does_not_claim_failure_when_cancel_wins(self):
+        module = load_handoff()
+        unknown = SimpleNamespace(outcome=module.DeliveryHandoffOutcome.UNCONFIRMED_FINAL,
+                                  failure=object(), exceptions=(), cause=None)
+        async def observe(*args): return unknown
+        async def save(*args, **kwargs): return module.FailureSaveDisposition.CANCELED
+        module.asyncio = SimpleNamespace(to_thread=observe)
+        module._save_unconfirmed = save
+        state = SimpleNamespace(facts=module.DeliveryFacts(19, Status.PUBLISHING,
+            publication_intent_event_id=90, prepared_size=4, prepared_sha256='a' * 64))
+        result = await module._publish_delivery(19, object(), state)
+        self.assertEqual(result.phase, module.DeliveryPhase.NOT_ACTIVE)
+
+    async def test_missing_copy_after_not_moved_is_handed_to_cancel(self):
+        module = load_handoff()
+        decisions = [SimpleNamespace(outcome=module.DeliveryHandoffOutcome.PUBLISH, exceptions=(), cause=None),
+                     SimpleNamespace(outcome=module.DeliveryHandoffOutcome.UNCONFIRMED_FINAL,
+                                     failure=object(), exceptions=(), cause=None)]
+        async def observe(*args): return decisions.pop(0)
+        async def saved(*args, **kwargs): return None
+        async def save_failure(*args, **kwargs): return module.FailureSaveDisposition.CANCELED
+        async def move(*args): return SimpleNamespace(stage='not_moved', exception=None, error=None)
+        module.asyncio = SimpleNamespace(to_thread=observe)
+        module._save_intent = saved
+        module._save_unconfirmed = save_failure
+        module._staging_ref = lambda state, directories: (object(), object(), object())
+        module.publish_file = move
+        module.ReadyName = lambda name: name
+        module.PublishStage = SimpleNamespace(MOVED='moved', NOT_MOVED='not_moved')
+        state = SimpleNamespace(file_name='name', facts=module.DeliveryFacts(19, Status.PUBLISHING,
+            publication_intent_event_id=90, prepared_size=4, prepared_sha256='a' * 64))
+        result = await module._publish_delivery(19, SimpleNamespace(directories=object()), state)
+        self.assertEqual(result.phase, module.DeliveryPhase.NOT_ACTIVE)
+
+    async def test_already_observed_handoff_is_saved_even_when_cancel_has_won(self):
+        module = load_handoff()
+        delivered = SimpleNamespace(outcome=module.DeliveryHandoffOutcome.DELIVERED_LOCALLY,
+                                    exceptions=(), cause=None)
+        calls = []
+        async def observe(*args): return delivered
+        async def save(identity, context): calls.append(identity)
+        module.asyncio = SimpleNamespace(to_thread=observe)
+        module._save_publication = save
+        state = SimpleNamespace(facts=module.DeliveryFacts(19, Status.PUBLISHING,
+            publication_intent_event_id=90, prepared_size=4, prepared_sha256='a' * 64))
+        result = await module._publish_delivery(19, object(), state)
+        self.assertEqual(result.phase, module.DeliveryPhase.PUBLISHED)
+        self.assertEqual(calls, [19])
+
+    async def test_unreliable_observation_preserves_error_instead_of_missing_copy_failure(self):
+        module = load_handoff()
+        original = OSError('observation failed')
+        undecidable = SimpleNamespace(outcome=module.DeliveryHandoffOutcome.UNDECIDABLE,
+            error='observation failed', exceptions=(original,), cause=original)
+        async def observe(*args): return undecidable
+        module.asyncio = SimpleNamespace(to_thread=observe)
+        module.record_error = lambda *args, **kwargs: None
+        state = SimpleNamespace(facts=module.DeliveryFacts(19, Status.PUBLISHING,
+            publication_intent_event_id=90, prepared_size=4, prepared_sha256='a' * 64))
+        with self.assertRaises(module.DeliveryHandoffError) as caught:
+            await module._publish_delivery(19, object(), state)
+        self.assertIs(caught.exception.__cause__, original)
+
+    async def test_skipped_unconfirmed_save_does_not_publish_normal_failure_diagnostic(self):
+        module = load_handoff()
+        module.new_operation_key = lambda: 'key'
+        module.DbOutcomeKind = SimpleNamespace(COMPLETED='completed')
+        records = []
+        module.record_error = lambda *args, **kwargs: records.append((args, kwargs))
+        class Database:
+            async def write(self, callback, **kwargs):
+                return SimpleNamespace(kind='completed', value=SimpleNamespace(
+                    disposition=module.FailureSaveDisposition.CANCELED))
+        failure = module.DeliveryFailure('delivery_handoff_unconfirmed', 'publication', {'delivery_id': '19'})
+        context = module.DeliveryContext(repository=object(), database=Database(),
+                                         directories=object(), occurred_at=100)
+        outcome = await module._save_unconfirmed(19, failure, context)
+        self.assertEqual(outcome, module.FailureSaveDisposition.CANCELED)
+        self.assertEqual(records, [])
+
+    def test_unconfirmed_failure_original_key_remains_the_original_result(self):
+        repo = load_repository()
+        repo.saved_transaction_events = lambda connection, key: ['saved-failure']
+        command = object.__new__(repo._UnconfirmedFailureCommand)
+        command._key = 'original'
+        command._reuse = lambda saved: ('already', saved)
+        self.assertEqual(command.plan(SimpleNamespace(connection=object())), ('already', ['saved-failure']))
