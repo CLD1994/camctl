@@ -25,6 +25,7 @@ __all__ = [
     "RecoveryDiagnostic",
     "emergency_eligibility",
     "emergency_stop",
+    "recovery_block_reason",
     "recovery_registry",
 ]
 
@@ -32,6 +33,24 @@ __all__ = [
 # 旧导入路径继续导出同一通用类型，保留拍摄及读取消费者身份。
 from camctl.operations.recovery import (
     RecoveryBoundary, RecoveryBlockedReason, RecoveryDiagnostic, recovery_registry)
+
+
+def recovery_block_reason(boundary, max_event_id, intent_event_id, *, evidence_lookup_available,
+                          active_local_control=False, evidence_available=True):
+    """按原会话与尝试事实判断能否恢复本地调用结果。"""
+    if boundary is RecoveryBoundary.UNCONFIRMED:
+        return RecoveryBlockedReason.UNCONFIRMED_BOUNDARY
+    if max_event_id is None:
+        return RecoveryBlockedReason.MISSING_HORIZON
+    if not evidence_lookup_available:
+        return RecoveryBlockedReason.MISSING_EVIDENCE_LOOKUP
+    if intent_event_id is None or intent_event_id > max_event_id:
+        return RecoveryBlockedReason.INTENT_OUTSIDE_HORIZON
+    if active_local_control:
+        return RecoveryBlockedReason.ACTIVE_LOCAL_CONTROL
+    if not evidence_available:
+        return RecoveryBlockedReason.EVIDENCE_UNAVAILABLE
+    return None
 
 
 class EmergencyDecision(Enum):
