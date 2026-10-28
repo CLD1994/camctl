@@ -1,5 +1,6 @@
 """完整原扫描中的事后配对；原始页不变，事实归属于预览文件。"""
 from contextlib import closing
+from dataclasses import dataclass
 from types import SimpleNamespace
 
 from camctl.capture.files import OwnershipFromResultPageSave, PairResultFilesSave
@@ -42,6 +43,21 @@ _FAMILY_WHERE = ('attempt_id=? AND family_directory=? COLLATE BINARY'
     ' AND family_stem=? COLLATE BINARY AND family_role=? AND page_event_id<=?')
 
 
+@dataclass(frozen=True)
+class _FixedPairing:
+    preview_file_id: int
+    scan: object
+    occurred_at: int
+    source_boundary: HistoryBoundary
+
+    @classmethod
+    def from_request(cls, request, boundary):
+        return cls(request.preview_file_id, request.scan, request.occurred_at, boundary)
+
+    def request(self):
+        return PairResultFilesSave(self.preview_file_id, self.scan, self.occurred_at)
+
+
 def request_document(request):
     page = ownership_document(OwnershipFromResultPageSave(
         request.scan, request.preview_file_id, request.occurred_at))['page']
@@ -62,8 +78,8 @@ def _request(event):
     proxy = SimpleNamespace(occurred_at=event.occurred_at, evidence={
         'ownership_from_result_page_request': {'page': raw['scan'], 'file_id': raw['preview_file_id']}})
     original = ownership_request(proxy)
-    result = PairResultFilesSave(original.file_id, original.page,
-                                 HistoryBoundary(**boundary), event.occurred_at)
+    request = PairResultFilesSave(original.file_id, original.page, event.occurred_at)
+    result = _FixedPairing.from_request(request, HistoryBoundary(**boundary))
     if not json_equal(raw, request_document(result)):
         raise ConsistencyError('扫描配对申请不是规范完整编码')
     return result
@@ -252,9 +268,11 @@ class PairResultFilesCommand:
         connection, request = scope.connection, self.request
         if read_operation_transaction(connection, self.key) is not None:
             return CommandPlan((), {}, {}, result=_verify(request, self.key, connection), read_only=True)
-        if pages._latest_history_boundary(connection) != request.source_boundary:
-            raise ConsistencyError('新配对申请不能更换原保存前文件边界')
-        classified = _classify(connection, request)
+        boundary = pages._latest_history_boundary(connection)
+        if boundary != HistoryBoundary(scope.max_txn_id, scope.max_event_id):
+            raise ConsistencyError('配对事务开始时的完整历史边界不一致')
+        fixed = _FixedPairing.from_request(request, boundary)
+        classified = _classify(connection, fixed)
         if classified is None:
             return CommandPlan((), {}, {}, result=None, read_only=True)
         source, preview, values = classified
@@ -270,7 +288,7 @@ class PairResultFilesCommand:
         from .capture import _load_related_outputs
         _load_related_outputs(connection, state, preview['id'])
         event = event_envelope(allocation.first_event_id, allocation.txn_id, _EVENT['id'],
-            _REASON, rows, request.occurred_at, {'result_scan_pairing_request': request_document(request)})
+            _REASON, rows, request.occurred_at, {'result_scan_pairing_request': request_document(fixed)})
         return CommandPlan((event,), {(row.table, row.row_id): ('device_file', preview['id'])
             for row in rows}, state, result=fact_id,
             capture_result_read_scope=pages.capture_result_scope(source, request.scan.ticket, request.scan.event_id))
@@ -287,11 +305,13 @@ def _verify(request, key, connection, *, current_boundary=None):
     if (event.event_type, event.reason, event.transaction_id) != (_EVENT['id'], _REASON, transaction.txn_id):
         raise TransactionError('原键属于其他完整事务')
     original = _request(event)
-    if original != request or not json_equal(request_document(original), request_document(request)):
-        raise TransactionError('原键配对申请、边界或事实时刻不同')
-    if request.source_boundary != pages._page_before_boundary(connection, transaction):
+    if (original.request() != request or not json_equal(
+            request_document(original),
+            request_document(_FixedPairing.from_request(request, original.source_boundary)))):
+        raise TransactionError('原键配对申请或事实时刻不同')
+    if original.source_boundary != pages._page_before_boundary(connection, transaction):
         raise ConsistencyError('原配对没有固定其实际保存前边界')
-    _check_event(connection, event, request, current_boundary=current_boundary)
+    _check_event(connection, event, original, current_boundary=current_boundary)
     fact_id = event.rows[0].row_id
     fact = row_facts(connection, 'device_file_pairing_facts', fact_id)
     if fact is None or not json_equal({name: fact[name] for name in event.rows[0].after.values},

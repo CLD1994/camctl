@@ -269,12 +269,11 @@ async def register_segment_observations(runtime, action_id, listing):
                     action_id,
                     runtime.capture,
                     "save_result_file_pairing",
-                    (await runtime.database.read(lambda owned, occurred_at=runtime.wall_us(): PairResultFilesSave(
+                    PairResultFilesSave(
                         file_id,
                         listing.entries.last_ref,
-                        _boundary(owned.connection),
-                        occurred_at,
-                    ))),
+                        runtime.wall_us(),
+                    ),
                 )
 
 

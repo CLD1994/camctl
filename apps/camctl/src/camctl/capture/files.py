@@ -20,7 +20,6 @@ from camctl.persistence.transaction import encode_json_value
 
 if TYPE_CHECKING:
     from camctl.capture.result_pages import ResultPageRef
-    from camctl.contracts.history_values import HistoryBoundary
 
 __all__ = [
     "FileChecksumSave",
@@ -224,21 +223,17 @@ class OwnershipSave:
 
 @dataclass(frozen=True)
 class PairResultFilesSave:
-    """按原完整扫描和固定文件边界保存一次后配对事实。"""
+    """按原完整扫描保存一次后配对事实。"""
 
     preview_file_id: int
     scan: "ResultPageRef"
-    source_boundary: "HistoryBoundary"
     occurred_at: int
 
     def __post_init__(self):
         from camctl.capture.result_pages import ResultPageRef
-        from camctl.contracts.history_values import HistoryBoundary
         ObjectId(self.preview_file_id)
         if not isinstance(self.scan, ResultPageRef):
             raise TypeError("配对必须引用原扫描末页")
-        if not isinstance(self.source_boundary, HistoryBoundary):
-            raise TypeError("配对必须使用完整历史边界")
         OwnershipFromResultPageSave(self.scan, self.preview_file_id, self.occurred_at)
         UtcMicros(self.occurred_at)
 
