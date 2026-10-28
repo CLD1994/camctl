@@ -114,7 +114,7 @@ from camctl.capture.recording import (
     start_recording,
 )
 from camctl.capture.recovery import (
-    RecoveryBlockedReason, RecoveryBoundary, RecoveryDiagnostic,
+    RecoveryBlockedReason, RecoveryBoundary, RecoveryDiagnostic, recovery_block_reason,
 )
 from camctl.capture.results import (
     CaptureFile,
@@ -323,6 +323,7 @@ class PendingCallResult:
     query_conclude_stop_keys: tuple[str, ...] = ()
     diagnostics_check: Callable[[CallOutcome], None] | None = None
     diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
+    shared: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
 
     @property
     def validated(self) -> bool:
@@ -1364,10 +1365,12 @@ class CaptureRuntime(_FileObservationSaves):
         pending = self.pending_start_results.get(identity)
         if pending is None or pending.finish.ticket != ticket:
             raise ConsistencyError("原调用结果尚未持有或票据不符")
-        (await self._save_call_result(identity, pending))
+        (await self._save_call_result(identity, pending, retry=True))
 
-    async def _save_call_result(self, identity, pending: PendingCallResult) -> None:
+    async def _save_call_result(self, identity, pending: PendingCallResult, *, retry=False) -> None:
         """最多重送一次原事务；可靠回滚与提交后错误使用同一身份。"""
+        if retry:
+            pending.shared.retry_failed()
         # 校验不进入有限 DB 重送循环；本次失败不自动重复校验。
         async def save_and_apply():
             nonlocal pending
@@ -1444,7 +1447,7 @@ class CaptureRuntime(_FileObservationSaves):
             if receipt is not None:
                 raise db_failure(ConsistencyError, f"原调用结果未可靠保存，原结果仍持有: {error}", receipt)
             raise ConsistencyError(f"原调用结果未可靠保存，原结果仍持有: {error}") from error
-        return await settle_required(save_and_apply())
+        return await pending.shared.run(save_and_apply)
 
     async def resume_start_results(self, action_id: int) -> bool:
         """同会话原真实结果优先保存，包括动作已经终态的分区。"""
@@ -1453,7 +1456,7 @@ class CaptureRuntime(_FileObservationSaves):
             if not pending.result_disposition_ready:
                 continue
             if (await self.action_id_of_ticket(pending.finish.ticket)) == action_id:
-                (await self._save_call_result(identity, pending))
+                (await self._save_call_result(identity, pending, retry=True))
                 changed |= self.pending_start_results.get(identity) is not pending
         return changed
 
@@ -1493,7 +1496,7 @@ class CaptureRuntime(_FileObservationSaves):
             if not pending.result_disposition_ready:
                 pending = (await _settle_recovered_listing(self, pending))
                 self.pending_start_results[identity] = pending
-            (await self._save_call_result(identity, pending))
+            (await self._save_call_result(identity, pending, retry=True))
             self.last_recovery_diagnostic = None
             return True
         def read(owned, parameters=(ticket.run_id, ticket.attempt_id)):
@@ -1568,31 +1571,25 @@ class CaptureRuntime(_FileObservationSaves):
             if found is None:
                 raise ConsistencyError("原恢复尝试不存在")
             attempt = (await self.database.read(lambda owned, inputs=("operation_attempts", found[0]): row_facts(owned.connection, *inputs), description="读取拍摄直接事实"))
-        blocked = None
-        if self.recovery_boundary is RecoveryBoundary.UNCONFIRMED:
-            blocked = RecoveryBlockedReason.UNCONFIRMED_BOUNDARY
-        elif self.recovery_max_event_id is None:
-            blocked = RecoveryBlockedReason.MISSING_HORIZON
-        elif self.recovery_evidence_for is None:
-            blocked = RecoveryBlockedReason.MISSING_EVIDENCE_LOOKUP
+        def blocked_reason(*, active_local_control=False, evidence_available=True):
+            return recovery_block_reason(self.recovery_boundary, self.recovery_max_event_id,
+                attempt["intent_event_id"], evidence_lookup_available=self.recovery_evidence_for is not None,
+                active_local_control=active_local_control, evidence_available=evidence_available)
+
+        blocked = blocked_reason()
         if blocked is not None:
             self.record_recovery_diagnostic(RecoveryDiagnostic(
                 blocked, ticket.run_id, ticket.attempt_id))
-            return None
-        if (attempt["intent_event_id"] is None
-                or attempt["intent_event_id"] > self.recovery_max_event_id):
-            self.record_recovery_diagnostic(RecoveryDiagnostic(
-                RecoveryBlockedReason.INTENT_OUTSIDE_HORIZON,
-                ticket.run_id, ticket.attempt_id))
             return None
         run = (await self.database.read(lambda owned, inputs=("operation_runs", ticket.run_id): row_facts(owned.connection, *inputs), description="读取拍摄直接事实"))
         if run is None:
             raise ConsistencyError("原恢复尝试缺少流程")
         owner_id = run["action_id"]
         local = self.start_entries.get(self.database.metadata.instance_id, owner_id)
-        if ticket.operation == "control" and local is not None and local.active:
+        blocked = blocked_reason(active_local_control=ticket.operation == "control" and local is not None and local.active)
+        if blocked is not None:
             self.record_recovery_diagnostic(RecoveryDiagnostic(
-                RecoveryBlockedReason.ACTIVE_LOCAL_CONTROL, ticket.run_id, ticket.attempt_id))
+                blocked, ticket.run_id, ticket.attempt_id))
             return None
         if (run["kind"] in (int(_RUN_KIND.STOP_RESIDUAL), int(_RUN_KIND.EMERGENCY_STOP))
                 or (run["kind"] == int(_RUN_KIND.QUERY_ACTIVITY)
@@ -1602,10 +1599,10 @@ class CaptureRuntime(_FileObservationSaves):
                 raise ConsistencyError("原停止恢复责任缺少活动")
             owner_id = activity["action_id"]
         evidence = self.recovery_evidence_for(_binding((await self.action(owner_id))), ticket.operation)
-        if evidence is None:
+        blocked = blocked_reason(evidence_available=evidence is not None)
+        if blocked is not None:
             self.record_recovery_diagnostic(RecoveryDiagnostic(
-                RecoveryBlockedReason.EVIDENCE_UNAVAILABLE,
-                ticket.run_id, ticket.attempt_id))
+                blocked, ticket.run_id, ticket.attempt_id))
             return None
         self.last_recovery_diagnostic = None
         return evidence
