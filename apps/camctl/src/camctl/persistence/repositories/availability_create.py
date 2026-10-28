@@ -88,7 +88,8 @@ def _request(raw):
         raise ConsistencyError("检查创建申请无效") from error
 
 
-def _qualify(connection, request, boundary, *, existing_check=None, exclude_attempt_id=None):
+def _qualify(connection, request, boundary, *, existing_check=None, exclude_attempt_id=None,
+             check_candidate_order=True, exclude_read_attempt_id=None):
     action = row_facts(connection, "actions", request.action_id)
     if action is None:
         raise ConsistencyError("检查触发动作不存在")
@@ -147,33 +148,23 @@ def _qualify(connection, request, boundary, *, existing_check=None, exclude_atte
             from camctl.outputs.read_discovery import first_eligible_read
             if first_eligible_read(connection, device_id, request.trusted_wall_now) != request.trigger_copy_id:
                 raise AvailabilityTargetBlocked("拷贝没有当前读取候选顺序资格")
-    from camctl.devices.capture_preparation import CAPTURE_ACTION_TYPES
-    after = 0
-    while True:
-        with closing(connection.execute(
-            "SELECT id,scheduled_at,plan_id,input_index,max_delay_ms FROM actions"
-            " WHERE device_id=? AND id>? AND status=1 AND execution_started=0 AND cancel_requested=0"
-            " ORDER BY id LIMIT 128", (device_id, after),
-        )) as cursor:
-            page = tuple(cursor.fetchmany(128))
-        if not page:
-            break
-        for other_id, scheduled, plan_id, index, delay in page:
-            other = row_facts(connection, "actions", other_id)
-            if (other["type"] in CAPTURE_ACTION_TYPES and other_id != action["id"]
-                    and (request.trigger_copy_id is not None or
-                         (scheduled, plan_id, index) < (action["scheduled_at"], action["plan_id"], action["input_index"]))
-                    and Decimal(scheduled) - request.prepare_lead_s * 1_000_000
-                    <= request.trusted_wall_now <= scheduled + delay * 1000):
-                raise AvailabilityTargetBlocked("存在更早的合格拍摄候选")
-        after = page[-1][0]
-        if len(page) < 128:
-            break
+    if check_candidate_order:
+        from .capture_selection import CaptureSelectionInput, selected_pending_capture
+        selection = CaptureSelectionInput(device_id, driver_id, request.identity,
+            request.prepare_lead_s, request.trusted_wall_now)
+        selected = selected_pending_capture(connection, selection, boundary,
+                                            exclude_attempt_id=exclude_attempt_id)
+        if (selected is not None and selected.action_id != action["id"]
+                and (request.trigger_copy_id is not None or
+                     (selected.scheduled_at, selected.plan_id, selected.input_index)
+                     < (action["scheduled_at"], action["plan_id"], action["input_index"]))):
+            raise AvailabilityTargetBlocked("存在更早的合格拍摄候选")
     from camctl.capture.software_recovery import recovery_locked
     if recovery_locked(connection, device_id):
         raise AvailabilityTargetBlocked("设备的软件恢复责任尚未收场")
     from .retry_wait_reads import read_reservation_blocks_control
-    if read_reservation_blocks_control(connection, device_id):
+    if read_reservation_blocks_control(connection, device_id, allow_unstarted=True,
+                                       exclude_attempt_id=exclude_read_attempt_id):
         raise AvailabilityTargetBlocked("设备读取调用尚未收场")
     from camctl.outputs.read_discovery import device_holder
     holder = device_holder(connection, device_id)
@@ -181,7 +172,9 @@ def _qualify(connection, request, boundary, *, existing_check=None, exclude_atte
             or (request.trigger_copy_id is None and request.trusted_wall_now < action["scheduled_at"]))):
         raise AvailabilityTargetBlocked("设备读取机会仍由原拷贝保留")
     from camctl.scheduling.resources import device_read_in_flight, device_start_in_flight
-    if device_read_in_flight(connection, device_id) or device_start_in_flight(connection, device_id):
+    read_in_flight = (device_read_in_flight(connection, device_id) if exclude_read_attempt_id is None else
+                      device_read_in_flight(connection, device_id, exclude_attempt_id=exclude_read_attempt_id))
+    if read_in_flight or device_start_in_flight(connection, device_id):
         raise AvailabilityTargetBlocked("设备调用尚未收场")
     running = int(enum_for("operation_attempts.status").RUNNING)
     if (_one(connection, "SELECT 1 FROM device_activities d JOIN operation_runs r ON r.activity_id=d.id"
@@ -214,7 +207,8 @@ def _qualify(connection, request, boundary, *, existing_check=None, exclude_atte
         if count == 0:
             raise AvailabilityTargetNotRequired("检查固定目标已经全部解除")
         from .availability_release import _no_conflicts
-        _no_conflicts(connection, existing_check, exclude_attempt_id)
+        _no_conflicts(connection, existing_check, exclude_attempt_id,
+                      exclude_read_attempt_id=exclude_read_attempt_id)
     return action, check, count
 
 

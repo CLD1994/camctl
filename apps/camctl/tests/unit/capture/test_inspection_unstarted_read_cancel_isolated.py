@@ -48,6 +48,7 @@ def release_command(*, canceled=1, inspection_state=4, attempts=0, active=False)
         "SlotOutcome": SimpleNamespace(RELEASED="released", WAIT="wait", ALREADY_RELEASED="already"),
         "SlotDecision": lambda outcome, reason=None: SimpleNamespace(outcome=outcome, reason=reason),
         "CommandPlan": Plan, "ConsistencyError": ValueError, "TransactionError": ValueError,
+        "json_equal": lambda first, second: first == second,
         "_update": lambda table, identity, before, after: SimpleNamespace(table=table, row_id=identity,
             before=SimpleNamespace(exists=True, values={key: value for key, value in before.items() if value != after[key]}),
             after=SimpleNamespace(exists=True, values={key: value for key, value in after.items() if value != before[key]})),
@@ -56,7 +57,7 @@ def release_command(*, canceled=1, inspection_state=4, attempts=0, active=False)
             occurred_at=occurred_at, evidence={})}
     cls = extract(OUTPUTS, "_SlotChangeCommand", namespace)
     command = object.__new__(cls)
-    command._request = SimpleNamespace(copy_id=9, occurred_at=10)
+    command._request = SimpleNamespace(copy_id=9, occurred_at=10, capture_selection=None)
     command._direction = "release"
     command._owners = {("file_copies", 9): ("action", 7)}
     command._coverage = None

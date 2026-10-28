@@ -2583,6 +2583,13 @@ class _SlotChangeCommand:
             if source_physical_alias_conflict(scope.connection, source, observer, origin):
                 return self._decision(SlotOutcome.WAIT, "physical_identity_conflict")
             identity = source_physical_identity(scope.connection, source, observer, origin)
+            from .capture_selection import read_capture_priority
+            if self._request.capture_selection is None:
+                return self._decision(SlotOutcome.WAIT, "capture_selection_unavailable")
+            if read_capture_priority(scope.connection, self._request.capture_selection, scope.max_event_id,
+                                     device_id=device_id, identity=identity,
+                                     occurred_at=self._request.occurred_at) is not None:
+                return self._decision(SlotOutcome.WAIT, "capture_priority")
         from .preparation import PreparationReads
         if PreparationReads(scope.connection).availability_in_flight(device_id, identity):
             return self._decision(SlotOutcome.WAIT, "device_busy")
@@ -2635,6 +2642,8 @@ class _SlotChangeCommand:
     # ---- 释放 ----
 
     def _release(self, scope, copy, device_id: str, run) -> CommandPlan:
+        if self._request.capture_selection is not None:
+            raise TransactionError("释放读取机会不能携带拍摄选择申请")
         slot = copy["slot_device_id"]
         if slot is None:
             return self._decision(SlotOutcome.ALREADY_RELEASED)
@@ -2693,6 +2702,8 @@ class _SlotChangeCommand:
             allocation.first_event_id, allocation.txn_id,
             _COPY_CHANGED_EVENT, _SLOT_REASON, (row,),
             self._request.occurred_at,
+            ({"capture_selection": self._request.capture_selection.document()}
+             if after_slot is not None and self._request.capture_selection is not None else None),
         )
         return CommandPlan(
             events=(event,),
@@ -2732,6 +2743,10 @@ class _SlotChangeCommand:
         event = saved[0]
         if event["occurred_at"] != self._request.occurred_at:
             raise TransactionError("机会变化的事实时刻与原事务不同")
+        selection = self._request.capture_selection
+        expected = None if selection is None else selection.document()
+        if not json_equal(event["body"].get("evidence", {}).get("capture_selection"), expected):
+            raise TransactionError("机会变化的拍摄选择输入与原事务不同")
         rows = event["body"]["rows"]
         if len(rows) != 1 or rows[0]["table"] != "file_copies" or rows[0]["id"] != self._request.copy_id:
             raise TransactionError("原机会变化的目标拷贝与输入不符")
@@ -7253,6 +7268,16 @@ def _read_slot_guard(event, context) -> None:
                 if source_physical_alias_conflict(context.preparation_reads.connection, source, observer, origin):
                     raise EventValidationError("读取机会越过了其他逻辑设备的机身责任")
                 identity = source_physical_identity(context.preparation_reads.connection, source, observer, origin)
+                from .capture_selection import CaptureSelectionInput, read_capture_priority
+                try:
+                    selection = CaptureSelectionInput.from_document(event.evidence.get("capture_selection"))
+                    selected = read_capture_priority(context.preparation_reads.connection, selection,
+                        context.transaction.first_event_id - 1, device_id=binding[0], identity=identity,
+                        occurred_at=event.occurred_at)
+                except (ConsistencyError, ValueError) as error:
+                    raise EventValidationError(f"读取机会缺少原拍摄选择资格: {error}") from error
+                if selected is not None:
+                    raise EventValidationError("读取机会越过了已选中的拍摄")
             if context.preparation_reads.availability_in_flight(binding[0], identity):
                 raise EventValidationError("读取机会越过了尚未收场的设备检查")
             if run["status"] in _RUN_TERMINAL:

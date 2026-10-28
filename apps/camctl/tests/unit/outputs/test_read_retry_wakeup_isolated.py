@@ -36,7 +36,14 @@ def load_function(path, name, collaborators):
     if name == "_advance_reads":
         namespace["_complete_read_wait"] = load_function(path, "_complete_read_wait", {})
     exec(compile(ast.fix_missing_locations(isolated), str(path), "exec"), namespace)
-    return namespace[name]
+    function = namespace[name]
+    if name == "_advance_reads":
+        async def advance(runtime, *args):
+            if not hasattr(runtime, "availability"):
+                runtime.availability = None
+            return await function(runtime, *args)
+        return advance
+    return function
 
 
 class RetryWakeupTests(unittest.TestCase):

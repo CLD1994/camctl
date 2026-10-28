@@ -919,6 +919,10 @@ def session_capture_assembly(
                 read_discovery_batch_size=read_discovery_batch_size)
             if media_enabled else None)
         if media is not None:
+            if driver_id == HASSELBLAD_DRIVER_ID:
+                from camctl.persistence.repositories.capture_selection import CaptureSelectionInput
+                media.capture_selection = lambda now: CaptureSelectionInput(
+                    device_id, str(driver_id), _hasselblad_identity(declaration), preparation_leads[device_id], now)
             media.segment_size = segment_size
             media.recovery_boundary = recovery_boundary
             media.recovery_max_event_id = fixed_recovery_boundary()

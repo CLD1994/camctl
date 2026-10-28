@@ -56,7 +56,9 @@ class CaptureReservationGuardTests(unittest.TestCase):
         retries.read_reservation_blocks_control = lambda *args: blocked
         discovery = ModuleType("camctl.outputs.read_discovery")
         discovery.device_holder = lambda *args: 7 if held else None
-        modules = (definitions, json_values, capture_models, scheduling, history, retries, discovery)
+        driver = ModuleType("camctl.devices.drivers.hasselblad.definitions")
+        driver.DRIVER_ID = "hasselblad_cfv100c"
+        modules = (definitions, json_values, capture_models, scheduling, history, retries, discovery, driver)
         with patch.dict(sys.modules, {module.__name__: module for module in modules}):
             return namespace["verify_create"](reader, event, context, row)
 

@@ -1,6 +1,7 @@
 """业务候选接到共同检查入口，隔离驱动、状态库与包资源。"""
 
 from dataclasses import dataclass
+import asyncio
 from decimal import Decimal
 from enum import Enum
 from importlib.util import find_spec, module_from_spec, spec_from_file_location
@@ -129,6 +130,22 @@ async def test_settled_reserved_read_can_request_check(assembly, monkeypatch):
                                 source_file_id=12, action_id=3, copy_id=9)
 
     assert await instance.read(runtime, candidate) is Progress.WAIT
+    assert coordinator.request.await_args.args[1].trigger_copy_id == 9
+
+
+def test_unstarted_reserved_read_requests_check_without_consuming_an_attempt(assembly, monkeypatch):
+    instance, coordinator, _, _, _, Progress = assembly
+    retry = sys.modules["camctl.persistence.repositories.retry_wait_reads"]
+    checked = []
+    monkeypatch.setattr(retry, "held_read_ready_for_availability",
+                        lambda *args: checked.append(args[1:]) or True)
+    connection = SimpleNamespace(source={"identity_key": "source", "locator_json": {}})
+    database = SimpleNamespace(read=AsyncMock(side_effect=lambda callback: callback(SimpleNamespace(connection=connection))))
+    runtime = SimpleNamespace(database=database, occurred_at=lambda: 100)
+    candidate = SimpleNamespace(driver_id="hb", device_id="camera", held=True, attempts_used=0,
+                                retry_wait_required=0, source_file_id=12, action_id=3, copy_id=9)
+    assert asyncio.run(instance.read(runtime, candidate)) is Progress.WAIT
+    assert checked == [(9, "camera", 100, 3)]
     assert coordinator.request.await_args.args[1].trigger_copy_id == 9
 
 

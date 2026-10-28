@@ -1394,25 +1394,35 @@ class ReservePreparationCommand:
             if cursor.fetchone() is not None:
                 return result(ReservePreparationOutcome.REJECTED, reason="device_busy")
         from .retry_wait_reads import read_reservation_blocks_control
-        if read_reservation_blocks_control(connection, action["device_id"]):
+        if (read_reservation_blocks_control(connection, action["device_id"], allow_unstarted=True)
+                if action["driver_id"] == HASSELBLAD_DRIVER_ID else
+                read_reservation_blocks_control(connection, action["device_id"])):
             return result(ReservePreparationOutcome.REJECTED, reason="device_busy")
         if request.trusted_wall_now < action["scheduled_at"]:
             from camctl.outputs.read_discovery import device_holder
             if device_holder(connection, action["device_id"]) is not None:
                 return result(ReservePreparationOutcome.REJECTED, reason="device_busy")
-        mine = (action["scheduled_at"], action["plan_id"], action["input_index"])
-        with closing(connection.execute(
-                "SELECT scheduled_at,plan_id,input_index,max_delay_ms FROM actions"
-                f" WHERE device_id=? AND type IN ({_CAPTURE_TYPE_PLACEHOLDERS})"
-                " AND status=1 AND execution_started=0"
-                " AND cancel_requested=0 ORDER BY scheduled_at,plan_id,input_index",
-                (action["device_id"], *CAPTURE_ACTION_TYPES))) as cursor:
-            for scheduled, plan_id, index, delay in cursor:
-                if (scheduled, plan_id, index) >= mine:
-                    break
-                if (Decimal(scheduled) - request.prepare_lead_s * 1_000_000
-                        <= request.trusted_wall_now <= scheduled + delay * 1000):
-                    return result(ReservePreparationOutcome.REJECTED, reason="not_first_candidate")
+        if action["driver_id"] == HASSELBLAD_DRIVER_ID:
+            from .capture_selection import CaptureSelectionInput, selected_pending_capture
+            selection = CaptureSelectionInput(action["device_id"], action["driver_id"],
+                request.expected_identity, request.prepare_lead_s, request.trusted_wall_now)
+            selected = selected_pending_capture(connection, selection, scope.max_event_id)
+            if selected is None or selected.action_id != action["id"]:
+                return result(ReservePreparationOutcome.REJECTED, reason="not_first_candidate")
+        else:
+            mine = (action["scheduled_at"], action["plan_id"], action["input_index"])
+            with closing(connection.execute(
+                    "SELECT scheduled_at,plan_id,input_index,max_delay_ms FROM actions"
+                    f" WHERE device_id=? AND type IN ({_CAPTURE_TYPE_PLACEHOLDERS})"
+                    " AND status=1 AND execution_started=0"
+                    " AND cancel_requested=0 ORDER BY scheduled_at,plan_id,input_index",
+                    (action["device_id"], *CAPTURE_ACTION_TYPES))) as cursor:
+                for scheduled, plan_id, index, delay in cursor:
+                    if (scheduled, plan_id, index) >= mine:
+                        break
+                    if (Decimal(scheduled) - request.prepare_lead_s * 1_000_000
+                            <= request.trusted_wall_now <= scheduled + delay * 1000):
+                        return result(ReservePreparationOutcome.REJECTED, reason="not_first_candidate")
         allocation = scope.allocate(1)
         identity = _next_id(connection, "device_activities")
         values = _new_activity_values(action, capabilities, request.expected_identity)

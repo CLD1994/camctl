@@ -5475,7 +5475,7 @@
             "attempt_intent",
             "query_configuration"
           ],
-          "evidence": ["start_camera_identity", "availability_intent_request"]
+          "evidence": ["start_camera_identity", "availability_intent_request", "capture_selection"]
         }
       }
     },
@@ -7643,7 +7643,7 @@
             "report_impact",
             "read_slot"
           ],
-          "evidence": []
+          "evidence": ["capture_selection"]
         },
         "CONFIGURE": {
           "reason": 7,

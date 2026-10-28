@@ -17,7 +17,7 @@
 
 本目录六份文件合起来定义当前 SQLite 表结构。来源依赖、清理项结果与产物汇总、单向流程关联、独立文件历史、结果页身份索引、基准调用、两类目录及文件快照范围已落实到 SQL；[报告字段登记](../report-dependencies.json)的来源列与关联均使用实际结构核对。
 
-读取重试的有界历史及未收场尝试查询依赖 `history_events_row`、`operation_attempts_run_status` 和 `operation_attempts_without_result`。打开已有状态库时，从本目录权威 SQL 核对这些索引的完整定义；缺失或不匹配时拒绝打开，不修改状态库或自动建立索引。
+读取重试的有界历史及未收场尝试查询依赖 `history_events_row`、`operation_attempts_run_status` 和 `operation_attempts_without_result`；拍摄候选选择依赖 `actions_pending_capture_selection`。打开已有状态库时，从本目录权威 SQL 核对这些索引的完整定义；缺失或不匹配时拒绝打开，不修改状态库或自动建立索引。
 
 打开已有状态库时核对 `file_copies.read_end_event_id` 列及其历史事件外键；缺失或不匹配时拒绝打开，不迁移旧结构。
 

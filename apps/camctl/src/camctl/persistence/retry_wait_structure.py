@@ -9,6 +9,7 @@ from camctl.resources import ResourceError, resource_bytes
 
 
 _INDEX_RESOURCES = {
+    "actions_pending_capture_selection": "sql/core.sql",
     "history_events_row": "sql/history.sql",
     "operation_attempts_run_status": "sql/operations.sql",
     "operation_attempts_without_result": "sql/operations.sql",

@@ -216,7 +216,9 @@ class PreparationReads:
                                          activity["ownership_mode"], activity["output_scope_json"])):
             return False
         from .retry_wait_reads import read_reservation_blocks_control
-        if read_reservation_blocks_control(self.connection, action["device_id"]):
+        if (read_reservation_blocks_control(self.connection, action["device_id"], allow_unstarted=True)
+                if action["driver_id"] == DRIVER_ID else
+                read_reservation_blocks_control(self.connection, action["device_id"])):
             return False
         with closing(self.connection.execute(
                 "SELECT 1 FROM device_activities d JOIN actions a ON a.id=d.action_id"
@@ -264,25 +266,37 @@ class PreparationReads:
             if cursor.fetchone() is not None:
                 raise ConsistencyError("准备活动越过了同设备原占用")
         from .retry_wait_reads import read_reservation_blocks_control
-        if read_reservation_blocks_control(self.connection, action["device_id"]):
+        from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+        if (read_reservation_blocks_control(self.connection, action["device_id"], allow_unstarted=True)
+                if action["driver_id"] == DRIVER_ID else
+                read_reservation_blocks_control(self.connection, action["device_id"])):
             raise ConsistencyError("准备活动越过了同设备原读取调用")
         if request.trusted_wall_now < action["scheduled_at"]:
             from camctl.outputs.read_discovery import device_holder
             if device_holder(self.connection, action["device_id"]) is not None:
                 raise ConsistencyError("提前准备不能越过原读取机会")
-        mine = (action["scheduled_at"], action["plan_id"], action["input_index"])
-        with closing(self.connection.execute(
-                "SELECT scheduled_at,plan_id,input_index,max_delay_ms FROM actions"
-                f" WHERE device_id=? AND type IN ({','.join('?' for _ in CAPTURE_ACTION_TYPES)})"
-                " AND status=1 AND execution_started=0"
-                " AND cancel_requested=0 ORDER BY scheduled_at,plan_id,input_index",
-                (action["device_id"], *CAPTURE_ACTION_TYPES))) as cursor:
-            for scheduled, plan_id, index, delay in cursor:
-                if (scheduled, plan_id, index) >= mine:
-                    break
-                if (Decimal(scheduled) - request.prepare_lead_s * 1_000_000
-                        <= request.trusted_wall_now <= scheduled + delay * 1000):
-                    raise ConsistencyError("准备活动越过了原候选顺序")
+        if action["driver_id"] == DRIVER_ID:
+            from .capture_selection import CaptureSelectionInput, selected_pending_capture
+            selection = CaptureSelectionInput(action["device_id"], action["driver_id"],
+                request.expected_identity, request.prepare_lead_s, request.trusted_wall_now)
+            selected = selected_pending_capture(self.connection, selection,
+                                                context.transaction.first_event_id - 1)
+            if selected is None or selected.action_id != action["id"]:
+                raise ConsistencyError("准备活动越过了实际选中的拍摄")
+        else:
+            mine = (action["scheduled_at"], action["plan_id"], action["input_index"])
+            with closing(self.connection.execute(
+                    "SELECT scheduled_at,plan_id,input_index,max_delay_ms FROM actions"
+                    f" WHERE device_id=? AND type IN ({','.join('?' for _ in CAPTURE_ACTION_TYPES)})"
+                    " AND status=1 AND execution_started=0"
+                    " AND cancel_requested=0 ORDER BY scheduled_at,plan_id,input_index",
+                    (action["device_id"], *CAPTURE_ACTION_TYPES))) as cursor:
+                for scheduled, plan_id, index, delay in cursor:
+                    if (scheduled, plan_id, index) >= mine:
+                        break
+                    if (Decimal(scheduled) - request.prepare_lead_s * 1_000_000
+                            <= request.trusted_wall_now <= scheduled + delay * 1000):
+                        raise ConsistencyError("准备活动越过了原候选顺序")
 
     def verify_failure(self, action, details):
         from .capture_facts import load_start_facts

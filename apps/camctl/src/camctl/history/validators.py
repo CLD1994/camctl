@@ -540,6 +540,12 @@ def _check_evidence_member(event_id: int, member: str, value: Any, reason: int) 
             _fail(f"事件 {event_id} 的 evidence.entries 必须是数组")
     elif member == "preparation_request":
         parse_preparation_request(value)
+    elif member == "capture_selection":
+        from camctl.persistence.repositories.capture_selection import CaptureSelectionInput
+        try:
+            CaptureSelectionInput.from_document(value)
+        except (TypeError, ValueError) as error:
+            _fail(f"事件 {event_id} 的拍摄选择申请无效: {error}")
     elif member == "availability_wait_finish_request":
         from camctl.persistence.repositories.availability_wait_finish import _request
         try:

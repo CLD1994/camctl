@@ -219,6 +219,7 @@ class AttemptIntent:
     occurred_at: int
     copy_round: int | None = None
     session_key: str | None = None
+    capture_selection: object | None = None
 
     def __post_init__(self) -> None:
         _positive_int(self.action_id, "action_id")
@@ -242,6 +243,12 @@ class AttemptIntent:
             _positive_int(self.copy_round, "copy_round")
         elif self.copy_round is not None:
             raise AttemptConfigError("只有读取尝试保存 copy_round")
+        if self.capture_selection is not None:
+            from camctl.persistence.repositories.capture_selection import CaptureSelectionInput
+            if (self.kind is not OperationKind.READ_FILE
+                    or not isinstance(self.capture_selection, CaptureSelectionInput)
+                    or self.capture_selection.trusted_wall_now != self.occurred_at):
+                raise AttemptConfigError("拍摄选择输入必须属于同一读取意图及事实时刻")
         if self.kind is OperationKind.RESOLVE_OUTPUT_SCOPE and (
             self.operation != "result" or self.config.timeout_s is None
             or self.config.retry_interval_s is None

@@ -21,6 +21,15 @@ class AvailabilityAssembly:
         self._recovery_after = 0
         self._finish_after = 0
 
+    def capture_selection(self, device_id, now):
+        """取得本会话对该机身实际采用的拍摄选择输入。"""
+        declaration = self.devices.get(device_id)
+        if declaration is None or declaration.get("driver") != DRIVER_ID:
+            return None
+        from camctl.persistence.repositories.capture_selection import CaptureSelectionInput
+        return CaptureSelectionInput(device_id, DRIVER_ID, _hasselblad_identity(declaration),
+                                     self.preparation_leads[device_id], now)
+
     async def resume(self, context):
         """发现旧检查的未交付结果，包括触发动作已经终态的责任。"""
         self.coordinator.wake = context.wake
@@ -113,7 +122,7 @@ class AvailabilityAssembly:
             return AvailabilityProgress.READY
         max_attempts = _device_attempts(declaration, "copy", 3, "max_read_attempts")
         if candidate.held:
-            if candidate.attempts_used == 0 or candidate.retry_wait_required != 0:
+            if candidate.retry_wait_required != 0:
                 return AvailabilityProgress.READY
             from camctl.persistence.repositories.retry_wait_reads import held_read_ready_for_availability
             eligible = await runtime.database.read(lambda owned: held_read_ready_for_availability(

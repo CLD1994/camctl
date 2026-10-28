@@ -15,6 +15,7 @@ from unittest.mock import patch
 sys.dont_write_bytecode = True
 SOURCE = Path(__file__).parents[3] / "src" / "camctl"
 INDEXES = {
+    "actions_pending_capture_selection": "CREATE INDEX actions_pending_capture_selection ON actions(device_id, driver_id, scheduled_at, plan_id, input_index, id) WHERE status = 1 AND execution_started = 0 AND cancel_requested = 0",
     "history_events_row": "CREATE INDEX history_events_row ON history_events(event_type, json_extract(body_json, '$.rows[0].table'), json_extract(body_json, '$.rows[0].id'), id)",
     "operation_attempts_run_status": "CREATE INDEX operation_attempts_run_status ON operation_attempts(run_id, status)",
     "operation_attempts_without_result": "CREATE INDEX operation_attempts_without_result ON operation_attempts(run_id) WHERE result_json IS NULL",
@@ -70,7 +71,7 @@ class RetryStructureTests(unittest.TestCase):
         for name in INDEXES:
             with self.subTest(name=name):
                 indexes = dict(INDEXES)
-                indexes[name] = indexes[name].replace("run_id", "id").replace("event_type", "id")
+                indexes[name] = indexes[name].replace("run_id", "id").replace("event_type", "id").replace("device_id", "id")
                 with self.assertRaises(ValueError):
                     structure.verify_retry_wait_structure(Connection(indexes))
 
@@ -110,7 +111,8 @@ class RetryStructureTests(unittest.TestCase):
         structure.verify_retry_wait_structure = reject
         class Invalid(Exception): pass
         namespace = {"sqlite3": sqlite3, "expected_table_names": lambda: set(),
-                     "_verify_format_constraints": lambda connection, version: None, "DatabaseInvalidError": Invalid}
+                     "_verify_format_constraints": lambda connection, version: None,
+                     "_verify_read_end_structure": lambda connection: None, "DatabaseInvalidError": Invalid}
         exec(compile(ast.fix_missing_locations(isolated), "runtime", "exec"), namespace)
         connection = SimpleNamespace(execute=lambda query: iter(()))
         with patch.dict(sys.modules, {events.__name__: events, structure.__name__: structure}):

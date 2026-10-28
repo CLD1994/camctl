@@ -95,7 +95,7 @@ def decide_device_work(facts: DeviceFacts) -> DeviceWork:
 
 
 def plan_device_work(connection, now_us: int, capture_read_parallel: Container[str] = (),
-                     *, candidates=None, limit=None) -> tuple[DeviceWork, ...]:
+                     *, candidates=None, limit=None, capture_selections=None) -> tuple[DeviceWork, ...]:
     """本批设备读取事实；当前持有者独立查询，不依赖它是否在本页。"""
     from camctl.outputs.read_discovery import (
         DEFAULT_BATCH_SIZE, ReadDiscoveryScope, database_identity, device_holder, read_candidates,
@@ -127,6 +127,18 @@ def plan_device_work(connection, now_us: int, capture_read_parallel: Container[s
             (device_id, now_us),
         )) as cursor:
             due = cursor.fetchone()
+        selection = None if capture_selections is None else capture_selections.get(device_id)
+        if selection is not None:
+            from camctl.contracts.values import ConsistencyError
+            from camctl.persistence.repositories.capture_selection import CaptureSelectionInput, selected_pending_capture
+            if (not isinstance(selection, CaptureSelectionInput) or selection.device_id != device_id
+                    or selection.trusted_wall_now != now_us):
+                raise ConsistencyError("读取规划的拍摄选择输入与设备或时刻不符")
+            with closing(connection.execute("SELECT COALESCE(MAX(id),0) FROM history_events")) as cursor:
+                boundary = cursor.fetchone()[0]
+            selected = selected_pending_capture(connection, selection, boundary)
+            if selected is not None and (due is None or selected.scheduled_at <= now_us):
+                due = (selected.action_id,)
         with closing(connection.execute(
             "SELECT a.id FROM actions a JOIN device_activities d ON d.action_id=a.id"
             " WHERE a.device_id=? AND d.activity_state<>3 AND d.occupancy_state=1"

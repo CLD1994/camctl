@@ -19,7 +19,7 @@ def target_rules(monkeypatch):
     monkeypatch.setitem(sys.modules, definitions.__name__, definitions)
     members = {
         "actions.status": SimpleNamespace(PENDING=1, RUNNING=2, FAILED=4),
-        "actions.type": SimpleNamespace(OBTAIN_ACTION_OUTPUTS=4),
+        "actions.type": SimpleNamespace(CAMERA_TAKE_PHOTO=1, OBTAIN_ACTION_OUTPUTS=4),
         "device_activities.activity_state": SimpleNamespace(UNKNOWN=1),
         "device_activities.occupancy_state": SimpleNamespace(HELD=1, RELEASED=2),
         "device_activities.ownership_mode": SimpleNamespace(TASK_SCOPE=1),
@@ -116,6 +116,10 @@ class _PagedConnection:
 
     def execute(self, sql, args):
         self.calls.append((sql, args))
+        if "LEFT JOIN device_activities d ON d.action_id=a.id" in sql:
+            cursor = _Cursor([])
+            self.cursors.append(cursor)
+            return cursor
         after = args[1] if "FROM actions" in sql else args[2]
         cursor = _Cursor([row for row in self.rows if row[0] > after])
         self.cursors.append(cursor)
@@ -429,7 +433,7 @@ def test_device_trigger_fixes_original_copy_and_camera(creation_module, monkeypa
     discovery.device_holder = lambda *args: None
     monkeypatch.setitem(sys.modules, discovery.__name__, discovery)
     retry_reads = ModuleType("camctl.persistence.repositories.retry_wait_reads")
-    retry_reads.read_reservation_blocks_control = lambda *args: False
+    retry_reads.read_reservation_blocks_control = lambda *args, **kwargs: False
     retry_reads.held_read_ready_for_availability = lambda *args: True
     retry_reads.read_attempt_budget_available = lambda *args: (1, 2, 1, 0)
     monkeypatch.setitem(sys.modules, retry_reads.__name__, retry_reads)
@@ -497,7 +501,7 @@ def test_capture_check_respects_settled_read_reservation(creation_module, monkey
     recovery = ModuleType("camctl.capture.software_recovery")
     recovery.recovery_locked = lambda *args: False
     retries = ModuleType("camctl.persistence.repositories.retry_wait_reads")
-    retries.read_reservation_blocks_control = lambda *args: blocked
+    retries.read_reservation_blocks_control = lambda *args, **kwargs: blocked
     discovery = ModuleType("camctl.outputs.read_discovery")
     discovery.device_holder = lambda *args: 8 if held else None
     resources = ModuleType("camctl.scheduling.resources")
@@ -512,6 +516,40 @@ def test_capture_check_respects_settled_read_reservation(creation_module, monkey
     else:
         with pytest.raises(creation_module.AvailabilityTargetBlocked):
             creation_module._qualify(_PagedConnection([]), request, 99)
+
+
+@pytest.mark.parametrize("now,selected", [(9, False), (10, True)])
+def test_selected_photo_uses_original_held_read_qualification(creation_module, monkeypatch, now, selected):
+    from decimal import Decimal
+    from camctl.persistence.repositories import capture_selection
+
+    action = {"id": 12, "type": 1, "status": 1, "execution_started": 0, "cancel_requested": 0,
+              "scheduled_at": 10, "max_delay_ms": 10, "device_id": "hb0",
+              "driver_id": "hasselblad_cfv100c", "plan_id": 1, "input_index": 0}
+    monkeypatch.setattr(creation_module, "row_facts", lambda connection, table, row_id: action)
+    monkeypatch.setattr(creation_module, "is_hasselblad_photo", lambda action: True)
+    monkeypatch.setattr(creation_module, "_one", lambda *args: None)
+    monkeypatch.setattr(creation_module, "iter_creation_targets", lambda *args, **kwargs: iter(((25,),)))
+    monkeypatch.setitem(sys.modules, "camctl.persistence.repositories.availability_create", creation_module)
+    monkeypatch.setattr(capture_selection, "pending_capture_candidates", lambda *_: iter((
+        capture_selection.CaptureCandidate(12, 10, 1, 0, 10, None),)))
+    recovery = ModuleType("camctl.capture.software_recovery")
+    recovery.recovery_locked = lambda *args: False
+    retries = ModuleType("camctl.persistence.repositories.retry_wait_reads")
+    retries.read_reservation_blocks_control = lambda *args, **kwargs: False
+    discovery = ModuleType("camctl.outputs.read_discovery")
+    discovery.device_holder = lambda *args: 8
+    resource_reads = ModuleType("camctl.scheduling.resources")
+    resource_reads.device_read_in_flight = resource_reads.device_start_in_flight = lambda *args: False
+    alias = ModuleType("camctl.persistence.repositories.physical_alias")
+    alias.physical_alias_conflict = lambda *args: False
+    for dependency in (recovery, retries, discovery, resource_reads, alias):
+        monkeypatch.setitem(sys.modules, dependency.__name__, dependency)
+    identity = creation_module.CameraIdentity("CAMERA-1", 10)
+    request = capture_selection.CaptureSelectionInput("hb0", "hasselblad_cfv100c", identity,
+                                                      Decimal("1"), now)
+    result = capture_selection.selected_pending_capture(_PagedConnection([]), request, 99)
+    assert (result is not None) is selected
 
 
 @pytest.fixture
@@ -760,7 +798,7 @@ def isolated_result_guard(target_rules, monkeypatch):
     attempts.OperationKind, attempts.QueryPurpose = Kind, Purpose
     for name in ("AttemptFinish", "ReadResumeDecision", "ReadResumeDisposition", "ReadResumeRequest",
                  "AttemptIntent", "AttemptTarget", "BeginAttemptResult", "BeginDisposition", "FinishAttemptResult",
-                 "FinishDisposition", "RunStatus", "StaleRunFinish", "StaleRunFinishResult", "responsibility_key",
+                 "FinishDisposition", "RunFinish", "RunOutcome", "RunStatus", "StaleRunFinish", "StaleRunFinishResult", "responsibility_key",
                  "seconds_from_json", "ticket_target_id", "ticket_target_for_identity", "operation_responsibility_key"):
         setattr(attempts, name, object())
     monkeypatch.setitem(sys.modules, attempts.__name__, attempts)
@@ -845,7 +883,7 @@ def test_generic_finish_guard_rejects_terminal_check_with_in_flight_attempt(
     monkeypatch.setitem(sys.modules, "camctl.persistence.repositories.availability_finish", finish_reads)
     row = SimpleNamespace(table="operation_runs", row_id=3, before=SimpleNamespace(exists=True),
         after=SimpleNamespace(values={"status": 4, "retry_wait_required": 0, "error_json": {"code": "failed"}}))
-    event = SimpleNamespace(rows=(row,))
+    event = SimpleNamespace(rows=(row,), evidence={})
     context = SimpleNamespace(state_rows={"operation_runs": {3: {"kind": 12}}},
         availability_finish_reads=finish_reads.AvailabilityFinishReads(_PendingAttemptConnection()))
     with pytest.raises(isolated_result_guard.EventValidationError):
@@ -868,7 +906,7 @@ def test_generic_finish_guard_accepts_the_validated_prior_result(
     context = SimpleNamespace(state_rows={"operation_runs": {3: {"kind": 12}}},
         availability_reads=None,
         availability_finish_reads=finish_reads.AvailabilityFinishReads(_PendingAttemptConnection(), (validated,)))
-    isolated_result_guard._operation_finish_guard(SimpleNamespace(rows=(row,)), context)
+    isolated_result_guard._operation_finish_guard(SimpleNamespace(rows=(row,), evidence={}), context)
 
 
 @pytest.mark.parametrize("kind", ["START", "READ_FILE"])
@@ -913,6 +951,55 @@ def test_ordinary_attempt_guard_independently_rejects_in_flight_check(isolated_r
              "device_files": {40: {"observer_action_id": 11, "source_action_id": 11}}}
     context = SimpleNamespace(state_rows=state, preparation_reads=Reads())
     with pytest.raises(module.EventValidationError, match="设备检查"):
+        module._attempt_intent_guard(event, context)
+
+
+def test_read_intent_guard_rejects_selected_capture(isolated_result_guard, monkeypatch):
+    module = isolated_result_guard
+    module._RUN_KIND.RESOLVE_OUTPUT_SCOPE = 11
+    module._RUN_KIND.CHECK_CAPTURE_RESULTS = 7
+    module._RUN_KIND.READ_FILE = 3
+    module._ATTEMPT_STATUS.RUNNING = 1
+    module._EFFECT_STATE.UNKNOWN = 1
+    preparation = ModuleType("camctl.persistence.repositories.preparation")
+    class Reads:
+        connection = object()
+        def device_start_in_flight(self, device_id):
+            return False
+    preparation.PreparationReads = Reads
+    definitions = ModuleType("camctl.devices.drivers.hasselblad.definitions")
+    definitions.DRIVER_ID = "hasselblad_cfv100c"
+    alias = ModuleType("camctl.persistence.repositories.physical_alias")
+    alias.source_physical_alias_conflict = lambda *args: False
+    alias.source_physical_identity = lambda *args: "identity"
+    selection = ModuleType("camctl.persistence.repositories.capture_selection")
+    selection.CaptureSelectionInput = SimpleNamespace(from_document=lambda value: value)
+    selection.read_capture_priority = lambda *args, **kwargs: SimpleNamespace(action_id=42)
+    outputs = ModuleType("camctl.persistence.repositories.outputs")
+    outputs._read_owner_eligible = lambda action: True
+    outputs._slot_owner_action = lambda context, copy: context.state_rows["actions"][10]
+    for dependency in (preparation, definitions, alias, selection, outputs):
+        monkeypatch.setitem(sys.modules, dependency.__name__, dependency)
+    run = {"kind": 3, "action_id": 10, "copy_id": 30, "attempts_used": 0}
+    attempt = {"run_id": 3, "attempt_no": 1, "intent_event_id": 7, "status": 1,
+               "effect_state": 1, "result_event_id": None, "result_json": None,
+               "error_json": None, "copy_round": 1}
+    attempt_row = SimpleNamespace(table="operation_attempts", row_id=5,
+        before=SimpleNamespace(exists=False), after=SimpleNamespace(values=attempt))
+    run_row = SimpleNamespace(table="operation_runs", row_id=3,
+        before=SimpleNamespace(exists=True, values={"attempts_used": 0}),
+        after=SimpleNamespace(values={"attempts_used": 1}))
+    event = SimpleNamespace(event_id=7, occurred_at=10, rows=(attempt_row, run_row),
+                            evidence={"capture_selection": {}})
+    state = {"operation_runs": {3: run},
+             "actions": {10: {"id": 10},
+                         11: {"id": 11, "device_id": "camera", "driver_id": definitions.DRIVER_ID}},
+             "file_copies": {30: {"id": 30, "source_device_file_id": 40,
+                                  "source_intermediate_file_id": None, "slot_device_id": "camera", "round": 1}},
+             "device_files": {40: {"observer_action_id": 11, "source_action_id": 11}}}
+    context = SimpleNamespace(state_rows=state, preparation_reads=Reads(),
+                              transaction=SimpleNamespace(first_event_id=7))
+    with pytest.raises(module.EventValidationError, match="已选中的拍摄"):
         module._attempt_intent_guard(event, context)
 
 

@@ -81,15 +81,17 @@ def current_preparation_holder(connection, device_id):
     return None if not rows else PreparationHolder(*rows[0])
 
 
-def device_read_in_flight(connection, device_id: str) -> bool:
+def device_read_in_flight(connection, device_id: str, *, exclude_attempt_id=None) -> bool:
     """只将尚未保存结果的设备读取视为在途调用。"""
     kind = int(enum_for("operation_runs.kind").READ_FILE)
     running = int(enum_for("operation_attempts.status").RUNNING)
+    exclusion = "" if exclude_attempt_id is None else " AND t.id<>?"
+    parameters = (kind, device_id) if exclude_attempt_id is None else (kind, device_id, exclude_attempt_id)
     with closing(connection.execute(
         "SELECT 1 FROM file_copies c"
         " JOIN operation_runs r ON r.copy_id=c.id AND r.kind=?"
         f" JOIN operation_attempts t ON t.run_id=r.id AND t.status={running}"
-        " WHERE c.slot_device_id=? LIMIT 1", (kind, device_id),
+        " WHERE c.slot_device_id=?" + exclusion + " LIMIT 1", parameters,
     )) as cursor:
         return cursor.fetchone() is not None
 
