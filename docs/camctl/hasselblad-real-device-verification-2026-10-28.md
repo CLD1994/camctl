@@ -112,6 +112,8 @@ HOST 以主机正式源为准，不为登记、取回或恢复归档向相机核
 
 当前程序尚需按这一来源规则调整 DEVICE 来源事实与副本复用责任。既有分段视频检查副本的有限复用规则已经定位；Hasselblad 的原图、预览及同步工作区需要接入相应的结果责任和清理。相机按用户安排用于充电，软件调整期间保持零设备调用，之后再安排新规则的真机复验。
 
+来源生产链的阶段快照为 `c9627f55f6186ad3275a6f45f9d7ae5220782e48`，包含冻结模式、DEVICE 控制结果、真实 RESULTS 角色端口、页后文件责任及来源结果处理。主代理在独立固定副本、Python 3.11.17 上复跑四组隔离单元：`test_hasselblad_device_response_isolated.py`、`test_hasselblad_frozen_storage_isolated.py`、`test_hasselblad_device_results_isolated.py`、`test_photo_result_workspace_isolated.py`，57 项通过，退出 0；日志为 `.local/verification/h6-real-device-20261028/source-c9627f55-unit.log`。命令设置 `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`、`PYTHONDONTWRITEBYTECODE=1`，显式使用该副本的源码 `PYTHONPATH`、部署版本解释器及 `pytest -p no:cacheprovider`。运行前已静态核对导入前的资源与协作者隔离。独立完整评审仍在进行，一次比较、H 等待者缓存和原工作目录维护尚未完成；本快照未合入或安装，不代表真实事务、完整来源链或设备验收通过。
+
 ## 充电期间的离线收口
 
 相机充电期间未调用设备。再次审计现有证据，45 份报告均通过公共 Schema 与文件名 SHA-256 核对；18 条 delivery 中有 14 份实际交付文件，大小与固定摘要全部相符，另外 4 条对应此前失败且未发布的预览交付。17 份不同 JPEG 内容中 8 份可解码，其余继续保留实际失败，不以传输字节相同替代媒体有效。SQLite `integrity_check` 为 `ok`，`foreign_key_check` 为空。结果和旧审计副本分别位于 `validation/audit/result.json`、`result-before-source-authority.json`。
