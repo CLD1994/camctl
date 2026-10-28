@@ -16,7 +16,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=apps/camctl/src /workspaces/camctl/apps/cam
 env -u PYTHONHOME -u PYTEST_ADDOPTS PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=apps/camctl/src /workspaces/camctl/apps/camctl/.venv311/bin/python -m pytest -p no:cacheprovider apps/camctl/tests/unit/outputs/test_canceled_publication_isolated.py -q
 ```
 
-新增用例复用现有装配，从取回调度和仓储入口覆盖配置缺失、驱动不符、只读终态或取消退休、实时资格保留及错误来源拒绝，核对原申请和历史边界；不另建测试文件或框架。原结果加载和照片历史核验器在该单元中使用替身，因此拒绝传播不代表真实守卫对普通 HOST 或错误关联的组合已经验证。GPT-6-Astra 独立复核原事务边界、业务键重送、取消和终态分类后未发现剩余阻断。原始日志、命令及退出码收据归档于 `.local/verification/photo-binding-cold-recovery-20261028/`。上述软件验证不含真实仓储与 SQLite 冷重启、软件集成或设备流程；后续源码 `a9023ec0` 的构建、原环境安装及元信息核对已完成，见[真机环境安装记录](hasselblad-real-device-verification-2026-10-28.md#合并及冷恢复修复版安装)。新版本的真实冷重启和设备流程仍待验。
+新增用例复用现有装配，从取回调度和仓储入口覆盖配置缺失、驱动不符、只读终态或取消退休、实时资格保留及错误来源拒绝，核对原申请和历史边界；不另建测试文件或框架。原结果加载和照片历史核验器在该单元中使用替身，因此拒绝传播不代表真实守卫对普通 HOST 或错误关联的组合已经验证。GPT-6-Astra 独立复核原事务边界、业务键重送、取消和终态分类后未发现剩余阻断。原始日志、命令及退出码收据归档于 `.local/verification/photo-binding-cold-recovery-20261028/`。上述软件验证不含真实仓储与 SQLite 冷重启、软件集成或设备流程；后续源码 `a9023ec0` 的构建、原环境安装及元信息核对已完成，见[真机记录](hasselblad-real-device-verification-2026-10-28.md)。当前安装版另已取得两类 DEVICE 来源、RESULTS 进程中断恢复和 START 结果丢失后新请求检查恢复的实际证据；这些流程不等于本修复的“读取绑定失败已提交、交付失败尚未提交”事务间隙已经经过真实冷重启验证，该具体范围仍待验。
 
 ## implement_camctl 合并的软件验证（2026-10-28）
 
