@@ -129,7 +129,11 @@ def plan_device_work(connection, now_us: int, capture_read_parallel: Container[s
             due = cursor.fetchone()
         selection = None if capture_selections is None else capture_selections.get(device_id)
         if selection is not None:
-            from camctl.persistence.repositories.capture_selection import selected_pending_capture
+            from camctl.contracts.values import ConsistencyError
+            from camctl.persistence.repositories.capture_selection import CaptureSelectionInput, selected_pending_capture
+            if (not isinstance(selection, CaptureSelectionInput) or selection.device_id != device_id
+                    or selection.trusted_wall_now != now_us):
+                raise ConsistencyError("读取规划的拍摄选择输入与设备或时刻不符")
             with closing(connection.execute("SELECT COALESCE(MAX(id),0) FROM history_events")) as cursor:
                 boundary = cursor.fetchone()[0]
             selected = selected_pending_capture(connection, selection, boundary)

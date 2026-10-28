@@ -151,6 +151,9 @@ class ReadGuardTests(unittest.TestCase):
         alias = ModuleType("camctl.persistence.repositories.physical_alias")
         alias.source_physical_alias_conflict = lambda *args: False
         alias.source_physical_identity = lambda *args: "identity"
+        selection = ModuleType("camctl.persistence.repositories.capture_selection")
+        selection.CaptureSelectionInput = SimpleNamespace(from_document=lambda value: value)
+        selection.read_capture_priority = lambda *args, **kwargs: None
         scheduling = ModuleType("camctl.scheduling.resources")
         scheduling.current_preparation_holder = lambda *args: object() if preparation_held else None
         def fail(message): raise GuardError(message)
@@ -168,7 +171,8 @@ class ReadGuardTests(unittest.TestCase):
                 "error_json": None, "status": 1, "effect_state": 1, "attempt_no": 1, "copy_round": 1}))
         run_row = SimpleNamespace(table="operation_runs", row_id=11, before=SimpleNamespace(exists=False))
         event = SimpleNamespace(event_id=20, rows=(attempt, run_row), evidence={}, occurred_at=10)
-        context = SimpleNamespace(state_rows=state, preparation_reads=PreparationReads(), obtain_check_reads=None)
+        context = SimpleNamespace(state_rows=state, preparation_reads=PreparationReads(), obtain_check_reads=None,
+                                  transaction=SimpleNamespace(first_event_id=20))
         namespace = {"__name__": "isolated.operations", "__package__": "camctl.persistence.repositories",
             "_ATTEMPT_STATUS": SimpleNamespace(RUNNING=1), "_EFFECT_STATE": SimpleNamespace(UNKNOWN=1),
             "_RUN_KIND": SimpleNamespace(READ_FILE=3, RESOLVE_OUTPUT_SCOPE=11, CHECK_CAPTURE_RESULTS=7,
@@ -182,7 +186,7 @@ class ReadGuardTests(unittest.TestCase):
         guard = extract("_attempt_intent_guard", namespace)
         with patch.dict(sys.modules, {outputs.__name__: outputs, preparation.__name__: preparation,
                                       definitions.__name__: definitions, alias.__name__: alias,
-                                      scheduling.__name__: scheduling}):
+                                      scheduling.__name__: scheduling, selection.__name__: selection}):
             guard(event, context)
 
     def test_device_and_host_eligible_owners_remain_accepted(self):

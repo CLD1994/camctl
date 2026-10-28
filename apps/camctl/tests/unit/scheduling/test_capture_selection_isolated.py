@@ -168,15 +168,18 @@ def test_read_work_plan_yields_to_selected_photo_without_activity():
     resources = ModuleType("camctl.scheduling.resources")
     resources.current_preparation_holder = lambda *args: None
     selected = ModuleType("camctl.persistence.repositories.capture_selection")
+    selected.CaptureSelectionInput = type("CaptureSelectionInput", (), {})
     selected.selected_pending_capture = lambda *args: SimpleNamespace(action_id=42, scheduled_at=10)
     class PlanConnection:
         def execute(self, sql, parameters=()):
             return Cursor([(9,)] if "history_events" in sql else [])
     candidate = SimpleNamespace(device_id="camera", copy_id=11, held=False)
+    selection = selected.CaptureSelectionInput()
+    selection.device_id, selection.trusted_wall_now = "camera", 10
     with patch.dict(sys.modules, {spec.name: module, discovery.__name__: discovery,
             recovery.__name__: recovery, resources.__name__: resources, selected.__name__: selected}):
         spec.loader.exec_module(module)
         plan = module.plan_device_work(PlanConnection(), 10, candidates=(candidate,),
-                                       capture_selections={"camera": object()})
+                                       capture_selections={"camera": selection})
     assert plan[0].dispatch_captures == (42,)
     assert plan[0].grant_reads == ()
