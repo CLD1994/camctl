@@ -104,8 +104,16 @@ class AvailabilityAssembly:
             entry.driver, entry.evidence, DeviceBinding(action["device_id"], DRIVER_ID))
 
     async def read(self, runtime, candidate):
-        if candidate.driver_id != DRIVER_ID or candidate.held:
+        if candidate.driver_id != DRIVER_ID:
             return AvailabilityProgress.READY
+        if candidate.held:
+            if candidate.attempts_used == 0 or candidate.retry_wait_required != 0:
+                return AvailabilityProgress.READY
+            from camctl.persistence.repositories.retry_wait_reads import held_read_ready_for_availability
+            eligible = await runtime.database.read(lambda owned: held_read_ready_for_availability(
+                owned.connection, candidate.copy_id, candidate.device_id, runtime.occurred_at()))
+            if not eligible:
+                return AvailabilityProgress.READY
         source = await runtime.database.read(lambda owned: row_facts(owned.connection, "device_files", candidate.source_file_id))
         fixed = CameraFileIdentity.from_source(source["identity_key"], source["locator_json"])
         declaration = self.devices.get(candidate.device_id)

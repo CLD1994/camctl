@@ -107,7 +107,26 @@ async def test_device_read_requests_same_coordinator_with_fixed_source(assembly)
 @pytest.mark.asyncio
 async def test_existing_read_does_not_request_new_check(assembly):
     instance, coordinator, _, _, _, Progress = assembly
-    candidate = SimpleNamespace(driver_id="hb", held=True)
+    candidate = SimpleNamespace(driver_id="hb", held=True, attempts_used=1, retry_wait_required=1)
 
     assert await instance.read(SimpleNamespace(), candidate) is Progress.READY
     coordinator.request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("eligible", [True, False])
+async def test_held_read_checks_new_restriction_only_after_original_settles(assembly, monkeypatch, eligible):
+    instance, coordinator, _, _, _, Progress = assembly
+    retries = ModuleType("camctl.persistence.repositories.retry_wait_reads")
+    retries.held_read_ready_for_availability = lambda connection, copy_id, device_id, now: eligible
+    monkeypatch.setitem(sys.modules, retries.__name__, retries)
+    connection = SimpleNamespace(source={"identity_key": "source", "locator_json": {}})
+    database = SimpleNamespace(read=AsyncMock(side_effect=lambda callback: callback(SimpleNamespace(connection=connection))))
+    runtime = SimpleNamespace(database=database, occurred_at=lambda: 100)
+    candidate = SimpleNamespace(driver_id="hb", device_id="camera", held=True, attempts_used=1,
+                                retry_wait_required=0, source_file_id=12, action_id=3, copy_id=9)
+    assert await instance.read(runtime, candidate) is (Progress.WAIT if eligible else Progress.READY)
+    if eligible:
+        assert coordinator.request.await_args.args[1].trigger_copy_id == 9
+    else:
+        coordinator.request.assert_not_awaited()

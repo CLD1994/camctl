@@ -107,8 +107,7 @@ def _qualify(connection, request, boundary, *, existing_check=None, exclude_atte
                 or output["device_file_id"] != source["id"] or delivery["action_id"] != action["id"]
                 or action["type"] != int(enum_for("actions.type").OBTAIN_ACTION_OUTPUTS)):
             raise ConsistencyError("检查触发拷贝缺少原设备来源或取回归属")
-        if (action["status"] != int(enum_for("actions.status").RUNNING) or action["cancel_requested"]
-                or copy["slot_device_id"] is not None):
+        if action["status"] != int(enum_for("actions.status").RUNNING) or action["cancel_requested"]:
             raise AvailabilityTargetBlocked("取回或原拷贝不再具备检查资格")
         from camctl.devices.drivers.hasselblad.files import CameraFileIdentity
         from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
@@ -125,9 +124,16 @@ def _qualify(connection, request, boundary, *, existing_check=None, exclude_atte
             raise ConsistencyError("原设备来源绑定与拍摄动作不一致")
         if (fixed.serial, fixed.product_id) != (request.identity.serial, request.identity.product_id):
             raise AvailabilityTargetIdentityMismatch("设备来源的固定机身身份不同")
-        from camctl.outputs.read_discovery import first_eligible_read
-        if first_eligible_read(connection, device_id, request.trusted_wall_now) != request.trigger_copy_id:
-            raise AvailabilityTargetBlocked("拷贝没有当前读取候选顺序资格")
+        if copy["slot_device_id"] is not None:
+            if copy["slot_device_id"] != device_id:
+                raise ConsistencyError("读取机会与原来源设备不一致")
+            from .retry_wait_reads import held_read_ready_for_availability
+            if not held_read_ready_for_availability(connection, copy["id"], device_id, request.trusted_wall_now):
+                raise AvailabilityTargetBlocked("持槽读取的原调用或重试等待尚未结束")
+        else:
+            from camctl.outputs.read_discovery import first_eligible_read
+            if first_eligible_read(connection, device_id, request.trusted_wall_now) != request.trigger_copy_id:
+                raise AvailabilityTargetBlocked("拷贝没有当前读取候选顺序资格")
     from camctl.devices.capture_preparation import CAPTURE_ACTION_TYPES
     after = 0
     while True:
@@ -157,8 +163,9 @@ def _qualify(connection, request, boundary, *, existing_check=None, exclude_atte
     if read_reservation_blocks_control(connection, device_id):
         raise AvailabilityTargetBlocked("设备读取调用尚未收场")
     from camctl.outputs.read_discovery import device_holder
-    if (device_holder(connection, device_id) is not None
-            and (request.trigger_copy_id is not None or request.trusted_wall_now < action["scheduled_at"])):
+    holder = device_holder(connection, device_id)
+    if (holder is not None and ((request.trigger_copy_id is not None and holder != request.trigger_copy_id)
+            or (request.trigger_copy_id is None and request.trusted_wall_now < action["scheduled_at"]))):
         raise AvailabilityTargetBlocked("设备读取机会仍由原拷贝保留")
     from camctl.scheduling.resources import device_read_in_flight, device_start_in_flight
     if device_read_in_flight(connection, device_id) or device_start_in_flight(connection, device_id):
