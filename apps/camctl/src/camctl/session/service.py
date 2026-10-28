@@ -627,11 +627,20 @@ def _attach_ordered_error_notes(
             existing_notes.add(note)
 
 
+@dataclass(frozen=True)
+class _PendingCleanupDiagnostic:
+    error: BaseException
+    stage: str
+    attach_error_on_failure: bool = False
+    only_if_original_selected: bool = False
+
+
 def _merge_cleanup_errors(
     outcome: SessionOutcome | None,
     original: BaseException | None,
     failures: list[tuple[BaseException, str, str]],
     observed_errors: list[BaseException] | None = None,
+    *, pending_diagnostics: list[_PendingCleanupDiagnostic] | None = None,
 ) -> tuple[SessionOutcome | None, BaseException | None]:
     """合并同步资源收场结果，控制对象优先且每个原错误只交付一次。"""
     seen: set[int] = set()
@@ -639,6 +648,9 @@ def _merge_cleanup_errors(
         seen.update(id(error) for error in observed_errors)
     if original is not None:
         seen.add(id(original))
+    own_pending = pending_diagnostics is None
+    if pending_diagnostics is None:
+        pending_diagnostics = []
     for error, stage, fallback_reason in failures:
         sources = _ordered_error_sources(error)
         unobserved_sources = [
@@ -652,17 +664,7 @@ def _merge_cleanup_errors(
             id(source) for source in _error_identity_objects(error)
         )
         if original is not None:
-            from camctl.logging_runtime.diagnostics import record_error
-            try:
-                record_error(error, stage=stage)
-            except BaseException as diagnostic_error:
-                if not isinstance(diagnostic_error, Exception) and isinstance(original, Exception):
-                    _RequiredPhaseWaiter.attach_exception_notes(
-                        diagnostic_error, "此前会话异常", original)
-                    original = diagnostic_error
-                else:
-                    _RequiredPhaseWaiter.attach_exception_notes(
-                        original, "收场诊断异常", diagnostic_error)
+            pending_diagnostics.append(_PendingCleanupDiagnostic(error, stage))
         if not isinstance(error, Exception):
             if original is None or isinstance(original, Exception):
                 previous = original
@@ -694,6 +696,10 @@ def _merge_cleanup_errors(
                 diagnostic_error=error,
             )
             continue
+        # 原错误尚未形成异常时，机器结果负责这项事实。若之后又
+        # 选择控制异常，结果不会返回，需独立交付这项原错误。
+        pending_diagnostics.append(_PendingCleanupDiagnostic(
+            error, stage, only_if_original_selected=True))
         if len(unobserved_sources) == len(sources):
             added = _transaction_error_outcome(
                 error,
@@ -709,7 +715,42 @@ def _merge_cleanup_errors(
                 diagnostic_error=error,
             )
         outcome = added if outcome is None else _merge_failure_outcome(outcome, added)
+
+    if own_pending:
+        original = _deliver_cleanup_diagnostics(original, pending_diagnostics)
     return outcome, original
+
+
+def _deliver_cleanup_diagnostics(
+    original: BaseException | None, pending: list[_PendingCleanupDiagnostic],
+) -> BaseException | None:
+    """在实际收场结束并选出业务控制后登记诊断，不等待日志交付。"""
+    if not pending:
+        return original
+    from camctl.logging_runtime.diagnostics import record_error
+    deferred = []
+    for item in pending:
+        if item.only_if_original_selected and original is None:
+            deferred.append(item)
+            continue
+        try:
+            record_error(item.error, stage=item.stage)
+        except BaseException as diagnostic_error:
+            if original is None:
+                original = diagnostic_error
+            elif not isinstance(diagnostic_error, Exception) and isinstance(original, Exception):
+                _RequiredPhaseWaiter.attach_exception_notes(
+                    diagnostic_error, "此前会话异常", original)
+                original = diagnostic_error
+            else:
+                _RequiredPhaseWaiter.attach_exception_notes(
+                    original, "收场诊断异常", diagnostic_error)
+            if item.attach_error_on_failure:
+                _RequiredPhaseWaiter.attach_exception_notes(
+                    original, "未交付的收场错误", item.error)
+    if original is not None and deferred:
+        original = _deliver_cleanup_diagnostics(original, deferred)
+    return original
 
 
 async def run_session(
@@ -1207,10 +1248,11 @@ async def _run_session(
                 )
         elif original is None:
             original = waiter.parent_cancel
+    pending_cleanup_diagnostics: list[_PendingCleanupDiagnostic] = []
     outcome, original = _merge_cleanup_errors(
         outcome, original,
         [(error, "shutdown", "state_db_error") for error in local_errors],
-        observed_errors,
+        observed_errors, pending_diagnostics=pending_cleanup_diagnostics,
     )
     # 后面的句柄关闭沿同一原错误身份去重，包括已通过控制附注交付的错误。
     for error in (*local_errors, *waiter._stop_errors):
@@ -1229,8 +1271,8 @@ async def _run_session(
         try:
             await waiter.run("diagnostic-result-handoff", diagnostic_settlement)
         except Exception as error:
-            from camctl.logging_runtime.diagnostics import record_error
-            record_error(error, stage="diagnostic_result_handoff")
+            pending_cleanup_diagnostics.append(_PendingCleanupDiagnostic(
+                error, "diagnostic_result_handoff", attach_error_on_failure=True))
         except BaseException as error:
             cleanup_failures.append((error, "shutdown", "state_db_error"))
     if admission_lease is not None:
@@ -1250,7 +1292,9 @@ async def _run_session(
             cleanup_failures.append((error, "shutdown", "state_db_error"))
     outcome, original = _merge_cleanup_errors(
         outcome, original, cleanup_failures, observed_errors,
+        pending_diagnostics=pending_cleanup_diagnostics,
     )
+    original = _deliver_cleanup_diagnostics(original, pending_cleanup_diagnostics)
     if original is not None:
         raise original.with_traceback(original.__traceback__)
     assert outcome is not None

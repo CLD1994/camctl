@@ -477,3 +477,162 @@ def test_terminal_actual_entry_records_new_cleanup_after_prepared_primary(termin
     assert records == [(cleanup, {"stage": "shutdown", "context": {"resource": "基准读取缓存关闭异常"}})]
     assert any("new close error" in note for note in primary.__notes__)
     assert not delivered
+
+
+@pytest.mark.parametrize("original_control,cleanup_control,diagnostic_control,selection", [
+    (False, True, True, "cleanup"),
+    (True, True, True, "original"),
+    (False, False, True, "diagnostic"),
+    (False, False, False, "original"),
+])
+def test_cleanup_control_precedes_new_diagnostic_control(modules, original_control, cleanup_control, diagnostic_control, selection):
+    import asyncio
+    _, service, _ = modules
+    original = asyncio.CancelledError("original") if original_control else RuntimeError("original")
+    cleanup = asyncio.CancelledError("cleanup") if cleanup_control else OSError("cleanup")
+    diagnostic = asyncio.CancelledError("diagnostic") if diagnostic_control else OSError("diagnostic")
+    calls = []
+    def fail(error, **kwargs):
+        calls.append(error)
+        raise diagnostic
+    sys.modules["camctl.logging_runtime.diagnostics"].record_error = fail
+    _, selected = service._merge_cleanup_errors(None, original, [(cleanup, "shutdown", "state_db_error")])
+    assert selected is {"original": original, "cleanup": cleanup, "diagnostic": diagnostic}[selection]
+    assert calls == [cleanup]
+    notes = "\n".join(getattr(selected, "__notes__", ()))
+    assert all(str(error) in notes for error in (original, cleanup, diagnostic) if error is not selected)
+
+
+def test_later_real_cleanup_control_precedes_earlier_diagnostic_control(modules):
+    import asyncio
+    _, service, _ = modules
+    original = RuntimeError("original")
+    first = OSError("first cleanup")
+    second = asyncio.CancelledError("second cleanup")
+    diagnostic = asyncio.CancelledError("diagnostic")
+    calls = []
+    def fail(error, **kwargs):
+        calls.append(error)
+        raise diagnostic
+    sys.modules["camctl.logging_runtime.diagnostics"].record_error = fail
+    _, selected = service._merge_cleanup_errors(None, original, [
+        (first, "shutdown", "state_db_error"), (second, "shutdown", "state_db_error")])
+    assert selected is second
+    assert calls == [first, second]
+    notes = "\n".join(selected.__notes__)
+    assert all(str(error) in notes for error in (original, first, diagnostic))
+
+
+@pytest.mark.parametrize("first_is_control", [False, True])
+def test_cleanup_without_original_keeps_business_order(modules, first_is_control):
+    import asyncio
+    _, service, _ = modules
+    first = asyncio.CancelledError("first control") if first_is_control else OSError("first ordinary")
+    second = asyncio.CancelledError("second control")
+    diagnostic = asyncio.CancelledError("diagnostic control")
+    calls = []
+    def fail(error, **kwargs):
+        calls.append(error)
+        raise diagnostic
+    sys.modules["camctl.logging_runtime.diagnostics"].record_error = fail
+    outcome, selected = service._merge_cleanup_errors(None, None, [
+        (first, "shutdown", "state_db_error"), (second, "shutdown", "state_db_error")])
+    assert selected is (first if first_is_control else second)
+    assert calls == ([second] if first_is_control else [first])
+    assert (outcome is None) is first_is_control
+    notes = "\n".join(selected.__notes__)
+    assert str(second if first_is_control else first) in notes
+    if first_is_control:
+        assert "diagnostic control" in notes
+
+
+def test_cleanup_control_selection_spans_both_closure_batches(modules):
+    import asyncio
+    _, service, _ = modules
+    original = RuntimeError("original")
+    local = OSError("local cleanup")
+    lease = asyncio.CancelledError("lease control")
+    diagnostic = asyncio.CancelledError("diagnostic control")
+    calls, pending = [], []
+    def fail(error, **kwargs):
+        calls.append(error)
+        raise diagnostic
+    sys.modules["camctl.logging_runtime.diagnostics"].record_error = fail
+    outcome, chosen = service._merge_cleanup_errors(None, original, [(local, "shutdown", "state_db_error")],
+                                                     pending_diagnostics=pending)
+    assert chosen is original and not calls
+    outcome, chosen = service._merge_cleanup_errors(outcome, chosen, [(lease, "shutdown", "internal_error")],
+                                                     pending_diagnostics=pending)
+    assert chosen is lease and not calls
+    chosen = service._deliver_cleanup_diagnostics(chosen, pending)
+    assert chosen is lease
+    assert calls == [local, lease]
+    notes = "\n".join(chosen.__notes__)
+    assert all(str(error) in notes for error in (original, local, diagnostic))
+
+
+def test_handoff_diagnostic_waits_for_all_actual_closures_and_retains_its_error(modules):
+    import asyncio
+    _, service, _ = modules
+    handoff = OSError("handoff failure")
+    closing = asyncio.CancelledError("lease control")
+    diagnostic = asyncio.CancelledError("diagnostic control")
+    events = []
+    def fail(error, **kwargs):
+        events.append(("record", error))
+        raise diagnostic
+    sys.modules["camctl.logging_runtime.diagnostics"].record_error = fail
+    pending = [service._PendingCleanupDiagnostic(handoff, "diagnostic_result_handoff", True)]
+    events.append(("lease closed", closing))
+    _, chosen = service._merge_cleanup_errors(None, None, [(closing, "shutdown", "internal_error")],
+                                               pending_diagnostics=pending)
+    chosen = service._deliver_cleanup_diagnostics(chosen, pending)
+    assert chosen is closing
+    assert events == [("lease closed", closing), ("record", handoff)]
+    notes = "\n".join(chosen.__notes__)
+    assert "handoff failure" in notes and "diagnostic control" in notes
+
+
+def test_prior_ordinary_cleanup_is_recorded_when_later_control_may_already_be_frozen(modules):
+    import asyncio
+    _, service, _ = modules
+    ordinary, control = OSError("ordinary cleanup"), asyncio.CancelledError("control already frozen")
+    calls, pending = [], []
+    sys.modules["camctl.logging_runtime.diagnostics"].record_error = lambda error, **kwargs: calls.append(error)
+    outcome, selected = service._merge_cleanup_errors(None, None, [(ordinary, "shutdown", "state_db_error")],
+                                                       pending_diagnostics=pending)
+    assert selected is None and not calls
+    _, selected = service._merge_cleanup_errors(outcome, selected, [(control, "shutdown", "internal_error")],
+                                                pending_diagnostics=pending)
+    assert service._deliver_cleanup_diagnostics(selected, pending) is control
+    assert calls == [ordinary]
+
+
+def test_ordinary_cleanup_result_does_not_create_redundant_record(modules):
+    _, service, _ = modules
+    ordinary = OSError("ordinary cleanup")
+    calls = []
+    sys.modules["camctl.logging_runtime.diagnostics"].record_error = lambda error, **kwargs: calls.append(error)
+    outcome, selected = service._merge_cleanup_errors(None, None, [(ordinary, "shutdown", "state_db_error")])
+    assert selected is None and outcome.reason == "state_db_error"
+    assert not calls
+
+
+def test_late_handoff_diagnostic_control_also_delivers_prior_ordinary_result(modules):
+    import asyncio
+    _, service, _ = modules
+    ordinary, handoff = OSError("ordinary"), OSError("handoff")
+    control = asyncio.CancelledError("diagnostic control")
+    calls, pending = [], []
+    def record(error, **kwargs):
+        calls.append(error)
+        if error is handoff:
+            raise control
+    sys.modules["camctl.logging_runtime.diagnostics"].record_error = record
+    outcome, original = service._merge_cleanup_errors(None, None, [(ordinary, "shutdown", "state_db_error")],
+                                                      pending_diagnostics=pending)
+    pending.append(service._PendingCleanupDiagnostic(handoff, "diagnostic_result_handoff", True))
+    selected = service._deliver_cleanup_diagnostics(original, pending)
+    assert selected is control and outcome.reason == "state_db_error"
+    assert calls == [handoff, ordinary]
+    assert any("handoff" in note for note in selected.__notes__)
