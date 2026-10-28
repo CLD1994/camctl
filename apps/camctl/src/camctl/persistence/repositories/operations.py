@@ -1075,11 +1075,12 @@ class FinishAttemptCommand:
     """一次尝试结束结果的完整事务命令。"""
 
     def __init__(self, finish: AttemptFinish, key: OperationKey, *, binding_read=False,
-                 normal_recording_stop=None) -> None:
+                 current_identity=None, normal_recording_stop=None) -> None:
         self._finish = finish
         self._key = key
         self._binding_read = binding_read
         self._normal_recording_stop = normal_recording_stop
+        self._binding_identity = None if current_identity is None else dict(current_identity)
         self._owners: dict[tuple[str, int], tuple[str, int]] = {}
         self._state: dict[str, dict[int, dict[str, Any]]] = {}
 
@@ -1261,7 +1262,7 @@ class FinishAttemptCommand:
                     ),
                     max(finish.occurred_at, cancel_evidence["occurred_at"]) if cancel_evidence else finish.occurred_at,
                     {"binding_read_finish": {"error": _error_json(finish.run_finish.error),
-                        "cancel_event": cancel_evidence}} if self._binding_read else None,
+                        "cancel_event": cancel_evidence, "current_identity": self._binding_identity}} if self._binding_read else None,
                 )
             )
             run_status_after = RunStatus[final.name]
@@ -1351,8 +1352,9 @@ class FinishAttemptCommand:
             if binding_saved != self._binding_read:
                 raise TransactionError("重送的读取结果申请类别不一致")
             if binding_saved and (not isinstance(binding_evidence, Mapping)
-                    or set(binding_evidence) != {"error", "cancel_event"}
-                    or not json_equal(binding_evidence["error"], _error_json(finish.run_finish.error))):
+                    or set(binding_evidence) != {"error", "cancel_event", "current_identity"}
+                    or not json_equal(binding_evidence["error"], _error_json(finish.run_finish.error))
+                    or not json_equal(binding_evidence["current_identity"], self._binding_identity)):
                 raise TransactionError("重送的原绑定失败与申请不一致")
             canceled = binding_saved and original["status"] == int(_RUN_STATUS.CANCELED) and original["error_json"] is None
             cancel_event = binding_evidence["cancel_event"] if binding_saved else None
@@ -1822,8 +1824,9 @@ class OperationRepository:
         receipt = commit_operation(FinishAttemptCommand(finish, key), key, owned)
         return _outcome_of(receipt)
 
-    def finish_binding_read(self, finish, key, owned):
-        receipt = commit_operation(FinishAttemptCommand(finish, key, binding_read=True), key, owned)
+    def finish_binding_read(self, finish, key, owned, *, current_identity=None):
+        receipt = commit_operation(FinishAttemptCommand(finish, key, binding_read=True,
+            current_identity=current_identity), key, owned)
         return _outcome_of(receipt)
 
     def begin_availability_attempt(self, intent, request, key, owned):
@@ -2267,7 +2270,7 @@ def _operation_finish_guard(event, context) -> None:
                 _fail("绑定读取结果不属于原流程")
             error = after.get("error_json")
             binding_evidence = event.evidence["binding_read_finish"]
-            if not isinstance(binding_evidence, Mapping) or set(binding_evidence) != {"error", "cancel_event"}:
+            if not isinstance(binding_evidence, Mapping) or set(binding_evidence) != {"error", "cancel_event", "current_identity"}:
                 _fail("绑定读取结束证据不完整")
             binding_error = binding_evidence["error"]
             if not isinstance(binding_error, Mapping) or binding_error.get("code") != "device_binding_unavailable":
@@ -2275,8 +2278,19 @@ def _operation_finish_guard(event, context) -> None:
             copy = row_facts(reads.connection, "file_copies", after.get("copy_id"))
             if copy is None:
                 _fail("绑定读取结果缺少原拷贝")
+            details = binding_error.get("details")
+            identity = binding_evidence["current_identity"]
+            if isinstance(details, Mapping) and details.get("reason") == "physical_identity_mismatch":
+                from .physical_alias import verify_source_identity_mismatch
+                source = row_facts(reads.connection, "device_files", copy.get("source_device_file_id"))
+                observer = None if source is None else row_facts(reads.connection, "actions", source["observer_action_id"])
+                origin = None if source is None else row_facts(reads.connection, "actions", source["source_action_id"])
+                if (source is None or observer is None or origin is None or identity is None
+                        or not verify_source_identity_mismatch(reads.connection, source, observer, origin, identity)):
+                    _fail("读取结果的原次机身身份与固定来源不构成不符")
+            elif identity is not None:
+                _fail("非机身不符的读取结果不能携带当前机身身份")
             if copy.get("source_sha256") is not None:
-                details = binding_error.get("details")
                 from .read_end import load_read_end
                 if (not isinstance(details, Mapping) or details.get("reason") != "missing"
                         or copy.get("verification_state") != int(enum_for("file_copies.verification_state").MISMATCHED)

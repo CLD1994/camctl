@@ -181,4 +181,3 @@ def test_action6_entry_resumes_before_reclassifying(native):
         else:
             asyncio.run(entry(runtime, action, object()))
     assert calls == ["resume"]
-

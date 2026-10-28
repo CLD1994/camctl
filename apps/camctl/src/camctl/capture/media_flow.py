@@ -674,13 +674,19 @@ async def run_recording_media(
     state = await copies.copy_state(copy_id)
     ticket = None
     wait_key = f"read/{copy_id}"
-    if state.verification_state not in (3, 5) or state.target_sha256 is None:
-        from camctl.persistence.repositories.read_end import load_read_end
-        saved_end = await flow.database.read(lambda owned: load_read_end(copy_id, owned))
+    from camctl.outputs.read_attempts import HeldReadEnd, unfinished_read_end
+    unfinished = await flow.database.read(lambda owned: unfinished_read_end(owned, copy_id))
+    if unfinished is not None:
+        _original, saved_end = unfinished
         if saved_end is not None:
-            from camctl.outputs.read_attempts import HeldReadEnd
             ticket, end, occurred_at, _ = saved_end
-            flow.pending_read_ends[copy_id] = HeldReadEnd(ticket, end, occurred_at, evidence=flow.evidence)
+            held = flow.pending_read_ends.get(copy_id)
+            if held is None:
+                flow.pending_read_ends[copy_id] = HeldReadEnd(ticket, end, occurred_at, evidence=flow.evidence)
+            elif held.ticket != ticket or held.end != end:
+                raise ConsistencyError("内存中的读取结束与当前轮可靠依据不一致")
+        elif state.verification_state in (3, 5) and state.target_sha256 is not None:
+            return InputStep(InputPhase.WAITING, copy_id=copy_id, reason="read_end_unconfirmed")
     if (state.verification_state not in (3, 5) or state.target_sha256 is None) and ticket is None:
         run = await _read_one(flow.database, "SELECT attempts_used,retry_wait_required FROM operation_runs WHERE copy_id=?", (copy_id,))
         if run is None:
@@ -749,6 +755,10 @@ async def run_recording_media(
                 _resume_local_internal_end(current, value, flow, context))
 
     async def read_and_save(control):
+        if ticket is not None and state.verification_state in (3, 5) and state.target_sha256 is not None:
+            from camctl.outputs.read_attempts import current_local_read_end
+            if not await current_local_read_end(flow, copy_id, flow.pending_read_ends[copy_id]):
+                return InputStep(InputPhase.WAITING, copy_id=copy_id, reason="read_end_changed")
         current = replace(context, sessions=(sessions if ticket is None else
             sessions.for_attempt(ticket, idle_timeout_s=flow.read_idle_timeout_s, control=control)))
         step = await obtain_recording_input(current)

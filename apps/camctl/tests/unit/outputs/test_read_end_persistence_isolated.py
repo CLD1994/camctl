@@ -492,7 +492,7 @@ class MissingConfigGuardTests(unittest.TestCase):
         row = SimpleNamespace(table="operation_runs", row_id=7, before=SimpleNamespace(exists=True, values={"status": 2}),
                               after=SimpleNamespace(values={"status": 4}))
         event = SimpleNamespace(rows=(row,), event_type=10, reason=3, occurred_at=5,
-            evidence={"binding_read_finish": {"error": error, "cancel_event": None}})
+            evidence={"binding_read_finish": {"error": error, "cancel_event": None, "current_identity": None}})
         context = SimpleNamespace(preparation_reads=Reads(), state_rows={"operation_attempts": {12: {"run_id": 7}}})
         def facts(connection, table, identity): return action if table == "actions" else copy
         def fail(message): raise ValueError(message)

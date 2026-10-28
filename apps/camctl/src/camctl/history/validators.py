@@ -558,7 +558,7 @@ def _check_evidence_member(event_id: int, member: str, value: Any, reason: int) 
                 or not is_json_integer(value["trusted_wall_now"]) or value["trusted_wall_now"] < 0):
             _fail("可用性失败申请必须包含检查身份与可信时间")
     elif member == "binding_read_finish":
-        if (not isinstance(value, Mapping) or set(value) != {"error", "cancel_event"}
+        if (not isinstance(value, Mapping) or set(value) != {"error", "cancel_event", "current_identity"}
                 or not isinstance(value["error"], Mapping) or value["error"].get("code") != "device_binding_unavailable"
                 or (value["cancel_event"] is not None and (not isinstance(value["cancel_event"], Mapping)
                     or set(value["cancel_event"]) != {"event_id", "transaction_id", "occurred_at"}
@@ -566,6 +566,17 @@ def _check_evidence_member(event_id: int, member: str, value: Any, reason: int) 
                            for name in ("event_id", "transaction_id"))
                     or not is_json_integer(value["cancel_event"]["occurred_at"])))):
             _fail("绑定读取结果必须包含原绑定失败")
+        identity = value["current_identity"]
+        details = value["error"].get("details")
+        mismatch = isinstance(details, Mapping) and details.get("reason") == "physical_identity_mismatch"
+        if mismatch != (identity is not None):
+            _fail("机身不符的读取结果必须保存原次观察身份")
+        if identity is not None:
+            from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+            try:
+                CameraIdentity(**identity)
+            except (TypeError, ValueError) as error:
+                _fail(f"读取结果的原次机身身份无效: {error}")
     elif member == "read_current_identity":
         from camctl.devices.drivers.hasselblad.identity import CameraIdentity
         try:

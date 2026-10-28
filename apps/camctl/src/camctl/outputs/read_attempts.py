@@ -2,7 +2,7 @@
 
 from contextlib import closing
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from camctl.capture.recovery import RecoveryBoundary, RecoveryBlockedReason, RecoveryDiagnostic
 from camctl.contracts.values import ConsistencyError, OperationKey, new_operation_key
@@ -240,6 +240,7 @@ class PendingReadResult:
     diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
     preserved_run_terminal: bool = False
     binding_read: bool = False
+    binding_identity: Mapping | None = None
 
 
 @dataclass(frozen=True)
@@ -309,7 +310,7 @@ async def retry_read_ends(runtime):
         await held.resume(runtime, held)
 
 
-async def current_local_read_end(runtime, copy_id, held):
+async def current_local_read_end(runtime, copy_id, held, *, allow_held_slot=False):
     """取得文件资格后重新核对原票据及当前轮次的本机结束依据。"""
     from camctl.persistence.repositories.read_end import load_read_end
 
@@ -324,7 +325,7 @@ async def current_local_read_end(runtime, copy_id, held):
             return False
         if saved[0] != held.ticket or saved[1] != held.end:
             raise ConsistencyError("本机续接的当前轮结束依据已经改变")
-        return saved[3] is None
+        return allow_held_slot or saved[3] is None
 
     return await runtime.database.read(read)
 
@@ -591,7 +592,9 @@ async def held_binding_read_result(runtime, copy_id, binding_result, business):
         selected_business = replace(selected_business, request=request)
     return hold_read_result(runtime, finish, business=selected_business, key=key,
                             preserved_run_terminal=status[0] not in (1, 2),
-                            binding_read=binding_read, suppress_diagnostic=binding_read)
+                            binding_read=binding_read, suppress_diagnostic=binding_read,
+                            binding_identity=(dict(binding_result.current_identity)
+                                if binding_read and getattr(binding_result, "current_identity", None) is not None else None))
 
 
 @dataclass(frozen=True)
@@ -668,14 +671,15 @@ async def _prepare_stopped_read(runtime, pending):
 
 def hold_read_result(runtime, finish, *, business=None, key=None,
                      context=None, diagnostic_error=None, diagnostic_stage=None, suppress_diagnostic=False,
-                     preserved_run_terminal=False, binding_read=False):
+                     preserved_run_terminal=False, binding_read=False, binding_identity=None):
     identity = (finish.ticket.run_id, finish.ticket.attempt_id)
     if identity in runtime.pending_read_results:
         raise ConsistencyError("同一原读取已有待保存结果，不能覆盖")
     diagnostic = (business.diagnostic if business is not None else
                   diagnostic_state_for(diagnostic_error) or DiagnosticState())
     pending = PendingReadResult(finish, new_operation_key() if key is None else key, business,
-        diagnostic=diagnostic, preserved_run_terminal=preserved_run_terminal, binding_read=binding_read)
+        diagnostic=diagnostic, preserved_run_terminal=preserved_run_terminal, binding_read=binding_read,
+        binding_identity=binding_identity)
     runtime.pending_read_ends.pop(int(finish.ticket.target_id), None)
     runtime.pending_read_results[identity] = pending
     details = {"copy_id": int(finish.ticket.target_id), **(context or {})}
@@ -708,7 +712,8 @@ async def save_read_result(runtime, pending, *, retry=False):
         control_error = None
         try:
             outcome = await runtime.database.write(
-                lambda owned: (runtime.operations.finish_binding_read(prepared.finish, prepared.key, owned)
+                lambda owned: (runtime.operations.finish_binding_read(prepared.finish, prepared.key, owned,
+                    current_identity=prepared.binding_identity)
                     if prepared.binding_read else runtime.operations.finish_attempt(prepared.finish, prepared.key, owned)), key=prepared.key)
         except BaseException as error:
             outcome = db_outcome_for(error)
@@ -810,6 +815,19 @@ def running_read_ticket(owned, copy_id: int):
             or status != 1 or result is not None or intent_event_id is None):
         raise ConsistencyError("原读取尝试身份、结果或累计次数不可可靠解释")
     return AttemptTicket(attempt_no, "read", str(copy_id), responsibility, run_id), intent_event_id
+
+
+def unfinished_read_end(owned, copy_id):
+    """按原未结束票据读取当前轮结束依据；不存在尝试时不读取旧结束引用。"""
+    from camctl.persistence.repositories.read_end import load_read_end
+
+    original = running_read_ticket(owned, copy_id)
+    if original is None:
+        return None
+    saved = load_read_end(copy_id, owned)
+    if saved is not None and saved[0] != original[0]:
+        raise ConsistencyError("当前轮读取结束与原未完成票据不一致")
+    return original[0], saved
 
 
 def record_read_diagnostic(runtime, reason, ticket):

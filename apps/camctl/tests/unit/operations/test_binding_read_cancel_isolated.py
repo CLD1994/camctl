@@ -7,7 +7,7 @@ import pytest
 
 from camctl.contracts import enums
 from camctl.contracts.values import ConsistencyError
-from camctl.persistence.repositories.binding_read_cancel import binding_cancel_event, saved_binding_read_failure
+from camctl.persistence.repositories.binding_read_cancel import binding_cancel_event, saved_binding_read_failure, load_saved_binding_read_failure
 
 
 @pytest.fixture
@@ -55,7 +55,7 @@ def test_retirement_requires_exact_saved_read_result(monkeypatch, damage):
     result = {"settlement": {"basis": "observed", "evidence": {"type": "read_returned", "version": 1, "data": {}}}}
     attempt = {"run_id": 3, "result_event_id": 11, "status": 2, "result_json": result, "error_json": None}
     run = {"id": 3, "action_id": 4, "copy_id": 5, "status": 4, "error_json": error}
-    evidence = {"error": error, "cancel_event": None}
+    evidence = {"error": error, "cancel_event": None, "current_identity": None}
     events = [{"type": 12, "reason": 1, "event_id": 11, "body": {"rows": [{
         "table": "operation_attempts", "id": 6, "after": {"values": {"status": 2, "result_json": result}}}]}},
         {"type": 10, "reason": 3, "body": {"evidence": {"binding_read_finish": evidence}, "rows": [{
@@ -77,3 +77,25 @@ def test_retirement_requires_exact_saved_read_result(monkeypatch, damage):
     else:
         with pytest.raises(ConsistencyError):
             saved_binding_read_failure(object(), "original-key", 4, 5, error)
+
+
+def test_recovery_loads_original_transaction_identity_and_rejects_different_identity(monkeypatch):
+    identity = {"serial": "observed"}
+    error = {"code": "device_binding_unavailable", "stage": "execution", "details": {"reason": "physical_identity_mismatch"}}
+    result = {"settlement": {"basis": "observed", "evidence": {"type": "read_returned", "version": 1, "data": {}}}}
+    attempt = {"run_id": 3, "result_event_id": 11, "status": 2, "result_json": result, "error_json": None}
+    run = {"id": 3, "action_id": 4, "copy_id": 5, "status": 4, "error_json": error}
+    events = [{"type": 12, "reason": 1, "event_id": 11, "occurred_at": 17, "body": {"rows": [{
+        "table": "operation_attempts", "id": 6, "after": {"values": {"status": 2, "result_json": result}}}]}},
+        {"type": 10, "reason": 3, "body": {"evidence": {"binding_read_finish": {
+            "error": error, "cancel_event": None, "current_identity": identity}}, "rows": [{
+            "table": "operation_runs", "id": 3, "after": {"values": {"status": 4, "error_json": error}}}]}}]
+    transaction = ModuleType("camctl.persistence.transaction")
+    transaction.saved_transaction_events = lambda connection, key: events
+    transaction.row_facts = lambda connection, table, identity: attempt if table == "operation_attempts" else run
+    monkeypatch.setitem(sys.modules, transaction.__name__, transaction)
+    assert load_saved_binding_read_failure(Connection([("original-key",)]), 4, 5, error) == ("original-key", identity, 17)
+    with pytest.raises(ConsistencyError):
+        saved_binding_read_failure(object(), "original-key", 4, 5, error, {"serial": "different"})
+    with pytest.raises(ConsistencyError):
+        load_saved_binding_read_failure(Connection([]), 4, 5, error)

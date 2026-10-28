@@ -4,6 +4,7 @@ from enum import IntEnum
 from importlib.util import find_spec, module_from_spec, spec_from_file_location
 import sqlite3
 import sys
+from types import ModuleType
 from unittest.mock import create_autospec, patch
 
 import pytest
@@ -66,6 +67,10 @@ def test_open_structure_rejects_old_activity_definition(monkeypatch, runtime, fo
     monkeypatch.setattr(events, "load_event_registry", lambda: {"tables": {}})
     monkeypatch.setattr(events, "business_tables_for_format", lambda version: ())
     monkeypatch.setattr(runtime, "_verify_format_constraints", lambda connection, version: None)
+    monkeypatch.setattr(runtime, "_verify_read_end_structure", lambda connection: None)
+    retry_structure = ModuleType("camctl.persistence.retry_wait_structure")
+    retry_structure.verify_retry_wait_structure = lambda connection: None
+    monkeypatch.setitem(sys.modules, retry_structure.__name__, retry_structure)
 
     def reject_old_structure(connection):
         raise ValueError("device_activities 结构不一致")

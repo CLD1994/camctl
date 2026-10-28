@@ -4,6 +4,18 @@
 
 ## H1：录像启动占用释放测试装配
 
+2026-10-28，在基线 `de455595` 的独立工作区 `/tmp/camctl-h1-start-recovery-20261028` 使用 CPython 3.11.17 执行：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 /workspaces/camctl/apps/camctl/.venv311/bin/python -m unittest discover -s apps/camctl/tests/unit/capture -p 'test_h1_recovery_boundaries_isolated.py' -v
+```
+
+命令退出码为 0，11 项通过，前台输出未另存。测试加载目标源码前阻断真实 `camctl` 导入，其他协作者和报告登记均使用内存替身；未访问真实包资源、数据库、设备或现场数据。
+
+`capture.recovery.recovery_block_reason` 覆盖旧本地收场未确认、固定历史范围缺失或不包含原意图、证据查找缺失、本地控制仍在途、原驱动证据缺失和合格边界；生产 `_attempt_recovery_evidence` 按原顺序消费该判定。`recovery_registry` 覆盖原驱动声明及其恢复证据契约，通用 `operations.recovery.recover_attempt` 的分类另作独立单元验证，该通用函数不直接驱动拍摄恢复。原结果拥有者的 `save` 入口由生产保存路径调用；测试覆盖派生申请保留原票据、操作键和同一保存任务，两个等待者共同消费结果且只应用一次，回执未知后显式按已冻结的最新原申请重送；原结果已应用并移除时，旧快照不能重开保存。活动释放判定覆盖可靠无效果、准备未收场、可能启动以及输出范围未确定；报告投影解释器在登记替身下保持原错误与 `end_unconfirmed`，不把占用变化解释为设备结束。
+
+静态核对显示，`session_capture_assembly` 固定本会话恢复边界与历史上界；`recover_attempt` 优先处理同会话已持有结果，已保存结果不重新生成，原调用结果缺失且上述前提成立时形成原票据的 `UNKNOWN/result_not_saved`，没有重新派发旧 START。调用结果及派生申请沿 `PendingCallResult` 的原键提交；文件及报告事实仍由原生产责任处理。上述隔离测试不构成真实报告登记、完整会话组装、数据库事务或跨组件组合证明；安装版、跨组件和真机验收仍按计划单独跟踪。
+
 2026-10-28，在独立工作区 `/tmp/camctl-h1-capture-20261028` 的提交 `50691389` 上，使用 CPython 3.11.17 执行：
 
 ```bash
@@ -33,6 +45,32 @@ apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/integration/capture/
 安装版验证使用隔离入口和 `/tmp/camctl-h1-installed-20261028` 的未提交快照，完成后提交为 `aefcc589`，集成提交为 `9d811033`。证据目录 `/tmp/camctl-h1-installed-prep-20261028` 的 `summary.json` 记录入口退出码 0，实际收集八项并全部通过：missing START、两组已保存 START 和五个历史观察器反例。missing START 场景在替身真实拍摄形成两份工作文件后中断，正常重启沿原责任保存未知，原拍摄没有重放，文件及报告保留。另一轮正常链的四个任务各记录三项通过和 pytest 退出码 0，但入口主进程已消失而汇总仍为 `running`，没有总退出码；该轮不计为完整门禁通过。
 
 ## H2：固定身份和证据类别
+
+2026-10-28，在独立工作区 `/tmp/camctl-h2-stage-audit-20261028` 的基线 `a0174202`，使用 CPython 3.11.17 定向核对 H2。以下命令退出码均为 0，前台输出未另存：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 /workspaces/camctl/apps/camctl/.venv311/bin/python -m unittest discover -s apps/camctl/tests/unit/devices -p 'test_h2_availability_port_isolated.py' -v
+PYTHONDONTWRITEBYTECODE=1 /workspaces/camctl/apps/camctl/.venv311/bin/python -m unittest discover -s apps/camctl/tests/unit/history -p 'test_h2_availability_history_isolated.py' -v
+PYTHONDONTWRITEBYTECODE=1 /workspaces/camctl/apps/camctl/.venv311/bin/python -m unittest discover -s apps/camctl/tests/unit/operations -p 'test_h2_target_guard_isolated.py' -v
+PYTHONPATH=apps/camctl/src PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /workspaces/camctl/apps/camctl/.venv311/bin/python -c 'import camctl.resources as r; r.resource_bytes = lambda *a, **k: (_ for _ in ()).throw(AssertionError("real resource blocked")); r.available_resources = r.resource_bytes; import camctl.contracts.enums as e; e.resource_bytes = r.resource_bytes; import pytest; raise SystemExit(pytest.main(["apps/camctl/tests/unit/persistence/test_device_activity_structure_isolated.py", "-q", "--tb=short", "-p", "no:cacheprovider"]))'
+```
+
+四条命令分别通过 5、2、2、6 项。前三组在导入前阻断真实 `camctl` 包并以源码抽取及内存协作者执行；最后一组在测试导入前阻断真实资源读取，连接与结构检查使用替身。活动结构测试恢复对旧活动定义的原断言，新增的读取结束结构和重试索引检查只作为非被测协作者隔离。
+
+| H2 项目 | 实现核对与隔离证据 |
+| --- | --- |
+| 1. 检查结构与登记 | 当前 SQL 登记检查、固定目标、唯一关系、原流程及释放引用；旧活动结构拒绝分区由 6 项结构测试覆盖。真实初始化及 SQL 约束执行未在本次运行。 |
+| 2. 历史与归属 | 历史仓储包含检查和目标的动作归属；2 项隔离测试对触发动作与旧动作分别检查正向、快照起点及逆向行值，拒绝不一致的释放引用。未执行真实数据库历史回放。 |
+| 3. 释放合法性 | 原活动资格与目标页守卫已实现；隔离测试覆盖活动仍在执行、公共范围、已有引用、缺失身份、跨逻辑设备、机身不一致及伪造或不完整目标页。检查结果与真实事务的联合守卫另行验证。 |
+| 4. 创建、意图与结果事务 | 创建、意图、真实结果、目标释放、无调用终结和失败交付已有生产命令；目标页测试验证完整固定集合，其他提交、原键和全批原子性按代码及既有专项记录核对，本次未执行真实事务。 |
+| 5. 固定身份与别名 | 活动和 DEVICE 源保存原身份，`physical_alias` 核对未完成责任；此次目标和驱动入口测试分别覆盖缺失、错误机身与绑定不符，不以当前配置补造旧身份。 |
+| 6. 检查驱动 | 5 项隔离测试执行公开检查方法，覆盖 `list → info → doctor`、共享期限、绑定不符、失败和取消，并检查结果转换保留原步骤输出；解析器及受管工具使用替身，未验证真实进程。 |
+| 7. DEVICE 正式源 | `CameraFileIdentity` 固定原绑定、路径、种类、长度和摘要；`open_read` 核对来源与固定机身、长度及偏移。此项本次为静态入口核对，文件来源登记与实际读取组合另行验证。 |
+| 8. 错误与报告 | 公共登记包含拍摄检查失败、来源设备不可用及物理绑定原因，失败事务消费登记的错误与原检查次数；此项本次为静态核对，真实报告登记与交付组合未运行。 |
+
+这些结果不证明真实资源、数据库事务、受管进程、安装版或设备行为。公开检查和事务的跨组件验证、历史持久化回放及真实设备验收分别按计划跟踪。
+
+将 H2 交付 `cb02382f` 合入包含 H1 的 `d30fda8f` 后，在主工作区 `/workspaces/camctl` 用同一 Python 3.11.17 及 `PYTHONDONTWRITEBYTECODE=1`，运行上述三个 unittest 文件和 H1 的 `test_h1_recovery_boundaries_isolated.py`，将 `-v` 改为 `-q`；四条命令退出码均为 0，分别为 5、2、2、11 项通过。此轮用于核对合并后的实际源码，未扩大到真实资源、数据库或设备。Sol 对固定 H2 源码的八项责任审查未发现生产阻断，所指出的结构测试前置协作者隔离已在交付中修正。
 
 2026-10-28，在独立工作区 `/tmp/camctl-h2-availability-storage-20261028`，使用 CPython 3.11.17 执行：
 
@@ -81,6 +119,12 @@ PYTHONPATH=apps/camctl/src apps/camctl/.venv311/bin/python -m pytest apps/camctl
 读取机会事务和独立守卫补充了同逻辑设备的在途 START 核对。在 `/workspaces/camctl` 使用 Python 3.11.17 执行 `PYTHONPATH=apps/camctl/src PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/persistence/test_read_slot_start_isolation.py -q --tb=short -p no:cacheprovider`，退出码为 0，6 项通过。测试以受控枚举、事件、数据库及其他协作者替身覆盖授予等待、已有机会、释放与守卫；不证明真实数据库事务或同事务前序事件投影。
 
 资源守卫接入普通事务的已验证前序投影后，使用同一环境运行 `PYTHONPATH=apps/camctl/src PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/scheduling/test_preparation_flight_overlay.py apps/camctl/tests/unit/scheduling/test_start_read_exclusion.py apps/camctl/tests/unit/operations/test_intent_run_identity_isolated.py apps/camctl/tests/unit/persistence/test_read_slot_start_isolation.py -q --tb=short -p no:cacheprovider`，退出码为 0，31 项通过。首次组合运行因测试模块缓存共享使 2 项失败、29 项通过；隔离模块引用后重跑通过。测试核对前序创建、结束、关联变化、意图行基数和机会守卫；不证明真实数据库或完整设备调度。
+
+在独立工作区 `/tmp/camctl-h3-availability-coordinator-20261028` 的提交 `ae2bab45`，负责人报告定向隔离单元测试为 247 项及 12 个子测试通过，`git diff --check c3bb1b8f HEAD` 通过。该分支接入检查协调、拍摄与 DEVICE 读取、检查事务和取消恢复，但尚未合入当前分支。测试使用受控枚举和协作者替身，未运行集成测试，未读取真实包资源或访问真实数据库及设备；上述结果不能证明组件组合、历史回放、跨会话恢复或真机行为。
+
+内部 READ 耗尽接线在独立工作区 `/tmp/camctl-unknown-read-exhaustion-20261028` 误运行了一次不符合本轮限制的测试：`UV_PROJECT_ENVIRONMENT=/tmp/camctl-unknown-read-exhaustion-20261028/apps/camctl/.venv311 uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests/unit/capture/test_unknown_read_exhaustion.py -q`。该命令退出码为 0，输出 3 项通过；但测试直接导入真实 `camctl` 模块并调用真实枚举登记，按项目分类跨越集成边界，违反本轮禁止运行集成测试的要求。它没有访问真实数据库或设备，结果不作为本轮合规的单元验证证据。负责人收到提醒后停止运行该测试并改用隔离替身。
+
+该分支仍需处理完整 READ 已结束后的机会交接、尚未建立活动的拍摄与 READ 的选中竞争、合法 UNKNOWN 耗尽后的有限终结，以及取消与绑定失败的先后语义。顾问已分析前两项读取结束和 UNKNOWN 耗尽的规格边界，相关选择尚待用户答复；这些未完成事项不得以现有局部测试通过替代。
 
 ## H4：公共诊断消费者
 

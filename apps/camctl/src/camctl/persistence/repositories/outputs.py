@@ -3733,6 +3733,27 @@ class _DeliveryPublicationMixin:
         )
 
 
+def delivery_read_succeeded(connection, delivery_id):
+    """交付发布以前，原读取流程及尝试必须已有可靠成功结果。"""
+    from .retry_wait_reads import RetryWaitReads
+
+    with closing(connection.execute(
+        "SELECT r.id,r.status,r.attempts_used,r.retry_wait_required,"
+        " t.status,t.result_json,t.result_event_id FROM file_copies c"
+        " JOIN operation_runs r ON r.copy_id=c.id AND r.kind=?"
+        " LEFT JOIN operation_attempts t ON t.run_id=r.id AND t.attempt_no=r.attempts_used"
+        " WHERE c.delivery_id=? LIMIT 2", (int(_RUN_KIND.READ_FILE), delivery_id),
+    )) as cursor:
+        rows = cursor.fetchall()
+    if len(rows) != 1:
+        return False
+    run_id, status, used, waiting, attempt_status, result, event_id = rows[0]
+    return (status == int(_RUN_STATUS.SUCCEEDED) and used > 0 and waiting == 0
+            and attempt_status == int(_ATTEMPT_STATUS.SUCCEEDED)
+            and result is not None and event_id is not None
+            and RetryWaitReads(connection).no_unsettled_attempts(run_id))
+
+
 class _PublicationIntentCommand(_DeliveryPublicationMixin):
     """发布意图保存事务命令。
 
@@ -3771,6 +3792,10 @@ class _PublicationIntentCommand(_DeliveryPublicationMixin):
             return self._decision(
                 IntentSaveOutcome(
                     IntentDisposition.SKIPPED, reason="owner_not_running"),
+                read_only=True)
+        if not delivery_read_succeeded(connection, delivery["id"]):
+            return self._decision(
+                IntentSaveOutcome(IntentDisposition.SKIPPED, reason="read_result_unconfirmed"),
                 read_only=True)
         allocation = scope.allocate(1)
         event = _envelope(
@@ -4406,7 +4431,8 @@ class _ReadBindingFailCommand(_DeliveryPublicationMixin):
         if self._command.read_result_key is not None:
             from .binding_read_cancel import saved_binding_read_failure
             saved_binding_read_failure(scope.connection, self._command.read_result_key, action["id"], copy["id"],
-                {"code": "device_binding_unavailable", "stage": "execution", "details": details})
+                {"code": "device_binding_unavailable", "stage": "execution", "details": details},
+                self._command.binding_result.current_identity)
         if saved is not None:
             return self._reuse(scope, saved, facts)
         if delivery["status"] in (6, 7, 8) or copy["verification_state"] in (3, 5):
@@ -6551,6 +6577,10 @@ def _delivery_guard(event, context) -> None:
                 raise EventValidationError(
                     "发布意图必须推进到 PUBLISHING 并引用本意图事件")
             _require_publishable_copy(context, row.row_id)
+            from .retry_wait_reads import RetryWaitReads
+            reads = context.retry_wait_reads
+            if type(reads) is not RetryWaitReads or not delivery_read_succeeded(reads.connection, row.row_id):
+                raise EventValidationError("发布意图要求原读取流程可靠成功")
     elif event.event_type == _DELIVERY_CHANGED_EVENT and event.reason == _PUBLISH_REASON:
         for row in event.rows:
             if row.table != "deliveries":

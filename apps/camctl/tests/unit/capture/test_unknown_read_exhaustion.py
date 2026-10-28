@@ -91,6 +91,7 @@ def _entry_namespace():
     return {
         "InputPhase": phase,
         "InputStep": input_step,
+        "Path": Path,
         "SaveDisposition": SimpleNamespace(SAVED=_SAVED),
         "QualificationOutcome": SimpleNamespace(GRANTED=_GRANTED),
         "OperationConfig": lambda *args: args,
@@ -106,7 +107,7 @@ def _entry_namespace():
         "resume_media_saves": _async_noop,
         "retry_read_business": _async_noop,
         "retry_read_ends": _async_noop,
-        "load_read_end": lambda copy_id, owned: None,
+        "unfinished_read_end": lambda owned, copy_id: None,
         "load_processing_status": lambda *_args: object(),
         "_fail_internal_read_input": _async_noop,
         "replace": lambda flow, **_changes: flow,
@@ -134,6 +135,66 @@ async def _budget_exhausted(*_args, **_kwargs):
 
 
 class UnknownReadExhaustionTests(unittest.TestCase):
+    def test_verified_segment_recovery_settles_original_before_ready(self):
+        namespace = _entry_namespace()
+        trace = []
+        phase = SimpleNamespace(WAITING="waiting", INPUT_READY="ready", SEGMENT_FAILED="failed", RECOPY_PENDING="recopy")
+        namespace["InputPhase"] = phase
+        namespace["InputContext"] = lambda **values: SimpleNamespace(**values)
+        namespace["HeldReadEnd"] = lambda ticket, end, occurred_at, **kwargs: SimpleNamespace(
+            ticket=ticket, end=end, occurred_at=occurred_at, resume=None, **kwargs)
+        ticket, end = object(), object()
+        namespace["unfinished_read_end"] = lambda owned, copy_id: (ticket, (ticket, end, 99, None))
+        async def valid(*args):
+            trace.append("recheck")
+            return True
+        async def obtain(context):
+            self.assertIs(context.read_end, end)
+            trace.append("local_copy")
+            return SimpleNamespace(phase=phase.INPUT_READY, input_file=object(), copy_id=9)
+        async def finish(flow, actual, step, **kwargs):
+            self.assertIs(actual, ticket)
+            trace.append("finish_original")
+        async def owned(flow, copy_id, callback):
+            trace.append("file_owner")
+            return await callback(None)
+        namespace.update(current_local_read_end=valid, obtain_recording_input=obtain,
+                         _finish_internal_read=finish, run_owned_read=owned)
+        obtain_input = _load_function(SOURCE / "capture" / "segment_inspections.py", "_obtain_input", namespace)
+        copies = _Copies()
+        async def ready_state(copy_id):
+            return SimpleNamespace(round=2, verification_state=3, target_sha256="hash")
+        copies.copy_state = ready_state
+        sessions = SimpleNamespace(for_attempt=lambda *args, **kwargs: sessions)
+        flow = SimpleNamespace(max_read_attempts=1, read_idle_timeout_s=5, retry_interval_s=0,
+            occurred_at=lambda: 100, copies=lambda: copies,
+            database=SimpleNamespace(read=lambda callback, **kwargs: _call(callback)),
+            pending_read_ends={}, evidence=object(), sessions=sessions, segment_size=1024,
+            roots=SimpleNamespace(staging=Path("staging")), digest_for=None, digest=None,
+            capture_selection=None, continuing_read_tickets={},
+            retry_gate=SimpleNamespace(cleared=lambda key: None))
+        request = SimpleNamespace(action_id=21, budget=SimpleNamespace(max_attempts=1, timeout_s=5, retry_interval_s=0))
+        result = asyncio.run(obtain_input(flow, request, 4, 30, "recording.mp4"))
+        self.assertEqual(result.phase, "ready")
+        self.assertEqual(trace, ["file_owner", "recheck", "local_copy", "finish_original"])
+        self.assertEqual(copies.grants, 0)
+
+    def test_verified_segment_without_reliable_end_waits(self):
+        namespace = _entry_namespace()
+        namespace["unfinished_read_end"] = lambda owned, copy_id: (object(), None)
+        obtain_input = _load_function(SOURCE / "capture" / "segment_inspections.py", "_obtain_input", namespace)
+        copies = _Copies()
+        async def ready_state(copy_id):
+            return SimpleNamespace(round=2, verification_state=3, target_sha256="hash")
+        copies.copy_state = ready_state
+        flow = SimpleNamespace(max_read_attempts=1, read_idle_timeout_s=5, retry_interval_s=0,
+            occurred_at=lambda: 100, copies=lambda: copies,
+            database=SimpleNamespace(read=lambda callback, **kwargs: _call(callback)))
+        request = SimpleNamespace(action_id=21, budget=SimpleNamespace(max_attempts=1, timeout_s=5, retry_interval_s=0))
+        result = asyncio.run(obtain_input(flow, request, 4, 30, "recording.mp4"))
+        self.assertEqual((result.phase, result.reason), ("waiting", "read_end_unconfirmed"))
+        self.assertEqual(copies.grants, 0)
+
     def test_media_entry_finishes_exhausted_unknown_before_slot_grant(self):
         namespace = _entry_namespace()
         run_recording_media = _load_function(
