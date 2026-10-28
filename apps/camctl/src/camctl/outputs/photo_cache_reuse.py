@@ -123,9 +123,40 @@ def _read_bound_photo_cache(*, output_id, obtain_action_id, selection_id, owned,
             or not json_equal(changes[0].after.values,
                               {"size_bytes": request.size_bytes, "sha256": request.sha256})):
         raise ConsistencyError("照片缓存申请与原产物或当前文件事实不同")
-    from camctl.persistence.repositories.capture_facts import PhotoResultReads
-    if PhotoResultReads(connection).verify_cache(request, before_event_id=cache.event.event_id) != role[1]:
-        raise ConsistencyError("照片缓存角色与原产物不同")
+    # 来源形成时已完整核验 START、双流与一次比较；日常消费只核直接引用。
+    from camctl.persistence.repositories.result_pages import read_saved_page
+    page_record = read_event(connection, request.result_page_event_id)
+    if page_record.transaction.last_event_id >= cache.transaction.first_event_id:
+        raise ConsistencyError("照片角色页必须早于原缓存事务")
+    page, _ = read_saved_page(connection, request.result_page_event_id)
+    run = row_facts(connection, "operation_runs", page.ref.ticket.run_id)
+    observations = [item for item in page.page.outcome.observations
+                    if item.type == "result_files_listed" and item.version == 3]
+    attempts = [item for item in page.page.outcome.observations
+                if item.type == "photo_result_attempt" and item.version == 2]
+    device = row_facts(connection, "device_files", request.device_file_id)
+    evidence = None if device is None else device.get("completion_evidence_json")
+    observation = evidence.get("observation") if isinstance(evidence, dict) else None
+    reference = observation.get("photo_source") if isinstance(observation, dict) else None
+    if (validate_event_structure(page_record.event)[:2] != ("RESULT_PAGE", "APPEND")
+            or run is None or run["action_id"] != action["id"]
+            or run["kind"] != int(enum_for("operation_runs.kind").CHECK_CAPTURE_RESULTS)
+            or len(observations) != 1 or observations[0].data.get("role") != role[1]
+            or len(attempts) != 1 or attempts[0].data.get("role") != role[1]
+            or not isinstance(attempts[0].data.get("comparison"), dict)
+            or attempts[0].data["comparison"].get("selected") != request.selected
+            or len(page.page.entries) != 1
+            or (page.page.entries[0].identity, request.device_file_id) not in page.file_ids
+            or device is None or device["source_action_id"] != action["id"]
+            or device["role"] != int(enum_for("device_files.role").ORIGINAL if role[1] == "original"
+                                     else enum_for("device_files.role").PREVIEW)
+            or device["completion_state"] != int(enum_for("device_files.completion_state").COMPLETE)
+            or device["size_bytes"] != request.size_bytes or device["sha256"] != request.sha256
+            or page.page.entries[0].size_bytes != request.size_bytes
+            or not json_equal(page.page.entries[0].locator, device["locator_json"])
+            or not isinstance(reference, dict) or reference.get("result_page_event_id") != request.result_page_event_id
+            or reference.get("role") != role[1]):
+        raise ConsistencyError("照片缓存角色、设备文件或原角色页引用不一致")
     return BoundPhotoCache(action["id"], output["device_file_id"], file["id"],
         request.result_page_event_id, boundary, file["size_bytes"], file["sha256"],
         file["relative_path"], role[0].name)
@@ -188,8 +219,9 @@ def _photo_cache_waiters_settled(file_id, owned):
             if selection == int(selection_status.FIXED):
                 with closing(connection.execute(
                     "SELECT i.status,d.status FROM obtain_items i LEFT JOIN deliveries d ON d.id=i.delivery_id"
-                    " WHERE i.selection_id=? AND i.output_id=? ORDER BY i.id LIMIT 2",
-                    (selection_id, output_id))) as cursor:
+                    " WHERE i.selection_id=? AND (i.output_id=? OR (i.status=? AND i.requested_output_id=?))"
+                    " ORDER BY i.id LIMIT 2",
+                    (selection_id, output_id, int(item_status.UNRESOLVED), output_id))) as cursor:
                     items = cursor.fetchall()
                 if len(items) > 1:
                     raise ConsistencyError("同一来源选择重复包含照片角色产物")

@@ -1660,10 +1660,10 @@ class LocalReadSessions:
         if on_start is not None:
             on_start()
         if photo:
-            from camctl.host_files.downloads import DownloadWorkspace
+            from camctl.host_files.downloads import PhotoCacheReadWorkspace
             from camctl.host_files.io import OwnedPhotoCacheReader
-            owner = DownloadWorkspace(self._directories.staging, self._ticket)
-            return _LocalReadSession(OwnedPhotoCacheReader(path, offset, row[1], owner))
+            owner = PhotoCacheReadWorkspace(self._directories.staging, self._ticket)
+            return _LocalReadSession(OwnedPhotoCacheReader(path, self._directories.staging, offset, row[1], owner))
         return _LocalReadSession(LocalSourceReader(path, offset))
 
 

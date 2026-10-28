@@ -696,6 +696,8 @@ class HasselbladDriver:
                     raise BaseExceptionGroup("照片来源文件关闭未确认，原 RESULTS 拥有者继续持有",
                                              [actual, *close_errors])
                 raise BaseExceptionGroup("照片来源文件关闭未确认，原 RESULTS 拥有者继续持有", list(close_errors))
+            if in_call:
+                raise RuntimeError("照片来源工具调用尚未实际收场，原 RESULTS 拥有者继续持有") from pending_error
             if not in_call:
                 workspace.release()
 

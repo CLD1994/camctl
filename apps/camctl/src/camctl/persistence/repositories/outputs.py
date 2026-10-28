@@ -4884,15 +4884,8 @@ class _WorkFileMixin:
         return owner, table
 
     def _require_stopped_operations(self, connection, file) -> None:
-        """释放前核对目标拷贝没有未结束的读取尝试。"""
-        with closing(connection.execute(
-            "SELECT COUNT(*) FROM operation_attempts AS a"
-            " JOIN operation_runs AS r ON a.run_id = r.id"
-            " JOIN file_copies AS c ON r.copy_id = c.id"
-            " WHERE c.target_file_id = ? AND a.status = 1",
-            (file["id"],),
-        )) as cursor:
-            running = cursor.fetchone()[0]
+        """释放前核对源与目标两端没有未结束的读取尝试。"""
+        running = _running_file_operations(connection, file["id"])
         if running:
             raise ConsistencyError(
                 f"中间文件 {file['id']} 仍有 {running} 个未结束操作尝试")
@@ -5371,15 +5364,7 @@ def _load_work_file_facts(owned: OwnedConnection, file_id: int) -> WorkFileFacts
                 if published_event_id is not None:
                     owner_finished = owner_finished and all_bound_waiters_terminal(
                         int(file["owner_action_id"]), int(published_event_id), owned)
-    with closing(connection.execute(
-        "SELECT COUNT(*) FROM operation_attempts AS a"
-        " JOIN operation_runs AS r ON a.run_id = r.id"
-        " JOIN file_copies AS c ON r.copy_id = c.id"
-        " WHERE (c.target_file_id = ? OR c.source_intermediate_file_id = ?)"
-        " AND a.status = 1",
-        (file_id, file_id),
-    )) as cursor:
-        operations_stopped = cursor.fetchone()[0] == 0
+    operations_stopped = _running_file_operations(connection, file_id) == 0
     try:
         return WorkFileFacts(
             file_id=file_id,
@@ -5394,6 +5379,15 @@ def _load_work_file_facts(owned: OwnedConnection, file_id: int) -> WorkFileFacts
         )
     except ValueError as error:
         raise ConsistencyError(f"中间文件事实不可解释: {error}") from error
+
+
+def _running_file_operations(connection, file_id):
+    with closing(connection.execute(
+        "SELECT COUNT(*) FROM operation_attempts a JOIN operation_runs r ON a.run_id=r.id"
+        " JOIN file_copies c ON r.copy_id=c.id"
+        " WHERE (c.target_file_id=? OR c.source_intermediate_file_id=?) AND a.status=1",
+        (file_id, file_id))) as cursor:
+        return cursor.fetchone()[0]
 
 
 def _load_delivery_state_facts(
@@ -6556,6 +6550,8 @@ def _intermediate_guard(event, context) -> None:
                     from camctl.outputs.photo_cache_reuse import photo_cache_waiters_settled
                     if not photo_cache_waiters_settled(row.row_id, SimpleNamespace(connection=reads.connection)):
                         raise EventValidationError("照片缓存仍被 H 时固定的取回使用")
+                    if _running_file_operations(reads.connection, row.row_id):
+                        raise EventValidationError("照片缓存仍有源或目标读取尝试未结束")
             if "sha256" in after or "size_bytes" in after:
                 if after.get("sha256") is None or after.get("size_bytes") is None:
                     raise EventValidationError("完整字节事实必须同时携带长度与摘要")

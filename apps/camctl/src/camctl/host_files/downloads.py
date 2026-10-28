@@ -28,6 +28,32 @@ def download_owned(ticket: AttemptTicket, staging: Path | None = None):
         return any(owner.ticket == ticket for owner in _ACTIVE.values())
 
 
+def result_download_owned(staging: Path, ticket: AttemptTicket, role: str) -> bool:
+    with _ACTIVE_LOCK:
+        return result_download_path(staging, ticket, role) in _ACTIVE
+
+
+async def recover_result_download(staging: Path, ticket: AttemptTicket, role: str):
+    """上层核实原尝试及保存责任后，回收固定角色的独占目录。"""
+    workspace = ResultDownloadWorkspace(staging, ticket, role)
+    if not workspace.claim():
+        return False
+    try:
+        workspace.owned = True
+        def remove():
+            try:
+                parent = workspace.path.parent.lstat()
+            except FileNotFoundError:
+                return
+            if not stat.S_ISDIR(parent.st_mode):
+                raise ValueError("结果下载父目录不是直接普通目录")
+            DownloadWorkspace.remove(workspace)
+        await settled_file_io(remove)
+        return True
+    finally:
+        workspace.release()
+
+
 async def load_download_cursor(staging: Path):
     """只读固定长度的维护游标；游标不授权删除任何目录。"""
     def load():
@@ -250,6 +276,17 @@ class ResultDownloadWorkspace(DownloadWorkspace):
         self._observed_fds = set()
         self._close_errors = []
 
+    def claim(self):
+        with _ACTIVE_LOCK:
+            if self.claimed:
+                return True
+            capture_path = self.path.parent.parent / "capture-work" / str(self.ticket.target_id)
+            if self.path in _ACTIVE or capture_path in _ACTIVE:
+                return False
+            _ACTIVE[self.path] = self
+            self.claimed = True
+            return True
+
     @property
     def files_closed(self):
         return not self._observed_fds
@@ -297,6 +334,63 @@ class ResultDownloadWorkspace(DownloadWorkspace):
                 expected_size=observed.st_size, expected_sha256=None, file_kind="source", owner=self)
             _sync_directory_fd(directory_fd, self.path, "source_workspace_sync")
             return CapturedArtifact(name, facts.size_bytes, facts.sha256, media_type)
+
+
+class CaptureCleanupWorkspace(ResultDownloadWorkspace):
+    """清理原 START 专属采集目录时持有实际文件操作责任。"""
+
+    def __init__(self, staging: Path, ticket: AttemptTicket):
+        if (not isinstance(ticket, AttemptTicket)
+                or not ((ticket.operation == "control" and ticket.responsibility_key.startswith("start/"))
+                        or (ticket.operation == "result" and ticket.responsibility_key.startswith("results/")))):
+            raise ValueError("采集目录清理必须属于原 START 或 RESULTS 票据")
+        parse_object_id(ticket.target_id)
+        parse_object_id(ticket.responsibility_key.split("/", 1)[1])
+        self._initialize(staging / "capture-work" / ticket.target_id, ticket)
+        self.role = None
+        self._observed_fds = set()
+        self._close_errors = []
+
+    def claim(self):
+        with _ACTIVE_LOCK:
+            if self.claimed:
+                return True
+            if self.path in _ACTIVE or any(
+                    owner.ticket.operation in ("control", "result")
+                    and owner.ticket.target_id == self.ticket.target_id for owner in _ACTIVE.values()):
+                return False
+            _ACTIVE[self.path] = self
+            self.claimed = True
+            return True
+
+
+class PhotoCacheReadWorkspace(ResultDownloadWorkspace):
+    """原 READ 票据拥有照片缓存文件和用途目录的实际关闭责任。"""
+
+    def __init__(self, staging: Path, ticket: AttemptTicket):
+        self._initialize(download_path(staging, ticket), ticket)
+        self.role = None
+        self._observed_fds = set()
+        self._close_errors = []
+        self._file_close_error = None
+
+    def claim(self):
+        return DownloadWorkspace.claim(self)
+
+    def close_file(self):
+        if self._file_close_error is not None:
+            raise self._file_close_error
+        if self.fd is None:
+            return
+        fd = self.fd
+        try:
+            os.close(fd)
+        except BaseException as error:
+            self._file_close_error = error
+            self.closed_file(fd, error)
+            raise
+        self.closed_file(fd, None)
+        self.fd = None
 
 
 class DownloadStream:

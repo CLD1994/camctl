@@ -18,9 +18,18 @@ def api(monkeypatch):
     read.ReadChunk = read.ReadEnd = object
     read.ReadPreparationError, read.ReadPreparationSettlement = PreparationError, Settlement
     models = ModuleType("camctl.host_files.models"); models.BoundDirectories = models.FileRef = object
+    models.FilePurpose = Enum("FilePurpose", "CAPTURE_ORIGINAL CAPTURE_PREVIEW")
     paths = ModuleType("camctl.host_files.paths"); paths.resolve_file = lambda *args: None
+    paths.PURPOSE_DIRECTORIES = {models.FilePurpose.CAPTURE_ORIGINAL: "capture-originals",
+                                 models.FilePurpose.CAPTURE_PREVIEW: "capture-previews"}
+    from contextlib import contextmanager
+    sources = ModuleType("camctl.host_files.capture_sources")
+    @contextmanager
+    def directory(*args, owner, **kwargs):
+        yield 23
+    sources._open_directory = sources._open_directory_at = directory
     segments = ModuleType("camctl.host_files.segments"); segments.DEFAULT_CHUNK_SIZE_BYTES = 1024
-    for stub in (read, models, paths, segments): monkeypatch.setitem(sys.modules, stub.__name__, stub)
+    for stub in (read, models, paths, segments, sources): monkeypatch.setitem(sys.modules, stub.__name__, stub)
     path = Path(__file__).parents[3] / "src/camctl/host_files/io.py"
     name = "camctl.host_files._isolated_photo_cache_reader"
     spec = importlib.util.spec_from_file_location(name, path)
@@ -33,10 +42,17 @@ def api(monkeypatch):
 class Owner:
     def __init__(self, close_error=None):
         self.fd, self.claimed, self.close_error, self.close_calls = None, False, close_error, 0
+        self.opened, self.close_errors = set(), ()
     def claim(self): self.claimed = True; return True
+    def opened_file(self, fd): self.opened.add(fd)
+    @property
+    def files_closed(self): return not self.opened
     def close_file(self):
         self.close_calls += 1
-        if self.close_error is not None: raise self.close_error
+        if self.close_error is not None:
+            self.close_errors = (self.close_error,)
+            raise self.close_error
+        self.opened.discard(self.fd)
         self.fd = None
     def release(self):
         if self.fd is None: self.claimed = False
@@ -46,7 +62,7 @@ def configure(module, *, opened_size=100, named_mode=0o100644):
     opened = SimpleNamespace(st_mode=0o100644, st_size=opened_size, st_dev=1, st_ino=2)
     named = SimpleNamespace(st_mode=named_mode, st_size=opened_size, st_dev=1, st_ino=2)
     module.os = SimpleNamespace(O_RDONLY=1, O_NOFOLLOW=2, O_NONBLOCK=4, SEEK_SET=0,
-        open=lambda *args: 17, fstat=lambda fd: opened, stat=lambda *args, **kwargs: named,
+        open=lambda *args, **kwargs: 17, fstat=lambda fd: opened, stat=lambda *args, **kwargs: named,
         lseek=lambda *args: None)
 
 
@@ -54,7 +70,7 @@ def test_photo_cache_reader_holds_original_fd_until_close(api):
     module, _, _ = api
     configure(module)
     owner = Owner()
-    reader = module.OwnedPhotoCacheReader(Path("/fake/cache"), 0, 100, owner)
+    reader = module.OwnedPhotoCacheReader(Path("/fake/capture-originals/2.3fr"), Path("/fake"), 0, 100, owner)
     assert owner.fd == 17 and owner.claimed
     reader.close()
     assert not owner.claimed and owner.fd is None and owner.close_calls == 1
@@ -66,7 +82,7 @@ def test_photo_cache_rejects_wrong_size_or_link(api, size, mode):
     configure(module, opened_size=size, named_mode=mode)
     owner = Owner()
     with pytest.raises(module.FileIoError):
-        module.OwnedPhotoCacheReader(Path("/fake/cache"), 0, 100, owner)
+        module.OwnedPhotoCacheReader(Path("/fake/capture-originals/2.3fr"), Path("/fake"), 0, 100, owner)
     assert not owner.claimed and owner.close_calls == 1
 
 
@@ -75,6 +91,6 @@ def test_failed_close_during_photo_cache_open_retains_original_owner(api):
     configure(module, opened_size=99)
     owner = Owner(OSError("close failed"))
     with pytest.raises(error_type) as caught:
-        module.OwnedPhotoCacheReader(Path("/fake/cache"), 0, 100, owner)
+        module.OwnedPhotoCacheReader(Path("/fake/capture-originals/2.3fr"), Path("/fake"), 0, 100, owner)
     assert caught.value.settlement is settlement.UNCONFIRMED
     assert owner.claimed and owner.fd == 17 and owner.close_calls == 1

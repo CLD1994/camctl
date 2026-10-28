@@ -201,34 +201,48 @@ class LocalSourceReader:
 class OwnedPhotoCacheReader(LocalSourceReader):
     """固定角色缓存的直接普通文件与未确认关闭责任。"""
 
-    def __init__(self, path: Path, offset: int, expected_size: int, owner) -> None:
+    def __init__(self, path: Path, staging: Path, offset: int, expected_size: int, owner) -> None:
         from camctl.devices.read_session import ReadPreparationError, ReadPreparationSettlement
+        from camctl.host_files.capture_sources import _open_directory, _open_directory_at
+        from camctl.host_files.models import FilePurpose
+        from camctl.host_files.paths import PURPOSE_DIRECTORIES
         if type(offset) is not int or offset < 0 or type(expected_size) is not int or expected_size <= 0:
             raise FileIoError("照片缓存读取位置或完整大小无效")
+        if (path.parent.parent != staging or path.parent.name not in
+                (PURPOSE_DIRECTORIES[FilePurpose.CAPTURE_ORIGINAL], PURPOSE_DIRECTORIES[FilePurpose.CAPTURE_PREVIEW])
+                or not path.name or path.name in (".", "..")):
+            raise FileIoError("照片缓存路径不是绑定目录中的直接角色文件")
         if not owner.claim():
             raise ReadPreparationError("原照片缓存读取仍有文件拥有者",
                                        settlement=ReadPreparationSettlement.WAITING)
         self._owner = owner
         try:
             flags = os.O_RDONLY | _BINARY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
-            self._fd = os.open(path, flags)
-            owner.fd = self._fd
-            opened = os.fstat(self._fd)
-            named = os.stat(path, follow_symlinks=False)
-            if (not stat.S_ISREG(opened.st_mode) or not stat.S_ISREG(named.st_mode)
-                    or opened.st_size != expected_size
-                    or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)):
-                raise FileIoError("照片缓存不是原直接普通文件或完整大小不同")
-            os.lseek(self._fd, offset, os.SEEK_SET)
+            with _open_directory(staging, "photo_cache_staging_open", owner=owner) as staging_fd:
+                with _open_directory_at(staging_fd, path.parent.name, path.parent,
+                                        "photo_cache_directory_open", owner=owner) as directory_fd:
+                    self._fd = os.open(path.name, flags, dir_fd=directory_fd)
+                    owner.fd = self._fd
+                    owner.opened_file(self._fd)
+                    opened = os.fstat(self._fd)
+                    named = os.stat(path.name, dir_fd=directory_fd, follow_symlinks=False)
+                    if (not stat.S_ISREG(opened.st_mode) or not stat.S_ISREG(named.st_mode)
+                            or opened.st_size != expected_size
+                            or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)):
+                        raise FileIoError("照片缓存不是原直接普通文件或完整大小不同")
+                    os.lseek(self._fd, offset, os.SEEK_SET)
         except BaseException as error:
             try:
                 owner.close_file()
             except BaseException as close_error:
-                raise ReadPreparationError("照片缓存读取准备的文件关闭未确认",
-                    settlement=ReadPreparationSettlement.UNCONFIRMED) from BaseExceptionGroup(
-                        "照片缓存读取准备及关闭失败", [error, close_error])
+                if close_error not in owner.close_errors:
+                    raise
             finally:
                 owner.release()
+            if not owner.files_closed:
+                raise ReadPreparationError("照片缓存读取准备的文件关闭未确认",
+                    settlement=ReadPreparationSettlement.UNCONFIRMED) from BaseExceptionGroup(
+                        "照片缓存读取准备及关闭失败", [error, *owner.close_errors])
             raise
         self._position, self._bytes_read, self._closed = offset, 0, False
 
