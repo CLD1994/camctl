@@ -157,6 +157,78 @@ class RetryWaitReads:
             return None
         return last if self.no_unsettled_attempts(run_id) else None
 
+    def recovered_unknown(self, run_id, attempts_used):
+        """只接受已可靠保存的原本地收场后结果缺失事实。"""
+        last = self.last_attempt(run_id, attempts_used)
+        if last is None or last[1] != int(enum_for("operation_attempts.status").UNKNOWN):
+            return None
+        from camctl.persistence.transaction import row_facts
+        from camctl.operations.result_format import read_result_document
+        from camctl.operations.models import AttemptStatus, EffectState, SettlementBasis
+        attempt = row_facts(self.connection, "operation_attempts", last[0])
+        if attempt is None:
+            raise ConsistencyError("未知读取的原尝试不存在")
+        try:
+            outcome = read_result_document(attempt["status"], attempt["effect_state"],
+                                           attempt["result_json"], attempt["error_json"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ConsistencyError("未知读取的原结果不可解释") from error
+        evidence = outcome.settlement.evidence
+        if (outcome.status is not AttemptStatus.UNKNOWN or outcome.effect is not EffectState.UNKNOWN
+                or outcome.error.code != "result_not_saved" or outcome.error.stage != "recovery"
+                or dict(outcome.error.details) or outcome.settlement.basis is not SettlementBasis.ASSUMED
+                or evidence.type not in ("local_read_recovery", "adb_foreground_recovery")
+                or evidence.version != 1 or dict(evidence.data) or outcome.observations
+                or outcome.call_info is not None or outcome.diagnostics is not None):
+            return None
+        return last
+
+    def unknown_exhaustion_eligible(self, run_id, occurred_at):
+        """按原副本归属核对无需新读取机会的未知结果耗尽。"""
+        from .operations import _load_row
+        from .outputs import _internal_input_requirement, _read_is_due, _read_owner_eligible
+        from camctl.outputs.read_discovery import read_copy_dispatch_eligible
+
+        run = _load_row(self.connection, "operation_runs", run_id)
+        copy = None if run is None else _load_row(self.connection, "file_copies", run["copy_id"])
+        if run is None or copy is None:
+            raise ConsistencyError("读取耗尽缺少原流程或副本")
+        parents = [("deliveries", copy.get("delivery_id")),
+                   ("recording_processing", copy.get("processing_id")),
+                   ("segment_inspections", copy.get("inspection_id"))]
+        parents = [(table, identity) for table, identity in parents if identity is not None]
+        if len(parents) != 1:
+            raise ConsistencyError("读取耗尽缺少唯一所属责任")
+        table, identity = parents[0]
+        parent = _load_row(self.connection, table, identity)
+        if parent is None or parent.get("action_id") != run.get("action_id"):
+            raise ConsistencyError("读取耗尽的所属责任不一致")
+        action = _load_row(self.connection, "actions", run["action_id"])
+        if not _read_owner_eligible(action) or not _read_is_due(action, occurred_at):
+            return False
+        if not read_copy_dispatch_eligible(self.connection, copy["id"]):
+            return False
+        if table == "deliveries":
+            return self.read_eligible(run_id, occurred_at, allow_unheld=True)
+        if table == "recording_processing" and _internal_input_requirement(parent) is not None:
+            return False
+        if table == "segment_inspections" and parent.get("source_device_file_id") != copy.get("source_device_file_id"):
+            raise ConsistencyError("读取耗尽的分段检查来源不一致")
+        source_id = copy.get("source_device_file_id")
+        source = None if source_id is None else _load_row(self.connection, "device_files", source_id)
+        if source is None:
+            raise ConsistencyError("内部读取耗尽缺少原设备来源")
+        observer = _load_row(self.connection, "actions", source["observer_action_id"])
+        origin = _load_row(self.connection, "actions", source["source_action_id"])
+        if observer is None or origin is None:
+            raise ConsistencyError("内部读取耗尽缺少原来源动作")
+        binding = (observer.get("device_id"), observer.get("driver_id"))
+        if (not all(isinstance(value, str) and value for value in binding)
+                or binding != (origin.get("device_id"), origin.get("driver_id"))
+                or (copy.get("slot_device_id") is not None and copy["slot_device_id"] != binding[0])):
+            raise ConsistencyError("内部读取耗尽的原来源绑定不一致")
+        return source.get("completion_state") == int(enum_for("device_files.completion_state").COMPLETE)
+
     def completed(self, run_id, attempts_used):
         from camctl.history.events import reason_for_branch
         from .operations import _RETRY_WAIT_EVENT
@@ -217,7 +289,7 @@ class RetryWaitReads:
         return (isinstance(details, dict) and details.get("source_failed") is True
                 and _has_source_fallback_retry_proof(self.connection, copy, attempt))
 
-    def read_eligible(self, run_id, occurred_at):
+    def read_eligible(self, run_id, occurred_at, *, allow_unheld=False):
         from camctl.outputs.read_discovery import read_copy_dispatch_eligible
         from camctl.persistence.repositories.outputs import _read_is_due, _read_owner_eligible
 
@@ -252,7 +324,7 @@ class RetryWaitReads:
         if type(source_dependency) is not int or source_dependency not in (0, 1):
             raise ConsistencyError("读取交付状态或来源保护无法解释")
         return (_read_owner_eligible(action) and _read_is_due(action, occurred_at)
-                and (slot is not None or self.source_fallback(run_id))
+                and (slot is not None or allow_unheld or self.source_fallback(run_id))
                 and completion == int(enum_for("device_files.completion_state").COMPLETE)
                 and delivery_status in (int(delivery.PENDING), int(delivery.PREPARING))
                 and source_dependency == 1 and read_copy_dispatch_eligible(self.connection, copy_id))

@@ -12,7 +12,8 @@ from typing import Any, Mapping
 from camctl.capture.input_copy import InputContext, InputPhase, InputStep, obtain_recording_input
 from camctl.capture.media_facts import probe_document, read_probe
 from camctl.capture.media_flow import (
-    MediaFlow, _finish_internal_read, _resume_local_internal_end, _ensure_checksum_support, _read_dispatched,
+    MediaFlow, _finish_internal_read, _resume_local_internal_end, _ensure_checksum_support,
+    _exhaust_unknown_read_before_slot, _read_dispatched,
 )
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import json_equal, parse_exact_json
@@ -436,6 +437,15 @@ async def _obtain_input(flow: MediaFlow, request: SegmentInspectionRequest,
         run_id, run_status, attempts_used, max_attempts_used, retry_wait_required = (await _run_state(read_flow, copy_id))
         if run_status == int(_RUN_STATUS.FAILED):
             return InputStep(InputPhase.WAITING, copy_id=copy_id, reason="run_ended")
+        attempt_config = AttemptConfig(config.max_attempts, config.timeout_s, config.retry_interval_s)
+        exhausted = await _exhaust_unknown_read_before_slot(
+            read_flow, action_id=request.action_id, copy_id=copy_id,
+            copy_round=state.round, config=attempt_config)
+        if exhausted is not None:
+            if exhausted.reason == "budget_exhausted":
+                return InputStep(InputPhase.WAITING, copy_id=copy_id, reason="run_ended")
+            return InputStep(InputPhase.WAITING, copy_id=copy_id,
+                             reason=exhausted.reason or "exhaustion_not_eligible")
         wait_key = f"read/{copy_id}"
         if read_flow.retry_gate.remaining(wait_key, attempts_used=attempts_used,
                 retry_wait_required=retry_wait_required == 1,
@@ -456,7 +466,7 @@ async def _obtain_input(flow: MediaFlow, request: SegmentInspectionRequest,
         ticket, reason = (await __import__("camctl.capture.media_flow", fromlist=["acquire_read_attempt"]).acquire_read_attempt(
             read_flow, AttemptIntent("read", request.action_id, OperationKind.READ_FILE,
                 AttemptTarget(copy_id=copy_id), None,
-                AttemptConfig(config.max_attempts, config.timeout_s, config.retry_interval_s),
+                attempt_config,
                 current, copy_round=state.round, capture_selection=selection)))
         if ticket is None:
             return InputStep(InputPhase.WAITING, copy_id=copy_id, reason=reason)

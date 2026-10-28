@@ -32,7 +32,7 @@ def load_function(path, name, collaborators):
     isolated = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0),
                                 function], type_ignores=[])
     namespace = dict(collaborators)
-    namespace.setdefault("_ATTEMPT_STATUS", SimpleNamespace(RUNNING=1, SUCCEEDED=2))
+    namespace.setdefault("_ATTEMPT_STATUS", SimpleNamespace(RUNNING=1, SUCCEEDED=2, UNKNOWN=4))
     if name == "_advance_reads":
         namespace["_complete_read_wait"] = load_function(path, "_complete_read_wait", {})
     exec(compile(ast.fix_missing_locations(isolated), str(path), "exec"), namespace)
@@ -127,6 +127,43 @@ class BackgroundDeadlineTests(unittest.IsolatedAsyncioTestCase):
 
 
 class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
+    async def test_slotless_recovered_unknown_exhausts_without_device_work(self):
+        actions = []
+        candidate = SimpleNamespace(held=False, copy_id=7, device_id="camera", attempts_used=1, retry_wait_required=0)
+        assembly = SimpleNamespace(max_read_attempts=1, retry_interval_s=5, capture_read_parallel=False)
+        async def discover(*args): return SimpleNamespace(items=(candidate,))
+        async def read_one(*args): return (11, 12, 1, 0, 4, "{}", 101)
+        async def save(runtime, copy_id, operation, request, callback):
+            actions.append((operation, request[1]))
+            return SimpleNamespace(value=SimpleNamespace(reason="budget_exhausted"))
+        async def fail(runtime, facts, now): actions.append(("delivery", facts["id"]))
+        async def forbidden(*args): self.fail("耗尽后不能执行设备工作")
+        class Database:
+            async def read(self, operation): return operation(SimpleNamespace(connection=None))
+        class Reads:
+            def __init__(self, connection): pass
+            def read_eligible(self, run_id, now, *, allow_unheld=False):
+                self_test.assertTrue(allow_unheld)
+                return True
+        self_test = self
+        runtime = SimpleNamespace(discovery=SimpleNamespace(reads=discover), database=Database(),
+            pending_read_results={}, devices={"camera": assembly}, binding_check=None, occurred_at=lambda: 20,
+            availability=SimpleNamespace(read=forbidden), retry_gate=SimpleNamespace(cleared=lambda key: actions.append(("clear", key))),
+            operations=SimpleNamespace(exhaust_blocked_read=None))
+        read_attempts = ModuleType("camctl.outputs.read_attempts")
+        read_attempts.save_read_business = save
+        retry_reads = ModuleType("camctl.persistence.repositories.retry_wait_reads")
+        retry_reads.RetryWaitReads = Reads
+        availability = ModuleType("camctl.operations.availability")
+        availability.AvailabilityProgress = SimpleNamespace(READY="ready")
+        advance = load_function(SOURCE / "outputs" / "obtain_flow.py", "_advance_reads", {
+            "read_one": read_one, "_read_facts": lambda connection, copy_id: {"id": copy_id},
+            "_read_intent": lambda *args: object(), "_fail_read_delivery": fail,
+            "_advance_read": forbidden, "plan_device_work": lambda connection, now, **kwargs: ()})
+        with patch.dict(sys.modules, {m.__name__: m for m in (read_attempts, retry_reads, availability)}):
+            await advance(runtime, 10)
+        self.assertEqual(actions, [("exhaust_read", 12), ("clear", "read/7"), ("delivery", 7)])
+
     async def test_exhausted_unknown_does_not_enter_check_or_new_read(self):
         candidate = SimpleNamespace(held=True, copy_id=7, device_id="camera", attempts_used=2, retry_wait_required=1)
         assembly = SimpleNamespace(max_read_attempts=2, retry_interval_s=5, capture_read_parallel=False)

@@ -70,8 +70,8 @@ from camctl.outputs.database_reads import read_one as _read_one, read_all as _re
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
 from camctl.operations.attempts import RetryWaitGate
 from camctl.operations.attempts import (
-    AttemptConfig, AttemptFinish, AttemptIntent, AttemptTarget, OperationKind,
-    RunFinish, RunOutcome,
+    AttemptConfig, AttemptFinish, AttemptIntent, AttemptTarget, BeginAttemptResult,
+    OperationKind, RunFinish, RunOutcome,
 )
 from camctl.operations.models import (
     AttemptStatus, CallOutcome, EffectState, ErrorValue, EvidenceValue,
@@ -587,6 +587,44 @@ async def _ensure_checksum_support(
         request, CaptureRepository().save_file_checksum)
 
 
+async def _exhaust_unknown_read_before_slot(
+    flow: MediaFlow, *, action_id: int, copy_id: int, copy_round: int,
+    config: AttemptConfig,
+) -> BeginAttemptResult | None:
+    """预算耗尽的原本地 UNKNOWN 在新设备机会之前终结。"""
+    from camctl.contracts.enums import enum_for
+    from camctl.outputs.read_attempts import save_read_business
+
+    rows = await flow.database.read(lambda owned: owned.connection.execute(
+        "SELECT r.status,r.attempts_used,a.id,a.status FROM operation_runs r"
+        " LEFT JOIN operation_attempts a ON a.run_id=r.id AND a.attempt_no=r.attempts_used"
+        " WHERE r.copy_id=? AND r.kind=? LIMIT 2",
+        (copy_id, int(enum_for("operation_runs.kind").READ_FILE)),
+    ).fetchall(), description="读取预算耗尽事实")
+    if len(rows) != 1:
+        raise ConsistencyError("内部读取耗尽缺少唯一 READ 流程")
+    run_status, attempts_used, attempt_id, attempt_status = rows[0]
+    statuses = enum_for("operation_runs.status")
+    attempts = enum_for("operation_attempts.status")
+    if (run_status not in (int(statuses.PENDING), int(statuses.ACTIVE))
+            or attempts_used < config.max_attempts or attempt_id is None
+            or attempt_status != int(attempts.UNKNOWN)):
+        return None
+
+    intent = AttemptIntent(
+        "read", action_id, OperationKind.READ_FILE, AttemptTarget(copy_id=copy_id), None,
+        config, flow.occurred_at(), copy_round=copy_round)
+
+    def save(request, key, owned):
+        return flow.operations.exhaust_blocked_read(request[0], request[1], key, owned)
+
+    result = await save_read_business(
+        flow, copy_id, "unknown_read_exhaustion", (intent, attempt_id), save)
+    if not isinstance(result.value, BeginAttemptResult):
+        raise ConsistencyError("读取耗尽事务缺少可靠资格结果")
+    return result.value
+
+
 async def run_recording_media(
     flow: MediaFlow, action_id: int, processing_id: int,
     source_device_file_id: int, *, target_extension: str | None = "mp4",
@@ -647,6 +685,15 @@ async def run_recording_media(
         run = await _read_one(flow.database, "SELECT attempts_used,retry_wait_required FROM operation_runs WHERE copy_id=?", (copy_id,))
         if run is None:
             raise ConsistencyError("内部输入缺少原读取流程")
+        attempt_config = AttemptConfig(flow.max_read_attempts, flow.read_idle_timeout_s, flow.retry_interval_s)
+        exhausted = await _exhaust_unknown_read_before_slot(
+            flow, action_id=action_id, copy_id=copy_id, copy_round=state.round, config=attempt_config)
+        if exhausted is not None:
+            if exhausted.reason == "budget_exhausted":
+                await _fail_internal_read_input(flow, copy_id=copy_id)
+                return InputStep(InputPhase.WAITING, copy_id=copy_id, reason="run_ended")
+            return InputStep(InputPhase.WAITING, copy_id=copy_id,
+                             reason=exhausted.reason or "exhaustion_not_eligible")
         if flow.retry_gate.remaining(wait_key, attempts_used=run[0], retry_wait_required=run[1] == 1,
                 max_attempts_used=flow.max_read_attempts, interval_s=flow.retry_interval_s,
                 now_ns=flow.monotonic_ns()) is not None:
@@ -663,7 +710,7 @@ async def run_recording_media(
         selection = None if flow.capture_selection is None else flow.capture_selection(current)
         ticket, reason = await acquire_read_attempt(flow, AttemptIntent(
             "read", action_id, OperationKind.READ_FILE, AttemptTarget(copy_id=copy_id), None,
-            AttemptConfig(flow.max_read_attempts, flow.read_idle_timeout_s, flow.retry_interval_s),
+            attempt_config,
             current, copy_round=state.round, capture_selection=selection))
         if ticket is None:
             if reason == "budget_exhausted":
