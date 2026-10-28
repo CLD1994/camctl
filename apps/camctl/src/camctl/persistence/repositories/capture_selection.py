@@ -30,6 +30,25 @@ class CaptureSelectionInput:
             raise ValueError("拍摄选择提前量必须是有限非负秒数")
         UtcMicros(self.trusted_wall_now)
 
+    def document(self):
+        return {"device_id": self.device_id, "driver_id": self.driver_id,
+                "identity": {"serial": self.identity.serial, "product_id": self.identity.product_id},
+                "prepare_lead_s": self.prepare_lead_s, "trusted_wall_now": self.trusted_wall_now}
+
+    @classmethod
+    def from_document(cls, value):
+        if (not isinstance(value, dict) or set(value) != {"device_id", "driver_id", "identity",
+                                                           "prepare_lead_s", "trusted_wall_now"}):
+            raise ConsistencyError("拍摄选择缺少完整原申请")
+        try:
+            lead = value["prepare_lead_s"]
+            if isinstance(lead, bool) or not isinstance(lead, (int, Decimal)):
+                raise ValueError("提前量不是精确数字")
+            return cls(value["device_id"], value["driver_id"], CameraIdentity(**value["identity"]),
+                       Decimal(lead), value["trusted_wall_now"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ConsistencyError("拍摄选择的原申请无效") from error
+
 
 @dataclass(frozen=True)
 class CaptureCandidate:

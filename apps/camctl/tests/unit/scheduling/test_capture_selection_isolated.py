@@ -94,6 +94,16 @@ def test_invalid_current_inputs_do_not_produce_candidates(selection):
         list(module.pending_capture_candidates(Connection([]), request(selection, 0), batch_size=129))
 
 
+def test_saved_selection_input_round_trips_and_requires_complete_facts(selection):
+    module, _ = selection
+    original = request(selection, 12, "1.25")
+    document = original.document()
+    assert module.CaptureSelectionInput.from_document(document) == original
+    document.pop("identity")
+    with pytest.raises(module.ConsistencyError):
+        module.CaptureSelectionInput.from_document(document)
+
+
 def test_selection_skips_candidates_without_resource_qualification(selection, monkeypatch):
     module, _ = selection
     candidates = [module.CaptureCandidate(2, 0, 1, 0, 10, None),
