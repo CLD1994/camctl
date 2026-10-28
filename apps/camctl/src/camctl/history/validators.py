@@ -550,6 +550,16 @@ def _check_evidence_member(event_id: int, member: str, value: Any, reason: int) 
                 or not is_json_integer(value["check_id"]) or value["check_id"] <= 0
                 or not is_json_integer(value["trusted_wall_now"]) or value["trusted_wall_now"] < 0):
             _fail("可用性失败申请必须包含检查身份与可信时间")
+    elif member == "binding_read_finish":
+        if (not isinstance(value, Mapping) or set(value) != {"error", "cancel_event"}
+                or not isinstance(value["error"], Mapping) or value["error"].get("code") != "device_binding_unavailable"
+                or (value["cancel_event"] is not None and (not isinstance(value["cancel_event"], Mapping)
+                    or set(value["cancel_event"]) != {"event_id", "transaction_id", "occurred_at"}
+                    or any(not is_json_integer(value["cancel_event"][name]) or value["cancel_event"][name] <= 0
+                           for name in ("event_id", "transaction_id"))
+                    or not is_json_integer(value["cancel_event"]["occurred_at"])
+                    or value["cancel_event"]["occurred_at"] < 0))):
+            _fail("绑定读取结果必须包含原绑定失败")
     elif member == "read_current_identity":
         from camctl.devices.drivers.hasselblad.identity import CameraIdentity
         try:

@@ -2,6 +2,7 @@
 
 import asyncio
 import sys
+from dataclasses import dataclass
 from enum import Enum
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
@@ -18,6 +19,11 @@ def module(name, **members):
 
 
 class RunOutcome(Enum):
+    FAILED = "failed"
+    CANCELED = "canceled"
+
+
+class RunStatus(Enum):
     FAILED = "failed"
     CANCELED = "canceled"
 
@@ -62,8 +68,12 @@ def value(*args, **kwargs):
     return SimpleNamespace(args=args, **kwargs)
 
 
-def attempt_finish(ticket, outcome, occurred_at, **kwargs):
-    return SimpleNamespace(ticket=ticket, outcome=outcome, occurred_at=occurred_at, **kwargs)
+@dataclass(frozen=True)
+class attempt_finish:
+    ticket: object
+    outcome: object
+    occurred_at: int
+    run_finish: object = None
 
 
 def run_finish(status, error=None):
@@ -82,7 +92,7 @@ stub_modules = [
     module("camctl.capture.recovery", RecoveryBoundary=object, RecoveryBlockedReason=object, RecoveryDiagnostic=object),
     module("camctl.operations.attempts", AttemptFinish=attempt_finish, BeginDisposition=object,
            FinishDisposition=FinishDisposition, ReadResumeDisposition=object, ReadResumeRequest=object,
-           RunFinish=run_finish, RunOutcome=RunOutcome),
+           RunFinish=run_finish, RunOutcome=RunOutcome, RunStatus=RunStatus),
     module("camctl.operations.models", AttemptStatus=AttemptStatus, AttemptTicket=object, CallOutcome=outcome,
            EffectState=EffectState, ErrorValue=value, EvidenceValue=value, Settlement=settlement,
            SettlementBasis=SettlementBasis),
@@ -134,7 +144,7 @@ def setup(monkeypatch, status, canceled, *, digest_missing=True):
 
 
 @pytest.mark.parametrize("status,canceled,expected", [
-    (1, 0, RunOutcome.FAILED), (2, 1, RunOutcome.CANCELED),
+    (1, 0, RunOutcome.FAILED), (2, 1, RunOutcome.FAILED),
     (3, 1, None), (4, 0, None), (5, 1, None), (6, 0, None), (7, 1, None),
 ])
 def test_clean_end_selects_terminal_then_cancel_then_binding(monkeypatch, status, canceled, expected):
@@ -143,7 +153,7 @@ def test_clean_end_selects_terminal_then_cancel_then_binding(monkeypatch, status
     pending = asyncio.run(read_attempts.held_binding_read_result(runtime, 2, object(), business))
     assert pending.finish.ticket is ticket
     assert pending.finish.outcome.outcome.status is AttemptStatus.SUCCEEDED
-    assert pending.finish.occurred_at == 91
+    assert pending.finish.occurred_at == (20 if status in (1, 2) else 91)
     assert (None if pending.finish.run_finish is None else pending.finish.run_finish.status) is expected
     assert pending.business is (business if expected is RunOutcome.FAILED else None)
     assert pending.preserved_run_terminal is (status not in (1, 2))
@@ -168,14 +178,14 @@ def test_result_determined_during_read_takes_precedence(monkeypatch):
     assert asyncio.run(read_attempts.held_binding_read_result(runtime, 2, object(), object())) is pending
 
 
-def test_cancel_observed_during_lookup_wins_before_finish_is_determined(monkeypatch):
+def test_cancel_observed_during_lookup_keeps_original_binding_candidate(monkeypatch):
     runtime, _, _ = setup(monkeypatch, 2, 0)
     async def canceled_during_lookup(database, sql, params):
         return 2, 1
     monkeypatch.setattr(read_attempts, "read_one", canceled_during_lookup)
     pending = asyncio.run(read_attempts.held_binding_read_result(runtime, 2, object(), SimpleNamespace(diagnostic=object())))
-    assert pending.finish.run_finish.status is RunOutcome.CANCELED
-    assert pending.business is None
+    assert pending.finish.run_finish.status is RunOutcome.FAILED
+    assert pending.business is not None
 
 
 def test_completed_digest_leaves_local_work_untouched(monkeypatch):
@@ -209,11 +219,12 @@ def test_unknown_save_keeps_original_finish_and_key_after_cancel(monkeypatch):
         runtime, 2, object(), SimpleNamespace(diagnostic=object())))
     saved = []
     class Operations:
-        def finish_attempt(self, finish, key, owned):
+        def finish_binding_read(self, finish, key, owned):
             saved.append((finish, key))
             return SimpleNamespace(kind=DbOutcomeKind.UNKNOWN if len(saved) == 1 else DbOutcomeKind.COMPLETED,
                                    error="unknown", value=SimpleNamespace(run_was_terminal=False,
-                                                                          disposition=FinishDisposition.SAVED))
+                                                                          disposition=FinishDisposition.SAVED,
+                                                                          run_status=RunStatus.FAILED))
     async def write(callback, *, key):
         return callback(object())
     runtime.operations = Operations()
@@ -235,9 +246,10 @@ def test_save_receipt_controls_terminal_handling(monkeypatch, terminal, disposit
     pending = asyncio.run(read_attempts.held_binding_read_result(
         runtime, 2, object(), SimpleNamespace(diagnostic=object())))
     class Operations:
-        def finish_attempt(self, finish, key, owned):
+        def finish_binding_read(self, finish, key, owned):
             return SimpleNamespace(kind=DbOutcomeKind.COMPLETED,
-                                   value=SimpleNamespace(run_was_terminal=terminal, disposition=disposition))
+                                   value=SimpleNamespace(run_was_terminal=terminal, disposition=disposition,
+                                                         run_status=RunStatus.FAILED))
     async def write(callback, *, key):
         return callback(object())
     runtime.operations = Operations()
@@ -246,6 +258,46 @@ def test_save_receipt_controls_terminal_handling(monkeypatch, terminal, disposit
     assert result.preserved_run_terminal is preserved
     assert result.finish is pending.finish and result.key == pending.key
     assert runtime.pending_read_results[(5, 1)] is result
+
+
+def test_cancel_transaction_receipt_retires_binding_business(monkeypatch):
+    runtime, _, _ = setup(monkeypatch, 2, 0)
+    business = SimpleNamespace(diagnostic=object())
+    pending = asyncio.run(read_attempts.held_binding_read_result(runtime, 2, object(), business))
+    class Operations:
+        def finish_binding_read(self, finish, key, owned):
+            return SimpleNamespace(kind=DbOutcomeKind.COMPLETED, value=SimpleNamespace(
+                run_was_terminal=False, disposition=FinishDisposition.SAVED, run_status=RunStatus.CANCELED))
+    async def write(callback, *, key):
+        return callback(object())
+    runtime.operations, runtime.database.write = Operations(), write
+    result = asyncio.run(read_attempts.save_read_result(runtime, pending))
+    assert result.finish.run_finish.status is RunOutcome.CANCELED
+    assert result.finish.outcome is pending.finish.outcome
+    assert result.key == pending.key and result.business is None
+    assert runtime.pending_read_results[(5, 1)] is result
+
+
+def test_unknown_then_canceled_receipt_reuses_original_candidate_and_key(monkeypatch):
+    runtime, _, _ = setup(monkeypatch, 2, 0)
+    pending = asyncio.run(read_attempts.held_binding_read_result(
+        runtime, 2, object(), SimpleNamespace(diagnostic=object())))
+    calls = []
+    class Operations:
+        def finish_binding_read(self, finish, key, owned):
+            calls.append((finish, key))
+            if len(calls) == 1:
+                return SimpleNamespace(kind=DbOutcomeKind.UNKNOWN, error="unknown")
+            return SimpleNamespace(kind=DbOutcomeKind.COMPLETED, value=SimpleNamespace(
+                run_was_terminal=False, disposition=FinishDisposition.SAVED, run_status=RunStatus.CANCELED))
+    async def write(callback, *, key):
+        return callback(object())
+    runtime.operations, runtime.database.write = Operations(), write
+    with pytest.raises(ValueError):
+        asyncio.run(read_attempts.save_read_result(runtime, pending))
+    result = asyncio.run(read_attempts.save_read_result(runtime, pending, retry=True))
+    assert calls == [(pending.finish, pending.key), (pending.finish, pending.key)]
+    assert result.business is None and result.finish.run_finish.status is RunOutcome.CANCELED
 
 
 def test_business_held_before_diagnostic_control_error(monkeypatch):

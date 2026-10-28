@@ -38,6 +38,8 @@ from camctl.operations.attempts import (
     FinishDisposition,
     OperationKind,
     QueryPurpose,
+    RunFinish,
+    RunOutcome,
     RunStatus,
     StaleRunFinish,
     StaleRunFinishResult,
@@ -1051,12 +1053,16 @@ def _verify_result_ticket(finish: AttemptFinish, run: Mapping[str, Any], attempt
         raise TransactionError("重试等待输入必须是布尔值")
 
 
+from .binding_read_cancel import binding_cancel_event as _binding_cancel_event
+
+
 class FinishAttemptCommand:
     """一次尝试结束结果的完整事务命令。"""
 
-    def __init__(self, finish: AttemptFinish, key: OperationKey) -> None:
+    def __init__(self, finish: AttemptFinish, key: OperationKey, *, binding_read=False) -> None:
         self._finish = finish
         self._key = key
+        self._binding_read = binding_read
         self._owners: dict[tuple[str, int], tuple[str, int]] = {}
         self._state: dict[str, dict[int, dict[str, Any]]] = {}
 
@@ -1116,6 +1122,12 @@ class FinishAttemptCommand:
         )
 
         _verify_run_identity(run_facts, self._state)
+        if self._binding_read:
+            if (run_facts["kind"] != int(_RUN_KIND.READ_FILE) or finish.retry_wait
+                    or finish.run_finish is None or finish.run_finish.status is not RunOutcome.FAILED
+                    or finish.run_finish.error is None or finish.run_finish.error.code != "device_binding_unavailable"
+                    or finish.outcome.outcome.status is not AttemptStatus.SUCCEEDED):
+                raise TransactionError("绑定读取结果申请必须包含真实成功及原绑定失败")
         owner = _run_owner_ref(run_facts, self._state)
         self._owners[("operation_runs", ticket.run_id)] = owner
         self._owners[("operation_attempts", attempt_id)] = owner
@@ -1141,10 +1153,20 @@ class FinishAttemptCommand:
             raise TransactionError("原恢复意图晚于启动固定历史上界")
 
         outcome = finish.outcome.outcome
+        run_finish = finish.run_finish
+        cancel_evidence = None
+        if self._binding_read:
+            action = _load_row(connection, "actions", run_facts["action_id"])
+            if action is None or action["cancel_requested"] not in (0, 1):
+                raise ConsistencyError("读取结果缺少原动作取消事实")
+            self._state.setdefault("actions", {})[action["id"]] = action
+            if action["cancel_requested"] and run_facts["status"] in (int(_RUN_STATUS.PENDING), int(_RUN_STATUS.ACTIVE)):
+                run_finish = RunFinish(RunOutcome.CANCELED)
+                cancel_evidence = _binding_cancel_event(connection, action["id"], scope.max_txn_id)
         # 流程终态与在途尝试分别结算：迟到结果不能重开间隔或改写终态。
         run_active = run_facts["status"] in (int(_RUN_STATUS.PENDING), int(_RUN_STATUS.ACTIVE))
         event_count = 1 + (
-            1 if run_active and (finish.retry_wait or finish.run_finish is not None) else 0
+            1 if run_active and (finish.retry_wait or run_finish is not None) else 0
         )
         allocation = scope.allocate(event_count)
         result_event = _envelope(
@@ -1194,8 +1216,8 @@ class FinishAttemptCommand:
                     finish.occurred_at,
                 )
             )
-        elif run_active and finish.run_finish is not None:
-            final = finish.run_finish.status
+        elif run_active and run_finish is not None:
+            final = run_finish.status
             events.append(
                 _envelope(
                     allocation.last_event_id,
@@ -1214,11 +1236,13 @@ class FinishAttemptCommand:
                             {
                                 "status": int(_RUN_STATUS[final.name]),
                                 "retry_wait_required": 0,
-                                "error_json": _error_json(finish.run_finish.error),
+                                "error_json": _error_json(run_finish.error),
                             },
                         ),
                     ),
-                    finish.occurred_at,
+                    max(finish.occurred_at, cancel_evidence["occurred_at"]) if cancel_evidence else finish.occurred_at,
+                    {"binding_read_finish": {"error": _error_json(finish.run_finish.error),
+                        "cancel_event": cancel_evidence}} if self._binding_read else None,
                 )
             )
             run_status_after = RunStatus[final.name]
@@ -1261,7 +1285,7 @@ class FinishAttemptCommand:
                      "effect_state": int(_EFFECT_STATE[outcome.effect.name]),
                      "result_json": _result_json(finish.outcome), "error_json": _error_json(outcome.error)}
         if (any(not json_equal(attempt[name], value) for name, value in requested.items())
-                or any(event["occurred_at"] != finish.occurred_at for event in saved)):
+                or saved[0]["occurred_at"] != finish.occurred_at):
             raise TransactionError("重送的结果或事实时刻与原事务不同")
         waiting = len(saved) == 2 and (saved[1]["type"], saved[1]["reason"]) == (_RETRY_WAIT_EVENT, 1)
         ending = len(saved) == 2 and (saved[1]["type"], saved[1]["reason"]) == (_OPERATION_CONFIGURED_EVENT, 3)
@@ -1299,9 +1323,30 @@ class FinishAttemptCommand:
                 finish.retry_wait != waiting or (finish.run_finish is not None) != ending):
             raise TransactionError("重送的流程处置与原结果事务不同")
         if ending and finish.run_finish is not None:
-            if (original["status"] != int(_RUN_STATUS[finish.run_finish.status.name])
+            binding_evidence = saved[1]["body"].get("evidence", {}).get("binding_read_finish")
+            binding_saved = binding_evidence is not None
+            if binding_saved != self._binding_read:
+                raise TransactionError("重送的读取结果申请类别不一致")
+            if binding_saved and (not isinstance(binding_evidence, Mapping)
+                    or set(binding_evidence) != {"error", "cancel_event"}
+                    or not json_equal(binding_evidence["error"], _error_json(finish.run_finish.error))):
+                raise TransactionError("重送的原绑定失败与申请不一致")
+            canceled = binding_saved and original["status"] == int(_RUN_STATUS.CANCELED) and original["error_json"] is None
+            cancel_event = binding_evidence["cancel_event"] if binding_saved else None
+            if canceled:
+                actual = _binding_cancel_event(connection, run["action_id"], transaction.txn_id - 1)
+                if not json_equal(cancel_event, actual):
+                    raise ConsistencyError("原读取结果引用的取消事实不一致")
+            elif cancel_event is not None:
+                raise TransactionError("原绑定失败不应引用取消事件")
+            expected_at = max(finish.occurred_at, cancel_event["occurred_at"]) if canceled else finish.occurred_at
+            if saved[1]["occurred_at"] != expected_at:
+                raise TransactionError("原流程结束记录时刻不一致")
+            if not canceled and (original["status"] != int(_RUN_STATUS[finish.run_finish.status.name])
                     or not json_equal(original["error_json"], _error_json(finish.run_finish.error))):
                 raise TransactionError("重送的流程结束状态或错误与原事务不同")
+        elif len(saved) == 2 and saved[1]["occurred_at"] != finish.occurred_at:
+            raise TransactionError("重送的流程处置时刻与原事务不同")
         return CommandPlan(
             events=(),
             owners=self._owners,
@@ -1750,6 +1795,10 @@ class OperationRepository:
         receipt = commit_operation(FinishAttemptCommand(finish, key), key, owned)
         return _outcome_of(receipt)
 
+    def finish_binding_read(self, finish, key, owned):
+        receipt = commit_operation(FinishAttemptCommand(finish, key, binding_read=True), key, owned)
+        return _outcome_of(receipt)
+
     def begin_availability_attempt(self, intent, request, key, owned):
         """以当前触发资格和原检查身份登记一次设备检查意图。"""
         if intent.kind is not OperationKind.CHECK_DEVICE_AVAILABILITY:
@@ -2163,6 +2212,40 @@ def _operation_finish_guard(event, context) -> None:
             continue
         after = _row_after_facts(context, row)
         status = after.get("status")
+        if "binding_read_finish" in event.evidence:
+            from .preparation import PreparationReads
+            reads = context.preparation_reads
+            if type(reads) is not PreparationReads or after.get("kind") != int(_RUN_KIND.READ_FILE):
+                _fail("绑定读取结果缺少原读取与事务事实")
+            action = row_facts(reads.connection, "actions", after["action_id"])
+            if action is None or action["cancel_requested"] not in (0, 1):
+                _fail("绑定读取结果缺少原动作取消事实")
+            previous = reads.events
+            if (len(previous) != 1 or previous[0].event_type != _ATTEMPT_RESULT_EVENT
+                    or len(previous[0].rows) != 1
+                    or previous[0].rows[0].after.values.get("status") != int(_ATTEMPT_STATUS.SUCCEEDED)):
+                _fail("绑定读取结束缺少同事务真实成功结果")
+            attempt = context.state_rows.get("operation_attempts", {}).get(previous[0].rows[0].row_id)
+            if attempt is None or attempt.get("run_id") != row.row_id:
+                _fail("绑定读取结果不属于原流程")
+            error = after.get("error_json")
+            binding_evidence = event.evidence["binding_read_finish"]
+            if not isinstance(binding_evidence, Mapping) or set(binding_evidence) != {"error", "cancel_event"}:
+                _fail("绑定读取结束证据不完整")
+            binding_error = binding_evidence["error"]
+            if not isinstance(binding_error, Mapping) or binding_error.get("code") != "device_binding_unavailable":
+                _fail("绑定读取结束缺少原绑定失败")
+            if action["cancel_requested"]:
+                if status != int(_RUN_STATUS.CANCELED) or error is not None:
+                    _fail("已取消动作的读取必须按取消结束")
+                actual_cancel = _binding_cancel_event(reads.connection, after["action_id"], event.transaction_id - 1)
+                if (not json_equal(binding_evidence["cancel_event"], actual_cancel)
+                        or event.occurred_at != max(previous[0].occurred_at, actual_cancel["occurred_at"])):
+                    _fail("读取取消结束缺少更早已提交的原取消事件")
+            elif (status != int(_RUN_STATUS.FAILED) or not isinstance(error, Mapping)
+                    or not json_equal(error, binding_error) or binding_evidence["cancel_event"] is not None
+                    or event.occurred_at != previous[0].occurred_at):
+                _fail("未取消动作的读取必须保存原绑定失败")
         if after.get("kind") == int(_RUN_KIND.CHECK_DEVICE_AVAILABILITY):
             from .availability_finish import AvailabilityFinishReads
             reads = context.availability_finish_reads
