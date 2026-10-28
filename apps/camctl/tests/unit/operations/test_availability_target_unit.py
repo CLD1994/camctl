@@ -861,7 +861,7 @@ def test_failed_or_unknown_attempt_does_not_require_a_pass_group(isolated_result
     row = SimpleNamespace(table="operation_attempts", row_id=5, before=SimpleNamespace(exists=True),
         after=SimpleNamespace(values={"run_id": 3, "status": status, "effect_state": 2,
                                       "result_event_id": 7, "result_json": result, "error_json": {"code": "failed"}}))
-    event = SimpleNamespace(event_id=7, rows=(row,))
+    event = SimpleNamespace(event_id=7, rows=(row,), evidence={})
     context = SimpleNamespace(state_rows={"operation_runs": {3: {"kind": 12}}}, availability_reads=None)
     isolated_result_guard._attempt_result_guard(event, context)
 
@@ -873,7 +873,7 @@ def test_success_result_guard_rejects_a_forged_single_event(isolated_result_guar
     row = SimpleNamespace(table="operation_attempts", row_id=5, before=SimpleNamespace(exists=True),
         after=SimpleNamespace(values={"run_id": 3, "status": 2, "effect_state": 2,
                                       "result_event_id": 7, "result_json": result, "error_json": None}))
-    event = SimpleNamespace(event_id=7, rows=(row,))
+    event = SimpleNamespace(event_id=7, rows=(row,), evidence={})
     context = SimpleNamespace(state_rows={"operation_runs": {3: {"kind": 12}}}, availability_reads=None)
     with pytest.raises(isolated_result_guard.EventValidationError):
         isolated_result_guard._attempt_result_guard(event, context)
