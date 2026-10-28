@@ -15,6 +15,7 @@ PREVENTED = EvidenceContract("start_call_prevented", 1, "control", frozenset())
 
 class EntryPhase(Enum):
     READY = "ready"
+    GRANTING = "granting"
     RESERVED = "reserved"
     ENTERED = "entered"
     BLOCKED = "blocked"
@@ -36,13 +37,15 @@ class StartEntryPermit:
     ticket: AttemptTicket | None = None
     phase: EntryPhase = EntryPhase.READY
     active: bool = False
+    cancel_pending: bool = False
 
     def bind(self, database_id, ticket):
-        if (database_id != self.database_id or self.phase is not EntryPhase.READY
+        if (database_id != self.database_id or self.phase not in (EntryPhase.READY, EntryPhase.GRANTING, EntryPhase.UNKNOWN)
                 or self.ticket is not None or not isinstance(ticket, AttemptTicket)
                 or ticket.operation != "control" or ticket.responsibility_key != f"start/{self.action_id}"):
             raise ConsistencyError("START 入口许可不能改绑或重新开放")
         self.ticket = ticket
+        self.phase = EntryPhase.READY
 
     def enter(self, ticket):
         if self.ticket is None or self.ticket != ticket or self.phase is not EntryPhase.READY:
@@ -57,6 +60,7 @@ class StartEntryCoordinator:
     def __init__(self):
         self.permits = {}
         self.pending_cancels = {}
+        self.pending_grants = {}
 
     def prepare(self, database_id, action_id):
         key = database_id, action_id
@@ -73,6 +77,9 @@ class StartEntryCoordinator:
         permit = self.get(database_id, action_id)
         if permit is None and no_intent:
             permit = self.prepare(database_id, action_id)
+        if permit is not None and permit.phase in (EntryPhase.GRANTING, EntryPhase.UNKNOWN):
+            permit.cancel_pending = True
+            return None
         if permit is None or permit.phase is not EntryPhase.READY:
             return None
         permit.phase = EntryPhase.RESERVED

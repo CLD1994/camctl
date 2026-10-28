@@ -225,7 +225,7 @@ class AvailabilityCoordinator:
                     await self._deliver_failure(database, identity, check_id)
                 return AvailabilityProgress.FAILED
             if run["running_attempt"] is not None:
-                await self._recover_attempt(database, run, check_id, request, evidence, binding)
+                await self._recover_attempt(database, run, check_id, request, evidence, binding, config)
                 return AvailabilityProgress.WAIT
             from camctl.persistence.repositories.availability_wait_finish import (
                 WaitingFinishDisposition, finish_waiting_availability,
@@ -361,7 +361,7 @@ class AvailabilityCoordinator:
         return AvailabilityAttemptOwner(ticket, invoke, save,
             lambda error: error.result if isinstance(error, (AvailabilityCancelled, _DispatchCancelled)) else None)
 
-    async def _recover_attempt(self, database, run, check_id, request, evidence, binding):
+    async def _recover_attempt(self, database, run, check_id, request, evidence, binding, config):
         from camctl.operations.recovery import RecoveryBoundary
         horizon = self.recovery_max_event_id() if callable(self.recovery_max_event_id) else self.recovery_max_event_id
         if (self.recovery_boundary not in (RecoveryBoundary.HOST_LOCAL_SETTLED, RecoveryBoundary.HOST_POWER_CYCLE)
@@ -373,22 +373,30 @@ class AvailabilityCoordinator:
             error=ErrorValue("result_not_saved", "recovery"),
             settlement=Settlement(SettlementBasis.ASSUMED, EvidenceValue("local_availability_recovery", 1, {})))
         validated = validate_outcome(ticket, outcome, evidence)
-        error = ErrorValue("source_device_unavailable" if request.trigger_copy_id else "device_availability_unconfirmed",
-            "source_read" if request.trigger_copy_id else "execution", {"device_id": binding.device_id,
-            "operation_run_id": str(run["id"]), "attempts_used": run["attempts_used"],
-            "max_attempts": run["max_attempts_used"]})
-        exhausted = run["attempts_used"] >= run["max_attempts_used"]
         active = run["status"] in (1, 2)
-        finish = AttemptFinish(ticket, validated, self.occurred_at(), retry_wait=active and not exhausted,
-            run_finish=RunFinish(RunOutcome.UNCONFIRMED, error) if active and exhausted else None,
-            recovery_max_event_id=horizon)
+        finish = AttemptFinish(ticket, validated, self.occurred_at(), retry_wait=active,
+                               recovery_max_event_id=horizon)
         diagnostic = self.recovery_diagnostics.setdefault(run["id"], DiagnosticState())
-        record_call_outcome(outcome, ticket=ticket, run_error=error if exhausted else None,
+        record_call_outcome(outcome, ticket=ticket,
                             context={"action_id": request.action_id}, state=diagnostic)
         await self._write(database, (request.action_id, request.trigger_copy_id, "recover", run["id"]),
                           finish, self.operations.finish_attempt)
-        if active and not exhausted:
+        if active:
             self.retry_gate.established(ticket.responsibility_key, self.monotonic_ns())
+            action = await database.read(lambda owned: _action_facts(owned, request.action_id))
+            now = self.occurred_at()
+            terminal_trigger = (action["cancel_requested"] or action["status"] in (5, 6)
+                or request.trigger_copy_id is None and now > action["scheduled_at"] + action["max_delay_ms"] * 1000)
+            if config is not None or terminal_trigger:
+                from camctl.persistence.repositories.availability_wait_finish import (
+                    WaitingFinishDisposition, finish_waiting_availability,
+                )
+                maximum = config.max_attempts if config is not None else run["max_attempts_used"]
+                result = await self._write(database, (request.action_id, request.trigger_copy_id, "finish-wait"),
+                    (check_id, now, now, maximum),
+                    lambda args, key, owned: finish_waiting_availability(*args, key, owned))
+                if result in (WaitingFinishDisposition.FINISHED, WaitingFinishDisposition.TERMINAL):
+                    self.retry_gate.cleared(ticket.responsibility_key)
         self._notify()
 
 

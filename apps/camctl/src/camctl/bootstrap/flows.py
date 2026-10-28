@@ -757,11 +757,16 @@ async def _resolve_and_fix(
                 tuple(candidates))
     inputs, auto_candidates, candidates = await database.read(read)
     direct = []
+    deferred_entries = {}
     for identity, loaded in inputs:
         entry = None if start_entries is None else start_entries.get(
             database.metadata.instance_id, identity)
-        facts = current_eligibility_facts(
-            loaded, None if entry is None else entry.phase)
+        if entry is not None:
+            from camctl.devices.start_entry import EntryPhase
+            if entry.phase in (EntryPhase.GRANTING, EntryPhase.UNKNOWN):
+                deferred_entries[identity] = entry
+        facts = (loaded.facts if identity in deferred_entries else current_eligibility_facts(
+            loaded, None if entry is None else entry.phase))
         direct.append(TargetFacts(
             action_id=identity, terminal=facts.terminal,
             may_cancel=may_link_auto_preview(
@@ -773,6 +778,15 @@ async def _resolve_and_fix(
         return None
     blocks = []
     selected = {target.action_id for target in fixed.targets}
+    deferred = [entry for identity, entry in deferred_entries.items() if identity in selected]
+    if deferred:
+        for entry in deferred:
+            entry.cancel_pending = True
+        for entry in deferred:
+            pending = start_entries.pending_grants.get((entry.database_id, entry.action_id))
+            if entry.phase is EntryPhase.UNKNOWN and pending is not None:
+                await pending()
+        return None
     if start_entries is not None:
         for identity, no_intent in candidates:
             if identity not in selected:

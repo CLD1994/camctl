@@ -36,12 +36,15 @@ def coordinator_module(monkeypatch):
     class AttemptStatus(Enum):
         SUCCEEDED = 1
         FAILED = 2
+        UNKNOWN = 3
 
     class EffectState(Enum):
         NO_EFFECT = 1
+        UNKNOWN = 2
 
     class SettlementBasis(Enum):
         NOT_DISPATCHED = 1
+        ASSUMED = 2
 
     class Fields:
         def __init__(self, *args, **kwargs):
@@ -49,9 +52,10 @@ def coordinator_module(monkeypatch):
             self.__dict__.update(kwargs)
 
     class Finish(Fields):
-        def __init__(self, ticket, outcome, occurred_at, *, retry_wait=False, run_finish=None):
+        def __init__(self, ticket, outcome, occurred_at, *, retry_wait=False, run_finish=None,
+                     recovery_max_event_id=None):
             super().__init__(ticket=ticket, outcome=outcome, occurred_at=occurred_at,
-                             retry_wait=retry_wait, run_finish=run_finish)
+                             retry_wait=retry_wait, run_finish=run_finish, recovery_max_event_id=recovery_max_event_id)
 
     class RunFinish:
         def __init__(self, status, error=None):
@@ -61,11 +65,26 @@ def coordinator_module(monkeypatch):
         def __init__(self, ticket, invoke, save, cancelled_result):
             self.ticket, self.invoke, self.save, self.cancelled_result = ticket, invoke, save, cancelled_result
 
-    stub("camctl.operations.attempts", AttemptFinish=Finish, RunFinish=RunFinish, RunOutcome=RunOutcome,
-         **{name: type(name, (), {}) for name in ("AttemptIntent", "AttemptTarget", "OperationKind", "RetryWaitGate")})
+    class Ticket:
+        def __init__(self, attempt_id, operation, target_id, responsibility_key, run_id):
+            self.attempt_id, self.operation, self.target_id = attempt_id, operation, target_id
+            self.responsibility_key, self.run_id = responsibility_key, run_id
+
+    class Gate:
+        def __init__(self):
+            self.established_calls, self.cleared_calls = [], []
+
+        def established(self, key, when):
+            self.established_calls.append((key, when))
+
+        def cleared(self, key):
+            self.cleared_calls.append(key)
+
+    stub("camctl.operations.attempts", AttemptFinish=Finish, RunFinish=RunFinish, RunOutcome=RunOutcome, RetryWaitGate=Gate,
+         **{name: type(name, (), {}) for name in ("AttemptIntent", "AttemptTarget", "OperationKind")})
     stub("camctl.operations.availability_owner", AvailabilityAttemptOwner=Owner)
     stub("camctl.operations.models", AttemptStatus=AttemptStatus, EffectState=EffectState, SettlementBasis=SettlementBasis,
-         **{name: Fields for name in ("AttemptTicket", "CallOutcome", "ErrorValue", "EvidenceValue", "Settlement")})
+         AttemptTicket=Ticket, **{name: Fields for name in ("CallOutcome", "ErrorValue", "EvidenceValue", "Settlement")})
     stub("camctl.operations.validation", validate_outcome=lambda ticket, outcome, evidence: SimpleNamespace(outcome=outcome))
 
     class SharedSave:
@@ -250,3 +269,35 @@ async def test_last_failed_attempt_finishes_without_retry_wait(coordinator_modul
     finish = coordinator._write.await_args.args[2]
     assert finish.run_finish.status is module.RunOutcome.FAILED
     assert finish.retry_wait is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("current_max,canceled,waiting_result", [(2, 0, "WAIT"), (2, 1, "FINISHED")])
+async def test_recovery_saves_unknown_then_uses_current_budget_and_trigger(
+        coordinator_module, monkeypatch, current_max, canceled, waiting_result):
+    module, _ = coordinator_module
+    _, waiting = install_repositories(monkeypatch)
+    class Boundary(Enum):
+        HOST_LOCAL_SETTLED = 1
+        HOST_POWER_CYCLE = 2
+    recovery = ModuleType("camctl.operations.recovery")
+    recovery.RecoveryBoundary = Boundary
+    monkeypatch.setitem(sys.modules, recovery.__name__, recovery)
+    coordinator = make_coordinator(module)
+    coordinator.recovery_boundary, coordinator.recovery_max_event_id = Boundary.HOST_LOCAL_SETTLED, 20
+    coordinator.operations.finish_attempt = object()
+    coordinator._write = AsyncMock(side_effect=[None, waiting[waiting_result]])
+    monkeypatch.setattr(module, "_action_facts", lambda owned, action_id: {
+        "cancel_requested": canceled, "status": 1, "scheduled_at": 100, "max_delay_ms": 10})
+    database = SimpleNamespace(read=AsyncMock(side_effect=lambda callback: callback(None)))
+    run = {"id": 7, "status": 2, "attempts_used": 1, "max_attempts_used": 1,
+           "intent_event_id": 19, "responsibility_key": "availability/9"}
+    request = Request(1, None)
+
+    await coordinator._recover_attempt(database, run, 9, request, None, None,
+                                       SimpleNamespace(max_attempts=current_max))
+
+    finish = coordinator._write.await_args_list[0].args[2]
+    assert finish.outcome.outcome.status is module.AttemptStatus.UNKNOWN
+    assert finish.run_finish is None and finish.recovery_max_event_id == 20
+    assert coordinator._write.await_args_list[1].args[2][-1] == current_max

@@ -1150,8 +1150,18 @@ class CaptureRuntime(_FileObservationSaves):
         )
         permit = None
         if is_hasselblad_photo(action):
+            existing = self.start_entries.get(self.database.metadata.instance_id, action["id"])
+            if existing is not None:
+                pending = self.start_entries.pending_grants.get((existing.database_id, existing.action_id))
+                if pending is not None:
+                    return await pending()
+                if existing.phase in (EntryPhase.RESERVED, EntryPhase.BLOCKED):
+                    return None, "canceled"
+                raise ConsistencyError("原 START 入口许可仍承担责任")
             permit = self.start_entries.prepare(self.database.metadata.instance_id, action["id"])
+            permit.phase = EntryPhase.GRANTING
         key = new_operation_key()
+        shared = SharedSave()
         async def save_and_apply():
             _delivery_error = None
             try:
@@ -1174,15 +1184,22 @@ class CaptureRuntime(_FileObservationSaves):
             if result.outcome.value != "granted":
                 if permit is not None:
                     del self.start_entries.permits[(permit.database_id, permit.action_id)]
+                    self.start_entries.pending_grants.pop((permit.database_id, permit.action_id), None)
                 if _delivery_error is not None:
                     raise _delivery_error
                 return None, result.reason
             if permit is not None:
                 permit.bind(self.database.metadata.instance_id, result.ticket)
+                self.start_entries.pending_grants.pop((permit.database_id, permit.action_id), None)
             if _delivery_error is not None:
                 raise _delivery_error
             return result.ticket, None
-        return await settle_required(save_and_apply())
+        async def resume():
+            shared.retry_failed()
+            return await shared.run(save_and_apply)
+        if permit is not None:
+            self.start_entries.pending_grants[(permit.database_id, permit.action_id)] = resume
+        return await resume()
 
     async def finish(self, ticket, outcome: CallOutcome, *,
                end_run: RunOutcome | None = None,
@@ -1848,7 +1865,7 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
     if is_hasselblad_photo(action):
         if permit is None or permit.ticket != ticket:
             raise ConsistencyError("原 START 缺少匹配的会话入口许可，不能调用驱动")
-        if permit.phase is EntryPhase.BLOCKED and (await runtime.action(action["id"]))["cancel_requested"]:
+        if permit.cancel_pending or permit.phase in (EntryPhase.RESERVED, EntryPhase.BLOCKED):
             return HandlerOutcome("not_granted", "canceled")
         if permit.phase is not EntryPhase.READY:
             raise ConsistencyError("原 START 入口许可尚未核实或已使用，不能调用驱动")

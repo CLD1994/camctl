@@ -50,8 +50,10 @@ class AvailabilityAssembly:
             now = context.clock.utc_micros()
             request = CreateAvailabilityCheck(check["action_id"], identity, now, Decimal(0), now,
                                               trigger_copy_id=check["trigger_copy_id"])
+            declaration = self.devices.get(check["device_id"])
+            config = None if declaration is None else query_attempt_config(declaration)
             await self.coordinator._recover_attempt(context.database, run, check_id, request,
-                entry.evidence, DeviceBinding(check["device_id"], check["driver_id"]))
+                entry.evidence, DeviceBinding(check["device_id"], check["driver_id"]), config)
         def waiting(owned):
             return tuple(owned.connection.execute(
                 "SELECT r.id,c.id,c.action_id,c.trigger_copy_id,c.device_id,r.max_attempts_used,a.cancel_requested,a.status"
