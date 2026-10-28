@@ -14,11 +14,14 @@ _INDEX_RESOURCES = {
     "operation_attempts_without_result": "sql/operations.sql",
 }
 
+_CAPTURE_SELECTION_INDEX = "actions_pending_capture_selection"
+
 
 @lru_cache(maxsize=None)
 def _expected(name):
     try:
-        authority = resource_bytes(_INDEX_RESOURCES[name]).decode("utf-8")
+        resource = "sql/core.sql" if name == _CAPTURE_SELECTION_INDEX else _INDEX_RESOURCES[name]
+        authority = resource_bytes(resource).decode("utf-8")
     except (ResourceError, UnicodeError) as error:
         raise ValueError(f"读取重试索引的权威 SQL 不可读取: {name}") from error
     matches = re.findall(r"CREATE\s+INDEX\s+" + re.escape(name) + r"\s+ON\s+[^;]+;", authority, re.I)

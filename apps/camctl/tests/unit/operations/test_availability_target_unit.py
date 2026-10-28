@@ -319,6 +319,9 @@ def creation_module(target_rules, monkeypatch):
     validators.register_guard = lambda *args: None
     monkeypatch.setitem(sys.modules, validators.__name__, validators)
     monkeypatch.setitem(sys.modules, "camctl.persistence.repositories.availability_target", target_rules)
+    structure = ModuleType("camctl.persistence.retry_wait_structure")
+    structure.verify_retry_wait_index = lambda connection, name: None
+    monkeypatch.setitem(sys.modules, structure.__name__, structure)
     source = find_spec("camctl.persistence.repositories.availability_create")
     spec = spec_from_file_location("camctl.persistence.repositories._isolated_create", source.origin)
     module = module_from_spec(spec)
