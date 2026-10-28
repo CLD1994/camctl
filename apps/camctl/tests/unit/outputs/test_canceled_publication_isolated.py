@@ -193,6 +193,84 @@ def load_repository():
 
 
 class CancelSettlementTests(unittest.TestCase):
+    def test_saved_binding_read_retires_after_photo_cache_cleanup(self):
+        repo = load_repository()
+        repo._RUN_KIND = SimpleNamespace(READ_FILE=3)
+        repo.ReadCoverage = lambda value: value
+        repo.CommandPlan = lambda **kwargs: SimpleNamespace(**kwargs)
+        repo.FailureSaveDisposition = SimpleNamespace(ALREADY='already', RETIRED='retired')
+        repo.FailureSaveOutcome = lambda disposition: SimpleNamespace(disposition=disposition)
+        repo.commit_operation = lambda command, key, owned: command.plan(owned)
+        repo._outcome_of = lambda outcome: outcome
+        repo._load_binding_facts = lambda connection, file_id, result, state: {"reason": "missing"}
+        rows = {
+            'file_copies': {21: {'id': 21, 'delivery_id': 19, 'target_file_id': 23,
+                'source_device_file_id': None, 'source_intermediate_file_id': 31, 'verification_state': 4}},
+            'deliveries': {19: {'id': 19, 'action_id': 7, 'output_id': 29, 'status': 7}},
+            'actions': {7: {'id': 7, 'status': 6, 'cancel_requested': 1}},
+            'intermediate_files': {23: {'id': 23}, 31: {'id': 31, 'cleanup_state': 4}},
+            'obtain_items': {10: {'id': 10, 'delivery_id': 19, 'output_id': 29, 'selection_id': 9}},
+            'outputs': {29: {'id': 29, 'device_file_id': 30, 'source_action_id': 2}},
+            'obtain_source_selections': {9: {'id': 9, 'dependency_id': 8}},
+            'action_dependencies': {8: {'id': 8, 'action_id': 7, 'depends_on_action_id': 2}},
+            'operation_runs': {41: {'id': 41, 'action_id': 7, 'copy_id': 21, 'kind': 3,
+                'responsibility_key': 'read/21'}},
+            'operation_attempts': {},
+        }
+        class Cursor:
+            def __init__(self, found): self.found = found
+            def fetchall(self): return self.found
+            def close(self): pass
+        class Connection:
+            def execute(self, sql, parameters):
+                parts = sql.split()
+                table, column = parts[3], parts[5].split('=')[0]
+                return Cursor([(identity,) for identity, row in rows[table].items()
+                               if row.get(column) == parameters[0]])
+        repo.row_facts = lambda connection, table, identity: dict(rows[table][identity])
+        def saved_events(connection, key):
+            return [{'event_id': 101}] if key == 'read-key' else None
+        repo.saved_transaction_events = saved_events
+        binding = ModuleType('camctl.persistence.repositories.binding_read_cancel')
+        def saved_failure(connection, key, action, copy, error, identity):
+            self.assertEqual((key, action, copy, error, identity), ('read-key', 7, 21,
+                {'code': 'device_binding_unavailable', 'stage': 'execution', 'details': {'reason': 'missing'}}, None))
+        binding.saved_binding_read_failure = saved_failure
+        cache = ModuleType('camctl.outputs.photo_cache_reuse')
+        source = [30]
+        def verify(connection, copy, *, before_event_id, historical=False):
+            if not historical:
+                self.assertEqual(before_event_id, 201)
+                raise repo.ConsistencyError('缓存已清理，不具备实时读取资格')
+            self.assertEqual((copy['id'], before_event_id), (21, 101))
+            return source[0]
+        cache.verify_photo_cache_binding_failure = verify
+        request = SimpleNamespace(copy_id=21, source_device_file_id=30,
+            binding_result=SimpleNamespace(current_identity=None), occurred_at=17, read_result_key='read-key')
+        owned = SimpleNamespace(connection=Connection(), max_event_id=200)
+        with patch.dict(sys.modules, {binding.__name__: binding, cache.__name__: cache}):
+            result = repo.OutputsRepository().fail_read_binding(request, 'business-key', owned)
+            self.assertEqual(result.result.disposition, repo.FailureSaveDisposition.ALREADY)
+            self.assertTrue(result.read_only)
+            self.assertEqual(result.events, ())
+            rows['deliveries'][19]['status'] = 1
+            rows['actions'][7]['status'] = 2
+            result = repo.OutputsRepository().fail_read_binding(request, 'business-key', owned)
+            self.assertEqual(result.result.disposition, repo.FailureSaveDisposition.RETIRED)
+            self.assertTrue(result.read_only)
+            self.assertEqual(result.events, ())
+            rows['actions'][7]['cancel_requested'] = 0
+            with self.assertRaises(repo.ConsistencyError):
+                repo.OutputsRepository().fail_read_binding(request, 'business-key', owned)
+            rows['deliveries'][19]['status'] = 7
+            request.read_result_key = None
+            with self.assertRaises(repo.ConsistencyError):
+                repo.OutputsRepository().fail_read_binding(request, 'business-key', owned)
+            request.read_result_key = 'read-key'
+            source[0] = 99
+            with self.assertRaises(repo.TransactionError):
+                repo.OutputsRepository().fail_read_binding(request, 'business-key', owned)
+
     def test_cleaned_photo_cache_preserves_cancel_recovery_identity(self):
         for replay in (True, False):
             for cache_id in (31, 99, None):

@@ -4506,16 +4506,26 @@ class _ReadBindingFailCommand(_DeliveryPublicationMixin):
                 self._command.binding_result.current_identity)
         if saved is not None:
             return self._reuse(scope, saved, facts)
+        disposition = None
+        if delivery["status"] in (6, 7, 8) or copy["verification_state"] in (3, 5):
+            disposition = FailureSaveDisposition.ALREADY
+        elif (self._command.read_result_key is not None and action["cancel_requested"]
+              and action["status"] in (2, 6)):
+            disposition = FailureSaveDisposition.RETIRED
         if copy["source_device_file_id"] is None:
             from camctl.outputs.photo_cache_reuse import verify_photo_cache_binding_failure
+            historical = self._command.read_result_key is not None and disposition is not None
+            before_event_id = scope.max_event_id + 1
+            if historical:
+                original = saved_transaction_events(scope.connection, self._command.read_result_key)
+                if not original:
+                    raise ConsistencyError("原绑定读取结果事务缺失")
+                before_event_id = original[0]["event_id"]
             if verify_photo_cache_binding_failure(scope.connection, copy,
-                    before_event_id=scope.max_event_id + 1) != self._command.source_device_file_id:
+                    before_event_id=before_event_id, historical=historical) != self._command.source_device_file_id:
                 raise TransactionError("照片缓存绑定失败改变原设备来源")
-        if delivery["status"] in (6, 7, 8) or copy["verification_state"] in (3, 5):
-            return self._decision(FailureSaveOutcome(FailureSaveDisposition.ALREADY), read_only=True)
-        if self._command.read_result_key is not None and action["cancel_requested"]:
-            if action["status"] in (2, 6):
-                return self._decision(FailureSaveOutcome(FailureSaveDisposition.RETIRED), read_only=True)
+        if disposition is not None:
+            return self._decision(FailureSaveOutcome(disposition), read_only=True)
         if details["reason"] == "physical_identity_mismatch":
             from .physical_alias import read_mismatch_can_finish, verify_source_identity_mismatch
             source = self._state["device_files"][self._command.source_device_file_id]
