@@ -15,7 +15,6 @@ from camctl.logging_runtime.formatting import log_metadata
 from camctl.logging_runtime.models import LogLevel
 from camctl.logging_runtime.receipt import LogReceipt
 from camctl.logging_runtime.service import AdmissionResult, LogRecord
-from camctl.operations.error_diagnostics import exception_diagnostic
 
 __all__ = ["Logger", "SyncLogger", "get_logger", "get_sync_logger"]
 
@@ -168,23 +167,22 @@ def _prepare(name, number, message, args, *, context, extra, exc_info, stack_inf
             fields["message_value"] = message
     error = information[1] if information is not None else None
     if error is not None:
-        try:
-            fields["exception"] = exception_diagnostic(error)
-        except Exception as format_error:
-            try:
-                fields["exception"] = exception_diagnostic(error, include_message=False)
-            except Exception:
-                fields["exception"] = _snapshot({"exception": error})["exception"]
-            fields["exception_format_error"] = _format_error(format_error)
-        # 显式三元组可以指定不同于异常当前 traceback 的原栈。
-        fields["exception"]["traceback"] = [
-            {"filename": frame.f_code.co_filename, "lineno": line, "function": frame.f_code.co_name}
-            for frame, line in _walk_traceback(information[2])]
+        # 原异常对象交给公共投影，原因节点才能关联已冻结的原诊断。
+        fields["exception"] = error
     if stack is not None:
         fields["stack_info"] = stack
     metadata = log_metadata(_LEVELS[number])
     metadata["level"] = logging.getLevelName(number)
-    record = LogRecord(_LEVELS[number], _encode(_snapshot({**fields, **metadata})), source=source,
+    document = _snapshot({**fields, **metadata})
+    if error is not None and isinstance(document.get("exception"), dict):
+        # 显式三元组可以指定不同于异常当前 traceback 的原栈。
+        frames = [{"filename": frame.f_code.co_filename, "lineno": line, "function": frame.f_code.co_name}
+                  for frame, line in _walk_traceback(information[2])]
+        if "$ref" in document["exception"] or "diagnostic_ref" in document["exception"]:
+            document["exception_traceback"] = frames
+        else:
+            document["exception"]["traceback"] = frames
+    record = LogRecord(_LEVELS[number], _encode(document), source=source,
                        fallback=context.fallback, structured=True)
     return record, error
 

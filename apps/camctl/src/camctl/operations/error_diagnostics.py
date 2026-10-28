@@ -27,13 +27,14 @@ def _own_traceback(error: BaseException) -> list[dict]:
             for frame, lineno in traceback.walk_tb(error.__traceback__)]
 
 
-def exception_diagnostic(error: BaseException | None, *, include_message: bool = True) -> dict | None:
+def exception_diagnostic(error: BaseException | None, *, include_message: bool = True,
+                         reference_for=None, root_path: str = "#") -> dict | None:
     """保存全部标准异常关系；循环和共享节点引用首次出现的路径。"""
     if error is None:
         return None
     result = {}
-    seen = {id(error): "#"}
-    remaining = [(error, result, "#")]
+    seen = {id(error): root_path}
+    remaining = [(error, result, root_path)]
 
     def reference(original, path):
         if original is None:
@@ -41,6 +42,10 @@ def exception_diagnostic(error: BaseException | None, *, include_message: bool =
         previous = seen.get(id(original))
         if previous is not None:
             return {"$ref": previous}
+        if reference_for is not None:
+            external = reference_for(original, path)
+            if external is not None:
+                return external
         seen[id(original)] = path
         node = {}
         remaining.append((original, node, path))
@@ -50,7 +55,7 @@ def exception_diagnostic(error: BaseException | None, *, include_message: bool =
         if isinstance(value, BaseException):
             return reference(value, path)
         if isinstance(value, Mapping):
-            return {name: facts_document(item, path + "/" + name)
+            return {name: facts_document(item, path + "/" + str(name).replace("~", "~0").replace("/", "~1"))
                     for name, item in value.items()}
         if isinstance(value, (tuple, list)):
             return [facts_document(item, path + f"/{index}")

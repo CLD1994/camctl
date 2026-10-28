@@ -14,7 +14,7 @@ from enum import Enum
 import json
 from os import PathLike
 import sys
-import traceback
+from uuid import uuid4
 
 from camctl.logging_runtime.admission import AdmissionDecision, AdmissionKind
 from camctl.logging_runtime.models import LogLevel, LogWriteResult
@@ -30,7 +30,7 @@ from camctl.operations.tool_diagnostics import ToolDiagnostics, ToolStream, enco
 __all__ = [
     "DiagnosticState", "DiagnosticStatus", "record_error", "record_call_outcome", "record_availability_error",
     "error_diagnostics_context", "diagnostic_scope", "flush_diagnostics", "diagnostic_state_for",
-    "diagnostic_record_for", "acknowledge_diagnostic", "acknowledge_diagnostic_record",
+    "diagnostic_record_for", "diagnostic_reference_for", "acknowledge_diagnostic", "acknowledge_diagnostic_record",
     "DiagnosticReservation", "reserve_diagnostic", "adopt_diagnostic", "release_diagnostic",
     "prepare_log_diagnostic", "submit_diagnostic", "admit_diagnostic", "diagnostic_snapshot",
 ]
@@ -48,6 +48,7 @@ class DiagnosticState:
     """由原结果持有的一次诊断；终态不再登记，不保留全局身份集合。"""
 
     status: DiagnosticStatus = field(default=DiagnosticStatus.NEW, init=False)
+    diagnostic_id: str | None = field(default=None, init=False)
     _record: LogRecord | None = field(default=None, init=False, repr=False)
     _fallback_only: bool = field(default=False, init=False, repr=False)
     _target: _Target | None = field(default=None, init=False, repr=False)
@@ -224,6 +225,16 @@ def diagnostic_state_for(error: object) -> DiagnosticState | None:
     return None
 
 
+def diagnostic_reference_for(error_or_state: object) -> dict | None:
+    """只引用已冻结的原记录，不推断接纳或写入结果。"""
+    state = (error_or_state if isinstance(error_or_state, DiagnosticState)
+             else diagnostic_state_for(error_or_state))
+    if (state is None or state.status is DiagnosticStatus.NEW or state._record is None
+            or state.diagnostic_id is None):
+        return None
+    return {"diagnostic_ref": state.diagnostic_id}
+
+
 def diagnostic_record_for(state: DiagnosticState) -> LogRecord | None:
     """取得原不可变记录，供需要实际写入凭据的日志副本流程复用。"""
     return state._record
@@ -245,7 +256,17 @@ def prepare_log_diagnostic(
         if target is None:
             selected_fallback = fallback if fallback is not None else record.fallback
             target = _Target(channel, selected_fallback if selected_fallback is not None else _stderr)
-        state._record = replace(record, fallback=target.fallback)
+        diagnostic_id = uuid4().hex
+        try:
+            document = json.loads(record.message) if record.structured else None
+        except (TypeError, ValueError):
+            document = None
+        if not isinstance(document, dict):
+            document = {**log_metadata(record.level), "message": record.message}
+        document["diagnostic_id"] = diagnostic_id
+        state._record = replace(record, message=json.dumps(document, ensure_ascii=False,
+                                separators=(",", ":")), fallback=target.fallback, structured=True)
+        state.diagnostic_id = diagnostic_id
         state._target = target
         state.status = DiagnosticStatus.HELD
         _receipt_for(state)
@@ -537,7 +558,7 @@ def _record(payload: Mapping, state: DiagnosticState | None, *,
         # 编码器拒绝原结果时，仍沿原 dataclass 字段保存安全字节事实。
         try:
             document = {"diagnostic_format_error": _document(error, structured=False),
-                        "diagnostic": _document(payload, structured=False,
+                        "diagnostic": _document(payload, structured=False, _path="#/diagnostic",
                                                 non_media_diagnostics=non_media_diagnostics)}
         except Exception as fallback_error:
             # 诊断准备本身失效时只保留仍能取得的类型，结束该诊断责任。
@@ -546,7 +567,8 @@ def _record(payload: Mapping, state: DiagnosticState | None, *,
                         "diagnostic_format_error": _type_name(error),
                         "diagnostic_fallback_error": _type_name(fallback_error)}
         state._fallback_only = True
-    document = {**metadata, **document}
+    diagnostic_id = uuid4().hex
+    document = {**metadata, **document, "diagnostic_id": diagnostic_id}
     try:
         message = json.dumps(document, ensure_ascii=False, separators=(",", ":"))
     except Exception as error:
@@ -554,6 +576,7 @@ def _record(payload: Mapping, state: DiagnosticState | None, *,
         message = f"错误诊断格式化失败：{type(error).__name__}: {error}; diagnostic={document!r}"
         state._fallback_only = True
     state._record = LogRecord(LogLevel.ERROR, message, fallback=target.fallback, structured=True)
+    state.diagnostic_id = diagnostic_id
     state._target = target
     state.status = DiagnosticStatus.HELD
     _receipt_for(state)
@@ -574,28 +597,51 @@ def _record(payload: Mapping, state: DiagnosticState | None, *,
 
 
 def _document(value, *, name: str | None = None, structured: bool = True,
-              non_media_diagnostics: ToolDiagnostics | None = None, tool_stdout: bool = False):
+              non_media_diagnostics: ToolDiagnostics | None = None, tool_stdout: bool = False,
+              _seen=None, _path="#"):
     """复用原结构形成独立快照，并给已有 stderr 字节编码补可读文本。"""
-    def convert(item, *, name=None):
+    if _seen is None:
+        _seen = {}
+
+    def convert(item, *, name=None, path=None):
+        segment = str(name).replace("~", "~0").replace("/", "~1")
         return _document(item, name=name, structured=structured,
-                         non_media_diagnostics=non_media_diagnostics, tool_stdout=tool_stdout)
+                         non_media_diagnostics=non_media_diagnostics, tool_stdout=tool_stdout,
+                         _seen=_seen, _path=path if path is not None else _path + "/" + segment)
+
+    setting_call = (isinstance(value, Mapping) and
+                    {"command", "status", "effect", "error", "result_document", "stdout_hex", "stderr_hex"} <= value.keys())
+    if isinstance(value, BaseException) and _path != "#":
+        reference = diagnostic_reference_for(value)
+        if reference is not None:
+            return reference
+    if isinstance(value, (ErrorValue, BaseException)) or setting_call:
+        previous = _seen.get(id(value))
+        if previous is not None:
+            return {"$ref": previous}
+        _seen[id(value)] = _path
 
     if isinstance(value, BaseException):
+        def exception_reference(error, path):
+            previous = _seen.get(id(error))
+            if previous is not None:
+                return {"$ref": previous}
+            reference = diagnostic_reference_for(error)
+            if reference is not None:
+                return reference
+            _seen[id(error)] = path
+            return None
+
         if structured:
-            return convert(exception_diagnostic(value))
-        # 原异常无法格式化时不再调用 __str__，保留安全取得的原字段。
-        result = {"type": _type_name(value), "arguments": convert(value.args),
-                  "traceback": [{"filename": frame.f_code.co_filename, "lineno": lineno,
-                                 "function": frame.f_code.co_name}
-                                for frame, lineno in traceback.walk_tb(value.__traceback__)]}
-        if isinstance(value, DiagnosticError):
-            result["diagnostic_details"] = convert(value.diagnostic_details)
-        if hasattr(value, "__notes__"):
-            result["notes"] = convert(value.__notes__)
-        return result
+            return convert(exception_diagnostic(value, reference_for=exception_reference,
+                                                root_path=_path), path=_path)
+        # 格式化失败时不调用 __str__，仍保留异常关系与安全取得的事实。
+        return convert(exception_diagnostic(value, include_message=False,
+                                            reference_for=exception_reference,
+                                            root_path=_path), path=_path)
     if isinstance(value, ErrorValue):
         if structured:
-            return convert(error_document(value))
+            return convert(error_document(value), path=_path)
     if isinstance(value, ToolDiagnostics) and structured:
         result = encode_diagnostics(value)
         for call in result["calls"]:
@@ -631,10 +677,54 @@ def _document(value, *, name: str | None = None, structured: bool = True,
                 field_name = "stderr"
             elif isinstance(value, ToolStream) and field_name == "data" and name == "stdout":
                 field_name = "stdout"
-            result[item.name] = convert(getattr(value, item.name), name=field_name)
+            result[item.name] = convert(getattr(value, item.name), name=field_name,
+                                        path=_path + "/" + item.name.replace("~", "~0").replace("/", "~1"))
         return result
     if isinstance(value, Mapping):
-        result = {key: convert(item, name=key) for key, item in value.items()}
+        successful_setting = setting_call and value["status"] == "succeeded" and value["error"] is None
+        result = {key: convert(item, name=key) for key, item in value.items()
+                  if not (successful_setting and key == "stdout_hex")}
+        if successful_setting:
+            encoded = value["stdout_hex"]
+            if encoded is None:
+                result["stdout_byte_count"] = None
+            else:
+                try:
+                    result["stdout_byte_count"] = len(bytes.fromhex(encoded))
+                except (TypeError, ValueError):
+                    # 非法原始值仍交付，不能伪造长度或丢失事实。
+                    result["stdout_hex"] = convert(encoded, name="stdout_hex")
+        if setting_call:
+            # result_document 是业务结果的已编码副本；其工具流也须按日志规则投影。
+            outcome = result.get("result_document")
+            diagnostics = outcome.get("diagnostics") if isinstance(outcome, Mapping) else None
+            calls = diagnostics.get("calls") if isinstance(diagnostics, Mapping) else None
+            if isinstance(calls, list):
+                for call in calls:
+                    if not isinstance(call, Mapping):
+                        continue
+                    stderr = call.get("stderr")
+                    if isinstance(stderr, dict) and "hex" in stderr:
+                        data = stderr["hex"]
+                        if data is None:
+                            stderr["text"] = None
+                        else:
+                            try:
+                                stderr["text"] = bytes.fromhex(data).decode("utf-8", "backslashreplace")
+                            except (TypeError, ValueError):
+                                pass
+                    stream = call.get("stdout")
+                    if not successful_setting or not isinstance(stream, dict) or "hex" not in stream:
+                        continue
+                    data = stream["hex"]
+                    if data is None:
+                        stream["byte_count"] = None
+                    else:
+                        try:
+                            stream["byte_count"] = len(bytes.fromhex(data))
+                        except (TypeError, ValueError):
+                            continue
+                    del stream["hex"]
         for encoding in ("hex", "base64"):
             encoded = result.get(f"stderr_{encoding}")
             if isinstance(encoded, str):
@@ -644,9 +734,20 @@ def _document(value, *, name: str | None = None, structured: bool = True,
                 except ValueError:
                     continue  # 原诊断含非规范字节编码时仍保留原值。
                 result["stderr_text"] = raw.decode("utf-8", "backslashreplace")
+        # 同一次设置调用中的错误详情和调用流可能引用相同 stderr 事实。
+        # 仅在原始编码完全一致时共享它们，保留两处角色及无损值。
+        if setting_call:
+            error = result.get("error")
+            details = error.get("details") if isinstance(error, Mapping) else None
+            encoded = result.get("stderr_hex")
+            if (isinstance(details, Mapping) and isinstance(encoded, str)
+                    and details.get("stderr_hex") == encoded and "stderr_text" in details
+                    and result.get("stderr_text") == details["stderr_text"]):
+                result["stderr_hex"] = {"$ref": _path + "/error/details/stderr_hex"}
+                result["stderr_text"] = {"$ref": _path + "/error/details/stderr_text"}
         return result
     if isinstance(value, (tuple, list)):
-        return [convert(item) for item in value]
+        return [convert(item, name=index) for index, item in enumerate(value)]
     if isinstance(value, (Decimal, PathLike)):
         return str(value)
     return value
