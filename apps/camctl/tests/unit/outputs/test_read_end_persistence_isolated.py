@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 import ast
+import asyncio
 from dataclasses import dataclass
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
@@ -17,6 +18,8 @@ OUTPUTS_SOURCE = SOURCE.parent / "outputs.py"
 HANDLERS_SOURCE = SOURCE.parents[2] / "capture/handlers.py"
 INSPECTIONS_SOURCE = SOURCE.parents[2] / "capture/segment_inspections.py"
 RUNTIME_SOURCE = SOURCE.parent.parent / "runtime.py"
+COPY_SOURCE = SOURCE.parents[2] / "outputs/copy.py"
+OPERATIONS_SOURCE = SOURCE.parent / "operations.py"
 
 
 @dataclass(frozen=True)
@@ -351,7 +354,7 @@ class InternalColdResumeTests(unittest.IsolatedAsyncioTestCase):
         read.current_local_read_end = current
         media = ModuleType("camctl.capture.media_flow")
         async def settle(flow, result): calls.append(("settle", result))
-        async def resume(flow, held, original, context): calls.append(("local", held.ticket, context.read_end))
+        async def resume(flow, held, original, context, **kwargs): calls.append(("local", held.ticket, context.read_end))
         media._save_internal_read_and_settle = settle
         media._resume_local_internal_end = resume
         input_copy = ModuleType("camctl.capture.input_copy")
@@ -414,6 +417,104 @@ class InternalColdResumeTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):
                 await namespace["_settle_canceled_inspection_end"](flow, 9)
             self.assertEqual(calls, [("owned", 9)])
+
+
+class MissingConfigVerificationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_mismatch_is_saved_before_binding_failure_and_match_needs_no_budget(self):
+        tree = ast.parse(COPY_SOURCE.read_text())
+        function = next(node for node in tree.body if isinstance(node, ast.AsyncFunctionDef)
+                        and node.name == "_verify_and_finish")
+        calls = []
+        hashes = ["different"]
+        class CompletionError(Exception):
+            def __init__(self, stage, detail): self.stage = stage
+        class Database:
+            async def write(self, *args, **kwargs): raise AssertionError("必须使用原保存申请")
+        async def save(context, copy_id, stage, request, repository, description):
+            calls.append((stage, request.state, request.source_sha256, request.target_sha256))
+            return SimpleNamespace(kind="completed", value=SimpleNamespace(disposition="saved"))
+        async def prepared(copy_id, context, digest):
+            calls.append(("prepared", digest))
+            return "prepared"
+        async def recopy(*args): raise AssertionError("没有本次上限不能登记重拷")
+        def decide(facts):
+            self.assertEqual(facts.max_recopies, 0)
+            return SimpleNamespace(outcome="matched")
+        enum = SimpleNamespace(MISMATCHED=4, MATCHED=3, FAILED=6, SOURCE_CHECKSUM_UNAVAILABLE=5)
+        namespace = {"asyncio": asyncio, "FileRef": lambda **kwargs: object(),
+            "hash_target": lambda *args: SimpleNamespace(error=None, digest=hashes[0]),
+            "SourceChecksumSupport": SimpleNamespace(SUPPORTED="supported"),
+            "_VERIFICATION": enum, "VerificationSave": lambda **kwargs: SimpleNamespace(**kwargs),
+            "DbOutcomeKind": SimpleNamespace(COMPLETED="completed"),
+            "VerificationDisposition": SimpleNamespace(SKIPPED="skipped"),
+            "_save_completion_business": save, "_require_completed": lambda *args: None,
+            "CopyCompletionError": CompletionError, "IntegrityFacts": lambda **kwargs: SimpleNamespace(**kwargs),
+            "decide_integrity": decide, "IntegrityOutcome": SimpleNamespace(CAPABILITY_UNDETERMINED="unknown",
+                MISMATCHED="mismatch", VERIFICATION_FAILED="failed", SOURCE_UNAVAILABLE="unsupported"),
+            "_register_recopy": recopy, "_save_prepared": prepared}
+        future = ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0)
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[future, function], type_ignores=[])),
+                     str(COPY_SOURCE), "exec"), namespace)
+        facts = SimpleNamespace(target=SimpleNamespace(file_id=20, purpose="output", relative_path="name"),
+            source_sha256="source", source_support="supported", source_size=10, committed_bytes=10,
+            recopies_used=0)
+        context = SimpleNamespace(roots=SimpleNamespace(staging="staging"), max_recopies=None,
+            occurred_at=5, repository=SimpleNamespace(save_verification=object()), database=Database())
+        with self.assertRaises(CompletionError) as result:
+            await namespace["_verify_and_finish"](9, context, facts)
+        self.assertEqual(result.exception.stage, "source_binding_unavailable")
+        self.assertEqual(calls, [("verification", 4, "source", "different")])
+        calls.clear()
+        hashes[0] = "source"
+        self.assertEqual(await namespace["_verify_and_finish"](9, context, facts), "prepared")
+        self.assertEqual(calls, [("verification", 3, "source", "source"), ("prepared", "source")])
+
+
+class MissingConfigGuardTests(unittest.TestCase):
+    def test_binding_result_guard_requires_saved_mismatch_and_end(self):
+        tree = ast.parse(OPERATIONS_SOURCE.read_text())
+        function = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                        and node.name == "_operation_finish_guard")
+        class Reads:
+            def __init__(self):
+                self.connection = object()
+                self.events = (SimpleNamespace(event_type=12, occurred_at=5, rows=(SimpleNamespace(
+                    row_id=12, after=SimpleNamespace(values={"status": 2})),)),)
+        preparation = ModuleType("camctl.persistence.repositories.preparation")
+        preparation.PreparationReads = Reads
+        end = ModuleType("camctl.persistence.repositories.read_end")
+        end.load_read_end = lambda *args: object()
+        error = {"code": "device_binding_unavailable", "details": {"reason": "missing"}}
+        copy = {"id": 9, "source_sha256": "source", "target_sha256": "target", "verification_state": 4}
+        action = {"cancel_requested": 0}
+        run = {"kind": 3, "action_id": 6, "copy_id": 9, "status": 4,
+               "error_json": error, "retry_wait_required": 0}
+        row = SimpleNamespace(table="operation_runs", row_id=7, before=SimpleNamespace(exists=True, values={"status": 2}),
+                              after=SimpleNamespace(values={"status": 4}))
+        event = SimpleNamespace(rows=(row,), event_type=10, reason=3, occurred_at=5,
+            evidence={"binding_read_finish": {"error": error, "cancel_event": None}})
+        context = SimpleNamespace(preparation_reads=Reads(), state_rows={"operation_attempts": {12: {"run_id": 7}}})
+        def facts(connection, table, identity): return action if table == "actions" else copy
+        def fail(message): raise ValueError(message)
+        namespace = {"__name__": "camctl.persistence.repositories._isolated_guard",
+            "__package__": "camctl.persistence.repositories", "_row_after_facts": lambda *args: run,
+            "_fail": fail, "row_facts": facts, "SimpleNamespace": SimpleNamespace,
+            "Mapping": dict, "json_equal": lambda a, b: a == b,
+            "enum_for": lambda name: SimpleNamespace(MISMATCHED=4),
+            "_ATTEMPT_RESULT_EVENT": 12, "_OPERATION_CONFIGURED_EVENT": 10,
+            "_ATTEMPT_STATUS": SimpleNamespace(SUCCEEDED=2),
+            "_RUN_KIND": SimpleNamespace(READ_FILE=3, CHECK_DEVICE_AVAILABILITY=12, PREPARE_CAPTURE=10),
+            "_RUN_STATUS": SimpleNamespace(CANCELED=5, FAILED=4, UNCONFIRMED=6, SUCCEEDED=3, PENDING=1)}
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[function], type_ignores=[])),
+                     str(OPERATIONS_SOURCE), "exec"), namespace)
+        guard = namespace["_operation_finish_guard"]
+        with patch.dict(sys.modules, {preparation.__name__: preparation, end.__name__: end}):
+            guard(event, context)
+            copy["target_sha256"] = "source"
+            with self.assertRaises(ValueError): guard(event, context)
+            copy["target_sha256"] = "target"
+            end.load_read_end = lambda *args: None
+            with self.assertRaises(ValueError): guard(event, context)
 
 
 if __name__ == "__main__":

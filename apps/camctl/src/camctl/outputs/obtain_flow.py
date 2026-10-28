@@ -19,6 +19,7 @@ import re
 from contextlib import closing
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any, Callable, Mapping, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -653,7 +654,17 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
             continue
         assembly = runtime.devices.get(item.device_id)
         if assembly is None:
-            continue
+            if runtime.binding_check is None or runtime.recovery_evidence_for is None:
+                continue
+            binding = DeviceBinding(item.device_id, item.driver_id)
+            binding_result = runtime.binding_check(binding)
+            if binding_result.status is not BindingStatus.DEVICE_MISSING:
+                continue
+            evidence = runtime.recovery_evidence_for(binding, "read")
+            if evidence is None:
+                continue
+            assembly = SimpleNamespace(evidence=evidence, max_recopies=None,
+                                       max_read_attempts=None, binding_failure=binding_result)
         from camctl.persistence.repositories.read_end import load_read_end
         from camctl.outputs.read_attempts import running_read_ticket
         def current_end(owned):
@@ -1044,6 +1055,18 @@ async def _resume_local_delivery_end(current, held, original_runtime, assembly):
             read_runtime=runtime)
         step = replace(await _complete_copy(copies, copy_id, None), read_end=held.end,
                        stop_requested=True, content_complete=True)
+        if (step.phase is InputPhase.COMPLETION_FAILED
+                and getattr(step.error, "stage", None) == "source_binding_unavailable"):
+            from camctl.outputs.read_attempts import PendingReadBusiness, held_binding_read_result
+
+            binding = assembly.binding_failure
+            business = PendingReadBusiness(runtime.outputs.fail_read_binding,
+                FailReadBinding(copy_id, facts["source_device_file_id"], binding, runtime.occurred_at()),
+                new_operation_key())
+            pending = await held_binding_read_result(runtime, copy_id, binding, business)
+            if pending is not None:
+                await _save_read_result_and_settle(runtime, pending, facts)
+            return
         await _finish_read_attempt(runtime, assembly, facts, held.ticket, step)
 
     await run_owned_read(runtime, copy_id, complete_and_save)
@@ -1214,7 +1237,7 @@ async def _finish_read_attempt_phase(
                  or checksum_failed or verification_failed)
     # 原 ticket 的连续 attempt_no 已在取得／恢复时核实为原累计次数。
     # 实际返回后先持有结果，不能为读取预算再访问数据库而丢失结果。
-    exhausted = ticket.attempt_id >= assembly.max_read_attempts
+    exhausted = not succeeded and ticket.attempt_id >= assembly.max_read_attempts
     outcome = CallOutcome(
         status=(AttemptStatus.SUCCEEDED if succeeded
                 else AttemptStatus.FAILED),

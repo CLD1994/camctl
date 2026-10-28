@@ -3216,7 +3216,7 @@ async def _resume_bound_local_read(runtime, action, copy_id, ticket, saved_end):
     """绑定异常下只推进已结束的本机读取，其他设备责任仍由动作处理。"""
     if saved_end[0] != ticket:
         raise ConsistencyError("本机恢复的读取结束与原票据不一致")
-    if runtime.media is None or runtime.recovery_evidence_for is None:
+    if runtime.recovery_evidence_for is None:
         return
     source = await runtime.database.read(lambda owned: owned.connection.execute(
         "SELECT c.processing_id,c.inspection_id,c.source_device_file_id,ob.device_id,ob.driver_id"
@@ -3238,7 +3238,19 @@ async def _resume_bound_local_read(runtime, action, copy_id, ticket, saved_end):
     if held is None:
         held = HeldReadEnd(ticket, saved_end[1], saved_end[2], evidence=evidence)
         runtime.pending_read_ends[copy_id] = held
-    flow = replace(runtime.media, evidence=evidence)
+    if runtime.media is None:
+        if runtime.roots is None:
+            raise ConsistencyError("本机恢复缺少固定工作目录")
+        flow = MediaFlow(database=runtime.database, roots=runtime.roots, sessions=None,
+            tools=None, policy=None, occurred_at=runtime.wall_us, digest_supported=False,
+            max_recopies=None, evidence=evidence, file_executor=runtime.file_executor,
+            operations=runtime.operations, retry_gate=runtime.retry_gate,
+            pending_read_results=runtime.pending_read_results,
+            pending_read_business=runtime.pending_read_business,
+            pending_read_ends=runtime.pending_read_ends,
+            continuing_read_tickets=runtime.continuing_read_tickets)
+    else:
+        flow = replace(runtime.media, evidence=evidence)
     if action["cancel_requested"]:
         async def settle_canceled(_control):
             if not await current_local_read_end(flow, copy_id, held):
@@ -3265,11 +3277,26 @@ async def _resume_bound_local_read(runtime, action, copy_id, ticket, saved_end):
             segment_size=flow.segment_size, staging=flow.roots.staging,
             copies=flow.copies(), sessions=flow.sessions,
             occurred_at=runtime.wall_us(), read_end=saved_end[1])
+        async def finish_missing_config(current_flow, value):
+            from camctl.outputs.read_attempts import PendingReadBusiness, held_binding_read_result
+
+            binding_result = runtime.binding_check(DeviceBinding(device_id, driver_id))
+            details = binding_failure_details(binding_result)
+            if details is None or details["reason"] != "missing":
+                raise ConsistencyError("读取摘要不一致缺少原设备配置缺失依据")
+            request = await _binding_failure_request(runtime, action, details, excluded_run_id=ticket.run_id)
+            business = PendingReadBusiness(runtime.capture.finish_binding_failure, request, new_operation_key())
+            pending = await held_binding_read_result(current_flow, copy_id, binding_result, business)
+            if pending is not None:
+                await _save_internal_read_and_settle(current_flow, pending)
+
         if held.resume is None:
             held = replace(held, resume=lambda current, value:
-                _resume_local_internal_end(current, value, flow, input_context))
+                _resume_local_internal_end(current, value, flow, input_context,
+                                           on_missing_config=finish_missing_config))
             runtime.pending_read_ends[copy_id] = held
-        await _resume_local_internal_end(flow, held, flow, input_context)
+        await _resume_local_internal_end(flow, held, flow, input_context,
+                                         on_missing_config=finish_missing_config)
 
 
 async def _handle_binding_failure(

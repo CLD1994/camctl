@@ -16,6 +16,7 @@ from collections import ChainMap
 from contextlib import closing
 from dataclasses import asdict
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any, Mapping
 
 from camctl.contracts.enums import decode_member, enum_for
@@ -2235,6 +2236,18 @@ def _operation_finish_guard(event, context) -> None:
             binding_error = binding_evidence["error"]
             if not isinstance(binding_error, Mapping) or binding_error.get("code") != "device_binding_unavailable":
                 _fail("绑定读取结束缺少原绑定失败")
+            copy = row_facts(reads.connection, "file_copies", after.get("copy_id"))
+            if copy is None:
+                _fail("绑定读取结果缺少原拷贝")
+            if copy.get("source_sha256") is not None:
+                details = binding_error.get("details")
+                from .read_end import load_read_end
+                if (not isinstance(details, Mapping) or details.get("reason") != "missing"
+                        or copy.get("verification_state") != int(enum_for("file_copies.verification_state").MISMATCHED)
+                        or copy.get("target_sha256") is None
+                        or copy["source_sha256"] == copy["target_sha256"]
+                        or load_read_end(copy["id"], SimpleNamespace(connection=reads.connection)) is None):
+                    _fail("配置缺失收场缺少原读取结束及已保存的不一致摘要")
             if action["cancel_requested"]:
                 if status != int(_RUN_STATUS.CANCELED) or error is not None:
                     _fail("已取消动作的读取必须按取消结束")

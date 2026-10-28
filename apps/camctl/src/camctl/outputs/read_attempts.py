@@ -481,7 +481,8 @@ def hold_prepared_read_business(runtime, copy_id, operation, pending):
 
 async def held_binding_read_result(runtime, copy_id, binding_result, business):
     """可靠源实际完成、必要源摘要未取得时分别记录调用成功和绑定失败。"""
-    from camctl.devices.bindings import binding_failure_details
+    from camctl.contracts.enums import enum_for
+    from camctl.devices.bindings import BindingStatus, binding_failure_details
     from camctl.outputs.copy import SourceChecksumSupport
     from camctl.persistence.repositories.outputs import OutputsRepository
 
@@ -523,15 +524,19 @@ async def held_binding_read_result(runtime, copy_id, binding_result, business):
         raise ConsistencyError("原完整读取的流程状态或取消事实不可解释")
     if facts.committed_bytes != facts.source_size:
         return None
+    mismatch = (getattr(binding_result, "status", None) is BindingStatus.DEVICE_MISSING
+        and facts.verification_state == int(enum_for("file_copies.verification_state").MISMATCHED)
+        and facts.source_sha256 is not None and facts.target_sha256 is not None
+        and facts.source_sha256 != facts.target_sha256)
+    missing_digest = (facts.source_support is SourceChecksumSupport.SUPPORTED
+                      and facts.source_sha256 is None)
     binding_read = False
     if status[0] not in (1, 2):
         run_finish, selected_business = None, None
-    elif status[1] == 1 and (facts.source_support is not SourceChecksumSupport.SUPPORTED
-                            or facts.source_sha256 is not None):
+    elif status[1] == 1 and not missing_digest and not mismatch:
         run_finish, selected_business = RunFinish(RunOutcome.CANCELED), None
     else:
-        if (facts.source_support is not SourceChecksumSupport.SUPPORTED
-                or facts.source_sha256 is not None):
+        if not missing_digest and not mismatch:
             return None
         details = binding_failure_details(binding_result)
         if details is None:

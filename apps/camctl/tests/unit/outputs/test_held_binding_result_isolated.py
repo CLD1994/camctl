@@ -18,6 +18,9 @@ def module(name, **members):
     return value
 
 
+MISSING_BINDING = object()
+
+
 class RunOutcome(Enum):
     FAILED = "failed"
     CANCELED = "canceled"
@@ -107,7 +110,9 @@ stub_modules = [
            record_call_outcome=lambda *args, **kwargs: None, record_error=lambda *args, **kwargs: None),
     module("camctl.outputs.copy", SourceChecksumSupport=Support),
     module("camctl.persistence.repositories.outputs", OutputsRepository=object),
-    module("camctl.devices.bindings", binding_failure_details=lambda result: {"reason": "physical_identity_mismatch"}),
+    module("camctl.devices.bindings", BindingStatus=SimpleNamespace(DEVICE_MISSING=MISSING_BINDING),
+           binding_failure_details=lambda result: {"reason": "missing" if getattr(result, "status", None)
+                                                   is MISSING_BINDING else "physical_identity_mismatch"}),
 ]
 
 with (patch.object(enums, "resource_bytes", side_effect=AssertionError("禁止读取真实包资源")),
@@ -167,6 +172,24 @@ def test_determined_result_is_not_replaced_after_cancel(monkeypatch):
     runtime.database.read = Mock(side_effect=AssertionError("已有结果不能重新判断"))
     assert asyncio.run(read_attempts.held_binding_read_result(runtime, 2, object(), object())) is pending
     assert pending.key == "original-key"
+
+
+@pytest.mark.parametrize("canceled", [0, 1])
+def test_missing_configuration_with_saved_mismatch_keeps_binding_cancel_arbitration(monkeypatch, canceled):
+    runtime, ticket, _ = setup(monkeypatch, 2, canceled, digest_missing=False)
+    facts = SimpleNamespace(committed_bytes=12, source_size=12, source_support=Support.SUPPORTED,
+        source_sha256="source", target_sha256="target", verification_state=4)
+    class Repository:
+        def load_copy_state(self, copy_id, owned): return facts
+    monkeypatch.setattr(sys.modules["camctl.persistence.repositories.outputs"], "OutputsRepository", Repository)
+    monkeypatch.setattr(enums, "enum_for", lambda name: SimpleNamespace(MISMATCHED=4))
+    binding = SimpleNamespace(status=MISSING_BINDING)
+    pending = asyncio.run(read_attempts.held_binding_read_result(runtime, 2, binding, SimpleNamespace(diagnostic=object())))
+    assert pending.finish.ticket is ticket
+    assert pending.finish.outcome.outcome.status is AttemptStatus.SUCCEEDED
+    assert pending.finish.run_finish.status is RunOutcome.FAILED
+    assert pending.finish.run_finish.error.args[2]["reason"] == "missing"
+    assert pending.binding_read is True
 
 
 def test_result_determined_during_read_takes_precedence(monkeypatch):

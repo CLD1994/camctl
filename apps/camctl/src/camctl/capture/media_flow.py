@@ -735,7 +735,7 @@ async def run_recording_media(
     return require_saved_media_result(repair)
 
 
-async def _resume_local_internal_end(current, held, original_flow, original_context):
+async def _resume_local_internal_end(current, held, original_flow, original_context, *, on_missing_config=None):
     """原完整 End 的本地校验与原结果保存；不重开源或推进媒体处理。"""
     from camctl.capture.input_copy import _complete_input
     from camctl.outputs.read_attempts import current_local_read_end, run_owned_read
@@ -750,6 +750,12 @@ async def _resume_local_internal_end(current, held, original_flow, original_cont
             return
         step = replace(await _complete_input(context, copy_id, await copies.copy_state(copy_id)),
                        read_end=held.end, stop_requested=True, content_complete=True)
+        if (step.phase is InputPhase.COMPLETION_FAILED
+                and getattr(step.error, "stage", None) == "source_binding_unavailable"):
+            if on_missing_config is None:
+                raise ConsistencyError("读取结束后的配置缺失没有所属绑定失败收场")
+            await on_missing_config(flow, held)
+            return
         await _finish_internal_read(flow, held.ticket, step, diagnostic_context={
             "action_id": context.action_id, "processing_id": context.processing_id,
             "inspection_id": context.inspection_id,
@@ -815,7 +821,7 @@ async def _finish_internal_read_result(flow, ticket, step, *, max_attempts, diag
     succeeded = (step.phase is InputPhase.INPUT_READY
                  or checksum_failed or verification_failed)
     # 原 ticket 的连续编号已由意图／恢复事务核实，实际返回后先持有结果。
-    exhausted = ticket.attempt_id >= (max_attempts or flow.max_read_attempts)
+    exhausted = not succeeded and ticket.attempt_id >= (max_attempts or flow.max_read_attempts)
     outcome = CallOutcome(status=AttemptStatus.SUCCEEDED if succeeded else AttemptStatus.FAILED,
         effect=EffectState.UNKNOWN,
         error=None if succeeded else ErrorValue("device_error", "read", read_failure_details(step)),
