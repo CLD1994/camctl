@@ -1402,6 +1402,7 @@ async def _execute_command(
             if primary_error is not None and not isinstance(primary_error, Exception)
             else None
         )
+        ordinary_diagnostic_error: Exception | None = None
         cleanup_errors: list[tuple[str, BaseException]] = []
         pending_cleanup_diagnostics: list[_PendingCleanupDiagnostic] = []
         seen_cleanup_errors: set[int] = set()
@@ -1411,15 +1412,44 @@ async def _execute_command(
 
         def attach_cleanup_error(
                 target: BaseException, label: str, error: BaseException) -> None:
-            if target is error or id(error) in noted_cleanup_errors:
+            if target is error:
+                return
+            failures = getattr(error, "_camctl_cleanup_diagnostic_failures", ())
+            if failures:
+                existing = getattr(target, "_camctl_cleanup_diagnostic_failures", ())
+                seen = {id(failure) for failure in existing}
+                target._camctl_cleanup_diagnostic_failures = (
+                    *existing, *(failure for failure in failures if id(failure) not in seen))
+            if id(error) in noted_cleanup_errors:
                 return
             _attach_runtime_close_note(target, label, error)
             noted_cleanup_errors.add(id(error))
 
+        def adopt_control(label: str, error: BaseException) -> None:
+            nonlocal selected_control
+            if selected_control is None:
+                selected_control = error
+                noted_cleanup_errors.add(id(error))
+                if primary_error is not None and primary_error is not error:
+                    attach_cleanup_error(selected_control, "此前会话异常", primary_error)
+                if ordinary_diagnostic_error is not None and ordinary_diagnostic_error is not error:
+                    attach_cleanup_error(selected_control, "此前诊断异常", ordinary_diagnostic_error)
+                if outcome is not None and not outcome.succeeded:
+                    note = (
+                        "此前会话结果："
+                        f"reason={outcome.reason}; details={outcome.details!r}"
+                    )
+                    if note not in tuple(getattr(selected_control, "__notes__", ())):
+                        selected_control.add_note(note)
+                for earlier_label, earlier_error in cleanup_errors:
+                    if earlier_error is not error:
+                        attach_cleanup_error(selected_control, earlier_label, earlier_error)
+            else:
+                attach_cleanup_error(selected_control, label, error)
+
         def remember_cleanup_error(
                 label: str, error: BaseException) -> None:
             """保存首个收场 control，并在全部资源结束后选择传播对象。"""
-            nonlocal selected_control
             if id(error) not in seen_cleanup_errors:
                 seen_cleanup_errors.add(id(error))
                 cleanup_errors.append((label, error))
@@ -1431,27 +1461,20 @@ async def _execute_command(
                 if selected_control is not None:
                     attach_cleanup_error(selected_control, label, error)
                 return
-            if selected_control is None:
-                selected_control = error
-                noted_cleanup_errors.add(id(error))
-                if primary_error is not None and primary_error is not error:
-                    attach_cleanup_error(
-                        selected_control, "此前会话异常", primary_error,
-                    )
-                if outcome is not None and not outcome.succeeded:
-                    note = (
-                        "此前会话结果："
-                        f"reason={outcome.reason}; details={outcome.details!r}"
-                    )
-                    if note not in tuple(getattr(selected_control, "__notes__", ())):
-                        selected_control.add_note(note)
-                for earlier_label, earlier_error in cleanup_errors:
-                    if earlier_error is not error:
-                        attach_cleanup_error(
-                            selected_control, earlier_label, earlier_error,
-                        )
+            adopt_control(label, error)
+
+        def remember_diagnostic_selection(
+                prior: BaseException | None, selected: BaseException | None) -> None:
+            nonlocal ordinary_diagnostic_error
+            if selected is None or selected is prior:
+                return
+            if isinstance(selected, Exception):
+                if ordinary_diagnostic_error is None:
+                    ordinary_diagnostic_error = selected
+                else:
+                    attach_cleanup_error(ordinary_diagnostic_error, "后续诊断异常", selected)
             else:
-                attach_cleanup_error(selected_control, label, error)
+                adopt_control("收场诊断控制异常", selected)
 
         async def stop_worker(worker):
             nonlocal outcome
@@ -1508,11 +1531,10 @@ async def _execute_command(
                         remember_cleanup_error("结果读取缓存关闭异常", error)
         # 先结束实际资源责任，再登记诊断并保持最早的业务控制对象。
         prior_error = selected_control or primary_error or (
-            cleanup_errors[0][1] if cleanup_errors else None)
+            cleanup_errors[0][1] if cleanup_errors else ordinary_diagnostic_error)
         diagnostic_selection = _deliver_cleanup_diagnostics(prior_error, pending_cleanup_diagnostics)
         pending_cleanup_diagnostics.clear()
-        if diagnostic_selection is not None and diagnostic_selection is not prior_error:
-            selected_control = diagnostic_selection
+        remember_diagnostic_selection(prior_error, diagnostic_selection)
         # 所有必要业务与资源收场先结束，文件接纳不能成为它们的前置。
         try:
             if primary_error is not None:
@@ -1535,7 +1557,7 @@ async def _execute_command(
             remember_cleanup_error("会话失败诊断异常", error)
         record_event("session.cleanup", cleanup_error_count=len(cleanup_errors))
         command_error = selected_control or primary_error or (
-            cleanup_errors[0][1] if cleanup_errors else None)
+            cleanup_errors[0][1] if cleanup_errors else ordinary_diagnostic_error)
         if command_error is not None:
             finish_command(event=("cancelled" if isinstance(command_error, asyncio.CancelledError)
                          else "raised"), exception_type=type(command_error).__name__)
@@ -1550,11 +1572,11 @@ async def _execute_command(
             except BaseException as error:
                 remember_cleanup_error("共享日志收场异常", error)
         if pending_cleanup_diagnostics:
-            prior_error = selected_control or primary_error or cleanup_errors[0][1]
+            prior_error = selected_control or primary_error or (
+                cleanup_errors[0][1] if cleanup_errors else ordinary_diagnostic_error)
             previous_failures = len(getattr(prior_error, "_camctl_cleanup_diagnostic_failures", ()))
             diagnostic_selection = _deliver_cleanup_diagnostics(prior_error, pending_cleanup_diagnostics)
-            if diagnostic_selection is not None and diagnostic_selection is not prior_error:
-                selected_control = diagnostic_selection
+            remember_diagnostic_selection(prior_error, diagnostic_selection)
             if (diagnostic_selection is not None and len(getattr(
                     diagnostic_selection, "_camctl_cleanup_diagnostic_failures", ())) > previous_failures):
                 message = _direct_exception_message(deps, diagnostic_selection)
@@ -1562,17 +1584,17 @@ async def _execute_command(
                     try:
                         _write_stderr_diagnostic(deps, message)
                     except BaseException as error:
-                        if selected_control is None and not isinstance(error, Exception):
-                            _attach_runtime_close_note(error, "此前会话异常", diagnostic_selection)
-                            selected_control = error
+                        if not isinstance(error, Exception):
+                            adopt_control("stderr 诊断异常", error)
                         else:
                             _attach_runtime_close_note(
                                 selected_control or diagnostic_selection, "stderr 诊断异常", error)
         if selected_control is not None and selected_control is not primary_error:
             raise selected_control.with_traceback(
                 selected_control.__traceback__)
-        if selected_control is None and cleanup_errors:
-            selected_error = primary_error or cleanup_errors[0][1]
+        if selected_control is None and (cleanup_errors or ordinary_diagnostic_error is not None):
+            selected_error = primary_error or (
+                cleanup_errors[0][1] if cleanup_errors else ordinary_diagnostic_error)
             for label, error in cleanup_errors:
                 attach_cleanup_error(selected_error, label, error)
             if selected_error is not primary_error:

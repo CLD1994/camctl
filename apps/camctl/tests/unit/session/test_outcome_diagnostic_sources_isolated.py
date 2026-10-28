@@ -871,3 +871,148 @@ def test_stderr_control_failure_after_log_close_keeps_original_control(terminal_
             poll_interval_s=None, finish_command=lambda **kwargs: None))
     assert caught.value is primary
     assert any("stderr canceled" in note for note in primary.__notes__)
+
+
+@pytest.fixture
+def worker_terminal_world(terminal_world):
+    outcome_type, lifecycle, actual, asyncio, deps, delivered = terminal_world
+    class Dummy:
+        def __getattr__(self, name): return self
+        def __call__(self, *args, **kwargs): return self
+    class Worker:
+        async def stop(self):
+            return SimpleNamespace(state_failure=SimpleNamespace(
+                error_code="db", error_message="worker failed", raw="worker details",
+                error_kind=SimpleNamespace(value="db")), configuration_failure=None)
+    class EmptyWorker:
+        async def stop(self): return SimpleNamespace(state_failure=None, configuration_failure=None)
+    worker = Worker()
+    mode = SimpleNamespace(value="run")
+    lifecycle.CommandMode = SimpleNamespace(RUN=mode)
+    deps.mode = mode
+    deps.config = Dummy()
+    deps.config.session = SimpleNamespace(plan_poll_interval_ms=500, wakeup_margin_ms=5,
+                                          read_discovery_batch_size=10)
+    deps.config.paths = SimpleNamespace(log_file="/unused", staging="/unused", ready="/unused", processing="/unused")
+    deps.config.clock = SimpleNamespace(recovery_wait_cap_s=1)
+    for name in ("state_db", "start_entries", "motor_permits", "work_files", "capture_file_observations",
+                 "capture_call_results", "capture_preparations", "capture_completions", "capture_result_closes",
+                 "capture_retry_gate", "capture_segment_writes", "capture_segment_inspection_results",
+                 "capture_media_results", "capture_read_results", "capture_read_business", "capture_read_ends",
+                 "capture_continuing_reads", "capture_recording_anchors", "recovery_boundary"):
+        setattr(deps, name, Dummy())
+    deps.capture_baselines = {}
+    deps.capture_result_scans = {}
+    deps.session_key = "test"
+    sys.modules["camctl.bootstrap.recovery_logging"].recovery_diagnostics_logger = lambda *args, **kwargs: None
+    failure_log = SimpleNamespace(logs_dir="/unused", ownership=object(), bind_owner=lambda owner: None)
+    lifecycle._failure_log_wiring = lambda deps: (failure_log, None)
+    lifecycle._report_assembly = lambda *args: ({"scheduling": SimpleNamespace(owns_device=object())}, worker)
+    lifecycle._emergency_settlement_of = lambda deps: None
+    lifecycle.RecoveryBoundary = SimpleNamespace(HOST_LOCAL_SETTLED=object())
+    sys.modules["camctl.logging_runtime.ownership"].LoggingOwner = lambda **kwargs: SimpleNamespace(start_session=None)
+    sys.modules["camctl.session.supervision"].Supervisor = lambda: object()
+    sys.modules["camctl.scheduling.notifications"].WorkNotifier = lambda: object()
+    sys.modules["camctl.bootstrap.capture_assembly"].session_capture_assembly = lambda **kwargs: object()
+    for name in ("cancel_flow", "report_flow", "winddown_flow"):
+        setattr(sys.modules["camctl.bootstrap.flows"], name, lambda **kwargs: object())
+    sys.modules["camctl.devices.drivers.runtime"].current_registry = lambda: object()
+    sys.modules["camctl.reporting.maintenance"].MaintenanceLimits = SimpleNamespace(defaults=lambda: object())
+    sys.modules["camctl.reporting.supervisor"].WorkerSupervisor = lambda **kwargs: EmptyWorker()
+    sys.modules["camctl.reporting.worker"].report_lock_path = lambda value: "/unused"
+    async def session(*args): return outcome_type.SessionOutcome(succeeded=True)
+    lifecycle.run_session = session
+    diagnostics = sys.modules["camctl.logging_runtime.diagnostics"]
+    diagnostics.diagnostic_reference_for = lambda error: None
+    diagnostics.diagnostic_snapshot = lambda value: _project(value, actual.exception_diagnostic)
+    return lifecycle, asyncio, deps, delivered, diagnostics
+
+
+def test_worker_diagnostic_ordinary_then_log_close_control_selects_control(worker_terminal_world):
+    lifecycle, asyncio, deps, delivered, diagnostics = worker_terminal_world
+    ordinary, control = OSError("worker diagnostic error"), asyncio.CancelledError("log close control")
+    def fail(*args, **kwargs): raise ordinary
+    diagnostics.record_error = fail
+    async def close(*args, **kwargs): raise control
+    lifecycle._close_log_runtime = close
+    deps.log_runtime = SimpleNamespace(channel=object())
+    with pytest.raises(asyncio.CancelledError) as caught:
+        _run(lifecycle._execute_command(deps, None, flows=None, restricted_flows=None, wake=object(),
+            poll_interval_s=None, finish_command=lambda **kwargs: None))
+    assert caught.value is control
+    assert any("worker diagnostic error" in note for note in control.__notes__)
+    assert any("worker details" in json.dumps(record[0]) for record in delivered)
+
+
+def test_worker_diagnostic_ordinary_then_late_stderr_control_selects_control(worker_terminal_world):
+    lifecycle, asyncio, deps, delivered, diagnostics = worker_terminal_world
+    ordinary, control = OSError("worker diagnostic error"), asyncio.CancelledError("stderr control")
+    def fail(*args, **kwargs): raise ordinary
+    diagnostics.record_error = fail
+    async def fail_emit(*args, **kwargs): raise OSError("session log unavailable")
+    lifecycle._emit_session_error = fail_emit
+    def fail_stderr(*args): raise control
+    lifecycle._write_stderr_diagnostic = fail_stderr
+    async def close(*args, **kwargs): return None
+    lifecycle._close_log_runtime = close
+    deps.log_runtime = SimpleNamespace(channel=object())
+    with pytest.raises(asyncio.CancelledError) as caught:
+        _run(lifecycle._execute_command(deps, None, flows=None, restricted_flows=None, wake=object(),
+            poll_interval_s=None, finish_command=lambda **kwargs: None))
+    assert caught.value is control
+    assert any("worker diagnostic error" in note for note in control.__notes__)
+    assert any("worker details" in note for note in control.__notes__)
+
+
+def test_later_log_control_inherits_unrecorded_cleanup_diagnostics(worker_terminal_world):
+    lifecycle, asyncio, deps, _, diagnostics = worker_terminal_world
+    cache_error, diagnostic, control = OSError("cache cleanup"), OSError("record failure"), asyncio.CancelledError("log control")
+    class Pending:
+        in_call = False
+        def close(self): raise cache_error
+    deps.capture_baselines = {"first": Pending()}
+    deps.background_flows = ()
+    def fail(*args, **kwargs): raise diagnostic
+    diagnostics.record_error = fail
+    async def close(*args, **kwargs): raise control
+    lifecycle._close_log_runtime = close
+    deps.log_runtime = SimpleNamespace(channel=object())
+    with pytest.raises(asyncio.CancelledError) as caught:
+        _run(lifecycle._execute_command(deps, None, flows=None, restricted_flows=None, wake=object(),
+            poll_interval_s=None, finish_command=lambda **kwargs: None))
+    assert caught.value is control
+    failures = getattr(control, "_camctl_cleanup_diagnostic_failures", ())
+    assert any(isinstance(item["error"], dict) and item["error"].get("raw") == "worker details" for item in failures)
+    assert any(item["error"] is cache_error for item in failures)
+
+
+def test_worker_ordinary_diagnostic_alone_remains_the_ordinary_failure(worker_terminal_world):
+    lifecycle, _, deps, delivered, diagnostics = worker_terminal_world
+    ordinary = OSError("worker diagnostic error")
+    def fail(*args, **kwargs): raise ordinary
+    diagnostics.record_error = fail
+    deps.log_runtime = None
+    with pytest.raises(OSError) as caught:
+        _run(lifecycle._execute_command(deps, None, flows=None, restricted_flows=None, wake=object(),
+            poll_interval_s=None, finish_command=lambda **kwargs: None))
+    assert caught.value is ordinary
+    assert any("worker details" in json.dumps(item[0]) for item in delivered)
+
+
+def test_existing_real_control_keeps_priority_over_later_log_control(worker_terminal_world):
+    lifecycle, asyncio, deps, delivered, diagnostics = worker_terminal_world
+    primary = asyncio.CancelledError("primary control")
+    diagnostic, later_control = OSError("worker diagnostic"), asyncio.CancelledError("log close control")
+    async def session(*args): raise primary
+    lifecycle.run_session = session
+    def fail(*args, **kwargs): raise diagnostic
+    diagnostics.record_error = fail
+    async def close(*args, **kwargs): raise later_control
+    lifecycle._close_log_runtime = close
+    deps.log_runtime = SimpleNamespace(channel=object())
+    with pytest.raises(asyncio.CancelledError) as caught:
+        _run(lifecycle._execute_command(deps, None, flows=None, restricted_flows=None, wake=object(),
+            poll_interval_s=None, finish_command=lambda **kwargs: None))
+    assert caught.value is primary
+    assert any("log close control" in note for note in primary.__notes__)
+    assert any("worker details" in json.dumps(item[0]) for item in delivered)
