@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 import sys
@@ -50,7 +51,7 @@ def test_osmo_overrecord_uses_strict_control_lower_bound(margin, elapsed, expect
     })
     action = {"execution_spec_json": {"target_duration_ms": 9000}}
     complete, overrun = control_facts(SimpleNamespace(repair_margin_s=margin), action,
-                                      {"control_elapsed_ns": elapsed}, strict_overrun=True)
+                                      {"control_elapsed_ns": elapsed})
     assert complete is Evidence.CONFIRMED
     assert overrun is expected
 
@@ -59,7 +60,7 @@ def test_control_elapsed_missing_does_not_invent_evidence():
     control_facts = extract(ROOT / "segment_completion.py", "_control_facts", {
         "CaptureTiming": Timing, "EvidenceState": Evidence,
     })
-    assert control_facts(None, {}, {"control_elapsed_ns": None}, strict_overrun=True) == (
+    assert control_facts(None, {}, {"control_elapsed_ns": None}) == (
         Evidence.UNKNOWN, Evidence.UNKNOWN)
 
 
@@ -181,3 +182,62 @@ def test_action6_entry_resumes_before_reclassifying(native):
         else:
             asyncio.run(entry(runtime, action, object()))
     assert calls == ["resume"]
+
+
+@pytest.mark.parametrize("normal, expected", [(True, "publish"), (False, "recover")])
+def test_recording_entry_uses_saved_stop_origin(normal, expected):
+    calls = []
+    action = {"id": 1, "type": 2, "cancel_requested": False}
+    ref = object()
+    status = SimpleNamespace(SUCCEEDED="success", UNCONFIRMED="unknown")
+
+    @dataclass(frozen=True)
+    class Decision:
+        status: str
+        failure_code: str | None = None
+        reason: str | None = None
+
+    @dataclass(frozen=True)
+    class Facts:
+        decision: Decision
+
+    async def prepare(runtime, actual_action, listing): return ref
+    async def resume(*args): return False
+    async def classify(*args, **kwargs): return Facts(Decision(status.SUCCEEDED))
+    async def publish(runtime, actual_action, actual_ref, decision): calls.append("publish")
+    async def recover(runtime, actual_action, decision): calls.append("recover")
+    async def listing(runtime, action): return object()
+    async def release(runtime, action_id): pass
+    async def activity_id(runtime, action_id): return 2
+    async def recording_state(action_id): return object()
+
+    class Database:
+        async def read(self, callback): return callback(SimpleNamespace(connection=object()))
+
+    capture = ModuleType("camctl.capture")
+    capture.__path__ = []
+    handlers = ModuleType("camctl.capture.handlers")
+    handlers._local_recording_listing = listing
+    handlers._activity_id_of = activity_id
+    handlers._recording_port = lambda runtime: SimpleNamespace(recording_state=recording_state)
+    capture.handlers = handlers
+    completion = ModuleType("camctl.capture.segment_completion")
+    completion.release_segment_occupancy = release
+    recording = ModuleType("camctl.capture.recording")
+    recording.RecordingPhase = SimpleNamespace(CONTROL_COMPLETE="complete")
+    recording.RecordingFacts = lambda: object()
+    recording.decide_recording_next = lambda state, facts: SimpleNamespace(phase="complete")
+    storage = ModuleType("camctl.capture.segment_storage")
+    storage.SegmentResultRef = type("SegmentResultRef", (), {})
+    stop = ModuleType("camctl.persistence.repositories.normal_recording_stop")
+    stop.read_normal_recording_stop = lambda connection, action, activity: normal
+    recovery = ModuleType("camctl.capture.action6_recovery")
+    recovery.advance_action6_recovery = recover
+    modules = {m.__name__: m for m in (capture, handlers, completion, recording, storage, stop, recovery)}
+    namespace = {"prepare_action6_segment_set": prepare, "SegmentRepository": object,
+                 "_resume_action6_segment_decision": resume, "classify_action6_segment_set": classify,
+                 "publish_action6_segment_result": publish, "SegmentDecisionStatus": status}
+    entry = extract(ROOT / "action6_completion.py", "advance_action6_segmented_recording", namespace)
+    with patch.dict(sys.modules, modules):
+        asyncio.run(entry(SimpleNamespace(database=Database()), action, object()))
+    assert calls == [expected]

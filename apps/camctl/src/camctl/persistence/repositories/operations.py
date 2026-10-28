@@ -2178,6 +2178,12 @@ def _attempt_result_guard(event, context) -> None:
         if not isinstance(observations, list):
             _fail("结果正文必须保存观察数组")
         run = _guard_facts(context, "operation_runs", after.get("run_id"))
+        if "normal_recording_stop" in event.evidence:
+            from .normal_recording_stop import verify_normal_stop_group
+            try:
+                verify_normal_stop_group(event, context, after, run)
+            except (ConsistencyError, ValueError, KeyError, TypeError) as error:
+                raise EventValidationError(f"正常录像停止来源无效: {error}") from error
         if (run.get("kind") == int(_RUN_KIND.CHECK_DEVICE_AVAILABILITY)
                 and status == int(_ATTEMPT_STATUS.SUCCEEDED)):
             from .availability_release import require_result_group

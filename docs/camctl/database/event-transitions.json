@@ -5531,7 +5531,8 @@
             "attempt_result"
           ],
           "evidence": [
-            "attempt_id"
+            "attempt_id",
+            "normal_recording_stop"
           ]
         },
         "FAIL": {

@@ -2691,8 +2691,7 @@ async def _stop_call(runtime: CaptureRuntime, action,
             and action["execution_spec_json"].get("result_policy")
             == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value
             and stop_state.anchor_from_current_session and stop_state.stop_target_ns is not None
-            and stop_state.stop_attempts_used == 0
-            and not (await runtime.action(action["id"]))["cancel_requested"]):
+            and stop_state.stop_attempts_used == 0 and ticket.attempt_id == 1):
         def read_start(owned):
             with closing(owned.connection.execute(
                 "SELECT a.result_event_id FROM operation_runs r JOIN operation_attempts a ON a.run_id=r.id "
@@ -2704,10 +2703,11 @@ async def _stop_call(runtime: CaptureRuntime, action,
             )) as cursor:
                 return cursor.fetchone()
         start = await runtime.database.read(read_start, description="读取正常录像原启动结果")
+        canceled_before_stop = (await runtime.action(action["id"]))["cancel_requested"]
         elapsed = runtime.monotonic_ns() - (stop_state.stop_target_ns - (
             _target_duration_ms(action) + action["execution_spec_json"].get("startup_margin_ms", 0)
         ) * 1_000_000)
-        if start is not None and elapsed >= (
+        if start is not None and not canceled_before_stop and elapsed >= (
             _target_duration_ms(action) + action["execution_spec_json"].get("startup_margin_ms", 0)
         ) * 1_000_000:
             from camctl.capture.models import NormalRecordingStop
