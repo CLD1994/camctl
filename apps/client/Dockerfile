@@ -5,6 +5,7 @@ RUN npm ci
 COPY apps/client/tsconfig.json apps/client/vite.config.ts ./
 COPY apps/client/src ./src
 COPY protocol/schemas /app/protocol/schemas
+COPY protocol/errors/workflow-codes.json /app/protocol/errors/workflow-codes.json
 RUN npm run build
 
 FROM node:24.16.0-bookworm-slim
@@ -17,5 +18,6 @@ COPY --from=build /app/apps/client/src/server ./src/server
 COPY --from=build /app/apps/client/src/shared ./src/shared
 COPY --from=build /app/apps/client/src/domain ./src/domain
 COPY --from=build /app/protocol/schemas /app/protocol/schemas
+COPY --from=build /app/protocol/errors/workflow-codes.json /app/protocol/errors/workflow-codes.json
 EXPOSE 4310
 CMD ["npm", "start"]
