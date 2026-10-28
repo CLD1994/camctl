@@ -139,6 +139,7 @@ CREATE TABLE file_copies (
     committed_bytes INTEGER NOT NULL CHECK (committed_bytes BETWEEN 0 AND source_size),
     reset_state INTEGER NOT NULL CHECK (reset_state IN (1,2)),
     slot_device_id TEXT UNIQUE CHECK (slot_device_id IS NULL OR length(slot_device_id) > 0),
+    read_end_event_id INTEGER REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
     verification_state INTEGER NOT NULL CHECK (verification_state BETWEEN 1 AND 6),
     target_sha256 TEXT CHECK (target_sha256 IS NULL OR (length(target_sha256) = 64 AND target_sha256 NOT GLOB '*[^0-9a-f]*')),
     verification_error_json TEXT CHECK (verification_error_json IS NULL OR (json_valid(verification_error_json) AND json_type(verification_error_json) = 'object')),

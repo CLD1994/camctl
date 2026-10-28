@@ -226,11 +226,31 @@ def hold_read_end(runtime, ticket, end, complete, *, resume=None, evidence=None)
     if end.stopped is True and end.error is None and complete:
         copy_id = int(ticket.target_id)
         held = runtime.pending_read_ends.get(copy_id)
-        if held is not None and held.ticket != ticket:
-            raise ConsistencyError("原完整读取结束事实属于其他尝试")
-        runtime.pending_read_ends[copy_id] = HeldReadEnd(ticket, end, runtime.occurred_at(),
+        if held is not None and (held.ticket != ticket or held.end != end):
+            raise ConsistencyError("原完整读取结束事实与已持有的返回不一致")
+        runtime.pending_read_ends[copy_id] = HeldReadEnd(ticket, end,
+            held.occurred_at if held is not None else runtime.occurred_at(),
             resume if resume is not None else (held.resume if held is not None else None),
             evidence if evidence is not None else (held.evidence if held is not None else None))
+
+
+async def persist_read_end(runtime, ticket, end, complete, *, state, source_device_file_id,
+                           source_intermediate_file_id, resume=None, evidence=None):
+    """先持有原返回，再沿同一申请及操作键可靠保存。"""
+    hold_read_end(runtime, ticket, end, complete, resume=resume, evidence=evidence)
+    copy_id = int(ticket.target_id)
+    held = runtime.pending_read_ends.get(copy_id)
+    if held is None or held.ticket != ticket or held.end != end:
+        return
+    from camctl.persistence.repositories.read_end import SaveReadEnd, save_read_end
+
+    pending = runtime.pending_read_business.get((copy_id, "read_end"))
+    if pending is None:
+        original = SaveReadEnd(ticket, state.round, source_device_file_id,
+            source_intermediate_file_id, state.target.file_id, state.source_size, end, held.occurred_at)
+    else:
+        original = pending.request
+    await save_read_business(runtime, copy_id, "read_end", original, save_read_end, retry=pending is not None)
 
 
 async def retry_read_ends(runtime):
@@ -258,6 +278,26 @@ async def retry_read_ends(runtime):
         if held.resume is None:
             raise ConsistencyError("原实际读取结束缺少本地校验续接责任")
         await held.resume(runtime, held)
+
+
+async def current_local_read_end(runtime, copy_id, held):
+    """取得文件资格后重新核对原票据及当前轮次的本机结束依据。"""
+    from camctl.persistence.repositories.read_end import load_read_end
+
+    def read(owned):
+        original = running_read_ticket(owned, copy_id)
+        if original is None:
+            return False
+        if original[0] != held.ticket:
+            raise ConsistencyError("本机续接的原读取票据已经改变")
+        saved = load_read_end(copy_id, owned)
+        if saved is None:
+            return False
+        if saved[0] != held.ticket or saved[1] != held.end:
+            raise ConsistencyError("本机续接的当前轮结束依据已经改变")
+        return saved[3] is None
+
+    return await runtime.database.read(read)
 
 
 async def source_verification_run_finish(runtime, ticket, step, *, output_id=None):
@@ -788,6 +828,23 @@ async def recover_unavailable_read(runtime, copy_id: int, binding, now: int) -> 
     if original is None:
         return True
     ticket, intent_id = original
+    from camctl.persistence.repositories.read_end import load_read_end
+    saved_end = await runtime.database.read(lambda owned: load_read_end(copy_id, owned))
+    if saved_end is not None:
+        saved_ticket, end, occurred_at, slot = saved_end
+        if saved_ticket != ticket:
+            raise ConsistencyError("已保存读取结束与原未完成尝试不一致")
+        evidence = (None if runtime.recovery_evidence_for is None
+                    else runtime.recovery_evidence_for(binding, "read"))
+        if evidence is None:
+            record_read_diagnostic(runtime, RecoveryBlockedReason.EVIDENCE_UNAVAILABLE, ticket)
+            return False
+        held = runtime.pending_read_ends.get(copy_id)
+        if held is not None and (held.ticket != ticket or held.end != end):
+            raise ConsistencyError("已保存读取结束与当前拥有者持有的返回不一致")
+        if held is None and slot is not None:
+            runtime.pending_read_ends[copy_id] = HeldReadEnd(ticket, end, occurred_at, evidence=evidence)
+        return False
     if copy_id in runtime.pending_read_ends:
         raise ConsistencyError("原实际读取结束已持有，仍需设备摘要或重拷输入；保留原责任")
     if not read_host_boundary(runtime, ticket, intent_id, continuing=False):

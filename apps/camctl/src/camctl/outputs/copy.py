@@ -16,7 +16,7 @@ import asyncio
 import threading
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Mapping, Protocol, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol, Sequence
 
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import (
@@ -967,6 +967,7 @@ class CompletionContext:
     max_recopies: int = 1
     key: OperationKey | None = None
     executor: FileTaskExecutor | None = None
+    save_business: Callable | None = None
     diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
 
 
@@ -1116,15 +1117,13 @@ async def _verify_and_finish(copy_id, context, facts) -> CompletionStep:
     else:
         save_state = int(_VERIFICATION.MATCHED)
         source_value, error_json = source_sha256, None
-    key = context.key if context.key is not None else new_operation_key()
     request = VerificationSave(
         copy_id=copy_id, state=save_state, source_sha256=source_value,
         target_sha256=hashed.digest, error_json=error_json,
         occurred_at=context.occurred_at,
     )
-    outcome = await context.database.write(
-        lambda owned: context.repository.save_verification(request, key, owned),
-        key=key, description="拷贝校验结果保存")
+    outcome = await _save_completion_business(context, copy_id, "verification", request,
+        context.repository.save_verification, "拷贝校验结果保存")
     if outcome.kind is DbOutcomeKind.COMPLETED \
             and outcome.value.disposition is VerificationDisposition.SKIPPED:
         raise CopyCompletionError(
@@ -1145,7 +1144,6 @@ async def _register_recopy(copy_id, context, facts, target_sha256: str,
         source_sha256 = facts.source_sha256
     if source_sha256 is None or not target_sha256:
         raise ConsistencyError("重拷登记缺少判定所依据的摘要")
-    key = context.key if context.key is not None else new_operation_key()
     request = RecopyRegistration(
         copy_id=copy_id, source_sha256=source_sha256,
         target_sha256=target_sha256, max_recopies=context.max_recopies,
@@ -1160,9 +1158,8 @@ async def _register_recopy(copy_id, context, facts, target_sha256: str,
         context={"copy_id": copy_id, "copy_round": facts.round,
                  "max_recopies": context.max_recopies, "recopies_used": facts.recopies_used},
         state=context.diagnostic)
-    outcome = await context.database.write(
-        lambda owned: context.repository.register_recopy(request, key, owned),
-        key=key, description="拷贝重拷登记")
+    outcome = await _save_completion_business(context, copy_id, "recopy", request,
+        context.repository.register_recopy, "拷贝重拷登记")
     if outcome.kind is not DbOutcomeKind.COMPLETED:
         _require_completed(outcome, "recopy_register_failed", "recopy_register_unknown")
     result = outcome.value
@@ -1181,14 +1178,12 @@ async def _save_prepared(copy_id, context, target_sha256: str) -> CompletionStep
     facts = await context.database.read(
         lambda owned: context.repository.load_copy_state(copy_id, owned),
         description="拷贝状态读取")
-    key = context.key if context.key is not None else new_operation_key()
     request = PreparedRequest(
         copy_id=copy_id, target_sha256=target_sha256,
         size_bytes=facts.source_size, occurred_at=context.occurred_at,
     )
-    outcome = await context.database.write(
-        lambda owned: context.repository.save_prepared(request, key, owned),
-        key=key, description="拷贝准备完成保存")
+    outcome = await _save_completion_business(context, copy_id, "prepared", request,
+        context.repository.save_prepared, "拷贝准备完成保存")
     if outcome.kind is not DbOutcomeKind.COMPLETED:
         _require_completed(outcome, "prepared_save_failed", "prepared_save_unknown")
     result = outcome.value
@@ -1196,3 +1191,11 @@ async def _save_prepared(copy_id, context, target_sha256: str) -> CompletionStep
         raise CopyCompletionError(_owner_stage(result.reason), "发起责任不再执行")
     assert result.prepared is not None
     return CompletionStep(phase=CompletionPhase.PREPARED, prepared=result.prepared)
+
+
+async def _save_completion_business(context, copy_id, stage, request, save, description):
+    if context.save_business is not None:
+        return await context.save_business(copy_id, stage, request, save)
+    key = context.key if context.key is not None else new_operation_key()
+    return await context.database.write(lambda owned: save(request, key, owned),
+                                        key=key, description=description)

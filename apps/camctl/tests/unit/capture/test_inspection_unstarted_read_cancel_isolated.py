@@ -185,9 +185,9 @@ class SharedSaveOwnershipTests(unittest.TestCase):
 class InspectionSettlementTests(unittest.IsolatedAsyncioTestCase):
     async def run_settlement(self, *, pending_intent=False, run_status=1, unfinished=False, slot_outcome="released",
                              pending_failed=True, recovered_ticket=False, canceled=1,
-                             continuation=None, existing_result=False):
+                             continuation=None, existing_result=False, end_id=None, slot="camera"):
         calls = []
-        state = {"run_status": run_status}
+        state = {"run_status": run_status, "slot": slot}
         class Cursor:
             def __init__(self, value): self.value = value
             def fetchall(self): return self.value
@@ -195,7 +195,7 @@ class InspectionSettlementTests(unittest.IsolatedAsyncioTestCase):
         class Connection:
             def execute(self, query, parameters):
                 if "SELECT c.inspection_id" in query:
-                    return Cursor([(8, "camera", state["run_status"], 0, 4, canceled)])
+                    return Cursor([(8, state["slot"], state["run_status"], 0, 4, canceled, end_id)])
                 if "SELECT 1 FROM operation_attempts" in query:
                     return Cursor((1,) if unfinished else None)
                 raise AssertionError(query)
@@ -220,6 +220,10 @@ class InspectionSettlementTests(unittest.IsolatedAsyncioTestCase):
         def prevented(flow, ticket, prevented, evidence):
             calls.append(("not_dispatched", prevented.reason, prevented.canceled))
             return SimpleNamespace(ticket=ticket)
+        async def settle_end(flow, copy_id):
+            calls.append(("saved_end", copy_id))
+            state["run_status"] = 5
+            state["slot"] = None
         pending = {(9, "read_intent"): SimpleNamespace(request="original", save="original-save",
                     shared=SimpleNamespace(failed=lambda: pending_failed), inspection_cancel_recovery=[])} if pending_intent else {}
         runtime = SimpleNamespace(database=Database(), pending_read_business=pending,
@@ -231,12 +235,13 @@ class InspectionSettlementTests(unittest.IsolatedAsyncioTestCase):
         module.ReadDispatchPrevented = lambda reason, canceled: SimpleNamespace(reason=reason, canceled=canceled)
         media = ModuleType("camctl.capture.media_flow")
         media._save_internal_read_and_settle = settle_result
-        statuses = {"PENDING": 1, "SUCCEEDED": 3, "FAILED": 4, "CANCELED": 5}
+        statuses = {"PENDING": 1, "ACTIVE": 2, "SUCCEEDED": 3, "FAILED": 4, "CANCELED": 5}
         namespace = {"__name__": "isolated.inspections", "enum_for": lambda name: SimpleNamespace(
             READ_FILE=3) if name == "operation_runs.kind" else SimpleNamespace(RUNNING=1),
             "ConsistencyError": ValueError, "_INSPECTION_STATE": SimpleNamespace(PENDING=1),
             "_RUN_STATUS": statuses, "SlotOutcome": SimpleNamespace(RELEASED="released", ALREADY_RELEASED="already"),
             "SlotRequest": lambda copy_id, now: (copy_id, now),
+            "_settle_canceled_inspection_end": settle_end,
             "OutputsRepository": lambda: SimpleNamespace(release_read_slot="release")}
         settle = extract(INSPECTIONS, "settle_terminal_inspection_read_slot", namespace)
         with patch.dict(sys.modules, {module.__name__: module, media.__name__: media}):
@@ -283,6 +288,11 @@ class InspectionSettlementTests(unittest.IsolatedAsyncioTestCase):
         result, calls = await self.run_settlement(run_status=2)
         self.assertFalse(result)
         self.assertEqual(calls, [])
+
+    async def test_canceled_saved_end_settles_original_even_after_slot_release(self):
+        result, calls = await self.run_settlement(run_status=2, end_id=30, slot=None)
+        self.assertTrue(result)
+        self.assertEqual(calls, [("saved_end", 9)])
 
     async def test_already_dispatched_ticket_is_not_declared_unstarted(self):
         continuation = SimpleNamespace(ticket=SimpleNamespace(run_id=11, attempt_id=1, target_id="9"),

@@ -2086,6 +2086,7 @@ class _GrantFileCommand:
                 "committed_bytes": 0,
                 "reset_state": int(_RESET_STATE.READY),
                 "slot_device_id": None,
+                "read_end_event_id": None,
                 "verification_state": int(_VERIFICATION.NOT_PERFORMED),
                 "target_sha256": None,
                 "verification_error_json": None,
@@ -2568,6 +2569,8 @@ class _SlotChangeCommand:
             return self._decision(SlotOutcome.HELD)
         if slot is not None:
             raise ConsistencyError("拷贝的读取机会不属于原来源设备")
+        if copy["read_end_event_id"] is not None:
+            return self._decision(SlotOutcome.FINISHED)
         if run["status"] in _RUN_TERMINAL or not _read_owner_eligible(action):
             return self._decision(SlotOutcome.FINISHED)
         source = self._state["device_files"][copy["source_device_file_id"]]
@@ -3154,6 +3157,10 @@ class _IntegritySaveCommand(_CopyCompletionTablesMixin):
         if copy["source_sha256"] is None and command.source_sha256 is not None:
             before["source_sha256"] = None
             after["source_sha256"] = command.source_sha256
+        if (copy["read_end_event_id"] is not None and copy["slot_device_id"] is not None
+                and command.source_sha256 is not None):
+            before["slot_device_id"] = copy["slot_device_id"]
+            after["slot_device_id"] = None
         if command.target_sha256 != copy["target_sha256"]:
             before["target_sha256"] = copy["target_sha256"]
             after["target_sha256"] = command.target_sha256
@@ -3268,6 +3275,7 @@ class _RecopyCommand(_CopyCompletionTablesMixin):
             "reset_state": int(_RESET_STATE.READY),
             "verification_state": int(_VERIFICATION.MISMATCHED),
             "target_sha256": command.target_sha256,
+            "read_end_event_id": copy["read_end_event_id"],
         }
         after = {
             "round": round_now + 1,
@@ -3276,6 +3284,7 @@ class _RecopyCommand(_CopyCompletionTablesMixin):
             "reset_state": int(_RESET_STATE.RESET_PENDING),
             "verification_state": int(_VERIFICATION.NOT_PERFORMED),
             "target_sha256": None,
+            "read_end_event_id": None,
         }
         if command.max_recopies != copy["max_recopies_used"]:
             before["max_recopies_used"] = copy["max_recopies_used"]
@@ -3309,6 +3318,9 @@ class _RecopyCommand(_CopyCompletionTablesMixin):
         if copy["source_sha256"] is None:
             before["source_sha256"] = None
             after["source_sha256"] = self._command.source_sha256
+        if copy["read_end_event_id"] is not None and copy["slot_device_id"] is not None:
+            before["slot_device_id"] = copy["slot_device_id"]
+            after["slot_device_id"] = None
         before["target_sha256"] = copy["target_sha256"]
         after["target_sha256"] = self._command.target_sha256
         return _update("file_copies", copy["id"], before, after)
@@ -4153,13 +4165,13 @@ class _ReadSourceFallbackCommand:
                 or source["presence_state"] != int(_PRESENCE.PRESENT)):
             return self._decision(ReadSourceFallbackDisposition.BLOCKED)
 
-        row = _update(
-            "file_copies", copy["id"],
-            {"source_device_file_id": copy["source_device_file_id"],
-             "source_intermediate_file_id": copy["source_intermediate_file_id"]},
-            {"source_device_file_id": source["id"],
-             "source_intermediate_file_id": None},
-        )
+        before = {"source_device_file_id": copy["source_device_file_id"],
+                  "source_intermediate_file_id": copy["source_intermediate_file_id"]}
+        after = {"source_device_file_id": source["id"], "source_intermediate_file_id": None}
+        if copy["read_end_event_id"] is not None:
+            before["read_end_event_id"] = copy["read_end_event_id"]
+            after["read_end_event_id"] = None
+        row = _update("file_copies", copy["id"], before, after)
         allocation = scope.allocate(1)
         event = _envelope(
             allocation.first_event_id, allocation.txn_id,
@@ -4228,8 +4240,9 @@ class _ReadSourceFallbackCommand:
         before, after = rows[0].get("before", {}).get("values"), rows[0].get(
             "after", {}).get("values")
         if (not isinstance(before, dict) or not isinstance(after, dict)
-                or set(before) != {"source_device_file_id", "source_intermediate_file_id"}
+                or set(before) - {"read_end_event_id"} != {"source_device_file_id", "source_intermediate_file_id"}
                 or set(after) != set(before)
+                or ("read_end_event_id" in after and after["read_end_event_id"] is not None)
                 or before["source_device_file_id"] is not None
                 or before["source_intermediate_file_id"] is None
                 or after["source_device_file_id"] is None
@@ -6608,9 +6621,10 @@ def _copy_round_chain_proven(
     每次只解码一条涉及目标拷贝的历史事件，并仅累计期望轮次；内存
     不随重拷次数增长。调用方分别在写命令和独立事件守卫中校验该链。
     """
-    values = (copy_id, initial_round, current_round, intent_event_id,
-              result_event_id, source_size)
+    values = (copy_id, initial_round, current_round, intent_event_id, result_event_id)
     if any(type(value) is not int or value <= 0 for value in values):
+        return False
+    if type(source_size) is not int or source_size < 0:
         return False
     if (initial_round > current_round
             or intent_event_id >= result_event_id):
@@ -6649,8 +6663,8 @@ def _copy_round_chain_proven(
                         or after.get("round") != expected_round + 1
                         or before.get("recopies_used") != expected_round - 1
                         or after.get("recopies_used") != expected_round
-                        or before.get("committed_bytes") != source_size
-                        or after.get("committed_bytes") != 0
+                        or before.get("committed_bytes", 0 if source_size == 0 else None) != source_size
+                        or after.get("committed_bytes", 0 if source_size == 0 else None) != 0
                         or before.get("reset_state") != int(_RESET_STATE.READY)
                         or after.get("reset_state") != int(_RESET_STATE.RESET_PENDING)
                         or before.get("verification_state") != int(_VERIFICATION.MISMATCHED)
@@ -6679,8 +6693,12 @@ def _copy_guard(event, context) -> None:
         before, after = row.before.values, row.after.values
         source_columns = {
             "source_device_file_id", "source_intermediate_file_id"}
-        if (copy is None or set(before) != source_columns
-                or set(after) != source_columns
+        if (copy is None or set(before) - {"read_end_event_id"} != source_columns
+                or set(after) - {"read_end_event_id"} != source_columns
+                or ("read_end_event_id" in after and after["read_end_event_id"] is not None)
+                or (copy.get("read_end_event_id") is not None
+                    and (before.get("read_end_event_id") != copy["read_end_event_id"]
+                         or "read_end_event_id" not in after or after["read_end_event_id"] is not None))
                 or copy.get("source_device_file_id") is not None
                 or copy.get("source_intermediate_file_id") is None
                 or not all(json_equal(copy.get(name), value)
@@ -6826,6 +6844,13 @@ def _copy_guard(event, context) -> None:
             state = after.get("verification_state")
             source = after.get("source_sha256", copy.get("source_sha256"))
             target = after.get("target_sha256", copy.get("target_sha256"))
+            if "slot_device_id" in after:
+                from .read_end import load_read_end
+                reads = context.read_end_reads
+                if (reads is None or source is None or row.before.values.get("slot_device_id") != copy.get("slot_device_id")
+                        or after["slot_device_id"] is not None
+                        or load_read_end(row.row_id, SimpleNamespace(connection=reads.connection)) is None):
+                    raise EventValidationError("源摘要与释放机会必须关联原完整读取结束")
             if state == int(_VERIFICATION.MATCHED):
                 if source is None or target is None or source != target:
                     raise EventValidationError("校验通过要求源摘要与主机摘要一致")
@@ -6850,15 +6875,21 @@ def _copy_guard(event, context) -> None:
                 raise EventValidationError("重拷登记缺少当前拷贝事实")
             before = row.before.values
             after = row.after.values
-            if before.get("committed_bytes") != copy.get("source_size"):
+            if before.get("committed_bytes", copy.get("committed_bytes")) != copy.get("source_size"):
                 raise EventValidationError("重拷登记要求全部字节已经可靠保存")
             if after.get("round") != before.get("round", 0) + 1 \
                     or after.get("recopies_used") != before.get("recopies_used", -1) + 1:
                 raise EventValidationError("重拷登记必须恰好增加一轮并消耗一次额度")
-            if after.get("committed_bytes") != 0:
+            if after.get("committed_bytes", copy.get("committed_bytes")) != 0:
                 raise EventValidationError("重拷登记必须把可靠进度归零")
             if after.get("target_sha256") is not None:
                 raise EventValidationError("新一轮拷贝不能沿用旧目标摘要")
+            if "read_end_event_id" in after and after["read_end_event_id"] is not None:
+                raise EventValidationError("新一轮拷贝不能建立读取结束依据")
+            if (copy.get("read_end_event_id") is not None
+                    and (before.get("read_end_event_id") != copy["read_end_event_id"]
+                         or "read_end_event_id" not in after or after["read_end_event_id"] is not None)):
+                raise EventValidationError("新一轮拷贝不能沿用原读取结束依据")
         return
     if event.event_type == _COPY_CHANGED_EVENT and event.reason == _CONFIGURE_REASON:
         for row in event.rows:
@@ -7194,6 +7225,8 @@ def _read_slot_guard(event, context) -> None:
             raise EventValidationError("读取源观察者与可靠来源的原设备绑定不一致")
         after_slot = row.after.values["slot_device_id"]
         if after_slot is not None:
+            if copy.get("read_end_event_id") is not None:
+                raise EventValidationError("当前轮读取已经结束，不能再次授予相机机会")
             before_slot = row.before.values.get("slot_device_id") if row.before.exists else None
             if before_slot is not None:
                 raise EventValidationError("授予必须从空闲机会开始")
@@ -10054,6 +10087,8 @@ def register_outputs_guards() -> None:
     register_guard("cursor", _cursor_guard)
     register_guard("delivery", _delivery_guard)
     register_guard("copy", _copy_guard)
+    from .read_end import read_end_guard
+    register_guard("read_end", read_end_guard)
     register_guard("copy_links", _copy_links_guard)
     register_guard("read_slot", _read_slot_guard)
     register_guard("read_permission", _read_permission_guard)

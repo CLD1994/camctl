@@ -448,6 +448,7 @@
         "committed_bytes",
         "reset_state",
         "slot_device_id",
+        "read_end_event_id",
         "verification_state",
         "target_sha256",
         "verification_error_json"
@@ -7407,6 +7408,9 @@
                 "slot_device_id": [
                   null
                 ],
+                "read_end_event_id": [
+                  null
+                ],
                 "reset_state": [
                   1
                 ],
@@ -7470,6 +7474,7 @@
               "op": "update",
               "columns": [
                 "source_sha256",
+                "slot_device_id",
                 "verification_state",
                 "target_sha256",
                 "verification_error_json"
@@ -7521,7 +7526,8 @@
                 "reset_state",
                 "verification_state",
                 "target_sha256",
-                "verification_error_json"
+                "verification_error_json",
+                "read_end_event_id"
               ],
               "before": {
                 "reset_state": [
@@ -7672,7 +7678,8 @@
               "op": "update",
               "columns": [
                 "source_device_file_id",
-                "source_intermediate_file_id"
+                "source_intermediate_file_id",
+                "read_end_event_id"
               ],
               "before": {},
               "after": {},
@@ -7693,6 +7700,15 @@
           "evidence": [
             "attempt_id"
           ]
+        },
+        "READ_END": {
+          "reason": 9,
+          "title": "保存当前轮次实际读取结束",
+          "rows": [{"table": "file_copies", "op": "update",
+            "columns": ["read_end_event_id", "slot_device_id"],
+            "before": {}, "after": {}, "required": ["read_end_event_id"], "transitions": {}}],
+          "guards": ["row_shape", "transaction", "ownership", "report_impact", "read_end"],
+          "evidence": ["read_end"]
         }
       }
     },

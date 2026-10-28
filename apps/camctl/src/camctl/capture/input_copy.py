@@ -266,7 +266,11 @@ async def obtain_recording_input(context: InputContext) -> InputStep:
                           result.error if result is not None else None)
         end = await stop_read_session(session, original_error=original_error)
         if context.on_read_end is not None:
-            context.on_read_end(end, session.position() == facts.source_size)
+            import inspect
+            saved = context.on_read_end(end, session.position() == facts.source_size)
+            if inspect.isawaitable(saved):
+                from camctl.persistence.business import settle_required
+                await settle_required(saved)
     if result is not None:
         return replace(result, read_end=end, stop_requested=True, content_complete=session.position() == facts.source_size)
     if end.error is not None:

@@ -211,12 +211,14 @@ async def finalize_pending_action6_inspections(runtime, action_id: int, *, reaso
             raise db_failure(ConsistencyError, f"Action6 未结束检查收场被拒绝: {outcome.error}", outcome)
         after_inspection_id = rows[-1][0]
     if flow is None:
-        from camctl.devices.evidence import EvidenceRegistry
+        from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
         slot_flow = SimpleNamespace(
             database=runtime.database, pending_read_business=runtime.pending_read_business,
             pending_read_results=runtime.pending_read_results, pending_read_ends=runtime.pending_read_ends,
             continuing_read_tickets=runtime.continuing_read_tickets, operations=runtime.operations,
-            occurred_at=runtime.wall_us, evidence=EvidenceRegistry(()),
+            occurred_at=runtime.wall_us,
+            evidence=EvidenceRegistry((EvidenceContract("read_returned", 1, "read", frozenset()),)),
+            file_executor=getattr(runtime, "file_executor", None),
         )
     else:
         slot_flow = flow

@@ -646,8 +646,43 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
     """
     page = (await runtime.discovery.reads(runtime.database, "reads", now))
     binding_blocked = set()
+    local_end = set()
+    digest_end = set()
+    for item in page.items:
+        if getattr(item, "read_end_event_id", None) is None:
+            continue
+        assembly = runtime.devices.get(item.device_id)
+        if assembly is None:
+            continue
+        from camctl.persistence.repositories.read_end import load_read_end
+        from camctl.outputs.read_attempts import running_read_ticket
+        def current_end(owned):
+            if running_read_ticket(owned, item.copy_id) is None:
+                return None
+            return load_read_end(item.copy_id, owned)
+        saved = await runtime.database.read(current_end)
+        if saved is None:
+            local_end.add(item.copy_id)
+            continue
+        ticket, end, occurred_at, slot = saved
+        from camctl.outputs.read_attempts import HeldReadEnd
+        held = runtime.pending_read_ends.get(item.copy_id)
+        if held is not None and (held.ticket != ticket or held.end != end):
+            raise ConsistencyError("已保存读取结束与原拥有者持有的返回不一致")
+        if held is None:
+            held = HeldReadEnd(ticket, end, occurred_at,
+                resume=lambda current, value, current_assembly=assembly:
+                    _resume_local_delivery_end(current, value, runtime, current_assembly),
+                evidence=assembly.evidence)
+            runtime.pending_read_ends[item.copy_id] = held
+        if slot is not None:
+            digest_end.add(item.copy_id)
+            continue
+        await _resume_local_delivery_end(runtime, held, runtime, assembly)
+        local_end.add(item.copy_id)
     if runtime.binding_check is not None:
-        candidates = ((item.copy_id, item.source_file_id, item.device_id, item.driver_id) for item in page.items)
+        candidates = ((item.copy_id, item.source_file_id, item.device_id, item.driver_id)
+                      for item in page.items if item.copy_id not in local_end)
         for copy_id, source_id, device_id, driver_id in candidates:
             result = runtime.binding_check(DeviceBinding(device_id, driver_id))
             if result.status is BindingStatus.MATCHED:
@@ -681,11 +716,18 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
                         f"读取绑定失败事务未完成（{failed.kind.value}）: {failed.error}", failed)
                 if failed.value.disposition is not FailureSaveDisposition.RETIRED:
                     runtime.retry_gate.cleared(f"read/{copy_id}")
+    # 摘要仍属于持槽读取的原责任，应先收场，不能被新拍摄计划跳过。
+    for item in page.items:
+        if item.copy_id not in digest_end or item.copy_id in binding_blocked:
+            continue
+        assembly = runtime.devices.get(item.device_id)
+        if assembly is not None:
+            await _advance_read(runtime, assembly, item.copy_id, now)
     deferred_waits = {}
     exhausted_reads = set()
     # 读取机会保留原顺序，间隔完成与其他设备占用分别处理。
     for item in page.items:
-        if item.copy_id in binding_blocked:
+        if item.copy_id in binding_blocked or item.copy_id in local_end or item.copy_id in digest_end:
             continue
         assembly = runtime.devices.get(item.device_id)
         if assembly is None:
@@ -734,7 +776,8 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
             continue
         deferred_waits[item.copy_id] = (run_id, attempt_id)
     candidates = tuple(item for item in page.items
-                       if item.copy_id not in binding_blocked and item.copy_id not in exhausted_reads)
+                       if item.copy_id not in binding_blocked and item.copy_id not in exhausted_reads
+                       and item.copy_id not in local_end and item.copy_id not in digest_end)
     if getattr(runtime, "availability", None) is not None:
         from camctl.operations.availability import AvailabilityProgress
         ready = []
@@ -801,6 +844,16 @@ async def _advance_read(
     if assembly.binding != DeviceBinding(*saved_binding):
         # 本次设备标识相同仍可能更换驱动；实际意图和调用只采用原绑定。
         return False
+    from camctl.persistence.repositories.read_end import load_read_end
+    saved = await runtime.database.read(lambda owned: load_read_end(copy_id, owned))
+    if saved is not None:
+        ticket, end, occurred_at, _ = saved
+        from camctl.outputs.read_attempts import HeldReadEnd
+        runtime.pending_read_ends[copy_id] = HeldReadEnd(ticket, end, occurred_at,
+            resume=lambda current, held: _resume_local_delivery_end(current, held, runtime, assembly),
+            evidence=assembly.evidence)
+        await _run_read(runtime, assembly, facts, ticket, now)
+        return True
     if await _read_wait_remaining(runtime, copy_id, assembly.retry_interval_s, assembly.max_read_attempts) \
             is not None:
         return False
@@ -951,7 +1004,7 @@ async def _run_read(
 
 
 async def _run_read_and_save(runtime, assembly, facts, ticket, now, *, control=None):
-    from camctl.outputs.read_attempts import hold_read_end
+    from camctl.outputs.read_attempts import persist_read_end
 
     device_file_id = facts["source_device_file_id"]
     await _ensure_checksum_support(runtime, assembly, device_file_id, now)
@@ -965,7 +1018,9 @@ async def _run_read_and_save(runtime, assembly, facts, ticket, now, *, control=N
                            idle_timeout_s=assembly.read_idle_timeout_s, control=control),
         facts, digest, max_recopies=assembly.max_recopies,
         read_end=(runtime.pending_read_ends[facts["id"]].end if facts["id"] in runtime.pending_read_ends else None),
-        on_read_end=lambda end, complete: hold_read_end(runtime, ticket, end, complete,
+        on_read_end=lambda end, complete, state: persist_read_end(runtime, ticket, end, complete,
+            state=state, source_device_file_id=facts["source_device_file_id"],
+            source_intermediate_file_id=facts["source_intermediate_file_id"],
             resume=lambda current, held: _resume_local_delivery_end(current, held, runtime, assembly), evidence=assembly.evidence),
         on_read_start=lambda: runtime.pending_read_ends.pop(facts["id"], None))
     await _finish_read_attempt(runtime, assembly, facts, ticket, step)
@@ -973,7 +1028,7 @@ async def _run_read_and_save(runtime, assembly, facts, ticket, now, *, control=N
 
 async def _resume_local_delivery_end(current, held, original_runtime, assembly):
     """只核实原完整副本；原会话的设备结果不再调用源端口。"""
-    from camctl.outputs.read_attempts import run_owned_read
+    from camctl.outputs.read_attempts import current_local_read_end, run_owned_read
 
     runtime = replace(original_runtime, database=current.database)
     copy_id = int(held.ticket.target_id)
@@ -982,8 +1037,11 @@ async def _resume_local_delivery_end(current, held, original_runtime, assembly):
         raise ConsistencyError("原本地副本校验缺少所属交付")
 
     async def complete_and_save(_control):
+        if not await current_local_read_end(runtime, copy_id, held):
+            return
         copies = RecordingInputCopies(runtime.database, BoundDirectories(staging=runtime.directories.staging),
-            runtime.occurred_at, max_recopies=assembly.max_recopies, file_executor=runtime.file_executor)
+            runtime.occurred_at, max_recopies=assembly.max_recopies, file_executor=runtime.file_executor,
+            read_runtime=runtime)
         step = replace(await _complete_copy(copies, copy_id, None), read_end=held.end,
                        stop_requested=True, content_complete=True)
         await _finish_read_attempt(runtime, assembly, facts, held.ticket, step)
@@ -998,7 +1056,8 @@ async def _copy_delivery(
     """复用资格、续传、分段与完整性事务推进交付拷贝。"""
     copies: RecordingCopies = RecordingInputCopies(
         runtime.database, BoundDirectories(staging=runtime.directories.staging),
-        runtime.occurred_at, max_recopies=max_recopies, file_executor=runtime.file_executor)
+        runtime.occurred_at, max_recopies=max_recopies, file_executor=runtime.file_executor,
+        read_runtime=runtime)
     state = await copies.copy_state(facts["id"])
     if (state.verification_state in _VERIFICATION_DONE
             and state.target_sha256 is not None):
@@ -1068,7 +1127,11 @@ async def _copy_delivery(
                           result.error if result is not None else None)
         end = await stop_read_session(session, original_error=original_error)
         if on_read_end is not None:
-            on_read_end(end, session.position() == state.source_size)
+            import inspect
+            saved = on_read_end(end, session.position() == state.source_size, state)
+            if inspect.isawaitable(saved):
+                from camctl.persistence.business import settle_required
+                await settle_required(saved)
     if result is not None:
         return replace(result, read_end=end, stop_requested=True, content_complete=session.position() == state.source_size)
     if end.error is not None:
@@ -1120,6 +1183,7 @@ async def _finish_read_attempt_phase(
         return
     if step.phase is InputPhase.RECOPY_PENDING:
         # 新轮次已经提交且文件任务已结束；读取尝试和原次数继续承担责任。
+        runtime.pending_read_ends.pop(facts["id"], None)
         from camctl.outputs.read_attempts import ReadContinuation
         runtime.continuing_read_tickets[facts["id"]] = ReadContinuation(ticket, False, step, runtime.occurred_at(), evidence=assembly.evidence)
         runtime.retry_gate.cleared(f"read/{facts['id']}")
@@ -1413,15 +1477,42 @@ async def _advance_local_read(
         current = await runtime.database.read(lambda owned: _read_facts(owned.connection, copy_id))
         if current is None:
             return
-        ticket = await _begin_local_attempt(runtime, current, now, config)
+        from camctl.persistence.repositories.read_end import load_read_end
+        from camctl.outputs.read_attempts import persist_read_end
+        saved = await runtime.database.read(lambda owned: load_read_end(copy_id, owned))
+        ticket = saved[0] if saved is not None else await _begin_local_attempt(runtime, current, now, config)
         if ticket is None:
             return
-        step = await _copy_delivery(runtime, sessions.for_attempt(ticket, control=control), current, None)
+        step = await _copy_delivery(runtime, sessions.for_attempt(ticket, control=control), current, None,
+            read_end=None if saved is None else saved[1],
+            on_read_end=lambda end, complete, state: persist_read_end(runtime, ticket, end, complete,
+                state=state, source_device_file_id=current["source_device_file_id"],
+                source_intermediate_file_id=current["source_intermediate_file_id"],
+                resume=lambda current_runtime, held: _resume_local_host_end(current_runtime, held, runtime, config),
+                                                               evidence=_LOCAL_READ_EVIDENCE))
         await _finish_local_attempt(runtime, current, ticket, step, config)
 
     from camctl.outputs.read_attempts import run_owned_read
 
     await run_owned_read(runtime, copy_id, body)
+
+
+async def _resume_local_host_end(current, held, original_runtime, config):
+    from camctl.outputs.read_attempts import current_local_read_end, run_owned_read
+
+    runtime = replace(original_runtime, database=current.database)
+    copy_id = int(held.ticket.target_id)
+    async def complete_and_save(_control):
+        if not await current_local_read_end(runtime, copy_id, held):
+            return
+        facts = await runtime.database.read(lambda owned: _read_facts(owned.connection, copy_id, include_terminal=True))
+        copies = RecordingInputCopies(runtime.database, BoundDirectories(staging=runtime.directories.staging),
+                                      runtime.occurred_at, file_executor=runtime.file_executor, read_runtime=runtime)
+        step = replace(await _complete_copy(copies, copy_id, None), read_end=held.end,
+                       stop_requested=True, content_complete=True)
+        await _finish_local_attempt(runtime, facts, held.ticket, step, config)
+
+    await run_owned_read(runtime, copy_id, complete_and_save)
 
 
 def _is_inspection_copy_source(connection, facts: Mapping) -> bool:
@@ -1554,6 +1645,7 @@ async def _finish_local_attempt_phase(
         return
     if step.phase is InputPhase.RECOPY_PENDING:
         # 新轮次已登记且本地文件任务已收场；原 READ_FILE attempt 继续负责。
+        runtime.pending_read_ends.pop(facts["id"], None)
         from camctl.outputs.read_attempts import ReadContinuation
         runtime.continuing_read_tickets[facts["id"]] = ReadContinuation(ticket, False, step, runtime.occurred_at(), evidence=_LOCAL_READ_EVIDENCE)
         runtime.retry_gate.cleared(f"read/{facts['id']}")

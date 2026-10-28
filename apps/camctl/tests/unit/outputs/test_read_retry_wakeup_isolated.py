@@ -55,7 +55,7 @@ class RetryWakeupTests(unittest.TestCase):
     def test_discovery_returns_attempt_count_in_candidate_page(self):
         source = SOURCE / "outputs" / "read_discovery.py"
         class Cursor:
-            def fetchall(self): return [(7, 2, 10, 3, 0, "camera", "driver", 8, 0, 1, 1)]
+            def fetchall(self): return [(7, 2, 10, 3, 0, "camera", "driver", 8, 0, 1, 1, 42)]
             def close(self): pass
         class Connection:
             query = None
@@ -69,14 +69,17 @@ class RetryWakeupTests(unittest.TestCase):
             "database_identity": lambda connection: "db", "validate_read_basis": lambda *args: None,
             "_READ_COPY_ELIGIBLE": "eligible", "_READ_FROM": " FROM file_copies fc",
             "closing": __import__("contextlib").closing,
-            "ReadCandidate": lambda *row: SimpleNamespace(attempts_used=row[-2], retry_wait_required=row[-1], key=(0, 0, 0, 0, 0)),
+            "ReadCandidate": lambda *row: SimpleNamespace(attempts_used=row[-3], retry_wait_required=row[-2],
+                read_end_event_id=row[-1], key=(0, 0, 0, 0, 0)),
             "Page": lambda items, position: SimpleNamespace(items=items),
         })
         page = discover(connection, scope, limit=100)
         self.assertIn("r.attempts_used", connection.query)
         self.assertIn("r.retry_wait_required", connection.query)
+        self.assertIn("fc.read_end_event_id", connection.query)
         self.assertEqual(page.items[0].attempts_used, 1)
         self.assertEqual(page.items[0].retry_wait_required, 1)
+        self.assertEqual(page.items[0].read_end_event_id, 42)
 
 
 class BackgroundDeadlineTests(unittest.IsolatedAsyncioTestCase):

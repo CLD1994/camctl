@@ -380,6 +380,15 @@ def _verify_format_constraints(
     )
 
 
+def _verify_read_end_structure(connection) -> None:
+    columns = {row[1]: row for row in connection.execute("PRAGMA table_info(file_copies)")}
+    column = columns.get("read_end_event_id")
+    foreign_keys = tuple(connection.execute("PRAGMA foreign_key_list(file_copies)"))
+    if (column is None or column[2].upper() != "INTEGER" or column[3] != 0
+            or not any(row[2:5] == ("history_events", "read_end_event_id", "id") for row in foreign_keys)):
+        raise DatabaseInvalidError("文件拷贝缺少读取结束事件引用结构")
+
+
 def _verify_structure(connection: sqlite3.Connection, format_version: int) -> None:
     try:
         present = {
@@ -396,6 +405,7 @@ def _verify_structure(connection: sqlite3.Connection, format_version: int) -> No
         if missing:
             raise DatabaseInvalidError(f"状态库缺少必要结构: {sorted(missing)}")
         _verify_format_constraints(connection, format_version)
+        _verify_read_end_structure(connection)
         from camctl.persistence.retry_wait_structure import verify_retry_wait_structure
         try:
             verify_retry_wait_structure(connection)

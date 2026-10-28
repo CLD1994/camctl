@@ -3212,6 +3212,66 @@ async def _closed_capture_is_local(
     return await runtime.database.read(read, description="读取拍摄当前责任")
 
 
+async def _resume_bound_local_read(runtime, action, copy_id, ticket, saved_end):
+    """绑定异常下只推进已结束的本机读取，其他设备责任仍由动作处理。"""
+    if saved_end[0] != ticket:
+        raise ConsistencyError("本机恢复的读取结束与原票据不一致")
+    if runtime.media is None or runtime.recovery_evidence_for is None:
+        return
+    source = await runtime.database.read(lambda owned: owned.connection.execute(
+        "SELECT c.processing_id,c.inspection_id,c.source_device_file_id,ob.device_id,ob.driver_id"
+        " FROM file_copies c JOIN device_files f ON f.id=c.source_device_file_id"
+        " JOIN actions ob ON ob.id=f.observer_action_id WHERE c.id=?", (copy_id,)).fetchone())
+    if source is None:
+        raise ConsistencyError("本机恢复缺少内部拷贝的固定来源")
+    processing_id, inspection_id, source_id, device_id, driver_id = source
+    evidence = runtime.recovery_evidence_for(DeviceBinding(device_id, driver_id), "read")
+    if evidence is None:
+        return
+    from camctl.outputs.read_attempts import (HeldReadEnd, canceled_complete_read_result,
+                                              current_local_read_end, run_owned_read)
+    from camctl.capture.media_flow import _save_internal_read_and_settle
+
+    held = runtime.pending_read_ends.get(copy_id)
+    if held is not None and (held.ticket != ticket or held.end != saved_end[1]):
+        raise ConsistencyError("本机恢复与原拥有者持有的读取结束不一致")
+    if held is None:
+        held = HeldReadEnd(ticket, saved_end[1], saved_end[2], evidence=evidence)
+        runtime.pending_read_ends[copy_id] = held
+    flow = replace(runtime.media, evidence=evidence)
+    if action["cancel_requested"]:
+        async def settle_canceled(_control):
+            if not await current_local_read_end(flow, copy_id, held):
+                return
+            pending = await canceled_complete_read_result(flow, ticket, evidence)
+            if pending is not None:
+                await _save_internal_read_and_settle(flow, pending)
+        if held.resume is None:
+            held = replace(held, resume=lambda current, value:
+                _resume_bound_local_read(replace(runtime, database=current.database), action,
+                                         copy_id, ticket, saved_end))
+            runtime.pending_read_ends[copy_id] = held
+        await run_owned_read(flow, copy_id, settle_canceled)
+    else:
+        from camctl.capture.input_copy import InputContext, OperationConfig
+        from camctl.capture.media_flow import _resume_local_internal_end
+
+        input_context = InputContext(
+            action_id=action["id"], processing_id=processing_id,
+            inspection_id=inspection_id, source_device_file_id=source_id,
+            target_extension=None,
+            config=OperationConfig(flow.max_read_attempts, flow.read_idle_timeout_s,
+                                   flow.retry_interval_s),
+            segment_size=flow.segment_size, staging=flow.roots.staging,
+            copies=flow.copies(), sessions=flow.sessions,
+            occurred_at=runtime.wall_us(), read_end=saved_end[1])
+        if held.resume is None:
+            held = replace(held, resume=lambda current, value:
+                _resume_local_internal_end(current, value, flow, input_context))
+            runtime.pending_read_ends[copy_id] = held
+        await _resume_local_internal_end(flow, held, flow, input_context)
+
+
 async def _handle_binding_failure(
     runtime: CaptureRuntime, action: Mapping[str, Any],
 ) -> bool:
@@ -3273,6 +3333,11 @@ async def _handle_binding_failure(
                 from camctl.outputs.read_attempts import PendingReadBusiness, held_binding_read_result
                 from camctl.capture.media_flow import _save_internal_read_and_settle
 
+                from camctl.persistence.repositories.read_end import load_read_end
+                saved_end = await runtime.database.read(lambda owned: load_read_end(copy_id, owned))
+                if saved_end is not None and saved_end[3] is None:
+                    await _resume_bound_local_read(runtime, action, copy_id, ticket, saved_end)
+                    return True
                 if copy_id in read_scope.pending_read_ends:
                     request = (await _binding_failure_request(runtime, action, details, excluded_run_id=ticket.run_id))
                     business = PendingReadBusiness(runtime.capture.finish_binding_failure, request, new_operation_key())

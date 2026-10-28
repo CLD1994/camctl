@@ -185,12 +185,14 @@ class RecordingInputCopies:
                  occurred_at: Callable[[], int], *,
                  max_recopies: int = 1,
                  file_executor: FileTaskExecutor | None = None,
+                 read_runtime=None,
                  read_discovery_batch_size: int | None = None) -> None:
         self.database = database
         self.roots = roots
         self.occurred_at = occurred_at
         self.max_recopies = max_recopies
         self.file_executor = file_executor
+        self.read_runtime = read_runtime
         self.repository = OutputsRepository() if read_discovery_batch_size is None else OutputsRepository(read_discovery_batch_size)
 
     @staticmethod
@@ -229,10 +231,22 @@ class RecordingInputCopies:
             session=session, executor=self.file_executor))
 
     async def complete(self, copy_id: int, digest):
+        async def save_business(identity, stage, request, save):
+            from camctl.outputs.copy import RecopyDisposition
+            from camctl.outputs.read_attempts import save_read_business
+
+            def applied(value):
+                if stage == "recopy" and value.disposition is RecopyDisposition.REGISTERED:
+                    self.read_runtime.pending_read_ends.pop(identity, None)
+
+            return await save_read_business(self.read_runtime, identity, "copy_" + stage,
+                                            request, save, on_completed=applied)
+
         return await complete_copy(copy_id, CompletionContext(
             repository=self.repository, database=self.database, roots=self.roots,
             occurred_at=self.occurred_at(), digest=digest,
-            max_recopies=self.max_recopies, executor=self.file_executor))
+            max_recopies=self.max_recopies, executor=self.file_executor,
+            save_business=save_business if self.read_runtime is not None else None))
 
 
 class MediaSaveStage(Enum):
@@ -535,7 +549,8 @@ class MediaFlow:
     def copies(self) -> RecordingInputCopies:
         return RecordingInputCopies(
             self.database, self.roots, self.occurred_at, max_recopies=self.max_recopies,
-            file_executor=self.file_executor, read_discovery_batch_size=self.read_discovery_batch_size)
+            file_executor=self.file_executor, read_runtime=self,
+            read_discovery_batch_size=self.read_discovery_batch_size)
 
 
 async def _ensure_checksum_support(
@@ -604,6 +619,13 @@ async def run_recording_media(
     ticket = None
     wait_key = f"read/{copy_id}"
     if state.verification_state not in (3, 5) or state.target_sha256 is None:
+        from camctl.persistence.repositories.read_end import load_read_end
+        saved_end = await flow.database.read(lambda owned: load_read_end(copy_id, owned))
+        if saved_end is not None:
+            from camctl.outputs.read_attempts import HeldReadEnd
+            ticket, end, occurred_at, _ = saved_end
+            flow.pending_read_ends[copy_id] = HeldReadEnd(ticket, end, occurred_at, evidence=flow.evidence)
+    if (state.verification_state not in (3, 5) or state.target_sha256 is None) and ticket is None:
         run = await _read_one(flow.database, "SELECT attempts_used,retry_wait_required FROM operation_runs WHERE copy_id=?", (copy_id,))
         if run is None:
             raise ConsistencyError("内部输入缺少原读取流程")
@@ -625,7 +647,7 @@ async def run_recording_media(
             if reason == "budget_exhausted":
                 await _fail_internal_read_input(flow, copy_id=copy_id)
             return InputStep(InputPhase.WAITING, copy_id=copy_id, reason=reason)
-    from camctl.outputs.read_attempts import hold_read_end
+    from camctl.outputs.read_attempts import persist_read_end
 
     sessions = flow.sessions if ticket is None else flow.sessions.for_attempt(
         ticket, idle_timeout_s=flow.read_idle_timeout_s)
@@ -643,11 +665,18 @@ async def run_recording_media(
         digest=digest,
         read_end=(flow.pending_read_ends[copy_id].end if copy_id in flow.pending_read_ends else None),
         on_read_end=(None if ticket is None else
-            lambda end, complete: hold_read_end(flow, ticket, end, complete,
+            lambda end, complete: persist_read_end(flow, ticket, end, complete,
+                state=state, source_device_file_id=source_device_file_id,
+                source_intermediate_file_id=None,
                 resume=lambda current, held: _resume_local_internal_end(current, held, flow, context),
                 evidence=flow.evidence)),
         on_read_start=lambda: _read_dispatched(flow, copy_id),
     )
+    if ticket is not None and copy_id in flow.pending_read_ends:
+        held = flow.pending_read_ends[copy_id]
+        if held.resume is None:
+            flow.pending_read_ends[copy_id] = replace(held, resume=lambda current, value:
+                _resume_local_internal_end(current, value, flow, context))
 
     async def read_and_save(control):
         current = replace(context, sessions=(sessions if ticket is None else
@@ -709,7 +738,7 @@ async def run_recording_media(
 async def _resume_local_internal_end(current, held, original_flow, original_context):
     """原完整 End 的本地校验与原结果保存；不重开源或推进媒体处理。"""
     from camctl.capture.input_copy import _complete_input
-    from camctl.outputs.read_attempts import run_owned_read
+    from camctl.outputs.read_attempts import current_local_read_end, run_owned_read
 
     flow = replace(original_flow, database=current.database)
     copies = flow.copies()
@@ -717,6 +746,8 @@ async def _resume_local_internal_end(current, held, original_flow, original_cont
     copy_id = int(held.ticket.target_id)
 
     async def complete_and_save(_control):
+        if not await current_local_read_end(flow, copy_id, held):
+            return
         step = replace(await _complete_input(context, copy_id, await copies.copy_state(copy_id)),
                        read_end=held.end, stop_requested=True, content_complete=True)
         await _finish_internal_read(flow, held.ticket, step, diagnostic_context={
@@ -755,6 +786,7 @@ async def _finish_internal_read_result(flow, ticket, step, *, max_attempts, diag
     if not require_preparation_settled(step):
         return
     if step.phase is InputPhase.RECOPY_PENDING:
+        flow.pending_read_ends.pop(step.copy_id, None)
         from camctl.outputs.read_attempts import ReadContinuation
         flow.continuing_read_tickets[step.copy_id] = ReadContinuation(ticket, False, step, flow.occurred_at(), evidence=flow.evidence)
         return
