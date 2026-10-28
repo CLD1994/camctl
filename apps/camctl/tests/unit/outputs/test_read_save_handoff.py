@@ -51,7 +51,7 @@ def world(monkeypatch):
     monkeypatch.setattr(media_flow, 'OutputsRepository', lambda: outputs)
     runtime = SimpleNamespace(
         database=database, operations=operations, pending_read_results={},
-        pending_read_ends={}, pending_read_business={}, continuing_read_tickets={},
+        pending_read_ends={}, pending_read_business={}, continuing_read_tickets={}, pending_segment_inspection_results={},
     )
     return SimpleNamespace(runtime=runtime, database=database, operations=operations,
         outputs=outputs, entered=entered, release=release)
@@ -199,7 +199,8 @@ async def test_internal_result_and_main_resume_share_complete_business_phase(wor
         pending_read_results=world.runtime.pending_read_results,
         pending_read_business=world.runtime.pending_read_business,
         pending_read_ends=world.runtime.pending_read_ends,
-        continuing_read_tickets=world.runtime.continuing_read_tickets))
+        continuing_read_tickets=world.runtime.continuing_read_tickets,
+        pending_segment_inspection_results=world.runtime.pending_segment_inspection_results))
     receipts = await _join_after_release(world, original, resumed)
     assert receipts == [None, None]
     world.operations.finish_attempt.assert_called_once()
@@ -255,7 +256,8 @@ async def test_stopped_observation_and_main_resume_share_original_preparation(wo
         pending_read_results=world.runtime.pending_read_results,
         pending_read_business=world.runtime.pending_read_business,
         pending_read_ends=world.runtime.pending_read_ends,
-        continuing_read_tickets=world.runtime.continuing_read_tickets))
+        continuing_read_tickets=world.runtime.continuing_read_tickets,
+        pending_segment_inspection_results=world.runtime.pending_segment_inspection_results))
     await asyncio.sleep(0)
     release.set()
     receipts = await _join_after_release(world, original, resumed)
@@ -305,7 +307,8 @@ async def test_internal_recovery_reuses_original_result_key_after_failure(world,
         pending_read_results=world.runtime.pending_read_results,
         pending_read_business=world.runtime.pending_read_business,
         pending_read_ends=world.runtime.pending_read_ends,
-        continuing_read_tickets=world.runtime.continuing_read_tickets)
+        continuing_read_tickets=world.runtime.continuing_read_tickets,
+        pending_segment_inspection_results=world.runtime.pending_segment_inspection_results)
     assert all(call.args[:2] == (pending.finish, pending.key)
         for call in world.operations.finish_attempt.call_args_list)
     assert world.operations.finish_attempt.call_count == 2
@@ -334,7 +337,8 @@ async def test_stopped_result_failure_keeps_prepared_phase_and_original_input(wo
         pending_read_results=world.runtime.pending_read_results,
         pending_read_business=world.runtime.pending_read_business,
         pending_read_ends=world.runtime.pending_read_ends,
-        continuing_read_tickets=world.runtime.continuing_read_tickets)
+        continuing_read_tickets=world.runtime.continuing_read_tickets,
+        pending_segment_inspection_results=world.runtime.pending_segment_inspection_results)
     assert world.database.read.await_count == 2
     assert all(call.args[:2] == (prepared.finish, pending.key)
         for call in world.operations.finish_attempt.call_args_list)
@@ -355,7 +359,8 @@ async def test_internal_business_failure_retries_only_original_release_phase(wor
         pending_read_results=world.runtime.pending_read_results,
         pending_read_business=world.runtime.pending_read_business,
         pending_read_ends=world.runtime.pending_read_ends,
-        continuing_read_tickets=world.runtime.continuing_read_tickets)
+        continuing_read_tickets=world.runtime.continuing_read_tickets,
+        pending_segment_inspection_results=world.runtime.pending_segment_inspection_results)
     world.operations.finish_attempt.assert_called_once()
     assert world.outputs.release_read_slot.call_count == 2
     assert all(call.args[:2] == (release.request, release.key)
@@ -445,7 +450,8 @@ async def test_exhausted_internal_read_recovers_original_business_stages(world, 
             pending_read_results=world.runtime.pending_read_results,
             pending_read_business=world.runtime.pending_read_business,
             pending_read_ends=world.runtime.pending_read_ends,
-            continuing_read_tickets=world.runtime.continuing_read_tickets)
+            continuing_read_tickets=world.runtime.continuing_read_tickets,
+            pending_segment_inspection_results=world.runtime.pending_segment_inspection_results)
     if control is None:
         await recover()
     else:

@@ -926,33 +926,50 @@ async def _finish_internal_read_result(flow, ticket, step, *, max_attempts, diag
     await _save_internal_read_and_settle(flow, pending)
 
 
+def internal_read_scope(database, operations, *, pending_read_results, pending_read_business,
+                        pending_read_ends, continuing_read_tickets, pending_segment_inspection_results,
+                        occurred_at=None, file_executor=None, evidence=None):
+    """共享内部 READ 与检查保存的实际拥有者及其待核实容器。"""
+    return SimpleNamespace(database=database, operations=operations, occurred_at=occurred_at,
+        pending_read_results=pending_read_results, pending_read_business=pending_read_business,
+        pending_read_ends=pending_read_ends, continuing_read_tickets=continuing_read_tickets,
+        pending_segment_inspection_results=pending_segment_inspection_results,
+        file_executor=file_executor, evidence=evidence)
+
+
 async def resume_prepared_internal_reads(
     database: BusinessDatabase, *, pending_read_results: dict,
     pending_read_business: dict, pending_read_ends: dict,
-    continuing_read_tickets: dict,
+    continuing_read_tickets: dict, pending_segment_inspection_results: dict, file_executor=None,
+    occurred_at=None,
 ) -> None:
     """默认入口只核实原完整 READ 申请，不取得新设备或媒体执行资格。"""
     prepared = tuple(pending for pending in pending_read_results.values()
                      if isinstance(pending, (PendingReadResult, PendingStoppedRead)))
-    if not prepared and not pending_read_business:
+    if not prepared and not pending_read_business and not pending_segment_inspection_results:
         return
-    scope = SimpleNamespace(
-        database=database, operations=OperationRepository(),
+    scope = internal_read_scope(database, OperationRepository(),
         pending_read_results=pending_read_results, pending_read_business=pending_read_business,
-        pending_read_ends=pending_read_ends, continuing_read_tickets=continuing_read_tickets)
+        pending_read_ends=pending_read_ends, continuing_read_tickets=continuing_read_tickets,
+        pending_segment_inspection_results=pending_segment_inspection_results,
+        file_executor=file_executor, occurred_at=occurred_at)
     for pending in prepared:
         # 完整输入首次确定的原时刻承担其独立收场，重送不读取当前墙钟。
         original_time = (pending.occurred_at if isinstance(pending, PendingStoppedRead)
                          else pending.finish.occurred_at)
         scope.occurred_at = lambda original=original_time: original
         await _save_internal_read_and_settle(scope, pending, retry=True)
+    scope.occurred_at = occurred_at
+    from camctl.capture.segment_inspections import resume_pending_inspection_results
+    await resume_pending_inspection_results(scope)
     await retry_read_business(scope)
 
 
 async def resume_binding_internal_read_ends(
     database: BusinessDatabase, *, pending_read_results: dict,
     pending_read_business: dict, pending_read_ends: dict,
-    continuing_read_tickets: dict, binding_check: Callable, occurred_at: Callable,
+    continuing_read_tickets: dict, pending_segment_inspection_results: dict,
+    binding_check: Callable, occurred_at: Callable, file_executor=None,
 ) -> None:
     """普通与残留入口保存已实际读完、却缺必要源摘要的绑定失败。"""
     from camctl.capture.media import RecordingFailure
@@ -963,21 +980,23 @@ async def resume_binding_internal_read_ends(
     from camctl.persistence.repositories.capture import FinishBindingFailure
 
     # 原完整申请的核实由 prepared 前置负责；失败传播后不会到达本分类。
-    if pending_read_results or pending_read_business:
+    if pending_read_results or pending_read_business or pending_segment_inspection_results:
         return
     action_status = enum_for("actions.status")
     run_status = enum_for("operation_runs.status")
     run_kind = enum_for("operation_runs.kind")
     query_purpose = enum_for("operation_runs.query_purpose")
-    scope = SimpleNamespace(
-        database=database, operations=OperationRepository(),
+    scope = internal_read_scope(database, OperationRepository(),
         pending_read_results=pending_read_results, pending_read_business=pending_read_business,
-        pending_read_ends=pending_read_ends, continuing_read_tickets=continuing_read_tickets)
+        pending_read_ends=pending_read_ends, continuing_read_tickets=continuing_read_tickets,
+        pending_segment_inspection_results=pending_segment_inspection_results, file_executor=file_executor)
     for copy_id, held in tuple(pending_read_ends.items()):
         row = await _read_one(database, "SELECT a.id,a.device_id,a.driver_id,a.status,a.cancel_requested,r.id,r.status,"
             "r.kind,c.delivery_id,f.source_action_id,ob.device_id,ob.driver_id FROM file_copies c"
-            " JOIN recording_processing p ON p.id=c.processing_id"
-            " JOIN actions a ON a.id=p.action_id JOIN operation_runs r ON r.copy_id=c.id"
+            " LEFT JOIN recording_processing p ON p.id=c.processing_id"
+            " LEFT JOIN segment_inspections s ON s.id=c.inspection_id"
+            " JOIN operation_runs r ON r.copy_id=c.id"
+            " JOIN actions a ON a.id=r.action_id AND a.id=COALESCE(p.action_id,s.action_id)"
             " JOIN device_files f ON f.id=c.source_device_file_id"
             " JOIN actions ob ON ob.id=f.observer_action_id WHERE c.id=?", (copy_id,))
         if row is None:

@@ -147,6 +147,24 @@ async def _save_result(flow: MediaFlow, request: InspectionResultSave) -> bool:
     return False
 
 
+async def resume_pending_inspection_results(flow) -> None:
+    """原检查结果回执未知时沿原申请和键核实，再解除对应机会。"""
+    for inspection_id, (request, _key) in tuple(flow.pending_segment_inspection_results.items()):
+        if request.inspection_id != inspection_id:
+            raise ConsistencyError("待核实分段检查申请的身份不符")
+        if not await _save_result(flow, request):
+            continue
+        rows = await flow.database.read(lambda owned: owned.connection.execute(
+            "SELECT id FROM file_copies WHERE inspection_id=? LIMIT 2", (inspection_id,),
+        ).fetchall())
+        if len(rows) > 1:
+            raise ConsistencyError("原分段检查存在多个副本")
+        if rows:
+            if flow.occurred_at is None:
+                raise ConsistencyError("恢复检查释放缺少当前事实时钟")
+            await settle_terminal_inspection_read_slot(flow, rows[0][0], flow.occurred_at())
+
+
 async def settle_inspection_read_failure(flow: MediaFlow, copy_id: int,
                                    occurred_at: int) -> bool:
     """把已可靠终结的 inspection READ 错误写成原检查结果。"""

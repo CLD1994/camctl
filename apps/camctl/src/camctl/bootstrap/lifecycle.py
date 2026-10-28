@@ -143,7 +143,9 @@ async def _resume_read_requests(deps: RuntimeDeps, database) -> None:
         pending_read_results=deps.capture_read_results,
         pending_read_business=deps.capture_read_business,
         pending_read_ends=deps.capture_read_ends,
-        continuing_read_tickets=deps.capture_continuing_reads)
+        continuing_read_tickets=deps.capture_continuing_reads,
+        pending_segment_inspection_results=deps.capture_segment_inspection_results,
+        file_executor=deps.work_files.executor, occurred_at=SystemClock().utc_micros)
     await _resume_capture_requests(deps, database)
 
 
@@ -203,6 +205,8 @@ async def _resume_normal_read_requests(deps: RuntimeDeps, database) -> None:
         pending_read_business=deps.capture_read_business,
         pending_read_ends=deps.capture_read_ends,
         continuing_read_tickets=deps.capture_continuing_reads,
+        pending_segment_inspection_results=deps.capture_segment_inspection_results,
+        file_executor=deps.work_files.executor,
         binding_check=lambda saved: check_binding(saved, deps.config),
         occurred_at=SystemClock().utc_micros)
 

@@ -3253,7 +3253,8 @@ async def _resume_bound_local_read(runtime, action, copy_id, ticket, saved_end):
             pending_read_results=runtime.pending_read_results,
             pending_read_business=runtime.pending_read_business,
             pending_read_ends=runtime.pending_read_ends,
-            continuing_read_tickets=runtime.continuing_read_tickets)
+            continuing_read_tickets=runtime.continuing_read_tickets,
+            pending_segment_inspection_results=runtime.pending_segment_inspection_results)
     else:
         flow = replace(runtime.media, evidence=evidence)
     if action["cancel_requested"]:
@@ -3393,14 +3394,12 @@ async def _handle_binding_failure(
                 if original is None:
                     raise ConsistencyError("内部读取绑定失败缺少原未结束尝试")
                 ticket, intent_id = original
-                read_scope = SimpleNamespace(
-                    recovery_boundary=runtime.recovery_boundary, recovery_max_event_id=runtime.recovery_max_event_id,
-                    continuing_read_tickets=runtime.continuing_read_tickets,
-                    pending_read_results=runtime.pending_read_results, pending_read_ends=runtime.pending_read_ends,
-                    pending_read_business=runtime.pending_read_business, database=runtime.database, operations=runtime.operations,
-                    occurred_at=runtime.wall_us, last_recovery_diagnostic=runtime.last_recovery_diagnostic,
-                    recovery_evidence_for=runtime.recovery_evidence_for,
-                    on_recovery_diagnostic=runtime.record_recovery_diagnostic)
+                read_scope = _read_result_scope(runtime)
+                read_scope.recovery_boundary = runtime.recovery_boundary
+                read_scope.recovery_max_event_id = runtime.recovery_max_event_id
+                read_scope.last_recovery_diagnostic = runtime.last_recovery_diagnostic
+                read_scope.recovery_evidence_for = runtime.recovery_evidence_for
+                read_scope.on_recovery_diagnostic = runtime.record_recovery_diagnostic
                 from camctl.outputs.read_attempts import PendingReadBusiness, held_binding_read_result
                 from camctl.capture.media_flow import _save_internal_read_and_settle
 
@@ -3892,15 +3891,18 @@ async def _advance_record_start(runtime, action, attempt) -> bool:
 
 
 def _read_result_scope(runtime):
-    from types import SimpleNamespace
+    from camctl.capture.media_flow import internal_read_scope
 
-    return SimpleNamespace(database=runtime.database, operations=runtime.operations, occurred_at=runtime.wall_us,
+    return internal_read_scope(runtime.database, runtime.operations, occurred_at=runtime.wall_us,
         pending_read_results=runtime.pending_read_results, pending_read_business=runtime.pending_read_business,
-        pending_read_ends=runtime.pending_read_ends, continuing_read_tickets=runtime.continuing_read_tickets)
+        pending_read_ends=runtime.pending_read_ends, continuing_read_tickets=runtime.continuing_read_tickets,
+        pending_segment_inspection_results=runtime.pending_segment_inspection_results,
+        file_executor=runtime.file_executor, evidence=runtime.evidence)
 
 
 async def _resume_internal_read_results(runtime):
-    pending_maps = (runtime.pending_read_business, runtime.pending_read_results, runtime.pending_read_ends)
+    pending_maps = (runtime.pending_read_business, runtime.pending_read_results, runtime.pending_read_ends,
+                    runtime.pending_segment_inspection_results)
     original = tuple(tuple(pending.items()) for pending in pending_maps)
     if not any(original):
         return False
@@ -3912,6 +3914,8 @@ async def _resume_internal_read_results(runtime):
     (await retry_read_business(scope))
     for pending in tuple(scope.pending_read_results.values()):
         (await _save_internal_read_and_settle(scope, pending))
+    from camctl.capture.segment_inspections import resume_pending_inspection_results
+    await resume_pending_inspection_results(scope)
     await retry_read_ends(scope)
     # 原申请被消费或替换才交付进展；保留原对象的强引用以比较实际拥有权。
     if any(len(pending) != len(items)
