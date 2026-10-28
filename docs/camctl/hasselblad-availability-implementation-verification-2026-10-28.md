@@ -213,3 +213,5 @@ PYTHONPATH=apps/camctl/src /workspaces/camctl/apps/camctl/.venv311/bin/python -m
 wheel 的 SHA-256 为 `74b8beaa213c3b6572f82e0874449b8a3d6fdabc592a83a361a85375b4c92c55`。忽略目录 `.local/delivery/hasselblad-recovery-20261028/` 保存 wheel、依赖导出、27 项逐资源 SHA-256 的 `resource-manifest.json` 和覆盖三项交付文件的 `SHA256SUMS`；清单校验退出码为 0。协调者对比 `831e17e0..1cf7cc43` 后确认公共错误登记变化没有伴随 `status-report.schema.json` 变化，客户端生成报告类型依赖该 Schema，因此无需重生成客户端或 C 资源。
 
 本轮没有安装或运行 camctl，没有初始化数据库、导入 camctl 业务模块或运行测试；Linux x86_64 wheel 构建不代表目标安装版、ARM64／其他平台或真实设备验收，这些范围仍待分别核验。
+
+协调者另行静态审阅项目真机部署 skill 和其 `scripts/deploy.py`：脚本通过当前 wheel 构建钩子同步资源，通过正式 `camctl init` 创建新库，没有复制旧结构或硬编码当前枚举，现有配置整体保留，因此本次无需修改部署脚本。未执行该脚本、安装、初始化或启动现场进程。人工验证应新建当前结构的环境；旧实例接续或数据转换不包含在本次交付。H1—H5 的阶段勾选只表达代码、相应隔离单元及构建范围完成，H6 实际部署和真机验收由用户后续执行。
