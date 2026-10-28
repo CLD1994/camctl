@@ -82,6 +82,10 @@ PYTHONPATH=apps/camctl/src apps/camctl/.venv311/bin/python -m pytest apps/camctl
 
 资源守卫接入普通事务的已验证前序投影后，使用同一环境运行 `PYTHONPATH=apps/camctl/src PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/scheduling/test_preparation_flight_overlay.py apps/camctl/tests/unit/scheduling/test_start_read_exclusion.py apps/camctl/tests/unit/operations/test_intent_run_identity_isolated.py apps/camctl/tests/unit/persistence/test_read_slot_start_isolation.py -q --tb=short -p no:cacheprovider`，退出码为 0，31 项通过。首次组合运行因测试模块缓存共享使 2 项失败、29 项通过；隔离模块引用后重跑通过。测试核对前序创建、结束、关联变化、意图行基数和机会守卫；不证明真实数据库或完整设备调度。
 
+在独立工作区 `/tmp/camctl-h3-availability-coordinator-20261028` 的提交 `ae2bab45`，负责人报告定向隔离单元测试为 247 项及 12 个子测试通过，`git diff --check c3bb1b8f HEAD` 通过。该分支接入检查协调、拍摄与 DEVICE 读取、检查事务和取消恢复，但尚未合入当前分支。测试使用受控枚举和协作者替身，未运行集成测试，未读取真实包资源或访问真实数据库及设备；上述结果不能证明组件组合、历史回放、跨会话恢复或真机行为。
+
+该分支仍需处理完整 READ 已结束后的机会交接、尚未建立活动的拍摄与 READ 的选中竞争、合法 UNKNOWN 耗尽后的有限终结，以及取消与绑定失败的先后语义。顾问已分析前两项读取结束和 UNKNOWN 耗尽的规格边界，相关选择尚待用户答复；这些未完成事项不得以现有局部测试通过替代。
+
 ## H4：公共诊断消费者
 
 在 `/tmp/camctl-h4-diagnostics` 的提交 `0316cb2c` 上，使用 CPython 3.11.17 执行日志单元目录和组件集成目录，分别为 366 项和 296 项通过；补充测试后，受影响单元文件 51 项、集成文件 8 项通过。原始输出分别位于 `/tmp/camctl-h4-diagnostics-unit.log`、`/tmp/camctl-h4-diagnostics-integration.log`、`/tmp/camctl-h4-diagnostics-unit-final.log` 和 `/tmp/camctl-h4-diagnostics-integration-final.log`；集成提交为 `cd7282fb`。测试覆盖公共消费者、原双流、重复交付、满队列和非检查媒体输出隐藏。检查的实际结果拥有者尚未接入该入口，真实设备收场和 HA-11 联合验收尚未完成。
