@@ -829,8 +829,8 @@ def test_host_start_confirms_only_after_local_pair_validation(photo_driver_api):
     api.CapturedArtifact = Artifact
     async def prepare(roots, activity_id): return Path("/staging/capture-work/7")
     validated = []
-    async def verify(roots, activity_id, specs):
-        validated.append(tuple(spec.original_name for spec in specs))
+    async def verify(roots, activity_id, specs, *, trusted_preview_name):
+        validated.append((tuple(spec.original_name for spec in specs), trusted_preview_name))
         return tuple(Artifact(spec) for spec in specs)
     api.prepare_capture_workspace, api.verify_capture_files = prepare, verify
     driver = object.__new__(api.HasselbladDriver)
@@ -857,7 +857,7 @@ def test_host_start_confirms_only_after_local_pair_validation(photo_driver_api):
         output_storage="host", timeout_s=Decimal(10), dispatch_check=dispatch)
     result = _finish_immediate(driver._capture_control(request, prepare_only=False))
     assert result.outcome.status is api.AttemptStatus.SUCCEEDED
-    assert validated == [("a.3FR", "a.3FR.thumbnail.jpg")]
+    assert validated == [(("a.3FR", "a.3FR.thumbnail.jpg"), "a.3FR.thumbnail.jpg")]
     assert next(item for item in result.outcome.observations if item.type == "photo_taken").version == 1
 
 

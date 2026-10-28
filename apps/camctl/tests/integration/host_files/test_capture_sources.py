@@ -149,6 +149,7 @@ async def test_cancel_waits_for_started_file_io_worker_to_finish(
         _roots: BoundDirectories,
         _path: Path,
         _specs: tuple[CaptureFileSpec, ...],
+        _trusted_preview_name: str | None,
     ) -> tuple[CapturedArtifact, ...]:
         entered.set()
         release.wait()

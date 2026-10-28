@@ -138,7 +138,7 @@ def host_files(monkeypatch):
         prepared.append((actual_roots, activity_id))
         return WORKSPACE
 
-    async def verify(actual_roots, activity_id, specs):
+    async def verify(actual_roots, activity_id, specs, *, trusted_preview_name):
         verified.append((actual_roots, activity_id, specs))
         return _artifacts(specs)
 
@@ -587,7 +587,7 @@ async def test_file_verification_failure_keeps_unknown_photo_workspace(host_file
 
     roots, prepared, _verified = host_files
 
-    async def missing_original(_roots, _activity_id, _specs):
+    async def missing_original(_roots, _activity_id, _specs, *, trusted_preview_name):
         raise CaptureFileError("source_open", WORKSPACE / ORIGINAL_NAME, detail="文件不存在")
 
     monkeypatch.setattr(driver_module, "verify_capture_files", missing_original)

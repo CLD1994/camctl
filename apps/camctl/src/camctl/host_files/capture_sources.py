@@ -191,8 +191,10 @@ async def verify_capture_files(
     roots: BoundDirectories,
     activity_id: str,
     specs: tuple[CaptureFileSpec, ...],
+    *,
+    trusted_preview_name: str | None = None,
 ) -> tuple[CapturedArtifact, ...]:
-    """核对工作目录中的普通文件、完整长度及媒体签名，并同步后返回摘要。"""
+    """核对文件事实并同步；可信预览由工具保证媒体内容。"""
     path = workspace_path(roots, activity_id)
     if type(specs) is not tuple or not specs:
         raise CaptureFileError("spec_validation", path, detail="文件规格必须是非空 tuple")
@@ -208,7 +210,9 @@ async def verify_capture_files(
                 detail=f"同一工作目录中的文件名重复: {spec.original_name!r}",
             )
         names.add(spec.original_name)
-    return await _run_file_io(_verify_capture_files, roots, path, specs)
+    if trusted_preview_name is not None and trusted_preview_name not in names:
+        raise CaptureFileError("spec_validation", path, detail="可信预览不在文件规格中")
+    return await _run_file_io(_verify_capture_files, roots, path, specs, trusted_preview_name)
 
 
 async def inspect_capture_candidate(roots: BoundDirectories, activity_id: str,
@@ -276,6 +280,9 @@ async def archive_capture_file(
         workspace,
         artifact,
         target_path,
+        False,
+        None,
+        purpose is not FilePurpose.CAPTURE_PREVIEW,
     )
 
 
@@ -372,6 +379,7 @@ def _verify_capture_files(
     roots: BoundDirectories,
     path: Path,
     specs: tuple[CaptureFileSpec, ...],
+    trusted_preview_name: str | None,
 ) -> tuple[CapturedArtifact, ...]:
     artifacts: list[CapturedArtifact] = []
     identities: set[tuple[int, int]] = set()
@@ -385,6 +393,7 @@ def _verify_capture_files(
                 expected_size=spec.size_bytes,
                 expected_sha256=None,
                 file_kind="source",
+                validate_media=spec.original_name != trusted_preview_name,
             )
             identity = (facts.device, facts.inode)
             if identity in identities:
@@ -410,6 +419,7 @@ def _archive_capture_file(
     target_path: Path,
     result_workspace: bool = False,
     owner=None,
+    validate_media: bool = True,
 ) -> None:
     directory = (_result_workspace_directory if result_workspace else _workspace_directory)
     with directory(roots, workspace, owner=owner) as workspace_fd:
@@ -444,7 +454,7 @@ def _archive_capture_file(
                     artifact.media_type,
                     expected_size=artifact.size_bytes,
                     expected_sha256=artifact.sha256,
-                    file_kind="source", owner=owner,
+                    file_kind="source", owner=owner, validate_media=validate_media,
                 )
 
             if target_stat is not None:
@@ -455,7 +465,7 @@ def _archive_capture_file(
                     artifact.media_type,
                     expected_size=artifact.size_bytes,
                     expected_sha256=artifact.sha256,
-                    file_kind="target", owner=owner,
+                    file_kind="target", owner=owner, validate_media=validate_media,
                 )
                 if source_facts is not None:
                     _unlink_source(
@@ -489,7 +499,7 @@ def _archive_capture_file(
                     artifact.media_type,
                     expected_size=artifact.size_bytes,
                     expected_sha256=artifact.sha256,
-                    file_kind="target", owner=owner,
+                    file_kind="target", owner=owner, validate_media=validate_media,
                 )
             except OSError as failure:
                 raise CaptureFileError(
@@ -541,6 +551,7 @@ def _read_file_facts_at(
     expected_sha256: str | None,
     file_kind: str,
     owner=None,
+    validate_media: bool = True,
 ) -> _FileFacts:
     fd, opened_stat = _open_regular_file_at(
         directory_fd, name, path, f"{file_kind}_open", f"{file_kind}_type", owner=owner
@@ -558,7 +569,7 @@ def _read_file_facts_at(
         digest = hashlib.sha256()
         bytes_read = 0
         header = bytearray()
-        jpeg_boundary = JpegBoundary() if media_type == "image/jpeg" else None
+        jpeg_boundary = JpegBoundary() if validate_media and media_type == "image/jpeg" else None
         while True:
             try:
                 block = os.read(fd, DEFAULT_CHUNK_SIZE_BYTES)
@@ -570,7 +581,7 @@ def _read_file_facts_at(
                 break
             digest.update(block)
             bytes_read += len(block)
-            if len(header) < 4:
+            if validate_media and len(header) < 4:
                 header.extend(block[: 4 - len(header)])
             if jpeg_boundary is not None:
                 jpeg_boundary.feed(block)
@@ -582,7 +593,8 @@ def _read_file_facts_at(
                 path,
                 f"读取长度 {bytes_read}，期望 {expected_size}",
             )
-        _validate_media_signature(media_type, bytes(header), jpeg_boundary, path, file_kind)
+        if validate_media:
+            _validate_media_signature(media_type, bytes(header), jpeg_boundary, path, file_kind)
         sha256 = digest.hexdigest()
         if expected_sha256 is not None and sha256 != expected_sha256:
             raise _file_error(

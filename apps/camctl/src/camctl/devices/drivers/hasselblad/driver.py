@@ -1013,7 +1013,8 @@ class HasselbladDriver:
         steps[-1]["camera_identity"] = {"serial": config.serial, "product_id": config.product_id}
         specs = tuple(CaptureFileSpec(item.host_name, item.size, item.media_type) for item in (response.original, response.preview))
         try:
-            artifacts = await verify_capture_files(roots, activity_id, specs)
+            artifacts = await verify_capture_files(roots, activity_id, specs,
+                trusted_preview_name=response.preview.host_name)
         except CaptureFileError as error:
             return failed("verify_files", error.stage, effect=EffectState.UNKNOWN, extra={"file_error": str(error)})
         if (not isinstance(artifacts, tuple) or len(artifacts) != 2
