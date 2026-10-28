@@ -669,6 +669,9 @@ async def publish_delivery(
         lambda owned: context.repository.load_delivery_state(delivery_id, owned),
         description="交付发布状态读取")
     executor = context.executor if context.executor is not None else FileTaskExecutor(Supervisor())
+    if state.target.file_id in executor.unfinished_files():
+        return DeliveryResult(DeliveryPhase.HELD, DeliveryDecision(
+            DeliveryHandoffOutcome.HOLD, error="file_in_use"))
     with log_context(delivery_id=delivery_id):
         return await executor.run_owned_async_file_task(AsyncFileTask(
             FileTaskId(f"delivery/{delivery_id}/{new_operation_key()}"), (state.target.file_id,),

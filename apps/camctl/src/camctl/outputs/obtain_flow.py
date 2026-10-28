@@ -55,7 +55,7 @@ from camctl.outputs.dispatch import plan_device_work
 from camctl.outputs.diagnostics import record_qualification, record_selection, record_source_resolution
 from camctl.outputs.read_discovery import ReadDiscoveryOwner
 from camctl.outputs.handoff import (
-    DeliveryContext, DeliveryDirectories, DeliveryPhase, publish_delivery)
+    DeliveryContext, DeliveryDirectories, DeliveryHandoffError, DeliveryPhase, publish_delivery)
 from camctl.outputs.qualification import (
     FileCandidate, OperationConfig)
 from camctl.outputs.read_attempts import acquire_read_attempt, recover_unavailable_read, read_failure_details
@@ -621,6 +621,8 @@ async def _publish_and_finish(
         await _publish_delivery(runtime, int(delivery_id), now)
     if await runtime.database.read(lambda owned: _unpublished_deliveries(owned.connection, action_id, limit=1)):
         return len(deliveries)
+    if not await runtime.database.read(lambda owned: _obtain_running(owned.connection, action_id)):
+        return len(deliveries)
     outcome = await _save_repository(runtime, runtime.outputs.finish_obtain, FinishObtain(action_id=action_id, occurred_at=now), new_operation_key())
     if outcome.kind is not DbOutcomeKind.COMPLETED:
         raise db_failure(ConsistencyError,
@@ -651,17 +653,30 @@ def _unpublished_deliveries(connection, action_id: int, *, limit: int, read_succ
         return [int(row[0]) for row in cursor.fetchall()]
 
 
+def _obtain_running(connection, action_id: int) -> bool:
+    with closing(connection.execute(
+        "SELECT 1 FROM actions WHERE id=? AND type=4 AND status=2 AND cancel_requested=0",
+        (action_id,),
+    )) as cursor:
+        return cursor.fetchone() is not None
+
+
 async def _publish_delivery(
         runtime: ObtainRuntime, delivery_id: int, now: int) -> None:
     """发布一份准备完成的交付；终局失败按已保存事实保留。"""
     with measure_stage("obtain.publication", delivery_id=delivery_id,
                        database_id=runtime.database.metadata.instance_id):
-        result = await publish_delivery(delivery_id, DeliveryContext(
-            repository=runtime.outputs, database=runtime.database,
-            directories=runtime.directories, occurred_at=now, executor=runtime.file_executor))
+        try:
+            result = await publish_delivery(delivery_id, DeliveryContext(
+                repository=runtime.outputs, database=runtime.database,
+                directories=runtime.directories, occurred_at=now, executor=runtime.file_executor))
+        except DeliveryHandoffError as error:
+            if error.stage in ("owner_canceled", "owner_not_running"):
+                return
+            raise
     if result.phase not in (
             DeliveryPhase.PUBLISHED, DeliveryPhase.FAILED_FINAL,
-            DeliveryPhase.NOT_ACTIVE):
+            DeliveryPhase.NOT_ACTIVE, DeliveryPhase.HELD):
         raise ConsistencyError(
             f"交付发布处于未决状态: delivery={delivery_id}"
             f" phase={result.phase.value}")

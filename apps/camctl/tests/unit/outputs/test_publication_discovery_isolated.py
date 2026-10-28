@@ -101,16 +101,22 @@ class Cursor:
     def fetchall(self):
         return self.rows
 
+    def fetchone(self):
+        return self.rows[0] if self.rows else None
+
     def close(self):
         pass
 
 
 class Connection:
     """只解释候选查询所需的 SQL 参数，不打开数据库。"""
-    def __init__(self, rows):
+    def __init__(self, rows, active=True):
         self.rows = rows
+        self.active = active
 
     def execute(self, sql, parameters):
+        if sql.startswith('SELECT 1 FROM actions'):
+            return Cursor([(1,)] if self.active else [])
         action, *statuses, limit = parameters
         if 'd.status IN' not in sql:
             assert len(statuses) == 1
@@ -186,3 +192,29 @@ class PublicationFlowTests(unittest.IsolatedAsyncioTestCase):
         runtime = SimpleNamespace(database=Database())
         with patch.dict(sys.modules, modules):
             self.assertEqual(await flow._publish_and_finish(runtime, 7, 20, publish_limit=1), 0)
+
+    async def test_canceled_action_is_not_finished_by_old_publication_round(self):
+        flow, modules = load_flow()
+        db = Connection([], active=False)
+        class Database:
+            async def read(self, callback):
+                return callback(SimpleNamespace(connection=db))
+        modules['camctl.outputs.obtain_summary'].decide_obtain_finish = lambda _: SimpleNamespace(may_publish=True)
+        flow.load_obtain_facts = lambda conn, action: object()
+        runtime = SimpleNamespace(database=Database())
+        with patch.dict(sys.modules, modules):
+            self.assertEqual(await flow._publish_and_finish(runtime, 7, 20, publish_limit=1), 0)
+
+    async def test_owner_canceled_publication_is_handed_to_cancellation(self):
+        from contextlib import nullcontext
+        flow, _ = load_flow()
+        class DeliveryError(Exception):
+            def __init__(self, stage): self.stage = stage
+        async def publish(*args): raise DeliveryError('owner_canceled')
+        flow.DeliveryHandoffError = DeliveryError
+        flow.measure_stage = lambda *args, **kwargs: nullcontext()
+        flow.publish_delivery = publish
+        flow.DeliveryContext = lambda **kwargs: kwargs
+        runtime = SimpleNamespace(outputs=object(), database=SimpleNamespace(metadata=SimpleNamespace(instance_id='db')),
+                                  directories=object(), file_executor=None)
+        self.assertIsNone(await flow._publish_delivery(runtime, 19, 100))

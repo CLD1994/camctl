@@ -661,6 +661,7 @@ def cancel_flow(
     pending_origin_settlements = {}
     pending_canceled_publications = {}
     canceled_publication_scans = {}
+    canceled_publication_diagnostics = {}
     pending_obtain_settlements = {}
     target_cursor = 0
     withdrawal_cursor = 0
@@ -688,6 +689,7 @@ def cancel_flow(
                 raise StateDbFailure("原取消发布保存责任属于另一状态库")
             target_cursor = withdrawal_cursor = 0
             canceled_publication_scans.clear()
+            canceled_publication_diagnostics.clear()
             cursor_database = database.metadata.instance_id
         if any(identity[0] != database.metadata.instance_id for identity in pending_origin_settlements):
             raise StateDbFailure("原取消收场申请属于另一状态库")
@@ -729,7 +731,7 @@ def cancel_flow(
         publication_context = CanceledPublicationContext(database, OutputsRepository(),
             DeliveryDirectories(staging, ready, processing), withdrawal_context,
             executor, occurred, pending_canceled_publications, canceled_publication_scans,
-            batch_size=discovery_limit, wake=wake_publication)
+            canceled_publication_diagnostics, batch_size=discovery_limit, wake=wake_publication)
 
         async def reconcile_publications(action_id):
             return await reconcile_canceled_obtain(action_id, publication_context)

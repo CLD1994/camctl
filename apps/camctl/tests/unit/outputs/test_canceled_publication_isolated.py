@@ -557,7 +557,7 @@ def load_canceled_runtime():
     names = ('camctl.contracts.enums', 'camctl.contracts.values', 'camctl.host_files.tasks',
              'camctl.logging_runtime.diagnostics', 'camctl.outputs.handoff', 'camctl.outputs.withdrawal',
              'camctl.persistence.models', 'camctl.persistence.repositories.outputs',
-             'camctl.outputs.read_discovery')
+             'camctl.outputs.read_discovery', 'camctl.operations.models')
     modules = {}
     for name in names:
         module = ModuleType(name)
@@ -573,7 +573,10 @@ def load_canceled_runtime():
     modules['camctl.contracts.values'].ConsistencyError = type('ConsistencyError', (Exception,), {})
     modules['camctl.contracts.values'].new_operation_key = lambda: 'key'
     modules['camctl.persistence.models'].DbOutcomeKind = SimpleNamespace(COMPLETED='completed')
-    modules['camctl.outputs.withdrawal']._failure = lambda identity, detail, **kwargs: {'id': identity, 'detail': detail}
+    modules['camctl.outputs.withdrawal']._failure = lambda identity, detail, **kwargs: {
+        'code': 'withdrawal_unconfirmed', 'stage': 'publication',
+        'details': {'delivery_id': str(identity), 'error': detail}}
+    modules['camctl.operations.models'].ErrorValue = lambda code, stage, details: SimpleNamespace(code=code, stage=stage, details=details)
     class Task:
         def __init__(self, task_id, file_ids, stage, business, body, **kwargs): self.body = body
     modules['camctl.host_files.tasks'].AsyncFileTask = Task
@@ -642,6 +645,10 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
         state = SimpleNamespace(action_id=7, target=SimpleNamespace(file_id=23), facts=facts)
         absent = handoff.LocationObservation(True, False)
         calls, locked = [], False
+        diagnostics = []
+        actual_error = OSError('observation failed')
+        failed = handoff.LocationObservation(False, error=actual_error)
+        module.record_error = lambda error, **kwargs: diagnostics.append((error, kwargs))
         class Executor:
             def unfinished_files(self): return ()
             async def run_owned_async_file_task(self, task):
@@ -650,7 +657,7 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 result = await task.body(None)
                 locked = False
                 return result
-        async def observe(function, *args): return handoff.DeliveryLocations(absent, absent, absent)
+        async def observe(function, *args): return handoff.DeliveryLocations(absent, failed, absent)
         async def withdraw(identity, context):
             self.assertFalse(locked)
             calls.append('withdraw')
@@ -677,6 +684,12 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict(sys.modules, modules):
             self.assertEqual(await module.reconcile_canceled_obtain(7, context), ())
         self.assertEqual(calls, ['requested', 'unknown', 'withdraw'])
+        self.assertEqual(len(diagnostics), 1)
+        error, data = diagnostics[0]
+        self.assertEqual((error.code, error.stage), ('withdrawal_unconfirmed', 'publication'))
+        self.assertEqual(error.details['delivery_id'], '19')
+        self.assertIn('observation failed', error.details['error'])
+        self.assertIs(data['details']['observation_errors'][0], actual_error)
 
     async def test_unknown_save_retries_original_request_and_operation_key(self):
         module, _, modules = load_canceled_runtime()
@@ -691,10 +704,11 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
         class Repository:
             def save_publication(self, request, key, owned): requests.append(request)
         context = SimpleNamespace(database=Database(), repository=Repository(), pending={})
-        original, replacement = object(), object()
+        original, replacement, diagnostic = object(), object(), object()
         with patch.dict(sys.modules, modules):
             with self.assertRaises(RuntimeError):
-                await module._save(context, (19, 'publication'), 7, 19, 'save_publication', original)
+                await module._save(context, (19, 'publication'), 7, 19, 'save_publication', original, diagnostic)
+            self.assertIs(context.pending[(19, 'publication')].diagnostic, diagnostic)
             await module._save(context, (19, 'publication'), 7, 19, 'save_publication', replacement)
         self.assertEqual(received, ['key', 'key'])
         self.assertEqual(requests, [original, original])
@@ -821,3 +835,160 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict(sys.modules, modules):
             self.assertEqual(await module.reconcile_canceled_obtain(7, context), ())
         self.assertEqual(calls, [19])
+
+    def test_existing_intent_cannot_start_move_after_cancel_takes_effect(self):
+        repo = load_repository()
+        repo.saved_transaction_events = lambda connection, key: None
+        repo.IntentDisposition = SimpleNamespace(ALREADY='already', SKIPPED='skipped')
+        repo.IntentSaveOutcome = lambda disposition, reason=None: SimpleNamespace(disposition=disposition, reason=reason)
+        repo._read_owner_eligible = lambda action: action['status'] == 2 and action['cancel_requested'] == 0
+        command = object.__new__(repo._PublicationIntentCommand)
+        command._key = 'key'
+        command._request = SimpleNamespace(delivery_id=19)
+        command._load_delivery = lambda connection, identity: ({'id': 19, 'status': 4, 'publication_intent_event_id': 90}, None)
+        command._owner_action = lambda connection, delivery: {'status': 2, 'cancel_requested': 1}
+        command._decision = lambda result, **kwargs: SimpleNamespace(result=result)
+        result = command.plan(SimpleNamespace(connection=object())).result
+        self.assertEqual((result.disposition, result.reason), ('skipped', 'cancel_requested'))
+        command._owner_action = lambda connection, delivery: {'status': 2, 'cancel_requested': 0}
+        repo.delivery_read_succeeded = lambda connection, identity: False
+        result = command.plan(SimpleNamespace(connection=object())).result
+        self.assertEqual((result.disposition, result.reason), ('skipped', 'read_result_unconfirmed'))
+        repo.delivery_read_succeeded = lambda connection, identity: True
+        result = command.plan(SimpleNamespace(connection=object())).result
+        self.assertEqual(result.disposition, 'already')
+
+    async def test_file_becoming_busy_during_state_read_waits_without_admitting_task(self):
+        module, handoff, modules = load_canceled_runtime()
+        state = SimpleNamespace(action_id=7, target=SimpleNamespace(file_id=23), facts=handoff.DeliveryFacts(
+            19, Status.PUBLISHING, publication_intent_event_id=90, prepared_size=4, prepared_sha256='a' * 64))
+        class Executor:
+            count = 0
+            def unfinished_files(self):
+                self.count += 1
+                return () if self.count == 1 else (23,)
+            async def run_owned_async_file_task(self, task):
+                raise AssertionError('已有文件任务，不能再次派发')
+        class Repository:
+            def load_delivery_state(self, identity, owned): return state
+        class Cursor:
+            def fetchall(self): return [(19, 21, 23, 1, 4)]
+            def close(self): pass
+        class Database:
+            async def read(self, callback, **kwargs):
+                return callback(SimpleNamespace(connection=SimpleNamespace(execute=lambda sql, args: Cursor())))
+        context = module.CanceledPublicationContext(Database(), Repository(), object(), object(), Executor(), lambda: 100, {})
+        with patch.dict(sys.modules, modules):
+            self.assertIsNone(await module.reconcile_canceled_obtain(7, context))
+
+    def test_finish_reports_canceled_action_without_writing_a_normal_outcome(self):
+        repo = load_repository()
+        repo._OBTAIN_TYPE = 4
+        repo._ACTION_STATUS = SimpleNamespace(RUNNING=2)
+        repo._ACTION_TERMINAL = (3, 4, 5, 6)
+        repo.saved_transaction_events = lambda connection, key: None
+        repo.CommandPlan = lambda **kwargs: SimpleNamespace(**kwargs)
+        repo.row_facts = lambda connection, table, identity: {
+            'id': 7, 'type': 4, 'status': 6, 'cancel_requested': 1}
+        command = object.__new__(repo._FinishObtainCommand)
+        command._key = 'key'
+        command._command = SimpleNamespace(action_id=7)
+        command._state = {'actions': {}}
+        command._owners = {}
+        result = command.plan(SimpleNamespace(connection=object()))
+        self.assertTrue(result.read_only)
+        self.assertEqual(result.result.disposition.value, 'skipped')
+        self.assertIsNone(result.result.prepared)
+        self.assertIsNone(result.result.failed)
+
+    def test_finish_original_key_recovers_even_if_action_now_canceled(self):
+        repo = load_repository()
+        repo.saved_transaction_events = lambda connection, key: ['original']
+        command = object.__new__(repo._FinishObtainCommand)
+        command._key = 'key'
+        command._reuse = lambda connection, events: ('recovered', events)
+        self.assertEqual(command.plan(SimpleNamespace(connection=object())), ('recovered', ['original']))
+
+    def test_new_key_for_normal_terminal_action_uses_original_completion(self):
+        repo = load_repository()
+        repo._OBTAIN_TYPE = 4
+        repo._ACTION_STATUS = SimpleNamespace(RUNNING=2)
+        repo._ACTION_TERMINAL = (3, 4, 5, 6)
+        repo.saved_transaction_events = lambda connection, key: None
+        repo.row_facts = lambda connection, table, identity: {
+            'id': 7, 'type': 4, 'status': 3, 'cancel_requested': 0}
+        command = object.__new__(repo._FinishObtainCommand)
+        command._key = 'new-key'
+        command._command = SimpleNamespace(action_id=7)
+        command._state = {'actions': {}}
+        command._recover = lambda connection, action: ('already', action['status'])
+        self.assertEqual(command.plan(SimpleNamespace(connection=object())), ('already', 3))
+
+    async def test_normal_publication_waits_when_cancel_owns_original_file(self):
+        module = load_handoff()
+        class Database:
+            async def read(self, callback, **kwargs):
+                return SimpleNamespace(target=SimpleNamespace(file_id=23))
+        class Executor:
+            def unfinished_files(self): return (23,)
+            async def run_owned_async_file_task(self, task):
+                raise AssertionError('已有文件任务，不能再次派发')
+        context = module.DeliveryContext(repository=object(), database=Database(),
+            directories=object(), occurred_at=100, executor=Executor())
+        result = await module.publish_delivery(19, context)
+        self.assertEqual(result.phase.value, 'held')
+        self.assertEqual(result.decision.error, 'file_in_use')
+
+    async def test_unknown_commit_retry_emits_original_diagnostic_once(self):
+        module, handoff, modules = load_canceled_runtime()
+        module.db_failure = lambda *args: RuntimeError('unknown commit')
+        original_error = OSError('ready inaccessible')
+        absent = handoff.LocationObservation(True, False)
+        failed = handoff.LocationObservation(False, error=original_error)
+        async def observe(function, *args): return handoff.DeliveryLocations(absent, failed, absent)
+        async def withdraw(identity, context): return True
+        module.asyncio, module.withdraw_delivery = SimpleNamespace(to_thread=observe), withdraw
+        records, states, saved_keys = [], set(), []
+        def record(error, **kwargs):
+            identity = id(kwargs['state'])
+            if identity not in states:
+                states.add(identity)
+                records.append((error, kwargs))
+        module.record_error = record
+        actual = {'withdrawal': 1, 'unknown_calls': 0}
+        class Executor:
+            def unfinished_files(self): return ()
+            async def run_owned_async_file_task(self, task): return await task.body(None)
+        class Repository:
+            def load_delivery_state(self, identity, owned):
+                return SimpleNamespace(action_id=7, target=SimpleNamespace(file_id=23),
+                    facts=handoff.DeliveryFacts(19, Status.PUBLISHING, publication_intent_event_id=90,
+                        prepared_size=4, prepared_sha256='a' * 64, withdrawal_requested=actual['withdrawal'] != 1))
+            def advance_withdrawal(self, request, key, owned):
+                saved_keys.append((request.choice.value, key))
+                if request.choice.value == 'unknown':
+                    actual['unknown_calls'] += 1
+                    if actual['unknown_calls'] == 1: return SimpleNamespace(kind='unknown', value=None)
+                    actual['withdrawal'] = 6
+                return SimpleNamespace(kind='completed', value=True)
+        class Cursor:
+            def __init__(self, sql): self.sql = sql
+            def fetchall(self):
+                return [(19, 21, 23, actual['withdrawal'], 4)] if 'SELECT d.id' in self.sql else []
+            def fetchone(self): return (4, actual['withdrawal'])
+            def close(self): pass
+        class Database:
+            async def read(self, callback, **kwargs):
+                return callback(SimpleNamespace(connection=SimpleNamespace(execute=lambda sql, args: Cursor(sql))))
+            async def write(self, callback, **kwargs): return callback(None)
+        context = module.CanceledPublicationContext(Database(), Repository(), object(), object(), Executor(), lambda: 100, {})
+        with patch.dict(sys.modules, modules):
+            with self.assertRaises(RuntimeError):
+                await module.reconcile_canceled_obtain(7, context)
+            self.assertIsNotNone(context.pending[(19, 'withdrawal_unknown')].diagnostic)
+            self.assertEqual(await module.reconcile_canceled_obtain(7, context), ())
+        self.assertEqual([pair[0] for pair in saved_keys], ['requested', 'unknown', 'unknown'])
+        self.assertEqual(saved_keys[1][1], saved_keys[2][1])
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0][0].code, 'withdrawal_unconfirmed')
+        self.assertIs(records[0][1]['details']['observation_errors'][0], original_error)

@@ -10,12 +10,13 @@ from typing import Any
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.host_files.tasks import AsyncFileTask, FileTaskId
-from camctl.logging_runtime.diagnostics import record_error
+from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
 from camctl.outputs.handoff import (
     AdvanceWithdrawal, DeliveryDirectories, PublicationSaveRequest,
     WithdrawalChoice, _observe_locations, reconcile_canceled_publication,
 )
 from camctl.outputs.withdrawal import _failure, withdraw_delivery
+from camctl.operations.models import ErrorValue
 from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE
 from camctl.persistence.models import DbOutcomeKind, db_failure
 from camctl.persistence.repositories.outputs import EnsureWithdrawalWaiter
@@ -31,6 +32,7 @@ class _PendingSave:
     method: str
     request: Any
     key: Any
+    diagnostic: Any = None
 
 
 @dataclass
@@ -43,6 +45,7 @@ class CanceledPublicationContext:
     occurred_at: Any
     pending: dict
     scans: dict = field(default_factory=dict)
+    diagnostics: dict = field(default_factory=dict)
     batch_size: int = DEFAULT_BATCH_SIZE
     wake: Any = None
     remaining: int | None = None
@@ -61,10 +64,10 @@ class _Scan:
     staging: dict = field(default_factory=dict)
 
 
-async def _save(context, identity, action_id, delivery_id, method, request):
+async def _save(context, identity, action_id, delivery_id, method, request, diagnostic=None):
     pending = context.pending.get(identity)
     if pending is None:
-        pending = _PendingSave(action_id, delivery_id, method, request, new_operation_key())
+        pending = _PendingSave(action_id, delivery_id, method, request, new_operation_key(), diagnostic)
         context.pending[identity] = pending
     elif (pending.action_id, pending.delivery_id, pending.method) != (action_id, delivery_id, method):
         raise ConsistencyError("取消发布的原保存责任身份不一致")
@@ -149,8 +152,6 @@ async def reconcile_canceled_obtain(action_id: int, context: CanceledPublication
         async def unknown(identity, locations):
             failures = tuple(item.error for item in (locations.staging, locations.ready, locations.processing)
                              if isinstance(item.error, BaseException))
-            for error in failures:
-                record_error(error, stage="delivery_observation", context={"delivery_id": identity})
             detail = []
             present = []
             for name in ("staging", "ready", "processing"):
@@ -173,13 +174,24 @@ async def reconcile_canceled_obtain(action_id: int, context: CanceledPublication
             if not detail:
                 detail.append("原撤回结果尚未可靠保存")
             error = _failure(identity, "; ".join(detail), unknown=True)
+            diagnostic = context.diagnostics.setdefault(identity, DiagnosticState())
+            record_error(ErrorValue(error["code"], error["stage"], error["details"]),
+                stage="delivery_observation", context={"delivery_id": identity,
+                    "action_id": action_id, "file_id": int(file_id)}, state=diagnostic,
+                details={"observation_errors": failures,
+                    "locations": {name: {"observed": item.observed, "present": item.present,
+                        "length": item.length, "sha256": item.sha256}
+                        for name, item in (("staging", locations.staging),
+                                           ("ready", locations.ready),
+                                           ("processing", locations.processing))}})
             if withdrawal_state == int(_WITHDRAWAL.NOT_REQUESTED):
                 request = AdvanceWithdrawal(identity, WithdrawalChoice.REQUESTED, context.occurred_at())
                 await _save(context, (identity, "withdrawal_request"), action_id, identity,
-                            "advance_withdrawal", request)
+                            "advance_withdrawal", request, diagnostic)
             request = AdvanceWithdrawal(identity, WithdrawalChoice.UNKNOWN, context.occurred_at(), error)
             await _save(context, (identity, "withdrawal_unknown"), action_id, identity,
-                        "advance_withdrawal", request)
+                        "advance_withdrawal", request, diagnostic)
+            context.diagnostics.pop(identity, None)
 
         async def waiters(identity):
             waiter_limit = min(context.batch_size, context.waiter_remaining)
@@ -210,6 +222,7 @@ async def reconcile_canceled_obtain(action_id: int, context: CanceledPublication
             if status not in (int(_DELIVERY.PUBLISHING), int(_DELIVERY.PUBLISHED)):
                 return None
             if status == int(_DELIVERY.PUBLISHED) or withdrawal_state == int(_WITHDRAWAL.UNKNOWN):
+                context.diagnostics.pop(int(delivery_id), None)
                 if not await waiters(int(delivery_id)):
                     return False
                 await withdraw(int(delivery_id))
@@ -220,6 +233,8 @@ async def reconcile_canceled_obtain(action_id: int, context: CanceledPublication
                 confirm_handoff=confirm, save_unknown=unknown,
                 ensure_waiters=waiters, withdraw=withdraw)
 
+        if int(file_id) in context.executor.unfinished_files():
+            return None
         result = await context.executor.run_owned_async_file_task(AsyncFileTask(
             FileTaskId(f"cancel-publication/{delivery_id}/{new_operation_key()}"),
             (int(file_id),), "cancel_publication", "取消发布的原文件对账", body,

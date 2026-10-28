@@ -3794,14 +3794,13 @@ class _PublicationIntentCommand(_DeliveryPublicationMixin):
         if saved is not None:
             return self._reuse(saved)
         delivery, _copy = self._load_delivery(connection, self._request.delivery_id)
-        if delivery["status"] == int(_DELIVERY_STATUS.PUBLISHING) \
-                and delivery["publication_intent_event_id"] is not None:
-            return self._decision(
-                IntentSaveOutcome(IntentDisposition.ALREADY), read_only=True)
-        if delivery["status"] != int(_DELIVERY_STATUS.PREPARED):
+        publishing = delivery["status"] == int(_DELIVERY_STATUS.PUBLISHING)
+        if not publishing and delivery["status"] != int(_DELIVERY_STATUS.PREPARED):
             raise ConsistencyError(
                 "交付未处于准备完成状态，不能保存发布意图:"
                 f" {delivery['status']!r}")
+        if publishing and delivery["publication_intent_event_id"] is None:
+            raise ConsistencyError("发布中的交付缺少原发布意图")
         action = self._owner_action(connection, delivery)
         if action["cancel_requested"] == 1:
             return self._decision(
@@ -3817,6 +3816,9 @@ class _PublicationIntentCommand(_DeliveryPublicationMixin):
             return self._decision(
                 IntentSaveOutcome(IntentDisposition.SKIPPED, reason="read_result_unconfirmed"),
                 read_only=True)
+        if publishing:
+            return self._decision(
+                IntentSaveOutcome(IntentDisposition.ALREADY), read_only=True)
         allocation = scope.allocate(1)
         event = _envelope(
             allocation.first_event_id, allocation.txn_id,
@@ -5425,16 +5427,17 @@ class ObtainFinishDisposition(Enum):
 
     SAVED = "saved"
     ALREADY = "already"
+    SKIPPED = "skipped"
 
 
 @dataclass(frozen=True)
 class ObtainFinishResult:
-    """取回完成登记的已保存事实。"""
+    """取回完成登记的结果；取消优先时汇总字段不适用。"""
 
     action_status: int
-    plan_status: int
-    prepared: int
-    failed: int
+    plan_status: int | None
+    prepared: int | None
+    failed: int | None
     disposition: ObtainFinishDisposition = ObtainFinishDisposition.SAVED
 
 
@@ -5805,10 +5808,11 @@ class _FinishObtainCommand:
         if action["type"] != _OBTAIN_TYPE:
             raise TransactionError(f"动作不是取回动作: {command.action_id}")
         self._state["actions"][command.action_id] = action
-        if action["status"] == int(_ACTION_STATUS.RUNNING) \
-                and action["cancel_requested"]:
-            raise TransactionError(
-                f"取消请求已生效的取回动作不能保存终态: {command.action_id}")
+        if action["cancel_requested"]:
+            return CommandPlan(events=(), owners=self._owners, state_rows=self._state,
+                read_only=True, result=ObtainFinishResult(
+                    action_status=action["status"], plan_status=None, prepared=None, failed=None,
+                    disposition=ObtainFinishDisposition.SKIPPED))
         if action["status"] in _ACTION_TERMINAL:
             return self._recover(connection, action)
         if action["status"] != int(_ACTION_STATUS.RUNNING):
