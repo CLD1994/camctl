@@ -434,3 +434,70 @@ def test_admission_keeps_same_record_and_receipt_for_redelivery():
             assert m.diagnostic_reference_for(state)['diagnostic_ref'] == json.loads(record.message)['diagnostic_id']
         assert records == [record]
         assert state.status is m.DiagnosticStatus.ADMITTED
+
+def graph_root():
+    child = ValueError('specific child')
+    parent = RuntimeError('specific parent')
+    parent.__cause__ = child
+    parent.__context__ = child
+    return parent
+
+def test_preencoded_graphs_rebase_at_actual_nodes_and_leave_plain_ref_alone():
+    with isolated() as m:
+        first = graph_root()
+        second = RuntimeError('self node')
+        second.__cause__ = second
+        raw = m.exception_diagnostic(first)
+        raw_self = m.exception_diagnostic(second)
+        original = json.loads(json.dumps(raw))
+        wrapper = m.DiagnosticError('outer', diagnostic_details={
+            'causes': [raw], 'segment_result': {'failure': raw_self},
+            'user_data': {'$ref': '#/external-contract'}})
+        _, doc = document(m, lambda: m.record_error(wrapper, stage='test'))
+        details = doc['error']['diagnostic_details']
+        cause = details['causes'][0]
+        assert resolve(doc, cause['context']) == cause['cause']
+        assert cause['cause']['message'] == 'specific child'
+        failure = details['segment_result']['failure']
+        assert resolve(doc, failure['cause']) == failure
+        assert failure['message'] == 'self node'
+        assert details['user_data'] == {'$ref': '#/external-contract'}
+        assert json.loads(json.dumps(raw)) == original
+
+def test_record_format_failure_graph_uses_actual_envelope_root():
+    failure = graph_root()
+    class BrokenMessage(Exception):
+        def __str__(self): raise failure
+    with isolated() as m:
+        _, doc = document(m, lambda: m.record_error(BrokenMessage('raw'), stage='test'))
+        graph = doc['diagnostic_format_error']
+        assert resolve(doc, graph['context']) == graph['cause']
+        assert graph['cause']['arguments'] == ['specific child']
+
+def test_logger_message_format_error_graph_uses_actual_field_root():
+    failure = graph_root()
+    class BrokenMessage:
+        def __str__(self): raise failure
+    with isolated() as m:
+        context = SimpleNamespace(fields={}, fallback=lambda message: None)
+        record, _ = m.test_logger._prepare('test', 40, '%s', (BrokenMessage(),), context=context,
+                                            extra=None, exc_info=False, stack_info=False, stacklevel=1, source=None)
+        doc = json.loads(record.message)
+        graph = doc['message_format_error']
+        assert resolve(doc, graph['context']) == graph['cause']
+        assert graph['cause']['arguments'] == ['specific child']
+
+def test_logger_encoding_error_graph_uses_actual_field_root():
+    failure = graph_root()
+    with isolated() as m:
+        actual_dumps = json.dumps
+        attempts = []
+        def controlled_dumps(*args, **kwargs):
+            attempts.append(True)
+            if len(attempts) == 1: raise failure
+            return actual_dumps(*args, **kwargs)
+        with patch.object(m.test_logger.json, 'dumps', controlled_dumps):
+            doc = json.loads(m.test_logger._encode({'message': 'x'}))
+        graph = doc['diagnostic_format_error']
+        assert resolve(doc, graph['context']) == graph['cause']
+        assert graph['cause']['arguments'] == ['specific child']
