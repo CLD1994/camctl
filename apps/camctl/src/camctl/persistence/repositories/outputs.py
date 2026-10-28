@@ -5014,6 +5014,10 @@ class _RetentionReleaseCommand(_WorkFileMixin):
         if owner["status"] not in allowed:
             raise ConsistencyError(
                 f"归属尚未进入允许释放的终态: {owner['status']!r}")
+        if table == "actions":
+            from camctl.outputs.photo_cache_reuse import photo_cache_waiters_settled
+            if not photo_cache_waiters_settled(file["id"], SimpleNamespace(connection=connection)):
+                raise ConsistencyError("照片角色缓存仍被 H 时固定的取回使用")
         self._require_stopped_operations(connection, file)
         row = _update(
             "intermediate_files", file["id"],
@@ -5313,6 +5317,9 @@ def _load_work_file_facts(owned: OwnedConnection, file_id: int) -> WorkFileFacts
             raise ConsistencyError(
                 f"中间文件的归属动作缺失: {file['owner_action_id']}")
         owner_finished = action["status"] in _WorkFileMixin._TERMINAL_ACTIONS
+        if owner_finished and file["purpose"] in (int(_PURPOSE.CAPTURE_ORIGINAL), int(_PURPOSE.CAPTURE_PREVIEW)):
+            from camctl.outputs.photo_cache_reuse import photo_cache_waiters_settled
+            owner_finished = photo_cache_waiters_settled(file_id, owned)
         if file["purpose"] == int(_PURPOSE.RECORDING_INPUT):
             with closing(connection.execute(
                 "SELECT inspection_id FROM file_copies"
@@ -6540,6 +6547,15 @@ def _intermediate_guard(event, context) -> None:
             if row.table != "intermediate_files":
                 continue
             after = row.after.values
+            if after.get("retention_state") == int(_RETENTION.RELEASABLE):
+                facts = context.state_rows.get("intermediate_files", {}).get(row.row_id)
+                if facts is not None and facts.get("purpose") in (int(_PURPOSE.CAPTURE_ORIGINAL), int(_PURPOSE.CAPTURE_PREVIEW)):
+                    reads = context.photo_result_reads
+                    if reads is None:
+                        raise EventValidationError("照片缓存释放缺少独立原事务读取")
+                    from camctl.outputs.photo_cache_reuse import photo_cache_waiters_settled
+                    if not photo_cache_waiters_settled(row.row_id, SimpleNamespace(connection=reads.connection)):
+                        raise EventValidationError("照片缓存仍被 H 时固定的取回使用")
             if "sha256" in after or "size_bytes" in after:
                 if after.get("sha256") is None or after.get("size_bytes") is None:
                     raise EventValidationError("完整字节事实必须同时携带长度与摘要")

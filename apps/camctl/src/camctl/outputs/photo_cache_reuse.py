@@ -26,14 +26,14 @@ class BoundPhotoCache:
     purpose: str
 
 
-def read_bound_photo_cache(*, output_id, obtain_action_id, selection_id, owned):
+def read_bound_photo_cache(*, output_id, obtain_action_id, selection_id, owned, allow_released=False):
     """验证输出原完整事务、H 上等待者及原角色缓存。"""
     with _read_scope(owned.connection):
         return _read_bound_photo_cache(output_id=output_id, obtain_action_id=obtain_action_id,
-                                       selection_id=selection_id, owned=owned)
+                                       selection_id=selection_id, owned=owned, allow_released=allow_released)
 
 
-def _read_bound_photo_cache(*, output_id, obtain_action_id, selection_id, owned):
+def _read_bound_photo_cache(*, output_id, obtain_action_id, selection_id, owned, allow_released):
     connection = owned.connection
     output = row_facts(connection, "outputs", output_id)
     if output is None or output["device_file_id"] is None or output["intermediate_file_id"] is not None:
@@ -90,9 +90,12 @@ def _read_bound_photo_cache(*, output_id, obtain_action_id, selection_id, owned)
     file = row_facts(connection, "intermediate_files", files[0][0])
     retention = enum_for("intermediate_files.retention_state")
     cleanup = enum_for("intermediate_files.cleanup_state")
-    if (file["retention_state"] != int(retention.REQUIRED)
-            or file["cleanup_state"] != int(cleanup.NOT_NEEDED)
-            or file["last_error_json"] is not None
+    retained = (file["retention_state"] == int(retention.REQUIRED)
+                and file["cleanup_state"] == int(cleanup.NOT_NEEDED))
+    released = (allow_released and file["retention_state"] == int(retention.RELEASABLE)
+                and file["cleanup_state"] != int(cleanup.COMPLETED))
+    if (not (retained or released)
+            or (not allow_released and file["last_error_json"] is not None)
             or file["size_bytes"] is None or file["sha256"] is None):
         return None
     with closing(connection.execute(
@@ -126,3 +129,76 @@ def _read_bound_photo_cache(*, output_id, obtain_action_id, selection_id, owned)
     return BoundPhotoCache(action["id"], output["device_file_id"], file["id"],
         request.result_page_event_id, boundary, file["size_bytes"], file["sha256"],
         file["relative_path"], role[0].name)
+
+
+def photo_cache_waiters_settled(file_id, owned):
+    """分页核对该角色仍需要缓存的 H 等待者。"""
+    with _read_scope(owned.connection):
+        return _photo_cache_waiters_settled(file_id, owned)
+
+
+def _photo_cache_waiters_settled(file_id, owned):
+    connection = owned.connection
+    file = row_facts(connection, "intermediate_files", file_id)
+    if file is None or file["owner_action_id"] is None:
+        return True
+    action = row_facts(connection, "actions", file["owner_action_id"])
+    from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+    if (action is None or action["driver_id"] != DRIVER_ID
+            or action["type"] != int(enum_for("actions.type").CAMERA_TAKE_PHOTO)
+            or action["execution_spec_json"].get("output_storage") != "device"):
+        return True
+    purposes, kinds = enum_for("intermediate_files.purpose"), enum_for("outputs.kind")
+    kind = {int(purposes.CAPTURE_ORIGINAL): int(kinds.ORIGINAL),
+            int(purposes.CAPTURE_PREVIEW): int(kinds.PREVIEW)}.get(file["purpose"])
+    if kind is None or file["size_bytes"] is None or file["sha256"] is None:
+        return True
+    with closing(connection.execute(
+        "SELECT id FROM outputs WHERE source_action_id=? AND kind=? ORDER BY id LIMIT 2",
+        (action["id"], kind))) as cursor:
+        outputs = cursor.fetchall()
+    if not outputs:
+        return True
+    if len(outputs) != 1:
+        raise ConsistencyError("照片缓存角色对应多个正式产物")
+    output_id = outputs[0][0]
+    statuses = enum_for("actions.status")
+    selection_status = enum_for("obtain_source_selections.status")
+    item_status = enum_for("obtain_items.status")
+    delivery_status = enum_for("deliveries.status")
+    terminal_actions = {int(statuses.SUCCEEDED), int(statuses.FAILED), int(statuses.CANCELED), int(statuses.EXPIRED)}
+    terminal_deliveries = {int(delivery_status.PUBLISHED), int(delivery_status.FAILED),
+                           int(delivery_status.CANCELED), int(delivery_status.WITHDRAWN)}
+    after_action = after_selection = 0
+    while True:
+        with closing(connection.execute(
+            "SELECT a.id,s.id,a.status,s.status FROM actions a"
+            " JOIN action_dependencies d ON d.action_id=a.id"
+            " JOIN obtain_source_selections s ON s.dependency_id=d.id"
+            " WHERE d.depends_on_action_id=? AND a.type=?"
+            " AND (a.id>? OR (a.id=? AND s.id>?)) ORDER BY a.id,s.id LIMIT 32",
+            (action["id"], int(enum_for("actions.type").OBTAIN_ACTION_OUTPUTS),
+             after_action, after_action, after_selection))) as cursor:
+            rows = cursor.fetchall()
+        if not rows:
+            return True
+        for obtain_id, selection_id, status, selection in rows:
+            if status in terminal_actions:
+                continue
+            if selection == int(selection_status.FIXED):
+                with closing(connection.execute(
+                    "SELECT i.status,d.status FROM obtain_items i LEFT JOIN deliveries d ON d.id=i.delivery_id"
+                    " WHERE i.selection_id=? AND i.output_id=? ORDER BY i.id LIMIT 2",
+                    (selection_id, output_id))) as cursor:
+                    items = cursor.fetchall()
+                if len(items) > 1:
+                    raise ConsistencyError("同一来源选择重复包含照片角色产物")
+                if not items or items[0][0] in (int(item_status.FAILED), int(item_status.CANCELED)):
+                    continue
+                if items[0][1] in terminal_deliveries:
+                    continue
+            bound = read_bound_photo_cache(output_id=output_id, obtain_action_id=obtain_id,
+                selection_id=selection_id, owned=owned, allow_released=True)
+            if bound is not None and bound.intermediate_file_id == file_id:
+                return False
+        after_action, after_selection = rows[-1][0], rows[-1][1]
