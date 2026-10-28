@@ -523,6 +523,14 @@ def _due_cancel_actions(owned: Any, now_us: int | None) -> list[tuple[int, int, 
                 for row in cursor.fetchall()]
 
 
+async def _current_cancel_origin(database, action_id):
+    rows = await _query_rows(database, "SELECT type,status,cancel_requested FROM actions WHERE id=?", (action_id,))
+    if (len(rows) != 1 or rows[0][0] != 6 or rows[0][1] not in (1, 2, 3, 4, 5, 6)
+            or rows[0][2] not in (0, 1)):
+        raise StateDbFailure("取消发起者当前状态不可可靠核实")
+    return rows[0][1], bool(rows[0][2])
+
+
 def _cancel_target_from_input(spec_json: str):
     """从已受理取消动作的原始输入重建寻址对象；形态不可靠按状态库错误。"""
     from camctl.cancellation.models import CancelTarget
@@ -686,6 +694,14 @@ def cancel_flow(
         now_us = None if unscheduled_only else occurred()
         due = await database.read(lambda owned: _due_cancel_actions(owned, now_us))
         for action_id, status, spec_json in due:
+            status, canceled = await _current_cancel_origin(database, action_id)
+            if status in (3, 4, 5, 6):
+                continue
+            if canceled:
+                resumed = await settle_origin_cancel(OriginSettle(action_id), cancellation_runtime)
+                if resumed.kind is not DbOutcomeKind.COMPLETED:
+                    raise db_failure(StateDbFailure, f"取消发起者收场仍未完成: {resumed.error}", resumed)
+                continue
             item_ids = await database.read(lambda owned: _fixed_cancel_items(owned, action_id))
             if item_ids is None:
                 if status == 1:

@@ -399,3 +399,32 @@ async def test_expired_unentered_ticket_saves_prevented_result(entries, monkeypa
     args, kwargs = runtime.finish.await_args
     assert args[0] is ticket and args[1].settlement[0] == "not-dispatched"
     assert kwargs["end_run"] == "expired" and kwargs["expiration"] == (1, 100, 100)
+
+
+@pytest.mark.asyncio
+async def test_stale_cancel_candidates_use_current_origin_state():
+    path = Path(__file__).parents[3] / "src/camctl/bootstrap/flows.py"
+    tree = ast.parse(path.read_text())
+    outer = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "cancel_flow")
+    flow = next(node for node in outer.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "flow")
+    loop = next(node for node in flow.body if isinstance(node, ast.For)
+                and isinstance(node.target, ast.Tuple) and len(node.target.elts) == 3)
+    loop.body = loop.body[:3] + [ast.Expr(value=ast.Call(
+        func=ast.Attribute(value=ast.Name(id="processed", ctx=ast.Load()), attr="append", ctx=ast.Load()),
+        args=[ast.Name(id="action_id", ctx=ast.Load())], keywords=[]))]
+    function = ast.AsyncFunctionDef(name="advance", args=ast.arguments(posonlyargs=[],
+        args=[ast.arg(arg="due"), ast.arg(arg="database"), ast.arg(arg="cancellation_runtime")],
+        kwonlyargs=[], kw_defaults=[], defaults=[]), body=[loop], decorator_list=[])
+    async def current(database, action_id):
+        return {1: (6, True), 2: (2, True), 3: (2, False)}[action_id]
+    settle = AsyncMock(return_value=SimpleNamespace(kind="completed"))
+    processed = []
+    namespace = {"_current_cancel_origin": current, "settle_origin_cancel": settle,
+        "OriginSettle": lambda identity: identity, "DbOutcomeKind": SimpleNamespace(COMPLETED="completed"),
+        "processed": processed}
+    exec(compile(ast.fix_missing_locations(ast.Module(body=[function], type_ignores=[])), str(path), "exec"), namespace)
+
+    await namespace["advance"]([(1, 2, "a"), (2, 2, "b"), (3, 2, "c")], object(), object())
+
+    assert processed == [3]
+    assert settle.await_args.args[0] == 2 and settle.await_count == 1
