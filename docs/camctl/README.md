@@ -51,6 +51,7 @@ camctl 是嵌入式主机上的 Python CLI，负责计划受理、调度、设�
 | [报告历史读取范围审查（2026-10-25）](report-history-read-scope-review-2026-10-25.md) | 公开字段依赖、完整动作恢复的额外工作、旧报告重建基准及待明确的校验范围 |
 | [事务事实读取与普通完成消费重构](../superpowers/plans/2026-10-26-transaction-facts-refactor.md) | 事实形成、内核读取、普通消费、批次依赖及真实副本对照的实施与验收 |
 | [录像完成保存的剩余查询优化](../superpowers/plans/2026-10-26-finish-select-reduction.md) | 190 次 SELECT 的归因、固定关系共享、分页消费、当前行失效及与真机验证并行的实施交接 |
+| [查询与流程性能优化](../superpowers/plans/2026-10-28-query-and-flow-performance.md) | 报告初始化、READ 发现及事务内查询复用；临时诊断的对照结果与限度见[验证记录](query-and-flow-performance-verification-2026-10-28.md)。 |
 
 各专题的验收要求共同约束实现。[真实设备联调](integration-readiness.md#设备证据与联调输入)及硬件性能测量单独安排，不作为第一版软件集成测试的运行前提或通过门槛；软件结论向部署与联调的交接口径见[部署交接与待核验项](verification.md#部署交接与待核验项)。
 
