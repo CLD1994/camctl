@@ -116,6 +116,45 @@ def validate_host_photo_event(event, context):
     has_host_create = any(row.table == "intermediate_files" and not row.before.exists
         and row.after.values.get("purpose") in _HOST_PURPOSES for row in event.rows)
     raw = event.evidence.get("host_photo_request")
+    cache_raw = event.evidence.get("photo_cache_request")
+    if cache_raw is not None:
+        from camctl.history.photo_cache_request import parse_photo_cache_request
+        try:
+            request = parse_photo_cache_request(cache_raw)
+            if (branch_name != "LIFECYCLE" or raw is not None or len(event.rows) != 1
+                    or request.occurred_at != event.occurred_at):
+                raise ValueError("照片缓存申请必须单独保存角色完整字节")
+            row = event.rows[0]
+            facts = context.state_rows.get("intermediate_files", {}).get(request.file_id)
+            action = context.state_rows.get("actions", {}).get(request.action_id)
+            before = ({"size_bytes": None, "sha256": None} if request.archive_error is None
+                      else {"last_error_json": None})
+            after = ({"size_bytes": request.size_bytes, "sha256": request.sha256}
+                     if request.archive_error is None else {"last_error_json": {
+                         "stage": "photo_cache_archive", "diagnostic": request.archive_error}})
+            if (row.table != "intermediate_files" or row.row_id != request.file_id or not row.before.exists
+                    or not json_equal(row.before.values, before) or not json_equal(row.after.values, after)
+                    or facts is None or facts.get("owner_action_id") != request.action_id
+                    or facts.get("owner_delivery_id") is not None
+                    or any(facts.get(name) is not None for name in ("size_bytes", "sha256", "last_error_json"))
+                    or facts.get("retention_state") != int(_RETENTION.REQUIRED)
+                    or facts.get("cleanup_state") != int(_CLEANUP.NOT_NEEDED)
+                    or action is None or action.get("type") != int(_ACTION.CAMERA_TAKE_PHOTO)
+                    or action.get("status") != int(enum_for("actions.status").RUNNING)
+                    or read_action_spec(action).get("output_storage") != "device"
+                    or context.photo_result_reads is None):
+                raise ValueError("照片缓存缺少原 DEVICE 动作和未释放角色责任")
+            role = context.photo_result_reads.verify_cache(request, before_event_id=event.event_id)
+            purpose = _PURPOSE.CAPTURE_ORIGINAL if role == "original" else _PURPOSE.CAPTURE_PREVIEW
+            if facts.get("purpose") != int(purpose):
+                raise ValueError("照片缓存用途与原角色不同")
+            model = FilePurpose[purpose.name]
+            if facts.get("relative_path") != relative_file_path(model, request.file_id,
+                    photo_file_extension(model, saved_photo_format(action))):
+                raise ValueError("照片缓存路径与原角色及格式不同")
+        except (ValueError, TypeError, KeyError) as error:
+            raise EventValidationError(f"照片缓存事件违反原来源契约: {error}") from error
+        return
     if raw is None:
         if has_host_bytes or has_host_create or branch_name == "HOST_PHOTO_COMPLETE":
             raise EventValidationError("主机拍摄文件责任及完整字节必须保存原完整申请")
@@ -300,6 +339,84 @@ class _HostPhotoCommand:
         return CommandPlan((), {}, {"actions": {action["id"]: action}}, result=files, read_only=True)
 
 
+class _PhotoCacheCommand:
+    """原照片来源页授权的一份角色缓存完整字节。"""
+
+    def __init__(self, request, key, format_version):
+        self.request, self.key, self.format_version = request, key, format_version
+
+    def plan(self, scope):
+        from camctl.persistence.repositories.capture_facts import PhotoResultReads
+        request = self.request
+        saved = saved_transaction_events(scope.connection, self.key)
+        if saved is not None:
+            return self.reuse(scope, saved)
+        require_host_photo_format(self.format_version)
+        action, rows = _load(scope.connection, request.action_id)
+        files = {row["id"]: row for row in rows}
+        file = files.get(request.file_id)
+        if (file is None or file["size_bytes"] is not None or file["sha256"] is not None
+                or file["last_error_json"] is not None
+                or read_action_spec(action).get("output_storage") != "device"):
+            raise ConsistencyError("照片缓存没有可写入的原 DEVICE 角色责任")
+        device = row_facts(scope.connection, "device_files", request.device_file_id)
+        if device is None:
+            raise ConsistencyError("照片缓存缺少原设备文件")
+        allocation = scope.allocate(1)
+        PhotoResultReads(scope.connection).verify_cache(request, before_event_id=allocation.first_event_id)
+        before = ({"size_bytes": None, "sha256": None} if request.archive_error is None
+                  else {"last_error_json": None})
+        after = ({"size_bytes": request.size_bytes, "sha256": request.sha256}
+                 if request.archive_error is None else {"last_error_json": {
+                     "stage": "photo_cache_archive", "diagnostic": request.archive_error}})
+        change = update_change("intermediate_files", request.file_id, before, after)
+        event = event_envelope(allocation.first_event_id, allocation.txn_id, 26,
+            reason_for_branch("INTERMEDIATE_FILE_CHANGED", "LIFECYCLE"), (change,), request.occurred_at,
+            evidence={"photo_cache_request": asdict(request)})
+        state = {"actions": {action["id"]: action}, "intermediate_files": files,
+                 "device_files": {device["id"]: device}}
+        return CommandPlan((event,), {("intermediate_files", request.file_id): ("intermediate_file", request.file_id)},
+                           state, result=request.file_id)
+
+    def reuse(self, scope, saved):
+        from camctl.persistence.repositories.capture_facts import PhotoResultReads
+        request = self.request
+        reason = reason_for_branch("INTERMEDIATE_FILE_CHANGED", "LIFECYCLE")
+        if (len(saved) != 1 or saved[0]["type"] != 26 or saved[0]["reason"] != reason
+                or saved[0]["occurred_at"] != request.occurred_at
+                or not json_equal(saved[0]["body"]["evidence"], {"photo_cache_request": asdict(request)})):
+            raise TransactionError("原照片缓存申请与重送不同")
+        event = saved[0]
+        changes = event["body"]["rows"]
+        before = ({"size_bytes": None, "sha256": None} if request.archive_error is None
+                  else {"last_error_json": None})
+        expected = ({"size_bytes": request.size_bytes, "sha256": request.sha256}
+                    if request.archive_error is None else {"last_error_json": {
+                        "stage": "photo_cache_archive", "diagnostic": request.archive_error}})
+        if (len(changes) != 1 or changes[0]["table"] != "intermediate_files"
+                or changes[0]["id"] != request.file_id or not changes[0]["before"]["exists"]
+                or not changes[0]["after"]["exists"]
+                or not json_equal(changes[0]["before"]["values"], before)
+                or not json_equal(changes[0]["after"]["values"], expected)):
+            raise TransactionError("原照片缓存事务没有保存完整角色字节")
+        action, rows = _load(scope.connection, request.action_id, allow_reclaimed=True)
+        file = next((item for item in rows if item["id"] == request.file_id), None)
+        if file is None:
+            raise ConsistencyError("原照片缓存责任缺失")
+        role = PhotoResultReads(scope.connection).verify_cache(request, before_event_id=event["event_id"])
+        expected_purpose = _PURPOSE.CAPTURE_ORIGINAL if role == "original" else _PURPOSE.CAPTURE_PREVIEW
+        if (read_action_spec(action).get("output_storage") != "device"
+                or file["purpose"] != int(expected_purpose)):
+            raise ConsistencyError("原照片缓存角色或冻结来源模式不同")
+        history = read_row_values_at_boundary(scope.connection, owner=("intermediate_file", request.file_id),
+            table="intermediate_files", row_id=request.file_id, columns=frozenset(expected), current_values=file,
+            boundary=HistoryBoundary(event["transaction"].txn_id, event["transaction"].last_event_id),
+            current_boundary=HistoryBoundary(scope.max_txn_id, scope.max_event_id))
+        if not json_equal(history, expected):
+            raise ConsistencyError("原照片缓存完整字节与历史不同")
+        return CommandPlan((), {}, {"actions": {action["id"]: action}}, result=request.file_id, read_only=True)
+
+
 class HostCaptureRepository:
     def prepare_host_photo(self, action_id, occurred_at, key, owned):
         request = PrepareHostPhoto(action_id, occurred_at)
@@ -311,6 +428,14 @@ class HostCaptureRepository:
         parsed = parse_host_photo_request(asdict(request), reason=2)
         return self._write(parsed, key, owned)
 
+    def save_photo_cache_complete(self, request, key, owned):
+        from camctl.history.photo_cache_request import PhotoCacheComplete, parse_photo_cache_request
+        if not isinstance(request, PhotoCacheComplete):
+            raise TypeError("照片缓存申请类型无效")
+        parsed = parse_photo_cache_request(asdict(request))
+        receipt = commit_operation(_PhotoCacheCommand(parsed, key, owned.metadata.format_version), key, owned)
+        return DbOutcome(DbOutcomeKind(receipt.kind), receipt.result, error=receipt.error, boundary=receipt.boundary)
+
     @staticmethod
     def _write(request, key, owned):
         receipt = commit_operation(
@@ -320,7 +445,8 @@ class HostCaptureRepository:
 
     def verify_operation(self, request, key, owned):
         """新连接只核实原完整提交；原键不存在时可靠返回未提交。"""
-        if not isinstance(request, (PrepareHostPhoto, HostPhotoComplete)):
+        from camctl.history.photo_cache_request import PhotoCacheComplete
+        if not isinstance(request, (PrepareHostPhoto, HostPhotoComplete, PhotoCacheComplete)):
             raise TypeError("核实要求原完整主机拍摄文件申请")
         connection = owned.connection
         reading = False
@@ -335,9 +461,9 @@ class HostCaptureRepository:
             else:
                 with closing(connection.execute("SELECT MAX(id), MAX(last_event_id) FROM history_transactions")) as cursor:
                     latest = cursor.fetchone()
-                plan = _HostPhotoCommand(
-                    request, key, owned.metadata.format_version
-                ).reuse(TransactionScope(connection, *latest), saved)
+                command = _PhotoCacheCommand if isinstance(request, PhotoCacheComplete) else _HostPhotoCommand
+                plan = command(request, key, owned.metadata.format_version).reuse(
+                    TransactionScope(connection, *latest), saved)
                 transaction = saved[0]["transaction"]
                 result = DbOutcome(DbOutcomeKind.COMPLETED, plan.result,
                     boundary=HistoryBoundary(transaction.txn_id, transaction.last_event_id), stage="verification")

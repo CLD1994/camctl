@@ -103,6 +103,7 @@ def _request(*, device_id="camera-1", params=None, timeout=Decimal("180"),
         ticket=AttemptTicket(1, "control", ACTIVITY_ID, "capture/1", 9) if ticket is None else ticket,
         timeout_s=timeout,
         dispatch_check=AsyncMock(side_effect=dispatch_check),
+        output_storage="host",
     )
 
 
@@ -628,13 +629,15 @@ async def test_configuration_updates_are_visible_to_the_same_registered_driver(h
         control_supported=True,
         stop_supported=False,
         query_supported=False,
-        result_supported=False,
+        result_supported=True,
         read_supported=True,
         digest_supported=False,
         delete_supported=False,
         directory_supported=False,
         local_read_recovery_supported=True,
+        local_result_recovery_supported=True,
         local_control_recovery_supported=True,
+        local_availability_recovery_supported=True,
         capture_preparation_supported=True,
     )
 

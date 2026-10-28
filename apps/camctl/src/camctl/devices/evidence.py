@@ -89,6 +89,10 @@ RESULT_PAGE_CONTRACT = EvidenceContract(
     RESULT_LISTED_TYPE, 2, "result",
     frozenset({"activity_id", "entries", "cursor", "next_cursor", "set_finalized", "completion_evidence"}),
     identity_field="activity_id")
+RESULT_PHOTO_PAGE_CONTRACT = EvidenceContract(
+    RESULT_LISTED_TYPE, 3, "result",
+    frozenset({"activity_id", "binding", "role", "entries", "cursor", "next_cursor"}),
+    identity_field="activity_id")
 
 
 @dataclass(frozen=True)
