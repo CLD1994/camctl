@@ -548,6 +548,37 @@ def test_photo_source_does_not_dispatch_to_changed_camera_binding(photo_driver_a
     assert workspace.instances[-1].released
 
 
+def test_actual_info_serial_mismatch_is_binding_failure(photo_driver_api):
+    from decimal import Decimal
+    api, files, _, Raw = photo_driver_api
+    driver = object.__new__(api.HasselbladDriver)
+    driver.roots = SimpleNamespace(staging=Path("/staging"))
+    driver.monotonic_ns = lambda: 0
+    driver._binding_config = lambda binding: SimpleNamespace(serial="serial", product_id=10)
+    calls = []
+    async def run(*, config, name, args, timeout_s, steps):
+        calls.append(name)
+        steps.append({"name": name, "local_exit_code": 0, "local_signal": None,
+                      "transport_error": None, "output_failure": None})
+        raw = Raw()
+        raw.output = b"vid=0x2756 pid=0x000a bus=1 addr=2\n" if name == "list" else b"serial : another\n"
+        raw.stderr, raw.output_failure, raw.error = b"", None, None
+        raw.exit = SimpleNamespace(exit_code=0, signal=None)
+        return raw
+    driver._run_step = run
+    binding = files.DeviceBinding("camera", "hasselblad_cfv100c")
+    ticket = SimpleNamespace(operation="result", target_id="7", responsibility_key="results/7", run_id=9, attempt_id=2)
+    locator = files.CameraFileLocator(files.CameraLocatorStatus.PATH, "/mnt/a.3FR", "a.3FR")
+    request = SimpleNamespace(operation="result", ticket=ticket, timeout_s=Decimal(10), binding=binding,
+        params={"activity_id": "7", "camera_identity": {"serial": "serial", "product_id": 10},
+            "camera_locator": locator.as_json(), "capture_format": "raw", "role": "original", "cursor": None,
+            "original_identity": None, "sync_candidate": None, "sync_error": "主机记录不可用"})
+    outcome = _finish_immediate(driver.observe_photo_source(request)).outcome
+    assert calls == ["list", "info"]
+    assert outcome.error.code == "device_binding_unavailable"
+    assert outcome.error.details["reason"] == "physical_identity_mismatch"
+
+
 def test_unconfirmed_file_close_cannot_return_a_settled_result(photo_driver_api):
     from decimal import Decimal
     api, files, workspace, _ = photo_driver_api
@@ -564,9 +595,10 @@ def test_unconfirmed_file_close_cannot_return_a_settled_result(photo_driver_api)
         params={"activity_id": "7", "camera_identity": {"serial": "serial", "product_id": 10},
             "camera_locator": locator.as_json(), "capture_format": "raw", "role": "original", "cursor": None,
             "original_identity": None, "sync_candidate": None, "sync_error": "主机记录不可用"})
-    with pytest.raises(RuntimeError, match="关闭未确认") as caught:
+    with pytest.raises(BaseExceptionGroup, match="关闭未确认") as caught:
         _finish_immediate(driver.observe_photo_source(request))
-    assert caught.value.__cause__ is workspace.close_error
+    assert workspace.close_error in caught.value.exceptions
+    assert any(isinstance(error, api.PhysicalIdentityMismatch) for error in caught.value.exceptions)
     assert not workspace.instances[-1].released
 
 

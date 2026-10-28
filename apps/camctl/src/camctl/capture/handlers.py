@@ -1620,6 +1620,10 @@ class CaptureRuntime(_FileObservationSaves):
 
     async def _attempt_recovery_evidence(self, ticket: AttemptTicket, attempt=None):
         """核对原意图与旧会话收场资格，不保存或推导设备结果。"""
+        if ticket.operation == "result":
+            from camctl.host_files.downloads import download_owned
+            if download_owned(ticket):
+                return None
         if attempt is None:
             def read(owned, parameters=(ticket.run_id, ticket.attempt_id)):
                 with closing(owned.connection.execute("SELECT id FROM operation_attempts WHERE run_id=? AND attempt_no=?", parameters)) as cursor:

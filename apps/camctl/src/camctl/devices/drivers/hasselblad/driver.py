@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import sys
 from collections.abc import Mapping
 from contextlib import nullcontext
 from copy import deepcopy
@@ -563,6 +564,7 @@ class HasselbladDriver:
         last_raw = None
         in_call = False
         comparison = None
+        pending_error = None
 
         def result(*, error=None, entries=()):
             observed = [DeviceObservation("photo_result_attempt", 2, {
@@ -625,7 +627,7 @@ class HasselbladDriver:
             observed_serial = parse_serial(info.output)
             steps[-1]["observed_serial"] = observed_serial
             if observed_serial != fixed_camera.serial:
-                raise ValueError("serial_mismatch")
+                raise PhysicalIdentityMismatch(request.binding)
             await run("download", ("download", role.value, locator.camera_name, "--output", str(workspace.path)))
             description = CAPTURE_FORMATS[capture_format]
             media = description.original_media_type if role is DownloadVariant.ORIGINAL else description.preview_media_type
@@ -662,24 +664,34 @@ class HasselbladDriver:
                 "paired_identity": original_identity}
             return result(entries=(entry,))
         except PhysicalIdentityMismatch as error:
+            pending_error = error
             return result(error=ErrorValue("device_binding_unavailable", "execution", {
                 "device_id": request.binding.device_id,
                 "expected_driver_id": request.binding.driver_id,
                 "actual_driver_id": request.binding.driver_id,
                 "reason": "physical_identity_mismatch"}))
         except CaptureFileError as error:
+            pending_error = error
             classification = ("invalid" if error.stage in {
                 "source_file_count", "source_type", "source_size", "source_media"} else "unconfirmed")
             return result(error=ErrorValue("device_error", "result", {
                 "role": role.value, "reason": error.stage, "classification": classification,
                 "diagnostic": exception_diagnostic(error)}))
         except (ValueError, OSError) as error:
+            pending_error = error
             return result(error=ErrorValue("device_error", "result", {
                 "role": role.value, "reason": str(error), "classification": "unconfirmed",
                 "diagnostic": exception_diagnostic(error)}))
         finally:
             # 裸取消或 transport 未交回收场事实时，实际拥有者不得释放。
             if not workspace.files_closed:
+                actual = sys.exception() or pending_error
+                if isinstance(actual, asyncio.CancelledError):
+                    actual.add_note(f"照片来源文件关闭未确认: {workspace.close_error!r}")
+                    raise actual
+                if actual is not None and actual is not workspace.close_error:
+                    raise BaseExceptionGroup("照片来源文件关闭未确认，原 RESULTS 拥有者继续持有",
+                                             [actual, workspace.close_error])
                 raise RuntimeError("照片来源文件关闭未确认，原 RESULTS 拥有者继续持有") from workspace.close_error
             if not in_call:
                 workspace.release()
