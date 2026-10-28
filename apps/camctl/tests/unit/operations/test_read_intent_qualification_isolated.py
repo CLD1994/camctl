@@ -313,6 +313,19 @@ class ReadConsumerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.run_finish.status, "canceled")
         self.assertFalse(result.retry_wait)
 
+    async def test_cold_recovered_read_waits_without_forging_not_dispatched(self):
+        source = SOURCE.parents[2] / "outputs" / "read_attempts.py"
+        ticket = SimpleNamespace(run_id=11, attempt_id=1, target_id="9")
+        runtime = SimpleNamespace(continuing_read_tickets={}, pending_read_ends={})
+        evidence_module = ModuleType("camctl.devices.evidence")
+        evidence_module.EvidenceContract = object
+        prevented = extract("prevented_read_result", {}, source)
+        with patch.dict(sys.modules, {evidence_module.__name__: evidence_module}):
+            result = prevented(runtime, ticket, SimpleNamespace(terminal=False, canceled=False,
+                               reason="capture_priority"), object())
+        self.assertIsNone(result)
+        self.assertEqual(runtime.continuing_read_tickets, {})
+
 
 if __name__ == "__main__":
     unittest.main()

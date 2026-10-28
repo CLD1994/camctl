@@ -137,7 +137,7 @@ def test_dispatch_rejects_wrong_read_responsibility(read_module):
                                                 device_source=True)
 
 
-def test_prepared_capture_blocks_only_an_unentered_read(read_module, monkeypatch):
+def test_prepared_capture_blocks_unentered_and_recovered_reads(read_module, monkeypatch):
     connection = _Connection(False)
     connection.capture_held = True
     for action in (10, 11):
@@ -155,5 +155,6 @@ def test_prepared_capture_blocks_only_an_unentered_read(read_module, monkeypatch
     unentered = read_module.read_dispatch_qualification(SimpleNamespace(connection=connection), ticket, 9,
         device_source=True, capture_selection=current, never_dispatched=True)
     assert unentered.reason == "capture_priority"
-    assert read_module.read_dispatch_qualification(SimpleNamespace(connection=connection), ticket, 9,
-        device_source=True, capture_selection=current, never_dispatched=False) is None
+    recovered = read_module.read_dispatch_qualification(SimpleNamespace(connection=connection), ticket, 9,
+        device_source=True, capture_selection=current, never_dispatched=False)
+    assert recovered.reason == "capture_priority"
