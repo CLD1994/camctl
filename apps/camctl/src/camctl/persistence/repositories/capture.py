@@ -4112,7 +4112,10 @@ class _CaptureStopCommand:
                 or activity["control_elapsed_ns"] is not None):
             raise ConsistencyError("原 STOP 不具备新的拍摄结束事实")
         sub = _CompositeScope(scope, scope.max_event_id + 1)
-        result = FinishAttemptCommand(finish, self._key).plan(sub)
+        result = FinishAttemptCommand(
+            finish, self._key,
+            normal_recording_stop=None if self._stop is None else self._stop.normal_recording_stop,
+        ).plan(sub)
         if result.read_only:
             raise ConsistencyError("已保存的普通 STOP 结果不能补写为共同停止事实")
         before, after = {"activity_state": activity["activity_state"]}, {"activity_state": 3}
@@ -4134,7 +4137,10 @@ class _CaptureStopCommand:
 
     def _reuse(self, scope, saved):
         cut = 1 + int(len(saved) > 1 and saved[1]["type"] in (_RUN_END_EVENT, _RETRY_WAIT_EVENT))
-        result = FinishAttemptCommand(self._finish, self._key)._reuse(scope, saved[:cut])
+        result = FinishAttemptCommand(
+            self._finish, self._key,
+            normal_recording_stop=None if self._stop is None else self._stop.normal_recording_stop,
+        )._reuse(scope, saved[:cut])
         if self._stop is None and len(saved) == cut:
             return result
         if len(saved) != cut + 1:

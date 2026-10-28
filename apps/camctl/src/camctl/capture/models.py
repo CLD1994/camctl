@@ -440,15 +440,37 @@ def build_capture_spec(action_type: str, task: CaptureTask | None) -> dict:
 
 
 @dataclass(frozen=True)
+class NormalRecordingStop:
+    """正常到时停止派发前的原启动结果与会话计时。"""
+
+    start_result_event_id: int
+    elapsed_before_stop_ns: int
+
+    def __post_init__(self) -> None:
+        if (not is_json_integer(self.start_result_event_id)
+                or not 1 <= self.start_result_event_id <= MAX_OBJECT_ID
+                or not is_json_integer(self.elapsed_before_stop_ns)
+                or not 0 <= self.elapsed_before_stop_ns <= MAX_OBJECT_ID):
+            raise ValueError("正常停止来源必须携带原启动结果和非负计时")
+
+    def document(self):
+        return {"start_result_event_id": self.start_result_event_id,
+                "elapsed_before_stop_ns": self.elapsed_before_stop_ns}
+
+
+@dataclass(frozen=True)
 class HostTimerStopSave:
     """原停止确认同时保存的控制时长；None 明确表示无法证明。"""
 
     control_elapsed_ns: int | None
+    normal_recording_stop: NormalRecordingStop | None = None
 
     def __post_init__(self) -> None:
         value = self.control_elapsed_ns
         if value is not None and (not is_json_integer(value) or not 0 <= value <= MAX_OBJECT_ID):
             raise ValueError("控制时长必须是可保存的非负整数纳秒或未知")
+        if self.normal_recording_stop is not None and not isinstance(self.normal_recording_stop, NormalRecordingStop):
+            raise ValueError("正常停止来源格式无效")
 
 
 @dataclass(frozen=True)

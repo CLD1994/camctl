@@ -710,8 +710,6 @@ async def advance_action6_segmented_recording(runtime, action, decision):
     from camctl.capture import handlers as common
     from camctl.capture.segment_completion import release_segment_occupancy
     from camctl.capture.recording import RecordingPhase
-    from camctl.capture.segment_completion import _control_facts
-    from camctl.capture.segment_models import EvidenceState
 
     action_id = action["id"]
     if action["cancel_requested"]:
@@ -748,10 +746,11 @@ async def advance_action6_segmented_recording(runtime, action, decision):
     facts = await classify_action6_segment_set(action, ref, repository, runtime.database)
     await release_segment_occupancy(runtime, action_id)
     activity_id = await common._activity_id_of(runtime, action_id)
-    activity = await runtime.database.read(lambda owned: row_facts(
-        owned.connection, "device_activities", activity_id,
+    from camctl.persistence.repositories.normal_recording_stop import read_normal_recording_stop
+
+    normal_stop = await runtime.database.read(lambda owned: read_normal_recording_stop(
+        owned.connection, action, activity_id
     ))
-    _, overrun = _control_facts(runtime, action, activity)
     # RESULTS 可能刚刚保存了本轮 STOP+filewait 证据。入口传入的 decision
     # 是读取之前的快照，需依据此刻持久化事实重算，不能因此把正常完成送去媒体检查。
     from camctl.capture.handlers import _recording_port
@@ -762,23 +761,18 @@ async def advance_action6_segmented_recording(runtime, action, decision):
     )
     control_complete = (
         current_decision.phase is RecordingPhase.CONTROL_COMPLETE
-        and overrun is not EvidenceState.CONFIRMED
+        and normal_stop
     )
     if not control_complete:
         from dataclasses import replace
 
-        reason = (
-            "control_overrun"
-            if overrun is EvidenceState.CONFIRMED
-            else "completion_unknown"
-        )
         facts = replace(
             facts,
             decision=replace(
                 facts.decision,
                 status=SegmentDecisionStatus.UNCONFIRMED,
                 failure_code="capture_result_unconfirmed",
-                reason=reason,
+                reason="completion_unknown",
             ),
         )
     if control_complete and facts.decision.status is SegmentDecisionStatus.SUCCEEDED:
