@@ -144,6 +144,79 @@ class PublicationDiscoveryTests(unittest.TestCase):
 
 
 class PublicationFlowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_saved_photo_binding_failure_recovers_from_original_read(self):
+        flow, modules = load_flow()
+        class RoundContinues(Exception):
+            pass
+        class ConsistencyError(Exception):
+            pass
+        class Database:
+            async def read(self, callback):
+                return callback(SimpleNamespace(connection=self))
+            def execute(self, sql, parameters):
+                return Cursor([(9, 2, 4, None, 23, 12, 1, 4, 13, 14)])
+        error = {"code": "device_binding_unavailable", "details": {
+            "reason": "missing", "device_id": "camera", "expected_driver_id": "driver"}}
+        class Discovery:
+            async def begin_round(self, database, now): pass
+            async def rows(self, database, kind, now, query, *args, **kwargs):
+                if kind == "failed": return SimpleNamespace(items=[(9, error)])
+                raise RoundContinues
+        async def noop(*args): pass
+        captured = []
+        async def save(runtime, copy_id, stage, request, method):
+            captured.append(request)
+            return SimpleNamespace(kind="completed")
+        flow.ConsistencyError = ConsistencyError
+        flow.parse_exact_json = lambda value: value
+        flow.BindingStatus = SimpleNamespace(DEVICE_MISSING="missing", DRIVER_MISMATCH="mismatch",
+            PHYSICAL_IDENTITY_MISMATCH="physical_identity_mismatch", PHYSICAL_IDENTITY_CONFLICT="physical_identity_conflict")
+        flow.DeviceBinding = lambda *args: args
+        flow.BindingResult = lambda *args: args
+        flow.FailReadBinding = lambda *args: args
+        flow.DbOutcomeKind = SimpleNamespace(COMPLETED="completed")
+        flow._retry_read_results = noop
+        flow._settle_canceled_read_ends = noop
+        flow._settle_ready_read_ends = noop
+        reads = modules['camctl.outputs.read_attempts']
+        reads.retry_read_business = reads.retry_read_ends = noop
+        reads.save_read_business = save
+        binding = ModuleType('camctl.persistence.repositories.binding_read_cancel')
+        def load_failure(connection, action, copy, value):
+            self.assertEqual((action, copy, value), (4, 9, error))
+            return ("original-key", None, 17)
+        binding.load_saved_binding_read_failure = load_failure
+        transaction = ModuleType('camctl.persistence.transaction')
+        transaction.row_facts = lambda connection, table, identity: {"id": identity, "source_intermediate_file_id": 23}
+        def saved_events(connection, key):
+            self.assertEqual(key, "original-key")
+            return [dict(event_id=101)]
+        transaction.saved_transaction_events = saved_events
+        photo = ModuleType('camctl.outputs.photo_cache_reuse')
+        invalid = [False]
+        def verify(connection, copy, *, before_event_id, historical):
+            self.assertEqual((copy["id"], before_event_id, historical), (9, 101, True))
+            if invalid[0]:
+                raise ConsistencyError("非照片来源或原关联不符")
+            return 15
+        photo.verify_photo_cache_binding_failure = verify
+        modules.update({m.__name__: m for m in (binding, transaction, photo)})
+        runtime = SimpleNamespace(database=Database(), discovery=Discovery(), occurred_at=lambda: 90,
+            outputs=SimpleNamespace(fail_read_binding=object()))
+        with patch.dict(sys.modules, modules):
+            for reason in ("missing", "mismatch"):
+                error["details"]["reason"] = reason
+                actual = None if reason == "missing" else "other-driver"
+                if actual is not None:
+                    error["details"]["actual_driver_id"] = actual
+                with self.assertRaises(RoundContinues):
+                    await flow.advance_obtain(runtime)
+                self.assertEqual(captured.pop(), (9, 15, (reason, ("camera", "driver"), actual, None), 17, "original-key"))
+            invalid[0] = True
+            with self.assertRaises(ConsistencyError):
+                await flow.advance_obtain(runtime)
+            self.assertEqual(captured, [])
+
     async def test_recovery_uses_original_delivery_and_defers_finish_until_budget_clears(self):
         flow, modules = load_flow()
         db = Connection([(11, 7, DeliveryStatus.PREPARED, True),

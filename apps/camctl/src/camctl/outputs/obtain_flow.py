@@ -1216,10 +1216,24 @@ async def _settle_saved_read_binding_failure(runtime, copy_id, error):
     from camctl.outputs.read_attempts import save_read_business
 
     facts = await runtime.database.read(lambda owned: _read_facts(owned.connection, copy_id, include_terminal=True))
-    if facts is None or facts["source_device_file_id"] is None:
+    if facts is None:
         raise ConsistencyError("原绑定失败缺少设备源交付拷贝")
     key, identity, occurred_at = await runtime.database.read(lambda owned: load_saved_binding_read_failure(
         owned.connection, facts["action_id"], copy_id, error))
+    source_id = facts["source_device_file_id"]
+    if source_id is None:
+        from camctl.outputs.photo_cache_reuse import verify_photo_cache_binding_failure
+        from camctl.persistence.transaction import row_facts, saved_transaction_events
+
+        def photo_source(owned):
+            copy = row_facts(owned.connection, "file_copies", copy_id)
+            events = saved_transaction_events(owned.connection, key)
+            if copy is None or not events:
+                raise ConsistencyError("原绑定失败缺少拷贝或读取结果事务")
+            return verify_photo_cache_binding_failure(owned.connection, copy,
+                before_event_id=events[0]["event_id"], historical=True)
+
+        source_id = await runtime.database.read(photo_source)
     details = error.get("details")
     if not isinstance(details, Mapping):
         raise ConsistencyError("原绑定失败缺少保存的详情")
@@ -1231,7 +1245,7 @@ async def _settle_saved_read_binding_failure(runtime, copy_id, error):
         raise ConsistencyError("原绑定失败原因不属于已登记分区")
     binding = BindingResult(status, DeviceBinding(details["device_id"], details["expected_driver_id"]),
         details.get("actual_driver_id"), identity)
-    request = FailReadBinding(copy_id, facts["source_device_file_id"], binding, occurred_at, key)
+    request = FailReadBinding(copy_id, source_id, binding, occurred_at, key)
     result = await save_read_business(runtime, copy_id, "read_binding_failure", request, runtime.outputs.fail_read_binding)
     if result.kind is not DbOutcomeKind.COMPLETED:
         raise db_failure(ConsistencyError, f"原绑定失败业务事务未可靠保存: {result.error}", result)
