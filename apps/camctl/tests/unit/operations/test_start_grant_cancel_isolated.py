@@ -113,3 +113,56 @@ async def test_cancel_waits_for_grant_and_unknown_receipt_reuses_key(entries, un
         release.set()
         assert await task == (ticket, None)
     assert permit.ticket is ticket and permit.cancel_pending
+
+
+@pytest.mark.asyncio
+async def test_cancel_selection_uses_unentered_fact_while_grant_is_pending(entries, monkeypatch):
+    module, _ = entries
+    monkeypatch.setitem(sys.modules, "camctl.devices.start_entry", module)
+    path = Path(__file__).parents[3] / "src/camctl/bootstrap/flows.py"
+    tree = ast.parse(path.read_text())
+    method = next(node for node in tree.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "_resolve_and_fix")
+    program = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0),
+                               method], type_ignores=[])
+    loaded = SimpleNamespace(action={"id": 1, "status": 2, "cancel_requested": 0}, facts="snapshot")
+    phases = []
+    rules = ModuleType("camctl.cancellation.rules")
+    def current_facts(value, phase):
+        phases.append(phase)
+        return SimpleNamespace(terminal=False)
+    rules.current_eligibility_facts = current_facts
+    rules.decide_cancel_eligibility = lambda facts: True
+    rules.load_eligibility_inputs = lambda connection, identity, motor_permit=None: loaded
+    rules.may_link_auto_preview = lambda action, result: result
+    models = ModuleType("camctl.cancellation.models")
+    models.CancelTargetsDisposition = SimpleNamespace(SAVED="saved")
+    models.FixCancelTargets = object
+    models.ResolvedTargets = lambda **kwargs: kwargs
+    models.TargetFacts = lambda **kwargs: SimpleNamespace(**kwargs)
+    models.CancelTargetError = type("CancelTargetError", (), {})
+    targets = ModuleType("camctl.cancellation.targets")
+    targets.missing_target_error = lambda target: None
+    targets.prepare_cancel_set = lambda *args: SimpleNamespace(targets=(SimpleNamespace(action_id=1),))
+    targets.resolve_cancel_target = lambda *args: SimpleNamespace(lookup_failed=None, missing=False, action_ids=(1,))
+    repositories = ModuleType("camctl.persistence.repositories.cancellation")
+    repositories.SqliteCancelLookup = lambda connection: object()
+    repositories.sqlite_auto_candidates = lambda *args: ()
+    facts_module = ModuleType("camctl.persistence.repositories.capture_facts")
+    facts_module.load_start_facts = lambda *args: SimpleNamespace(attempts_used=1)
+    for item in (rules, models, targets, repositories, facts_module):
+        monkeypatch.setitem(sys.modules, item.__name__, item)
+    monkeypatch.setattr(module, "is_hasselblad_photo", lambda action: True)
+    namespace = {"_cancel_target_from_input": lambda spec: spec}
+    exec(compile(ast.fix_missing_locations(program), str(path), "exec"), namespace)
+    coordinator = module.StartEntryCoordinator()
+    permit = coordinator.prepare("db", 1)
+    permit.phase = module.EntryPhase.GRANTING
+    async def read(callback):
+        return callback(SimpleNamespace(connection=object()))
+    database = SimpleNamespace(read=read, metadata=SimpleNamespace(instance_id="db"))
+
+    result = await namespace["_resolve_and_fix"](database, object(), 8, "target", lambda: 100, {}, coordinator)
+
+    assert result is None
+    assert phases == [module.EntryPhase.READY]
+    assert permit.cancel_pending and permit.ticket is None

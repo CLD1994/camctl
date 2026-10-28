@@ -765,8 +765,8 @@ async def _resolve_and_fix(
             from camctl.devices.start_entry import EntryPhase
             if entry.phase in (EntryPhase.GRANTING, EntryPhase.UNKNOWN):
                 deferred_entries[identity] = entry
-        facts = (loaded.facts if identity in deferred_entries else current_eligibility_facts(
-            loaded, None if entry is None else entry.phase))
+        facts = current_eligibility_facts(loaded, EntryPhase.READY if identity in deferred_entries
+                                          else None if entry is None else entry.phase)
         direct.append(TargetFacts(
             action_id=identity, terminal=facts.terminal,
             may_cancel=may_link_auto_preview(
