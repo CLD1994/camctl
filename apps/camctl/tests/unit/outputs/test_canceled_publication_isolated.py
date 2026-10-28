@@ -234,3 +234,62 @@ class CancelSettlementTests(unittest.TestCase):
             command._reuse(None, [original])
         original['body']['evidence']['canceled_publication']['file_id'] = 23
         self.assertTrue(command._reuse(None, [original]).complete)
+
+    def test_withdrawal_only_updates_live_cancellation_waiters(self):
+        repo = load_repository()
+        command = object.__new__(repo._AdvanceWithdrawalCommand)
+        command._command = SimpleNamespace(delivery_id=19)
+        command._owners, command._state, command._items = {}, {}, []
+        rows = {('deliveries', 19): {'id': 19, 'action_id': 7, 'status': 5,
+                                     'withdrawal_state': 2, 'withdrawal_error_json': None},
+                ('cancel_delivery_items', 30): {'id': 30, 'cancel_item_id': 40, 'status': 1},
+                ('cancel_delivery_items', 31): {'id': 31, 'cancel_item_id': 41, 'status': 1},
+                ('cancel_items', 40): {'id': 40, 'action_id': 50, 'target_action_id': 7, 'status': 2},
+                ('cancel_items', 41): {'id': 41, 'action_id': 51, 'target_action_id': 7, 'status': 2},
+                ('actions', 50): {'id': 50, 'status': 2, 'cancel_requested': 0},
+                ('actions', 51): {'id': 51, 'status': 6, 'cancel_requested': 1}}
+        repo.row_facts = lambda connection, table, identity: dict(rows[(table, identity)])
+        class Cursor:
+            def fetchall(self): return [(30, 50), (31, 51)]
+            def close(self): pass
+        scope = SimpleNamespace(connection=SimpleNamespace(execute=lambda *args: Cursor()))
+        command._load(scope)
+        self.assertEqual([item['id'] for item in command._items], [30])
+
+
+def load_settlement():
+    names = ('camctl.persistence.models', 'camctl.cancellation.service', 'camctl.cancellation.ports',
+        'camctl.contracts.enums', 'camctl.contracts.values', 'camctl.persistence.business',
+        'camctl.persistence.repositories.capture_facts', 'camctl.persistence.transaction')
+    modules = {}
+    for name in names:
+        module = ModuleType(name)
+        module.__getattr__ = lambda name: Stub
+        modules[name] = module
+    modules['camctl.contracts.enums'].enum_for = lambda name: Status
+    name = 'camctl.cancellation._isolated_settlement'
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).parents[3] / 'src/camctl/cancellation/settlement.py')
+    module = importlib.util.module_from_spec(spec)
+    modules[name] = module
+    with patch.dict(sys.modules, modules):
+        spec.loader.exec_module(module)
+    return module
+
+
+class CancelWaiterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_ended_parent_does_not_block_a_live_waiter(self):
+        settlement = load_settlement()
+        class Cursor:
+            def __init__(self, query):
+                self.query = query
+            def fetchall(self):
+                if all(part in self.query for part in ('ci.status=2', 'origin.status=2', 'origin.cancel_requested=0')):
+                    return [(19,)]
+                return [(19,), (20,)]
+            def close(self): pass
+        class Database:
+            async def read(self, callback, **kwargs):
+                return callback(SimpleNamespace(connection=SimpleNamespace(execute=lambda query, args: Cursor(query))))
+        target = object.__new__(settlement.TargetSettlement)
+        target._database = Database()
+        self.assertEqual(await target._pending_withdrawal_items(7), (19,))

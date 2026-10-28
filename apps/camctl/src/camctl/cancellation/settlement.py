@@ -36,6 +36,10 @@ _CLEANUP_SUCCEEDED, _CLEANUP_FAILED, _CLEANUP_CANCELED = 4, 5, 6
 #: cancel_delivery_items.status：PENDING/WITHDRAWN/NOT_RETRACTABLE/FAILED。
 _DELIVERY_ITEM_PENDING, _DELIVERY_ITEM_WITHDRAWN = 1, 2
 _DELIVERY_ITEM_NOT_RETRACTABLE, _DELIVERY_ITEM_FAILED = 3, 4
+_ACTIVE_WITHDRAWAL_PARENT = (
+    " JOIN cancel_items ci ON ci.id=cdi.cancel_item_id"
+    " JOIN actions origin ON origin.id=ci.action_id"
+    " WHERE ci.status=2 AND origin.status=2 AND origin.cancel_requested=0")
 _RUN = enum_for("operation_runs.status")
 _KIND = enum_for("operation_runs.kind")
 _ATTEMPT = enum_for("operation_attempts.status")
@@ -283,7 +287,7 @@ class TargetSettlement:
                 owned.connection,
                 "SELECT cdi.status FROM cancel_delivery_items cdi"
                 " JOIN deliveries d ON d.id = cdi.delivery_id"
-                " WHERE d.action_id = ?", (target_action_id,))),
+                + _ACTIVE_WITHDRAWAL_PARENT + " AND d.action_id = ?", (target_action_id,))),
             description="读取取消取回的交付撤回结果",
         )
         if _DELIVERY_ITEM_PENDING in statuses:
@@ -389,7 +393,7 @@ class TargetSettlement:
                 owned.connection,
                 "SELECT DISTINCT cdi.delivery_id FROM cancel_delivery_items cdi"
                 " JOIN deliveries d ON d.id = cdi.delivery_id"
-                " WHERE d.action_id = ? AND cdi.status = ?",
+                + _ACTIVE_WITHDRAWAL_PARENT + " AND d.action_id = ? AND cdi.status = ?",
                 (target_action_id, _DELIVERY_ITEM_PENDING))),
             description="读取待撤回交付",
         )

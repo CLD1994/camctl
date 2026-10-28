@@ -10161,6 +10161,14 @@ class _AdvanceWithdrawalCommand:
             parent = row_facts(connection, "cancel_items", item["cancel_item_id"])
             if parent is None or parent["target_action_id"] != delivery["action_id"]:
                 raise ConsistencyError("原交付撤回明细与取消目标不一致")
+            origin = row_facts(connection, "actions", parent["action_id"])
+            if origin is None or origin["id"] != owner[1]:
+                raise ConsistencyError("原交付撤回明细缺少所属取消动作")
+            original("cancel_items", parent, owner, ("status",))
+            original("actions", origin, owner, ("status", "cancel_requested"))
+            if parent["status"] != 2 or origin["status"] != 2 or origin["cancel_requested"]:
+                continue
+            self._state.setdefault("actions", {})[origin["id"]] = origin
             self._state["cancel_items"][parent["id"]] = parent
             self._state["cancel_delivery_items"][item["id"]] = item
             self._owners[("cancel_delivery_items", item["id"])] = owner
