@@ -4,6 +4,31 @@
 
 [关键阶段与命令日志验证（2026-10-26）](operational-logging-validation-2026-10-26.md)记录统一 JSON、INFO 阶段与实际命令、DEBUG 耗时明细的最终单元和定向集成结果，以及现有真机验证环境的安装一致性；扩大检查中的旧测试失配单独保留。
 
+## 拍摄结果与普通交付恢复的软件验证（2026-10-28）
+
+[修复计划](../superpowers/plans/2026-10-28-capture-result-and-publication-recovery.md)完成首次配对的事务内边界固定、原 RESULTS 结果与业务处置共同保存，以及普通 PUBLISHING 的发现和取消收场。公共路径覆盖 Action6、OSMO 360 II 与 Hasselblad；Hasselblad 主机照片继续使用原 START 及文件恢复依据。
+
+最终受测生产源码为 `f1aa91a97d8d2d82842ecb9570bb658d83232a30`。环境为 Linux 开发容器、CPython 3.11.17，工作目录为 `/home/cld/.codex/worktrees/7426/camctl`，解释器为 `apps/camctl/.venv311/bin/python`。显式指定源码路径、禁用插件自动加载及字节码写入，隔离真实包资源、数据库、业务文件、网络、线程和子进程；只加载被测源码与内存协作者。
+
+| 独立进程范围 | 结果 |
+| --- | --- |
+| 配对、原结果拥有者与消费者、Hasselblad 恢复边界、取消录像读取、普通停止、分段完成、内部绑定、可用性装配、设备可用性及取消读取收场，共 11 个隔离文件 | 145 项、8 个子测试通过，4.52 秒，退出 0。 |
+| 普通发布发现与取消发布恢复，共 2 个隔离文件 | 52 项、9 个子测试通过，2.28 秒，退出 0。 |
+
+完整命令如下；两组在独立进程中运行，发布测试要求进程没有先前加载的 `camctl` 模块。
+
+```bash
+env -u PYTHONHOME -u PYTEST_ADDOPTS -u CAMCTL_TIMING_REPO -u CAMCTL_TIMING_DATA PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=apps/camctl/src:apps/camctl/tests apps/camctl/.venv311/bin/python -m pytest -p no:cacheprovider apps/camctl/tests/unit/persistence/test_result_pairing_atomic_isolated.py apps/camctl/tests/unit/capture/test_result_recovery_owner_isolated.py apps/camctl/tests/unit/capture/test_result_consumers_isolated.py apps/camctl/tests/unit/capture/test_h1_recovery_boundaries_isolated.py apps/camctl/tests/unit/capture/test_canceled_processing_read_isolated.py apps/camctl/tests/unit/capture/test_normal_recording_stop_isolated.py apps/camctl/tests/unit/capture/test_segment_completion_recovery_isolated.py apps/camctl/tests/unit/capture/test_saved_internal_binding_recovery_isolated.py apps/camctl/tests/unit/operations/test_availability_binding_assembly_isolated.py apps/camctl/tests/unit/devices/test_h2_availability_port_isolated.py apps/camctl/tests/unit/outputs/test_canceled_read_end_recovery_isolated.py -q --tb=short
+env -u PYTHONHOME -u PYTEST_ADDOPTS -u CAMCTL_TIMING_REPO -u CAMCTL_TIMING_DATA PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=apps/camctl/src:apps/camctl/tests apps/camctl/.venv311/bin/python -m pytest -p no:cacheprovider apps/camctl/tests/unit/outputs/test_publication_discovery_isolated.py apps/camctl/tests/unit/outputs/test_canceled_publication_isolated.py -q --tb=short
+```
+
+配对和 RESULTS 的独立评审核对原申请、事务、守卫、恢复和各设备消费者。发布评审进一步核对持文件资格后的状态重读、观察期间取消、已发生交接、普通未知失败的两个出口、原键重送、目标独立发现、分页、有效父明细及首次清理；处理发现后复核未发现剩余阻塞。24 个变更 Python 文件的 AST 解析、事件转换 JSON 解析和差异空白检查通过。部署脚本按目录复制源码和权威资源，本次没有新增依赖、配置或能力声明，脚本及工作规则不需修改。
+
+验证期间有一轮新增单元用例因延迟导入未隔离，触及真实包资源目录，随后在资源名检查失败；没有读取到资源字节，也没有访问数据库或设备。该轮结果作废，补齐贯穿模块执行的导入阻断器和资源失败替身后重跑；原取消证据守卫覆盖保留。另一次合并运行中，前序 AST 测试留下的合成模块使发布测试的清洁进程检查中止，随后按上述独立进程范围执行。配对与 RESULTS 合并时缺失的协作者替身已补齐，没有放宽断言。
+
+原始命令、日志、源码及退出码收据保存在 `tmp/capture-result-repair-20261028/`。本次没有新增或修改集成测试文件，也未调用集成测试入口；上述资源目录触达属于验证越界，已经作废。三个既有 `test_flow_events.py` 调用点只补齐 staging 参数，该文件未运行。真实 SQLite／文件／执行器组合、安装包、TX2、真实相机及物理断电均未验证，单元与静态评审结果不替代这些验收。
+
+
 ## 错误日志的断电持久性软件验证（2026-10-27）
 
 [分级写入完成要求](../architecture/logging.md#分级写入完成与断电持久性)将 ERROR／CRITICAL 的成功回执绑定到文件及必要目录同步；普通调用继续立即提交。原记录的追加、持久性及 stderr 交付分别保存，副本失败不会重写已经追加的原记录。[实施计划](../superpowers/plans/2026-10-27-error-log-durability.md)已完成软件范围，使用方式见[通用日志入口](logging-runtime.md#日志异步投递入口与有界队列)。
