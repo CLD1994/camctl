@@ -684,6 +684,27 @@ async def publish_action6_segment_result(runtime, action, ref, decision, *, fail
     )
 
 
+async def _resume_action6_segment_decision(runtime, action, ref, repository):
+    """已保存的范围决定和检查责任优先于重新分类正常结果。"""
+    row = await runtime.database.read(lambda owned: repository.read_set(ref, owned))
+    if row["state"] == int(enum_for("segment_sets.state").ASSESSED):
+        from camctl.capture.segment_completion import release_segment_occupancy
+
+        decision = await runtime.database.read(lambda owned: repository.read_decision(ref, owned))
+        await release_segment_occupancy(runtime, action["id"])
+        await publish_action6_segment_result(runtime, action, ref, decision)
+        return True
+    inspection = await runtime.database.read(lambda owned: owned.connection.execute(
+        "SELECT 1 FROM segment_inspections WHERE set_id=? LIMIT 1", (row["id"],)
+    ).fetchone())
+    if inspection is None:
+        return False
+    from camctl.capture.action6_recovery import advance_action6_recovery
+
+    await advance_action6_recovery(runtime, action)
+    return True
+
+
 async def advance_action6_segmented_recording(runtime, action, decision):
     """普通录像与原生有限延时共用的完整结果推进。"""
     from camctl.capture import handlers as common
@@ -722,6 +743,8 @@ async def advance_action6_segmented_recording(runtime, action, decision):
         await finish_action6_retained_unconfirmed(runtime, action, ref)
         return
     repository = SegmentRepository()
+    if await _resume_action6_segment_decision(runtime, action, ref, repository):
+        return
     facts = await classify_action6_segment_set(action, ref, repository, runtime.database)
     await release_segment_occupancy(runtime, action_id)
     activity_id = await common._activity_id_of(runtime, action_id)
@@ -793,6 +816,8 @@ async def advance_action6_native_result(runtime, action_id, *, canceled=False):
             await finish_action6_retained_unconfirmed(runtime, action, ref)
         return
     repository = SegmentRepository()
+    if not canceled and await _resume_action6_segment_decision(runtime, action, ref, repository):
+        return
     facts = await classify_action6_segment_set(
         action, ref, repository, runtime.database, canceled=canceled
     )
