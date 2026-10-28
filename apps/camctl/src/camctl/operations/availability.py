@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Any
 
 from camctl.contracts.values import ConsistencyError, new_operation_key
-from camctl.logging_runtime.diagnostics import DiagnosticState, record_call_outcome
+from camctl.logging_runtime.diagnostics import DiagnosticState, record_availability_error, record_call_outcome
 from camctl.operations.attempts import (
     AttemptFinish, AttemptIntent, AttemptTarget, OperationKind, RetryWaitGate,
     RunFinish, RunOutcome,
@@ -42,6 +42,60 @@ class _Write:
     callback: Any
     key: Any = field(default_factory=new_operation_key)
     save: SharedSave = field(default_factory=SharedSave)
+
+
+def availability_result_saver(*, ticket, request, config, evidence, binding, check_id,
+                              database, write, finish_availability, finish_attempt,
+                              occurred_at, monotonic_ns, retry_gate):
+    """持有一次检查结果的固定保存申请及诊断责任。"""
+    finish_holder = {}
+
+    async def save(actual, diagnostic):
+        if not isinstance(actual, CallOutcome) and not actual.settled:
+            error = next((call.error for call in actual.calls if call.error is not None), None)
+            if error is None:
+                error = ErrorValue("device_error", "availability", {"reason": actual.reason})
+            record_availability_error(error, ticket=ticket, diagnostics=actual.tool_diagnostics(),
+                context={"action_id": request.action_id},
+                details={"reason": actual.reason, "calls": actual.calls}, state=diagnostic)
+            raise ConsistencyError("设备检查实际收场尚未确认")
+        device_result = None if isinstance(actual, CallOutcome) else actual.to_device_result(str(check_id))
+        outcome = actual if device_result is None else device_result.outcome
+        diagnostic_error = None if device_result is None else device_result.diagnostic_error
+        if outcome.error is not None or diagnostic_error is not None:
+            record_call_outcome(outcome, ticket=ticket, run_error=diagnostic_error,
+                context={"action_id": request.action_id}, state=diagnostic, include_tool_stdout=True)
+        if "finish" not in finish_holder:
+            validated = validate_outcome(ticket, outcome, evidence)
+            if outcome.status is AttemptStatus.SUCCEEDED:
+                finish = AttemptFinish(ticket, validated, occurred_at(), run_finish=RunFinish(RunOutcome.SUCCEEDED))
+            else:
+                action = await database.read(lambda owned: _action_facts(owned, request.action_id))
+                if action["cancel_requested"] or action["status"] == 6:
+                    finish = AttemptFinish(ticket, validated, occurred_at(), run_finish=RunFinish(RunOutcome.CANCELED))
+                elif request.trigger_copy_id is None and (action["status"] == 5 or
+                        occurred_at() > action["scheduled_at"] + action["max_delay_ms"] * 1000):
+                    finish = AttemptFinish(ticket, validated, occurred_at(), run_finish=RunFinish(RunOutcome.EXPIRED))
+                elif ticket.attempt_id >= config.max_attempts:
+                    error = ErrorValue("source_device_unavailable" if request.trigger_copy_id else "device_availability_unconfirmed",
+                        "source_read" if request.trigger_copy_id else "execution", {"device_id": binding.device_id,
+                        "operation_run_id": str(ticket.run_id), "attempts_used": ticket.attempt_id,
+                        "max_attempts": config.max_attempts})
+                    finish = AttemptFinish(ticket, validated, occurred_at(), run_finish=RunFinish(RunOutcome.FAILED, error))
+                else:
+                    finish = AttemptFinish(ticket, validated, occurred_at(), retry_wait=True)
+            finish_holder["finish"] = finish
+        finish = finish_holder["finish"]
+        record_call_outcome(outcome, ticket=ticket,
+            run_error=diagnostic_error or (None if finish.run_finish is None else finish.run_finish.error),
+            context={"action_id": request.action_id}, state=diagnostic, include_tool_stdout=True)
+        callback = finish_availability if outcome.status is AttemptStatus.SUCCEEDED else finish_attempt
+        await write(database, (request.action_id, request.trigger_copy_id, "result", ticket.run_id, ticket.attempt_id),
+                    finish, callback)
+        if finish.retry_wait:
+            retry_gate.established(ticket.responsibility_key, monotonic_ns())
+
+    return save
 
 
 class AvailabilityCoordinator:
@@ -323,40 +377,10 @@ class AvailabilityCoordinator:
                 timeout_s=config.timeout_s)
             return result
 
-        finish_holder = {}
-        async def save(actual, diagnostic):
-            device_result = None if isinstance(actual, CallOutcome) else actual.to_device_result(str(check_id))
-            outcome = actual if device_result is None else device_result.outcome
-            if "finish" not in finish_holder:
-                validated = validate_outcome(ticket, outcome, evidence)
-                if outcome.status is AttemptStatus.SUCCEEDED:
-                    finish = AttemptFinish(ticket, validated, self.occurred_at(), run_finish=RunFinish(RunOutcome.SUCCEEDED))
-                else:
-                    action = await database.read(lambda owned: _action_facts(owned, request.action_id))
-                    if action["cancel_requested"] or action["status"] == 6:
-                        finish = AttemptFinish(ticket, validated, self.occurred_at(), run_finish=RunFinish(RunOutcome.CANCELED))
-                    elif request.trigger_copy_id is None and (action["status"] == 5 or
-                            self.occurred_at() > action["scheduled_at"] + action["max_delay_ms"] * 1000):
-                        finish = AttemptFinish(ticket, validated, self.occurred_at(), run_finish=RunFinish(RunOutcome.EXPIRED))
-                    elif ticket.attempt_id >= config.max_attempts:
-                        error = ErrorValue("source_device_unavailable" if request.trigger_copy_id else "device_availability_unconfirmed",
-                            "source_read" if request.trigger_copy_id else "execution", {"device_id": binding.device_id,
-                            "operation_run_id": str(ticket.run_id), "attempts_used": ticket.attempt_id,
-                            "max_attempts": config.max_attempts})
-                        finish = AttemptFinish(ticket, validated, self.occurred_at(), run_finish=RunFinish(RunOutcome.FAILED, error))
-                    else:
-                        finish = AttemptFinish(ticket, validated, self.occurred_at(), retry_wait=True)
-                finish_holder["finish"] = finish
-            finish = finish_holder["finish"]
-            diagnostic_error = None if device_result is None else device_result.diagnostic_error
-            record_call_outcome(outcome, ticket=ticket,
-                run_error=diagnostic_error or (None if finish.run_finish is None else finish.run_finish.error),
-                context={"action_id": request.action_id}, state=diagnostic, include_tool_stdout=True)
-            callback = finish_availability if outcome.status is AttemptStatus.SUCCEEDED else self.operations.finish_attempt
-            await self._write(database, (request.action_id, request.trigger_copy_id, "result", ticket.run_id, ticket.attempt_id),
-                              finish, callback)
-            if finish.retry_wait:
-                self.retry_gate.established(ticket.responsibility_key, self.monotonic_ns())
+        save = availability_result_saver(ticket=ticket, request=request, config=config,
+            evidence=evidence, binding=binding, check_id=check_id, database=database, write=self._write,
+            finish_availability=finish_availability, finish_attempt=self.operations.finish_attempt,
+            occurred_at=self.occurred_at, monotonic_ns=self.monotonic_ns, retry_gate=self.retry_gate)
 
         return AvailabilityAttemptOwner(ticket, invoke, save,
             lambda error: error.result if isinstance(error, (AvailabilityCancelled, _DispatchCancelled)) else None)

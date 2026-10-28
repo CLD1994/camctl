@@ -191,6 +191,20 @@ class AvailabilityPortTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(caught.exception.result.calls[0].outcome.output, b"list")
         self.assertEqual(len(transport.calls), 1)
 
+    async def test_unsettled_transport_keeps_original_diagnostics_without_result(self):
+        error = RuntimeError("transport unsettled")
+        driver, binding, transport, _ = self.setup_driver([raw(b"list"), error])
+        result = await driver.check_availability(binding, expected_serial="SERIAL", expected_product_id=10,
+                                                 timeout_s=Decimal(5))
+        self.assertFalse(result.settled)
+        self.assertIs(result.calls[-1].error, error)
+        diagnostics = result.tool_diagnostics()
+        self.assertEqual([call.name for call in diagnostics.calls], ["list", "info"])
+        self.assertEqual(diagnostics.calls[0].stdout.data, b"list")
+        self.assertEqual(diagnostics.calls[1].stdout.state, "unavailable")
+        with self.assertRaises(ValueError):
+            result.to_device_result("31")
+
 
 if __name__ == "__main__":
     unittest.main()
