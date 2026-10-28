@@ -175,6 +175,7 @@ class RetryReadFactsTests(unittest.TestCase):
             outcome.settlement.evidence.type = "other"
             self.assertIsNone(reads.recovered_unknown(7, 1))
             outcome.settlement.evidence.type = "adb_foreground_recovery"
+            self.assertEqual(reads.recovered_unknown(7, 1)[0], 12)
             outcome.observations = (object(),)
             self.assertIsNone(reads.recovered_unknown(7, 1))
             outcome.observations = ()
