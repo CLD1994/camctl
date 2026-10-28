@@ -2,6 +2,7 @@
 
 from contextlib import closing
 from dataclasses import dataclass
+import weakref
 
 from camctl.contracts.pages import Page
 from camctl.contracts.values import ConsistencyError, MAX_OBJECT_ID, ObjectId, UtcMicros
@@ -199,7 +200,24 @@ class ReadCandidate:
         return (0 if self.held else 1, self.scheduled_at, self.plan_id, self.input_index, self.copy_id)
 
 
-def read_candidates(connection, scope, cursor=None, *, limit):
+class _ReadBasisCache:
+    """仅保存一个自有只读事务中验证成功的当前视图。"""
+
+    def __init__(self):
+        self.value = None
+
+    def clear(self):
+        self.value = None
+
+    def matches(self, owned, marker):
+        return self.value is not None and self.value[0]() is owned and self.value[1] == marker
+
+    def save(self, owned, marker):
+        self.value = (weakref.ref(owned), marker)
+
+
+def read_candidates(connection, scope, cursor=None, *, limit, _basis_cache=None, _owned=None,
+                    _restart_if_changed=False, _restarted=None):
     positive_limit(limit)
     check_cursor(scope, cursor)
     if scope.database != database_identity(connection):
@@ -208,7 +226,45 @@ def read_candidates(connection, scope, cursor=None, *, limit):
         raise ValueError("读取继续位置缺少完整排序键")
     if scope.kind not in ("delivery", "reads", "internal", "all", "local"):
         raise ValueError("读取候选种类无效")
-    validate_read_basis(connection, scope.device_id)
+    own_transaction = not connection.in_transaction
+    try:
+        if own_transaction:
+            connection.execute("BEGIN")
+        elif _basis_cache is not None:
+            _basis_cache.clear()
+        marker = None
+        if own_transaction and _basis_cache is not None and _owned is not None:
+            # 固定 main 的实际读快照，再在该快照内读取版本。
+            with closing(connection.execute("SELECT id FROM file_copies LIMIT 1")) as result:
+                result.fetchone()
+            with closing(connection.execute("PRAGMA main.data_version")) as result:
+                version = result.fetchone()[0]
+            marker = (scope.database, scope.device_id, version, connection.total_changes)
+        validated = marker is not None and _basis_cache.matches(_owned, marker)
+        if _restart_if_changed and not validated:
+            cursor = None
+            _restarted.append(True)
+        page = _read_candidates_in_transaction(connection, scope, cursor, limit, validated)
+        if own_transaction:
+            connection.execute("COMMIT")
+        if marker is not None:
+            _basis_cache.save(_owned, marker)
+        return page
+    except BaseException as error:
+        if _basis_cache is not None:
+            _basis_cache.clear()
+        if own_transaction and connection.in_transaction:
+            try:
+                connection.execute("ROLLBACK")
+            except BaseException as rollback_error:
+                from camctl.persistence.transaction import _attach_control_receipt
+                _attach_control_receipt(error, "unknown", (rollback_error,))
+        raise
+
+
+def _read_candidates_in_transaction(connection, scope, cursor, limit, validated):
+    if not validated:
+        validate_read_basis(connection, scope.device_id)
     condition = "a.status=2 AND a.cancel_requested=0 AND " + _READ_COPY_ELIGIBLE
     parameters = []
     if scope.kind == "local":
@@ -226,16 +282,34 @@ def read_candidates(connection, scope, cursor=None, *, limit):
         parameters.append(scope.device_id)
     priority = "CASE WHEN fc.slot_device_id IS NOT NULL THEN 0 ELSE 1 END"
     key_sql = f"{priority},a.scheduled_at,a.plan_id,a.input_index,fc.id"
-    if cursor is not None:
-        condition += f" AND ({key_sql})>(?,?,?,?,?)"
-        parameters.extend(cursor.after)
-    parameters.append(limit)
-    with closing(connection.execute(
-        "SELECT fc.id,a.id,a.scheduled_at,a.plan_id,a.input_index,ob.device_id,ob.driver_id,"
-        "fc.source_device_file_id,fc.slot_device_id IS NOT NULL,r.attempts_used,r.retry_wait_required,fc.read_end_event_id" + _READ_FROM
-        + " WHERE " + condition + " ORDER BY " + key_sql + " LIMIT ?", parameters,
-    )) as result:
-        items = tuple(ReadCandidate(*row) for row in result.fetchall())
+    select = ("SELECT fc.id,a.id,a.scheduled_at,a.plan_id,a.input_index,ob.device_id,ob.driver_id,"
+              "fc.source_device_file_id,fc.slot_device_id IS NOT NULL,r.attempts_used,"
+              "r.retry_wait_required,fc.read_end_event_id")
+    items = ()
+    if cursor is not None and cursor.after[0] in (0, 1):
+        held, scheduled_at, plan_id, input_index, copy_id = cursor.after
+        held_condition = "fc.slot_device_id IS NOT NULL" if held == 0 else "fc.slot_device_id IS NULL"
+        with closing(connection.execute(
+            select + _READ_FROM.replace("file_copies fc", "file_copies fc NOT INDEXED", 1)
+            + " WHERE " + condition + " AND " + held_condition
+            + " AND a.scheduled_at=? AND a.plan_id=? AND a.input_index=? AND fc.id>?"
+            + " ORDER BY fc.id LIMIT ?",
+            (*parameters, scheduled_at, plan_id, input_index, copy_id, limit),
+        )) as result:
+            items = tuple(ReadCandidate(*row) for row in result.fetchall())
+    if len(items) < limit:
+        after = items[-1].key if items else (None if cursor is None else cursor.after)
+        rest_condition = condition
+        rest_parameters = list(parameters)
+        if after is not None:
+            rest_condition += f" AND ({key_sql})>(?,?,?,?,?)"
+            rest_parameters.extend(after)
+        rest_parameters.append(limit - len(items))
+        with closing(connection.execute(
+            select + _READ_FROM + " WHERE " + rest_condition + " ORDER BY " + key_sql + " LIMIT ?",
+            rest_parameters,
+        )) as result:
+            items += tuple(ReadCandidate(*row) for row in result.fetchall())
     position = ReadDiscoveryCursor(scope, items[-1].key) if len(items) == limit else None
     return Page(items, position)
 
@@ -274,6 +348,7 @@ class ReadDiscoveryOwner:
         self._positions = {}
         self._stamp = None
         self._deadline = None
+        self._read_basis = _ReadBasisCache()
 
     @property
     def pending(self):
@@ -283,9 +358,11 @@ class ReadDiscoveryOwner:
     def cursor_count(self):
         return len(self._positions)
 
-    def invalidate(self):
+    def invalidate(self, *, preserve_read_basis=False):
         self.generation += 1
         self._positions.clear()
+        if not preserve_read_basis:
+            self._read_basis.clear()
 
     def observe(self, stamp, now_us):
         if stamp != self._stamp or (self._deadline is not None and now_us >= self._deadline):
@@ -353,7 +430,25 @@ class ReadDiscoveryOwner:
         scope = self.scope(kind, database_id, now_us)
         cursor = self._positions.get(kind)
         limit = self.batch_size
-        page = await database.read(lambda owned: read_candidates(owned.connection, scope, cursor, limit=limit))
+        restarted = []
+        try:
+            page = await database.read(lambda owned: read_candidates(
+                owned.connection, scope, cursor, limit=limit,
+                _basis_cache=self._read_basis, _owned=owned,
+                _restart_if_changed=bool(self._positions), _restarted=restarted))
+        except BaseException:
+            self._read_basis.clear()
+            raise
+        if restarted:
+            if scope.generation != self.generation:
+                self._read_basis.clear()
+                raise ValueError("不能保存旧代次的继续位置")
+            self.invalidate(preserve_read_basis=True)
+            scope = ReadDiscoveryScope(scope.database, scope.kind, now_us,
+                                       self.generation, scope.device_id)
+            next_cursor = (None if page.next_cursor is None else
+                           ReadDiscoveryCursor(scope, page.next_cursor.after))
+            page = Page(page.items, next_cursor)
         self.accept(scope, page)
         return page
 
