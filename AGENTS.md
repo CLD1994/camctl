@@ -51,6 +51,7 @@
 | 定义或核对行为契约，设计架构，编写或审查规格、实施计划       | [设计与计划规则](.agents/rules/design-and-planning.md) |
 | 实现功能、修复缺陷、重构代码或修改开发脚本                   | [实施规则](.agents/rules/implementation.md)            |
 | 进行评审、处理评审意见或交接评审缺陷                         | [评审规则](.agents/rules/review.md)                    |
+| 协调多个 Agent 的任务、验证与交付                            | [Agent 调度规则](.agents/rules/agent-coordination.md) |
 
 一项任务符合多个条件时，读取全部适用规则；任务范围扩大时，在继续相关工作前补读新增规则。必需规则或参考文件无法读取时，停止依赖它的工作并说明缺失内容。
 
