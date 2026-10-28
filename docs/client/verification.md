@@ -2,6 +2,14 @@
 
 本页记录软件组件的实际验证结果，并区分部署、设备联调和物理断电验证。完整业务验收依据为[客户端六组场景](acceptance.md)，实现进度由[客户端规格同步计划](../superpowers/plans/2026-10-09-client-spec-sync.md)跟踪。
 
+## Hasselblad 快门分数字符串同步（2026-10-29）
+
+参数契约采用[单张参数规格](../superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md#快门档位与分数字符串)。`23a7a7c5` 将客户端有限照片样例的三个短快门改为字符串 `const`，并同步对象分支恢复、预设保存与重开、应用到独立草稿及计划导出的现有断言；通用精确数字覆盖保持。样例不维护设备的完整快门目录，实际选项继续来自 camctl 导出的能力说明。
+
+静态核对从能力加载、字符串选项和表单写入，到预设保存、计划校验、JSON 导出及报告展示的实际生产调用：现有通用逻辑保留字符串原值，校验不转换类型，未发现需要增加的 Hasselblad 专属生产逻辑。Sol 对三个变更文件及其生产接线的只读评审无阻断，`git diff --check` 通过。
+
+未运行客户端代码、单元、集成、类型检查、构建或浏览器，也未启动服务、操作设备或改写已有客户端数据。因此本项只有静态核对，预设重开和导出等实际运行结果仍待验证。新能力说明来自独立真机实例 `fraction-shutter/device-capabilities.json`；主机四种来源／格式的真实结果见[专项真机记录](../camctl/hasselblad-real-device-verification-2026-10-28.md#快门分数字符串的统一接入)，不计作客户端验证。
+
 ## MP4 类型缺失时的预览（2026-10-26）
 
 Windows、Node.js 24.22.1 中，四项新增用例先在原实现复现 MP4 类型缺失或为通用二进制类型时无法取得查看类型、按交付名称识别失败及产物归入其他文件的问题。修复后，在 `apps/client` 执行 `node node_modules/vitest/vitest.mjs run tests/unit/media.test.ts tests/unit/result-model.test.ts --maxWorkers=2`，两个单元文件的 44 项全部通过，退出 0。覆盖原始名称与已关联交付名称、扩展名大小写、明确类型优先、扩展名后的额外后缀及未关联文件的读取边界。`npm run build` 完成类型检查与生产构建，退出 0，保留既有主包超过 500 kB 的提示。

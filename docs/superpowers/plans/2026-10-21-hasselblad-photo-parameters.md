@@ -26,7 +26,7 @@
 
 - 驱动为 `hasselblad_cfv100c`，动作为 `camera_take_photo`，参数类型为 `hasselblad_photo`，能力名称为“Hasselblad 单张拍照”，`preview_supported=true`。
 - 完整参数的五个顶层字段全部必填；互斥分支封闭，MF 的 `relative_move` 可省略且仅允许 `-5`、`5`。域、标题和命令映射由驱动同源生成，完整档位表只在其权威定义维护。
-- 参数、Schema、预设、计划、历史及工具参数使用精确数字。快门目录生成时的舍入只应用一次；执行时直接使用已保存值。
+- 快门在参数、Schema、预设、计划、历史、报告及工具参数中使用相同的规范分数字符串；其他数值保持精确数字。执行时直接使用已保存值。
 - 设置、对焦和拍摄共用一次 START；完整调用预算为首次受理保存的 `180` 秒，正式源位置也使用原执行定义。每次派发仍检查窗口、剩余预算和普通资格。
 - 实际进入整次 START 后拒绝取消。照片采集 `NO_EFFECT` 与整次 START 尚未进入分别判断；步骤副作用随原尝试保存，恢复消费原事实。
 - 原图和预览各有独立文件身份。JPEG 原图与 JPEG 预览通过角色区分，MIME 用于内容校验；机内路径、机内文件名及主机文件名分别表达。
@@ -205,14 +205,16 @@ camctl_pytest() {
 
 **测试位置：** `apps/client/tests/unit/parameter-options.test.ts`、`object-branch-controls.test.ts`、`fields.test.ts`、`json-field-rules.test.ts`；集成为 `browser-camera-parameters.test.ts`、`browser-rule-display.test.ts`、`parameter-variants.test.ts`、`browser-linked-parameters.test.ts`。
 
-**输入与交付：** 消费导出的通用 Schema，交付带原数值上下文的 `ScalarChoice`、合法对象分支及统一标签；选择器、字段说明和设备指南共同消费元数据。
+**输入与交付：** 消费导出的通用 Schema，交付保留字符串原值及数字来源上下文的 `ScalarChoice`、合法对象分支及统一标签；选择器、字段说明和设备指南共同消费元数据。
 
 - [x] **步骤 1：增加选项资格测试。** `titled scalar constants preserve exact machine values` 覆盖字符串／数字 const、缺失标题的机器值回退、重复标题的值区分、精确重复 const 的拒绝资格、非法或不可解析分支的 JSON 编辑回退；沿现有候选限制覆盖 4096／4097 边界。修改标题、打开说明和切换表单／JSON 均不改变正文及合法性。
 - [x] **步骤 2：增加分支和独立编辑测试。** `incomplete white balance does not disable exposure choices` 验证色温未填不阻断曝光独立选择；`object branches use titles and preserve per-branch drafts` 验证中文模式名、切换后恢复各分支私有值、未选择保持缺省、当前额外字段保留并报错。换设备只改变校验依据，缓存身份沿现有契约。
 - [x] **步骤 3：确认失败。** 执行 `pnpm --dir apps/client exec vitest run tests/unit/parameter-options.test.ts tests/unit/object-branch-controls.test.ts tests/unit/fields.test.ts tests/unit/json-field-rules.test.ts`。
 - [x] **步骤 4：实现通用解析及控件接入。** 只接受公共编辑契约允许的直接标量 `oneOf` 常量选项，解析本地引用及其原数字上下文；相同机器值比较使用精确 JSON 身份。对象分支资格调用共同标量规则，模式选项使用分支标题；`Field`、规则提示、指南显示使用同一标签来源。非法规则、合法规则下的非法输入分别呈现。
-- [x] **步骤 5：增加真实浏览器往返。** `short shutter choices survive preset reopen and export` 在浏览器选择三个短快门，保存并重开预设、应用到独立草稿、导出并比较精确值；曝光／白平衡／对焦切换后子参数保持。验证 ISO／光圈／快门下拉、色温整数输入及 MF 真正未填写状态，并核对曝光四模式的中文标签。预设按现有整体替换规则清理相关缓存，私有缓存不进入公共计划；重新加载能力失败时保留上一份规则与当前输入。
+- [x] **步骤 5：增加真实浏览器往返。** `short shutter choices survive preset reopen and export` 在浏览器选择三个短快门，保存并重开预设、应用到独立草稿、导出并比较规范分数字符串；曝光／白平衡／对焦切换后子参数保持。验证 ISO／光圈／快门下拉、色温整数输入及 MF 真正未填写状态，并核对曝光四模式的中文标签。预设按现有整体替换规则清理相关缓存，私有缓存不进入公共计划；重新加载能力失败时保留上一份规则与当前输入。
 - [x] **步骤 6：验证通过并形成阶段提交。** 运行步骤 3、`pnpm --dir apps/client run typecheck`、`pnpm --dir apps/client run build`，再运行 `VITEST_MAX_WORKERS=2 pnpm --dir apps/client run test:integration`。建议提交名为“支持 Schema 中文常量选项与精确分支编辑”。
+
+**快门字符串同步。** `23a7a7c5` 将客户端照片编辑样例、对象分支恢复及预设重开和导出断言同步为分数字符串，保留原覆盖及通用精确数字用例。生产控件和保存链路由通用 Schema 与 JSON 规则处理，静态审查未发现需要增加的快门专属逻辑；新能力说明由已安装 camctl 导出。Sol 只读评审无阻断，差异检查通过。客户端代码、单元、集成、类型检查、构建和浏览器均未运行；本段不将原阶段运行结果计为新字符串格式的通过证据，实际范围见[客户端验证记录](../../client/verification.md#hasselblad-快门分数字符串同步2026-10-29)。
 
 **阶段证据：** 实现提交 `83a6d9f`、修复提交 `38fc635` 已通过独立规格及质量复核，并合入协调提交 `126222d`。任务工作区在 Node.js 24.20.0 下完成 2936 项单元、1379 项集成，以及类型检查和构建；协调工作区的六文件单元 302 项、真实 Node 首次导入集成 5 项和类型检查通过。验证覆盖命名常量的精确数字、模式缓存、实际浏览器预设／导出，以及附带局部断言的 4096／4097 常量目录。构建保留主包 858.52 kB 的体积提示。实际安装版 describe、相机拍摄、媒体及 ACK 联合证据继续由 H8、H9 取得。
 
@@ -241,7 +243,7 @@ camctl_pytest() {
 **输入与交付：** 消费安装 wheel、真实客户端、C HostDemo、H7 的接口受约束工具替身；交付四种组合的独立软件证据和精确参数的三端判定结果。
 
 - [x] **步骤 1：建立三端参数反例集。** 将 `validate-parameters` 输入改为显式指定 `action_type`、`device_id`、`action_name`，浏览器、客户端后端和导出计划共同使用。新测试 `test_installed_hasselblad_parameter_validation_agrees_across_consumers` 比较浏览器、客户端后端和安装版 camctl 的接受／拒绝：合法分支、短快门、色温边界、错误模式字段、额外 tint、缺项及 `null`。反例集合只定义一次，不复制整份档位目录；更新延时摄影原调用方后确认其原行为保持。
-- [x] **步骤 2：建立四种安装链并确认失败。** `test_installed_hasselblad_photo_roundtrip` 参数化 RAW×host、RAW×device、JPEG×host、JPEG×device。每个独立请求恰执行一次 capture，从客户端选值、预设重开和导出开始，经 C host 提交、安装版 CLI 执行、SQLite／历史／报告到正式输出；比较三个短快门在草稿、预设、导出正文、受理、生效参数、历史恢复、报告及实际 argv 中的精确数学值，并核对双文件身份。只在工具进程边界替换 hb_cli。
+- [x] **步骤 2：建立四种安装链并确认失败。** `test_installed_hasselblad_photo_roundtrip` 参数化 RAW×host、RAW×device、JPEG×host、JPEG×device。每个独立请求恰执行一次 capture，从客户端选值、预设重开和导出开始，经 C host 提交、安装版 CLI 执行、SQLite／历史／报告到正式输出；比较三个短快门在草稿、预设、导出正文、受理、生效参数、历史恢复、报告及实际 argv 中的相同分数字符串，并核对双文件身份。只在工具进程边界替换 hb_cli。
 - [x] **步骤 3：补齐取回及恢复。** 分别明确取回原图和预览并重复取回，验证新 delivery 与原 output／源动作身份。主机正式源在相机不可用时仍可取回；设备正式源使用原机内 basename、绑定及读取种类。注入原结果保存后中断和提交回执丢失，核实同一申请恢复且不重复设置、调焦或拍摄；同一公共请求重送也不重复登记。
 - [x] **步骤 4：验证文件导入与 ACK。** 通过真实 `Files.upload` 导入交付文件，覆盖报告先到、媒体先到及部分文件未到。核对 JPEG 两角色不会因 MIME 或相同内容合并，报告同历史边界重建一致；客户端导出累计 ACK 后，camctl 确认水位符合报告覆盖，媒体缺失单独呈现。单张动作仍省略公共 `result`，按原字段报告设备执行情况；步骤细节保存在内部，失败仍使用现有通用摘要。
 - [x] **步骤 5：执行根组合测试。** 先执行 `apps/camctl/.venv311/bin/python -m pytest tests/integration/test_hasselblad_photo_parameters.py tests/integration/test_hasselblad_photo_roundtrip.py -q`，再按根测试指南运行被本次接缝影响的能力、时间参数及 C host 回归；保留各组合的计划、报告、数据库、工具轨迹、文件摘要和 ACK 证据。
