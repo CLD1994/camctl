@@ -359,13 +359,13 @@ it("object branches use titles and preserve per-branch drafts", async () => {
     "程序曝光",
   ]);
   const initial = {
-    text: '{"actions":[{"type":"camera_take_photo","params":{"type":"titled_photo","exposure":{"mode":"M","shutter_s":0.000667,"extra":7}}}]}',
+    text: '{"actions":[{"type":"camera_take_photo","params":{"type":"titled_photo","exposure":{"mode":"M","shutter_s":"1/1500","extra":7}}}]}',
   };
   const switched = switchObjectBranch(initial, 0, ["exposure"], "mode", "P");
   const restored = switchObjectBranch(switched, 0, ["exposure"], "mode", "M");
   expect((parseDraft(restored).actions[0].params as any).exposure).toEqual({
     mode: "M",
-    shutter_s: 0.000667,
+    shutter_s: "1/1500",
     extra: 7,
   });
   expect(render('{"mode":"M","extra":7}', titledParameter())).toContain(
@@ -376,7 +376,7 @@ it("object branches use titles and preserve per-branch drafts", async () => {
 it("换设备只改变当前校验依据，模式内容与未完成输入继续随原字段恢复", async () => {
   const { titledParameter } = await import("../fixtures/titled-parameters");
   const initial: DraftContent = {
-    text: '{"actions":[{"type":"camera_take_photo","device_id":"first","params":{"type":"titled_photo","exposure":{"mode":"M","iso":100,"shutter_s":0.000667}}}]}',
+    text: '{"actions":[{"type":"camera_take_photo","device_id":"first","params":{"type":"titled_photo","exposure":{"mode":"M","iso":100,"shutter_s":"1/1500"}}}]}',
     pending: {
       "/actions/0/params/exposure/aperture": { kind: "number", text: "4e" },
     },
@@ -388,7 +388,7 @@ it("换设备只改变当前校验依据，模式内容与未完成输入继续�
   expect((parseDraft(restored).actions[0].params as any).exposure).toEqual({
     mode: "M",
     iso: 100,
-    shutter_s: 0.000667,
+    shutter_s: "1/1500",
   });
   expect(restored.pending?.["/actions/0/params/exposure/aperture"]?.text).toBe(
     "4e",

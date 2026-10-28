@@ -1524,12 +1524,12 @@ it("能力源的 Action6 延时参数、预览与三种输出经真实表单和�
 }, 60000);
 
 it.each([
-  ["0", "1/1500 秒", "0.000667"],
-  ["1", "1/3000 秒", "0.000333"],
-  ["2", "1/4000 秒", "0.00025"],
+  ["0", "1/1500 秒", "1/1500"],
+  ["1", "1/3000 秒", "1/3000"],
+  ["2", "1/4000 秒", "1/4000"],
 ])(
   "short shutter choices survive preset reopen and export: %s",
-  async (choice, label, token) => {
+  async (choice, label, shutter) => {
     const capabilities = {
       devices: [
         {
@@ -1617,7 +1617,9 @@ it.each([
       .click();
     await check.poll(() => app.state().presets!.length).toBe(1);
     const preset = app.state().presets![0];
-    expect(stringifyJson(preset.params)).toContain('"shutter_s":' + token);
+    expect(stringifyJson(preset.params)).toContain(
+      '"shutter_s":' + stringifyJson(shutter),
+    );
     await page.reload();
     await page.getByTestId("draft-open-button").click();
     await check(control("快门 (shutter_s)")).toContainText(label);
@@ -1678,7 +1680,7 @@ it.each([
       (await (await downloadEvent).path())!,
       "utf8",
     );
-    expect(downloaded).toContain('"shutter_s": ' + token);
+    expect(downloaded).toContain('"shutter_s": ' + stringifyJson(shutter));
     const exported = parseJson(downloaded) as any;
     expect(exported.actions[0].params).toEqual(preset.params);
     expect(exported).not.toHaveProperty("objectVariants");
