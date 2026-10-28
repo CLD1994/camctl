@@ -331,6 +331,20 @@ def test_creation_request_rejects_invalid_budget_type(creation_module):
             creation_module.CreateAvailabilityCheck(12, identity, 10, Decimal("1"), 10, batch)
 
 
+def test_read_check_request_round_trips_current_budget(creation_module):
+    from decimal import Decimal
+    identity = creation_module.CameraIdentity("CAMERA-1", 10)
+    request = creation_module.CreateAvailabilityCheck(12, identity, 10, Decimal("1"), 10,
+                                                       trigger_copy_id=8, max_read_attempts=2)
+    document = creation_module._request_document(request)
+    assert document["max_read_attempts"] == 2
+    assert creation_module._request(document) == request
+    for maximum in (0, True, -1):
+        with pytest.raises(ValueError):
+            creation_module.CreateAvailabilityCheck(12, identity, 10, Decimal("1"), 10,
+                                                   trigger_copy_id=8, max_read_attempts=maximum)
+
+
 def test_creation_group_requires_all_events_before_final_seal(creation_module, monkeypatch):
     from dataclasses import dataclass
     @dataclass(frozen=True)
@@ -392,7 +406,7 @@ def test_device_trigger_fixes_original_copy_and_camera(creation_module, monkeypa
     from decimal import Decimal
     identity = creation_module.CameraIdentity("CAMERA-1", 10)
     request = creation_module.CreateAvailabilityCheck(12, identity, 10, Decimal("1"), 10,
-                                                       trigger_copy_id=8)
+                                                       trigger_copy_id=8, max_read_attempts=3)
     rows = {
         ("actions", 12): {"id": 12, "type": 4, "status": 2, "cancel_requested": 0},
         ("file_copies", 8): {"id": 8, "delivery_id": 11, "source_device_file_id": 15, "slot_device_id": None},
@@ -417,6 +431,7 @@ def test_device_trigger_fixes_original_copy_and_camera(creation_module, monkeypa
     retry_reads = ModuleType("camctl.persistence.repositories.retry_wait_reads")
     retry_reads.read_reservation_blocks_control = lambda *args: False
     retry_reads.held_read_ready_for_availability = lambda *args: True
+    retry_reads.read_attempt_budget_available = lambda *args: (1, 2, 1, 0)
     monkeypatch.setitem(sys.modules, retry_reads.__name__, retry_reads)
     preparation = ModuleType("camctl.devices.capture_preparation")
     preparation.CAPTURE_ACTION_TYPES = (1, 2, 3)
@@ -434,10 +449,18 @@ def test_device_trigger_fixes_original_copy_and_camera(creation_module, monkeypa
     connection = _PagedConnection([])
     _, check, count = creation_module._qualify(connection, request, 99)
     assert (check["action_id"], check["trigger_copy_id"], check["device_id"], count) == (12, 8, "hb0", 1)
+    retry_reads.read_attempt_budget_available = lambda *args: None
+    with pytest.raises(creation_module.AvailabilityTargetBlocked):
+        creation_module._qualify(connection, request, 99)
+    retry_reads.read_attempt_budget_available = lambda *args: (1, 2, 1, 0)
     rows[("file_copies", 8)]["slot_device_id"] = "hb0"
     discovery.device_holder = lambda *args: 8
     _, check, count = creation_module._qualify(connection, request, 99)
     assert (check["trigger_copy_id"], count) == (8, 1)
+    retry_reads.read_attempt_budget_available = lambda *args: None
+    with pytest.raises(creation_module.AvailabilityTargetBlocked):
+        creation_module._qualify(connection, request, 99)
+    retry_reads.read_attempt_budget_available = lambda *args: (1, 2, 1, 0)
     retry_reads.held_read_ready_for_availability = lambda *args: False
     with pytest.raises(creation_module.AvailabilityTargetBlocked):
         creation_module._qualify(connection, request, 99)

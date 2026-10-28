@@ -682,6 +682,7 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
                 if failed.value.disposition is not FailureSaveDisposition.RETIRED:
                     runtime.retry_gate.cleared(f"read/{copy_id}")
     deferred_waits = {}
+    exhausted_reads = set()
     # 读取机会保留原顺序，间隔完成与其他设备占用分别处理。
     for item in page.items:
         if item.copy_id in binding_blocked:
@@ -706,6 +707,8 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
             continue
         if attempt_status == int(_ATTEMPT_STATUS.SUCCEEDED):
             continue
+        if attempts_used >= assembly.max_read_attempts:
+            exhausted_reads.add(item.copy_id)
         if not item.held:
             if waiting != 1 and attempts_used < assembly.max_read_attempts:
                 continue
@@ -730,7 +733,8 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
                 runtime, item.copy_id, assembly.retry_interval_s, assembly.max_read_attempts) is not None:
             continue
         deferred_waits[item.copy_id] = (run_id, attempt_id)
-    candidates = tuple(item for item in page.items if item.copy_id not in binding_blocked)
+    candidates = tuple(item for item in page.items
+                       if item.copy_id not in binding_blocked and item.copy_id not in exhausted_reads)
     if getattr(runtime, "availability", None) is not None:
         from camctl.operations.availability import AvailabilityProgress
         ready = []

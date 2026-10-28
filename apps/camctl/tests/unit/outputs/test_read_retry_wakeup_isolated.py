@@ -117,6 +117,36 @@ class BackgroundDeadlineTests(unittest.IsolatedAsyncioTestCase):
 
 
 class BlockedReadTests(unittest.IsolatedAsyncioTestCase):
+    async def test_exhausted_unknown_does_not_enter_check_or_new_read(self):
+        candidate = SimpleNamespace(held=True, copy_id=7, device_id="camera", attempts_used=2, retry_wait_required=1)
+        assembly = SimpleNamespace(max_read_attempts=2, retry_interval_s=5, capture_read_parallel=False)
+        async def discover(*args): return SimpleNamespace(items=(candidate,))
+        async def read_one(*args): return (11, 12, 2, candidate.retry_wait_required, 4, "{}", 101)
+        async def save(*args, **kwargs): return SimpleNamespace(value=SimpleNamespace(reason="qualification_changed"))
+        async def forbidden(*args): self.fail("未知结果耗尽时不能启动检查、读取或结束交付")
+        def plan(connection, now, **kwargs):
+            self.assertEqual(kwargs["candidates"], ())
+            return ()
+        class Database:
+            async def read(self, operation): return operation(SimpleNamespace(connection=None))
+        runtime = SimpleNamespace(discovery=SimpleNamespace(reads=discover), database=Database(),
+            pending_read_results={}, devices={"camera": assembly}, binding_check=None, occurred_at=lambda: 20,
+            availability=SimpleNamespace(read=forbidden), operations=SimpleNamespace(exhaust_blocked_read=None))
+        reads = ModuleType("camctl.outputs.read_attempts")
+        reads.save_read_business = save
+        availability = ModuleType("camctl.operations.availability")
+        availability.AvailabilityProgress = SimpleNamespace(READY="ready")
+        advance = load_function(SOURCE / "outputs" / "obtain_flow.py", "_advance_reads", {
+            "read_one": read_one, "_read_facts": lambda connection, copy_id: {"id": copy_id},
+            "_read_intent": lambda *args: object(), "_fail_read_delivery": forbidden,
+            "_advance_read": forbidden, "plan_device_work": plan,
+        })
+        with patch.dict(sys.modules, {reads.__name__: reads, availability.__name__: availability}):
+            for waiting in (0, 1):
+                candidate.retry_wait_required = waiting
+                with self.subTest(waiting=waiting):
+                    await advance(runtime, 10)
+
     async def test_binding_failure_excludes_candidate_from_wait_and_work_plan(self):
         candidate = SimpleNamespace(held=True, copy_id=7, source_file_id=15, device_id="camera",
                                     driver_id="driver", attempts_used=1, retry_wait_required=1)
