@@ -33,6 +33,12 @@ def result_download_owned(staging: Path, ticket: AttemptTicket, role: str) -> bo
         return result_download_path(staging, ticket, role) in _ACTIVE
 
 
+def result_role_owned(activity_id: str, role: str) -> bool:
+    with _ACTIVE_LOCK:
+        return any(owner.ticket.operation == "result" and owner.ticket.target_id == activity_id
+                   and getattr(owner, "role", None) == role for owner in _ACTIVE.values())
+
+
 async def recover_result_download(staging: Path, ticket: AttemptTicket, role: str):
     """上层核实原尝试及保存责任后，回收固定角色的独占目录。"""
     workspace = ResultDownloadWorkspace(staging, ticket, role)
@@ -47,7 +53,7 @@ async def recover_result_download(staging: Path, ticket: AttemptTicket, role: st
                 return
             if not stat.S_ISDIR(parent.st_mode):
                 raise ValueError("结果下载父目录不是直接普通目录")
-            DownloadWorkspace.remove(workspace)
+            workspace.recover_remove()
         await settled_file_io(remove)
         return True
     finally:
@@ -275,10 +281,11 @@ class ResultDownloadWorkspace(DownloadWorkspace):
         self.role = role
         self._observed_fds = set()
         self._close_errors = []
+        self._unconfirmed_close = False
 
     @property
     def files_closed(self):
-        return not self._observed_fds
+        return not self._observed_fds and not self._unconfirmed_close
 
     def opened_file(self, fd):
         self._observed_fds.add(fd)
@@ -297,6 +304,38 @@ class ResultDownloadWorkspace(DownloadWorkspace):
 
     def remove(self):
         raise ValueError("来源观察目录须沿已保存的文件责任清理")
+
+    def recover_remove(self):
+        """原尝试已授权后，登记递归删除内部的实际关闭失败。"""
+        if not self.files_closed:
+            raise OSError("原来源工作文件关闭未确认") from self.close_error
+        try:
+            observed = self.path.lstat()
+        except FileNotFoundError:
+            self.owned = False
+            return
+        if not stat.S_ISDIR(observed.st_mode):
+            raise ValueError("原来源工作目录不是直接普通目录")
+        close_paths = []
+        def failed(function, path, exc_info):
+            error = exc_info[1]
+            if function is os.close:
+                self._unconfirmed_close = True
+                self._close_errors.append(error)
+                close_paths.append(str(path))
+                if self.close_error is None:
+                    self.close_error = error
+                error.add_note(f"来源目录关闭失败，路径: {path}")
+            raise error
+        try:
+            shutil.rmtree(self.path, onerror=failed)
+        except BaseException as error:
+            if self._close_errors:
+                from camctl.operations.error_diagnostics import attach_diagnostic_facts
+                attach_diagnostic_facts(error, {"photo_cleanup_close_errors": self.close_errors,
+                                                "photo_cleanup_close_paths": close_paths})
+            raise
+        self.owned = False
 
     async def observe(self, media_type: str):
         return await settled_file_io(self._observe, media_type)
@@ -339,6 +378,7 @@ class CaptureCleanupWorkspace(ResultDownloadWorkspace):
         self.role = None
         self._observed_fds = set()
         self._close_errors = []
+        self._unconfirmed_close = False
 
     def claim(self):
         with _ACTIVE_LOCK:
@@ -361,6 +401,7 @@ class PhotoCacheReadWorkspace(ResultDownloadWorkspace):
         self.role = None
         self._observed_fds = set()
         self._close_errors = []
+        self._unconfirmed_close = False
         self._file_close_error = None
 
     def claim(self):

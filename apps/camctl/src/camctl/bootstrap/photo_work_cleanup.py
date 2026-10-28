@@ -13,7 +13,7 @@ from camctl.host_files.capture_sources import (
     CaptureFileError, _open_directory, _open_directory_at, _sync_directory_fd,
 )
 from camctl.host_files.downloads import (
-    CaptureCleanupWorkspace, ResultDownloadWorkspace, recover_result_download, settled_file_io,
+    CaptureCleanupWorkspace, ResultDownloadWorkspace, recover_result_download, result_role_owned, settled_file_io,
 )
 from camctl.host_files.models import BoundDirectories
 from camctl.history.photo_cache_request import parse_photo_cache_request
@@ -151,7 +151,27 @@ def _attempt_candidate(connection, attempt_id, staging, horizon, boundary):
     status_enum = enum_for("actions.status")
     terminal = action["status"] in (int(status_enum.SUCCEEDED), int(status_enum.FAILED),
                                     int(status_enum.CANCELED), int(status_enum.EXPIRED))
-    return ticket, allowed, tuple(sync_names), terminal
+    failed_names = []
+    if terminal:
+        with closing(connection.execute(
+            "SELECT 1 FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id"
+            " WHERE r.action_id=? AND a.status=? LIMIT 1",
+            (action_id, int(enum_for("operation_attempts.status").RUNNING)))) as cursor:
+            stopped = cursor.fetchone() is None
+        if stopped:
+            for role, name in (("original", "original"), ("thumbnail", "preview")):
+                candidate = start[name]
+                if candidate is None:
+                    continue
+                with closing(connection.execute(
+                    "SELECT 1 FROM result_page_files WHERE action_id=? AND run_id=?"
+                    " AND CASE WHEN json_valid(identity) THEN json_extract(identity,'$[0]') END='hb-download-v3'"
+                    " AND CASE WHEN json_valid(identity) THEN json_extract(identity,'$[5]') END=? LIMIT 1",
+                    (action_id, run_id, role))) as cursor:
+                    has_source = cursor.fetchone() is not None
+                if not has_source:
+                    failed_names.append((role, candidate["host_name"]))
+    return ticket, allowed, tuple(sync_names), tuple(failed_names), terminal
 
 
 def _remove_direct_file(directory_fd, directory, name):
@@ -257,7 +277,10 @@ class PhotoWorkCleanup:
                     description="核对照片工作目录原尝试及选择")
                 if candidate is None:
                     continue
-                ticket, allowed, sync_names, terminal = candidate
+                ticket, allowed, sync_names, failed_names, terminal = candidate
+                if not any(key[0] == run_id for key in (*self.pending_scans, *self.pending_results)):
+                    sync_names += tuple((role, name) for role, name in failed_names
+                                        if not result_role_owned(ticket.target_id, role))
                 for role in ("original", "thumbnail"):
                     if allowed[role]:
                         await recover_result_download(self.staging, ticket, role)
@@ -277,6 +300,10 @@ class PhotoWorkCleanup:
                     if owner.claim():
                         try:
                             await settled_file_io(_cleanup_sync_files, self.staging, ticket, (), True, owner)
+                        except BaseException as error:
+                            if not owner.files_closed:
+                                attach_diagnostic_facts(error, {"photo_cleanup_close_errors": owner.close_errors})
+                            raise
                         finally:
                             owner.release()
             except Exception as error:

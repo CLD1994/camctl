@@ -80,3 +80,27 @@ def test_result_workspace_retains_ownership_when_any_close_is_unconfirmed(api):
     assert not workspace.files_closed
     assert workspace.close_error is error
     assert module.download_owned(ticket)
+
+
+def test_result_cleanup_retains_owner_when_recursive_close_is_unconfirmed(api, monkeypatch):
+    """原关闭失败必须阻止同票据的后续读取或清理。"""
+    from types import SimpleNamespace
+    module, Ticket = api
+    ticket = Ticket(2, "result", "7", "results/7", 9)
+    monkeypatch.setattr(type(Path("/staging")), "lstat", lambda self: SimpleNamespace(st_mode=0o40700))
+    error = OSError(5, "close failed", "/staging/result-downloads/9-2-original")
+    def remove(path, *, onerror):
+        onerror(module.os.close, path, (OSError, error, None))
+    module.shutil = SimpleNamespace(rmtree=remove)
+    async def immediate(function, *args, **kwargs):
+        return function(*args)
+    module.settled_file_io = immediate
+    diagnostic = ModuleType("camctl.operations.error_diagnostics")
+    diagnostic.attach_diagnostic_facts = lambda actual, facts: None
+    monkeypatch.setitem(sys.modules, diagnostic.__name__, diagnostic)
+    operation = module.recover_result_download(Path("/staging"), ticket, "original")
+    with pytest.raises(OSError) as actual:
+        operation.send(None)
+    assert actual.value is error
+    assert module.download_owned(ticket)
+    assert not module.ResultDownloadWorkspace(Path("/staging"), ticket, "original").claim()
