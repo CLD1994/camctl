@@ -162,7 +162,7 @@ HOST 以主机正式源为准，不为登记、取回或恢复归档向相机核
 
 ## 参数、进程中断、幂等与清理复验
 
-`validation/43-parameter-catalog-summary.json`、第 13 项的 `validation/43-catalog-13/recovered-evidence.json` 与 `validation/48-parameter-summary.json` 合并覆盖规格中的 34 档快门 PREPARE：32 档被接受，`.000333` 与 `.00025` 两档被拒绝，所有组的 START 总数为 0。新旧记录对 `.000667` 秒请求的工具回显均为 `1/1000`；这不是实际曝光读回。这些 PREPARE 结果不证明实际曝光准确性。32 秒拍摄的动作 31 仍为失败／结果未知；第 21 组只在恢复检查后释放旧限制，没有重拍动作 31。
+`validation/43-parameter-catalog-summary.json`、第 13 项的 `validation/43-catalog-13/recovered-evidence.json` 与 `validation/48-parameter-summary.json` 合并覆盖规格中的 34 档快门 PREPARE：32 档被接受，`.000333` 与 `.00025` 两档被拒绝，所有组的 START 总数为 0。新旧记录对 `.000667` 秒请求的工具回显均为 `1/1000`；第 48 组的 `.0005` 秒请求也回显 `1/1000`。日志记录两值分别按精确十进制传给工具，未发现 camctl 格式化舍入；这不是实际曝光读回。这些 PREPARE 结果不证明实际曝光准确性。32 秒拍摄的动作 31 仍为失败／结果未知；第 21 组只在恢复检查后释放旧限制，没有重拍动作 31。
 
 `50-device-results-camctl-interrupted/` 在真实 DEVICE 下载进行中 SIGKILL camctl；host 先确认原进程组收场，再自动启动不带计划路径的 `run`，沿原请求恢复。原 START 仅成功一次；RESULTS 第一次尝试按 `local_result_recovery` 保存 UNKNOWN，第二次尝试成功；activity 60 为 ENDED／RELEASED。RESULTS 未知不表示 START 未知。
 
@@ -172,9 +172,19 @@ HOST 以主机正式源为准，不为登记、取回或恢复归档向相机核
 
 本轮最终轻量审计见 `validation/final-online-audit.json`：80 份报告的 Schema 与文件名摘要错误均为 0；40 条 delivery 中，36 个实际文件全部匹配记录大小和 SHA-256。缺席的 delivery 6、8、9、15 均为旧失败且未发布的预览交付；没有已发布文件缺失。SQLite `integrity_check` 为 `ok`，`foreign_key_check` 为空。交付摘要审计不等同于媒体解码，媒体结论仍以第 53／54 组为准。
 
+## HOST 预览保障分工的实现与安装
+
+按[HOST 完成依据](hasselblad-source-authority.md#host-完成依据)，源码 `046d483187ec429ec337f521e3738dbb66ed7152` 在可靠响应确定预览角色后省略 HOST 预览的媒体内容检查，覆盖 RAW 和 JPEG 拍摄。拍摄文件检查与归档恢复采用同一角色分工；原图、DEVICE 来源和同步候选仍履行各自的内容检查，普通文件、长度、完整摘要、稳定性、同步及独立交付的校验责任保持。
+
+Python 3.11.17 下，现有 `test_capture_sources_jpeg_boundary.py`、`test_photo_sync_observation_isolated.py` 与 `test_hasselblad_device_response_isolated.py` 共 174 项通过，退出 0。命令及日志保存在 `.local/verification/host-preview-trust-20261029/`，收据同时归档到现场安装目录。已有驱动隔离用例核对向文件协作者传递已解析预览名；这些结果不证明真实文件归档、已有目标恢复或新规则的完整设备流程。Sol 对最终源码的只读评审未发现必修问题。本次未新增测试用例；既有测试只适配新增参数，软件集成测试未运行。
+
+实际安装记录为 `validation/61-host-preview-trust-install/receipt.json`：wheel SHA-256 为 `e6fdfc07d0de2c987d771a6bce7e3d133d63ff055d93d3ee1e3e4b2a76de732f`，392 个包文件与源码及实际安装一致，安装前后 167 个受保护文件保持一致，并保存安装前状态库备份。与前版 wheel 相比仅两个 Python 文件变化，依赖版本及哈希、包元信息、SQL 和登记资源均相同。导出依赖文件的命令注释不同，初次逐字节比较据实为不等；独立核对排除注释后依赖内容相同，证据见 `dependency-verification.json`。部署 skill 及脚本无需调整。
+
+安装后的 `describe`、依赖检查均退出 0，能力说明按精确数字解析与原文件一致，配置、状态库、WAL、客户端能力文件及 C host 摘要保持；核对时无设备控制进程。安装过程未初始化数据库，未启动 host 或客户端，也未调用相机。相机充电期间未安排新拍摄；新 HOST/RAW 的拍摄、归档及独立取回仍待在线复验。第 46 组的旧失败、文件和媒体诊断保持原事实。
+
 ## 当前验收边界
 
-H6 尚未勾选。`a9023ec0` 安装版已经有 HOST/JPEG、DEVICE/JPEG、DEVICE/RAW 的在线业务见证；HOST/RAW 因主机预览无效而失败，不能把四种组合写成全通过。RAW 原图本身经独立诊断可解码。完整 34 档快门目录均有 PREPARE 受理尝试，且两档被拒绝；这不等于逐档实际曝光验证。`.000667` 秒请求的工具回显为 `1/1000`，没有实际曝光读回；32 秒实际拍摄失败。曝光准确性未获验证。camctl 在 DEVICE 下载和真实 `capture` 中的两类 SIGKILL 已覆盖，但不能替代所有事务故障点。用户明确暂缓受控物理供电时序；ARM64 与第二机身目前没有目标。HA-01—HA-12 的完整软件交错、事务提交未知与三路径历史重建组合仍未执行；本轮未新增或运行软件集成测试。客户端仍不在本次范围。
+H6 尚未勾选。`a9023ec0` 安装版已经有 HOST/JPEG、DEVICE/JPEG、DEVICE/RAW 的在线业务见证；HOST/RAW 因主机预览无效而失败，不能把四种组合写成全通过。RAW 原图本身经独立诊断可解码。完整 34 档快门目录均有 PREPARE 受理尝试，且两档被拒绝；这不等于逐档实际曝光验证。`.000667` 与 `.0005` 秒请求的工具回显均为 `1/1000`，没有实际曝光读回；32 秒实际拍摄失败。曝光准确性未获验证。camctl 在 DEVICE 下载和真实 `capture` 中的两类 SIGKILL 已覆盖，但不能替代所有事务故障点。用户明确暂缓受控物理供电时序；ARM64 与第二机身目前没有目标。HA-01—HA-12 的完整软件交错、事务提交未知与三路径历史重建组合仍未执行；本轮未新增或运行软件集成测试。客户端仍不在本次范围。
 
 下表把现有现场分支映射到[完整 HA 验收契约](hasselblad-availability-recovery.md#实施责任与联合验收)，不将一个分支的成功记为整项通过。软件组合、真实相机和物理供电各自保留证据边界；新来源规则已安装并执行其真实在线流程。
 

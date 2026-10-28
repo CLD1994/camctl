@@ -163,7 +163,7 @@
 
 - [ ] 完成 H6；实际目标未安排或尚未执行时，保留未完成状态和具体待验范围。
 
-**当前进度。** 已接管独立环境 `/home/cld/.camctl/manual-validation-20261028`，安装并核对 `a9023ec0` 后，以正式计划和真实机身取得 HOST/JPEG、DEVICE/JPEG、DEVICE/RAW 在线结果；HOST/RAW 因 404,599 字节预览的媒体检查失败而未交付。DEVICE 两种格式均实际核验原图与预览的同步副本选择、后到读取及交付摘要，RAW 原图另经 rawpy／LibRaw 解码。第 50 组在真实 DEVICE 下载中断 camctl：原 START 只成功一次，RESULTS 第一次尝试按 `local_result_recovery` 为 UNKNOWN、第二次尝试成功，activity 60 已 ENDED／RELEASED。第 56 组在真实 `capture` 中断 camctl：START 按 `local_control_recovery` 为 UNKNOWN 且未重放，后续检查释放 activity 61 的占用。第 58—60 组另有同请求幂等、HOST 指定原图清理、DEVICE 删除拒绝及清理后配对 HOST 预览独立取回见证。第 43、48 组合计尝试规格的 34 档快门 PREPARE，32 档接受、两档拒绝，START 为 0，不能据此宣称曝光准确。H6 仍未完成：HOST/RAW 组合失败，`.000667` 秒请求回显为 `1/1000`、`.000333`／`.00025` 被拒绝，32 秒真实拍摄失败；用户明确暂缓受控物理供电时序，ARM64 与第二机身当前没有目标，完整 HA 软件交错、具体事务提交未知和三路径历史重建组合仍未验证。本轮未新增或运行软件集成测试。部署与现场证据见[专项真机记录](../../camctl/hasselblad-real-device-verification-2026-10-28.md)。
+**当前进度。** 已接管独立环境 `/home/cld/.camctl/manual-validation-20261028`，安装并核对 `a9023ec0` 后，以正式计划和真实机身取得 HOST/JPEG、DEVICE/JPEG、DEVICE/RAW 在线结果；HOST/RAW 因 404,599 字节预览的媒体检查失败而未交付。DEVICE 两种格式均实际核验原图与预览的同步副本选择、后到读取及交付摘要，RAW 原图另经 rawpy／LibRaw 解码。第 50 组在真实 DEVICE 下载中断 camctl：原 START 只成功一次，RESULTS 第一次尝试按 `local_result_recovery` 为 UNKNOWN、第二次尝试成功，activity 60 已 ENDED／RELEASED。第 56 组在真实 `capture` 中断 camctl：START 按 `local_control_recovery` 为 UNKNOWN 且未重放，后续检查释放 activity 61 的占用。第 58—60 组另有同请求幂等、HOST 指定原图清理、DEVICE 删除拒绝及清理后配对 HOST 预览独立取回见证。第 43、48 组合计尝试规格的 34 档快门 PREPARE，32 档接受、两档拒绝，START 为 0，不能据此宣称曝光准确。H6 仍未完成：HOST/RAW 组合失败，`.000667` 与 `.0005` 秒请求均回显为 `1/1000`、`.000333`／`.00025` 被拒绝，32 秒真实拍摄失败；用户明确暂缓受控物理供电时序，ARM64 与第二机身当前没有目标，完整 HA 软件交错、具体事务提交未知和三路径历史重建组合仍未验证。本轮未新增或运行软件集成测试。部署与现场证据见[专项真机记录](../../camctl/hasselblad-real-device-verification-2026-10-28.md)。
 
 **现场绑定缺陷的修复顺序。** 当前配置与同逻辑设备旧 `HELD` 活动的固定身份不一致时，新单张尚无自身活动，准备入口遗漏该事实；可用性入口又将 `IDENTITY_MISMATCH` 当作暂时等待，新动作最终过期。现有恢复规格已经规定此时在有效准备区间内直接绑定失败，无需新增业务决定。
 
@@ -175,7 +175,7 @@
 
 **现场 JPEG 校验修复。** 真实 JPEG 原图可解码且再次下载字节相同，但外层 EOI 后附带数据使现有文件尾判断拒绝。用户已确定接受该类文件，完整大小与摘要仍覆盖全部原始字节，文件不裁剪、不改写。按[单张文件核验](../../architecture/camera-capture.md#主机单张拍摄文件的登记与恢复)实现有界的外层边界识别，保留元数据嵌套、截断、跨块、原摘要和归档恢复的分类；不新增默认整图解码。先用隔离反例证明原 EOF 限制，再实现并回归、独立评审、构建安装及真机复验。标准库与现有依赖没有满足该非解码边界的现成入口，成熟解码库的文件核验也不能直接替代外层结束识别；实现限定于分块标记边界，不扩展成媒体质量检查。DEVICE 预览的同步副本与相机来源的差异由正式来源及有限复用规则处理，保存各自真实内容及一次选择；旧摘要和失败历史保持。
 
-**HOST 预览保障分工的接入。** HOST 预览的媒体内容有效性由 `hb_cli` 保障，完成条件以[HOST 完成依据](../../camctl/hasselblad-source-authority.md#host-完成依据)为准。此前第 46 组的失败及媒体诊断保留为原始证据；新规则仍需实现、安装及新请求的实际流程见证，不能重写旧终态。
+**HOST 预览保障分工的接入。** HOST 预览的媒体内容有效性由 `hb_cli` 保障，完成条件以[HOST 完成依据](../../camctl/hasselblad-source-authority.md#host-完成依据)为准。源码 `046d4831` 已完成实现和 Sol 评审，现有 174 项隔离单元回归通过，已构建并安装到原独立环境。现场收据位于 `validation/61-host-preview-trust-install/`，实际范围与待验边界见[专项真机记录](../../camctl/hasselblad-real-device-verification-2026-10-28.md#host-预览保障分工的实现与安装)。此前第 46 组的失败及媒体诊断保留为原始证据；新请求的实际拍摄、归档及取回仍待相机在线后验证，H6 保持未完成。
 
 1. 在可靠响应已确定原图和预览角色后，仅对 HOST 预览省略媒体内容检查；同时覆盖 RAW 和 JPEG 拍摄，不以 `image/jpeg` 推断角色。原图和 DEVICE 路径维持各自检查责任。
 2. 沿同一规则处理 HOST 归档及已有目标恢复。文件类型、可读性、工具报告长度、稳定性、完整摘要、同步、目标身份与逐次交付校验继续执行，预览内容原样保存。
