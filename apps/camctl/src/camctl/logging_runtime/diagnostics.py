@@ -21,7 +21,9 @@ from camctl.logging_runtime.models import LogLevel, LogWriteResult
 from camctl.logging_runtime.receipt import LogReceipt
 from camctl.logging_runtime.service import AdmissionResult, LogChannel, LogRecord, admission_result_for
 from camctl.logging_runtime.formatting import log_metadata
-from camctl.operations.error_diagnostics import DiagnosticError, exception_diagnostic
+from camctl.operations.error_diagnostics import (
+    DiagnosticError, ExceptionDiagnosticGraph, ExceptionDiagnosticReference, exception_diagnostic,
+)
 from camctl.operations.models import AttemptTicket, CallOutcome, ErrorValue
 from camctl.operations.process import RawToolOutcome
 from camctl.operations.result_format import error_document
@@ -346,9 +348,9 @@ async def admit_diagnostic(state: DiagnosticState) -> DiagnosticState:
     return state
 
 
-def diagnostic_snapshot(value, *, structured: bool = True):
+def diagnostic_snapshot(value, *, structured: bool = True, root_path: str = "#"):
     """复用诊断快照规则，保留原错误字节并排除媒体 stdout。"""
-    return _document(value, structured=structured)
+    return _document(value, structured=structured, _path=root_path)
 
 
 def _stderr(message: str) -> None:
@@ -557,7 +559,7 @@ def _record(payload: Mapping, state: DiagnosticState | None, *,
     except Exception as error:
         # 编码器拒绝原结果时，仍沿原 dataclass 字段保存安全字节事实。
         try:
-            document = {"diagnostic_format_error": _document(error, structured=False),
+            document = {"diagnostic_format_error": _document(error, structured=False, _path="#/diagnostic_format_error"),
                         "diagnostic": _document(payload, structured=False, _path="#/diagnostic",
                                                 non_media_diagnostics=non_media_diagnostics)}
         except Exception as fallback_error:
@@ -598,7 +600,7 @@ def _record(payload: Mapping, state: DiagnosticState | None, *,
 
 def _document(value, *, name: str | None = None, structured: bool = True,
               non_media_diagnostics: ToolDiagnostics | None = None, tool_stdout: bool = False,
-              _seen=None, _path="#"):
+              _seen=None, _path="#", _exception_graph=None):
     """复用原结构形成独立快照，并给已有 stderr 字节编码补可读文本。"""
     if _seen is None:
         _seen = {}
@@ -607,7 +609,16 @@ def _document(value, *, name: str | None = None, structured: bool = True,
         segment = str(name).replace("~", "~0").replace("/", "~1")
         return _document(item, name=name, structured=structured,
                          non_media_diagnostics=non_media_diagnostics, tool_stdout=tool_stdout,
-                         _seen=_seen, _path=path if path is not None else _path + "/" + segment)
+                         _seen=_seen, _path=path if path is not None else _path + "/" + segment,
+                         _exception_graph=_exception_graph)
+
+    if isinstance(value, ExceptionDiagnosticGraph):
+        _exception_graph = (value.root_path, _path)
+    elif isinstance(value, ExceptionDiagnosticReference) and _exception_graph is not None:
+        source, target = _exception_graph
+        reference = value.get("$ref")
+        if isinstance(reference, str) and (reference == source or reference.startswith(source + "/")):
+            return {"$ref": target + reference[len(source):]}
 
     setting_call = (isinstance(value, Mapping) and
                     {"command", "status", "effect", "error", "result_document", "stdout_hex", "stderr_hex"} <= value.keys())

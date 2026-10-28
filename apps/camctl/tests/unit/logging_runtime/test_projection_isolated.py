@@ -1,4 +1,5 @@
 """公共错误日志投影：源码与受约束替身，禁止实际资源访问。"""
+import ast
 import builtins
 import importlib.abc
 import importlib.resources
@@ -21,6 +22,8 @@ import pytest
 SOURCE = Path(__file__).parents[3] / 'src/camctl/logging_runtime/diagnostics.py'
 EXCEPTION_SOURCE = Path(__file__).parents[3] / 'src/camctl/operations/error_diagnostics.py'
 LOGGER_SOURCE = Path(__file__).parents[3] / 'src/camctl/logging_runtime/logger.py'
+HB_SOURCE = Path(__file__).parents[3] / 'src/camctl/devices/drivers/hasselblad/driver.py'
+COPY_SOURCE = Path(__file__).parents[3] / 'src/camctl/outputs/copy.py'
 
 @dataclass(frozen=True)
 class ErrorValue:
@@ -100,6 +103,8 @@ def isolated():
         source = SOURCE.read_text(encoding='utf-8')
         exception_source = EXCEPTION_SOURCE.read_text(encoding='utf-8')
         logger_source = LOGGER_SOURCE.read_text(encoding='utf-8')
+        hb_source = HB_SOURCE.read_text(encoding='utf-8')
+        copy_source = COPY_SOURCE.read_text(encoding='utf-8')
         with patch.object(builtins, 'open', forbidden), patch.object(Path, 'open', forbidden):
             exec(compile(exception_source, str(EXCEPTION_SOURCE), 'exec'), modules['camctl.operations.error_diagnostics'].__dict__)
             exec(compile(source, str(SOURCE), 'exec'), module.__dict__)
@@ -108,6 +113,8 @@ def isolated():
             sys.modules[logger.__name__] = logger
             exec(compile(logger_source, str(LOGGER_SOURCE), 'exec'), logger.__dict__)
             module.test_logger = logger
+            module.test_error_diagnostics = modules['camctl.operations.error_diagnostics']
+            module.test_producer_sources = (hb_source, copy_source)
             yield module
 
 def document(module, fn):
@@ -501,3 +508,96 @@ def test_logger_encoding_error_graph_uses_actual_field_root():
         graph = doc['diagnostic_format_error']
         assert resolve(doc, graph['context']) == graph['cause']
         assert graph['cause']['arguments'] == ['specific child']
+
+def test_nested_graphs_and_escaped_facts_rebase_independently():
+    with isolated() as m:
+        child = ValueError('escaped target')
+        parent = RuntimeError('fact parent')
+        embedded = m.exception_diagnostic(graph_root())
+        m.test_error_diagnostics.attach_diagnostic_facts(parent, {
+            'a/~': child, 'shared': child, 'inner': embedded,
+            'user': {'$ref': '#/not-a-graph-reference'},
+        })
+        source = m.exception_diagnostic(parent)
+        original = json.loads(json.dumps(source))
+        group = ExceptionGroup('outer group', [ValueError('separate'), ValueError('other')])
+        wrapper = m.DiagnosticError('outer', diagnostic_details={'nested': source, 'group': m.exception_diagnostic(group)})
+        _, doc = document(m, lambda: m.record_error(wrapper, stage='test'))
+        facts = doc['error']['diagnostic_details']['nested']['diagnostic_facts']
+        assert resolve(doc, facts['shared']) == facts['a/~']
+        assert facts['a/~']['message'] == 'escaped target'
+        assert resolve(doc, facts['inner']['context']) == facts['inner']['cause']
+        assert facts['inner']['cause']['message'] == 'specific child'
+        assert facts['user'] == {'$ref': '#/not-a-graph-reference'}
+        assert json.loads(json.dumps(source)) == original
+
+def test_logger_snapshot_errors_use_top_level_and_escaped_field_roots():
+    with isolated() as m:
+        original = m.diagnostic_snapshot
+        top_failure = graph_root()
+        field_failure = graph_root()
+        def controlled(value, *, structured=True, root_path='#'):
+            if isinstance(value, BaseException):
+                return original(value, structured=structured, root_path=root_path)
+            if 'a/~' in value:
+                if structured or len(value) == 1:
+                    raise top_failure if structured else field_failure
+                raise top_failure
+            return original(value, structured=structured, root_path=root_path)
+        m.diagnostic_snapshot = controlled
+        doc = m.test_logger._snapshot({'a/~': object(), 'ok': 1})
+        top = doc['diagnostic_format_error']
+        field = doc['a/~']['diagnostic_format_error']
+        assert resolve(doc, top['context']) == top['cause']
+        assert top['cause']['arguments'] == ['specific child']
+        assert field['cause']['arguments'] == ['specific child']
+        assert resolve(doc, field['context']['context']) == field['context']['cause']
+        assert field['context']['cause']['arguments'] == ['specific child']
+
+def test_preencoded_shared_exception_group_survives_dataclass_conversion():
+    from dataclasses import asdict
+    from copy import deepcopy
+    @dataclass
+    class Facts:
+        graph: dict
+    with isolated() as m:
+        child = ValueError('group child')
+        graph = m.exception_diagnostic(ExceptionGroup('group', [child, child]))
+        expected = json.loads(json.dumps(graph))
+        assert json.loads(json.dumps(deepcopy(graph))) == expected
+        copied = asdict(Facts(graph))
+        assert json.loads(json.dumps(copied['graph'])) == expected
+        _, doc = document(m, lambda: m.record_error(copied, stage='test'))
+        group = doc['error']['graph']
+        assert resolve(doc, group['exceptions'][1]) == group['exceptions'][0]
+        assert group['exceptions'][0]['message'] == 'group child'
+
+
+def test_real_hasselblad_and_copy_error_producers_keep_resolvable_graphs():
+    from copy import deepcopy
+    with isolated() as m:
+        class Settlement(Enum): SETTLED = 'settled'
+        class ReadPreparationError(ValueError):
+            def __init__(self, message, *, settlement):
+                self.settlement = settlement
+                ValueError.__init__(self, message)
+        namespace = {'ReadPreparationError': ReadPreparationError, 'DiagnosticError': m.DiagnosticError,
+                     'ReadPreparationSettlement': Settlement, 'exception_diagnostic': m.exception_diagnostic,
+                     'deepcopy': deepcopy}
+        for source, class_name in zip(m.test_producer_sources, ('CameraReadError', 'CopySegmentError')):
+            tree = ast.parse(source)
+            cls = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == class_name)
+            unit = ast.Module(body=[ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0), cls], type_ignores=[])
+            exec(compile(ast.fix_missing_locations(unit), '<isolated producer>', 'exec'), namespace)
+        original = graph_root()
+        hb = namespace['CameraReadError']('read_failed', [], causes=[original])
+        result = SimpleNamespace(error=None, processed_end=4, synced=False, write_extent_known=True,
+                                 failure=original, source_end=None, source_close_error=original)
+        copy = namespace['CopySegmentError']('copy', 'failed', result=result)
+        for error, path in ((hb, ('causes', 0)), (copy, ('segment_result', 'failure')),
+                            (copy, ('segment_result', 'source_close_error'))):
+            _, doc = document(m, lambda: m.record_error(error, stage='test'))
+            details = doc['error']['diagnostic_details']
+            graph = details[path[0]][path[1]]
+            assert graph['cause']['message'] == 'specific child'
+            assert resolve(doc, graph['context']) == graph['cause']

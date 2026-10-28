@@ -7,6 +7,18 @@ import traceback
 _FACTS_ATTRIBUTE = "_camctl_exception_diagnostic_facts"
 
 
+class ExceptionDiagnosticGraph(dict):
+    """内存中标识独立异常图边界；JSON 内容与普通字典一致。"""
+
+    def __init__(self, *args, root_path: str = "#", **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.root_path = root_path
+
+
+class ExceptionDiagnosticReference(dict):
+    """只标识编码器生成的图内引用，不解释调用方的普通字典。"""
+
+
 def attach_diagnostic_facts(error: BaseException, facts: Mapping) -> None:
     """事实所属模块附加有限诊断；原异常由共同编码器按对象身份引用。"""
     setattr(error, _FACTS_ATTRIBUTE, dict(facts))
@@ -32,7 +44,7 @@ def exception_diagnostic(error: BaseException | None, *, include_message: bool =
     """保存全部标准异常关系；循环和共享节点引用首次出现的路径。"""
     if error is None:
         return None
-    result = {}
+    result = ExceptionDiagnosticGraph(root_path=root_path)
     seen = {id(error): root_path}
     remaining = [(error, result, root_path)]
 
@@ -41,7 +53,7 @@ def exception_diagnostic(error: BaseException | None, *, include_message: bool =
             return None
         previous = seen.get(id(original))
         if previous is not None:
-            return {"$ref": previous}
+            return ExceptionDiagnosticReference({"$ref": previous})
         if reference_for is not None:
             external = reference_for(original, path)
             if external is not None:
@@ -52,6 +64,14 @@ def exception_diagnostic(error: BaseException | None, *, include_message: bool =
         return node
 
     def facts_document(value, path):
+        if isinstance(value, ExceptionDiagnosticGraph):
+            # 已编码的独立图有自己的引用根，复制内容时保留该边界。
+            result = ExceptionDiagnosticGraph(root_path=value.root_path)
+            result.update({name: facts_document(item, path + "/" + str(name).replace("~", "~0").replace("/", "~1"))
+                           for name, item in value.items()})
+            return result
+        if isinstance(value, ExceptionDiagnosticReference):
+            return ExceptionDiagnosticReference(value)
         if isinstance(value, BaseException):
             return reference(value, path)
         if isinstance(value, Mapping):

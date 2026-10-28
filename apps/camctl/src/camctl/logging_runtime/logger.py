@@ -94,10 +94,10 @@ def _safe_repr(value):
         return f"<{kind.__module__}.{kind.__qualname__}>"
 
 
-def _format_error(error):
+def _format_error(error, *, root_path):
     from camctl.logging_runtime.diagnostics import diagnostic_snapshot
     try:
-        return diagnostic_snapshot(error, structured=False)
+        return diagnostic_snapshot(error, structured=False, root_path=root_path)
     except Exception:
         return {"type": f"{type(error).__module__}.{type(error).__qualname__}"}
 
@@ -108,7 +108,7 @@ def _encode(document):
     except Exception as error:
         # 不支持的附加对象仍保留完整 repr；其他字段继续保持 JSON 结构。
         try:
-            document = {**document, "diagnostic_format_error": _format_error(error)}
+            document = {**document, "diagnostic_format_error": _format_error(error, root_path="#/diagnostic_format_error")}
             return json.dumps(document, ensure_ascii=False, separators=(",", ":"), default=_safe_repr)
         except Exception:
             # 循环容器等不能编码时，只降级该字段，不丢弃其余可编码事实。
@@ -138,8 +138,10 @@ def _snapshot(document):
                     # 不能安全解释的字段只保留类型和实际编码错误，不对原操作作 repr。
                     kind = type(value)
                     snapshot[name] = {"type": f"{kind.__module__}.{kind.__qualname__}",
-                                      "diagnostic_format_error": _format_error(field_error)}
-        return {**snapshot, "diagnostic_format_error": _format_error(error)}
+                                      "diagnostic_format_error": _format_error(
+                                          field_error, root_path="#/" + str(name).replace("~", "~0").replace("/", "~1")
+                                          + "/diagnostic_format_error")}
+        return {**snapshot, "diagnostic_format_error": _format_error(error, root_path="#/diagnostic_format_error")}
 
 
 def _prepare(name, number, message, args, *, context, extra, exc_info, stack_info,
@@ -162,7 +164,7 @@ def _prepare(name, number, message, args, *, context, extra, exc_info, stack_inf
     except Exception as error:
         fields.update(message=message if isinstance(message, str) else
                       f"<{type(message).__module__}.{type(message).__qualname__}>",
-                      message_arguments=args, message_format_error=_format_error(error))
+                      message_arguments=args, message_format_error=_format_error(error, root_path="#/message_format_error"))
         if not isinstance(message, str):
             fields["message_value"] = message
     error = information[1] if information is not None else None
