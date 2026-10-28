@@ -26,6 +26,36 @@ def load(name, namespace):
 
 
 class CanceledRecoveryTests(unittest.TestCase):
+    def test_binding_failure_recovery_preserves_original_identity_and_key(self):
+        async def run(reason, identity):
+            calls = []
+            class Database:
+                async def read(self, callback): return callback(SimpleNamespace(connection=object()))
+            async def save(runtime, copy_id, stage, request, method):
+                calls.append((copy_id, stage, request))
+                return SimpleNamespace(kind="completed")
+            status = SimpleNamespace(DEVICE_MISSING="missing", DRIVER_MISMATCH="mismatch",
+                PHYSICAL_IDENTITY_MISMATCH="physical_identity_mismatch", PHYSICAL_IDENTITY_CONFLICT="physical_identity_conflict")
+            namespace = {"load_saved_binding_read_failure": lambda connection, action, copy, error: ("original-key", identity, 17),
+                "_read_facts": lambda connection, copy, **kwargs: {"source_device_file_id": 15, "action_id": 4},
+                "save_read_business": save, "Mapping": dict, "BindingStatus": status,
+                "DeviceBinding": lambda device, driver: (device, driver),
+                "BindingResult": lambda *args: args,
+                "FailReadBinding": lambda *args: args,
+                "DbOutcomeKind": SimpleNamespace(COMPLETED="completed"), "ConsistencyError": ValueError}
+            flow = SimpleNamespace(database=Database(), outputs=SimpleNamespace(fail_read_binding=object()))
+            error = {"code": "device_binding_unavailable", "details": {"reason": reason,
+                "device_id": "camera", "expected_driver_id": "driver"}}
+            await load("_settle_saved_read_binding_failure", namespace)(flow, 9, error)
+            return calls
+        for reason, identity in (("missing", None), ("physical_identity_mismatch", {"serial": "old"})):
+            calls = asyncio.run(run(reason, identity))
+            self.assertEqual(len(calls), 1)
+            copy, stage, request = calls[0]
+            self.assertEqual((copy, stage, request[0], request[1], request[3:]),
+                (9, "read_binding_failure", 9, 15, (17, "original-key")))
+            self.assertEqual(request[2][3], identity)
+
     def test_verified_delivery_recovers_original_end_for_host_and_device(self):
         async def run(source, saved, slot):
             ticket = SimpleNamespace(target_id="9")

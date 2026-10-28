@@ -2,7 +2,7 @@
 
 from contextlib import closing
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from camctl.capture.recovery import RecoveryBoundary, RecoveryBlockedReason, RecoveryDiagnostic
 from camctl.contracts.values import ConsistencyError, OperationKey, new_operation_key
@@ -240,6 +240,7 @@ class PendingReadResult:
     diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
     preserved_run_terminal: bool = False
     binding_read: bool = False
+    binding_identity: Mapping | None = None
 
 
 @dataclass(frozen=True)
@@ -591,7 +592,9 @@ async def held_binding_read_result(runtime, copy_id, binding_result, business):
         selected_business = replace(selected_business, request=request)
     return hold_read_result(runtime, finish, business=selected_business, key=key,
                             preserved_run_terminal=status[0] not in (1, 2),
-                            binding_read=binding_read, suppress_diagnostic=binding_read)
+                            binding_read=binding_read, suppress_diagnostic=binding_read,
+                            binding_identity=(dict(binding_result.current_identity)
+                                if binding_read and getattr(binding_result, "current_identity", None) is not None else None))
 
 
 @dataclass(frozen=True)
@@ -668,14 +671,15 @@ async def _prepare_stopped_read(runtime, pending):
 
 def hold_read_result(runtime, finish, *, business=None, key=None,
                      context=None, diagnostic_error=None, diagnostic_stage=None, suppress_diagnostic=False,
-                     preserved_run_terminal=False, binding_read=False):
+                     preserved_run_terminal=False, binding_read=False, binding_identity=None):
     identity = (finish.ticket.run_id, finish.ticket.attempt_id)
     if identity in runtime.pending_read_results:
         raise ConsistencyError("同一原读取已有待保存结果，不能覆盖")
     diagnostic = (business.diagnostic if business is not None else
                   diagnostic_state_for(diagnostic_error) or DiagnosticState())
     pending = PendingReadResult(finish, new_operation_key() if key is None else key, business,
-        diagnostic=diagnostic, preserved_run_terminal=preserved_run_terminal, binding_read=binding_read)
+        diagnostic=diagnostic, preserved_run_terminal=preserved_run_terminal, binding_read=binding_read,
+        binding_identity=binding_identity)
     runtime.pending_read_ends.pop(int(finish.ticket.target_id), None)
     runtime.pending_read_results[identity] = pending
     details = {"copy_id": int(finish.ticket.target_id), **(context or {})}
@@ -708,7 +712,8 @@ async def save_read_result(runtime, pending, *, retry=False):
         control_error = None
         try:
             outcome = await runtime.database.write(
-                lambda owned: (runtime.operations.finish_binding_read(prepared.finish, prepared.key, owned)
+                lambda owned: (runtime.operations.finish_binding_read(prepared.finish, prepared.key, owned,
+                    current_identity=prepared.binding_identity)
                     if prepared.binding_read else runtime.operations.finish_attempt(prepared.finish, prepared.key, owned)), key=prepared.key)
         except BaseException as error:
             outcome = db_outcome_for(error)

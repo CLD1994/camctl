@@ -243,7 +243,7 @@ def test_unknown_save_keeps_original_finish_and_key_after_cancel(monkeypatch):
         runtime, 2, object(), SimpleNamespace(diagnostic=object())))
     saved = []
     class Operations:
-        def finish_binding_read(self, finish, key, owned):
+        def finish_binding_read(self, finish, key, owned, *, current_identity=None):
             saved.append((finish, key))
             return SimpleNamespace(kind=DbOutcomeKind.UNKNOWN if len(saved) == 1 else DbOutcomeKind.COMPLETED,
                                    error="unknown", value=SimpleNamespace(run_was_terminal=False,
@@ -270,7 +270,7 @@ def test_save_receipt_controls_terminal_handling(monkeypatch, terminal, disposit
     pending = asyncio.run(read_attempts.held_binding_read_result(
         runtime, 2, object(), SimpleNamespace(diagnostic=object())))
     class Operations:
-        def finish_binding_read(self, finish, key, owned):
+        def finish_binding_read(self, finish, key, owned, *, current_identity=None):
             return SimpleNamespace(kind=DbOutcomeKind.COMPLETED,
                                    value=SimpleNamespace(run_was_terminal=terminal, disposition=disposition,
                                                          run_status=RunStatus.FAILED))
@@ -289,7 +289,7 @@ def test_cancel_transaction_receipt_retires_binding_business(monkeypatch):
     business = SimpleNamespace(diagnostic=object())
     pending = asyncio.run(read_attempts.held_binding_read_result(runtime, 2, object(), business))
     class Operations:
-        def finish_binding_read(self, finish, key, owned):
+        def finish_binding_read(self, finish, key, owned, *, current_identity=None):
             return SimpleNamespace(kind=DbOutcomeKind.COMPLETED, value=SimpleNamespace(
                 run_was_terminal=False, disposition=FinishDisposition.SAVED, run_status=RunStatus.CANCELED))
     async def write(callback, *, key):
@@ -330,7 +330,7 @@ def test_unknown_then_canceled_receipt_reuses_original_candidate_and_key(monkeyp
         runtime, 2, object(), SimpleNamespace(diagnostic=object())))
     calls = []
     class Operations:
-        def finish_binding_read(self, finish, key, owned):
+        def finish_binding_read(self, finish, key, owned, *, current_identity=None):
             calls.append((finish, key))
             if len(calls) == 1:
                 return SimpleNamespace(kind=DbOutcomeKind.UNKNOWN, error="unknown")
@@ -376,7 +376,7 @@ def test_canceled_control_error_retries_original_candidate(monkeypatch):
         run_was_terminal=False, disposition=FinishDisposition.SAVED, run_status=RunStatus.CANCELED))
     calls = []
     class Operations:
-        def finish_binding_read(self, finish, key, owned):
+        def finish_binding_read(self, finish, key, owned, *, current_identity=None):
             calls.append((finish, key))
             return receipt
     async def write(callback, *, key):

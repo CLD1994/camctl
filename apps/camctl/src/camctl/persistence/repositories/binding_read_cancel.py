@@ -33,7 +33,10 @@ def binding_cancel_event(connection, action_id, max_txn_id):
     return {"event_id": event.event_id, "transaction_id": event.transaction_id, "occurred_at": event.occurred_at}
 
 
-def saved_binding_read_failure(connection, key, action_id, copy_id, error):
+_NOT_PROVIDED = object()
+
+
+def saved_binding_read_failure(connection, key, action_id, copy_id, error, current_identity=_NOT_PROVIDED):
     """仅接受原键对应的完整真实读取结果和绑定失败。"""
     from camctl.persistence.transaction import row_facts, saved_transaction_events
 
@@ -44,7 +47,10 @@ def saved_binding_read_failure(connection, key, action_id, copy_id, error):
     evidence = events[1]["body"]["evidence"].get("binding_read_finish")
     if (len(attempt_rows) != 1 or len(run_rows) != 1 or attempt_rows[0]["table"] != "operation_attempts"
             or run_rows[0]["table"] != "operation_runs" or not isinstance(evidence, dict)
-            or not json_equal(evidence, {"error": error, "cancel_event": None})):
+            or set(evidence) != {"error", "cancel_event", "current_identity"}
+            or not json_equal(evidence["error"], error) or evidence["cancel_event"] is not None
+            or (current_identity is not _NOT_PROVIDED
+                and not json_equal(evidence["current_identity"], current_identity))):
         raise ConsistencyError("原读取结果键与绑定失败申请不一致")
     attempt = row_facts(connection, "operation_attempts", attempt_rows[0]["id"])
     run = row_facts(connection, "operation_runs", run_rows[0]["id"])
@@ -63,3 +69,25 @@ def saved_binding_read_failure(connection, key, action_id, copy_id, error):
             or not json_equal(run_rows[0]["after"]["values"].get("error_json"), error)):
         raise ConsistencyError("原读取结果与实际调用或流程归属不一致")
     return True
+
+
+def load_saved_binding_read_failure(connection, action_id, copy_id, error):
+    """按原尝试结果事件找到完整事务，返回原键与原次机身观察。"""
+    from camctl.persistence.transaction import saved_transaction_events
+
+    with closing(connection.execute(
+        "SELECT h.operation_key FROM operation_runs r"
+        " JOIN operation_attempts t ON t.run_id=r.id AND t.attempt_no=r.attempts_used"
+        " JOIN history_events e ON e.id=t.result_event_id"
+        " JOIN history_transactions h ON h.id=e.transaction_id"
+        " WHERE r.action_id=? AND r.copy_id=? AND r.kind=3 LIMIT 2",
+        (action_id, copy_id),
+    )) as cursor:
+        rows = cursor.fetchall()
+    if len(rows) != 1:
+        raise ConsistencyError("绑定失败缺少唯一原读取结果事务")
+    key = rows[0][0]
+    saved_binding_read_failure(connection, key, action_id, copy_id, error)
+    events = saved_transaction_events(connection, key)
+    evidence = events[1]["body"]["evidence"]["binding_read_finish"]
+    return key, evidence["current_identity"], events[0]["occurred_at"]

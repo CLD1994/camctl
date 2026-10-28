@@ -4431,7 +4431,8 @@ class _ReadBindingFailCommand(_DeliveryPublicationMixin):
         if self._command.read_result_key is not None:
             from .binding_read_cancel import saved_binding_read_failure
             saved_binding_read_failure(scope.connection, self._command.read_result_key, action["id"], copy["id"],
-                {"code": "device_binding_unavailable", "stage": "execution", "details": details})
+                {"code": "device_binding_unavailable", "stage": "execution", "details": details},
+                self._command.binding_result.current_identity)
         if saved is not None:
             return self._reuse(scope, saved, facts)
         if delivery["status"] in (6, 7, 8) or copy["verification_state"] in (3, 5):

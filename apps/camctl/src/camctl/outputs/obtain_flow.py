@@ -1113,6 +1113,9 @@ async def _settle_failed_reads(runtime: ObtainRuntime) -> None:
         if error_json is None:
             raise ConsistencyError("原失败读取缺少可靠终局错误")
         error = parse_exact_json(error_json)
+        if error["code"] == "device_binding_unavailable":
+            await _settle_saved_read_binding_failure(runtime, copy_id, error)
+            continue
         if error["code"] not in (
                 "read_attempts_exhausted", "checksum_mismatch",
                 "source_file_unconfirmed"):
@@ -1124,6 +1127,33 @@ async def _settle_failed_reads(runtime: ObtainRuntime) -> None:
             runtime, facts, runtime.occurred_at(),
             checksum_mismatch=error["code"] == "checksum_mismatch",
             source_verification_failed=error["code"] == "source_file_unconfirmed")
+
+
+async def _settle_saved_read_binding_failure(runtime, copy_id, error):
+    """原读取失败已保存时，恢复其所属绑定业务收场。"""
+    from camctl.persistence.repositories.binding_read_cancel import load_saved_binding_read_failure
+    from camctl.outputs.read_attempts import save_read_business
+
+    facts = await runtime.database.read(lambda owned: _read_facts(owned.connection, copy_id, include_terminal=True))
+    if facts is None or facts["source_device_file_id"] is None:
+        raise ConsistencyError("原绑定失败缺少设备源交付拷贝")
+    key, identity, occurred_at = await runtime.database.read(lambda owned: load_saved_binding_read_failure(
+        owned.connection, facts["action_id"], copy_id, error))
+    details = error.get("details")
+    if not isinstance(details, Mapping):
+        raise ConsistencyError("原绑定失败缺少保存的详情")
+    statuses = {"missing": BindingStatus.DEVICE_MISSING, "mismatch": BindingStatus.DRIVER_MISMATCH,
+                "physical_identity_mismatch": BindingStatus.PHYSICAL_IDENTITY_MISMATCH,
+                "physical_identity_conflict": BindingStatus.PHYSICAL_IDENTITY_CONFLICT}
+    status = statuses.get(details.get("reason"))
+    if status is None:
+        raise ConsistencyError("原绑定失败原因不属于已登记分区")
+    binding = BindingResult(status, DeviceBinding(details["device_id"], details["expected_driver_id"]),
+        details.get("actual_driver_id"), identity)
+    request = FailReadBinding(copy_id, facts["source_device_file_id"], binding, occurred_at, key)
+    result = await save_read_business(runtime, copy_id, "read_binding_failure", request, runtime.outputs.fail_read_binding)
+    if result.kind is not DbOutcomeKind.COMPLETED:
+        raise db_failure(ConsistencyError, f"原绑定失败业务事务未可靠保存: {result.error}", result)
 
 
 async def _run_read(
