@@ -812,6 +812,19 @@ def running_read_ticket(owned, copy_id: int):
     return AttemptTicket(attempt_no, "read", str(copy_id), responsibility, run_id), intent_event_id
 
 
+def unfinished_read_end(owned, copy_id):
+    """按原未结束票据读取当前轮结束依据；不存在尝试时不读取旧结束引用。"""
+    from camctl.persistence.repositories.read_end import load_read_end
+
+    original = running_read_ticket(owned, copy_id)
+    if original is None:
+        return None
+    saved = load_read_end(copy_id, owned)
+    if saved is not None and saved[0] != original[0]:
+        raise ConsistencyError("当前轮读取结束与原未完成票据不一致")
+    return original[0], saved
+
+
 def record_read_diagnostic(runtime, reason, ticket):
     diagnostic = RecoveryDiagnostic(reason, ticket.run_id, ticket.attempt_id)
     if diagnostic != runtime.last_recovery_diagnostic:

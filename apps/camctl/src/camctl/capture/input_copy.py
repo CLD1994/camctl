@@ -210,7 +210,8 @@ async def obtain_recording_input(context: InputContext) -> InputStep:
             and facts.target_sha256 is not None):
         return InputStep(
             InputPhase.INPUT_READY, copy_id=copy_id,
-            input_file=_input_ref(facts, context.staging))
+            input_file=_input_ref(facts, context.staging), read_end=context.read_end,
+            stop_requested=context.read_end is not None, content_complete=context.read_end is not None)
 
     try:
         prepared = await context.copies.prepare(copy_id)

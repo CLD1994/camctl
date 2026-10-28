@@ -426,13 +426,19 @@ async def _obtain_input(flow: MediaFlow, request: SegmentInspectionRequest,
     copy_id = qualification.copy_id
     state = (await copies.copy_state(copy_id))
     ticket = None
-    if state.verification_state not in (3, 5) or state.target_sha256 is None:
-        from camctl.persistence.repositories.read_end import load_read_end
-        saved_end = await read_flow.database.read(lambda owned: load_read_end(copy_id, owned))
+    from camctl.outputs.read_attempts import HeldReadEnd, unfinished_read_end
+    unfinished = await read_flow.database.read(lambda owned: unfinished_read_end(owned, copy_id))
+    if unfinished is not None:
+        _original, saved_end = unfinished
         if saved_end is not None:
-            from camctl.outputs.read_attempts import HeldReadEnd
             ticket, end, occurred_at, _ = saved_end
-            read_flow.pending_read_ends[copy_id] = HeldReadEnd(ticket, end, occurred_at, evidence=read_flow.evidence)
+            held = read_flow.pending_read_ends.get(copy_id)
+            if held is None:
+                read_flow.pending_read_ends[copy_id] = HeldReadEnd(ticket, end, occurred_at, evidence=read_flow.evidence)
+            elif held.ticket != ticket or held.end != end:
+                raise ConsistencyError("内存中的读取结束与当前轮可靠依据不一致")
+        elif state.verification_state in (3, 5) and state.target_sha256 is not None:
+            return InputStep(InputPhase.WAITING, copy_id=copy_id, reason="read_end_unconfirmed")
     if (state.verification_state not in (3, 5) or state.target_sha256 is None) and ticket is None:
         run_id, run_status, attempts_used, max_attempts_used, retry_wait_required = (await _run_state(read_flow, copy_id))
         if run_status == int(_RUN_STATUS.FAILED):
@@ -500,6 +506,10 @@ async def _obtain_input(flow: MediaFlow, request: SegmentInspectionRequest,
                 _resume_local_internal_end(current, value, read_flow, context))
 
     async def read_and_save(control):
+        if ticket is not None and state.verification_state in (3, 5) and state.target_sha256 is not None:
+            from camctl.outputs.read_attempts import current_local_read_end
+            if not await current_local_read_end(read_flow, copy_id, read_flow.pending_read_ends[copy_id]):
+                return InputStep(InputPhase.WAITING, copy_id=copy_id, reason="read_end_changed")
         current = replace(context, sessions=(sessions if ticket is None else
             sessions.for_attempt(ticket, idle_timeout_s=config.timeout_s, control=control)))
         step = await obtain_recording_input(current)
@@ -683,6 +693,14 @@ async def inspect_segment(flow: MediaFlow, request: SegmentInspectionRequest) ->
         return SegmentInspectionStep(SegmentInspectionPhase.WAITING, ref.inspection_id,
             input_step.copy_id, reason=input_step.reason or input_step.phase.value,
             error=input_step.error)
+
+    from camctl.persistence.repositories.segment_inspections import inspection_input_read_succeeded
+    input_read_finished = await flow.database.read(lambda owned: inspection_input_read_succeeded(
+        owned.connection, {"id": ref.inspection_id, "action_id": ref.action_id,
+                           "source_device_file_id": ref.source_device_file_id}))
+    if not input_read_finished:
+        return SegmentInspectionStep(SegmentInspectionPhase.WAITING, ref.inspection_id,
+            input_step.copy_id, reason="read_result_unconfirmed")
 
     count_frames = request.target.metric is CoverageMetric.FRAMES
     probe_call = getattr(flow.tools, "probe_segment", None)
