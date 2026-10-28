@@ -87,7 +87,7 @@ def _facts(connection, request):
 
 
 def saved_binding_check_failure(connection, action_id, *, resource_key=None, expected_identity=None):
-    """按检查终态的原操作键恢复绑定失败申请及原次机身观察。"""
+    """按检查终态的原操作键恢复绑定失败申请及原次配置身份。"""
     registry = load_event_registry()["events"]["OPERATION_CONFIGURED"]
     event_type, reason = registry["id"], registry["branches"]["FINISH"]["reason"]
     condition = "c.trigger_copy_id IS NULL" if resource_key is None else (

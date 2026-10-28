@@ -70,7 +70,9 @@ def test_saved_conflict_keeps_original_identity_even_if_current_configuration_ch
 def test_missing_current_identity_still_discovers_prior_failed_photo_check(assembly_module, monkeypatch, reason):
     module, _, _ = assembly_module
     availability = sys.modules["camctl.operations.availability"]
-    availability._action_binding_checks = lambda owned, request: ((9, 7, None),)
+    async def pages(database, request):
+        yield (9, 7, None)
+    availability._binding_check_pages = pages
     transaction = sys.modules["camctl.persistence.transaction"]
     transaction.row_facts = lambda connection, table, ident: {"expected_identity_json": {"serial": "old", "product_id": 10}}
     monkeypatch.setattr(module, "row_facts", transaction.row_facts)

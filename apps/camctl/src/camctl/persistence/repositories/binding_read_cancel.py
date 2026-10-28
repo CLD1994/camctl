@@ -72,7 +72,7 @@ def saved_binding_read_failure(connection, key, action_id, copy_id, error, curre
 
 
 def load_saved_binding_read_failure(connection, action_id, copy_id, error):
-    """按原尝试结果事件找到完整事务，返回原键与原次机身观察。"""
+    """按原尝试结果事件找到完整事务，返回原键与原次配置身份。"""
     from camctl.persistence.transaction import saved_transaction_events
 
     with closing(connection.execute(

@@ -5,7 +5,7 @@ from camctl.devices.bindings import BindingResult, BindingStatus, DeviceBinding
 
 
 async def saved_source_binding(runtime, source_id, action_id, device_id, driver_id):
-    """恢复原读取检查已经保存的绑定失败，保持原次身份观察。"""
+    """恢复原读取检查已经保存的绑定失败，保持原次配置身份。"""
     from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
     if driver_id != DRIVER_ID:
         return None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import closing
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
@@ -250,8 +251,7 @@ class AvailabilityCoordinator:
         write_identity = (request.action_id, ("item", request.trigger_copy_id)) if not has_read_copy else identity
         lock = self._locks.setdefault(write_identity, asyncio.Lock())
         async with lock:
-            checks = await database.read(lambda owned: _action_binding_checks(owned, request))
-            for check_id, run_id, copy_id in checks:
+            async for check_id, run_id, copy_id in _binding_check_pages(database, request):
                 owner = self.calls.get(run_id)
                 if owner is not None:
                     if not owner.saved:
@@ -561,54 +561,62 @@ def _open_check(owned, request):
     return ("identity_mismatch",) if fixed != request.identity else tuple(rows[0])
 
 
-def _action_binding_checks(owned, request):
+def _action_binding_checks(owned, request, *, after=0):
+    """读取一页当前仍需消费的检查，保留原始页的继续位置。"""
     from camctl.devices.drivers.hasselblad.identity import CameraIdentity
     from camctl.persistence.transaction import row_facts
     if request.trigger_copy_id is None:
         condition, params = "c.trigger_copy_id IS NULL", (request.action_id,)
     else:
         condition, params = "c.trigger_copy_id IS NOT NULL AND c.resource_key=?", (request.action_id, request.identity.resource_key)
-    after, matching = 0, []
+    if after != 0:
+        ObjectId(after)
+    matching = []
+    with closing(owned.connection.execute(
+        "SELECT c.id,r.id,c.trigger_copy_id,r.status FROM device_availability_checks c"
+        " JOIN operation_runs r ON r.availability_check_id=c.id"
+        " WHERE c.action_id=? AND " + condition + " AND r.status IN (1,2,4,6) AND c.id>? ORDER BY c.id LIMIT 128",
+        (*params, after),
+    )) as cursor:
+        rows = cursor.fetchall()
+    ids = tuple(ObjectId(row[0]) for row in rows)
+    if any(left >= right for left, right in zip((after, *ids), ids)):
+        raise ConsistencyError("检查读取页不是严格递增的唯一身份")
+    for check_id, run_id, copy_id, status in rows:
+        check = row_facts(owned.connection, "device_availability_checks", check_id)
+        try:
+            if check is None:
+                raise ValueError("缺少固定检查")
+            fixed = CameraIdentity(**check["expected_identity_json"])
+            if check["resource_key"] != fixed.resource_key:
+                raise ValueError("固定检查资源键不符")
+        except (KeyError, TypeError, ValueError) as error:
+            raise ConsistencyError("检查缺少可靠固定机身身份") from error
+        if request.trigger_copy_id is not None and fixed != request.identity:
+            continue
+        if status in (4, 6):
+            run = row_facts(owned.connection, "operation_runs", run_id)
+            if run is None:
+                raise ConsistencyError("终态检查缺少原流程")
+            error = run.get("error_json")
+            if not isinstance(error, dict) or error.get("code") != "device_binding_unavailable":
+                from camctl.persistence.repositories.availability_failure import failure_basis
+                if failure_basis(owned.connection, check_id, request.action_id) is None:
+                    continue
+        matching.append((check_id, run_id, copy_id))
+    return tuple(matching), rows[-1][0] if len(rows) == 128 else None
+
+
+async def _binding_check_pages(database, request):
+    """逐页交付匹配项，不在事务连接之外保留游标。"""
+    after = 0
     while True:
-        rows = owned.connection.execute(
-            "SELECT c.id,r.id,c.trigger_copy_id,r.status FROM device_availability_checks c"
-            " JOIN operation_runs r ON r.availability_check_id=c.id"
-            " WHERE c.action_id=? AND " + condition + " AND r.status IN (1,2,4,6) AND c.id>? ORDER BY c.id LIMIT 128",
-            (*params, after),
-        ).fetchall()
-        if not rows:
-            break
-        ids = tuple(ObjectId(row[0]) for row in rows)
-        if any(left >= right for left, right in zip((after, *ids), ids)):
-            raise ConsistencyError("检查读取页不是严格递增的唯一身份")
-        for check_id, run_id, copy_id, status in rows:
-            check = row_facts(owned.connection, "device_availability_checks", check_id)
-            try:
-                if check is None:
-                    raise ValueError("缺少固定检查")
-                fixed = CameraIdentity(**check["expected_identity_json"])
-                if check["resource_key"] != fixed.resource_key:
-                    raise ValueError("固定检查资源键不符")
-            except (KeyError, TypeError, ValueError) as error:
-                raise ConsistencyError("检查缺少可靠固定机身身份") from error
-            if request.trigger_copy_id is not None and fixed != request.identity:
-                continue
-            if status in (4, 6):
-                run = row_facts(owned.connection, "operation_runs", run_id)
-                if run is None:
-                    raise ConsistencyError("终态检查缺少原流程")
-                error = run.get("error_json")
-                if not isinstance(error, dict) or error.get("code") != "device_binding_unavailable":
-                    from camctl.persistence.repositories.availability_failure import failure_basis
-                    if failure_basis(owned.connection, check_id, request.action_id) is None:
-                        continue
-            matching.append((check_id, run_id, copy_id))
-        after = rows[-1][0]
-        if len(rows) < 128:
-            break
-    if len(matching) > 1:
-        raise ConsistencyError("同一触发工作存在多个未交付的检查")
-    return tuple(matching)
+        page, next_after = await database.read(lambda owned: _action_binding_checks(owned, request, after=after))
+        for entry in page:
+            yield entry
+        if next_after is None:
+            return
+        after = next_after
 
 
 def _action_facts(owned, action_id):

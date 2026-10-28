@@ -125,20 +125,18 @@ class AvailabilityAssembly:
         identity = runtime.fixed_camera_identity
         if identity is None:
             from types import SimpleNamespace
-            from camctl.operations.availability import _action_binding_checks
-            def original(owned):
-                rows = _action_binding_checks(owned, SimpleNamespace(action_id=action["id"], trigger_copy_id=None))
-                if not rows:
-                    return None
-                found = row_facts(owned.connection, "device_availability_checks", rows[0][0])
+            from camctl.operations.availability import _binding_check_pages
+            async for check_id, _, _ in _binding_check_pages(
+                    runtime.database, SimpleNamespace(action_id=action["id"], trigger_copy_id=None)):
+                found = await runtime.database.read(lambda owned: row_facts(
+                    owned.connection, "device_availability_checks", check_id))
                 if found is None:
                     from camctl.contracts.values import ConsistencyError
                     raise ConsistencyError("开放检查缺少固定事实")
-                return found
-            check = await runtime.database.read(original)
-            if check is None:
+                identity = CameraIdentity(**found["expected_identity_json"])
+                break
+            else:
                 return True
-            identity = CameraIdentity(**check["expected_identity_json"])
         request = CreateAvailabilityCheck(action["id"], identity, now,
             effective_preparation_lead_s(runtime, action), now)
         entry = self.drivers.entry(DRIVER_ID)
