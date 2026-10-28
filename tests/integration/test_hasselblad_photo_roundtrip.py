@@ -45,20 +45,15 @@ def _client(package: InstalledCamctl, *args: str, output: Path) -> dict:
     return json.loads(output.read_text(), parse_float=Decimal)
 
 
-@dataclass(frozen=True)
-class _NumberToken:
-    text: str
-
-
 def _token(text: str, path: tuple[str | int, ...]) -> str:
-    value = json.loads(text, parse_float=_NumberToken)
+    value = json.loads(text)
     for part in path:
         value = value[part]
-    assert isinstance(value, _NumberToken), (path, value)
-    return value.text
+    assert isinstance(value, str), (path, value)
+    return value
 
 
-@pytest.mark.parametrize("shutter", ("0.000667", "0.000333", "0.00025"))
+@pytest.mark.parametrize("shutter", ("1/1500", "1/3000", "1/4000"))
 def test_installed_hasselblad_browser_preset_keeps_precise_shutter(
     tmp_path: Path, installed_camctl: InstalledCamctl, shutter: str,
 ):
@@ -69,12 +64,12 @@ def test_installed_hasselblad_browser_preset_keeps_precise_shutter(
     (store / "device-capabilities.json").write_text(description)
     params_text = (
         '{"type":"hasselblad_photo","capture_format":"jpeg",'
-        '"exposure":{"mode":"M","iso":100,"aperture":8,"shutter_s":' + shutter + '},'
+        '"exposure":{"mode":"M","iso":100,"aperture":8,"shutter_s":' + json.dumps(shutter) + '},'
         '"white_balance":{"mode":"manual","temperature_k":5500},'
         '"focus":{"mode":"MF","relative_move":5}}'
     )
     input_path = tmp_path / "browser-input.json"
-    refresh_schedule = shutter == "0.000333"
+    refresh_schedule = shutter == "1/3000"
     before_browser = datetime.now(timezone.utc).replace(microsecond=0)
     scheduled_at = (before_browser + timedelta(minutes=-2 if refresh_schedule else 5)).strftime("%Y-%m-%d %H:%M:%S")
     input_path.write_text(json.dumps({
@@ -207,37 +202,38 @@ class PhotoCase:
 
     @property
     def name(self):
-        return f"{self.capture_format}-{self.source}-{self.shutter}"
+        shutter_name = self.shutter.replace("/", "-")
+        return f"{self.capture_format}-{self.source}-{shutter_name}"
 
     @property
     def params_text(self):
-        exposure = ('"mode":"S","iso":100' if self.shutter == "0.000333"
+        exposure = ('"mode":"S","iso":100' if self.shutter == "1/3000"
                     else '"mode":"M","iso":100,"aperture":8')
         wb, focus = {
-            "0.000667": ('{"mode":"manual","temperature_k":5500}', '{"mode":"MF","relative_move":5}'),
-            "0.000333": ('{"mode":"auto"}', '{"mode":"AF-S"}'),
-            "0.00025": ('{"mode":"daylight"}', '{"mode":"MF"}'),
+            "1/1500": ('{"mode":"manual","temperature_k":5500}', '{"mode":"MF","relative_move":5}'),
+            "1/3000": ('{"mode":"auto"}', '{"mode":"AF-S"}'),
+            "1/4000": ('{"mode":"daylight"}', '{"mode":"MF"}'),
         }[self.shutter]
         if self.focus_override is not None:
             assert self.focus_override in (("MF", 5), ("MF", None))
             focus = '{"mode":"MF"' + (',"relative_move":5' if self.focus_override[1] == 5 else '') + '}'
         return ('{"type":"hasselblad_photo","capture_format":' + json.dumps(self.capture_format)
-                + ',"exposure":{' + exposure + ',"shutter_s":' + self.shutter + '},'
+                + ',"exposure":{' + exposure + ',"shutter_s":' + json.dumps(self.shutter) + '},'
                 + '"white_balance":' + wb + ',"focus":' + focus + '}')
 
     @property
     def settings_argv(self):
         # 独立手写代表期望，绝不调用被测 photo_start_commands。
         commands = [("set", "drive-mode", "single"), ("set", "capture-format", self.capture_format),
-                    ("set", "exposure-mode", "S" if self.shutter == "0.000333" else "M"),
+                    ("set", "exposure-mode", "S" if self.shutter == "1/3000" else "M"),
                     ("set", "iso", "100")]
-        if self.shutter != "0.000333":
+        if self.shutter != "1/3000":
             commands.append(("set", "aperture", "8"))
         commands.append(("set", "shutter", self.shutter))
-        if self.shutter == "0.000667":
+        if self.shutter == "1/1500":
             commands.extend((("set", "wb-mode", "manual"), ("set", "wb", "5500,0"),
                              ("set", "focus-mode", "MF"), ("focus", "5")))
-        elif self.shutter == "0.000333":
+        elif self.shutter == "1/3000":
             commands.extend((("set", "wb-mode", "auto"), ("set", "focus-mode", "AF-S"), ("autofocus",)))
         else:
             commands.extend((("set", "wb-mode", "daylight"), ("set", "focus-mode", "MF")))
@@ -253,10 +249,10 @@ class PhotoCase:
 
 NORMAL_CASES = tuple(PhotoCase(fmt, source, shutter)
                      for fmt in ("raw", "jpeg") for source in ("host", "device")
-                     for shutter in ("0.000667", "0.000333", "0.00025"))
+                     for shutter in ("1/1500", "1/3000", "1/4000"))
 FULL_UI_CASE_NAMES = frozenset((
-    "raw-host-0.000667", "raw-device-0.000333", "raw-host-0.00025",
-    "jpeg-device-0.000667", "jpeg-host-0.000333", "jpeg-device-0.00025",
+    "raw-host-1-1500", "raw-device-1-3000", "raw-host-1-4000",
+    "jpeg-device-1-1500", "jpeg-host-1-3000", "jpeg-device-1-4000",
 ))
 
 
@@ -347,7 +343,7 @@ class PhotoWorld:
         self.original_bytes = (helper._HASSELBLAD_ORIGINAL_BYTES if case.capture_format == "raw"
                                else helper._HASSELBLAD_JPEG_ORIGINAL_BYTES)
         self.preview_bytes = helper._HASSELBLAD_PREVIEW_BYTES
-        if case.capture_format == "jpeg" and case.shutter == "0.00025":
+        if case.capture_format == "jpeg" and case.shutter == "1/4000":
             self.original_bytes = self.preview_bytes
         self.tool.write_text(helper._hasselblad_tool_source(
             self.argv_log, "H8B-SERIAL", installed_python=installed.python,
@@ -646,7 +642,7 @@ class PhotoWorld:
         archive = self.root / "claimed"
         reports = sorted(archive.glob("status-report-*.json"), key=lambda p: int(p.name.split("-")[2]))
         paths = [archive / delivery["file_name"] for delivery in deliveries]
-        if self.case.shutter == "0.000333":
+        if self.case.shutter == "1/3000":
             waiting = self.upload(paths, "media-before-report")
             assert waiting["saved_report_ids"] == []
             assert len(waiting["media"]) == 4
@@ -660,9 +656,9 @@ class PhotoWorld:
         else:
             first = self.upload(reports, "reports-before-media")
             assert first["media"] == []
-            selected = paths if self.case.shutter == "0.000667" else [paths[0], paths[2]]
+            selected = paths if self.case.shutter == "1/1500" else [paths[0], paths[2]]
             final = self.upload(selected, "media-after-reports")
-        expected_count = 2 if self.case.shutter == "0.00025" else 4
+        expected_count = 2 if self.case.shutter == "1/4000" else 4
         assert final["worker_error"] is None
         assert len(final["media"]) == expected_count
         assert {row["status"] for row in final["media"]} == {"verified"}
@@ -786,7 +782,7 @@ def test_installed_hasselblad_photo_roundtrip(tmp_path, installed_camctl, host_d
         if case.source == "device":
             assert [row["locator_json"] for row in _rows(world.deployment.state_db,
                     "SELECT locator_json FROM device_files WHERE source_action_id=? ORDER BY role", (action_id,))] == world.frozen_locators
-        if case.capture_format == "jpeg" and case.shutter == "0.00025":
+        if case.capture_format == "jpeg" and case.shutter == "1/4000":
             assert outputs["original"]["media_type"] == outputs["preview"]["media_type"] == "image/jpeg"
             assert outputs["original"]["checksum"] == outputs["preview"]["checksum"]
         world.assert_upload_and_ack(deliveries)
@@ -938,7 +934,7 @@ def _fault_pair(world, capture):
     return outputs
 
 
-@pytest.mark.parametrize('case', (PhotoCase('jpeg', 'host', '0.000667'), PhotoCase('raw', 'device', '0.000333')), ids=lambda c:c.name)
+@pytest.mark.parametrize('case', (PhotoCase('jpeg', 'host', '1/1500'), PhotoCase('raw', 'device', '1/3000')), ids=lambda c:c.name)
 def test_installed_hasselblad_saved_start_recovers_without_replay(tmp_path, installed_camctl, host_demo, monkeypatch, case):
     world = PhotoWorld(tmp_path, installed_camctl, case, host_demo)
     monkeypatch.chdir(tmp_path)
@@ -987,7 +983,7 @@ def test_installed_hasselblad_saved_start_recovers_without_replay(tmp_path, inst
         world.close()
 
 
-@pytest.mark.parametrize('case', (PhotoCase('jpeg', 'host', '0.000667'), PhotoCase('jpeg', 'device', '0.000333')), ids=lambda c:c.name)
+@pytest.mark.parametrize('case', (PhotoCase('jpeg', 'host', '1/1500'), PhotoCase('jpeg', 'device', '1/3000')), ids=lambda c:c.name)
 def test_installed_hasselblad_complete_commit_receipt_loss_reuses_request(tmp_path, installed_camctl, host_demo, monkeypatch, case):
     world = PhotoWorld(tmp_path, installed_camctl, case, host_demo)
     monkeypatch.chdir(tmp_path)
@@ -1058,7 +1054,7 @@ def _no_private_details(action, world):
 
 
 def test_installed_hasselblad_missing_start_result_never_replays(tmp_path, installed_camctl, host_demo, monkeypatch):
-    case = PhotoCase('jpeg', 'host', '0.00025', focus_override=('MF', 5))
+    case = PhotoCase('jpeg', 'host', '1/4000', focus_override=('MF', 5))
     world = PhotoWorld(tmp_path, installed_camctl, case, host_demo)
     monkeypatch.chdir(tmp_path)
     try:
@@ -1129,7 +1125,7 @@ def test_installed_hasselblad_missing_start_result_never_replays(tmp_path, insta
 
 
 def test_installed_hasselblad_report_rebuild_keeps_frozen_bytes(tmp_path, installed_camctl, host_demo, monkeypatch):
-    case = PhotoCase('jpeg', 'device', '0.000667', focus_override=('MF', None))
+    case = PhotoCase('jpeg', 'device', '1/1500', focus_override=('MF', None))
     world = PhotoWorld(tmp_path, installed_camctl, case, host_demo)
     monkeypatch.chdir(tmp_path)
     try:
