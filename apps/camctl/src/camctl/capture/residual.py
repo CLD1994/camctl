@@ -783,7 +783,10 @@ def residual_flow(
 async def _recover_old_attempts(database: Any, capture_factory: Any, *, owns_device=None,
                                 discovery=None, now=0) -> None:
     """每轮结束一批具有可靠旧边界的原调用，沿用原身份及预算。"""
-    from camctl.capture.handlers import _RECOVERABLE_OPERATIONS
+    from camctl.capture.handlers import (
+        _ACTION_TERMINAL, _RECOVERABLE_OPERATIONS, _RUN_KIND, _held_listing,
+        _settle_discontinued_listing,
+    )
     from camctl.operations.models import AttemptTicket
 
     discovery = discovery if discovery is not None else ReadDiscoveryOwner()
@@ -812,8 +815,20 @@ async def _recover_old_attempts(database: Any, capture_factory: Any, *, owns_dev
             None if activity_id is None else str(activity_id), responsibility, run_id)
         # 查询责任的后续尝试沿重试间隔继续；恢复结果不带等待会
         # 使下一次查询被"先建立重试等待"守卫拒绝。
-        (await runtime.recover_attempt(
-            ticket, retry_wait=ticket.operation == "query"))
+        recovered = await runtime.recover_attempt(
+            ticket, retry_wait=ticket.operation == "query")
+        if recovered and ticket.operation == "result":
+            action_id = await runtime.action_id_of_ticket(ticket)
+            if kind == int(_RUN_KIND.RESOLVE_OUTPUT_SCOPE):
+                from camctl.capture.scope_closure import settle_scope_listing
+
+                listing = await _held_listing(runtime, ticket)
+                if listing is not None:
+                    await settle_scope_listing(runtime, action_id, listing)
+                continue
+            action = await runtime.action(action_id)
+            if action["status"] in _ACTION_TERMINAL:
+                await _settle_discontinued_listing(runtime, action_id, ticket, cancel_run=True)
 
 
 async def _settle_orphan_queries(context: Any, database: Any, operations: Any, *, discovery=None, now=0) -> None:

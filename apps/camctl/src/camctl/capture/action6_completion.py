@@ -321,6 +321,8 @@ async def prepare_action6_segment_set(runtime, action, listing, *, canceled=Fals
             return None
         if finalized:
             await common._finish_listing_result(runtime, listing, finalize_output_set=True)
+        elif canceled and not exhausted:
+            await common._finish_listing_result(runtime, listing, end_run=common.RunOutcome.CANCELED)
         request = await runtime.database.read(lambda owned, occurred_at=runtime.wall_us(): repository.prepare_result_set(
             action_id, occurred_at, owned
         ))

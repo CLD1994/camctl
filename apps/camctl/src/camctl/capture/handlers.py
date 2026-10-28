@@ -247,6 +247,7 @@ _RUN_KIND = enum_for("operation_runs.kind")
 _RECOVERABLE_OPERATIONS = {
     int(_RUN_KIND.START): "control", int(_RUN_KIND.STOP): "stop",
     int(_RUN_KIND.QUERY_ACTIVITY): "query", int(_RUN_KIND.CHECK_CAPTURE_RESULTS): "result",
+    int(_RUN_KIND.RESOLVE_OUTPUT_SCOPE): "result",
     int(_RUN_KIND.STOP_RESIDUAL): "stop",
 }
 _QUERY_PURPOSE = enum_for("operation_runs.query_purpose")
@@ -1528,8 +1529,8 @@ class CaptureRuntime(_FileObservationSaves):
         if pending is not None:
             pending = self._validate_call_result(identity, pending)
             if not pending.result_disposition_ready:
-                pending = (await _settle_recovered_listing(self, pending))
-                self.pending_start_results[identity] = pending
+                self.last_recovery_diagnostic = None
+                return True
             (await self._save_call_result(identity, pending, retry=True))
             self.last_recovery_diagnostic = None
             return True
@@ -1551,16 +1552,13 @@ class CaptureRuntime(_FileObservationSaves):
             last = (await self.database.read(lambda owned, inputs=(ticket,), options=dict(): self.capture.read_last_result_page(*inputs, owned, **options), description="读取已保存拍摄事实"))
             if last is not None and _result_page_returned(last):
                 _hold_recovered_result_page(self, last, evidence)
-                pending = (await _settle_recovered_listing(self, self.pending_start_results[identity]))
             else:
-                entries = None if last is None else SavedResultEntries(self.capture, self.database, last.ref)
+                entries = () if last is None else SavedResultEntries(self.capture, self.database, last.ref)
                 pending = PendingCallResult(new_operation_key(), AttemptFinish(
-                    ticket, validate_outcome(ticket, _recovered_call_outcome(), evidence), self.wall_us(),
-                    retry_wait=retry_wait),
-                    None, returned_ns=self.monotonic_ns(), result_listing=entries)
-                pending = (await _settle_recovered_listing(self, pending))
-            self.pending_start_results[identity] = pending
-            (await self._save_call_result(identity, pending))
+                    ticket, validate_outcome(ticket, _recovered_call_outcome(), evidence), self.wall_us()),
+                    None, returned_ns=self.monotonic_ns(), result_listing=entries,
+                    result_disposition_ready=False)
+                self.pending_start_results[identity] = pending
         else:
             action = (await self.action((await self.action_id_of_ticket(ticket))))
             recovered = _recovered_call_outcome("local_control_recovery"
@@ -3474,6 +3472,9 @@ async def _handle_binding_failure(
                 raise ConsistencyError("绑定失败的未完成责任缺少原尝试票据")
             if not (await runtime.recover_attempt(ticket)):
                 return True
+            if operation == "result":
+                if not await _settle_discontinued_listing(runtime, action["id"], ticket):
+                    return True
     if action["cancel_requested"]:
         from camctl.persistence.repositories.capture_facts import load_start_facts
 
@@ -5570,17 +5571,6 @@ def _hold_recovered_result_page(runtime: CaptureRuntime, saved, evidence) -> Non
         result_disposition_ready=False)
 
 
-async def _settle_recovered_listing(runtime: CaptureRuntime, pending: PendingCallResult) -> PendingCallResult:
-    """独立保存原真实结束依据；绑定失败不判定正常集合结论。"""
-    completion = None
-    if isinstance(pending.result_listing, SavedResultEntries):
-        saved = await pending.result_listing.completion_page()
-        activity = (await runtime.database.read(lambda owned, inputs=("device_activities", int(pending.finish.ticket.target_id)): row_facts(owned.connection, *inputs), description="读取拍摄直接事实"))
-        if saved is not None and activity["activity_state"] != 3:
-            completion = saved.ref
-    return replace(pending, completion_page=completion, result_disposition_ready=True)
-
-
 async def _continue_result_scan(runtime: CaptureRuntime, pending: PendingResultScan, *,
                                 read_allowed=None) -> ListingRound:
     if runtime.results is None and not pending.finished:
@@ -5732,6 +5722,23 @@ async def _finish_listing_result(runtime: CaptureRuntime, listing: ListingRound,
     (await runtime.save_held_result(ticket))
 
 
+async def _settle_discontinued_listing(runtime: CaptureRuntime, action_id: int,
+                                       ticket: AttemptTicket, *, cancel_run=False) -> bool:
+    """收回已不由普通拍摄处理的原结果，并保留可确认的文件事实。"""
+    listing = await _held_listing(runtime, ticket)
+    if listing is None:
+        return True
+    listing = await _qualify_listing_collection(runtime, action_id, listing)
+    try:
+        await _register_listing(runtime, action_id, listing)
+    except _NaturalTimeDeferred:
+        return False
+    await _finish_listing_result(runtime, listing,
+        end_run=RunOutcome.CANCELED if cancel_run else None,
+        finalize_output_set=_listing_finalized(listing))
+    return True
+
+
 @owned_tool_call
 async def _listing_round(runtime: CaptureRuntime, action_id: int) -> ListingRound:
     """先交接原申请，分别核对调用前与原页实际返回的时间资格。"""
@@ -5786,8 +5793,7 @@ async def _listing_round_input(runtime: CaptureRuntime, action_id: int) -> Listi
             return (await _held_listing(runtime, ticket))
         if not (await runtime.recover_attempt(ticket, retry_wait=True)):
             return ListingRound(ListingPhase.IN_FLIGHT)
-        # 原页发现的文件可能尚未保存归属或完成事实，必须先消费。
-        (await _register_listing(runtime, action_id, (await _saved_result_listing(runtime, action_id))))
+        return (await _held_listing(runtime, ticket))
     elif in_flight is not None:
         # 原尝试已经结束时，分页文件子责任仍可能尚未可靠保存。
         # 先恢复这些原事实，再按原重试要求区分新轮与结果收尾。

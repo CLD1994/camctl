@@ -65,6 +65,27 @@ async def _finish_incomplete(runtime, pending):
             reason="scope_trigger_ended")
 
 
+async def settle_scope_listing(runtime, owner_id, listing):
+    """消费已经取得的范围结果；新增设备检查仍由触发动作授予。"""
+    from camctl.capture import handlers as common
+    from camctl.capture.segment_completion import release_segment_occupancy
+
+    listing = await common._qualify_listing_collection(runtime, owner_id, listing)
+    try:
+        await common._register_listing(runtime, owner_id, listing)
+    except common._NaturalTimeDeferred:
+        return False
+    if (listing.outcome is not None and listing.outcome.error is not None
+            or not common._listing_finalized(listing)):
+        await common._finish_listing_result(runtime, listing, retry_wait=True)
+        return False
+    await common._finish_listing_result(runtime, listing, end_run=RunOutcome.SUCCEEDED,
+        finalize_output_set=True)
+    if not listing.already_saved:
+        await release_segment_occupancy(runtime, owner_id)
+    return True
+
+
 @owned_tool_call
 async def advance_ended_scope(runtime, trigger):
     """仅在有效准备时段核实已结束的旧范围；返回是否可以继续准备。"""
@@ -127,9 +148,9 @@ async def advance_ended_scope(runtime, trigger):
                     common._hold_recovered_result_page(runtime, last, evidence)
                     listing = await common._held_listing(runtime, ticket)
                 else:
-                    outcome = common._recovered_call_outcome(evidence.type)
-                    await runtime.finish(ticket, outcome, retry_wait=True)
-                    return False
+                    if not await runtime.recover_attempt(ticket):
+                        return False
+                    listing = await common._held_listing(runtime, ticket)
         else:
             def waiting(owned):
                 return owned.connection.execute(
@@ -176,19 +197,12 @@ async def advance_ended_scope(runtime, trigger):
             if not await _trigger_ready(runtime, trigger["id"]):
                 await _finish_incomplete(runtime, pending)
             return False
-    await common._register_listing(runtime, owner_id, listing)
-    if listing.outcome is not None and listing.outcome.error is not None:
-        await common._finish_listing_result(runtime, listing, retry_wait=True)
+    if not await settle_scope_listing(runtime, owner_id, listing):
         return False
-    if not common._listing_finalized(listing):
-        await common._finish_listing_result(runtime, listing, retry_wait=True)
-        return False
-    await common._finish_listing_result(runtime, listing, end_run=RunOutcome.SUCCEEDED,
-        finalize_output_set=True)
     if listing.already_saved:
         key = new_operation_key()
         finish = StaleRunFinish((responsibility,), RunOutcome.SUCCEEDED, runtime.wall_us())
         await _write(runtime, lambda owned: runtime.operations.finish_stale_runs(finish, key, owned),
             key, "结束已保存的范围核实责任")
-    await release_segment_occupancy(runtime, owner_id)
+        await release_segment_occupancy(runtime, owner_id)
     return True

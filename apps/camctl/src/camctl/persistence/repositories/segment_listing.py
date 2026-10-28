@@ -53,7 +53,10 @@ def _listing_page(owned, saved, attempt, final, boundary):
 @asynccontextmanager
 async def ordered_listing_members(database, listing):
     """每次只在 worker 读取一页，排序与规则迭代留在调用协程。"""
-    if listing.entries == () and listing.already_saved:
+    from camctl.operations.models import AttemptStatus
+
+    if listing.entries == () and (listing.already_saved
+            or listing.outcome is not None and listing.outcome.status is AttemptStatus.UNKNOWN):
         yield lambda: iter(())
         return
     boundary, attempt = await database.read(

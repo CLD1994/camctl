@@ -145,9 +145,11 @@ async def release_segment_occupancy(runtime, action_id):
 async def register_segment_observations(runtime, action_id, listing):
     """先保存全部原始 OSV/LRF 归属，再独立保存完成及跨页配对。"""
     from camctl.capture.result_scans import SavedResultEntries
+    from camctl.operations.models import AttemptStatus
 
     if not isinstance(listing.entries, SavedResultEntries):
-        if (listing.entries == () and listing.already_saved
+        if (listing.entries == () and (listing.already_saved
+                or listing.outcome is not None and listing.outcome.status is AttemptStatus.UNKNOWN)
                 and (await runtime.database.read(lambda owned: runtime.capture.read_last_result_page(listing.ticket, owned))) is None):
             return
         raise ConsistencyError("分段策略要求可靠原始结果页")
@@ -371,6 +373,9 @@ async def advance_segmented_recording(runtime, action, decision):
         explicit_error = (
             listing.outcome is not None and listing.outcome.error is not None
         )
+        if explicit_error and used < runtime.check_config.max_attempts and not listing.already_saved:
+            await common._finish_listing_result(runtime, listing, retry_wait=True)
+            return
         if (
             not explicit_error
             and used < runtime.check_config.max_attempts
