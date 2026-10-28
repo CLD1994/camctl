@@ -70,6 +70,8 @@ class DriverDeclaration:
     directory_supported: bool = False
     #: 仅声明 READ 的本地主机收场恢复，不推断设备效果或独立活动结束。
     local_read_recovery_supported: bool = False
+    #: 只结束可靠旧本地边界内的结果调用，不推断设备文件或结果。
+    local_result_recovery_supported: bool = False
     #: 仅结束旧本地 control 责任，不证明独立设备效果。
     local_control_recovery_supported: bool = False
     #: 仅结束旧本地可用性检查责任，不推断相机状态。
@@ -121,6 +123,8 @@ class ControlRequest:
     prepared_by: AttemptTicket | None = None
     #: 整体 timeout_s 中独立授予首次设备配置的部分，普通设置使用剩余部分。
     session_setup_timeout_s: Decimal = Decimal("0")
+    #: 首次受理时冻结的来源模式；未声明来源模式的其他调用留空。
+    output_storage: str | None = None
 
 
 @dataclass(frozen=True)

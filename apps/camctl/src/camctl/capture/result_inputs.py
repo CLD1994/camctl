@@ -7,7 +7,8 @@ from camctl.capture.results import FileKind
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.evidence import (DeviceObservation, EvidenceContract, RESULT_LISTED_TYPE, RESULT_LISTED_VERSION,
-                                    RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT, validate_observation)
+                                    RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT, RESULT_PHOTO_PAGE_CONTRACT,
+                                    validate_observation)
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.directory import DirectoryCursor
 from camctl.operations.models import (
@@ -54,6 +55,16 @@ class ResultPage:
     scan_complete: bool
 
 
+def decode_result_cursor(value):
+    """按显式类别解释原游标，保留目录游标原有规则。"""
+    if value is None:
+        return None
+    if isinstance(value, Mapping) and value.get("kind") == "hasselblad_photo":
+        from camctl.devices.drivers.hasselblad.files import PhotoResultCursor
+        return PhotoResultCursor.from_json(value)
+    return DirectoryCursor.from_json(value)
+
+
 def page_from_outcome(ticket: AttemptTicket, outcome: CallOutcome, *,
                       cursor: DirectoryCursor | None = None,
                       binding: DeviceBinding | None = None) -> ResultPage:
@@ -74,6 +85,27 @@ def page_from_outcome(ticket: AttemptTicket, outcome: CallOutcome, *,
         raise ConsistencyError("结果文件观察版本必须是登记整数")
     if scope_only and value.version != 2:
         raise ConsistencyError("范围收尾要求 v2 连续分页观察")
+    if value.version == 3:
+        if scope_only:
+            raise ConsistencyError("照片角色结果不能用于目录范围收尾")
+        validate_observation(value, RESULT_PHOTO_PAGE_CONTRACT, expected_identity=ticket.target_id)
+        data = value.data
+        if set(data) != RESULT_PHOTO_PAGE_CONTRACT.fields:
+            raise ConsistencyError("照片角色结果页缺少完整登记成员")
+        try:
+            raw_binding = data["binding"]
+            if not isinstance(raw_binding, Mapping) or set(raw_binding) != {"device_id", "driver_id"}:
+                raise ValueError("照片结果页缺少完整绑定")
+            photo_binding = DeviceBinding(raw_binding["device_id"], raw_binding["driver_id"])
+            if binding is not None and photo_binding != binding:
+                raise ValueError("照片结果页改变原设备绑定")
+            from camctl.devices.drivers.hasselblad.files import validate_photo_result_page
+            following = validate_photo_result_page(data, activity_id=ticket.target_id,
+                binding=photo_binding, cursor=cursor)
+            entries = tuple(observed_file(entry) for entry in data["entries"])
+        except (TypeError, ValueError, KeyError) as error:
+            raise ConsistencyError("照片角色结果页事实无效") from error
+        return ResultPage(entries, cursor, following, False, None, outcome, False)
     contract = RESULT_FILES_CONTRACT if value.version == 1 else RESULT_PAGE_CONTRACT
     validate_observation(value, contract, expected_identity=ticket.target_id)
     if set(value.data) != contract.fields or not isinstance(value.data["entries"], (list, tuple)):

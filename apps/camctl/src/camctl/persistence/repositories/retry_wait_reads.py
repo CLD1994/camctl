@@ -286,7 +286,9 @@ class RetryWaitReads:
         if not isinstance(error, dict) or error.get("code") != "local_read_failed" or error.get("stage") != "source_read":
             return False
         details = error.get("details")
-        return (isinstance(details, dict) and details.get("source_failed") is True
+        return (isinstance(details, dict)
+                and (details.get("source_failed") is True
+                     or details.get("photo_cache_checksum_mismatch") is True)
                 and _has_source_fallback_retry_proof(self.connection, copy, attempt))
 
     def read_eligible(self, run_id, occurred_at, *, allow_unheld=False):

@@ -4,6 +4,30 @@
 
 [关键阶段与命令日志验证（2026-10-26）](operational-logging-validation-2026-10-26.md)记录统一 JSON、INFO 阶段与实际命令、DEBUG 耗时明细的最终单元和定向集成结果，以及现有真机验证环境的安装一致性；扩大检查中的旧测试失配单独保留。
 
+## implement_camctl 合并的软件验证（2026-10-28）
+
+在 `fix/capture-results-and-delivery-recovery-20261028` 合入 `implement_camctl` 的 `07c13be7a6b7b15564ad4086dee4d9c47f7e0d0c`；合并前本分支为 `2312207b889707f1b128eac01af50b93c17bd4fc`，共同基线为 `61e73c8ac4e32dc5511664e0dd9f6c0a167926d3`。本地来源分支包含已拉取的远端提交。本次保留拍摄结果、发布取消及错误诊断修复，并接入 Hasselblad 原机来源、同步副本与有限缓存恢复。
+
+RESULTS 恢复先持有原实际返回或未知结果，再由消费者决定重试或结束；Hasselblad 使用原 `local_result_recovery` 证据。DEVICE 照片的 `LISTED/CLOSED` 消费者先恢复可靠角色页的文件责任，再保存 RESULTS 结论。取消取回仅核对照片缓存的历史关联，缓存释放或清理不阻断同键及终态新键恢复；首次读取资格仍要求当前可用的缓存。
+
+环境为 Linux 开发容器、CPython 3.11.17，工作目录为 `/home/cld/.codex/worktrees/7426/camctl`，解释器为 `apps/camctl/.venv311/bin/python`。各组在独立进程执行；清除 Python 与 pytest 外部选项、禁用插件自动加载和字节码写入。导入前隔离协作者或包资源，并阻止真实数据库连接、线程及子进程；只读取源码及使用内存替身。最终六组均退出 0，禁止器触发次数为 0。
+
+| 范围 | 结果 |
+| --- | --- |
+| `capture/test_hasselblad_device_results_isolated.py`、`capture/test_result_recovery_owner_isolated.py` | 25 项通过。 |
+| `outputs/test_publication_discovery_isolated.py`、`outputs/test_canceled_publication_isolated.py` | 53 项、15 个子测试通过。 |
+| capture 的六个 `test_photo_*_isolated.py`；devices 的 `test_hasselblad_device_response_isolated.py`、`test_hasselblad_frozen_storage_isolated.py`；host_files 的 `test_photo_cache_reader_isolated.py`、`test_photo_result_workspace_isolated.py`、`test_photo_sync_observation_isolated.py` | 113 项通过。 |
+| [拍摄结果与普通交付恢复](#拍摄结果与普通交付恢复的软件验证2026-10-28)第一组中除 `test_result_recovery_owner_isolated.py` 外的十个文件 | 133 项、8 个子测试通过；原结果拥有者另计入第一行。 |
+| [错误日志投影与诊断复用](#错误日志投影与诊断复用的软件验证2026-10-28)第一组四个隔离文件 | 128 项通过。 |
+| `host_files/test_capture_sources_jpeg_boundary.py` | 101 项通过。 |
+
+以上路径均相对于 `apps/camctl/tests/unit/`，共 553 项、23 个子测试；重复运行不重复计数。命令、隔离入口及完整日志收据保存在 `tmp/implement-merge-20261028/`。新增接缝用例分别证实登记故障不结束原 RESULTS、缓存清理后历史关联仍可核验而不授予新读取资格，以及取消恢复拒绝替换缓存身份。取消恢复样例的交付此前已失败，原取消组只含动作终态，返回的首次清理集合为空；该样例不证明 PUBLISHING 的非空清理集合恢复。既有 AST 抽取用例只验证恢复持有逻辑，不作为真实组件组合证据。
+
+独立静态复核覆盖两边的 capture、outputs、装配、诊断及数据库契约接缝，修正问题后未发现剩余阻断项。52 个变更 Python 文件的 AST 解析、事件转换 JSON 解析及差异空白检查通过。最初测试入口过度限制了无 I/O 的源码导入，禁止器在导入发生前中止；补齐必要的纯源码白名单或资源替身后执行上述最终范围，没有读取真实包资源。接缝红测与测试装配失败不计为最终通过。
+
+本次没有新增或运行集成测试；来源分支中一个既有组件集成用例的 HOST 模式参数变更随分支合入，该用例没有运行。部署脚本从源码构建并生成能力说明，未增加部署依赖或配置字段，脚本无需调整。本次没有构建安装包、部署既有环境，也未执行 TX2、真实相机或物理断电验收。
+
+
 ## 错误日志投影与诊断复用的软件验证（2026-10-28）
 
 [修复计划](../superpowers/plans/2026-10-28-error-log-projection-and-ownership.md)完成成功设置 stdout 摘要、同记录重复错误引用、会话最终摘要复用原诊断，以及报告内部通信的异常图边界保存。实际调用结果、数据库证据、机器会话 reason/details 保持各自的原编码；新收场错误及诊断登记失败仍交付完整适用事实。

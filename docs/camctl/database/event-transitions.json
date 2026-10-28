@@ -8698,7 +8698,9 @@
             "processing",
             "output"
           ],
-          "evidence": []
+          "evidence": [
+            "photo_cache_request"
+          ]
         },
         "HOST_PHOTO_COMPLETE": {
           "reason": 5,

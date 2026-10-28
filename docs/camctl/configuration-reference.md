@@ -160,7 +160,7 @@ result_mode = "segmented"
 `devices.<id>.residual_stop.timeout_s`|正秒数；`10`|一次残留收场停止调用的等待上限。
 `devices.<id>.result_check.max_attempts`|整数；`3` 轮|每项拍摄结果核实责任的累计轮数。
 `devices.<id>.result_check.retry_interval_s`|非负秒数；`3`|结果尚不可靠时的再次核实间隔。
-`devices.<id>.result_check.call_timeout_s`|正秒数；`10`|每次设备结果查询调用的等待上限；同一轮的各次分页调用分别计时。
+`devices.<id>.result_check.call_timeout_s`|正秒数；`10`|每次设备结果查询调用的等待上限；同一轮的各次分页调用分别计时。Hasselblad DEVICE 首次来源观察按每角色身份核对与完整指定下载共享此期限，部署按文件规模调整。
 `devices.<id>.capture.extra_wait_ms`|整数；`0` 毫秒|至少 0；在驱动要求的拍摄结果等待之后增加部署余量。
 
 `query` 表提供设备状态查询及 [Hasselblad 独立可用性检查](hasselblad-availability-recovery.md#检查责任共享与有限预算)的执行参数，两种操作各自计数。`result_check` 表控制拍摄结果核实，下面的 `cleanup.query_*` 控制文件存在性查询。当前三个内建驱动都没有声明设备状态查询能力；Hasselblad 可用性检查也不声明该能力。`capture.extra_wait_ms` 只用于任务声明了返回后等待的结果分支，不改变目标采集时长或正常停止时间。

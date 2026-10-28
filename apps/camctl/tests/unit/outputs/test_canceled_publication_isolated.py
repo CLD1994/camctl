@@ -193,6 +193,85 @@ def load_repository():
 
 
 class CancelSettlementTests(unittest.TestCase):
+    def test_cleaned_photo_cache_preserves_cancel_recovery_identity(self):
+        for replay in (True, False):
+            for cache_id in (31, 99, None):
+                with self.subTest(replay=replay, cache_id=cache_id):
+                    repo = load_repository()
+                    repo._OBTAIN_TYPE = 9
+                    repo._ACTION_STATUS = SimpleNamespace(RUNNING=2, CANCELED=6)
+                    repo._ACTION_TERMINAL = (3, 4, 5, 6)
+                    repo._RUN_TERMINAL = (5,)
+                    repo._RUN_KIND = SimpleNamespace(READ_FILE=7)
+                    rows = {
+                        'actions': {7: {'id': 7, 'plan_id': 1, 'type': 9, 'status': 6, 'cancel_requested': 1}},
+                        'plans': {1: {'id': 1, 'status': 3}},
+                        'action_dependencies': {8: {'id': 8, 'action_id': 7, 'depends_on_action_id': 2}},
+                        'obtain_source_selections': {9: {'id': 9, 'dependency_id': 8}},
+                        'obtain_items': {10: {'id': 10, 'selection_id': 9, 'delivery_id': 19, 'output_id': 29, 'source_dependency': 0}},
+                        'deliveries': {19: {'id': 19, 'action_id': 7, 'output_id': 29, 'status': int(Status.FAILED)}},
+                        'file_copies': {21: {'id': 21, 'delivery_id': 19, 'target_file_id': 23,
+                            'source_device_file_id': None, 'source_intermediate_file_id': 31, 'slot_device_id': None}},
+                        'intermediate_files': {23: {'id': 23, 'owner_delivery_id': 19, 'relative_path': 'target/23'},
+                            31: {'id': 31, 'retention_state': 2, 'cleanup_state': 4}},
+                        'outputs': {29: {'id': 29, 'source_action_id': 2, 'device_file_id': 30,
+                            'intermediate_file_id': None, 'kind': 1}},
+                        'operation_runs': {41: {'id': 41, 'copy_id': 21, 'kind': 7,
+                            'action_id': 7, 'responsibility_key': 'read/21', 'status': 5, 'retry_wait_required': 0}},
+                        'operation_attempts': {},
+                    }
+                    class Cursor:
+                        def __init__(self, found): self.found = found
+                        def fetchall(self): return self.found
+                        def fetchone(self): return self.found[0] if self.found else None
+                        def close(self): pass
+                    class Connection:
+                        def execute(self, sql, parameters):
+                            if "SELECT t.operation_key" in sql:
+                                return Cursor([("original-key",)])
+                            parts = sql.split()
+                            table, column = parts[3], parts[5].split('=')[0]
+                            return Cursor([(identity,) for identity, row in rows[table].items()
+                                if row.get(column) == parameters[0]])
+                    repo.row_facts = lambda connection, table, identity: dict(rows[table][identity])
+                    repo.validate_relative_file_path = lambda *args: None
+                    repo._target_purpose_model = lambda copy, target: object()
+                    original = [{'type': repo._ACTION_FINISHED_EVENT, 'reason': 4, 'occurred_at': 100,
+                        'transaction': SimpleNamespace(txn_id=1), 'body': {'evidence': {}, 'rows': [{
+                            'table': 'actions', 'id': 7,
+                            'before': {'exists': True, 'values': {'status': 2}},
+                            'after': {'exists': True, 'values': {'status': 6}}}]}}]
+                    repo.saved_transaction_events = lambda connection, key: original if replay or key == 'original-key' else None
+                    repo.OperationKey = lambda key: key
+                    repo.read_row_values_at_boundary = lambda *args, **kwargs: {'status': 2}
+                    repo.json_equal = lambda left, right: left == right
+                    repo._update = lambda table, identity, before, after: SimpleNamespace(table=table, row_id=identity,
+                        before=SimpleNamespace(exists=True, values=before), after=SimpleNamespace(exists=True, values=after))
+                    repo.CommandPlan = lambda **kwargs: SimpleNamespace(**kwargs)
+                    repo.commit_operation = lambda command, key, owned: command.plan(owned)
+                    repo._outcome_of = lambda outcome: outcome
+                    cache = ModuleType('camctl.outputs.photo_cache_reuse')
+                    def read_bound(**kwargs):
+                        # 已清理的缓存仍有历史身份，但不能再授予读取资格。
+                        if not (kwargs.get('allow_released') and kwargs.get('historical')):
+                            return None
+                        self.assertEqual((kwargs['output_id'], kwargs['obtain_action_id'], kwargs['selection_id']),
+                                         (29, 7, 9))
+                        return None if cache_id is None else SimpleNamespace(intermediate_file_id=cache_id)
+                    cache.read_bound_photo_cache = read_bound
+                    with patch.dict(sys.modules, {cache.__name__: cache}):
+                        request = repo.SettleCanceledObtain(7, 100 if replay else 200, (10,))
+                        owned = SimpleNamespace(connection=Connection(), max_txn_id=2, max_event_id=20)
+                        if cache_id == 31:
+                            restored = repo.OutputsRepository().settle_canceled_obtain(request, 'key', owned)
+                            self.assertTrue(restored.result.complete)
+                            self.assertEqual(restored.result.file_ids, ())
+                            self.assertEqual(restored.events, ())
+                            self.assertTrue(restored.read_only)
+                        else:
+                            with self.assertRaises(repo.ConsistencyError):
+                                repo.OutputsRepository().settle_canceled_obtain(request, 'key', owned)
+
     def test_observed_staging_is_canceled_in_same_group_as_first_cleanup(self):
         repo = load_repository()
         repo._ACTION_STATUS = SimpleNamespace(RUNNING=2, CANCELED=6)

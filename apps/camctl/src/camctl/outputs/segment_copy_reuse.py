@@ -187,6 +187,16 @@ def _selection_is_bound_at_publication(
         published_event_id: int, owned,
 ) -> tuple[HistoryBoundary, bool]:
     """按原依赖核对本次选择是否属于来源提交时的等待集合。"""
+    boundary = _publication_boundary(owned.connection, published_event_id)
+    return _selection_is_bound_at_boundary(source_action_id=source_action_id,
+        obtain_action_id=obtain_action_id, selection_id=selection_id, boundary=boundary, owned=owned)
+
+
+def _selection_is_bound_at_boundary(
+        *, source_action_id: int, obtain_action_id: int, selection_id: int,
+        boundary: HistoryBoundary, owned,
+) -> tuple[HistoryBoundary, bool]:
+    """按给定完整来源事务核对原依赖和等待时状态。"""
     connection = owned.connection
     selection = row_facts(connection, "obtain_source_selections", selection_id)
     if selection is None:
@@ -198,17 +208,6 @@ def _selection_is_bound_at_publication(
         dependency = cursor.fetchone()
     if dependency != (obtain_action_id, source_action_id):
         raise ConsistencyError("分段检查副本与本次取回的原来源依赖不一致")
-    with closing(connection.execute(
-        "SELECT transaction_id FROM history_events WHERE id=?",
-        (published_event_id,),
-    )) as cursor:
-        marker = cursor.fetchone()
-    if marker is None:
-        raise ConsistencyError("分段来源发布标记缺少历史事件")
-    transaction = read_transaction_range(connection, marker[0])
-    if transaction.last_event_id != published_event_id:
-        raise ConsistencyError("分段来源发布标记不是其完整事务的末事件")
-    boundary = HistoryBoundary(transaction.txn_id, transaction.last_event_id)
     action = row_facts(connection, "actions", obtain_action_id)
     if action is None:
         raise ConsistencyError(f"取回动作缺失: {obtain_action_id}")

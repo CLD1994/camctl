@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import sys
 from collections.abc import Mapping
 from contextlib import nullcontext
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from decimal import Decimal
 from typing import Callable
 
@@ -20,18 +21,22 @@ from camctl.devices.evidence import (
     DeviceObservation,
     EvidenceContract,
     EvidenceRegistry,
+    RESULT_PHOTO_PAGE_CONTRACT,
 )
 from camctl.devices.ports import ControlRequest, DeviceCallResult
 from camctl.devices.start_entry import ENTERED, PREVENTED, entered_observation
 from camctl.devices.read_session import ReadSession, SourceFile, ReadPreparationError, ReadPreparationSettlement
-from camctl.host_files.downloads import DownloadWorkspace
+from camctl.host_files.downloads import DownloadWorkspace, ResultDownloadWorkspace
 from camctl.host_files.capture_sources import (
     CaptureFileError,
     CaptureFileSpec,
     CapturedArtifact,
     prepare_capture_workspace,
     verify_capture_files,
+    inspect_capture_candidate,
+    workspace_path,
 )
+from camctl.logging_runtime.diagnostics import record_error
 from camctl.logging_runtime.events import log_context, measure_stage
 from camctl.operations.models import (
     AttemptStatus,
@@ -44,7 +49,7 @@ from camctl.operations.models import (
     SettlementBasis,
 )
 from camctl.operations.owned_calls import current_call_scope
-from camctl.operations.error_diagnostics import DiagnosticError, exception_diagnostic
+from camctl.operations.error_diagnostics import DiagnosticError, exception_diagnostic, attach_diagnostic_facts
 from camctl.operations.process import (
     RawToolOutcome,
     StopSignal,
@@ -60,16 +65,17 @@ from camctl.operations.tool_diagnostics import (
 from .commands import PhotoPhase, PhotoStep, PHOTO_START_CALL_LIMIT, photo_start_commands
 from .configuration import CameraConfig, read_camera_config
 from .definitions import DRIVER_DECLARATION, DRIVER_ID
-from .parameters import PhotoSettings, parse_photo_settings
+from .parameters import CAPTURE_FORMATS, CaptureFormat, PhotoSettings, parse_photo_settings
 from .responses import (
     CaptureResponse,
     CliParseError,
     parse_capture,
+    parse_device_capture,
     parse_devices,
     parse_serial,
     doctor_passed,
 )
-from .files import CameraFileIdentity
+from .files import CameraFileIdentity, CameraFileLocator, CameraLocatorStatus, DownloadVariant, PhotoResultCursor, decide_photo_cache
 
 __all__ = ["AvailabilityCall", "AvailabilityCancelled", "AvailabilityResult", "EVIDENCE", "HasselbladDriver"]
 
@@ -80,6 +86,11 @@ _PHOTO_TAKEN = EvidenceContract(
     "control",
     frozenset({"activity_id", "original", "preview", "steps"}),
     identity_field="activity_id",
+)
+_DEVICE_PHOTO_TAKEN = EvidenceContract(
+    "photo_taken", 2, "control",
+    frozenset({"activity_id", "camera_locator", "camera_identity", "original", "preview",
+               "original_error", "preview_error", "prepared_by", "steps"}), identity_field="activity_id",
 )
 _PHOTO_PREPARATION_STEPS = EvidenceContract(
     "photo_preparation_steps", 1, "control", frozenset({"activity_id", "steps"}),
@@ -105,14 +116,31 @@ _AVAILABILITY_RETURNED = EvidenceContract(
 _AVAILABILITY_NOT_DISPATCHED = EvidenceContract(
     "availability_not_dispatched", 1, "availability", frozenset(), max_diagnostic_calls=3,
 )
+_PHOTO_RESULT_RETURNED = EvidenceContract(
+    "photo_result_returned", 1, "result", frozenset(), max_diagnostic_calls=3,
+)
+_PHOTO_RESULT_NOT_DISPATCHED = EvidenceContract(
+    "photo_result_not_dispatched", 1, "result", frozenset(), max_diagnostic_calls=3,
+)
+_PHOTO_RESULT_ATTEMPT = EvidenceContract(
+    "photo_result_attempt", 1, "result", frozenset({"activity_id", "role", "steps"}),
+    identity_field="activity_id",
+)
+_PHOTO_RESULT_COMPARISON = EvidenceContract(
+    "photo_result_attempt", 2, "result", frozenset({"activity_id", "role", "steps", "comparison"}),
+    identity_field="activity_id",
+)
 EVIDENCE = EvidenceRegistry((
-    _PHOTO_TAKEN, _OPERATION_RETURNED, _DISPATCH_PREVENTED, ENTERED, PREVENTED,
+    _PHOTO_TAKEN, _DEVICE_PHOTO_TAKEN, _OPERATION_RETURNED, _DISPATCH_PREVENTED, ENTERED, PREVENTED,
     CAPTURE_PREPARATION_COMPLETED, _PHOTO_PREPARATION_STEPS,
     EvidenceContract("read_returned", 1, "read", frozenset()),
     EvidenceContract("local_read_recovery", 1, "read", frozenset()),
+    EvidenceContract("local_result_recovery", 1, "result", frozenset()),
     EvidenceContract("local_control_recovery", 1, "control", frozenset()),
     EvidenceContract("local_availability_recovery", 1, "availability", frozenset()),
     _AVAILABILITY, _AVAILABILITY_RETURNED, _AVAILABILITY_NOT_DISPATCHED,
+    RESULT_PHOTO_PAGE_CONTRACT, _PHOTO_RESULT_RETURNED, _PHOTO_RESULT_NOT_DISPATCHED,
+    _PHOTO_RESULT_ATTEMPT, _PHOTO_RESULT_COMPARISON,
 ))
 
 _VENDOR_ID = 0x2756
@@ -488,6 +516,196 @@ class HasselbladDriver:
                 raise CameraReadError("preparation_failed", steps, causes=(error,)) from error
             raise
 
+    async def observe_photo_source(self, request: ControlRequest) -> DeviceCallResult:
+        """沿原 RESULTS 尝试取得一个角色的实际相机内容。"""
+        ticket = request.ticket
+        if (request.operation != "result" or ticket is None or ticket.operation != "result"
+                or ticket.target_id is None or ticket.responsibility_key != f"results/{ticket.target_id}"):
+            raise ValueError("照片来源观察必须携带原 RESULTS 活动票据")
+        parse_object_id(ticket.target_id)
+        if not isinstance(request.timeout_s, Decimal) or not request.timeout_s.is_finite() or request.timeout_s <= 0:
+            raise ValueError("照片来源观察必须携带有限正期限")
+        params = request.params
+        if not isinstance(params, Mapping) or set(params) != {
+                "activity_id", "camera_identity", "camera_locator", "capture_format", "role", "cursor",
+                "original_identity", "sync_candidate", "sync_error"}:
+            raise ValueError("照片来源观察申请成员不完整")
+        if params["activity_id"] != ticket.target_id:
+            raise ValueError("照片来源观察改变原活动")
+        locator = CameraFileLocator.from_json(params["camera_locator"])
+        if locator.status is not CameraLocatorStatus.PATH:
+            raise ValueError("照片来源观察缺少可靠机内定位")
+        camera = params["camera_identity"]
+        if not isinstance(camera, Mapping) or set(camera) != {"serial", "product_id"}:
+            raise ValueError("照片来源观察缺少原机身")
+        from .identity import CameraIdentity
+        fixed_camera = CameraIdentity(camera["serial"], camera["product_id"])
+        role = DownloadVariant(params["role"])
+        original_identity = params["original_identity"]
+        if (original_identity is not None and (role is not DownloadVariant.THUMBNAIL
+                or not isinstance(original_identity, str) or not original_identity)):
+            raise ValueError("照片来源配对身份只能属于预览角色")
+        capture_format = CaptureFormat(params["capture_format"])
+        candidate, sync_error = params["sync_candidate"], params["sync_error"]
+        if candidate is None:
+            if not isinstance(sync_error, str) or not sync_error:
+                raise ValueError("同步副本缺少可信记录时须保留原诊断")
+        elif (not isinstance(candidate, Mapping) or set(candidate) != {"host_path", "host_name", "size", "media_type"}
+              or sync_error is not None):
+            raise ValueError("同步副本记录无效")
+        cursor = None if params["cursor"] is None else PhotoResultCursor.from_json(params["cursor"])
+        if cursor is not None and (cursor.binding != request.binding or cursor.activity_id != ticket.target_id
+                                   or role is not cursor.role):
+            raise ValueError("照片来源观察改变原角色游标")
+        config = self._binding_config(request.binding)
+        workspace = ResultDownloadWorkspace(self.roots.staging, ticket, role.value)
+        began = self.monotonic_ns()
+        steps, calls = [], []
+        last_raw = None
+        in_call = False
+        comparison = None
+        pending_error = None
+
+        def result(*, error=None, entries=()):
+            observed = [DeviceObservation("photo_result_attempt", 2, {
+                "activity_id": ticket.target_id, "role": role.value, "steps": list(steps),
+                "comparison": comparison})]
+            if entries:
+                following = (PhotoResultCursor(request.binding, ticket.target_id, DownloadVariant.THUMBNAIL)
+                             if role is DownloadVariant.ORIGINAL else None)
+                observed.append(DeviceObservation("result_files_listed", 3, {
+                    "activity_id": ticket.target_id,
+                    "binding": {"device_id": request.binding.device_id, "driver_id": request.binding.driver_id},
+                    "role": role.value, "entries": list(entries),
+                    "cursor": None if cursor is None else cursor.as_json(),
+                    "next_cursor": None if following is None else following.as_json(),
+                }))
+            basis = SettlementBasis.OBSERVED if last_raw is not None else SettlementBasis.NOT_DISPATCHED
+            contract = _PHOTO_RESULT_RETURNED if last_raw is not None else _PHOTO_RESULT_NOT_DISPATCHED
+            outcome = CallOutcome(status=AttemptStatus.SUCCEEDED if error is None else AttemptStatus.FAILED,
+                effect=EffectState.CONFIRMED if entries else EffectState.NO_EFFECT,
+                error=error, settlement=Settlement(basis, EvidenceValue.of(contract)),
+                observations=tuple(observed), call_info=self._call_info(last_raw),
+                diagnostics=ToolDiagnostics(3, tuple(calls)) if calls else None)
+            return DeviceCallResult.from_outcome(outcome)
+
+        async def run(name, args):
+            nonlocal in_call, last_raw
+            remaining = request.timeout_s - Decimal(self.monotonic_ns() - began) / _NANOSECONDS_PER_SECOND
+            if remaining <= 0:
+                raise ValueError("source_call_timeout")
+            in_call = True
+            raw = await self._run_step(config=config, name=name, args=args, timeout_s=remaining, steps=steps)
+            in_call = False
+            steps[-1]["argv"] = list(args)
+            complete = raw is not None and raw.output is not None and raw.stderr is not None and raw.output_failure is None
+            def stream(data):
+                return ToolStream(ToolStreamState.UNAVAILABLE if data is None else
+                                  ToolStreamState.COMPLETE if complete else ToolStreamState.UNCONFIRMED, data)
+            calls.append(ToolCallOutput(len(calls) + 1, name,
+                stream(None if raw is None else raw.output), stream(None if raw is None else raw.stderr)))
+            if raw is None:
+                raise ValueError("tool_start_failed")
+            last_raw = raw
+            failure = self._local_return_failure(raw, needs_stdout=True)
+            if failure is not None or raw.stderr is None:
+                raise ValueError(failure or "stderr_unavailable")
+            return raw
+
+        try:
+            if (config.serial, config.product_id) != (fixed_camera.serial, fixed_camera.product_id):
+                raise PhysicalIdentityMismatch(request.binding)
+            await workspace.prepare()
+            listed = await run("list", ("list",))
+            cameras = parse_devices(listed.output)
+            matching = tuple(item for item in cameras if item.vendor_id == _VENDOR_ID
+                             and item.product_id == fixed_camera.product_id)
+            steps[-1]["matching_count"] = len(matching)
+            if len(matching) != 1:
+                raise ValueError("no_matching_device" if not matching else "multiple_matching_devices")
+            info = await run("info", ("info",))
+            observed_serial = parse_serial(info.output)
+            steps[-1]["observed_serial"] = observed_serial
+            if observed_serial != fixed_camera.serial:
+                raise PhysicalIdentityMismatch(request.binding)
+            await run("download", ("download", role.value, locator.camera_name, "--output", str(workspace.path)))
+            description = CAPTURE_FORMATS[capture_format]
+            media = description.original_media_type if role is DownloadVariant.ORIGINAL else description.preview_media_type
+            artifact = await workspace.observe(media)
+            steps[-1]["artifact"] = artifact.as_json()
+            identity = CameraFileIdentity(request.binding, locator.camera_path, locator.camera_name, role,
+                artifact.sha256, fixed_camera.serial, fixed_camera.product_id, artifact.size_bytes)
+            if candidate is None:
+                sync_status, sync_artifact, sync_failure = "unconfirmed", None, sync_error
+                record_error(sync_error, stage="capture.photo_sync_candidate",
+                             context={"ticket": ticket, "role": role.value})
+            else:
+                spec = CaptureFileSpec(candidate["host_name"], candidate["size"], candidate["media_type"])
+                if (candidate["host_path"] != str(workspace_path(self.roots, ticket.target_id) / spec.original_name)
+                        or spec.media_type != media):
+                    raise ValueError("同步副本记录改变原角色工作目录或媒体类型")
+                sync = await inspect_capture_candidate(self.roots, ticket.target_id, spec, owner=workspace)
+                sync_status, sync_artifact = sync.status, sync.artifact
+                sync_failure = None if sync.error is None else exception_diagnostic(sync.error)
+                if sync.error is not None:
+                    record_error(sync.error, stage="capture.photo_sync_candidate",
+                                 context={"ticket": ticket, "role": role.value})
+            selected = decide_photo_cache(identity, status=sync_status,
+                size_bytes=None if sync_artifact is None else sync_artifact.size_bytes,
+                sha256=None if sync_artifact is None else sync_artifact.sha256)
+            comparison = {"status": selected.comparison, "selected": selected.selected,
+                "sync_artifact": None if sync_artifact is None else sync_artifact.as_json(),
+                "sync_error": sync_failure}
+            original_name = (locator.camera_name if role is DownloadVariant.ORIGINAL
+                             else locator.camera_name + ".thumbnail" + description.preview_extension)
+            entry = {"identity": identity.file_identity, "locator": identity.locator(),
+                "complete": True, "size_bytes": artifact.size_bytes, "kind": "photo",
+                "original_name": original_name, "media_type": artifact.media_type,
+                "paired_identity": original_identity}
+            return result(entries=(entry,))
+        except PhysicalIdentityMismatch as error:
+            pending_error = error
+            return result(error=ErrorValue("device_binding_unavailable", "execution", {
+                "device_id": request.binding.device_id,
+                "expected_driver_id": request.binding.driver_id,
+                "actual_driver_id": request.binding.driver_id,
+                "reason": "physical_identity_mismatch"}))
+        except CaptureFileError as error:
+            pending_error = error
+            classification = ("invalid" if error.stage in {
+                "source_file_count", "source_type", "source_size", "source_media"} else "unconfirmed")
+            return result(error=ErrorValue("device_error", "result", {
+                "role": role.value, "reason": error.stage, "classification": classification,
+                "diagnostic": exception_diagnostic(error)}))
+        except (ValueError, OSError) as error:
+            pending_error = error
+            return result(error=ErrorValue("device_error", "result", {
+                "role": role.value, "reason": str(error), "classification": "unconfirmed",
+                "diagnostic": exception_diagnostic(error)}))
+        finally:
+            # 裸取消或 transport 未交回收场事实时，实际拥有者不得释放。
+            if not workspace.files_closed:
+                actual = sys.exception() or pending_error
+                close_errors = workspace.close_errors
+                if actual is not None:
+                    attach_diagnostic_facts(actual, {"photo_source_close_errors": close_errors})
+                if isinstance(actual, asyncio.CancelledError):
+                    actual.add_note("照片来源文件关闭未确认，原关闭错误保留在诊断事实中")
+                    raise actual
+                if actual is not None:
+                    raise BaseExceptionGroup("照片来源文件关闭未确认，原 RESULTS 拥有者继续持有",
+                                             [actual, *close_errors])
+                raise BaseExceptionGroup("照片来源文件关闭未确认，原 RESULTS 拥有者继续持有", list(close_errors))
+            if in_call:
+                raise RuntimeError("照片来源工具调用尚未实际收场，原 RESULTS 拥有者继续持有") from pending_error
+            if not in_call:
+                workspace.release()
+
+    async def list_results(self, request: ControlRequest, batch: int) -> DeviceCallResult:
+        if type(batch) is not int or batch < 1:
+            raise ValueError("照片来源页批次必须为正整数")
+        return await self.observe_photo_source(request)
+
     def _request_config(self, request: ControlRequest) -> tuple[str, CameraConfig, PhotoSettings]:
         if request.operation != "take_photo":
             raise ValueError("Hasselblad 驱动只接受 take_photo")
@@ -498,6 +716,8 @@ class HasselbladDriver:
             raise ValueError("拍摄调用必须以活动身份为目标")
         parse_object_id(ticket.target_id)
         config = self._binding_config(request.binding)
+        if request.output_storage not in ("host", "device"):
+            raise ValueError("拍摄调用必须携带已冻结的来源模式")
         try:
             settings = parse_photo_settings(request.params)
         except ValueError as error:
@@ -759,6 +979,27 @@ class HasselbladDriver:
                             observations=(observation, preparation_steps))
             self._prepared_captures.remember(request, (serial, config.product_id))
             return result
+
+        if request.output_storage == "device":
+            try:
+                response = parse_device_capture(raw.output, raw.stderr, output_complete=complete,
+                    capture_format=settings.capture_format, output_directory=str(workspace))
+            except CliParseError as error:
+                return failed("capture", "capture_response_unconfirmed", effect=EffectState.UNKNOWN,
+                    extra={"response_error": str(error), "response_code": error.code})
+            observation = DeviceObservation("photo_taken", 2, {
+                "activity_id": activity_id,
+                "camera_locator": response.camera_locator.as_json(),
+                "camera_identity": {"serial": config.serial, "product_id": config.product_id},
+                "original": None if response.original is None else asdict(response.original),
+                "preview": None if response.preview is None else asdict(response.preview),
+                "original_error": response.original_error,
+                "preview_error": response.preview_error,
+                "prepared_by": None if request.prepared_by is None else {
+                    "run_id": request.prepared_by.run_id, "attempt_no": request.prepared_by.attempt_id},
+                "steps": [dict(fact) for fact in steps],
+            })
+            return finish(AttemptStatus.SUCCEEDED, EffectState.CONFIRMED, observations=(observation,))
 
         try:
             response: CaptureResponse = parse_capture(raw.output, raw.stderr, output_complete=complete,

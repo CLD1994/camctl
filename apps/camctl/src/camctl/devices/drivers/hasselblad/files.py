@@ -9,6 +9,7 @@ import re
 import unicodedata
 
 from camctl.contracts.json_values import json_equal, parse_exact_json
+from camctl.contracts.values import parse_object_id
 from camctl.devices.bindings import DeviceBinding
 from .definitions import DRIVER_ID
 from .identity import CameraIdentity
@@ -17,6 +18,37 @@ from .identity import CameraIdentity
 class DownloadVariant(StrEnum):
     ORIGINAL = "original"
     THUMBNAIL = "thumbnail"
+
+
+@dataclass(frozen=True, slots=True)
+class PhotoResultCursor:
+    """原图结果页可靠保存后，指向同一活动的预览来源观察。"""
+
+    binding: DeviceBinding
+    activity_id: str
+    role: DownloadVariant
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.binding, DeviceBinding) or self.binding.driver_id != DRIVER_ID:
+            raise ValueError("照片结果游标必须属于原 Hasselblad 绑定")
+        parse_object_id(self.activity_id)
+        if self.role is not DownloadVariant.THUMBNAIL:
+            raise ValueError("照片结果后续页只能观察预览角色")
+
+    def as_json(self) -> dict[str, str]:
+        return {"kind": "hasselblad_photo", "device_id": self.binding.device_id,
+                "driver_id": self.binding.driver_id, "activity_id": self.activity_id,
+                "role": self.role.value}
+
+    @classmethod
+    def from_json(cls, value: object) -> "PhotoResultCursor":
+        if not isinstance(value, Mapping) or set(value) != {
+                "kind", "device_id", "driver_id", "activity_id", "role"}:
+            raise ValueError("照片结果游标成员不完整")
+        if value["kind"] != "hasselblad_photo":
+            raise ValueError("照片结果游标类别无效")
+        return cls(DeviceBinding(value["device_id"], value["driver_id"]),
+                   value["activity_id"], DownloadVariant(value["role"]))
 
 
 class CameraLocatorStatus(StrEnum):
@@ -156,3 +188,64 @@ class CameraFileIdentity:
         if not isinstance(locator, Mapping) or not json_equal(dict(locator), expected):
             raise ValueError("相机源定位与原固定身份不一致")
         return identity
+
+
+def validate_photo_result_page(data: object, *, activity_id: str,
+                               binding: DeviceBinding, cursor: PhotoResultCursor | None):
+    """校验一页真实角色观察与原活动、角色及固定读取身份。"""
+    if not isinstance(data, Mapping) or set(data) != {
+            "activity_id", "binding", "role", "entries", "cursor", "next_cursor"}:
+        raise ValueError("照片来源结果页成员不完整")
+    if data["activity_id"] != activity_id:
+        raise ValueError("照片来源结果页改变原活动")
+    saved_binding = data["binding"]
+    if not isinstance(saved_binding, Mapping) or set(saved_binding) != {"device_id", "driver_id"}:
+        raise ValueError("照片来源结果页缺少原设备绑定")
+    if DeviceBinding(saved_binding["device_id"], saved_binding["driver_id"]) != binding:
+        raise ValueError("照片来源结果页改变原设备绑定")
+    role = DownloadVariant(data["role"])
+    input_cursor = None if data["cursor"] is None else PhotoResultCursor.from_json(data["cursor"])
+    if input_cursor != cursor or (cursor is not None and (
+            cursor.binding != binding or cursor.activity_id != activity_id or role is not cursor.role)):
+        raise ValueError("照片来源结果页改变原角色游标")
+    entries = data["entries"]
+    if not isinstance(entries, (tuple, list)) or len(entries) != 1 or not isinstance(entries[0], Mapping):
+        raise ValueError("照片来源成功页必须包含一个角色观察")
+    entry = entries[0]
+    opaque = entry.get("identity")
+    if not isinstance(opaque, str):
+        raise ValueError("照片来源结果缺少固定身份")
+    key = json.dumps([binding.device_id, binding.driver_id, opaque], ensure_ascii=False, separators=(",", ":"))
+    identity = CameraFileIdentity.from_source(key, entry.get("locator"))
+    if (identity.variant is not role or entry.get("complete") is not True
+            or type(entry.get("size_bytes")) is not int or entry["size_bytes"] != identity.size_bytes
+            or entry.get("kind") != "photo"):
+        raise ValueError("照片来源角色、大小或完成观察不一致")
+    next_cursor = None if data["next_cursor"] is None else PhotoResultCursor.from_json(data["next_cursor"])
+    expected = (PhotoResultCursor(binding, activity_id, DownloadVariant.THUMBNAIL)
+                if role is DownloadVariant.ORIGINAL else None)
+    if next_cursor != expected:
+        raise ValueError("照片来源结果页后续角色不一致")
+    return next_cursor
+
+
+@dataclass(frozen=True, slots=True)
+class PhotoCacheDecision:
+    comparison: str
+    selected: str
+
+
+def decide_photo_cache(source: CameraFileIdentity, *, status: str,
+                       size_bytes: int | None, sha256: str | None) -> PhotoCacheDecision:
+    """一次比较只以可靠相机来源和本次同步副本事实决定缓存。"""
+    if not isinstance(source, CameraFileIdentity):
+        raise ValueError("照片缓存决定缺少可靠相机来源")
+    if status == "complete":
+        if (type(size_bytes) is not int or size_bytes <= 0 or not isinstance(sha256, str)
+                or re.fullmatch(r"[0-9a-f]{64}", sha256) is None):
+            raise ValueError("完整同步副本缺少实际大小或摘要")
+        matched = size_bytes == source.size_bytes and sha256 == source.sha256
+        return PhotoCacheDecision("matched" if matched else "mismatch", "sync" if matched else "camera")
+    if status not in ("missing", "invalid", "unconfirmed") or size_bytes is not None or sha256 is not None:
+        raise ValueError("同步副本分类或内容事实无效")
+    return PhotoCacheDecision(status, "camera")

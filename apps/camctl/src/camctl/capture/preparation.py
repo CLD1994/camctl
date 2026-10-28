@@ -345,6 +345,8 @@ def effective_preparation_lead_s(runtime, action):
 
 def _request(runtime, action, *, ticket=None, prepared_by=None,
              timeout_s=None, session_setup_timeout_s=Decimal("0")):
+    from camctl.devices.start_entry import is_hasselblad_photo
+
     return ControlRequest(
         capture_operation(action["type"]),
         DeviceBinding(action["device_id"], action["driver_id"]), action["effective_params_json"],
@@ -352,6 +354,8 @@ def _request(runtime, action, *, ticket=None, prepared_by=None,
         prepared_by=prepared_by, session_setup_timeout_s=session_setup_timeout_s,
         dispatch_check=lambda: preparation_dispatch_reason(runtime, action["id"]),
         start_return_meaning=action["execution_spec_json"].get("start_return_meaning"),
+        output_storage=(action["execution_spec_json"]["output_storage"]
+                        if is_hasselblad_photo(action) else None),
     )
 
 

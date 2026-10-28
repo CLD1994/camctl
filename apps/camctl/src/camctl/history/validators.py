@@ -615,6 +615,12 @@ def _check_evidence_member(event_id: int, member: str, value: Any, reason: int) 
                 or not isinstance(value["stage"], str) or not value["stage"]
                 or not isinstance(value["details"], Mapping)):
             _fail(f"事件 {event_id} 的 evidence.preparation_error 必须是完整实际错误")
+    elif member == "photo_cache_request":
+        from camctl.history.photo_cache_request import parse_photo_cache_request
+        try:
+            parse_photo_cache_request(value)
+        except (TypeError, ValueError) as error:
+            _fail(f"事件 {event_id} 的 evidence.photo_cache_request 非法: {error}")
     elif member == "host_photo_request":
         try:
             parse_host_photo_request(value, reason=reason)

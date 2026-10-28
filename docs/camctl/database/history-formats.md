@@ -127,7 +127,11 @@ Action6 分段普通录像的可靠正常到时 STOP，在原 `ATTEMPT_RESULT` �
 
 独立交接终态清理成员的原可靠缺席时，`OUTPUT_REGISTERED.OBSERVATION` 使用专属成员 `cleanup_result_source`，结构恰好为 `{"item_id": 正整数, "result_event_id": 正整数}`。结果事件必须是原成员 DELETE 或 QUERY 的完整 `ATTEMPT_RESULT`，其事务确定原操作键，原事件和票据确定流程、尝试、动作、目标产物及承载文件。写事务核对原缺席证据及完整关联，将尚需改变的文件事实与本产物完成观察共同提交；主机文件事件继续使用上述 `cleanup_request`。文件事实已满足时只保存产物的实际变化，不生成空文件事件。产物已完成而承载文件不符合完成事实时，按一致性错误处理；两者都已可靠完成则只读交接，不为补来源引用新增事件。新交接事件保存自己真实形成的时刻，不能改写原结果时刻。原操作键重送核对来源引用、时刻、文件及产物变化的完整事务。该成员仅用于[终态成员文件事实交接](cleanup-coordination.md#终态成员的可靠缺席交接)，不授予新的调用，也不改变原成员、动作、流程或尝试终态。既有其他产物观察不携带该成员，历史按事件自身有无该来源解释。
 
-单张拍摄的主机原图与预览使用 `INTERMEDIATE_FILE_CHANGED.CREATE` 共同保存两份文件责任，使用专用 `HOST_PHOTO_COMPLETE` 分支共同保存两份完整大小与 SHA-256。准备申请恰有 `action_id`、`occurred_at`；完整字节申请还包含 `original_file_id`、`original_size_bytes`、`original_sha256`、`preview_file_id`、`preview_size_bytes`、`preview_sha256`。解码器要求专用完成分支携带申请，并按事件自身的时刻、文件身份、大小和摘要核对两行变化。通用 `LIFECYCLE` 分支仍保留原来的用途变化、提升、清理和完整字节变更契约，不根据行数推断主机拍摄。原键重送逐项比较原申请；提交结果未知时，先结束原写连接上的未决事务，再通过启用 `query_only` 的独立只读连接核实原键对应的完整事务，不从写入重试推断提交结果。核实按原完整事务边界恢复两份字节事实；后来已提升的保留状态不能改写原准备或完整字节结果。文件提升仍由同事务先行的正式产物登记授权。
+单张拍摄的主机原图与预览使用 `INTERMEDIATE_FILE_CHANGED.CREATE` 共同保存两份文件责任。HOST 使用专用 `HOST_PHOTO_COMPLETE` 分支共同保存两份完整大小与 SHA-256。准备申请恰有 `action_id`、`occurred_at`；完整字节申请还包含 `original_file_id`、`original_size_bytes`、`original_sha256`、`preview_file_id`、`preview_size_bytes`、`preview_sha256`。解码器要求专用完成分支携带申请，并按事件自身的时刻、文件身份、大小和摘要核对两行变化。通用 `LIFECYCLE` 分支仍保留原来的用途变化、提升、清理和完整字节变更契约，不根据行数推断主机拍摄。原键重送逐项比较原申请；提交结果未知时，先结束原写连接上的未决事务，再通过启用 `query_only` 的独立只读连接核实原键对应的完整事务，不从写入重试推断提交结果。核实按原完整事务边界恢复两份字节事实；后来已提升的保留状态不能改写原准备或完整字节结果。文件提升仍由同事务先行的正式产物登记授权。
+
+DEVICE 单张的每个缓存角色独立使用 `INTERMEDIATE_FILE_CHANGED.LIFECYCLE`，`photo_cache_request` 恰含 `action_id`、`file_id`、`device_file_id`、`result_page_event_id`、`selected`、`size_bytes`、`sha256`、`occurred_at`、`archive_error`。前四个身份为正整数；`selected` 为原比较决定中的 `sync` 或 `camera`；大小和摘要为原相机来源的完整事实；`archive_error` 为 `null` 或实际归档异常的结构化诊断。成功事件更新该角色的大小和摘要；失败事件只保存该角色的归档错误，不赋予完整缓存资格。事件守卫回查原设备文件完成依据、START、RESULTS 角色页和一次选择；原键重送按原完整事务边界核对，不重新选择同步副本。
+
+DEVICE 角色缓存沿各自可靠相机观察和一次决定保存完整字节事实及来源引用，不借用 HOST 双文件共同完成申请。已合格原图不要求预览成功才能保存；失败角色保留自己的实际错误，不补造另一份摘要。各角色、原页、缓存及一次决定的历史依据须能独立核验，具体生命周期见[正式源与同步副本](../hasselblad-source-authority.md)。
 
 拥有者终态后的伴随收场（`OPERATION_CONFIGURED.FINISH` 中由 `finish_stale_runs` 产生的部分）必须使用专属成员 `stale_run_request` 保存完整申请依据，结构恰好为 `{"kind": "stale_run_finish", "responsibility_keys": 唯一非空字符串数组, "status": 流程状态整数编号, "error": 完整结构化错误或显式 null}`。数组保存申请的全部责任键，包含当时已结束或不存在的键；实际结束的流程只是其中当时仍开放的子集。同一申请的每个结束事件携带相同依据；原操作键重送逐项核对依据、时刻、阶段及实际结束集合与原事务边界开放的流程一致，子集、替换或借用的其他结束事务键均整组拒绝。尝试结果事务自带的流程处置事件不携带该成员，也不作为伴随收场重送。该依据不改变流程状态转换，也不进入对外报告。
 
@@ -284,6 +288,8 @@ JSON 中的业务依据引用同样保留原整数。例如，文件及活动完
 `baseline_position` 为 JSON `null` 或 `{event_id, entry_index}`，表示原固定基准中尚未比较的下一项；空基准和已比较完的基准为 `null`，不把新的目录事实写回基准。`last_identity` 是本轮已取得的最后稳定身份或 JSON `null`，空中间页保留此前身份。`file_ids` 是本页新文件的 `[驱动文件身份, 设备文件 ID]` 数组，只包含原任务的实际差集或任务范围文件，不登记历史基准文件。该引用与已保存的原页输入共同用于独立文件事实恢复，不能由后来投影替代原输入。
 
 首次页将首末引用共同设为本页事件 E，后续页只推进末引用。范围内允许夹有其他事件；读取按原物理尝试及页分支筛选，核对页号和游标连续。无后续游标或实际调用错误的页不允许继续追加。页保存保持尝试 `RUNNING`，不增加尝试次数，也不虚构整轮的一次本地或远端退出。页或文件发现提交未知时沿原完整申请、key 和时刻核实，可靠回执前不读下一页。
+
+Hasselblad DEVICE 单张的角色页使用同一 APPEND／INDEX_FILES 事件与原尝试边界，但其 v3 角色游标不解释成目录游标，也不声明目录扫描完成。控制观察、角色页、文件事实中的原引用及跨轮含义见[单张控制与角色结果编码](operation-fields.md#hasselblad-单张的控制与角色结果编码)。
 
 `RESULT_SET_CONFIRMED.OUTPUTS_FINALIZED` 独立保存本次文件范围确定事实。`evidence` 恰好包含 `attempt_id`（原尝试的实际行 ID）和 `result_page_event_id`（原可靠末页的事件 ID）。两者都是正整数，末页事件必须先于本事件，所属尝试、活动和全部连续页范围必须一致。原末页实际成功、没有错误和后续游标，并提供 `set_finalized=true`；本次新增成员均已可靠归属。事实以实际末页返回时刻记录，活动的 `output_set_finalized_event_id` 设为本事件 ID。原 RESULTS 尚未结束时，与原结果共同保存；原结果已经可靠保存时，沿其原票据、完整页范围和实际结果另存该事实，不重开尝试或重读设备。原键重送完整核实这两个引用及原时刻，改变或省略引用必须拒绝。该分支不保存采集判断、动作终态或虚构设备结束；字段职责及释放组合见[活动字段规则](operation-fields.md#剩余限制与下一动作)。
 

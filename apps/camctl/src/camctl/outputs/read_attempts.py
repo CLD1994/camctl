@@ -555,7 +555,13 @@ async def held_binding_read_result(runtime, copy_id, binding_result, business):
         raise ConsistencyError("原完整读取的流程状态或取消事实不可解释")
     if facts.committed_bytes != facts.source_size:
         return None
-    mismatch = (getattr(binding_result, "status", None) is BindingStatus.DEVICE_MISSING
+    binding_status = getattr(binding_result, "status", None)
+    photo_mismatch = False
+    if binding_status is BindingStatus.DRIVER_MISMATCH:
+        from camctl.outputs.obtain_flow import _is_photo_cache_source, _read_facts
+        photo_mismatch = await runtime.database.read(lambda owned:
+            _is_photo_cache_source(owned.connection, _read_facts(owned.connection, copy_id, include_terminal=True)))
+    mismatch = ((binding_status is BindingStatus.DEVICE_MISSING or photo_mismatch)
         and facts.verification_state == int(enum_for("file_copies.verification_state").MISMATCHED)
         and facts.source_sha256 is not None and facts.target_sha256 is not None
         and facts.source_sha256 != facts.target_sha256)

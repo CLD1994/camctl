@@ -11,6 +11,13 @@ from unittest.mock import patch
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def isolate_download_ownership(monkeypatch):
+    downloads = ModuleType("camctl.host_files.downloads")
+    downloads.download_owned = lambda ticket: False
+    monkeypatch.setitem(sys.modules, downloads.__name__, downloads)
+
+
 def recovery_method():
     path = Path(__file__).parents[3] / "src/camctl/capture/handlers.py"
     tree = ast.parse(path.read_text())
@@ -44,15 +51,13 @@ def recovery_method():
             "original", Finish(ticket, SimpleNamespace(outcome=saved.page.outcome), saved.occurred_at), None,
             result_listing=Entries(None, None, saved.ref), result_disposition_ready=False)
 
-    async def settle(runtime, pending):
-        return replace(pending, result_disposition_ready=True)
-
     ns = {"_ATTEMPT_STATUS": SimpleNamespace(RUNNING=1), "PendingCallResult": Pending,
           "AttemptFinish": Finish, "new_operation_key": lambda: "original",
           "validate_outcome": lambda ticket, outcome, evidence: SimpleNamespace(outcome=outcome),
-          "_recovered_call_outcome": lambda: "unknown", "SavedResultEntries": Entries,
+          "_recovered_call_outcome": lambda kind="adb_foreground_recovery": ("unknown", kind),
+          "is_hasselblad_photo": lambda action: action["photo"], "SavedResultEntries": Entries,
           "_result_page_returned": lambda saved: saved.page.next_cursor is None or saved.page.outcome.error is not None,
-          "_hold_recovered_result_page": hold, "_settle_recovered_listing": settle,
+          "_hold_recovered_result_page": hold,
           "ConsistencyError": RuntimeError, "closing": lambda value: value}
     exec(compile(ast.fix_missing_locations(code), str(path), "exec"), ns)
     return ns["recover_attempt"]
@@ -71,7 +76,8 @@ class Database:
 
 
 @pytest.mark.parametrize("kind", ["none", "partial", "error", "complete"])
-def test_recovered_original_waits_for_consumer(kind):
+@pytest.mark.parametrize("photo", [False, True])
+def test_recovered_original_waits_for_consumer(kind, photo):
     ticket = SimpleNamespace(run_id=9, attempt_id=1, operation="result")
     outcome = SimpleNamespace(error=object() if kind == "error" else None)
     saved = None if kind == "none" else SimpleNamespace(
@@ -82,9 +88,14 @@ def test_recovered_original_waits_for_consumer(kind):
         return object()
     async def save(*args, **kwargs):
         calls.append(args)
+    async def action_id(ticket):
+        return 7
+    async def action(identity):
+        return {"photo": photo}
     runtime = SimpleNamespace(pending_start_results={}, database=Database(saved),
         capture=object(), wall_us=lambda: 456, monotonic_ns=lambda: 789,
         _attempt_recovery_evidence=evidence, _save_call_result=save,
+        action_id_of_ticket=action_id, action=action,
         last_recovery_diagnostic=None)
 
     assert asyncio.run(recovery_method()(runtime, ticket))
@@ -96,7 +107,8 @@ def test_recovered_original_waits_for_consumer(kind):
         assert pending.finish.outcome.outcome is outcome
         assert pending.finish.occurred_at == 123
     else:
-        assert pending.finish.outcome.outcome == "unknown"
+        assert pending.finish.outcome.outcome == ("unknown",
+            "local_result_recovery" if photo else "adb_foreground_recovery")
 
 
 def test_existing_unsettled_owner_is_not_replaced_or_saved():

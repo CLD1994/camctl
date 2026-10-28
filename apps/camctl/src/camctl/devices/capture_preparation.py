@@ -50,6 +50,7 @@ class _PreparedCapture:
     operation: str
     params: Mapping
     ticket: AttemptTicket
+    output_storage: str | None
 
 
 class PreparedCaptureCache:
@@ -72,7 +73,8 @@ class PreparedCaptureCache:
         if request.ticket is None or request.ticket.operation != "control":
             raise ValueError("准备凭据必须属于原 control 尝试")
         self._captures[request.binding.device_id] = _PreparedCapture(
-            request.binding, device_identity, request.operation, deepcopy(dict(request.params)), request.ticket)
+            request.binding, device_identity, request.operation, deepcopy(dict(request.params)),
+            request.ticket, request.output_storage)
 
     def matches(self, request: ControlRequest, device_identity: Hashable) -> bool:
         ready = self._captures.get(request.binding.device_id)
@@ -83,4 +85,5 @@ class PreparedCaptureCache:
                 and ready.ticket == request.prepared_by
                 and ready.ticket.target_id == request.ticket.target_id
                 and ready.operation == request.operation
+                and ready.output_storage == request.output_storage
                 and json_equal(ready.params, request.params))
