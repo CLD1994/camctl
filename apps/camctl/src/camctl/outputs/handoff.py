@@ -699,6 +699,14 @@ def _record_location_errors(delivery_id, decision) -> None:
 
 
 async def _publish_delivery(delivery_id, context, state) -> DeliveryResult:
+    facts = state.facts
+    if facts.status == int(_DELIVERY_STATUS.PUBLISHED):
+        return DeliveryResult(DeliveryPhase.PUBLISHED,
+                              DeliveryDecision(DeliveryHandoffOutcome.COMPLETED))
+    if facts.status in (int(_DELIVERY_STATUS.FAILED), int(_DELIVERY_STATUS.CANCELED),
+                        int(_DELIVERY_STATUS.WITHDRAWN)) or facts.withdrawal_requested:
+        return DeliveryResult(DeliveryPhase.NOT_ACTIVE,
+                              DeliveryDecision(DeliveryHandoffOutcome.NOT_ACTIVE))
     decision = await asyncio.to_thread(_decide_again, state, context)
     _record_location_errors(delivery_id, decision)
     if decision.outcome is DeliveryHandoffOutcome.COMPLETED:

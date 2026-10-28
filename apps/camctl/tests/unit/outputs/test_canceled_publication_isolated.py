@@ -1027,3 +1027,11 @@ class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
         result = await module.publish_delivery(19, context)
         self.assertEqual(result.phase, module.DeliveryPhase.NOT_ACTIVE)
         self.assertEqual(seen, [Status.CANCELED])
+
+    async def test_canceled_publication_returns_without_observing_file_locations(self):
+        module = load_handoff()
+        async def forbidden(*args): raise AssertionError('已取消交付不能再次观察文件')
+        module.asyncio = SimpleNamespace(to_thread=forbidden)
+        state = SimpleNamespace(facts=module.DeliveryFacts(19, Status.CANCELED))
+        result = await module._publish_delivery(19, object(), state)
+        self.assertEqual(result.phase, module.DeliveryPhase.NOT_ACTIVE)
