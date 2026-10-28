@@ -136,6 +136,7 @@ def validate_host_photo_event(event, context):
                     or not json_equal(row.before.values, before) or not json_equal(row.after.values, after)
                     or facts is None or facts.get("owner_action_id") != request.action_id
                     or facts.get("owner_delivery_id") is not None
+                    or any(facts.get(name) is not None for name in ("size_bytes", "sha256", "last_error_json"))
                     or facts.get("retention_state") != int(_RETENTION.REQUIRED)
                     or facts.get("cleanup_state") != int(_CLEANUP.NOT_NEEDED)
                     or action is None or action.get("type") != int(_ACTION.CAMERA_TAKE_PHOTO)
