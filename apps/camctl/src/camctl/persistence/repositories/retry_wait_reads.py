@@ -7,7 +7,7 @@ from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import ConsistencyError
 
 
-def read_reservation_blocks_control(connection, device_id, *, exclude_attempt_id=None):
+def read_reservation_blocks_control(connection, device_id, *, exclude_attempt_id=None, allow_unstarted=False):
     """读取顺序保留仅在原失败调用可靠收场后允许控制工作通过。"""
     with closing(connection.execute(
         "SELECT c.id,r.id,r.status,r.attempts_used,r.retry_wait_required FROM file_copies c"
@@ -44,6 +44,8 @@ def read_reservation_blocks_control(connection, device_id, *, exclude_attempt_id
         )) as cursor:
             return cursor.fetchone() is not None
     if not used:
+        if not allow_unstarted:
+            return True
         if waiting != 0 or not RetryWaitReads(connection).no_attempts(run_id):
             raise ConsistencyError("零次读取责任与已保存尝试或等待矛盾")
         return False

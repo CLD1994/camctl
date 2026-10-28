@@ -216,7 +216,9 @@ class PreparationReads:
                                          activity["ownership_mode"], activity["output_scope_json"])):
             return False
         from .retry_wait_reads import read_reservation_blocks_control
-        if read_reservation_blocks_control(self.connection, action["device_id"]):
+        if (read_reservation_blocks_control(self.connection, action["device_id"], allow_unstarted=True)
+                if action["driver_id"] == DRIVER_ID else
+                read_reservation_blocks_control(self.connection, action["device_id"])):
             return False
         with closing(self.connection.execute(
                 "SELECT 1 FROM device_activities d JOIN actions a ON a.id=d.action_id"
@@ -264,13 +266,15 @@ class PreparationReads:
             if cursor.fetchone() is not None:
                 raise ConsistencyError("准备活动越过了同设备原占用")
         from .retry_wait_reads import read_reservation_blocks_control
-        if read_reservation_blocks_control(self.connection, action["device_id"]):
+        from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+        if (read_reservation_blocks_control(self.connection, action["device_id"], allow_unstarted=True)
+                if action["driver_id"] == DRIVER_ID else
+                read_reservation_blocks_control(self.connection, action["device_id"])):
             raise ConsistencyError("准备活动越过了同设备原读取调用")
         if request.trusted_wall_now < action["scheduled_at"]:
             from camctl.outputs.read_discovery import device_holder
             if device_holder(self.connection, action["device_id"]) is not None:
                 raise ConsistencyError("提前准备不能越过原读取机会")
-        from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
         if action["driver_id"] == DRIVER_ID:
             from .capture_selection import CaptureSelectionInput, selected_pending_capture
             selection = CaptureSelectionInput(action["device_id"], action["driver_id"],

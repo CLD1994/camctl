@@ -433,7 +433,7 @@ def test_device_trigger_fixes_original_copy_and_camera(creation_module, monkeypa
     discovery.device_holder = lambda *args: None
     monkeypatch.setitem(sys.modules, discovery.__name__, discovery)
     retry_reads = ModuleType("camctl.persistence.repositories.retry_wait_reads")
-    retry_reads.read_reservation_blocks_control = lambda *args: False
+    retry_reads.read_reservation_blocks_control = lambda *args, **kwargs: False
     retry_reads.held_read_ready_for_availability = lambda *args: True
     retry_reads.read_attempt_budget_available = lambda *args: (1, 2, 1, 0)
     monkeypatch.setitem(sys.modules, retry_reads.__name__, retry_reads)
@@ -501,7 +501,7 @@ def test_capture_check_respects_settled_read_reservation(creation_module, monkey
     recovery = ModuleType("camctl.capture.software_recovery")
     recovery.recovery_locked = lambda *args: False
     retries = ModuleType("camctl.persistence.repositories.retry_wait_reads")
-    retries.read_reservation_blocks_control = lambda *args: blocked
+    retries.read_reservation_blocks_control = lambda *args, **kwargs: blocked
     discovery = ModuleType("camctl.outputs.read_discovery")
     discovery.device_holder = lambda *args: 8 if held else None
     resources = ModuleType("camctl.scheduling.resources")
@@ -536,7 +536,7 @@ def test_selected_photo_uses_original_held_read_qualification(creation_module, m
     recovery = ModuleType("camctl.capture.software_recovery")
     recovery.recovery_locked = lambda *args: False
     retries = ModuleType("camctl.persistence.repositories.retry_wait_reads")
-    retries.read_reservation_blocks_control = lambda *args: False
+    retries.read_reservation_blocks_control = lambda *args, **kwargs: False
     discovery = ModuleType("camctl.outputs.read_discovery")
     discovery.device_holder = lambda *args: 8
     resource_reads = ModuleType("camctl.scheduling.resources")

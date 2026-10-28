@@ -1394,7 +1394,9 @@ class ReservePreparationCommand:
             if cursor.fetchone() is not None:
                 return result(ReservePreparationOutcome.REJECTED, reason="device_busy")
         from .retry_wait_reads import read_reservation_blocks_control
-        if read_reservation_blocks_control(connection, action["device_id"]):
+        if (read_reservation_blocks_control(connection, action["device_id"], allow_unstarted=True)
+                if action["driver_id"] == HASSELBLAD_DRIVER_ID else
+                read_reservation_blocks_control(connection, action["device_id"])):
             return result(ReservePreparationOutcome.REJECTED, reason="device_busy")
         if request.trusted_wall_now < action["scheduled_at"]:
             from camctl.outputs.read_discovery import device_holder

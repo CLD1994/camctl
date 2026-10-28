@@ -163,8 +163,8 @@ def _qualify(connection, request, boundary, *, existing_check=None, exclude_atte
     if recovery_locked(connection, device_id):
         raise AvailabilityTargetBlocked("设备的软件恢复责任尚未收场")
     from .retry_wait_reads import read_reservation_blocks_control
-    if (read_reservation_blocks_control(connection, device_id) if exclude_read_attempt_id is None else
-            read_reservation_blocks_control(connection, device_id, exclude_attempt_id=exclude_read_attempt_id)):
+    if read_reservation_blocks_control(connection, device_id, allow_unstarted=True,
+                                       exclude_attempt_id=exclude_read_attempt_id):
         raise AvailabilityTargetBlocked("设备读取调用尚未收场")
     from camctl.outputs.read_discovery import device_holder
     holder = device_holder(connection, device_id)

@@ -70,8 +70,8 @@ def _no_conflicts(connection, check, attempt_id, *, exclude_read_attempt_id=None
             if cursor.fetchone() is not None:
                 raise AvailabilityTargetBlocked("原设备仍有其他未收场责任")
     from .retry_wait_reads import read_reservation_blocks_control
-    if (read_reservation_blocks_control(connection, check["device_id"]) if exclude_read_attempt_id is None else
-            read_reservation_blocks_control(connection, check["device_id"], exclude_attempt_id=exclude_read_attempt_id)):
+    if read_reservation_blocks_control(connection, check["device_id"], allow_unstarted=True,
+                                       exclude_attempt_id=exclude_read_attempt_id):
         raise AvailabilityTargetBlocked("原设备读取调用尚未收场")
 
 

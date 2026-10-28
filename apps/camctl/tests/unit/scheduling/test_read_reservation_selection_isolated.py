@@ -54,9 +54,10 @@ class Connection:
 
 
 def test_unstarted_slot_does_not_prevent_due_capture(reads):
-    assert not reads.read_reservation_blocks_control(Connection(used=0), "camera")
+    assert reads.read_reservation_blocks_control(Connection(used=0), "camera")
+    assert not reads.read_reservation_blocks_control(Connection(used=0), "camera", allow_unstarted=True)
     with pytest.raises(reads.ConsistencyError):
-        reads.read_reservation_blocks_control(Connection(used=0, other=True), "camera")
+        reads.read_reservation_blocks_control(Connection(used=0, other=True), "camera", allow_unstarted=True)
 
 
 @pytest.mark.parametrize("other,blocked", [(False, False), (True, True)])
