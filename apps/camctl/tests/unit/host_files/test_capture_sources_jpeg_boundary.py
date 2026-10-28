@@ -50,11 +50,11 @@ def read_facts(module, monkeypatch, blocks, *, kind="source", expected_sha256=No
     observed = SimpleNamespace(st_size=len(data), st_dev=1, st_ino=2)
     chunks = iter([*blocks, b""])
     synced = []
-    monkeypatch.setattr(module, "_open_regular_file_at", lambda *args: (11, observed))
+    monkeypatch.setattr(module, "_open_regular_file_at", lambda *args, **kwargs: (11, observed))
     monkeypatch.setattr(module, "_stat_entry", lambda *args: observed)
     monkeypatch.setattr(module, "_same_file_state", lambda *args: True)
     monkeypatch.setattr(module, "_same_identity", lambda *args: True)
-    monkeypatch.setattr(module, "_close_fd", lambda *args: None)
+    monkeypatch.setattr(module, "_close_fd", lambda *args, **kwargs: None)
     with monkeypatch.context() as patch:
         patch.setattr(module.os, "read", lambda fd, count: next(chunks))
         patch.setattr(module.os, "fstat", lambda fd: observed)
