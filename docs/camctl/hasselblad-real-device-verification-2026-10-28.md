@@ -108,6 +108,8 @@ DEVICE 预览的现场内容保证未通过：
 
 HOST 以主机正式源为准，不为登记、取回或恢复归档向相机核实文件。DEVICE 以固定原机身、机内原图定位及对应读取种类所得内容为准；同步生成的主机副本只做一次实际一致性确认，可靠保存结论。一致时按结果提交截点固定的等待者有限复用，不一致时固定清理；正式运行不反复比较或重新选择资格。每项取回仍保有独立交付与既有最终校验。
 
+来源调整期间曾误选旧响应测试：在独立工作区执行 `PYTHONPATH=apps/camctl/src /workspaces/camctl/apps/camctl/.venv311/bin/python -m pytest apps/camctl/tests/unit/devices/test_hasselblad_responses.py -q -k device_capture`，收集阶段因未登记 `registry/enum-registry.json` 退出 2，没有执行用例。导入链实际检查了 `_resources` 目录存在性，未读到资源正文；pytest 缓存、字节码及重定向日志有本地写入，没有业务库、设备或被测程序子进程调用。这次结果不计为符合范围的单元验证。后续用例在导入前隔离资源，并禁用自动插件、缓存和字节码；通过结果及独立复核另行记录。原日志保存于 `.local/verification/h6-real-device-20261028/source-misclassified-collection.log`。
+
 当前程序尚需按这一来源规则调整 DEVICE 来源事实与副本复用责任。既有分段视频检查副本的有限复用规则已经定位；Hasselblad 的原图、预览及同步工作区需要接入相应的结果责任和清理。相机按用户安排用于充电，软件调整期间保持零设备调用，之后再安排新规则的真机复验。
 
 ## 当前验收边界
