@@ -4,6 +4,20 @@
 
 [关键阶段与命令日志验证（2026-10-26）](operational-logging-validation-2026-10-26.md)记录统一 JSON、INFO 阶段与实际命令、DEBUG 耗时明细的最终单元和定向集成结果，以及现有真机验证环境的安装一致性；扩大检查中的旧测试失配单独保留。
 
+## 照片缓存绑定失败的冷恢复（2026-10-28）
+
+源码 `7351cee5f318bff00719561c2cfa1d0795ab446f`（包含 `d51eadbe`）修复原读取绑定失败已保存、所属交付失败尚未提交时的恢复。直接设备源沿原路径；照片缓存从原结果事务的首事件固定历史边界，核实原 H、角色页、归档及 READ_END 与摘要不符事实，解析原设备来源后接续既有失败事务。取消或终态已经生效、缓存已清理时，仓储仅在原读取结果已核实且将返回既有只读收场的分区采用历史核验；活跃申请和没有原结果键的申请继续核当前资格，已保存业务键继续核原事务。原错误、结果键、时刻、身份及取消规则保持，恢复不新增读取、重拷或交付。
+
+环境为 Linux 开发容器、CPython 3.11.17，工作目录为 `/tmp/camctl-photo-binding-cold-recovery-20261028`。两个反例分别经 `advance_obtain` 和 `OutputsRepository.fail_read_binding` 入口证明旧代码拒绝合法照片缓存及取消后的历史收场，均退出 1。修复后，既有 `test_publication_discovery_isolated.py` 文件 7 项通过，既有直接设备恢复单例 1 项通过；主代理另在最终源码运行受影响的 `test_canceled_publication_isolated.py` 完整文件，48 项、15 个子测试通过，2.60 秒，三组均退出 0。各组在独立进程执行，使用源码及内存协作者；原装配在导入前隔离包资源与生产协作者。绿测命令为：
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=apps/camctl/src /workspaces/camctl/apps/camctl/.venv311/bin/python -m pytest -p no:cacheprovider apps/camctl/tests/unit/outputs/test_publication_discovery_isolated.py -q
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=apps/camctl/src /workspaces/camctl/apps/camctl/.venv311/bin/python -m pytest -p no:cacheprovider apps/camctl/tests/unit/outputs/test_canceled_read_end_recovery_isolated.py::CanceledRecoveryTests::test_binding_failure_recovery_preserves_original_identity_and_key -q
+env -u PYTHONHOME -u PYTEST_ADDOPTS PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=apps/camctl/src /workspaces/camctl/apps/camctl/.venv311/bin/python -m pytest -p no:cacheprovider apps/camctl/tests/unit/outputs/test_canceled_publication_isolated.py -q
+```
+
+新增用例复用现有装配，从取回调度和仓储入口覆盖配置缺失、驱动不符、只读终态或取消退休、实时资格保留及错误来源拒绝，核对原申请和历史边界；不另建测试文件或框架。原结果加载和照片历史核验器在该单元中使用替身，因此拒绝传播不代表真实守卫对普通 HOST 或错误关联的组合已经验证。GPT-6-Astra 独立复核原事务边界、业务键重送、取消和终态分类后未发现剩余阻断。原始日志、命令及退出码收据归档于 `.local/verification/photo-binding-cold-recovery-20261028/`。未运行软件集成、真实仓储与 SQLite 冷重启、设备、host、构建或安装验证；真机环境未更新。
+
 ## implement_camctl 合并的软件验证（2026-10-28）
 
 在 `fix/capture-results-and-delivery-recovery-20261028` 合入 `implement_camctl` 的 `07c13be7a6b7b15564ad4086dee4d9c47f7e0d0c`；合并前本分支为 `2312207b889707f1b128eac01af50b93c17bd4fc`，共同基线为 `61e73c8ac4e32dc5511664e0dd9f6c0a167926d3`。本地来源分支包含已拉取的远端提交。本次保留拍摄结果、发布取消及错误诊断修复，并接入 Hasselblad 原机来源、同步副本与有限缓存恢复。
