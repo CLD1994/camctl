@@ -542,7 +542,8 @@ async def held_binding_read_result(runtime, copy_id, binding_result, business):
     if held.evidence is None:
         raise ConsistencyError("原实际读取结束缺少原驱动结果契约")
     status = await read_one(runtime.database,
-        "SELECT r.status,a.cancel_requested FROM operation_runs r JOIN actions a ON a.id=r.action_id"
+        "SELECT r.status,a.cancel_requested,c.inspection_id FROM operation_runs r"
+        " JOIN actions a ON a.id=r.action_id JOIN file_copies c ON c.id=r.copy_id"
         " WHERE r.id=? AND r.copy_id=?", (held.ticket.run_id, copy_id))
     pending = determined()
     if pending is not None:
@@ -571,7 +572,7 @@ async def held_binding_read_result(runtime, copy_id, binding_result, business):
         if details is None:
             raise ConsistencyError("必要摘要绑定失败必须具有原绑定异常事实")
         run_finish = RunFinish(RunOutcome.FAILED, ErrorValue("device_binding_unavailable", "execution", details))
-        selected_business = business
+        selected_business = None if status[2] is not None else business
         binding_read = True
     outcome = CallOutcome(status=AttemptStatus.SUCCEEDED, effect=EffectState.UNKNOWN,
         settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("read_returned", 1, {})))
@@ -592,7 +593,9 @@ async def held_binding_read_result(runtime, copy_id, binding_result, business):
         selected_business = replace(selected_business, request=request)
     return hold_read_result(runtime, finish, business=selected_business, key=key,
                             preserved_run_terminal=status[0] not in (1, 2),
-                            binding_read=binding_read, suppress_diagnostic=binding_read,
+                            binding_read=binding_read,
+                            diagnostic_error=(run_finish.error if binding_read and selected_business is None else None),
+                            diagnostic_stage="execution", suppress_diagnostic=binding_read and selected_business is not None,
                             binding_identity=(dict(binding_result.current_identity)
                                 if binding_read and getattr(binding_result, "current_identity", None) is not None else None))
 

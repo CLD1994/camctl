@@ -4613,6 +4613,20 @@ class _FinishBindingFailureCommand:
         if action is None:
             raise TransactionError("绑定失败动作不存在")
         self._verify_binding(action)
+        if request.read_result_key is not None:
+            copy = row_facts(connection, "file_copies", request.read_copy_id)
+            if copy is None:
+                raise ConsistencyError("原绑定读取缺少拷贝")
+            if copy.get("inspection_id") is not None:
+                inspection = row_facts(connection, "segment_inspections", copy["inspection_id"])
+                if inspection is None or inspection["action_id"] != action["id"]:
+                    raise ConsistencyError("原绑定读取的分段检查归属不符")
+                plan = row_facts(connection, "plans", action["plan_id"])
+                if plan is None:
+                    raise ConsistencyError("原动作缺少所属计划")
+                return CommandPlan(events=(), owners={}, read_only=True,
+                    state_rows={"actions": {action["id"]: action}, "plans": {plan["id"]: plan}},
+                    result=CaptureResult(action["status"], plan["status"], (), FinishDisposition.RETIRED))
         if request.read_result_key is not None and action["cancel_requested"] and action["status"] in (2, 6):
             plan = row_facts(connection, "plans", action["plan_id"])
             if plan is None:

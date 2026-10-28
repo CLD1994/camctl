@@ -1045,7 +1045,18 @@ async def _save_internal_read_result(flow, pending, *, retry=False):
 
         hold_prepared_read_business(flow, pending.business.request.action_id, "capture_binding_failure", pending.business)
         forget_read_result(flow, pending)
-        await save_prepared_read_business(flow, pending.business.request.action_id, "capture_binding_failure", pending.business)
+        receipt = await save_prepared_read_business(flow, pending.business.request.action_id, "capture_binding_failure", pending.business)
+        from camctl.persistence.repositories.capture import FinishDisposition
+        if receipt.value.disposition is FinishDisposition.RETIRED:
+            row = await _read_one(flow.database, "SELECT inspection_id FROM file_copies WHERE id=?",
+                                  (int(pending.finish.ticket.target_id),))
+            if row is not None and row[0] is not None:
+                from camctl.capture.segment_inspections import (
+                    settle_inspection_read_failure, settle_terminal_inspection_read_slot,
+                )
+                copy_id = int(pending.finish.ticket.target_id)
+                if await settle_inspection_read_failure(flow, copy_id, pending.finish.occurred_at):
+                    await settle_terminal_inspection_read_slot(flow, copy_id, flow.occurred_at())
         return
     ticket = pending.finish.ticket
     succeeded = pending.finish.outcome.outcome.status is AttemptStatus.SUCCEEDED
