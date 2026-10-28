@@ -4,7 +4,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from decimal import Decimal
 
-from camctl.contracts.values import ObjectId, UtcMicros
+from camctl.contracts.values import ConsistencyError, ObjectId, UtcMicros
 from camctl.devices.drivers.hasselblad.identity import CameraIdentity
 
 
@@ -58,14 +58,14 @@ def pending_capture_candidates(connection, request, *, batch_size=128):
     after = None
     while True:
         continuation = "" if after is None else " AND (a.scheduled_at,a.plan_id,a.input_index,a.id)>(?,?,?,?)"
-        parameters = (request.device_id, request.driver_id, photo, pending)
+        parameters = (request.device_id, request.driver_id, photo)
         if after is not None:
             parameters += after
         with closing(connection.execute(
             "SELECT a.id,a.scheduled_at,a.plan_id,a.input_index,a.max_delay_ms,d.id"
             " FROM actions a LEFT JOIN device_activities d ON d.action_id=a.id"
-            " WHERE a.device_id=? AND a.driver_id=? AND a.type=? AND a.status=?"
-            " AND a.execution_started=0 AND a.cancel_requested=0"
+            " WHERE a.device_id=? AND a.driver_id=? AND a.type=?"
+            f" AND a.status={pending} AND a.execution_started=0 AND a.cancel_requested=0"
             + continuation +
             " AND NOT EXISTS (SELECT 1 FROM operation_runs r WHERE r.action_id=a.id AND r.kind=?)"
             " ORDER BY a.scheduled_at,a.plan_id,a.input_index,a.id LIMIT ?",
@@ -81,7 +81,7 @@ def pending_capture_candidates(connection, request, *, batch_size=128):
                 ObjectId(activity_id)
             order = (scheduled, plan_id, index, action_id)
             if after is not None and order <= after:
-                raise ValueError("拍摄候选排序不严格递增")
+                raise ConsistencyError("拍摄候选排序不严格递增")
             after = order
             lower = Decimal(scheduled) - request.prepare_lead_s * 1_000_000
             if Decimal(request.trusted_wall_now) < lower:
@@ -90,3 +90,50 @@ def pending_capture_candidates(connection, request, *, batch_size=128):
                 yield CaptureCandidate(action_id, scheduled, plan_id, index, delay, activity_id)
         if len(page) < batch_size:
             return
+
+
+def selected_pending_capture(connection, request, boundary, *, exclude_attempt_id=None):
+    """从原连接逐项核对无活动拍摄的检查或普通准备资格。"""
+    from camctl.persistence.transaction import row_facts
+    from .availability_create import CreateAvailabilityCheck, _qualify
+    from .availability_target import (AvailabilityTargetBlocked, AvailabilityTargetIdentityMismatch,
+                                      AvailabilityTargetNotRequired, AvailabilityTargetReuse)
+    from camctl.contracts.enums import enum_for
+
+    for candidate in pending_capture_candidates(connection, request):
+        if candidate.activity_id is not None:
+            continue
+        check_request = CreateAvailabilityCheck(candidate.action_id, request.identity,
+            request.trusted_wall_now, request.prepare_lead_s, request.trusted_wall_now)
+        try:
+            _qualify(connection, check_request, boundary, exclude_attempt_id=exclude_attempt_id,
+                     check_candidate_order=False)
+        except AvailabilityTargetNotRequired:
+            return candidate
+        except AvailabilityTargetReuse as reuse:
+            check = row_facts(connection, "device_availability_checks", reuse.check_id)
+            if check is None or check.get("action_id") != candidate.action_id:
+                raise ConsistencyError("拍摄候选的原检查归属不一致")
+            with closing(connection.execute(
+                "SELECT status FROM operation_runs WHERE availability_check_id=? AND kind=?",
+                (reuse.check_id, int(enum_for("operation_runs.kind").CHECK_DEVICE_AVAILABILITY)),
+            )) as cursor:
+                run = cursor.fetchone()
+            statuses = enum_for("operation_runs.status")
+            if run is None:
+                raise ConsistencyError("拍摄候选缺少原检查流程")
+            if run[0] not in (int(statuses.PENDING), int(statuses.ACTIVE)):
+                continue
+            try:
+                _qualify(connection, check_request, check["target_boundary_event_id"],
+                         existing_check=check, exclude_attempt_id=exclude_attempt_id,
+                         check_candidate_order=False)
+            except AvailabilityTargetNotRequired:
+                return candidate
+            except (AvailabilityTargetBlocked, AvailabilityTargetIdentityMismatch):
+                continue
+            return candidate
+        except (AvailabilityTargetBlocked, AvailabilityTargetIdentityMismatch):
+            continue
+        return candidate
+    return None

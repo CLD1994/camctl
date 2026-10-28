@@ -19,7 +19,7 @@ def target_rules(monkeypatch):
     monkeypatch.setitem(sys.modules, definitions.__name__, definitions)
     members = {
         "actions.status": SimpleNamespace(PENDING=1, RUNNING=2, FAILED=4),
-        "actions.type": SimpleNamespace(OBTAIN_ACTION_OUTPUTS=4),
+        "actions.type": SimpleNamespace(CAMERA_TAKE_PHOTO=1, OBTAIN_ACTION_OUTPUTS=4),
         "device_activities.activity_state": SimpleNamespace(UNKNOWN=1),
         "device_activities.occupancy_state": SimpleNamespace(HELD=1, RELEASED=2),
         "device_activities.ownership_mode": SimpleNamespace(TASK_SCOPE=1),
@@ -116,6 +116,10 @@ class _PagedConnection:
 
     def execute(self, sql, args):
         self.calls.append((sql, args))
+        if "LEFT JOIN device_activities d ON d.action_id=a.id" in sql:
+            cursor = _Cursor([])
+            self.cursors.append(cursor)
+            return cursor
         after = args[1] if "FROM actions" in sql else args[2]
         cursor = _Cursor([row for row in self.rows if row[0] > after])
         self.cursors.append(cursor)
@@ -512,6 +516,40 @@ def test_capture_check_respects_settled_read_reservation(creation_module, monkey
     else:
         with pytest.raises(creation_module.AvailabilityTargetBlocked):
             creation_module._qualify(_PagedConnection([]), request, 99)
+
+
+@pytest.mark.parametrize("now,selected", [(9, False), (10, True)])
+def test_selected_photo_uses_original_held_read_qualification(creation_module, monkeypatch, now, selected):
+    from decimal import Decimal
+    from camctl.persistence.repositories import capture_selection
+
+    action = {"id": 12, "type": 1, "status": 1, "execution_started": 0, "cancel_requested": 0,
+              "scheduled_at": 10, "max_delay_ms": 10, "device_id": "hb0",
+              "driver_id": "hasselblad_cfv100c", "plan_id": 1, "input_index": 0}
+    monkeypatch.setattr(creation_module, "row_facts", lambda connection, table, row_id: action)
+    monkeypatch.setattr(creation_module, "is_hasselblad_photo", lambda action: True)
+    monkeypatch.setattr(creation_module, "_one", lambda *args: None)
+    monkeypatch.setattr(creation_module, "iter_creation_targets", lambda *args, **kwargs: iter(((25,),)))
+    monkeypatch.setitem(sys.modules, "camctl.persistence.repositories.availability_create", creation_module)
+    monkeypatch.setattr(capture_selection, "pending_capture_candidates", lambda *_: iter((
+        capture_selection.CaptureCandidate(12, 10, 1, 0, 10, None),)))
+    recovery = ModuleType("camctl.capture.software_recovery")
+    recovery.recovery_locked = lambda *args: False
+    retries = ModuleType("camctl.persistence.repositories.retry_wait_reads")
+    retries.read_reservation_blocks_control = lambda *args: False
+    discovery = ModuleType("camctl.outputs.read_discovery")
+    discovery.device_holder = lambda *args: 8
+    resource_reads = ModuleType("camctl.scheduling.resources")
+    resource_reads.device_read_in_flight = resource_reads.device_start_in_flight = lambda *args: False
+    alias = ModuleType("camctl.persistence.repositories.physical_alias")
+    alias.physical_alias_conflict = lambda *args: False
+    for dependency in (recovery, retries, discovery, resource_reads, alias):
+        monkeypatch.setitem(sys.modules, dependency.__name__, dependency)
+    identity = creation_module.CameraIdentity("CAMERA-1", 10)
+    request = capture_selection.CaptureSelectionInput("hb0", "hasselblad_cfv100c", identity,
+                                                      Decimal("1"), now)
+    result = capture_selection.selected_pending_capture(_PagedConnection([]), request, 99)
+    assert (result is not None) is selected
 
 
 @pytest.fixture
