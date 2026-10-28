@@ -1540,6 +1540,10 @@ class CaptureRuntime(_FileObservationSaves):
 
     async def recover_attempt(self, ticket: AttemptTicket, *, retry_wait: bool = False) -> bool:
         """可靠旧会话边界结束原前台发令；未知设备活动另行核实。"""
+        if ticket.operation == "result":
+            from camctl.host_files.downloads import download_owned
+            if download_owned(ticket):
+                return False
         identity = (ticket.run_id, ticket.attempt_id)
         pending = self.pending_start_results.get(identity)
         if pending is not None:

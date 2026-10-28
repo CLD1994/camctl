@@ -64,3 +64,19 @@ def test_result_workspace_rejects_unowned_or_noncanonical_path(api, operation, t
     module, Ticket = api
     with pytest.raises(ValueError):
         module.result_download_path(Path("/staging"), Ticket(2, operation, target, responsibility, 9), role)
+
+
+def test_result_workspace_retains_ownership_when_any_close_is_unconfirmed(api):
+    module, Ticket = api
+    ticket = Ticket(2, "result", "7", "results/7", 9)
+    workspace = module.ResultDownloadWorkspace(Path("/staging"), ticket, "original")
+    assert workspace.claim()
+    workspace.opened_file(10)
+    workspace.opened_file(11)
+    workspace.closed_file(10, None)
+    error = OSError("close failed")
+    workspace.closed_file(11, error)
+    workspace.release()
+    assert not workspace.files_closed
+    assert workspace.close_error is error
+    assert module.download_owned(ticket)

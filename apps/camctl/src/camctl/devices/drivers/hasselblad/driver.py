@@ -642,7 +642,7 @@ class HasselbladDriver:
                 if (candidate["host_path"] != str(workspace_path(self.roots, ticket.target_id) / spec.original_name)
                         or spec.media_type != media):
                     raise ValueError("同步副本记录改变原角色工作目录或媒体类型")
-                sync = await inspect_capture_candidate(self.roots, ticket.target_id, spec)
+                sync = await inspect_capture_candidate(self.roots, ticket.target_id, spec, owner=workspace)
                 sync_status, sync_artifact = sync.status, sync.artifact
                 sync_failure = None if sync.error is None else exception_diagnostic(sync.error)
                 if sync.error is not None:
@@ -679,6 +679,8 @@ class HasselbladDriver:
                 "diagnostic": exception_diagnostic(error)}))
         finally:
             # 裸取消或 transport 未交回收场事实时，实际拥有者不得释放。
+            if not workspace.files_closed:
+                raise RuntimeError("照片来源文件关闭未确认，原 RESULTS 拥有者继续持有") from workspace.close_error
             if not in_call:
                 workspace.release()
 

@@ -212,13 +212,13 @@ async def verify_capture_files(
 
 
 async def inspect_capture_candidate(roots: BoundDirectories, activity_id: str,
-                                    spec: CaptureFileSpec) -> PhotoSyncObservation:
+                                    spec: CaptureFileSpec, *, owner=None) -> PhotoSyncObservation:
     """只观察 START 可信记录指定的直接文件，不枚举或猜测名称。"""
     if not isinstance(spec, CaptureFileSpec):
         raise CaptureFileError("spec_validation", detail="同步候选必须使用原文件规格")
     workspace = workspace_path(roots, activity_id)
     try:
-        artifact = await _run_file_io(_inspect_capture_candidate, roots, workspace, spec)
+        artifact = await _run_file_io(_inspect_capture_candidate, roots, workspace, spec, owner)
     except CaptureFileError as error:
         status = "invalid" if error.stage in ("source_type", "source_size", "source_media") else "unconfirmed"
         return PhotoSyncObservation(status, error=error)
@@ -226,13 +226,13 @@ async def inspect_capture_candidate(roots: BoundDirectories, activity_id: str,
 
 
 def _inspect_capture_candidate(roots: BoundDirectories, workspace: Path,
-                               spec: CaptureFileSpec) -> CapturedArtifact | None:
-    with _workspace_directory(roots, workspace) as workspace_fd:
+                               spec: CaptureFileSpec, owner=None) -> CapturedArtifact | None:
+    with _workspace_directory(roots, workspace, owner=owner) as workspace_fd:
         path = workspace / spec.original_name
         if _stat_entry(workspace_fd, spec.original_name, path, "source_observe") is None:
             return None
         facts = _read_file_facts_at(workspace_fd, spec.original_name, path, spec.media_type,
-            expected_size=spec.size_bytes, expected_sha256=None, file_kind="source")
+            expected_size=spec.size_bytes, expected_sha256=None, file_kind="source", owner=owner)
         _sync_directory_fd(workspace_fd, workspace, "workspace_sync")
         return CapturedArtifact(spec.original_name, facts.size_bytes, facts.sha256, spec.media_type)
 
@@ -511,9 +511,10 @@ def _read_file_facts_at(
     expected_size: int,
     expected_sha256: str | None,
     file_kind: str,
+    owner=None,
 ) -> _FileFacts:
     fd, opened_stat = _open_regular_file_at(
-        directory_fd, name, path, f"{file_kind}_open", f"{file_kind}_type"
+        directory_fd, name, path, f"{file_kind}_open", f"{file_kind}_type", owner=owner
     )
     primary: BaseException | None = None
     try:
@@ -593,7 +594,7 @@ def _read_file_facts_at(
         primary = failure
         raise
     finally:
-        _close_fd(fd, f"{file_kind}_close", path, primary)
+        _close_fd(fd, f"{file_kind}_close", path, primary, owner=owner)
 
 
 def _open_regular_file_at(
@@ -602,6 +603,7 @@ def _open_regular_file_at(
     path: Path,
     open_stage: str,
     type_stage: str,
+    *, owner=None,
 ) -> tuple[int, os.stat_result]:
     before = _stat_entry(directory_fd, name, path, open_stage)
     if before is None:
@@ -616,17 +618,19 @@ def _open_regular_file_at(
     except OSError as failure:
         stage = type_stage if failure.errno == errno.ELOOP else open_stage
         raise CaptureFileError(stage, path, cause=failure) from failure
+    if owner is not None:
+        owner.opened_file(fd)
     try:
         opened = os.fstat(fd)
     except OSError as failure:
         error = CaptureFileError(open_stage, path, cause=failure)
-        _close_fd(fd, f"{open_stage}_close", path, error)
+        _close_fd(fd, f"{open_stage}_close", path, error, owner=owner)
         raise error from failure
     if not stat.S_ISREG(opened.st_mode):
         error = CaptureFileError(
             type_stage, path, detail="打开后的对象不是普通文件，拒绝读取"
         )
-        _close_fd(fd, f"{open_stage}_close", path, error)
+        _close_fd(fd, f"{open_stage}_close", path, error, owner=owner)
         raise error
     if not _same_identity(before, opened):
         error = CaptureFileError(
@@ -634,7 +638,7 @@ def _open_regular_file_at(
             path,
             detail="文件在检查与打开之间被替换",
         )
-        _close_fd(fd, f"{open_stage}_close", path, error)
+        _close_fd(fd, f"{open_stage}_close", path, error, owner=owner)
         raise error
     return fd, opened
 
@@ -686,46 +690,50 @@ def _stat_entry(
         raise CaptureFileError(stage, path, cause=failure) from failure
 
 
-def _open_directory(path: Path, stage: str):
+def _open_directory(path: Path, stage: str, *, owner=None):
     flags = os.O_RDONLY | _BINARY | _DIRECTORY | _NOFOLLOW
     try:
         fd = os.open(path, flags)
     except OSError as failure:
         raise CaptureFileError(stage, path, cause=failure) from failure
+    if owner is not None:
+        owner.opened_file(fd)
     try:
         observed = os.fstat(fd)
     except OSError as failure:
         error = CaptureFileError(stage, path, cause=failure)
-        _close_fd(fd, f"{stage}_close", path, error)
+        _close_fd(fd, f"{stage}_close", path, error, owner=owner)
         raise error from failure
     if not stat.S_ISDIR(observed.st_mode):
         error = CaptureFileError(stage, path, detail="对象不是普通目录")
-        _close_fd(fd, f"{stage}_close", path, error)
+        _close_fd(fd, f"{stage}_close", path, error, owner=owner)
         raise error
-    return _fd_context(fd, path, stage)
+    return _fd_context(fd, path, stage, owner=owner)
 
 
-def _open_directory_at(parent_fd: int, name: str, path: Path, stage: str):
+def _open_directory_at(parent_fd: int, name: str, path: Path, stage: str, *, owner=None):
     flags = os.O_RDONLY | _BINARY | _DIRECTORY | _NOFOLLOW
     try:
         fd = os.open(name, flags, dir_fd=parent_fd)
     except OSError as failure:
         raise CaptureFileError(stage, path, cause=failure) from failure
+    if owner is not None:
+        owner.opened_file(fd)
     try:
         observed = os.fstat(fd)
     except OSError as failure:
         error = CaptureFileError(stage, path, cause=failure)
-        _close_fd(fd, f"{stage}_close", path, error)
+        _close_fd(fd, f"{stage}_close", path, error, owner=owner)
         raise error from failure
     if not stat.S_ISDIR(observed.st_mode):
         error = CaptureFileError(stage, path, detail="对象不是普通目录")
-        _close_fd(fd, f"{stage}_close", path, error)
+        _close_fd(fd, f"{stage}_close", path, error, owner=owner)
         raise error
-    return _fd_context(fd, path, stage)
+    return _fd_context(fd, path, stage, owner=owner)
 
 
 @contextmanager
-def _fd_context(fd: int, path: Path, stage: str) -> Iterator[int]:
+def _fd_context(fd: int, path: Path, stage: str, *, owner=None) -> Iterator[int]:
     primary: BaseException | None = None
     try:
         yield fd
@@ -733,25 +741,25 @@ def _fd_context(fd: int, path: Path, stage: str) -> Iterator[int]:
         primary = failure
         raise
     finally:
-        _close_fd(fd, f"{stage}_close", path, primary)
+        _close_fd(fd, f"{stage}_close", path, primary, owner=owner)
 
 
 @contextmanager
 def _workspace_directory(
-    roots: BoundDirectories, path: Path
+    roots: BoundDirectories, path: Path, *, owner=None
 ) -> Iterator[int]:
-    with _open_directory(roots.staging, "staging_open") as staging_fd:
+    with _open_directory(roots.staging, "staging_open", owner=owner) as staging_fd:
         with _open_directory_at(
             staging_fd,
             "capture-work",
             path.parent,
-            "workspace_parent_open",
+            "workspace_parent_open", owner=owner,
         ) as parent_fd:
             with _open_directory_at(
                 parent_fd,
                 path.name,
                 path,
-                "workspace_open",
+                "workspace_open", owner=owner,
             ) as workspace_fd:
                 yield workspace_fd
 
@@ -768,10 +776,13 @@ def _close_fd(
     stage: str,
     path: Path,
     primary: BaseException | None = None,
+    *, owner=None,
 ) -> None:
     try:
         os.close(fd)
     except OSError as failure:
+        if owner is not None:
+            owner.closed_file(fd, failure)
         if isinstance(primary, CaptureFileError):
             primary.additional_errors += (failure,)
             primary.add_note(f"{stage} also failed: {failure!r}")
@@ -780,3 +791,6 @@ def _close_fd(
             primary.add_note(f"{stage} also failed: {failure!r}")
             return
         raise CaptureFileError(stage, path, cause=failure) from failure
+    else:
+        if owner is not None:
+            owner.closed_file(fd, None)

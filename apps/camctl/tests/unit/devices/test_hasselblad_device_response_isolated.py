@@ -316,6 +316,8 @@ def photo_driver_api(responses, monkeypatch):
         @classmethod
         def from_outcome(cls, outcome, **kwargs): return SimpleNamespace(outcome=outcome)
     class SourceWorkspace:
+        files_closed = True
+        close_error = None
         instances = []
         def __init__(self, staging, ticket, role):
             self.path, self.role, self.released = Path(f"/staging/result-downloads/{ticket.run_id}-{ticket.attempt_id}-{role}"), role, False
@@ -500,7 +502,7 @@ def test_photo_source_records_one_actual_sync_comparison(photo_driver_api, statu
     driver._run_step = run
     api.CaptureFileSpec = lambda name, size, media: SimpleNamespace(original_name=name, size_bytes=size, media_type=media)
     observed = []
-    async def inspect(roots, activity_id, spec):
+    async def inspect(roots, activity_id, spec, *, owner):
         observed.append((activity_id, spec.original_name))
         artifact = None if digest is None else SimpleNamespace(size_bytes=100, sha256=digest,
             as_json=lambda: {"original_name": "local.3FR", "size_bytes": 100, "sha256": digest,
@@ -544,6 +546,28 @@ def test_photo_source_does_not_dispatch_to_changed_camera_binding(photo_driver_a
     assert result.outcome.error.details["reason"] == "physical_identity_mismatch"
     assert result.outcome.settlement.basis is api.SettlementBasis.NOT_DISPATCHED
     assert workspace.instances[-1].released
+
+
+def test_unconfirmed_file_close_cannot_return_a_settled_result(photo_driver_api):
+    from decimal import Decimal
+    api, files, workspace, _ = photo_driver_api
+    workspace.files_closed = False
+    workspace.close_error = OSError("close failed")
+    driver = object.__new__(api.HasselbladDriver)
+    driver.roots = SimpleNamespace(staging=Path("/staging"))
+    driver.monotonic_ns = lambda: 0
+    driver._binding_config = lambda binding: SimpleNamespace(serial="different", product_id=10)
+    binding = files.DeviceBinding("camera", "hasselblad_cfv100c")
+    ticket = SimpleNamespace(operation="result", target_id="7", responsibility_key="results/7", run_id=9, attempt_id=2)
+    locator = files.CameraFileLocator(files.CameraLocatorStatus.PATH, "/mnt/a.3FR", "a.3FR")
+    request = SimpleNamespace(operation="result", ticket=ticket, timeout_s=Decimal(10), binding=binding,
+        params={"activity_id": "7", "camera_identity": {"serial": "serial", "product_id": 10},
+            "camera_locator": locator.as_json(), "capture_format": "raw", "role": "original", "cursor": None,
+            "original_identity": None, "sync_candidate": None, "sync_error": "主机记录不可用"})
+    with pytest.raises(RuntimeError, match="关闭未确认") as caught:
+        _finish_immediate(driver.observe_photo_source(request))
+    assert caught.value.__cause__ is workspace.close_error
+    assert not workspace.instances[-1].released
 
 
 @pytest.fixture

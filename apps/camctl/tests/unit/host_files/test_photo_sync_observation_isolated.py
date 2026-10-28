@@ -57,3 +57,39 @@ def test_missing_sync_candidate_is_distinct_from_unconfirmed_read(api):
     result = immediate(api.inspect_capture_candidate(SimpleNamespace(staging=Path("/staging")), "7",
         api.CaptureFileSpec("a.3FR", 100, "image/x-hasselblad-3fr")))
     assert result.status == "missing" and result.error is None and result.artifact is None
+
+
+@pytest.mark.parametrize("primary", [None, "source_media"])
+def test_close_failure_preserves_owner_even_when_media_is_invalid(api, primary):
+    error = OSError("close failed")
+    def close(fd): raise error
+    api.os = SimpleNamespace(close=close)
+    calls = []
+    owner = SimpleNamespace(closed_file=lambda fd, failure: calls.append((fd, failure)))
+    actual = None if primary is None else api.CaptureFileError(primary)
+    if actual is None:
+        with pytest.raises(api.CaptureFileError):
+            api._close_fd(17, "source_close", Path("/fake"), owner=owner)
+    else:
+        api._close_fd(17, "source_close", Path("/fake"), actual, owner=owner)
+        assert actual.additional_errors == (error,)
+    assert calls == [(17, error)]
+
+
+@pytest.mark.parametrize("content,stage", [(b"II*\x00", "source_close"), (b"BAD!", "source_media")])
+def test_actual_facts_read_tracks_open_and_failed_close(api, content, stage):
+    facts = SimpleNamespace(st_mode=0o100644, st_size=4, st_dev=1, st_ino=2, st_mtime_ns=1, st_ctime_ns=1)
+    blocks = iter((content, b""))
+    failure = OSError("close failed")
+    def close(fd): raise failure
+    api.os = SimpleNamespace(open=lambda *args, **kwargs: 17, fstat=lambda fd: facts,
+        read=lambda fd, size: next(blocks), fsync=lambda fd: None, close=close, O_RDONLY=0)
+    api._stat_entry = lambda *args: facts
+    tracked = []
+    owner = SimpleNamespace(opened_file=lambda fd: tracked.append(("open", fd)),
+        closed_file=lambda fd, error: tracked.append(("close", fd, error)))
+    with pytest.raises(api.CaptureFileError) as caught:
+        api._read_file_facts_at(4, "file.3FR", Path("/fake/file.3FR"), "image/x-hasselblad-3fr",
+            expected_size=4, expected_sha256=None, file_kind="source", owner=owner)
+    assert caught.value.stage == stage
+    assert tracked == [("open", 17), ("close", 17, failure)]

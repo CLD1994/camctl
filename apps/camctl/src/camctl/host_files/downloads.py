@@ -247,6 +247,20 @@ class ResultDownloadWorkspace(DownloadWorkspace):
     def __init__(self, staging: Path, ticket: AttemptTicket, role: str):
         self._initialize(result_download_path(staging, ticket, role), ticket)
         self.role = role
+        self._observed_fds = set()
+
+    @property
+    def files_closed(self):
+        return not self._observed_fds
+
+    def opened_file(self, fd):
+        self._observed_fds.add(fd)
+
+    def closed_file(self, fd, error):
+        if error is None:
+            self._observed_fds.discard(fd)
+        elif self.close_error is None:
+            self.close_error = error
 
     def remove(self):
         raise ValueError("来源观察目录须沿已保存的文件责任清理")
@@ -261,7 +275,7 @@ class ResultDownloadWorkspace(DownloadWorkspace):
         )
         if not self.owned or not self.claimed:
             raise ValueError("来源观察目录没有当前实际拥有者")
-        with _open_directory(self.path, "source_workspace_open") as directory_fd:
+        with _open_directory(self.path, "source_workspace_open", owner=self) as directory_fd:
             with os.scandir(directory_fd) as entries:
                 names = [entry.name for entry in islice(entries, 2)]
             if len(names) != 1:
@@ -273,7 +287,7 @@ class ResultDownloadWorkspace(DownloadWorkspace):
             if observed is None or not stat.S_ISREG(observed.st_mode) or observed.st_size <= 0:
                 raise CaptureFileError("source_type", path, detail="下载不是非空普通文件")
             facts = _read_file_facts_at(directory_fd, name, path, media_type,
-                expected_size=observed.st_size, expected_sha256=None, file_kind="source")
+                expected_size=observed.st_size, expected_sha256=None, file_kind="source", owner=self)
             _sync_directory_fd(directory_fd, self.path, "source_workspace_sync")
             return CapturedArtifact(name, facts.size_bytes, facts.sha256, media_type)
 
