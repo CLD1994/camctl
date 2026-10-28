@@ -24,6 +24,7 @@ def responses(monkeypatch):
     files = importlib.util.module_from_spec(file_spec)
     monkeypatch.setitem(sys.modules, file_name, files)
     file_spec.loader.exec_module(files)
+    monkeypatch.setattr(files, "json_equal", lambda left, right: left == right)
     parameters = ModuleType("camctl.devices.drivers.hasselblad.parameters")
     class Format(StrEnum):
         RAW = "raw"
@@ -154,3 +155,95 @@ def test_single_jpeg_thumbnail_named_record_has_ambiguous_role(responses):
         capture_format=fmt.JPEG, output_directory="/workspace")
     assert result.original is None and result.preview is None
     assert result.original_error and result.preview_error
+
+
+def test_photo_result_cursor_fixes_original_binding_activity_and_next_role(responses):
+    files = sys.modules["camctl.devices.drivers.hasselblad.files"]
+    binding = files.DeviceBinding("camera", "hasselblad_cfv100c")
+    cursor = files.PhotoResultCursor(binding, "7", files.DownloadVariant.THUMBNAIL)
+    assert files.PhotoResultCursor.from_json(cursor.as_json()) == cursor
+    assert cursor.as_json() == {"kind": "hasselblad_photo", "device_id": "camera",
+        "driver_id": "hasselblad_cfv100c", "activity_id": "7", "role": "thumbnail"}
+
+
+@pytest.mark.parametrize("role,activity", [("original", "7"), ("thumbnail", "07"), ("thumbnail", "0")])
+def test_photo_result_cursor_rejects_invalid_continuation(responses, role, activity):
+    files = sys.modules["camctl.devices.drivers.hasselblad.files"]
+    with pytest.raises(ValueError):
+        files.PhotoResultCursor(files.DeviceBinding("camera", "hasselblad_cfv100c"), activity,
+            files.DownloadVariant(role))
+
+
+def test_photo_result_page_preserves_role_and_exact_camera_identity(responses):
+    files = sys.modules["camctl.devices.drivers.hasselblad.files"]
+    binding = files.DeviceBinding("camera", "hasselblad_cfv100c")
+    identity = files.CameraFileIdentity(binding, "/mnt/a.3FR", "a.3FR",
+        files.DownloadVariant.ORIGINAL, "a" * 64, "serial", 10, 100)
+    entry = {"identity": identity.file_identity, "locator": identity.locator(),
+        "complete": True, "size_bytes": 100, "kind": "photo"}
+    cursor = files.PhotoResultCursor(binding, "7", files.DownloadVariant.THUMBNAIL)
+    data = {"activity_id": "7", "binding": {"device_id": "camera", "driver_id": "hasselblad_cfv100c"},
+        "role": "original", "entries": [entry], "cursor": None, "next_cursor": cursor.as_json()}
+    assert files.validate_photo_result_page(data, activity_id="7", binding=binding, cursor=None) == cursor
+
+
+def test_photo_result_page_cannot_replace_source_with_other_role(responses):
+    files = sys.modules["camctl.devices.drivers.hasselblad.files"]
+    binding = files.DeviceBinding("camera", "hasselblad_cfv100c")
+    identity = files.CameraFileIdentity(binding, "/mnt/a.3FR", "a.3FR",
+        files.DownloadVariant.THUMBNAIL, "a" * 64, "serial", 10, 100)
+    entry = {"identity": identity.file_identity, "locator": identity.locator(),
+        "complete": True, "size_bytes": 100, "kind": "photo"}
+    cursor = files.PhotoResultCursor(binding, "7", files.DownloadVariant.THUMBNAIL)
+    data = {"activity_id": "7", "binding": {"device_id": "camera", "driver_id": "hasselblad_cfv100c"},
+        "role": "original", "entries": [entry], "cursor": None, "next_cursor": cursor.as_json()}
+    with pytest.raises(ValueError):
+        files.validate_photo_result_page(data, activity_id="7", binding=binding, cursor=None)
+
+
+@pytest.fixture
+def page_api(responses, monkeypatch):
+    from enum import Enum
+    class FileKind(Enum):
+        PHOTO = "photo"
+        OTHER = "other"
+    modules = {
+        "camctl.capture.results": {"FileKind": FileKind},
+        "camctl.contracts.enums": {"enum_for": lambda name: None},
+        "camctl.devices.directory": {"DirectoryCursor": type("DirectoryCursor", (), {})},
+        "camctl.operations.models": {name: object for name in (
+            "AttemptStatus", "AttemptTicket", "CallInfo", "CallOutcome", "EffectState", "ErrorValue",
+            "EvidenceValue", "Settlement", "SettlementBasis")},
+        "camctl.operations.result_format": {"read_result_document": lambda *args: None},
+    }
+    for name, attributes in modules.items():
+        stub = ModuleType(name)
+        stub.__dict__.update(attributes)
+        monkeypatch.setitem(sys.modules, name, stub)
+    source = Path(__file__).parents[3] / "src/camctl/capture/result_inputs.py"
+    name = "camctl.capture._isolated_result_inputs"
+    spec = importlib.util.spec_from_file_location(name, source)
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, name, module)
+    spec.loader.exec_module(module)
+    return module, sys.modules["camctl.devices.drivers.hasselblad.files"]
+
+
+def test_photo_page_decode_keeps_real_role_without_claiming_directory_scan(page_api):
+    api, files = page_api
+    binding = files.DeviceBinding("camera", "hasselblad_cfv100c")
+    identity = files.CameraFileIdentity(binding, "/mnt/a.3FR", "a.3FR",
+        files.DownloadVariant.ORIGINAL, "a" * 64, "serial", 10, 100)
+    next_cursor = files.PhotoResultCursor(binding, "7", files.DownloadVariant.THUMBNAIL)
+    data = {"activity_id": "7", "binding": {"device_id": "camera", "driver_id": binding.driver_id},
+        "role": "original", "entries": [{"identity": identity.file_identity, "locator": identity.locator(),
+            "complete": True, "size_bytes": 100, "kind": "photo"}],
+        "cursor": None, "next_cursor": next_cursor.as_json()}
+    observation = api.DeviceObservation("result_files_listed", 3, data)
+    ticket = SimpleNamespace(operation="result", target_id="7", responsibility_key="results/7")
+    outcome = SimpleNamespace(observations=(observation,), error=None)
+    page = api.page_from_outcome(ticket, outcome, binding=binding)
+    assert page.entries[0].identity == identity.file_identity
+    assert page.next_cursor == next_cursor
+    assert not page.scan_complete and not page.set_finalized
+    assert api.decode_result_cursor(next_cursor.as_json()) == next_cursor

@@ -4,7 +4,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 from camctl.capture.files import FileObservationSave, file_identity_key
-from camctl.capture.result_inputs import observed_file, page_from_outcome, saved_outcome
+from camctl.capture.result_inputs import decode_result_cursor, observed_file, page_from_outcome, saved_outcome
 from camctl.capture.result_pages import ResultPageSave, ResultPageRef, SavedResultPage, result_page_input
 from camctl.contracts.enums import enum_for, load_registry as load_enum_registry
 from camctl.contracts.json_values import json_equal, parse_exact_json
@@ -220,7 +220,7 @@ def _decode(event, *, run=None):
             raise ConsistencyError("结果页历史与原流程、活动不同")
         ticket = AttemptTicket(raw["attempt_no"], "result", str(raw["activity_id"]),
                                responsibility, raw["run_id"])
-        cursor = None if raw["cursor"] is None else DirectoryCursor.from_json(raw["cursor"])
+        cursor = decode_result_cursor(raw["cursor"])
         actual = raw["outcome"]
         if not isinstance(actual, dict) or set(actual) != {"status", "effect_state", "error", "result"}:
             raise ValueError("实际结果成员不完整")
