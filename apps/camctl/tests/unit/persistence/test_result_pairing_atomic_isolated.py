@@ -337,6 +337,7 @@ def test_segment_observations_submits_original_scan_without_reading_boundary():
     module('camctl.contracts.values', 'ConsistencyError new_operation_key')
     module('camctl.devices.capture_timing', 'CaptureTiming')
     module('camctl.devices.recording_completion', 'is_completed_file_wait')
+    module('camctl.operations.models', 'AttemptStatus').AttemptStatus = SimpleNamespace(UNKNOWN=object())
     module('camctl.persistence.models', 'db_failure DbOutcomeKind db_outcome_for')
     module('camctl.persistence.business', 'SharedSave settle_required')
     module('camctl.persistence.repositories.segments', 'SegmentRepository')
@@ -354,7 +355,7 @@ def test_segment_observations_submits_original_scan_without_reading_boundary():
         async def pages(self):
             yield SimpleNamespace(file_ids=[('clip.LRF', 11)], page=SimpleNamespace(entries=[]))
     scans.SavedResultEntries = Entries
-    for name in ('camctl', 'camctl.capture', 'camctl.persistence', 'camctl.persistence.repositories'):
+    for name in ('camctl', 'camctl.capture', 'camctl.operations', 'camctl.persistence', 'camctl.persistence.repositories'):
         package = module(name, '')
         package.__path__ = []
     path = SOURCE.parents[1].parent / 'capture' / 'segment_completion.py'
