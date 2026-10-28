@@ -7,6 +7,29 @@ from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import ConsistencyError
 
 
+def read_reservation_blocks_control(connection, device_id):
+    """读取顺序保留仅在原失败调用可靠收场后允许控制工作通过。"""
+    with closing(connection.execute(
+        "SELECT c.id,r.id,r.status,r.attempts_used,r.retry_wait_required FROM file_copies c"
+        " LEFT JOIN operation_runs r ON r.copy_id=c.id AND r.kind=?"
+        " WHERE c.slot_device_id=? LIMIT 2",
+        (int(enum_for("operation_runs.kind").READ_FILE), device_id),
+    )) as cursor:
+        rows = cursor.fetchmany(2)
+    if not rows:
+        return False
+    if len(rows) != 1 or rows[0][1] is None:
+        raise ConsistencyError("读取机会缺少唯一的原流程")
+    _, run_id, status, used, waiting = rows[0]
+    runs = enum_for("operation_runs.status")
+    if status not in (int(runs.PENDING), int(runs.ACTIVE)) or not used or waiting not in (0, 1):
+        return True
+    reads = RetryWaitReads(connection)
+    if reads.last_attempt(run_id, used) is None:
+        return True
+    return waiting != 1 and not reads.completed(run_id, used)
+
+
 class RetryWaitReads:
     def __init__(self, connection):
         self.connection = connection

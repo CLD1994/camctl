@@ -412,7 +412,11 @@ def test_device_trigger_fixes_original_copy_and_camera(creation_module, monkeypa
     monkeypatch.setitem(sys.modules, files.__name__, files)
     discovery = ModuleType("camctl.outputs.read_discovery")
     discovery.first_eligible_read = lambda *args: 8
+    discovery.device_holder = lambda *args: None
     monkeypatch.setitem(sys.modules, discovery.__name__, discovery)
+    retry_reads = ModuleType("camctl.persistence.repositories.retry_wait_reads")
+    retry_reads.read_reservation_blocks_control = lambda *args: False
+    monkeypatch.setitem(sys.modules, retry_reads.__name__, retry_reads)
     preparation = ModuleType("camctl.devices.capture_preparation")
     preparation.CAPTURE_ACTION_TYPES = (1, 2, 3)
     monkeypatch.setitem(sys.modules, preparation.__name__, preparation)
@@ -432,6 +436,43 @@ def test_device_trigger_fixes_original_copy_and_camera(creation_module, monkeypa
     fixed.serial = "OTHER"
     with pytest.raises(creation_module.AvailabilityTargetIdentityMismatch):
         creation_module._qualify(connection, request, 99)
+
+
+@pytest.mark.parametrize("now,blocked,held,allowed", [
+    (10, False, True, True), (9, False, True, False),
+    (10, True, True, False), (9, False, False, True),
+])
+def test_capture_check_respects_settled_read_reservation(creation_module, monkeypatch, now, blocked, held, allowed):
+    from decimal import Decimal
+    identity = creation_module.CameraIdentity("CAMERA-1", 10)
+    request = creation_module.CreateAvailabilityCheck(12, identity, now, Decimal("1"), now)
+    action = {"id": 12, "type": 1, "status": 1, "execution_started": 0, "cancel_requested": 0,
+              "scheduled_at": 10, "max_delay_ms": 10, "device_id": "hb0", "driver_id": "hasselblad_cfv100c",
+              "plan_id": 1, "input_index": 0}
+    monkeypatch.setattr(creation_module, "row_facts", lambda connection, table, row_id: action)
+    monkeypatch.setattr(creation_module, "is_hasselblad_photo", lambda action: True)
+    monkeypatch.setattr(creation_module, "_one", lambda *args: None)
+    monkeypatch.setattr(creation_module, "iter_creation_targets", lambda *args, **kwargs: iter(((25,),)))
+    preparation = ModuleType("camctl.devices.capture_preparation")
+    preparation.CAPTURE_ACTION_TYPES = (1, 2, 3)
+    recovery = ModuleType("camctl.capture.software_recovery")
+    recovery.recovery_locked = lambda *args: False
+    retries = ModuleType("camctl.persistence.repositories.retry_wait_reads")
+    retries.read_reservation_blocks_control = lambda *args: blocked
+    discovery = ModuleType("camctl.outputs.read_discovery")
+    discovery.device_holder = lambda *args: 8 if held else None
+    resources = ModuleType("camctl.scheduling.resources")
+    resources.device_read_in_flight = resources.device_start_in_flight = lambda *args: False
+    alias = ModuleType("camctl.persistence.repositories.physical_alias")
+    alias.physical_alias_conflict = lambda *args: False
+    for module in (preparation, recovery, retries, discovery, resources, alias):
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+    if allowed:
+        _, check, count = creation_module._qualify(_PagedConnection([]), request, 99)
+        assert (check["action_id"], check["trigger_copy_id"], count) == (12, None, 1)
+    else:
+        with pytest.raises(creation_module.AvailabilityTargetBlocked):
+            creation_module._qualify(_PagedConnection([]), request, 99)
 
 
 @pytest.fixture
@@ -775,12 +816,18 @@ def test_generic_finish_guard_rejects_terminal_check_with_in_flight_attempt(
 def test_generic_finish_guard_accepts_the_validated_prior_result(
         isolated_result_guard, finish_reads, monkeypatch):
     monkeypatch.setitem(sys.modules, "camctl.persistence.repositories.availability_finish", finish_reads)
+    release = ModuleType("camctl.persistence.repositories.availability_release")
+    release.ReleaseGroup = type("ReleaseGroup", (), {})
+    monkeypatch.setitem(sys.modules, release.__name__, release)
+    monkeypatch.setattr(sys.modules["camctl.persistence.transaction"], "row_facts",
+                        lambda connection, table, identity: {"run_id": 3})
     attempt = SimpleNamespace(table="operation_attempts", row_id=5, before=SimpleNamespace(exists=True),
         after=SimpleNamespace(exists=True, values={"status": 3, "result_event_id": 7, "result_json": {}}))
     validated = SimpleNamespace(envelope=SimpleNamespace(event_id=7, event_type=12, rows=(attempt,)))
     row = SimpleNamespace(table="operation_runs", row_id=3, before=SimpleNamespace(exists=True),
         after=SimpleNamespace(values={"status": 4, "retry_wait_required": 0, "error_json": {"code": "failed"}}))
     context = SimpleNamespace(state_rows={"operation_runs": {3: {"kind": 12}}},
+        availability_reads=None,
         availability_finish_reads=finish_reads.AvailabilityFinishReads(_PendingAttemptConnection(), (validated,)))
     isolated_result_guard._operation_finish_guard(SimpleNamespace(rows=(row,)), context)
 
@@ -804,6 +851,10 @@ def test_ordinary_attempt_guard_independently_rejects_in_flight_check(isolated_r
             return True
     preparation.PreparationReads = Reads
     monkeypatch.setitem(sys.modules, preparation.__name__, preparation)
+    outputs = ModuleType("camctl.persistence.repositories.outputs")
+    outputs._read_owner_eligible = lambda action: True
+    outputs._slot_owner_action = lambda context, copy: context.state_rows["actions"][10]
+    monkeypatch.setitem(sys.modules, outputs.__name__, outputs)
     run_kind = 1 if kind == "START" else 3
     run = {"kind": run_kind, "action_id": 10, "activity_id": 20, "copy_id": 30, "attempts_used": 0}
     attempt = {"run_id": 3, "attempt_no": 1, "intent_event_id": 7, "status": 1, "effect_state": 1,
