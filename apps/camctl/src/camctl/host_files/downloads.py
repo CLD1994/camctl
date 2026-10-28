@@ -248,6 +248,7 @@ class ResultDownloadWorkspace(DownloadWorkspace):
         self._initialize(result_download_path(staging, ticket, role), ticket)
         self.role = role
         self._observed_fds = set()
+        self._close_errors = []
 
     @property
     def files_closed(self):
@@ -259,8 +260,14 @@ class ResultDownloadWorkspace(DownloadWorkspace):
     def closed_file(self, fd, error):
         if error is None:
             self._observed_fds.discard(fd)
-        elif self.close_error is None:
-            self.close_error = error
+        else:
+            self._close_errors.append(error)
+            if self.close_error is None:
+                self.close_error = error
+
+    @property
+    def close_errors(self):
+        return tuple(self._close_errors)
 
     def remove(self):
         raise ValueError("来源观察目录须沿已保存的文件责任清理")

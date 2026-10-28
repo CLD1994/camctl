@@ -49,7 +49,7 @@ from camctl.operations.models import (
     SettlementBasis,
 )
 from camctl.operations.owned_calls import current_call_scope
-from camctl.operations.error_diagnostics import DiagnosticError, exception_diagnostic
+from camctl.operations.error_diagnostics import DiagnosticError, exception_diagnostic, attach_diagnostic_facts
 from camctl.operations.process import (
     RawToolOutcome,
     StopSignal,
@@ -686,13 +686,16 @@ class HasselbladDriver:
             # 裸取消或 transport 未交回收场事实时，实际拥有者不得释放。
             if not workspace.files_closed:
                 actual = sys.exception() or pending_error
+                close_errors = workspace.close_errors
+                if actual is not None:
+                    attach_diagnostic_facts(actual, {"photo_source_close_errors": close_errors})
                 if isinstance(actual, asyncio.CancelledError):
-                    actual.add_note(f"照片来源文件关闭未确认: {workspace.close_error!r}")
+                    actual.add_note("照片来源文件关闭未确认，原关闭错误保留在诊断事实中")
                     raise actual
-                if actual is not None and actual is not workspace.close_error:
+                if actual is not None:
                     raise BaseExceptionGroup("照片来源文件关闭未确认，原 RESULTS 拥有者继续持有",
-                                             [actual, workspace.close_error])
-                raise RuntimeError("照片来源文件关闭未确认，原 RESULTS 拥有者继续持有") from workspace.close_error
+                                             [actual, *close_errors])
+                raise BaseExceptionGroup("照片来源文件关闭未确认，原 RESULTS 拥有者继续持有", list(close_errors))
             if not in_call:
                 workspace.release()
 

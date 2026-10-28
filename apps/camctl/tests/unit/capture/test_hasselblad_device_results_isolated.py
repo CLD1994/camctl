@@ -172,6 +172,7 @@ def test_role_cache_archives_selected_source_and_persists_actual_outcome(api, mo
     downloads = ModuleType("camctl.host_files.downloads")
     class Owner:
         files_closed = True
+        close_errors = ()
         def __init__(self, *args): pass
         def claim(self): return True
         def release(self): calls.append(("release",))
@@ -184,6 +185,7 @@ def test_role_cache_archives_selected_source_and_persists_actual_outcome(api, mo
     diagnostics.record_error = lambda *args, **kwargs: calls.append(("diagnostic",))
     errors = ModuleType("camctl.operations.error_diagnostics")
     errors.exception_diagnostic = lambda error: {"message": str(error)}
+    errors.attach_diagnostic_facts = lambda error, facts: None
     for stub in (cache, downloads, tasks, diagnostics, errors):
         monkeypatch.setitem(sys.modules, stub.__name__, stub)
     class Database:

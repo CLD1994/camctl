@@ -318,6 +318,7 @@ def photo_driver_api(responses, monkeypatch):
     class SourceWorkspace:
         files_closed = True
         close_error = None
+        close_errors = ()
         instances = []
         def __init__(self, staging, ticket, role):
             self.path, self.role, self.released = Path(f"/staging/result-downloads/{ticket.run_id}-{ticket.attempt_id}-{role}"), role, False
@@ -328,7 +329,12 @@ def photo_driver_api(responses, monkeypatch):
                 as_json=lambda: {"sha256": "a" * 64, "size_bytes": 100, "original_name": "downloaded.jpg", "media_type": media})
         def release(self): self.released = True
     class CameraReadError(ValueError): pass
-    class DiagnosticError(Exception): pass
+    diagnostics_path = Path(__file__).parents[3] / "src/camctl/operations/error_diagnostics.py"
+    diagnostics_name = "camctl.operations._isolated_photo_error_diagnostics"
+    diagnostics_spec = importlib.util.spec_from_file_location(diagnostics_name, diagnostics_path)
+    diagnostics_api = importlib.util.module_from_spec(diagnostics_spec)
+    monkeypatch.setitem(sys.modules, diagnostics_name, diagnostics_api)
+    diagnostics_spec.loader.exec_module(diagnostics_api)
     class RawToolOutcome: pass
     class ToolCallCancelled(Exception): pass
     class ToolStartError(Exception): pass
@@ -370,7 +376,9 @@ def photo_driver_api(responses, monkeypatch):
             "EffectState": EffectState, "ErrorValue": ErrorValue, "EvidenceValue": EvidenceValue,
             "Settlement": lambda basis, evidence: SimpleNamespace(basis=basis, evidence=evidence), "SettlementBasis": SettlementBasis},
         "camctl.operations.owned_calls": {"current_call_scope": lambda: None},
-        "camctl.operations.error_diagnostics": {"DiagnosticError": DiagnosticError, "exception_diagnostic": lambda error: {"message": str(error)}},
+        "camctl.operations.error_diagnostics": {"DiagnosticError": diagnostics_api.DiagnosticError,
+            "exception_diagnostic": diagnostics_api.exception_diagnostic,
+            "attach_diagnostic_facts": diagnostics_api.attach_diagnostic_facts},
         "camctl.operations.process": {"RawToolOutcome": RawToolOutcome, "StopSignal": object, "ToolCallCancelled": ToolCallCancelled,
             "ToolSpec": object, "ToolStartError": ToolStartError, "execute_tool": None},
         "camctl.operations.tool_diagnostics": {"ToolDiagnostics": ToolDiagnostics, "ToolCallOutput": ToolCallOutput,
@@ -579,15 +587,32 @@ def test_actual_info_serial_mismatch_is_binding_failure(photo_driver_api):
     assert outcome.error.details["reason"] == "physical_identity_mismatch"
 
 
-def test_unconfirmed_file_close_cannot_return_a_settled_result(photo_driver_api):
+@pytest.mark.parametrize("content_error", [False, True])
+def test_unconfirmed_file_close_cannot_return_a_settled_result(photo_driver_api, content_error):
     from decimal import Decimal
-    api, files, workspace, _ = photo_driver_api
+    api, files, workspace, Raw = photo_driver_api
     workspace.files_closed = False
-    workspace.close_error = OSError("close failed")
+    workspace.close_error = OSError(5, "first close failed", "/fake/source")
+    second_error = OSError(9, "second close failed", "/fake/directory")
+    workspace.close_errors = (workspace.close_error, second_error)
     driver = object.__new__(api.HasselbladDriver)
     driver.roots = SimpleNamespace(staging=Path("/staging"))
     driver.monotonic_ns = lambda: 0
-    driver._binding_config = lambda binding: SimpleNamespace(serial="different", product_id=10)
+    driver._binding_config = lambda binding: SimpleNamespace(serial="serial" if content_error else "different", product_id=10)
+    primary = api.CaptureFileError("source_media")
+    primary.stage = "source_media"
+    async def observe(self, media): raise primary
+    if content_error:
+        workspace.observe = observe
+    async def run(*, config, name, args, timeout_s, steps):
+        steps.append({"name": name, "local_exit_code": 0, "local_signal": None,
+                      "transport_error": None, "output_failure": None})
+        raw = Raw()
+        raw.output = {"list": b"vid=0x2756 pid=0x000a bus=1 addr=2\n", "info": b"serial : serial\n", "download": b""}[name]
+        raw.stderr, raw.output_failure, raw.error = b"", None, None
+        raw.exit = SimpleNamespace(exit_code=0, signal=None)
+        return raw
+    driver._run_step = run
     binding = files.DeviceBinding("camera", "hasselblad_cfv100c")
     ticket = SimpleNamespace(operation="result", target_id="7", responsibility_key="results/7", run_id=9, attempt_id=2)
     locator = files.CameraFileLocator(files.CameraLocatorStatus.PATH, "/mnt/a.3FR", "a.3FR")
@@ -598,8 +623,16 @@ def test_unconfirmed_file_close_cannot_return_a_settled_result(photo_driver_api)
     with pytest.raises(BaseExceptionGroup, match="关闭未确认") as caught:
         _finish_immediate(driver.observe_photo_source(request))
     assert workspace.close_error in caught.value.exceptions
-    assert any(isinstance(error, api.PhysicalIdentityMismatch) for error in caught.value.exceptions)
+    assert second_error in caught.value.exceptions
+    assert (primary in caught.value.exceptions if content_error else
+            any(isinstance(error, api.PhysicalIdentityMismatch) for error in caught.value.exceptions))
     assert not workspace.instances[-1].released
+    import json
+    diagnostic = json.dumps(api.exception_diagnostic(caught.value))
+    assert '"errno": 5' in diagnostic and '"errno": 9' in diagnostic
+    assert "/fake/source" in diagnostic and "/fake/directory" in diagnostic
+    if content_error:
+        assert "source_media" in diagnostic
 
 
 @pytest.fixture

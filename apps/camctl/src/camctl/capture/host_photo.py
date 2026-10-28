@@ -199,7 +199,8 @@ async def archive_device_photo_cache(runtime, action_id, saved, device_file_id):
     from camctl.host_files.downloads import ResultDownloadWorkspace
     from camctl.host_files.tasks import AsyncFileTask, FileTaskError, FileTaskId
     from camctl.logging_runtime.diagnostics import record_error
-    from camctl.operations.error_diagnostics import exception_diagnostic
+    from camctl.operations.error_diagnostics import exception_diagnostic, attach_diagnostic_facts
+    import sys
 
     attempts = [item for item in saved.page.outcome.observations
                 if item.type == "photo_result_attempt" and item.version == 2]
@@ -250,6 +251,11 @@ async def archive_device_photo_cache(runtime, action_id, saved, device_file_id):
             await _save_photo_cache(runtime, action_id, role, request)
         finally:
             owner.release()
+            if not owner.files_closed:
+                actual = sys.exception()
+                if actual is None:
+                    raise BaseExceptionGroup("照片缓存文件关闭未确认", list(owner.close_errors))
+                attach_diagnostic_facts(actual, {"photo_cache_close_errors": owner.close_errors})
     try:
         await runtime.file_executor.run_owned_async_file_task(AsyncFileTask(
             FileTaskId(f"photo_cache/{new_operation_key()}"), (prepared.file_id,),
