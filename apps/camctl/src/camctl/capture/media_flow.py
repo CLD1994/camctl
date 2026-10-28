@@ -202,7 +202,7 @@ class RecordingInputCopies:
                  occurred_at: Callable[[], int], *,
                  max_recopies: int = 1,
                  file_executor: FileTaskExecutor | None = None,
-                 read_runtime=None, hold_reset: bool = False,
+                 read_runtime=None, hold_reset: bool = False, allow_recopy: bool = True,
                  read_discovery_batch_size: int | None = None) -> None:
         self.database = database
         self.roots = roots
@@ -211,6 +211,7 @@ class RecordingInputCopies:
         self.file_executor = file_executor
         self.read_runtime = read_runtime
         self.hold_reset = hold_reset
+        self.allow_recopy = allow_recopy
         self.repository = OutputsRepository() if read_discovery_batch_size is None else OutputsRepository(read_discovery_batch_size)
 
     @staticmethod
@@ -268,7 +269,7 @@ class RecordingInputCopies:
         return await complete_copy(copy_id, CompletionContext(
             repository=self.repository, database=self.database, roots=self.roots,
             occurred_at=self.occurred_at(), digest=digest,
-            max_recopies=self.max_recopies, executor=self.file_executor,
+            max_recopies=self.max_recopies, allow_recopy=self.allow_recopy, executor=self.file_executor,
             save_business=save_business if self.read_runtime is not None else None))
 
 

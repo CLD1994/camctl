@@ -26,14 +26,14 @@ class BoundPhotoCache:
     purpose: str
 
 
-def read_bound_photo_cache(*, output_id, obtain_action_id, selection_id, owned, allow_released=False):
+def read_bound_photo_cache(*, output_id, obtain_action_id, selection_id, owned, allow_released=False, historical=False):
     """验证输出原完整事务、H 上等待者及原角色缓存。"""
     with _read_scope(owned.connection):
         return _read_bound_photo_cache(output_id=output_id, obtain_action_id=obtain_action_id,
-                                       selection_id=selection_id, owned=owned, allow_released=allow_released)
+                                       selection_id=selection_id, owned=owned, allow_released=allow_released, historical=historical)
 
 
-def _read_bound_photo_cache(*, output_id, obtain_action_id, selection_id, owned, allow_released):
+def _read_bound_photo_cache(*, output_id, obtain_action_id, selection_id, owned, allow_released, historical):
     connection = owned.connection
     output = row_facts(connection, "outputs", output_id)
     if output is None or output["device_file_id"] is None or output["intermediate_file_id"] is not None:
@@ -93,7 +93,7 @@ def _read_bound_photo_cache(*, output_id, obtain_action_id, selection_id, owned,
     retained = (file["retention_state"] == int(retention.REQUIRED)
                 and file["cleanup_state"] == int(cleanup.NOT_NEEDED))
     released = (allow_released and file["retention_state"] == int(retention.RELEASABLE)
-                and file["cleanup_state"] != int(cleanup.COMPLETED))
+                and (historical or file["cleanup_state"] != int(cleanup.COMPLETED)))
     if (not (retained or released)
             or (not allow_released and file["last_error_json"] is not None)
             or file["size_bytes"] is None or file["sha256"] is None):
@@ -160,6 +160,79 @@ def _read_bound_photo_cache(*, output_id, obtain_action_id, selection_id, owned,
     return BoundPhotoCache(action["id"], output["device_file_id"], file["id"],
         request.result_page_event_id, boundary, file["size_bytes"], file["sha256"],
         file["relative_path"], role[0].name)
+
+
+def verify_photo_cache_binding_failure(connection, copy, *, before_event_id, historical=False):
+    """核对照片缓存完整读取、真实不符及原 DEVICE 产物的直接事实。"""
+    from types import SimpleNamespace
+    from camctl.history.events import reason_for_branch
+    if (copy.get("source_intermediate_file_id") is None or copy.get("source_device_file_id") is not None
+            or copy.get("delivery_id") is None or copy.get("read_end_event_id") is None
+            or copy.get("verification_state") != int(enum_for("file_copies.verification_state").MISMATCHED)
+            or copy.get("committed_bytes") != copy.get("source_size")
+            or not isinstance(copy.get("source_sha256"), str) or not isinstance(copy.get("target_sha256"), str)
+            or copy["source_sha256"] == copy["target_sha256"]):
+        raise ConsistencyError("照片缓存绑定失败缺少完整读取与实际摘要不符")
+    with closing(connection.execute(
+        "SELECT d.output_id,d.action_id,i.selection_id FROM deliveries d"
+        " JOIN obtain_items i ON i.delivery_id=d.id WHERE d.id=? LIMIT 2", (copy["delivery_id"],))) as cursor:
+        rows = cursor.fetchall()
+    if len(rows) != 1:
+        raise ConsistencyError("照片缓存绑定失败缺少唯一正式取回项")
+    output_id, action_id, selection_id = rows[0]
+    bound = read_bound_photo_cache(output_id=output_id, obtain_action_id=action_id, selection_id=selection_id,
+        owned=SimpleNamespace(connection=connection), allow_released=True, historical=historical)
+    if (bound is None or bound.intermediate_file_id != copy["source_intermediate_file_id"]
+            or bound.size_bytes != copy["source_size"] or bound.sha256 != copy["source_sha256"]):
+        raise ConsistencyError("照片缓存绑定失败不对应原 H 角色缓存")
+    end = read_event(connection, copy["read_end_event_id"])
+    doc = end.event.evidence.get("read_end")
+    if (validate_event_structure(end.event)[:2] != ("COPY_CHANGED", "READ_END")
+            or end.transaction.last_event_id >= before_event_id or len(end.event.rows) != 1
+            or end.event.rows[0].table != "file_copies" or end.event.rows[0].row_id != copy["id"]
+            or end.event.rows[0].after.values.get("read_end_event_id") != copy["read_end_event_id"]
+            or not isinstance(doc, dict) or doc.get("copy_round") != copy["round"]
+            or doc.get("source_intermediate_file_id") != copy["source_intermediate_file_id"]
+            or doc.get("source_device_file_id") is not None or doc.get("target_file_id") != copy["target_file_id"]
+            or doc.get("source_size") != copy["source_size"] or doc.get("committed_bytes") != copy["source_size"]
+            or doc.get("reset_state") != int(enum_for("file_copies.reset_state").READY)
+            or not isinstance(doc.get("end"), dict) or set(doc["end"]) != {"stopped", "bytes_read", "error"}
+            or doc["end"].get("stopped") is not True or doc["end"].get("error") is not None
+            or type(doc["end"].get("bytes_read")) is not int
+            or not 0 <= doc["end"]["bytes_read"] <= copy["source_size"]
+            or not isinstance(doc.get("ticket"), dict) or doc["ticket"].get("target_id") != str(copy["id"])):
+        raise ConsistencyError("照片缓存绑定失败缺少原读取实际结束")
+    ticket = doc["ticket"]
+    if (set(ticket) != {"run_id", "attempt_no", "operation", "target_id", "responsibility_key"}
+            or ticket["operation"] != "read" or ticket["responsibility_key"] != f"read/{copy['id']}"):
+        raise ConsistencyError("照片缓存原读取结束的票据不完整")
+    with closing(connection.execute(
+        "SELECT r.action_id,r.copy_id,r.kind,a.intent_event_id,a.result_event_id,r.responsibility_key,r.attempts_used"
+        " FROM operation_runs r JOIN operation_attempts a ON a.run_id=r.id"
+        " WHERE r.id=? AND a.attempt_no=?", (ticket["run_id"], ticket["attempt_no"]))) as cursor:
+        original = cursor.fetchone()
+    if (original is None or original[0] != action_id or original[1] != copy["id"]
+            or original[2] != int(enum_for("operation_runs.kind").READ_FILE)
+            or original[5] != f"read/{copy['id']}" or original[6] != ticket["attempt_no"]
+            or original[3] is None or original[3] >= end.transaction.first_event_id
+            or (original[4] is not None and original[4] <= end.transaction.last_event_id)):
+        raise ConsistencyError("照片缓存读取结束不属于原实际 READ 票据")
+    with closing(connection.execute(
+        "SELECT id FROM history_events WHERE event_type=? AND json_extract(body_json,'$.reason')=?"
+        " AND id>? AND id<? AND json_extract(body_json,'$.rows[0].table')='file_copies'"
+        " AND json_extract(body_json,'$.rows[0].id')=?"
+        " AND json_extract(body_json,'$.rows[0].after.values.verification_state')=?"
+        " AND json_extract(body_json,'$.rows[0].after.values.target_sha256')=? ORDER BY id DESC LIMIT 1",
+        (22, reason_for_branch("COPY_CHANGED", "VERIFY"), end.event.event_id, before_event_id,
+         copy["id"], int(enum_for("file_copies.verification_state").MISMATCHED), copy["target_sha256"]))) as cursor:
+        mismatch = cursor.fetchone()
+    if mismatch is None:
+        raise ConsistencyError("照片缓存绑定失败缺少原不符事件")
+    verification = read_event(connection, mismatch[0])
+    if (validate_event_structure(verification.event)[:2] != ("COPY_CHANGED", "VERIFY")
+            or verification.transaction.last_event_id >= before_event_id):
+        raise ConsistencyError("照片缓存不符尚未可靠提交")
+    return bound.source_device_file_id
 
 
 def photo_cache_waiters_settled(file_id, owned):

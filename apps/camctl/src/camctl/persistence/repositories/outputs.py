@@ -4420,8 +4420,9 @@ class _ReadBindingFailCommand(_DeliveryPublicationMixin):
         command = self._command
         copy = row_facts(connection, "file_copies", command.copy_id)
         if (copy is None or copy["delivery_id"] is None
-                or copy["source_device_file_id"] != command.source_device_file_id):
-            raise TransactionError("读取绑定失败必须指向原设备交付拷贝")
+                or (copy["source_device_file_id"] != command.source_device_file_id
+                    and not (copy["source_device_file_id"] is None and copy["source_intermediate_file_id"] is not None))):
+            raise TransactionError("读取绑定失败必须指向原设备交付或其照片缓存")
         delivery, loaded_copy = self._load_delivery(connection, copy["delivery_id"])
         if loaded_copy["id"] != command.copy_id:
             raise ConsistencyError("交付的唯一拷贝与失败输入不同")
@@ -4443,6 +4444,11 @@ class _ReadBindingFailCommand(_DeliveryPublicationMixin):
             raise ConsistencyError("失败交付、取回项、产物及原文件关联不一致")
         self._state["obtain_items"][item["id"]] = item
         self._state["outputs"][output["id"]] = output
+        if copy["source_device_file_id"] is None:
+            cache = row_facts(connection, "intermediate_files", copy["source_intermediate_file_id"])
+            if cache is None:
+                raise ConsistencyError("照片缓存绑定失败缺少原缓存文件")
+            self._state["intermediate_files"][cache["id"]] = cache
         selection = row_facts(connection, "obtain_source_selections", item["selection_id"])
         if selection is None:
             raise ConsistencyError("原取回项的来源选择缺失")
@@ -4493,6 +4499,11 @@ class _ReadBindingFailCommand(_DeliveryPublicationMixin):
                 self._command.binding_result.current_identity)
         if saved is not None:
             return self._reuse(scope, saved, facts)
+        if copy["source_device_file_id"] is None:
+            from camctl.outputs.photo_cache_reuse import verify_photo_cache_binding_failure
+            if verify_photo_cache_binding_failure(scope.connection, copy,
+                    before_event_id=scope.max_event_id + 1) != self._command.source_device_file_id:
+                raise TransactionError("照片缓存绑定失败改变原设备来源")
         if delivery["status"] in (6, 7, 8) or copy["verification_state"] in (3, 5):
             return self._decision(FailureSaveOutcome(FailureSaveDisposition.ALREADY), read_only=True)
         if self._command.read_result_key is not None and action["cancel_requested"]:
@@ -4585,13 +4596,20 @@ class _ReadBindingFailCommand(_DeliveryPublicationMixin):
                 row.update(read_row_values_at_boundary(scope.connection, owner=owner,
                     table=table, row_id=identity, columns=business_columns(table), current_values=row,
                     boundary=boundary, current_boundary=current))
-        if (copy["delivery_id"] != delivery["id"] or copy["source_device_file_id"] != self._command.source_device_file_id
+        if (copy["delivery_id"] != delivery["id"]
+                or (copy["source_device_file_id"] != self._command.source_device_file_id
+                    and not (copy["source_device_file_id"] is None and copy["source_intermediate_file_id"] is not None))
                 or delivery["action_id"] != action["id"] or item["delivery_id"] != delivery["id"]
                 or item["output_id"] != delivery["output_id"] or run["copy_id"] != copy["id"]
                 or run["action_id"] != action["id"] or run["kind"] != int(_RUN_KIND.READ_FILE)
                 or run["responsibility_key"] != f"read/{copy['id']}"):
             raise TransactionError("原 H 的读取绑定组归属和原责任不符")
-        source = self._state["device_files"][copy["source_device_file_id"]]
+        source = self._state["device_files"][self._command.source_device_file_id]
+        if copy["source_device_file_id"] is None:
+            from camctl.outputs.photo_cache_reuse import verify_photo_cache_binding_failure
+            if verify_photo_cache_binding_failure(scope.connection, copy, before_event_id=transaction.first_event_id,
+                                                   historical=True) != source["id"]:
+                raise TransactionError("原绑定失败改变照片缓存的原设备来源")
         observer = self._state["actions"][source["observer_action_id"]]
         origin = self._state["actions"][source["source_action_id"]]
         output = self._state["outputs"][delivery["output_id"]]
@@ -6706,6 +6724,20 @@ def _delivery_guard(event, context) -> None:
                 if type(context.preparation_reads) is not PreparationReads:
                     raise EventValidationError("设备不可用失败缺少原连接事实")
                 verify_read_failure(context.preparation_reads.connection, event, context, row)
+            if code == "device_binding_unavailable" and details.get("reason") in ("missing", "mismatch"):
+                copies = [copy for copy in context.state_rows.get("file_copies", {}).values()
+                          if copy.get("delivery_id") == row.row_id]
+                if len(copies) == 1 and copies[0].get("source_device_file_id") is None:
+                    reads = context.current_reads
+                    if reads is None:
+                        raise EventValidationError("照片缓存绑定失败缺少原事务事实")
+                    from camctl.outputs.photo_cache_reuse import verify_photo_cache_binding_failure
+                    source_id = verify_photo_cache_binding_failure(reads.connection, copies[0], before_event_id=event.event_id)
+                    source = row_facts(reads.connection, "device_files", source_id)
+                    observer = None if source is None else row_facts(reads.connection, "actions", source["observer_action_id"])
+                    if (observer is None or (details.get("device_id"), details.get("expected_driver_id"))
+                            != (observer["device_id"], observer["driver_id"])):
+                        raise EventValidationError("照片缓存绑定失败与原设备身份不同")
             if code == "device_binding_unavailable" and details.get("reason") in ("physical_identity_conflict", "physical_identity_mismatch"):
                 from .preparation import PreparationReads
                 from .physical_alias import source_physical_alias_conflict, verify_source_identity_mismatch

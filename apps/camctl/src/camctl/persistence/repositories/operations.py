@@ -2299,7 +2299,18 @@ def _operation_finish_guard(event, context) -> None:
                 _fail("非机身不符的读取结果不能携带当前机身身份")
             if copy.get("source_sha256") is not None:
                 from .read_end import load_read_end
-                if (not isinstance(details, Mapping) or details.get("reason") != "missing"
+                photo_cache = copy.get("source_device_file_id") is None and copy.get("source_intermediate_file_id") is not None
+                if photo_cache:
+                    from camctl.outputs.photo_cache_reuse import verify_photo_cache_binding_failure
+                    source_id = verify_photo_cache_binding_failure(reads.connection, copy, before_event_id=event.event_id)
+                    source = row_facts(reads.connection, "device_files", source_id)
+                    observer = None if source is None else row_facts(reads.connection, "actions", source["observer_action_id"])
+                    if (observer is None or not isinstance(details, Mapping)
+                            or (details.get("device_id"), details.get("expected_driver_id"))
+                                != (observer["device_id"], observer["driver_id"])):
+                        _fail("照片缓存绑定失败与原设备身份不同")
+                if (not isinstance(details, Mapping)
+                        or details.get("reason") not in (("missing", "mismatch") if photo_cache else ("missing",))
                         or copy.get("verification_state") != int(enum_for("file_copies.verification_state").MISMATCHED)
                         or copy.get("target_sha256") is None
                         or copy["source_sha256"] == copy["target_sha256"]

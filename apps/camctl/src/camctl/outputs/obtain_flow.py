@@ -1299,10 +1299,14 @@ async def _copy_delivery(
     """复用资格、续传、分段与完整性事务推进交付拷贝。"""
     photo_cache = (isinstance(sessions, LocalReadSessions) and await runtime.database.read(
         lambda owned: _is_photo_cache_source(owned.connection, facts)))
+    photo_ticket = getattr(sessions, "_ticket", None) if photo_cache else None
+    photo_config = (await runtime.database.read(lambda owned: _stored_read_attempt_config(owned.connection, facts["id"]))
+                    if photo_ticket is not None else None)
     copies: RecordingCopies = RecordingInputCopies(
         runtime.database, BoundDirectories(staging=runtime.directories.staging),
         runtime.occurred_at, max_recopies=max_recopies, file_executor=runtime.file_executor,
-        read_runtime=runtime, hold_reset=photo_cache)
+        read_runtime=runtime, hold_reset=photo_cache,
+        allow_recopy=photo_config is None or photo_ticket.attempt_id < photo_config.max_attempts)
     state = await copies.copy_state(facts["id"])
     if (state.verification_state in _VERIFICATION_DONE
             and state.target_sha256 is not None):
@@ -1310,7 +1314,8 @@ async def _copy_delivery(
     try:
         prepared = await copies.prepare(facts["id"])
     except (CopyPreparationError, ConsistencyError) as error:
-        if photo_cache and (facts["id"], "copy_reset") in runtime.pending_read_business:
+        if photo_cache and ((facts["id"], "copy_reset") in runtime.pending_read_business
+                            or db_outcome_for(error) is not None):
             # 原重置保存尚未可靠确认，保留原申请和 READ 尝试。
             raise
         return InputStep(InputPhase.PREPARE_FAILED, copy_id=facts["id"],
@@ -1318,13 +1323,11 @@ async def _copy_delivery(
     # 冷恢复也从原 READ_END 与已保存的重拷事实接回照片缓存失败，不再次读取缓存。
     ticket = getattr(sessions, "_ticket", None)
     if photo_cache and ticket is not None:
-        config = await runtime.database.read(lambda owned: _stored_read_attempt_config(owned.connection, facts["id"]))
-        if ticket.attempt_id < config.max_attempts:
-            end = await runtime.database.read(lambda owned: _photo_recopy_end(owned.connection, facts["id"], ticket))
-            if end is not None:
-                return InputStep(InputPhase.RECOPY_PENDING, copy_id=facts["id"],
-                    reason="photo_cache_checksum_mismatch", read_end=end,
-                    stop_requested=True, content_complete=True)
+        end = await runtime.database.read(lambda owned: _photo_recopy_end(owned.connection, facts["id"], ticket))
+        if end is not None:
+            return InputStep(InputPhase.RECOPY_PENDING, copy_id=facts["id"],
+                reason="photo_cache_checksum_mismatch", read_end=end,
+                stop_requested=True, content_complete=True)
     if prepared.decision.outcome is ResumeOutcome.VERIFY and (read_end is not None or on_read_end is None):
         return replace(await _complete_copy(copies, facts["id"], digest), read_end=read_end,
                        stop_requested=read_end is not None, content_complete=read_end is not None)
@@ -1756,8 +1759,9 @@ async def _advance_local_read(
         ticket = saved[0] if saved is not None else await _begin_local_attempt(runtime, current, now, config)
         if ticket is None:
             return
+        max_recopies = await _local_recopy_limit(runtime, current)
         step = await _copy_delivery(runtime, sessions.for_attempt(ticket, control=control), current, None,
-            read_end=None if saved is None else saved[1],
+            max_recopies=max_recopies, read_end=None if saved is None else saved[1],
             on_read_end=lambda end, complete, state: persist_read_end(runtime, ticket, end, complete,
                 state=state, source_device_file_id=current["source_device_file_id"],
                 source_intermediate_file_id=current["source_intermediate_file_id"],
@@ -1779,8 +1783,12 @@ async def _resume_local_host_end(current, held, original_runtime, config):
         if not await current_local_read_end(runtime, copy_id, held):
             return
         facts = await runtime.database.read(lambda owned: _read_facts(owned.connection, copy_id, include_terminal=True))
+        max_recopies = await _local_recopy_limit(runtime, facts)
+        photo_cache = await runtime.database.read(lambda owned: _is_photo_cache_source(owned.connection, facts))
         copies = RecordingInputCopies(runtime.database, BoundDirectories(staging=runtime.directories.staging),
-                                      runtime.occurred_at, file_executor=runtime.file_executor, read_runtime=runtime)
+                                      runtime.occurred_at, max_recopies=max_recopies,
+                                      file_executor=runtime.file_executor, read_runtime=runtime,
+                                      allow_recopy=not photo_cache or held.ticket.attempt_id < config.max_attempts)
         step = replace(await _complete_copy(copies, copy_id, None), read_end=held.end,
                        stop_requested=True, content_complete=True)
         await _finish_local_attempt(runtime, facts, held.ticket, step, config)
@@ -1825,6 +1833,27 @@ def _is_photo_cache_source(connection, facts: Mapping) -> bool:
     spec = row[1] if isinstance(row[1], Mapping) else parse_exact_json(row[1])
     return (row[0] == DRIVER_ID and isinstance(spec, Mapping) and spec.get("output_storage") == "device"
             and row[2] is not None and row[3] == row[4])
+
+
+async def _local_recopy_limit(runtime, facts):
+    """照片缓存使用原设备绑定的重拷上限，普通本地源沿原配置。"""
+    def read(owned):
+        if not _is_photo_cache_source(owned.connection, facts):
+            return None
+        with closing(owned.connection.execute(
+            "SELECT a.device_id,a.driver_id FROM outputs o JOIN device_files f ON f.id=o.device_file_id"
+            " JOIN actions a ON a.id=f.observer_action_id WHERE o.id=?", (facts["output_id"],))) as cursor:
+            row = cursor.fetchone()
+        if row is None:
+            raise ConsistencyError("照片缓存重拷缺少原设备绑定")
+        return row
+    binding = await runtime.database.read(read)
+    if binding is None:
+        return 1
+    assembly = runtime.devices.get(binding[0])
+    if assembly is None or assembly.binding != DeviceBinding(*binding):
+        return None
+    return assembly.max_recopies
 
 
 def _stored_read_attempt_config(connection, copy_id: int) -> AttemptConfig:
@@ -1961,6 +1990,26 @@ async def _finish_local_attempt_phase(
 
     if not require_preparation_settled(step):
         return
+    if (step.phase is InputPhase.COMPLETION_FAILED
+            and getattr(step.error, "stage", None) == "source_binding_unavailable"
+            and await runtime.database.read(lambda owned: _is_photo_cache_source(owned.connection, facts))):
+        # 保留原完整 READ 与不符事实，按原设备绑定失败结束交付。
+        row = await read_one(runtime.database,
+            "SELECT f.id,a.device_id,a.driver_id FROM outputs o JOIN device_files f ON f.id=o.device_file_id"
+            " JOIN actions a ON a.id=f.observer_action_id WHERE o.id=?", (facts["output_id"],))
+        if row is None or runtime.binding_check is None:
+            raise step.error
+        binding = runtime.binding_check(DeviceBinding(row[1], row[2]))
+        if binding is None or binding.status not in (BindingStatus.DEVICE_MISSING, BindingStatus.DRIVER_MISMATCH):
+            raise step.error
+        from camctl.outputs.read_attempts import PendingReadBusiness, held_binding_read_result
+        business = PendingReadBusiness(runtime.outputs.fail_read_binding,
+            FailReadBinding(facts["id"], row[0], binding, runtime.occurred_at()), new_operation_key())
+        pending = await held_binding_read_result(runtime, facts["id"], binding, business)
+        if pending is None:
+            raise ConsistencyError("照片缓存绑定失败缺少已保存的原读取结束")
+        await _save_read_result_and_settle(runtime, pending, facts)
+        return
     photo_mismatch = False
     if step.phase is InputPhase.RECOPY_PENDING:
         # 保留原尝试和实际结束，先可靠重置已授权的新轮目标。
@@ -1968,8 +2017,7 @@ async def _finish_local_attempt_phase(
         from camctl.outputs.read_attempts import ReadContinuation
         runtime.continuing_read_tickets[facts["id"]] = ReadContinuation(ticket, False, step, runtime.occurred_at(), evidence=_LOCAL_READ_EVIDENCE)
         actual_end = None
-        if ticket.attempt_id < config.max_attempts and await runtime.database.read(
-                lambda owned: _is_photo_cache_source(owned.connection, facts)):
+        if await runtime.database.read(lambda owned: _is_photo_cache_source(owned.connection, facts)):
             actual_end = await runtime.database.read(lambda owned: _photo_recopy_end(owned.connection, facts["id"], ticket))
         if actual_end is None:
             runtime.retry_gate.cleared(f"read/{facts['id']}")
@@ -1984,7 +2032,7 @@ async def _finish_local_attempt_phase(
             raise ConsistencyError("照片缓存重拷目标尚未可靠重置")
         step = replace(step, reason="photo_cache_checksum_mismatch", read_end=actual_end,
                        stop_requested=True, content_complete=True)
-        photo_mismatch = True
+        photo_mismatch = ticket.attempt_id < config.max_attempts
     checksum_failed = step.phase is InputPhase.CHECKSUM_EXHAUSTED
     succeeded = step.phase is InputPhase.INPUT_READY or checksum_failed
     exhausted = ticket.attempt_id >= config.max_attempts
