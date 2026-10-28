@@ -3299,16 +3299,53 @@ async def _resume_bound_local_read(runtime, action, copy_id, ticket, saved_end):
                                          on_missing_config=finish_missing_config)
 
 
+async def _saved_internal_binding_failure(runtime, action):
+    """恢复内部 READ 已保存的原绑定失败，不查询本次设备配置。"""
+    from camctl.persistence.repositories.binding_read_cancel import load_saved_binding_read_failure
+
+    def read(owned):
+        with closing(owned.connection.execute(
+            "SELECT c.id,r.error_json FROM operation_runs r JOIN file_copies c ON c.id=r.copy_id"
+            " WHERE r.action_id=? AND r.kind=3 AND r.status=4 AND c.delivery_id IS NULL"
+            " AND json_extract(r.error_json,'$.code')='device_binding_unavailable' LIMIT 2",
+            (action["id"],),
+        )) as cursor:
+            rows = cursor.fetchall()
+        if not rows:
+            return None
+        if len(rows) != 1:
+            raise ConsistencyError("拍摄存在多个未收场的原读取绑定失败")
+        copy_id, stored = rows[0]
+        error = parse_exact_json(stored)
+        key, identity, _occurred_at = load_saved_binding_read_failure(
+            owned.connection, action["id"], copy_id, error)
+        return copy_id, error["details"], key, identity
+
+    return await runtime.database.read(read, description="读取原内部读取绑定失败")
+
+
 async def _handle_binding_failure(
     runtime: CaptureRuntime, action: Mapping[str, Any],
 ) -> bool:
     """异常绑定不产生新调用；原结果可靠保存后共同保存业务收场。"""
-    if (await _closed_capture_is_local(runtime, action)):
-        return False
-    if runtime.binding_check is None:
-        return False
-    binding_result = runtime.binding_check(_binding(action))
-    details = binding_failure_details(binding_result)
+    saved_read = await _saved_internal_binding_failure(runtime, action)
+    if saved_read is None:
+        if (await _closed_capture_is_local(runtime, action)):
+            return False
+        if runtime.binding_check is None:
+            return False
+        binding_result = runtime.binding_check(_binding(action))
+        details = binding_failure_details(binding_result)
+    else:
+        from camctl.devices.bindings import BindingStatus
+        copy_id, details, _key, identity = saved_read
+        statuses = {"missing": BindingStatus.DEVICE_MISSING, "mismatch": BindingStatus.DRIVER_MISMATCH,
+                    "physical_identity_mismatch": BindingStatus.PHYSICAL_IDENTITY_MISMATCH,
+                    "physical_identity_conflict": BindingStatus.PHYSICAL_IDENTITY_CONFLICT}
+        status = statuses.get(details.get("reason"))
+        if status is None:
+            raise ConsistencyError("原内部读取绑定失败原因不属于已登记分区")
+        binding_result = BindingResult(status, _binding(action), details.get("actual_driver_id"), identity)
     if details is None:
         from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
         if action.get("driver_id") == DRIVER_ID and action.get("type") == 1:
@@ -3325,7 +3362,7 @@ async def _handle_binding_failure(
                 details = binding_failure_details(binding_result)
     if details is None:
         return False
-    if (await _local_recording_listing(runtime, action)) is not None:
+    if saved_read is None and (await _local_recording_listing(runtime, action)) is not None:
         return False
     def read(owned, parameters=(action["id"], int(_ATTEMPT_STATUS.RUNNING))):
         with closing(owned.connection.execute("SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id = t.run_id"
@@ -3416,6 +3453,16 @@ async def _handle_binding_failure(
                 or stop is not None and stop[0] not in (1, 2)):
             return False
     from camctl.outputs.read_attempts import save_read_business
+
+    if saved_read is not None:
+        copy_id, details, key, _identity = saved_read
+        request = replace(await _binding_failure_request(runtime, action, details),
+                          read_result_key=key, read_copy_id=copy_id)
+        receipt = await save_read_business(_read_result_scope(runtime), action["id"],
+            "capture_binding_failure", request, runtime.capture.finish_binding_failure)
+        if receipt.kind is not DbOutcomeKind.COMPLETED:
+            raise db_failure(ConsistencyError, f"原内部读取绑定失败收场未可靠保存: {receipt.error}", receipt)
+        return receipt.value.disposition is not FinishDisposition.RETIRED
 
     from camctl.devices.tasks import CaptureResultPolicy
 
