@@ -59,7 +59,8 @@ def proposed(failure):
         "selected": "camera", "size_bytes": 100, "sha256": "a" * 64, "occurred_at": 50,
         "archive_error": error}
     before = {"last_error_json": None} if failure else {"size_bytes": None, "sha256": None}
-    after = ({"last_error_json": {"stage": "photo_cache_archive", "diagnostic": error}} if failure
+    after = ({"last_error_json": {"code": "photo_cache_archive_failed", "stage": "photo_cache_archive",
+                                   "details": {"diagnostic": error}}} if failure
              else {"size_bytes": 100, "sha256": "a" * 64})
     row = SimpleNamespace(table="intermediate_files", row_id=2,
         before=SimpleNamespace(exists=True, values=before), after=SimpleNamespace(exists=True, values=after))
@@ -76,7 +77,9 @@ def test_no_second_cache_outcome_after_either_saved_result(api, existing, propos
             "retention_state": 1, "cleanup_state": 1, "relative_path": "cache/2.3fr",
             "size_bytes": 100 if existing == "success" else None,
             "sha256": "a" * 64 if existing == "success" else None,
-            "last_error_json": {"stage": "photo_cache_archive"} if existing == "failure" else None}
+            "last_error_json": {"code": "photo_cache_archive_failed", "stage": "photo_cache_archive",
+                                "details": {"diagnostic": {"message": "original archive error"}}}
+                                if existing == "failure" else None}
     before = dict(file)
     action = {"id": 1, "type": 1, "status": 2, "execution_spec_json": {"output_storage": "device"}}
     context = SimpleNamespace(state_rows={"actions": {1: action}, "intermediate_files": {2: file}},

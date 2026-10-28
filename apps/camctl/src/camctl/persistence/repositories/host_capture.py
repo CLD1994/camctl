@@ -46,6 +46,12 @@ _ROLES = tuple(sorted((_PURPOSE[purpose.name] for purpose in HOST_PHOTO_PURPOSES
 _HOST_PURPOSES = frozenset(int(purpose) for purpose in _ROLES)
 
 
+def _photo_cache_archive_error(diagnostic):
+    """保留归档实际诊断，并使用公共文件错误结构。"""
+    return {"code": "photo_cache_archive_failed", "stage": "photo_cache_archive",
+            "details": {"diagnostic": diagnostic}}
+
+
 @dataclass(frozen=True)
 class PreparedHostFile:
     file_id: int
@@ -130,8 +136,7 @@ def validate_host_photo_event(event, context):
             before = ({"size_bytes": None, "sha256": None} if request.archive_error is None
                       else {"last_error_json": None})
             after = ({"size_bytes": request.size_bytes, "sha256": request.sha256}
-                     if request.archive_error is None else {"last_error_json": {
-                         "stage": "photo_cache_archive", "diagnostic": request.archive_error}})
+                     if request.archive_error is None else {"last_error_json": _photo_cache_archive_error(request.archive_error)})
             if (row.table != "intermediate_files" or row.row_id != request.file_id or not row.before.exists
                     or not json_equal(row.before.values, before) or not json_equal(row.after.values, after)
                     or facts is None or facts.get("owner_action_id") != request.action_id
@@ -367,8 +372,7 @@ class _PhotoCacheCommand:
         before = ({"size_bytes": None, "sha256": None} if request.archive_error is None
                   else {"last_error_json": None})
         after = ({"size_bytes": request.size_bytes, "sha256": request.sha256}
-                 if request.archive_error is None else {"last_error_json": {
-                     "stage": "photo_cache_archive", "diagnostic": request.archive_error}})
+                 if request.archive_error is None else {"last_error_json": _photo_cache_archive_error(request.archive_error)})
         change = update_change("intermediate_files", request.file_id, before, after)
         event = event_envelope(allocation.first_event_id, allocation.txn_id, 26,
             reason_for_branch("INTERMEDIATE_FILE_CHANGED", "LIFECYCLE"), (change,), request.occurred_at,
@@ -391,8 +395,7 @@ class _PhotoCacheCommand:
         before = ({"size_bytes": None, "sha256": None} if request.archive_error is None
                   else {"last_error_json": None})
         expected = ({"size_bytes": request.size_bytes, "sha256": request.sha256}
-                    if request.archive_error is None else {"last_error_json": {
-                        "stage": "photo_cache_archive", "diagnostic": request.archive_error}})
+                    if request.archive_error is None else {"last_error_json": _photo_cache_archive_error(request.archive_error)})
         if (len(changes) != 1 or changes[0]["table"] != "intermediate_files"
                 or changes[0]["id"] != request.file_id or not changes[0]["before"]["exists"]
                 or not changes[0]["after"]["exists"]
