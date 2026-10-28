@@ -1292,6 +1292,12 @@ async def _resume_local_delivery_end(current, held, original_runtime, assembly):
     await run_owned_read(runtime, copy_id, complete_and_save)
 
 
+def _photo_pending_copy_save(runtime, copy_id):
+    """原实际读取、校验、重拷和重置申请先按原键收妥。"""
+    return any((copy_id, stage) in runtime.pending_read_business
+               for stage in ("read_end", "copy_verification", "copy_recopy", "copy_reset"))
+
+
 async def _copy_delivery(
         runtime: ObtainRuntime, sessions, facts: Mapping, digest, *, max_recopies: int = 1,
         read_end: ReadEnd | None = None, on_read_end=None, on_read_start=None,
@@ -1299,6 +1305,8 @@ async def _copy_delivery(
     """复用资格、续传、分段与完整性事务推进交付拷贝。"""
     photo_cache = (isinstance(sessions, LocalReadSessions) and await runtime.database.read(
         lambda owned: _is_photo_cache_source(owned.connection, facts)))
+    if photo_cache and _photo_pending_copy_save(runtime, facts["id"]):
+        raise ConsistencyError("照片缓存原读取或拷贝保存尚未可靠确认")
     photo_ticket = getattr(sessions, "_ticket", None) if photo_cache else None
     photo_config = (await runtime.database.read(lambda owned: _stored_read_attempt_config(owned.connection, facts["id"]))
                     if photo_ticket is not None else None)
@@ -1314,7 +1322,7 @@ async def _copy_delivery(
     try:
         prepared = await copies.prepare(facts["id"])
     except (CopyPreparationError, ConsistencyError) as error:
-        if photo_cache and ((facts["id"], "copy_reset") in runtime.pending_read_business
+        if photo_cache and (_photo_pending_copy_save(runtime, facts["id"])
                             or db_outcome_for(error) is not None):
             # 原重置保存尚未可靠确认，保留原申请和 READ 尝试。
             raise
@@ -1410,6 +1418,10 @@ async def _complete_copy(
     except RecopyExhausted as error:
         return InputStep(InputPhase.CHECKSUM_EXHAUSTED, copy_id=copy_id, error=error)
     except (CopyCompletionError, ConsistencyError) as error:
+        runtime = getattr(copies, "read_runtime", None)
+        if (getattr(copies, "hold_reset", False) and runtime is not None
+                and (_photo_pending_copy_save(runtime, copy_id) or db_outcome_for(error) is not None)):
+            raise
         phase = (InputPhase.VERIFICATION_FAILED
                  if isinstance(error, CopyCompletionError)
                  and error.stage == "verification_failed"
@@ -1785,9 +1797,12 @@ async def _resume_local_host_end(current, held, original_runtime, config):
         facts = await runtime.database.read(lambda owned: _read_facts(owned.connection, copy_id, include_terminal=True))
         max_recopies = await _local_recopy_limit(runtime, facts)
         photo_cache = await runtime.database.read(lambda owned: _is_photo_cache_source(owned.connection, facts))
+        if photo_cache and _photo_pending_copy_save(runtime, copy_id):
+            raise ConsistencyError("照片缓存原读取或拷贝保存尚未可靠确认")
         copies = RecordingInputCopies(runtime.database, BoundDirectories(staging=runtime.directories.staging),
                                       runtime.occurred_at, max_recopies=max_recopies,
                                       file_executor=runtime.file_executor, read_runtime=runtime,
+                                      hold_reset=photo_cache,
                                       allow_recopy=not photo_cache or held.ticket.attempt_id < config.max_attempts)
         step = replace(await _complete_copy(copies, copy_id, None), read_end=held.end,
                        stop_requested=True, content_complete=True)
@@ -1990,6 +2005,9 @@ async def _finish_local_attempt_phase(
 
     if not require_preparation_settled(step):
         return
+    if (_photo_pending_copy_save(runtime, facts["id"])
+            and await runtime.database.read(lambda owned: _is_photo_cache_source(owned.connection, facts))):
+        raise ConsistencyError("照片缓存原读取或拷贝保存尚未可靠确认")
     if (step.phase is InputPhase.COMPLETION_FAILED
             and getattr(step.error, "stage", None) == "source_binding_unavailable"
             and await runtime.database.read(lambda owned: _is_photo_cache_source(owned.connection, facts))):
