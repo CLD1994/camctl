@@ -389,7 +389,7 @@ class CancelWaiterTests(unittest.IsolatedAsyncioTestCase):
         scope = SimpleNamespace(connection=object(), max_txn_id=12, max_event_id=120)
         self.assertTrue(command._reuse(scope, [event]).result)
 
-    def test_unknown_position_cancels_without_claiming_cleanup_of_unlocated_file(self):
+    def test_unknown_handoff_keeps_original_work_file_cleanup_responsibility(self):
         repo = load_repository()
         repo._ACTION_STATUS = SimpleNamespace(RUNNING=2, CANCELED=6)
         repo._ACTION_TERMINAL = (3, 4, 5, 6)
@@ -408,7 +408,7 @@ class CancelWaiterTests(unittest.IsolatedAsyncioTestCase):
             'operation_runs': {22: {'status': 3, 'retry_wait_required': 0}}, 'operation_attempts': {}}
         events, result = command._templates()
         self.assertTrue(result.complete)
-        self.assertEqual(result.file_ids, ())
+        self.assertEqual(result.file_ids, (23,))
         self.assertTrue(any(row[:2] == ('deliveries', 19) and row[3]['status'] == 7
                             for _, _, rows in events for row in rows))
 

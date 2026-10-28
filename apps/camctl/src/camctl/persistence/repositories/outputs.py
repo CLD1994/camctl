@@ -5639,7 +5639,7 @@ class _SettleCanceledObtainCommand:
                 templates.append((_COPY_CHANGED_EVENT, _SLOT_REASON, (_update("file_copies", copy_id,
                     {"slot_device_id": copy["slot_device_id"]}, {"slot_device_id": None}),)))
                 new_responsibility = True
-            if new_responsibility and delivery_id not in unknown:
+            if new_responsibility:
                 first_files.append(copy["target_file_id"])
         templates.append((_ACTION_FINISHED_EVENT, 4, (_update("actions", action["id"],
             {"status": action["status"]}, {"status": int(_ACTION_STATUS.CANCELED)}),)))

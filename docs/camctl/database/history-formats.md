@@ -121,7 +121,7 @@ Action6 分段普通录像的可靠正常到时 STOP，在原 `ATTEMPT_RESULT` �
 
 非电机目标的 `CANCEL_CHANGED.APPLY` 使用专属成员 `cancel_request` 保存原取消申请，结构恰好为 `{"item_id": 正整数, "mode": 字符串, "occurred_at": UTC 微秒整数}`。`mode` 为 `pre_start`、`with_stop`、`terminal` 或 `already`；成员身份、模式及时间须与本事件实际处理的目标和分支一致。原操作键重送逐字段核对这项输入，不通过后续投影或行变化反推原申请。电机目标沿用该分支已登记的 `motor_request` 和适用的 `motor_permit`，不同时保存两份申请身份。该证据不改变动作、同步或成员状态转换，也不进入对外报告。
 
-取消已生效的取回在发布意图之后中断时，`DELIVERY_CHANGED.CANCEL` 使用 `canceled_publication` 保存原交付、拷贝及目标文件身份。可靠确认原完整副本只位于 `staging` 时，`location` 为 `"staging"`，交付取消与原首次清理责任在同一取消收场事务中形成；位置无法确认且独立未知事实已经保存时，`location` 为 `"unknown"`，不把未定位文件纳入首次清理。重启从原事件恢复该依据，原键重送核对完整身份和原事实时刻，不从当前目录重新构造原申请。其他未完成交付的取消不携带该成员。
+取消已生效的取回在发布意图之后中断时，`DELIVERY_CHANGED.CANCEL` 使用 `canceled_publication` 保存原交付、拷贝及目标文件身份。可靠确认原完整副本只位于 `staging` 时，`location` 为 `"staging"`，交付取消与原首次清理责任在同一取消收场事务中形成；位置无法确认且独立未知事实已经保存时，`location` 为 `"unknown"`，仍按原文件归属及操作结束事实处理工作副本的首次清理，不将清理结果解释为交接结果。重启从原事件恢复该依据，原键重送核对完整身份和原事实时刻，不从当前目录重新构造原申请。其他未完成交付的取消不携带该成员。
 
 `INTERMEDIATE_FILE_CHANGED.CLEANUP_RESULT` 必须使用专属成员 `cleanup_request` 保存原清理结果申请中的游标输入，结构恰好为 `{"advance_cursor": 布尔值}`。原文件身份、结果、错误和时刻由同一结果事件表达。自动历史清理保存 `true`，单文件首次清理和显式主机清理保存 `false`。原游标已经指向目标文件时不产生重复位置变化，结果事件仍保存原布尔输入；原操作键重送逐项核对该输入和完整事件组，不能把 `true` 与 `false` 相互替代。该输入不改变文件清理或游标的状态转换，也不进入对外报告。
 
