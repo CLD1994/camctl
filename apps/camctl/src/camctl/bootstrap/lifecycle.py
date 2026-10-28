@@ -126,6 +126,7 @@ class RuntimeDeps:
     capture_read_business: dict = field(default_factory=dict)
     capture_read_ends: dict = field(default_factory=dict)
     capture_continuing_reads: dict = field(default_factory=dict)
+    capture_canceled_read_after: int = 0
     cleanup_intents: dict = field(default_factory=dict)
     cleanup_deletes: dict = field(default_factory=dict)
     cleanup_queries: dict = field(default_factory=dict)
@@ -209,6 +210,32 @@ async def _resume_normal_read_requests(deps: RuntimeDeps, database) -> None:
         file_executor=deps.work_files.executor,
         binding_check=lambda saved: check_binding(saved, deps.config),
         occurred_at=SystemClock().utc_micros)
+
+
+async def _resume_canceled_internal_reads(deps: RuntimeDeps, context) -> None:
+    """分页发现取消终态后仍持有的原内部读取机会。"""
+    from camctl.capture.canceled_internal_reads import settle_canceled_processing_read
+    from camctl.capture.media_flow import internal_read_scope
+    from camctl.persistence.repositories.operations import OperationRepository
+
+    rows = await context.database.read(lambda owned: owned.connection.execute(
+        "SELECT a.id FROM actions a JOIN recording_processing p ON p.action_id=a.id"
+        " JOIN file_copies c ON c.processing_id=p.id JOIN operation_runs r ON r.copy_id=c.id"
+        " WHERE a.status=6 AND a.cancel_requested=1 AND c.slot_device_id IS NOT NULL"
+        " AND r.kind=3 AND r.status=4 AND json_extract(r.error_json,'$.code')='device_binding_unavailable'"
+        " AND a.id>? ORDER BY a.id LIMIT 128", (deps.capture_canceled_read_after,),
+    ).fetchall())
+    deps.capture_canceled_read_after = rows[-1][0] if len(rows) == 128 else 0
+    if deps.capture_canceled_read_after and context.wake is not None:
+        from camctl.scheduling.notifications import WakeReason
+        context.wake.mark_changed(WakeReason.ACTIVITY_FINISHED)
+    scope = internal_read_scope(context.database, OperationRepository(),
+        pending_read_results=deps.capture_read_results, pending_read_business=deps.capture_read_business,
+        pending_read_ends=deps.capture_read_ends, continuing_read_tickets=deps.capture_continuing_reads,
+        pending_segment_inspection_results=deps.capture_segment_inspection_results,
+        occurred_at=context.clock.utc_micros, file_executor=deps.work_files.executor)
+    for (action_id,) in rows:
+        await settle_canceled_processing_read(scope, action_id)
 
 
 def _default_catalog(config: ConfigSnapshot):
@@ -890,6 +917,7 @@ def _report_assembly(
         # 拍摄推进：按设备声明与进程驱动登记组装运行时，等待配置读
         # 首次固定的执行定义。
         "availability_recovery": availability.resume,
+        "canceled_internal_reads": partial(_resume_canceled_internal_reads, deps),
         "scheduling": capture_flow(
             session_capture_assembly(
                 start_entries=deps.start_entries,

@@ -2904,6 +2904,9 @@ async def _finish_canceled_capture(runtime: CaptureRuntime, action_id: int, *,
         if pending is not None and pending.read_owner is not None:
             return
     action = (await runtime.action(action_id))
+    from camctl.capture.canceled_internal_reads import settle_canceled_processing_read
+    if not await settle_canceled_processing_read(_read_result_scope(runtime), action_id):
+        return
     policy = action["execution_spec_json"].get("result_policy")
     if policy == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value:
         from camctl.capture.action6_recovery import finalize_pending_action6_inspections
