@@ -32,7 +32,7 @@
 | `11-capture-process-interrupted` | 原计划意图是在真实 capture 期间中断工具，但实际在可用性检查三次失败后结束，未到达中断点、未发送 SIGTERM；不计为进程中断验收。 |
 | `12-binding-rejected` | 同逻辑设备存在旧 `UNKNOWN + HELD`，新配置 serial 改为另一值。动作 33 零新活动、检查与工具调用，但等待 66.36 秒后过期，违反有效准备区间直接绑定失败的规格。 |
 | `13-unavailable-finite` | 旧限制保持，临时撤去当前用户的 USB 节点访问权限。三次检查均失败，新拍摄以 `device_availability_unconfirmed` 有限结束，无 START。结束后在 finally 恢复原节点属组。 |
-| `14-device-recovery` | 原节点权限恢复后，新 DEVICE 原图取回触发检查，但机身仍 `camErrNoTethering`；检查三次耗尽，逐项以 `source_device_unavailable` 失败，没有 READ 尝试，未改源文件存在性。 |
+| `14-device-recovery` | 原节点权限恢复后，新 DEVICE 原图取回触发 check 5。前两次尝试出现 `camErrNoTethering`；第三次 info 返回 `camErrSystemState`，serial 等字段含控制字符，身份无法解析，没有继续 doctor。三次耗尽后逐项以 `source_device_unavailable` 失败，零 READ，源文件存在性保持。 |
 | `15-af-s-after-adjustment` | 用户调整目标后再提交 AF-S，但仍因可用性失败结束，未到达 autofocus；不能计为调整后的 AF-S 见证。 |
 | `17-cancel-before-start` | 未来 75 秒的单张被另一个新请求取消。原拍摄 canceled、取消动作 succeeded，零准备与 START。 |
 | `19-parameter-rejection` | 缺 focus、额外 tint、MF 移动量 0、曝光分支字段不适用、格式为 null，五个动作在受理时分别失败，零设备调用。 |
@@ -42,7 +42,7 @@
 | `24-cancel-during-start` | 1 秒曝光的真实 capture 在途时提交取消；取消逐项返回 `task_cancel_unsupported`、`not_applied`，原拍摄成功，没有重拍或关机调用。 |
 | `25-mf-negative-auto-preview` | RAW、M、0.008 秒、MF -5 及同刻的显式 auto_preview 关联，拍摄和自动预览取回成功。 |
 | `26-device-delete-unsupported` | 对本轮 DEVICE 预览 output 4 发起明确清理。按未声明删除能力的契约失败，不调用机内删除，不将原文件标记为不存在。 |
-| `27-idempotent-original-request` | 原请求 1 的计划文件经 host 再次递交，计划、动作、活动、产物、delivery 和操作尝试数量全部不变，新增 external_tool 事件为 0。 |
+| `27-idempotent-original-request` | 计划 1 对应的请求 `1793174785481481` 经 host 再次递交，计划、动作、活动、产物、delivery 和操作尝试数量全部不变，新增 external_tool 事件为 0。 |
 
 四种曝光模式、八种白平衡模式、手动色温两端、MF 不移动／正向／负向、AF-S，以及 ISO、光圈边界均经过真实设置或拍摄。不能把分支见证扩展为全部离散快门、ISO、光圈的逐档设备验收；0.000667 秒的工具回显也不能替代准确曝光读回。
 
@@ -60,6 +60,8 @@
 
 首次 HOST RAW 原图为 210,767,872 字节，SHA-256 为 `4e86ce1f506d8a0c6c2bb2c94c37611b0f701002e7a63ee00d0b2e65c666859d`；预览为 642,889 字节，摘要为 `cab68fd80cc7dc77d7ffd660aa8ccb57c3c313824706df121af186385c47627d`。首次操作结果、归档正式源及两次独立交付的相应大小、摘要相同。首次预览的 ffprobe 宽高为 0，实际 ffmpeg 解码退出 69；损坏在首次驱动文件核验时已经存在，归档与交付没有改变字节。第一版不默认逐图解码，因此动作成功不能代替真实媒体验收。
 
+另在独立诊断环境使用 rawpy／LibRaw 读取首次 HOST RAW 原图和第 32 组保留的 RAW 原图，两者均能解码，传感器有效数组为 8750×11664；半尺寸 RGB 输出为 4375×5832。两份 RAW 内嵌 JPEG 由 LibRaw 直接提取后均可解码，而工具生成的相应拍摄预览不可解码，进一步区分了原图与预览问题。诊断没有修改原图、没有向生产环境增加依赖，也不把其结果回填成原拍摄成功；工具版本、原文件及派生内容摘要见 `validation/37-raw-decoder-diagnosis/result.json`。
+
 两个被初始程序拒绝的 JPEG 原图均可用 `ffmpeg -v error -xerror -i <file> -frames:v 1 -f null -` 解码，尺寸为 11656×8742；配对预览为 3888×2918。最后一个 EOI 后分别有 875 和 2647 字节；这两份样本不能被描述为“不可解码”。独立下载 `B0000273.JPG` 后，原图与拍摄副本均为 7,086,080 字节，SHA-256 均为 `412f60a3e77ffe213264e4a61eb804a66d825813fe0bf33e48732c70ae6deb5b`。
 
 DEVICE 预览的现场内容保证未通过：
@@ -73,7 +75,20 @@ DEVICE 预览的现场内容保证未通过：
 
 ## 软件修复及后续复验
 
-绑定变化的分类、独立守卫和既有检查有限收场，以及 JPEG 外层结束识别，已按正式 H6 子任务推进。用户确定了检查因绑定变化无法继续时的 FAILED 收场与新请求规则，也确定 JPEG 尾部数据应原样保留。实施、隔离验证、审查、构建安装和安装版复验在完成后补入本节；未完成的工作不由上述初始发行物真机结果代替。
+绑定变化的分类、独立守卫和既有检查有限收场，以及 JPEG 外层结束识别，已按正式 H6 子任务推进。用户确定了检查因绑定变化无法继续时的 FAILED 收场与新请求规则，也确定 JPEG 尾部数据应原样保留。JPEG 修复提交在主工作区为 `8c52f6f32da474f504a44cfb151beb8463dfee5d`。新增反例在旧实现上失败，修复后独立工作区及主工作区的 101 项隔离单元均通过；主工作区命令为 `PYTHONPATH=/workspaces/camctl/apps/camctl/src PYTHONDONTWRITEBYTECODE=1 apps/camctl/.venv311/bin/python -m pytest -p no:cacheprovider apps/camctl/tests/unit/host_files/test_capture_sources_jpeg_boundary.py -q`，退出 0。覆盖外层 EOI、尾部、嵌套元数据、填充、重启标记、多扫描、DNL（行数定义标记）、跨块、截断、完整大小／摘要、源与既有目标分类及 RAW 文件头。Sol 独立复核无剩余阻塞问题；现有集成测试的合法媒体替身同步修正，原业务断言保持，未执行集成测试。
+
+`uv build --project apps/camctl --wheel --python /workspaces/camctl/apps/camctl/.venv311/bin/python --out-dir /workspaces/camctl/.local/delivery/h6-jpeg-20261028 --no-progress` 与冻结依赖导出均退出 0。安装前确认设备进程全部停止，使用 `uv pip install --python <目标>/venv/bin/python --no-deps --reinstall <wheel>`，安装退出 0。wheel SHA-256 为 `a32557dcec86f8935030894619fdc29989a84b35270fcacde96d616046402773`；387 个包文件与当前源码及安装逐字节相同，64 个受保护配置、数据库、媒体、交接、客户端数据与 host 文件的安装前后摘要相同。收据及一致数据库备份位于 `validation/28-jpeg-install/`；未重新 init，没有新增依赖、客户端或 C 构建要求，部署脚本的通用打包与初始化入口不需修改。
+
+| 后续组名 | 新发行物实际结果 |
+| --- | --- |
+| `29-host-jpeg-fixed` | JPEG 拍摄、HOST 原图与预览登记、取回均成功，完整大小和 SHA-256 覆盖尾部字节。 |
+| `30-device-jpeg-fixed`、`31-device-jpeg-original-repeat` | JPEG 拍摄与 DEVICE 原图两次独立取回成功；预览仍按原完整长度拒绝，三次 READ 耗尽后失败，未改变源摘要。 |
+| `32-raw-structural-revalidation` | RAW capture 返回成功，原图为 210,776,064 字节，预览为 309,515 字节；预览起始字节为 `ffd8fff639ca…`，外层边界核验拒绝，FFmpeg 实际解码也退出 69。动作 60 为 `capture_result_unconfirmed`，activity 21 为 UNKNOWN／HELD，工作文件保留。不能将它归为新增 JPEG 校验拒绝了已证明有效的 RAW 预览。 |
+| `33-host-original-delete` | 仅清理本轮成功 JPEG 动作的指定 HOST 原图；先保留独立取证副本，没有删除旧未知工作文件或机内原图。 |
+| `34-host-cleanup-independence` | 原图再次取回失败，配对预览独立取回成功；原图清理不级联预览，已发布交付保持。 |
+| `35-host-original-delete-again` | 同一指定原图的新清理请求成功，复用既有清理事实；正式原图路径缺席、预览路径仍在。 |
+
+绑定修复及后续安装版复验仍在推进，未完成的工作不由 JPEG 发行物或初始版本真机结果代替。
 
 ## 当前验收边界
 
