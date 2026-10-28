@@ -870,13 +870,15 @@ class BeginAttemptCommand:
         )
 
     def _read_exhausted(self, scope, run) -> CommandPlan:
-        """原明确失败耗尽本次预算时，只采用新流程配置并结束原流程。"""
+        """原失败或合格未知结果耗尽本次预算时结束原流程。"""
         from .retry_wait_reads import RetryWaitReads
         reads = RetryWaitReads(scope.connection)
         last = reads.last_attempt(run["id"], run["attempts_used"])
-        if (last is None or last[1] != int(_ATTEMPT_STATUS.FAILED)
-                or (run["retry_wait_required"] != 1 and not reads.completed(run["id"], run["attempts_used"]))):
-            raise TransactionError("读取耗尽必须已有原明确失败，不能结束原未完成尝试")
+        unknown = last is not None and last[1] == int(_ATTEMPT_STATUS.UNKNOWN)
+        if (last is None or (unknown and reads.recovered_unknown(run["id"], run["attempts_used"]) is None)
+                or (not unknown and (last[1] != int(_ATTEMPT_STATUS.FAILED)
+                    or (run["retry_wait_required"] != 1 and not reads.completed(run["id"], run["attempts_used"]))))):
+            raise TransactionError("读取耗尽缺少合格的原失败或未知结果")
         attempt = _load_row(scope.connection, "operation_attempts", last[0])
         if attempt is None:
             raise ConsistencyError("读取耗尽引用的原尝试不存在")
@@ -1659,8 +1661,12 @@ class _ExhaustBlockedReadCommand(BeginAttemptCommand):
         last = None if run is None else reads.last_attempt(run_id, run["attempts_used"])
         if (run is None or run["status"] not in (int(_RUN_STATUS.PENDING), int(_RUN_STATUS.ACTIVE))
                 or run["attempts_used"] < intent.config.max_attempts or last is None
-                or last[0] != self._exhaust_attempt_id or last[1] != int(_ATTEMPT_STATUS.FAILED)
-                or not reads.read_eligible(run_id, intent.occurred_at)):
+                or last[0] != self._exhaust_attempt_id
+                or (last[1] != int(_ATTEMPT_STATUS.FAILED)
+                    and reads.recovered_unknown(run_id, run["attempts_used"]) is None)
+                or not (reads.read_eligible(run_id, intent.occurred_at, allow_unheld=True)
+                        if last[1] == int(_ATTEMPT_STATUS.UNKNOWN)
+                        else reads.read_eligible(run_id, intent.occurred_at))):
             return self._rejected("qualification_changed")
         return super().plan(scope)
 
@@ -2225,14 +2231,29 @@ def _operation_finish_guard(event, context) -> None:
             last = reads.last_attempt(row.row_id, after.get("attempts_used"))
             if last is not None:
                 copy = context.state_rows.get("file_copies", {}).get(after.get("copy_id"))
+                unknown = last[1] == int(_ATTEMPT_STATUS.UNKNOWN)
+                if unknown and copy is not None:
+                    from .outputs import _internal_input_requirement, _read_is_due, _read_owner_eligible, _slot_owner_action
+                    from camctl.outputs.read_discovery import read_copy_dispatch_eligible
+                    owner = _slot_owner_action(context, copy)
+                    processing_id = copy.get("processing_id")
+                    processing = context.state_rows.get("recording_processing", {}).get(processing_id)
+                    if (owner.get("id") != after.get("action_id") or not _read_owner_eligible(owner)
+                            or not _read_is_due(owner, event.occurred_at)
+                            or not read_copy_dispatch_eligible(reads.connection, copy["id"])
+                            or (processing_id is not None and (processing is None
+                                or _internal_input_requirement(processing) is not None))):
+                        _fail("未知读取耗尽要求所属工作仍需要原副本")
                 if (last[0] != event.evidence.get("attempt_id")
-                        or last[1] != int(_ATTEMPT_STATUS.FAILED)
+                        or (unknown and reads.recovered_unknown(row.row_id, after.get("attempts_used")) is None)
+                        or (not unknown and last[1] != int(_ATTEMPT_STATUS.FAILED))
                         or after.get("attempts_used") < after.get("max_attempts_used")
                         or copy is None
-                        or (row.before.values.get("retry_wait_required") == 0
+                        or (not unknown and row.before.values.get("retry_wait_required") == 0
                             and not reads.completed(row.row_id, after.get("attempts_used")))
                         or (copy.get("source_device_file_id") is not None and copy.get("delivery_id") is not None
-                            and not reads.read_eligible(row.row_id, event.occurred_at))):
+                            and not (reads.read_eligible(row.row_id, event.occurred_at, allow_unheld=True)
+                                     if unknown else reads.read_eligible(row.row_id, event.occurred_at)))):
                     _fail("读取耗尽要求原失败已收场、预算耗尽且所属工作仍有资格")
             elif ("attempt_id" in event.evidence or not any(
                     attempt.get("run_id") == row.row_id

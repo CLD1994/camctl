@@ -109,6 +109,39 @@ def load_reads():
 
 
 class RetryReadFactsTests(unittest.TestCase):
+    def test_recovered_unknown_requires_original_result_and_no_unsettled_call(self):
+        module, modules = load_reads()
+        status = SimpleNamespace(UNKNOWN=object())
+        effect = SimpleNamespace(UNKNOWN=object())
+        basis = SimpleNamespace(ASSUMED=object())
+        models = ModuleType("camctl.operations.models")
+        models.AttemptStatus, models.EffectState, models.SettlementBasis = status, effect, basis
+        transaction = ModuleType("camctl.persistence.transaction")
+        transaction.row_facts = lambda connection, table, identity: {
+            "status": 4, "effect_state": 4, "result_json": {}, "error_json": {}}
+        result = ModuleType("camctl.operations.result_format")
+        outcome = SimpleNamespace(status=status.UNKNOWN, effect=effect.UNKNOWN,
+            error=SimpleNamespace(code="result_not_saved", stage="recovery", details={}),
+            settlement=SimpleNamespace(basis=basis.ASSUMED,
+                evidence=SimpleNamespace(type="local_read_recovery", version=1, data={})),
+            observations=(), call_info=None, diagnostics=None)
+        result.read_result_document = lambda *args: outcome
+        modules.update({m.__name__: m for m in (models, transaction, result)})
+        with patch.dict(sys.modules, modules):
+            reads = module.RetryWaitReads(Connection(last=(12, 4, "{}", 101)))
+            self.assertEqual(reads.recovered_unknown(7, 1)[0], 12)
+            outcome.error.code = "device_error"
+            self.assertIsNone(reads.recovered_unknown(7, 1))
+            outcome.error.code = "result_not_saved"
+            outcome.settlement.evidence.type = "other"
+            self.assertIsNone(reads.recovered_unknown(7, 1))
+            outcome.settlement.evidence.type = "adb_foreground_recovery"
+            outcome.observations = (object(),)
+            self.assertIsNone(reads.recovered_unknown(7, 1))
+            outcome.observations = ()
+            self.assertIsNone(module.RetryWaitReads(
+                Connection(last=(12, 4, "{}", 101), running=True)).recovered_unknown(7, 1))
+
     def test_held_check_requires_original_holder_completed_wait_and_active_owner(self):
         module, modules = load_reads()
         owner = (2, 0, 10, 9, "camera", 2, 1, 3, "camera", "driver", "camera", "driver")
@@ -323,7 +356,7 @@ def load_exhaust_command(reads_type, run):
     namespace = {"__name__": "isolated.operations", "__package__": "camctl.persistence.repositories",
         "BeginAttemptCommand": Base, "ObjectId": lambda value: value, "AttemptIntent": AttemptIntent,
         "OperationKind": SimpleNamespace(READ_FILE="read"), "_RUN_STATUS": SimpleNamespace(PENDING=1, ACTIVE=2),
-        "_ATTEMPT_STATUS": SimpleNamespace(FAILED=3), "TransactionError": ValueError,
+        "_ATTEMPT_STATUS": SimpleNamespace(FAILED=3, UNKNOWN=4), "TransactionError": ValueError,
         "_saved_transaction_events": lambda connection, key: None,
         "_find_responsibility": lambda connection, intent: 7,
         "_load_row": lambda connection, table, identity: run}
@@ -332,15 +365,66 @@ def load_exhaust_command(reads_type, run):
 
 
 class ExhaustReadTests(unittest.TestCase):
+    def test_saved_exhaustion_reuses_original_attempt_and_configuration(self):
+        source = SOURCE / "persistence" / "repositories" / "operations.py"
+        tree = ast.parse(source.read_text())
+        owner = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "BeginAttemptCommand")
+        method = next(node for node in owner.body if isinstance(node, ast.FunctionDef) and node.name == "_reuse_read_exhausted")
+        isolated = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0),
+                                    method], type_ignores=[])
+        run = {"max_attempts_used": 2, "timeout_s_json": 4, "retry_interval_s_json": 5,
+               "status": 4, "retry_wait_required": 0,
+               "error_json": {"code": "read_attempts_exhausted", "stage": "source_read", "details": {}}}
+        namespace = {"_OPERATION_CONFIGURED_EVENT": 10, "_RUN_STATUS": SimpleNamespace(FAILED=4),
+            "_find_responsibility": lambda connection, intent: 7,
+            "_load_row": lambda connection, table, identity: run,
+            "_load_flow_context": lambda connection, kind, action, target, purpose, state:
+                state.update({"file_copies": {9: {"round": 1}}}),
+            "_verify_run_intent": lambda *args: None, "_verify_run_identity": lambda *args: None,
+            "json_equal": lambda left, right: left == right, "TransactionError": ValueError}
+        exec(compile(ast.fix_missing_locations(isolated), str(source), "exec"), namespace)
+        intent = SimpleNamespace(kind=3, action_id=1, target=SimpleNamespace(copy_id=9), query_purpose=None,
+            config=SimpleNamespace(max_attempts=2, timeout_s=4, retry_interval_s=5), occurred_at=20, copy_round=1)
+        command = SimpleNamespace(_intent=intent, _exhaust_attempt_id=12, _state={}, _rejected=lambda reason: reason)
+        event = {"type": 10, "reason": 3, "occurred_at": 20,
+                 "body": {"evidence": {"attempt_id": 12}, "rows": [{"table": "operation_runs", "id": 7,
+                    "after": {"values": {"status": 4, "retry_wait_required": 0, "error_json": run["error_json"]}}}]}}
+        reuse = namespace["_reuse_read_exhausted"]
+        self.assertEqual(reuse(command, None, [event]), "budget_exhausted")
+        command._exhaust_attempt_id = 13
+        with self.assertRaises(ValueError): reuse(command, None, [event])
+        command._exhaust_attempt_id = 12
+        intent.config.max_attempts = 3
+        with self.assertRaises(ValueError): reuse(command, None, [event])
+
     def test_unknown_result_is_not_rewritten_as_explicit_read_failure(self):
         class Reads:
             def __init__(self, connection): pass
             def last_attempt(self, run_id, used): return (12, 4, "{}", 101)
+            def recovered_unknown(self, run_id, used): return None
             def read_eligible(self, run_id, now): raise AssertionError("未知结果不应进入明确失败收场")
 
         command, intent, module = load_exhaust_command(Reads, {"status": 2, "attempts_used": 2})
         with patch.dict(sys.modules, {module.__name__: module}):
             self.assertEqual(command(intent(2), 12, "key").plan(SimpleNamespace(connection=None)), "qualification_changed")
+
+    def test_recovered_unknown_exhaustion_checks_owner_without_slot(self):
+        class Reads:
+            eligible = True
+            def __init__(self, connection): pass
+            def last_attempt(self, run_id, used): return (12, 4, "{}", 101)
+            def recovered_unknown(self, run_id, used): return (12, 4, "{}", 101)
+            def read_eligible(self, run_id, now, *, allow_unheld=False):
+                assert allow_unheld
+                return self.eligible
+
+        command, intent, module = load_exhaust_command(Reads, {"status": 2, "attempts_used": 2})
+        with patch.dict(sys.modules, {module.__name__: module}):
+            self.assertEqual(command(intent(2), 12, "key").plan(SimpleNamespace(connection=None)), "exhausted")
+            Reads.eligible = False
+            self.assertEqual(command(intent(2), 12, "key").plan(SimpleNamespace(connection=None)), "qualification_changed")
+            self.assertEqual(command(intent(3), 12, "key").plan(SimpleNamespace(connection=None)), "qualification_changed")
+            self.assertEqual(command(intent(2), 13, "key").plan(SimpleNamespace(connection=None)), "qualification_changed")
 
     def test_reduced_budget_finishes_settled_read(self):
         class Reads:
@@ -485,6 +569,64 @@ class RetryGuardTests(unittest.TestCase):
 
 
 class ExhaustGuardTests(unittest.TestCase):
+    def test_unknown_guard_checks_owner_copy_evidence_and_budget(self):
+        source = SOURCE / "persistence" / "repositories" / "operations.py"
+        tree = ast.parse(source.read_text())
+        function = next(node for node in tree.body
+                        if isinstance(node, ast.FunctionDef) and node.name == "_operation_finish_guard")
+        isolated = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0),
+                                    function], type_ignores=[])
+        class Reads:
+            connection = object()
+            valid = True
+            def last_attempt(self, run_id, used): return (12, 4, "{}", 101)
+            def recovered_unknown(self, run_id, used): return (12, 4, "{}", 101) if self.valid else None
+        reads_module = ModuleType("camctl.persistence.repositories.retry_wait_reads")
+        reads_module.RetryWaitReads = Reads
+        outputs = ModuleType("camctl.persistence.repositories.outputs")
+        owner = {"id": 1, "status": 2, "cancel_requested": 0, "scheduled_at": 10}
+        outputs._slot_owner_action = lambda context, copy: owner
+        outputs._read_owner_eligible = lambda action: action["status"] == 2 and action["cancel_requested"] == 0
+        outputs._read_is_due = lambda action, now: action["scheduled_at"] <= now
+        outputs._internal_input_requirement = lambda processing: processing["reason"]
+        discovery = ModuleType("camctl.outputs.read_discovery")
+        copy_ready = [False]
+        discovery.read_copy_dispatch_eligible = lambda connection, copy_id: not copy_ready[0]
+        facts = {"kind": 3, "status": 4, "retry_wait_required": 0, "attempts_used": 2,
+                 "max_attempts_used": 2, "copy_id": 9, "action_id": 1,
+                 "error_json": {"code": "read_attempts_exhausted"}}
+        def fail(message): raise ValueError(message)
+        namespace = {"__name__": "isolated.operations", "__package__": "camctl.persistence.repositories",
+            "_OPERATION_CONFIGURED_EVENT": 10, "_RUN_KIND": SimpleNamespace(READ_FILE=3, PREPARE_CAPTURE=10, CHECK_DEVICE_AVAILABILITY=12),
+            "_RUN_STATUS": SimpleNamespace(PENDING=1, FAILED=4, CANCELED=5, UNCONFIRMED=6, SUCCEEDED=3),
+            "_ATTEMPT_STATUS": SimpleNamespace(FAILED=3, UNKNOWN=4), "Mapping": dict,
+            "_fail": fail, "_row_after_facts": lambda context, row: facts}
+        exec(compile(ast.fix_missing_locations(isolated), str(source), "exec"), namespace)
+        row = SimpleNamespace(table="operation_runs", row_id=7,
+            before=SimpleNamespace(exists=True, values={"retry_wait_required": 0}),
+            after=SimpleNamespace(values={"status": 4}))
+        event = SimpleNamespace(rows=(row,), event_type=10, reason=3, evidence={"attempt_id": 12}, occurred_at=20)
+        reads = Reads()
+        copy = {"id": 9, "source_device_file_id": None, "delivery_id": None, "processing_id": 8}
+        processing = {"reason": None}
+        context = SimpleNamespace(retry_wait_reads=reads, state_rows={"file_copies": {9: copy},
+            "recording_processing": {8: processing}})
+        modules = {m.__name__: m for m in (reads_module, outputs, discovery)}
+        guard = namespace["_operation_finish_guard"]
+        with patch.dict(sys.modules, modules):
+            guard(event, context)
+            for target, key, changed in ((owner, "cancel_requested", 1), (processing, "reason", "input_not_needed"),
+                                          (facts, "max_attempts_used", 3)):
+                original = target[key]
+                target[key] = changed
+                with self.assertRaises(ValueError): guard(event, context)
+                target[key] = original
+            copy_ready[0] = True
+            with self.assertRaises(ValueError): guard(event, context)
+            copy_ready[0] = False
+            reads.valid = False
+            with self.assertRaises(ValueError): guard(event, context)
+
     def test_settled_failure_requires_matching_attempt_reference(self):
         source = SOURCE / "persistence" / "repositories" / "operations.py"
         tree = ast.parse(source.read_text())
@@ -503,7 +645,7 @@ class ExhaustGuardTests(unittest.TestCase):
         namespace = {"__name__": "isolated.operations", "__package__": "camctl.persistence.repositories",
             "_OPERATION_CONFIGURED_EVENT": 10, "_RUN_KIND": SimpleNamespace(READ_FILE=3, PREPARE_CAPTURE=10, CHECK_DEVICE_AVAILABILITY=12),
             "_RUN_STATUS": SimpleNamespace(PENDING=1, FAILED=4, CANCELED=5, UNCONFIRMED=6, SUCCEEDED=3),
-            "_ATTEMPT_STATUS": SimpleNamespace(FAILED=3), "Mapping": dict,
+            "_ATTEMPT_STATUS": SimpleNamespace(FAILED=3, UNKNOWN=4), "Mapping": dict,
             "_fail": fail, "_row_after_facts": lambda context, row: facts}
         exec(compile(ast.fix_missing_locations(isolated), str(source), "exec"), namespace)
         row = SimpleNamespace(table="operation_runs", row_id=7, before=SimpleNamespace(exists=True, values={"retry_wait_required": 1}),

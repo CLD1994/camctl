@@ -713,8 +713,12 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
             if waiting != 1 and attempts_used < assembly.max_read_attempts:
                 continue
             from camctl.persistence.repositories.retry_wait_reads import RetryWaitReads
-            eligible = await runtime.database.read(
-                lambda owned: RetryWaitReads(owned.connection).read_eligible(run_id, runtime.occurred_at()))
+            def eligible_read(owned):
+                reads = RetryWaitReads(owned.connection)
+                if attempt_status == int(_ATTEMPT_STATUS.UNKNOWN) and attempts_used >= assembly.max_read_attempts:
+                    return reads.read_eligible(run_id, runtime.occurred_at(), allow_unheld=True)
+                return reads.read_eligible(run_id, runtime.occurred_at())
+            eligible = await runtime.database.read(eligible_read)
             if not eligible:
                 continue
         from camctl.outputs.read_attempts import save_read_business

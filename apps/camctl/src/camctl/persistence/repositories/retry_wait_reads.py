@@ -128,6 +128,32 @@ class RetryWaitReads:
             return None
         return last if self.no_unsettled_attempts(run_id) else None
 
+    def recovered_unknown(self, run_id, attempts_used):
+        """只接受已可靠保存的原本地收场后结果缺失事实。"""
+        last = self.last_attempt(run_id, attempts_used)
+        if last is None or last[1] != int(enum_for("operation_attempts.status").UNKNOWN):
+            return None
+        from camctl.persistence.transaction import row_facts
+        from camctl.operations.result_format import read_result_document
+        from camctl.operations.models import AttemptStatus, EffectState, SettlementBasis
+        attempt = row_facts(self.connection, "operation_attempts", last[0])
+        if attempt is None:
+            raise ConsistencyError("未知读取的原尝试不存在")
+        try:
+            outcome = read_result_document(attempt["status"], attempt["effect_state"],
+                                           attempt["result_json"], attempt["error_json"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ConsistencyError("未知读取的原结果不可解释") from error
+        evidence = outcome.settlement.evidence
+        if (outcome.status is not AttemptStatus.UNKNOWN or outcome.effect is not EffectState.UNKNOWN
+                or outcome.error.code != "result_not_saved" or outcome.error.stage != "recovery"
+                or dict(outcome.error.details) or outcome.settlement.basis is not SettlementBasis.ASSUMED
+                or evidence.type not in ("local_read_recovery", "adb_foreground_recovery")
+                or evidence.version != 1 or dict(evidence.data) or outcome.observations
+                or outcome.call_info is not None or outcome.diagnostics is not None):
+            return None
+        return last
+
     def completed(self, run_id, attempts_used):
         from camctl.history.events import reason_for_branch
         from .operations import _RETRY_WAIT_EVENT
@@ -188,7 +214,7 @@ class RetryWaitReads:
         return (isinstance(details, dict) and details.get("source_failed") is True
                 and _has_source_fallback_retry_proof(self.connection, copy, attempt))
 
-    def read_eligible(self, run_id, occurred_at):
+    def read_eligible(self, run_id, occurred_at, *, allow_unheld=False):
         from camctl.outputs.read_discovery import read_copy_dispatch_eligible
         from camctl.persistence.repositories.outputs import _read_is_due, _read_owner_eligible
 
@@ -223,7 +249,7 @@ class RetryWaitReads:
         if type(source_dependency) is not int or source_dependency not in (0, 1):
             raise ConsistencyError("读取交付状态或来源保护无法解释")
         return (_read_owner_eligible(action) and _read_is_due(action, occurred_at)
-                and (slot is not None or self.source_fallback(run_id))
+                and (slot is not None or allow_unheld or self.source_fallback(run_id))
                 and completion == int(enum_for("device_files.completion_state").COMPLETE)
                 and delivery_status in (int(delivery.PENDING), int(delivery.PREPARING))
                 and source_dependency == 1 and read_copy_dispatch_eligible(self.connection, copy_id))
