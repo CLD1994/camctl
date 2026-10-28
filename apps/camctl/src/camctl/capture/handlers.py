@@ -1157,6 +1157,8 @@ class CaptureRuntime(_FileObservationSaves):
                     return await pending()
                 if existing.phase in (EntryPhase.RESERVED, EntryPhase.BLOCKED):
                     return None, "canceled"
+                if existing.phase is EntryPhase.READY and existing.ticket is not None:
+                    return existing.ticket, None
                 raise ConsistencyError("原 START 入口许可仍承担责任")
             permit = self.start_entries.prepare(self.database.metadata.instance_id, action["id"])
             permit.phase = EntryPhase.GRANTING
@@ -1822,6 +1824,42 @@ def _prepared_start_ticket(runtime, action):
     return ticket
 
 
+async def _refresh_photo_cancel_origins(runtime, permit):
+    """只保留仍在固定目标的取消发起者；新的并发申请不会被清除。"""
+    origins = tuple(permit.cancel_origins)
+    if not origins:
+        return
+    def read(owned):
+        inactive = []
+        for origin in origins:
+            row = owned.connection.execute(
+                "SELECT type,status,cancel_requested,target_selection_state FROM actions WHERE id=?",
+                (origin,)).fetchone()
+            if row is None or row[0] != 6:
+                raise ConsistencyError("START 等待的取消发起者缺失或类型不符")
+            if row[1] not in (1, 2) or row[2] or row[3] != 1:
+                inactive.append(origin)
+        return tuple(inactive)
+    inactive = await runtime.database.read(read, description="读取 START 等待的取消发起者")
+    permit.cancel_origins.difference_update(inactive)
+
+
+async def _expire_unentered_photo(runtime, action, ticket, permit):
+    """原票据未进入驱动时，按实际窗口保存未派发与动作过期。"""
+    from camctl.devices.start_entry import PREVENTED
+    if permit.phase is not EntryPhase.READY or permit.ticket != ticket or permit.active:
+        raise ConsistencyError("过期单张缺少原未进入许可")
+    permit.phase = EntryPhase.BLOCKED
+    now = runtime.wall_us()
+    outcome = CallOutcome(status=AttemptStatus.FAILED, effect=EffectState.NO_EFFECT,
+        error=ErrorValue("window_ended", "dispatch"),
+        settlement=Settlement(SettlementBasis.NOT_DISPATCHED, EvidenceValue.of(PREVENTED)))
+    await runtime.finish(ticket, outcome, end_run=RunOutcome.EXPIRED,
+        activity=ActivityObservationSave(action["id"], now, dispatch_state=int(_DISPATCH_STATE.NOT_DISPATCHED)),
+        expiration=ExpireActionRequest(action["id"], now, now), occurred_at=now,
+        returned_ns=runtime.monotonic_ns())
+
+
 def _require_result_port(runtime, message: str) -> None:
     """只在旧拍摄已通过本轮启动资格检查后拒绝缺少结果端口。"""
     if runtime.results is None:
@@ -1865,14 +1903,15 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
     if is_hasselblad_photo(action):
         if permit is None or permit.ticket != ticket:
             raise ConsistencyError("原 START 缺少匹配的会话入口许可，不能调用驱动")
-        if permit.cancel_pending or permit.phase in (EntryPhase.RESERVED, EntryPhase.BLOCKED):
+        await _refresh_photo_cancel_origins(runtime, permit)
+        if permit.cancel_origins or permit.phase in (EntryPhase.RESERVED, EntryPhase.BLOCKED):
             return HandlerOutcome("not_granted", "canceled")
         if permit.phase is not EntryPhase.READY:
             raise ConsistencyError("原 START 入口许可尚未核实或已使用，不能调用驱动")
         from camctl.persistence.repositories.preparation import recheck_start_availability
         blocked = await runtime.database.read(lambda owned: recheck_start_availability(owned, ticket),
                                               description="复核启动设备检查占用")
-        if permit.phase is not EntryPhase.READY:
+        if permit.cancel_origins or permit.phase is not EntryPhase.READY:
             return HandlerOutcome("not_granted", "canceled")
         if blocked is not None:
             from camctl.devices.start_entry import PREVENTED
@@ -1886,6 +1925,14 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
                     dispatch_state=int(_DISPATCH_STATE.NOT_DISPATCHED)),
                 occurred_at=occurred, returned_ns=runtime.monotonic_ns())
             return HandlerOutcome("call_failed", "device_error")
+        reason = await _capture_dispatch_check(runtime, action["id"])
+        if permit.cancel_origins or permit.phase is not EntryPhase.READY:
+            return HandlerOutcome("not_granted", "canceled")
+        if reason == "window_ended":
+            await _expire_unentered_photo(runtime, action, ticket, permit)
+            return HandlerOutcome("not_granted", reason)
+        if reason is not None:
+            return HandlerOutcome("not_granted", reason)
     try:
         with measure_stage("capture.start", action_id=action["id"],
                 device_id=action["device_id"], activity_id=ticket.target_id,

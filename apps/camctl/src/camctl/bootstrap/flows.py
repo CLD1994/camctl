@@ -781,7 +781,7 @@ async def _resolve_and_fix(
     deferred = [entry for identity, entry in deferred_entries.items() if identity in selected]
     if deferred:
         for entry in deferred:
-            entry.cancel_pending = True
+            entry.cancel_origins.add(action_id)
         for entry in deferred:
             pending = start_entries.pending_grants.get((entry.database_id, entry.action_id))
             if entry.phase is EntryPhase.UNKNOWN and pending is not None:
@@ -791,7 +791,8 @@ async def _resolve_and_fix(
         for identity, no_intent in candidates:
             if identity not in selected:
                 continue
-            permit = start_entries.reserve(database.metadata.instance_id, identity, no_intent=no_intent)
+            permit = start_entries.reserve(database.metadata.instance_id, identity, no_intent=no_intent,
+                                           origin_action_id=action_id)
             if permit is not None:
                 blocks.append(EntryBlock(permit.database_id, permit.action_id, permit.ticket))
     request = FixCancelTargets(action_id, fixed, occurred(), tuple(blocks))

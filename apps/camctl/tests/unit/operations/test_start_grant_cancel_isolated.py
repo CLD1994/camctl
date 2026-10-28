@@ -6,6 +6,7 @@ from importlib.util import find_spec, module_from_spec, spec_from_file_location
 from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -41,8 +42,8 @@ def test_cancel_during_grant_waits_for_original_ticket(entries, phase):
     ticket = ticket_type()
     ticket.operation, ticket.responsibility_key = "control", "start/1"
 
-    assert coordinator.reserve("db", 1, no_intent=True) is None
-    assert permit.cancel_pending
+    assert coordinator.reserve("db", 1, no_intent=True, origin_action_id=8) is None
+    assert permit.cancel_origins == {8}
     permit.bind("db", ticket)
     assert permit.phase is module.EntryPhase.READY
     assert coordinator.reserve("db", 1, no_intent=False) is permit
@@ -105,14 +106,17 @@ async def test_cancel_waits_for_grant_and_unknown_receipt_reuses_key(entries, un
         assert permit.phase is module.EntryPhase.UNKNOWN
     else:
         assert permit.phase is module.EntryPhase.GRANTING
-    assert coordinator.reserve("db", 1, no_intent=True) is None
+    assert coordinator.reserve("db", 1, no_intent=True, origin_action_id=8) is None
     if unknown:
         assert await coordinator.pending_grants[("db", 1)]() == (ticket, None)
         assert seen[0] == seen[1]
     else:
         release.set()
         assert await task == (ticket, None)
-    assert permit.ticket is ticket and permit.cancel_pending
+    assert permit.ticket is ticket and permit.cancel_origins == {8}
+    count = len(seen)
+    assert await namespace["grant"](runtime, action) == (ticket, None)
+    assert len(seen) == count
 
 
 @pytest.mark.asyncio
@@ -165,4 +169,77 @@ async def test_cancel_selection_uses_unentered_fact_while_grant_is_pending(entri
 
     assert result is None
     assert phases == [module.EntryPhase.READY]
-    assert permit.cancel_pending and permit.ticket is None
+    assert permit.cancel_origins == {8} and permit.ticket is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_origin_refresh_clears_only_finished_origins(entries):
+    module, _ = entries
+    path = Path(__file__).parents[3] / "src/camctl/capture/handlers.py"
+    tree = ast.parse(path.read_text())
+    method = next(node for node in tree.body if isinstance(node, ast.AsyncFunctionDef)
+                  and node.name == "_refresh_photo_cancel_origins")
+    program = ast.Module(body=[method], type_ignores=[])
+    namespace = {"ConsistencyError": ValueError}
+    exec(compile(ast.fix_missing_locations(program), str(path), "exec"), namespace)
+    permit = module.StartEntryCoordinator().prepare("db", 1)
+    permit.cancel_origins.update((8, 9))
+    facts = {8: (6, 6, 1, 1), 9: (6, 2, 0, 1)}
+    class Connection:
+        def execute(self, sql, args):
+            return SimpleNamespace(fetchone=lambda: facts[args[0]])
+    async def read(callback, **kwargs):
+        value = callback(SimpleNamespace(connection=Connection()))
+        permit.cancel_origins.add(10)
+        return value
+    runtime = SimpleNamespace(database=SimpleNamespace(read=read))
+
+    await namespace["_refresh_photo_cancel_origins"](runtime, permit)
+
+    assert permit.cancel_origins == {9, 10}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("expired", [False, True])
+async def test_photo_revisits_original_unentered_ticket(entries, monkeypatch, expired):
+    module, ticket_type = entries
+    monkeypatch.setitem(sys.modules, "camctl.devices.start_entry", module)
+    path = Path(__file__).parents[3] / "src/camctl/capture/host_photo.py"
+    tree = ast.parse(path.read_text())
+    method = next(node for node in tree.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "advance_host_photo")
+    method.decorator_list = []
+    program = ast.Module(body=[method], type_ignores=[])
+    ticket = ticket_type()
+    ticket.operation, ticket.responsibility_key = "control", "start/1"
+    saved = SimpleNamespace(result_json=None, status=1, ticket=ticket)
+    permit = module.StartEntryCoordinator().prepare("db", 1)
+    permit.bind("db", ticket)
+    control = AsyncMock(return_value=SimpleNamespace(phase="not_granted"))
+    handlers = ModuleType("camctl.capture.handlers")
+    for name in ("_baseline_before_control", "_conclude_activity", "_finish_canceled_capture",
+                 "_handle_binding_failure", "_expire_unentered_photo"):
+        setattr(handlers, name, AsyncMock())
+    handlers._control_call = control
+    windows = ModuleType("camctl.scheduling.rules")
+    windows.WindowPhase = SimpleNamespace(BEFORE_START="before", AFTER_WINDOW="after", IN_WINDOW="inside")
+    windows.window_phase = lambda *args: "after" if expired else "inside"
+    monkeypatch.setitem(sys.modules, handlers.__name__, handlers)
+    monkeypatch.setitem(sys.modules, windows.__name__, windows)
+    saved_start = AsyncMock(return_value=saved)
+    namespace = {"_ACTION_STATUS": SimpleNamespace(SUCCEEDED=3, FAILED=4, CANCELED=6, EXPIRED=5),
+        "_ATTEMPT": SimpleNamespace(RUNNING=1), "_owned_repository": lambda *args: (None, None),
+        "_saved_start": saved_start, "_prepare_files": AsyncMock(return_value=object())}
+    exec(compile(ast.fix_missing_locations(program), str(path), "exec"), namespace)
+    runtime = SimpleNamespace(action=AsyncMock(return_value={"status": 2, "cancel_requested": 0}),
+        start_entries=SimpleNamespace(get=lambda *args: permit),
+        database=SimpleNamespace(metadata=SimpleNamespace(instance_id="db")),
+        window_of=lambda action: object(), wall_us=lambda: 100, recover_attempt=AsyncMock())
+
+    await namespace["advance_host_photo"](runtime, 1)
+
+    if expired:
+        control.assert_not_awaited()
+        handlers._expire_unentered_photo.assert_awaited_once_with(runtime, {"status": 2, "cancel_requested": 0}, ticket, permit)
+    else:
+        control.assert_awaited_once()
+    runtime.recover_attempt.assert_not_awaited()
