@@ -60,7 +60,7 @@ class AvailabilityAttemptOwner:
         await asyncio.shield(self.task)
 
     def stop(self):
-        if self.task is not None and not self.task.done():
+        if self.entered and self.task is not None and not self.task.done():
             self.task.cancel()
 
     async def settle(self):

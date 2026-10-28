@@ -79,6 +79,23 @@ async def test_cancel_delivers_result_before_propagating(owner_type):
 
 
 @pytest.mark.asyncio
+async def test_stop_before_task_entry_keeps_original_dispatch_recheck(owner_type):
+    actual = object()
+    invoke, save = AsyncMock(return_value=actual), AsyncMock()
+    owner = owner_type("ticket", invoke, save, lambda error: None)
+    observer = asyncio.create_task(owner.advance())
+    await asyncio.sleep(0)
+    assert owner.task is not None and not owner.entered
+    owner.stop()
+
+    await observer
+
+    invoke.assert_awaited_once()
+    save.assert_awaited_once_with(actual, owner.diagnostic)
+    assert owner.saved
+
+
+@pytest.mark.asyncio
 async def test_failed_save_retries_original_result(owner_type):
     actual = object()
     invoke = AsyncMock(return_value=actual)

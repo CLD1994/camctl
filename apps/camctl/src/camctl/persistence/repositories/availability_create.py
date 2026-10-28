@@ -107,8 +107,7 @@ def _qualify(connection, request, boundary, *, existing_check=None, exclude_atte
                 or output["device_file_id"] != source["id"] or delivery["action_id"] != action["id"]
                 or action["type"] != int(enum_for("actions.type").OBTAIN_ACTION_OUTPUTS)):
             raise ConsistencyError("检查触发拷贝缺少原设备来源或取回归属")
-        if (action["status"] != int(enum_for("actions.status").RUNNING) or action["cancel_requested"]
-                or copy["slot_device_id"] is not None):
+        if action["status"] != int(enum_for("actions.status").RUNNING) or action["cancel_requested"]:
             raise AvailabilityTargetBlocked("取回或原拷贝不再具备检查资格")
         from camctl.devices.drivers.hasselblad.files import CameraFileIdentity
         from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
@@ -125,9 +124,12 @@ def _qualify(connection, request, boundary, *, existing_check=None, exclude_atte
             raise ConsistencyError("原设备来源绑定与拍摄动作不一致")
         if (fixed.serial, fixed.product_id) != (request.identity.serial, request.identity.product_id):
             raise AvailabilityTargetIdentityMismatch("设备来源的固定机身身份不同")
-        from camctl.outputs.read_discovery import first_eligible_read
-        if first_eligible_read(connection, device_id, request.trusted_wall_now) != request.trigger_copy_id:
-            raise AvailabilityTargetBlocked("拷贝没有当前读取候选顺序资格")
+        if copy["slot_device_id"] is None:
+            from camctl.outputs.read_discovery import first_eligible_read
+            if first_eligible_read(connection, device_id, request.trusted_wall_now) != request.trigger_copy_id:
+                raise AvailabilityTargetBlocked("拷贝没有当前读取候选顺序资格")
+        elif not _held_read_eligible(connection, copy, device_id, request.trusted_wall_now):
+            raise AvailabilityTargetBlocked("持有读取机会的拷贝尚不能申请检查")
     from camctl.devices.capture_preparation import CAPTURE_ACTION_TYPES
     after = 0
     while True:
@@ -157,8 +159,10 @@ def _qualify(connection, request, boundary, *, existing_check=None, exclude_atte
     if read_reservation_blocks_control(connection, device_id):
         raise AvailabilityTargetBlocked("设备读取调用尚未收场")
     from camctl.outputs.read_discovery import device_holder
-    if (device_holder(connection, device_id) is not None
-            and (request.trigger_copy_id is not None or request.trusted_wall_now < action["scheduled_at"])):
+    holder = device_holder(connection, device_id)
+    if (holder is not None and
+            (request.trigger_copy_id is not None and holder != request.trigger_copy_id
+             or request.trigger_copy_id is None and request.trusted_wall_now < action["scheduled_at"])):
         raise AvailabilityTargetBlocked("设备读取机会仍由原拷贝保留")
     from camctl.scheduling.resources import device_read_in_flight, device_start_in_flight
     if device_read_in_flight(connection, device_id) or device_start_in_flight(connection, device_id):
@@ -196,6 +200,26 @@ def _qualify(connection, request, boundary, *, existing_check=None, exclude_atte
         from .availability_release import _no_conflicts
         _no_conflicts(connection, existing_check, exclude_attempt_id)
     return action, check, count
+
+
+def _held_read_eligible(connection, copy, device_id, now):
+    from camctl.outputs.read_discovery import device_holder
+    from .retry_wait_reads import RetryWaitReads, read_reservation_blocks_control
+
+    if copy["slot_device_id"] != device_id or device_holder(connection, device_id) != copy["id"]:
+        return False
+    if read_reservation_blocks_control(connection, device_id):
+        return False
+    run = _one(connection, "SELECT id,status,attempts_used,retry_wait_required FROM operation_runs"
+        " WHERE copy_id=? AND kind=?", (copy["id"], int(enum_for("operation_runs.kind").READ_FILE)))
+    if run is None:
+        raise ConsistencyError("持有读取机会的拷贝缺少原流程")
+    run_id, status, used, waiting = run
+    states = enum_for("operation_runs.status")
+    if status not in (int(states.PENDING), int(states.ACTIVE)) or not used or waiting != 0:
+        return False
+    reads = RetryWaitReads(connection)
+    return reads.completed(run_id, used) and reads.read_eligible(run_id, now)
 
 
 def _head(connection, request, boundary):
