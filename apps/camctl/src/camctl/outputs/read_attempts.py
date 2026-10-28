@@ -650,7 +650,8 @@ async def save_read_result(runtime, pending, *, retry=False):
             raise ConsistencyError("原读取结果缺少可靠事务回执")
         if prepared.binding_read and not result.run_was_terminal and result.disposition is not FinishDisposition.ALREADY_ENDED:
             if result.run_status is RunStatus.CANCELED:
-                prepared = replace(prepared, finish=replace(prepared.finish, run_finish=RunFinish(RunOutcome.CANCELED)), business=None)
+                if control_error is None:
+                    prepared = replace(prepared, finish=replace(prepared.finish, run_finish=RunFinish(RunOutcome.CANCELED)), business=None)
             elif result.run_status is not RunStatus.FAILED:
                 raise ConsistencyError("绑定读取结果回执缺少已保存的流程处置")
             identity = (prepared.finish.ticket.run_id, prepared.finish.ticket.attempt_id)

@@ -341,8 +341,34 @@ def test_completed_receipt_survives_control_error_and_records_only_selected_fail
         asyncio.run(read_attempts.save_read_result(runtime, pending))
     held = runtime.pending_read_results[(5, 1)]
     assert held.key == pending.key
-    assert (held.business is business) is recorded
+    assert held.business is business and held.finish is pending.finish
     assert errors == ([business] if recorded else [])
+
+
+def test_canceled_control_error_retries_original_candidate(monkeypatch):
+    runtime, _, _ = setup(monkeypatch, 2, 0)
+    pending = asyncio.run(read_attempts.held_binding_read_result(
+        runtime, 2, object(), SimpleNamespace(diagnostic=object())))
+    receipt = SimpleNamespace(kind=DbOutcomeKind.COMPLETED, value=SimpleNamespace(
+        run_was_terminal=False, disposition=FinishDisposition.SAVED, run_status=RunStatus.CANCELED))
+    calls = []
+    class Operations:
+        def finish_binding_read(self, finish, key, owned):
+            calls.append((finish, key))
+            return receipt
+    async def write(callback, *, key):
+        result = callback(object())
+        if len(calls) == 1:
+            raise KeyboardInterrupt("after commit")
+        return result
+    runtime.operations, runtime.database.write = Operations(), write
+    monkeypatch.setattr(read_attempts, "db_outcome_for", lambda error: receipt)
+    with pytest.raises(KeyboardInterrupt):
+        asyncio.run(read_attempts.save_read_result(runtime, pending))
+    held = runtime.pending_read_results[(5, 1)]
+    result = asyncio.run(read_attempts.save_read_result(runtime, held, retry=True))
+    assert calls == [(pending.finish, pending.key), (pending.finish, pending.key)]
+    assert result.business is None and result.finish.run_finish.status is RunOutcome.CANCELED
 
 
 def test_business_held_before_diagnostic_control_error(monkeypatch):
