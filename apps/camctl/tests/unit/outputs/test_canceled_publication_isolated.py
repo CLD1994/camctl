@@ -2,11 +2,45 @@
 
 import importlib.util
 from enum import IntEnum
+from importlib.abc import MetaPathFinder
 from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import patch
+
+
+class BlockCamctl(MetaPathFinder):
+    """禁止测试期间加载未明确替换的 camctl 模块或包资源。"""
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "camctl" or fullname.startswith("camctl."):
+            raise AssertionError(f"测试没有隔离生产模块: {fullname}")
+        return None
+
+
+def _forbidden_resource(*args, **kwargs):
+    raise AssertionError("单元测试不得读取真实包资源")
+
+
+_blocker = BlockCamctl()
+_resources = ModuleType("camctl.resources")
+_resources.resource_bytes = _forbidden_resource
+_resource_patch = None
+
+
+def setUpModule():
+    global _resource_patch
+    if any(name == "camctl" or name.startswith("camctl.") for name in sys.modules):
+        raise AssertionError("隔离单元测试必须在未加载 camctl 的进程内运行")
+    sys.meta_path.insert(0, _blocker)
+    _resource_patch = patch.dict(sys.modules, {"camctl.resources": _resources})
+    _resource_patch.start()
+
+
+def tearDownModule():
+    _resource_patch.stop()
+    sys.meta_path.remove(_blocker)
 
 
 class Status(IntEnum):
@@ -44,6 +78,9 @@ def load_handoff():
         modules[name] = module
     modules['camctl.contracts.enums'].enum_for = lambda name: Status
     modules['camctl.contracts.values'].ConsistencyError = type('ConsistencyError', (Exception,), {})
+    modules['camctl.contracts.values'].ObjectId = lambda value: value
+    modules['camctl.contracts.values'].UtcMicros = lambda value: value
+    modules['camctl.contracts.values'].MAX_OBJECT_ID = 2**63 - 1
     modules['camctl.contracts.workflow_errors'].registered_error = lambda code: {'stage': 'publication'}
     modules['camctl.contracts.workflow_errors'].validate_error_details = lambda code, details: None
     name = 'camctl.outputs._isolated_cancel_handoff'
@@ -85,6 +122,12 @@ class CanceledPublicationTests(unittest.TestCase):
                           {'staging': self.present, 'ready': self.present}):
             with self.subTest(locations=locations):
                 self.assertEqual(self.classify(**locations).value, 'unknown')
+
+    def test_pending_withdrawal_does_not_hide_original_publishing_state(self):
+        self.facts = self.h.DeliveryFacts(19, Status.PUBLISHING, publication_intent_event_id=29,
+            prepared_size=4, prepared_sha256=self.digest, withdrawal_requested=True)
+        self.assertEqual(self.classify(ready=self.present).value, 'confirm_handoff')
+        self.assertEqual(self.classify().value, 'unknown')
 
     def test_terminal_delivery_is_not_reactivated(self):
         self.facts = self.h.DeliveryFacts(19, Status.WITHDRAWN)
@@ -444,3 +487,302 @@ class UnknownWithdrawalTests(unittest.IsolatedAsyncioTestCase):
         module._identity_rows = lambda identity, owned: [(7, 'file', 7, 1, None, 23, 19)]
         with self.assertRaises(module.ConsistencyError):
             await module._identity(19, context)
+
+
+class CancelReconciliationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_staging_result_does_not_publish_or_create_withdrawal(self):
+        module = load_handoff()
+        facts = module.DeliveryFacts(19, Status.PUBLISHING, publication_intent_event_id=90,
+            prepared_size=4, prepared_sha256='a' * 64)
+        absent = module.LocationObservation(True, False)
+        staging = module.LocationObservation(True, True, 4, 'a' * 64)
+        calls = []
+        async def saved(*args): calls.append(args)
+        result = await module.reconcile_canceled_publication(
+            facts, module.DeliveryLocations(staging, absent, absent), 21, 23,
+            confirm_handoff=saved, save_unknown=saved, ensure_waiters=saved, withdraw=saved)
+        self.assertEqual(result, (19, 21, 23))
+        self.assertEqual(calls, [])
+
+    async def test_confirmed_handoff_is_saved_before_withdrawal(self):
+        module = load_handoff()
+        facts = module.DeliveryFacts(19, Status.PUBLISHING, publication_intent_event_id=90,
+            prepared_size=4, prepared_sha256='a' * 64)
+        absent = module.LocationObservation(True, False)
+        present = module.LocationObservation(True, True, 4, 'a' * 64)
+        calls = []
+        async def save(*args): calls.append('save')
+        async def unknown(*args): calls.append('unknown')
+        async def waiters(*args): calls.append('waiters')
+        async def withdraw(*args): calls.append('withdraw')
+        self.assertIsNone(await module.reconcile_canceled_publication(
+            facts, module.DeliveryLocations(absent, present, absent), 21, 23,
+            confirm_handoff=save, save_unknown=unknown, ensure_waiters=waiters, withdraw=withdraw))
+        self.assertEqual(calls, ['save', 'waiters', 'withdraw'])
+
+    async def test_unknown_is_saved_and_reports_failure_without_publication(self):
+        module = load_handoff()
+        facts = module.DeliveryFacts(19, Status.PUBLISHING, publication_intent_event_id=90,
+            prepared_size=4, prepared_sha256='a' * 64)
+        absent = module.LocationObservation(True, False)
+        calls = []
+        async def save(*args): calls.append('save')
+        async def unknown(*args): calls.append('unknown')
+        async def waiters(*args): calls.append('waiters')
+        async def withdraw(*args): calls.append('withdraw')
+        self.assertIsNone(await module.reconcile_canceled_publication(
+            facts, module.DeliveryLocations(absent, absent, absent), 21, 23,
+            confirm_handoff=save, save_unknown=unknown, ensure_waiters=waiters, withdraw=withdraw))
+        self.assertEqual(calls, ['unknown', 'waiters', 'withdraw'])
+
+    async def test_pending_unfinished_withdrawal_has_finite_unknown_result(self):
+        module = load_handoff()
+        facts = module.DeliveryFacts(19, Status.PUBLISHING, publication_intent_event_id=90,
+            prepared_size=4, prepared_sha256='a' * 64, withdrawal_requested=True)
+        absent = module.LocationObservation(True, False)
+        present = module.LocationObservation(True, True, 4, 'a' * 64)
+        calls = []
+        async def saved(*args): calls.append('saved')
+        async def unknown(*args): calls.append('unknown')
+        async def waiters(*args): calls.append('waiters')
+        async def withdraw(*args): calls.append('withdraw')
+        self.assertIsNone(await module.reconcile_canceled_publication(
+            facts, module.DeliveryLocations(present, absent, absent), 21, 23,
+            confirm_handoff=saved, save_unknown=unknown, ensure_waiters=waiters, withdraw=withdraw))
+        self.assertEqual(calls, ['unknown', 'waiters', 'withdraw'])
+
+
+def load_canceled_runtime():
+    handoff = load_handoff()
+    names = ('camctl.contracts.enums', 'camctl.contracts.values', 'camctl.host_files.tasks',
+             'camctl.logging_runtime.diagnostics', 'camctl.outputs.handoff', 'camctl.outputs.withdrawal',
+             'camctl.persistence.models', 'camctl.persistence.repositories.outputs',
+             'camctl.outputs.read_discovery')
+    modules = {}
+    for name in names:
+        module = ModuleType(name)
+        module.__getattr__ = lambda name: Stub
+        modules[name] = module
+    modules['camctl.outputs.handoff'] = handoff
+    modules['camctl.outputs.read_discovery'].DEFAULT_BATCH_SIZE = 100
+    class Withdrawal(IntEnum):
+        NOT_REQUESTED = 1
+        PENDING = 2
+        UNKNOWN = 6
+    modules['camctl.contracts.enums'].enum_for = lambda name: Status if name == 'deliveries.status' else Withdrawal
+    modules['camctl.contracts.values'].ConsistencyError = type('ConsistencyError', (Exception,), {})
+    modules['camctl.contracts.values'].new_operation_key = lambda: 'key'
+    modules['camctl.persistence.models'].DbOutcomeKind = SimpleNamespace(COMPLETED='completed')
+    modules['camctl.outputs.withdrawal']._failure = lambda identity, detail, **kwargs: {'id': identity, 'detail': detail}
+    class Task:
+        def __init__(self, task_id, file_ids, stage, business, body, **kwargs): self.body = body
+    modules['camctl.host_files.tasks'].AsyncFileTask = Task
+    modules['camctl.host_files.tasks'].FileTaskId = lambda value: value
+    name = 'camctl.outputs._isolated_canceled_publication'
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).parents[3] / 'src/camctl/outputs/canceled_publication.py')
+    module = importlib.util.module_from_spec(spec)
+    modules[name] = module
+    with patch.dict(sys.modules, modules): spec.loader.exec_module(module)
+    return module, handoff, modules
+
+
+class CancelRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_original_file_is_owned_during_observation_and_saved_before_withdrawal(self):
+        module, handoff, modules = load_canceled_runtime()
+        calls = []
+        state = SimpleNamespace(action_id=7, target=SimpleNamespace(file_id=23), facts=handoff.DeliveryFacts(
+            19, Status.PUBLISHING, publication_intent_event_id=90, prepared_size=4, prepared_sha256='a' * 64))
+        absent = handoff.LocationObservation(True, False)
+        present = handoff.LocationObservation(True, True, 4, 'a' * 64)
+        locked = False
+        class Executor:
+            def unfinished_files(self): return ()
+            async def run_owned_async_file_task(self, task):
+                nonlocal locked
+                locked = True
+                result = await task.body(None)
+                locked = False
+                return result
+        async def observe(function, *args):
+            self.assertTrue(locked)
+            calls.append('observe')
+            return handoff.DeliveryLocations(absent, present, absent)
+        async def withdraw(identity, context):
+            self.assertFalse(locked)
+            calls.append('withdraw')
+            return True
+        module.asyncio = SimpleNamespace(to_thread=observe)
+        module.withdraw_delivery = withdraw
+        class Repository:
+            def load_delivery_state(self, identity, owned): return state
+            def save_publication(self, request, key, owned):
+                self.assert_locked()
+                calls.append('save')
+                return SimpleNamespace(kind='completed', value=True)
+            def assert_locked(self):
+                if not locked: raise AssertionError('原文件资格未持有')
+        class Cursor:
+            def __init__(self, sql): self.sql = sql
+            def fetchall(self): return [(19, 21, 23, 1, 4)] if 'SELECT d.id' in self.sql else []
+            def close(self): pass
+        class Database:
+            async def read(self, callback, **kwargs):
+                return callback(SimpleNamespace(connection=SimpleNamespace(execute=lambda sql, args: Cursor(sql))))
+            async def write(self, callback, **kwargs): return callback(None)
+        context = module.CanceledPublicationContext(Database(), Repository(), object(), object(), Executor(), lambda: 100, {})
+        with patch.dict(sys.modules, modules):
+            self.assertEqual(await module.reconcile_canceled_obtain(7, context), ())
+        self.assertEqual(calls, ['observe', 'save', 'withdraw'])
+
+    async def test_unknown_result_is_saved_before_releasing_file_and_reuses_original_waiter(self):
+        module, handoff, modules = load_canceled_runtime()
+        facts = handoff.DeliveryFacts(19, Status.PUBLISHING, publication_intent_event_id=90,
+            prepared_size=4, prepared_sha256='a' * 64)
+        state = SimpleNamespace(action_id=7, target=SimpleNamespace(file_id=23), facts=facts)
+        absent = handoff.LocationObservation(True, False)
+        calls, locked = [], False
+        class Executor:
+            def unfinished_files(self): return ()
+            async def run_owned_async_file_task(self, task):
+                nonlocal locked
+                locked = True
+                result = await task.body(None)
+                locked = False
+                return result
+        async def observe(function, *args): return handoff.DeliveryLocations(absent, absent, absent)
+        async def withdraw(identity, context):
+            self.assertFalse(locked)
+            calls.append('withdraw')
+            return True
+        module.asyncio, module.withdraw_delivery = SimpleNamespace(to_thread=observe), withdraw
+        class Repository:
+            def load_delivery_state(self, identity, owned): return state
+            def advance_withdrawal(self, request, key, owned):
+                self.assert_locked()
+                calls.append(request.choice.value)
+                return SimpleNamespace(kind='completed', value=True)
+            def assert_locked(self):
+                if not locked: raise AssertionError('原文件资格未持有')
+        class Cursor:
+            def __init__(self, sql): self.sql = sql
+            def fetchall(self): return [(19, 21, 23, 1, 4)] if 'SELECT d.id' in self.sql else []
+            def close(self): pass
+        class Database:
+            async def read(self, callback, **kwargs):
+                return callback(SimpleNamespace(connection=SimpleNamespace(execute=lambda sql, args: Cursor(sql))))
+            async def write(self, callback, **kwargs): return callback(None)
+        context = module.CanceledPublicationContext(Database(), Repository(), object(), object(), Executor(), lambda: 100, {})
+        with patch.dict(sys.modules, modules):
+            self.assertEqual(await module.reconcile_canceled_obtain(7, context), ())
+        self.assertEqual(calls, ['requested', 'unknown', 'withdraw'])
+
+    async def test_unknown_save_retries_original_request_and_operation_key(self):
+        module, _, modules = load_canceled_runtime()
+        module.db_failure = lambda *args: RuntimeError('unknown')
+        received = []
+        class Database:
+            async def write(self, callback, *, key, **kwargs):
+                received.append(key)
+                callback(None)
+                return SimpleNamespace(kind='unknown' if len(received) == 1 else 'completed', value=True)
+        requests = []
+        class Repository:
+            def save_publication(self, request, key, owned): requests.append(request)
+        context = SimpleNamespace(database=Database(), repository=Repository(), pending={})
+        original, replacement = object(), object()
+        with patch.dict(sys.modules, modules):
+            with self.assertRaises(RuntimeError):
+                await module._save(context, (19, 'publication'), 7, 19, 'save_publication', original)
+            await module._save(context, (19, 'publication'), 7, 19, 'save_publication', replacement)
+        self.assertEqual(received, ['key', 'key'])
+        self.assertEqual(requests, [original, original])
+        self.assertEqual(context.pending, {})
+
+    async def test_large_target_scans_deliveries_in_batches_and_retains_staging_ids(self):
+        module, handoff, modules = load_canceled_runtime()
+        absent = handoff.LocationObservation(True, False)
+        present = handoff.LocationObservation(True, True, 4, 'a' * 64)
+        async def observe(function, *args): return handoff.DeliveryLocations(present, absent, absent)
+        module.asyncio = SimpleNamespace(to_thread=observe)
+        class Executor:
+            def unfinished_files(self): return ()
+            async def run_owned_async_file_task(self, task): return await task.body(None)
+        class Repository:
+            def load_delivery_state(self, identity, owned):
+                return SimpleNamespace(action_id=7, target=SimpleNamespace(file_id=identity + 100),
+                    facts=handoff.DeliveryFacts(identity, Status.PUBLISHING, publication_intent_event_id=90,
+                                                prepared_size=4, prepared_sha256='a' * 64))
+        class Cursor:
+            def __init__(self, args): self.args = args
+            def fetchall(self):
+                after, limit = self.args[1], self.args[-1]
+                return [(i, i + 10, i + 100, 1, 4) for i in (1, 2, 3) if i > after][:limit]
+            def close(self): pass
+        class Database:
+            async def read(self, callback, **kwargs):
+                return callback(SimpleNamespace(connection=SimpleNamespace(execute=lambda sql, args: Cursor(args))))
+        wakes = []
+        context = module.CanceledPublicationContext(Database(), Repository(), object(), object(), Executor(),
+            lambda: 100, {}, batch_size=2, wake=lambda: wakes.append(True))
+        with patch.dict(sys.modules, modules):
+            self.assertIsNone(await module.reconcile_canceled_obtain(7, context))
+            context.remaining = context.batch_size  # 下一轮重新取得本轮额度
+            result = await module.reconcile_canceled_obtain(7, context)
+        self.assertEqual(result, ((1, 11, 101), (2, 12, 102), (3, 13, 103)))
+        self.assertEqual(wakes, [True])
+
+    async def test_pending_settlement_reuses_original_request_before_any_new_observation(self):
+        module = load_settlement()
+        module.DbOutcomeKind = SimpleNamespace(COMPLETED='completed')
+        module.SettlementOutcome = lambda complete, failed=False: SimpleNamespace(complete=complete, failed=failed)
+        async def settle_required(awaitable): return await awaitable
+        module.settle_required = settle_required
+        calls = []
+        original = object()
+        class Cursor:
+            def fetchall(self): return []
+            def close(self): pass
+        class Database:
+            async def read(self, callback, **kwargs):
+                return callback(SimpleNamespace(connection=SimpleNamespace(execute=lambda sql, args: Cursor())))
+            async def write(self, callback, *, key, **kwargs):
+                calls.append(('key', key))
+                return callback(None)
+        class Outputs:
+            def settle_canceled_obtain(self, request, key, owned):
+                calls.append(('request', request))
+                return SimpleNamespace(kind='completed', value=SimpleNamespace(complete=True, file_ids=(23,)))
+        class WorkFiles:
+            executor = SimpleNamespace(unfinished_files=lambda: ())
+            async def first_cleanup(self, files, **kwargs):
+                calls.append(('cleanup', files))
+                return module.SettlementOutcome(True)
+        async def forbidden(*args): raise AssertionError('不能重新观察')
+        async def no_pending(*args): return ()
+        target = object.__new__(module.TargetSettlement)
+        target._database, target._outputs, target._work_files = Database(), Outputs(), WorkFiles()
+        target._withdrawal_resume = None
+        target._reconcile_publications = forbidden
+        target._pending_obtain_settlements = {7: (original, 'original-key')}
+        target._occurred_at = lambda: 100
+        target._pending_withdrawal_items = no_pending
+        target._withdrawal_execute = None
+        result = await target._settle_obtain(7)
+        self.assertTrue(result.complete)
+        self.assertEqual(calls, [('key', 'original-key'), ('request', original), ('cleanup', (23,))])
+
+    async def test_active_original_file_blocks_observation_and_save(self):
+        module, _, modules = load_canceled_runtime()
+        class Cursor:
+            def fetchall(self): return [(19, 21, 23, 1, 4)]
+            def close(self): pass
+        class Database:
+            async def read(self, callback, **kwargs):
+                return callback(SimpleNamespace(connection=SimpleNamespace(execute=lambda sql, args: Cursor())))
+        class Executor:
+            def unfinished_files(self): return (23,)
+            async def run_owned_async_file_task(self, task):
+                raise AssertionError('实际文件操作仍未结束')
+        context = module.CanceledPublicationContext(Database(), object(), object(), object(), Executor(), lambda: 100, {})
+        with patch.dict(sys.modules, modules):
+            self.assertIsNone(await module.reconcile_canceled_obtain(7, context))

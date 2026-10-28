@@ -901,6 +901,7 @@ def _report_assembly(
         ),
         # 取消动作按排期或立即执行；墙钟可信由会话进入路径保证。
         "cancel": cancel_flow(
+            staging=staging,
             ready=ready,
             processing=processing,
             start_entries=deps.start_entries,
@@ -912,6 +913,7 @@ def _report_assembly(
             cleanup_pending=partial(_cleanup_pending_for_action, deps),
             preparation_pending=deps.capture_preparations.pending,
             availability_owner=availability_owner,
+            read_discovery_batch_size=deps.config.session.read_discovery_batch_size,
         ),
         "motor": motor_flow(writer, deps.motor_permits),
         # 拍摄推进：按设备声明与进程驱动登记组装运行时，等待配置读
@@ -1202,6 +1204,7 @@ async def _execute_command(
             restricted_flows={
                 "cancel": cancel_flow(
                     start_entries=deps.start_entries,
+                    staging=staging,
                     ready=ready,
                     processing=processing,
                     unscheduled_only=True,
@@ -1211,6 +1214,7 @@ async def _execute_command(
                     resume_file_observations=resume_files,
                     resume_capture_completions=partial(_resume_capture_requests, deps),
                     preparation_pending=deps.capture_preparations.pending,
+                    read_discovery_batch_size=deps.config.session.read_discovery_batch_size,
                 ),
                 # 保守收场：额外等待上限取 clock.recovery_wait_cap_s。
                 "winddown": winddown_flow(

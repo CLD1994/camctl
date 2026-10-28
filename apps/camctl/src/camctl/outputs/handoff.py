@@ -15,7 +15,7 @@ import os
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any, Literal, Mapping
 
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import (
@@ -318,8 +318,6 @@ def decide_canceled_publication(
         return CanceledPublicationChoice.NOT_ACTIVE
     if facts.status != int(_DELIVERY_STATUS.PUBLISHING) or facts.publication_intent_event_id is None:
         raise ConsistencyError("取消对账要求原发布意图")
-    if facts.withdrawal_requested:
-        return CanceledPublicationChoice.NOT_ACTIVE
     if facts.published_event_id is not None or facts.prepared_size is None or facts.prepared_sha256 is None:
         raise ConsistencyError("取消对账缺少一致的原准备及发布事实")
     if any(not files.at(place).observed for place in HandoffPlace):
@@ -339,6 +337,31 @@ def decide_canceled_publication(
     if staging.sha256 is not None and staging.sha256 != facts.prepared_sha256:
         return CanceledPublicationChoice.UNKNOWN
     return CanceledPublicationChoice.CANCEL_STAGING
+
+
+async def reconcile_canceled_publication(
+    facts: DeliveryFacts, files: DeliveryLocations, copy_id: int, file_id: int, *,
+    confirm_handoff, save_unknown, ensure_waiters, withdraw,
+) -> tuple[int, int, int] | Literal[False] | None:
+    """把一次取消对账交给原事实保存和撤回责任。"""
+    ObjectId(copy_id)
+    ObjectId(file_id)
+    choice = decide_canceled_publication(facts, files)
+    if choice is CanceledPublicationChoice.CANCEL_STAGING:
+        if not facts.withdrawal_requested:
+            return facts.delivery_id, copy_id, file_id
+        # 先前撤回结果尚未保存；不将其解释为本次已确认的撤回结果。
+        choice = CanceledPublicationChoice.UNKNOWN
+    if choice is CanceledPublicationChoice.NOT_ACTIVE:
+        return None
+    if choice is CanceledPublicationChoice.CONFIRM_HANDOFF:
+        await confirm_handoff(facts.delivery_id)
+    else:
+        await save_unknown(facts.delivery_id, files)
+    if await ensure_waiters(facts.delivery_id) is False:
+        return False
+    await withdraw(facts.delivery_id)
+    return None
 
 
 # ---- 仓储输入与结果 ----

@@ -54,11 +54,13 @@ class TargetSettlement:
                  occurred_at: Callable[[], int], work_files: Any = None,
                  withdrawal_execute: Callable[[int], Awaitable[bool]] | None = None,
                  withdrawal_resume: Callable[[int], Awaitable[bool]] | None = None,
+                 reconcile_publications: Callable[[int], Awaitable[Any]] | None = None,
                  cleanup_pending: Callable[
                      [BusinessDatabase, int], Awaitable[bool]] | None = None,
                  preparation_pending: Callable[[int], bool] | None = None,
                  availability_owner: Any = None,
-                 pending_origin_settlements: dict | None = None) -> None:
+                 pending_origin_settlements: dict | None = None,
+                 pending_obtain_settlements: dict | None = None) -> None:
         self._database = database
         self._outputs = outputs
         self._cancellations = cancellations
@@ -66,12 +68,15 @@ class TargetSettlement:
         self._work_files = work_files
         self._withdrawal_execute = withdrawal_execute
         self._withdrawal_resume = withdrawal_resume
+        self._reconcile_publications = reconcile_publications
         self._cleanup_pending = cleanup_pending
         self._preparation_pending = preparation_pending
         self._availability_owner = availability_owner
         self._pending_origin_settlements = (
             {} if pending_origin_settlements is None
             else pending_origin_settlements)
+        self._pending_obtain_settlements = (
+            {} if pending_obtain_settlements is None else pending_obtain_settlements)
 
     async def settle(self, target_action_id: int) -> SettlementOutcome:
         """按动作类型推进本次取消所需的有限收场。"""
@@ -237,20 +242,28 @@ class TargetSettlement:
             )
             if set(file_ids) & set(self._work_files.executor.unfinished_files()):
                 return SettlementOutcome(complete=False)
-            item_ids = await database.read(
-                lambda owned: tuple(int(row[0]) for row in _fetchall(
-                    owned.connection,
-                    "SELECT i.id FROM obtain_items i JOIN obtain_source_selections s"
-                    " ON s.id=i.selection_id JOIN action_dependencies d"
-                    " ON d.id=s.dependency_id WHERE d.action_id=? ORDER BY i.id",
-                    (target_action_id,))),
-                description="读取取消取回的项目集合",
-            )
-            from camctl.persistence.repositories.outputs import SettleCanceledObtain
+            pending = self._pending_obtain_settlements.get(target_action_id)
+            if pending is None:
+                staging = ()
+                if self._reconcile_publications is not None:
+                    staging = await self._reconcile_publications(target_action_id)
+                    if staging is None:
+                        return SettlementOutcome(complete=False)
+                item_ids = await database.read(
+                    lambda owned: tuple(int(row[0]) for row in _fetchall(
+                        owned.connection,
+                        "SELECT i.id FROM obtain_items i JOIN obtain_source_selections s"
+                        " ON s.id=i.selection_id JOIN action_dependencies d"
+                        " ON d.id=s.dependency_id WHERE d.action_id=? ORDER BY i.id",
+                        (target_action_id,))),
+                    description="读取取消取回的项目集合",
+                )
+                from camctl.persistence.repositories.outputs import SettleCanceledObtain
 
-            request = SettleCanceledObtain(
-                target_action_id, self._occurred_at(), item_ids)
-            key = new_operation_key()
+                pending = (SettleCanceledObtain(
+                    target_action_id, self._occurred_at(), item_ids, staging), new_operation_key())
+                self._pending_obtain_settlements[target_action_id] = pending
+            request, key = pending
 
             async def settle_and_start_cleanup():
                 result = await database.write(
@@ -262,6 +275,7 @@ class TargetSettlement:
                 if result.kind is not DbOutcomeKind.COMPLETED:
                     raise ConsistencyError(
                         f"取消取回的完整收场事务未完成: {result.error}")
+                self._pending_obtain_settlements.pop(target_action_id)
                 if not result.value.complete:
                     return result, SettlementOutcome(complete=True)
                 first = await self._work_files.first_cleanup(

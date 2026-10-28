@@ -45,7 +45,7 @@ from camctl.persistence.repositories.scheduling import (
 )
 from camctl.session.service import StateDbFailure, _RequiredPhaseWaiter
 from camctl.bootstrap.background_flow import BackgroundFlow, CombinedLocalWork, FlowWakeup
-from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE, ReadDiscoveryOwner
+from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE, ReadDiscoveryOwner, positive_limit
 from camctl.scheduling.notifications import WakeReason
 
 __all__ = ["CaptureFlow", "capture_flow", "cancel_flow", "report_flow", "residual_flow",
@@ -639,7 +639,7 @@ async def _fix_cancel_request(database, repository, request, key, entries):
 
 
 def cancel_flow(
-    *, ready: Path, processing: Path, unscheduled_only: bool = False,
+    *, staging: Path, ready: Path, processing: Path, unscheduled_only: bool = False,
     motor_permits: dict | None = None,
     start_entries=None,
     work_files: Any = None,
@@ -649,6 +649,7 @@ def cancel_flow(
     cleanup_pending=None,
     preparation_pending=None,
     availability_owner=None,
+    read_discovery_batch_size=DEFAULT_BATCH_SIZE,
 ) -> Callable[[Any], Any]:
     """推进原取消集合；设备及文件等待不占用数据库线程。"""
     from camctl.host_files.tasks import FileTaskExecutor
@@ -658,6 +659,17 @@ def cancel_flow(
     executor = work_files.executor if work_files is not None else FileTaskExecutor(Supervisor())
     pending_withdrawals = work_files.pending_withdrawals if work_files is not None else {}
     pending_origin_settlements = {}
+    pending_canceled_publications = {}
+    canceled_publication_scans = {}
+    pending_obtain_settlements = {}
+    target_cursor = 0
+    withdrawal_cursor = 0
+    cursor_database = None
+    discovery_limit = positive_limit(read_discovery_batch_size)
+
+    def _fetch_page(connection, query, parameters):
+        with closing(connection.execute(query, parameters)) as cursor:
+            return cursor.fetchall()
 
     async def flow(context: Any) -> None:
         from camctl.cancellation.models import (
@@ -669,7 +681,14 @@ def cancel_flow(
         from camctl.persistence.repositories.cancellation import CancellationRepository
         from camctl.persistence.repositories.outputs import OutputsRepository
 
+        nonlocal target_cursor, withdrawal_cursor, cursor_database
         database = context.database
+        if cursor_database != database.metadata.instance_id:
+            if cursor_database is not None and (pending_canceled_publications or pending_obtain_settlements):
+                raise StateDbFailure("原取消发布保存责任属于另一状态库")
+            target_cursor = withdrawal_cursor = 0
+            canceled_publication_scans.clear()
+            cursor_database = database.metadata.instance_id
         if any(identity[0] != database.metadata.instance_id for identity in pending_origin_settlements):
             raise StateDbFailure("原取消收场申请属于另一状态库")
         await _resume_actual_file_facts(database, resume_file_observations, resume_media_results,
@@ -696,14 +715,35 @@ def cancel_flow(
             except ConsistencyError as error:
                 raise StateDbFailure(str(error)) from error
 
+        from camctl.outputs.canceled_publication import (
+            CanceledPublicationContext, reconcile_canceled_obtain,
+        )
+        from camctl.outputs.handoff import DeliveryDirectories
+
+        def wake_publication():
+            from camctl.scheduling.notifications import WakeReason
+            notifier = getattr(context, "wake", None)
+            if notifier is not None:
+                notifier.mark_changed(WakeReason.READ_OPPORTUNITY)
+
+        publication_context = CanceledPublicationContext(database, OutputsRepository(),
+            DeliveryDirectories(staging, ready, processing), withdrawal_context,
+            executor, occurred, pending_canceled_publications, canceled_publication_scans,
+            batch_size=discovery_limit, wake=wake_publication)
+
+        async def reconcile_publications(action_id):
+            return await reconcile_canceled_obtain(action_id, publication_context)
+
         settlement = TargetSettlement(
             database=database, outputs=OutputsRepository(), cancellations=repository,
             withdrawal_positions=_withdrawal_position(database, ready, processing),
             occurred_at=occurred, work_files=work_files,
             withdrawal_execute=execute_withdrawal, withdrawal_resume=resume_withdrawal,
+            reconcile_publications=reconcile_publications,
             cleanup_pending=cleanup_pending, preparation_pending=preparation_pending,
             availability_owner=availability_owner,
-            pending_origin_settlements=pending_origin_settlements)
+            pending_origin_settlements=pending_origin_settlements,
+            pending_obtain_settlements=pending_obtain_settlements)
         cancellation_runtime = CancellationRuntime(
             database=database, repository=repository, settlement=settlement,
             occurred_at=occurred, motor_permits={} if motor_permits is None else motor_permits, start_entries=start_entries,
@@ -713,6 +753,32 @@ def cancel_flow(
             resumed = await settle_origin_cancel(OriginSettle(origin_id), cancellation_runtime)
             if resumed.kind is not DbOutcomeKind.COMPLETED:
                 raise db_failure(StateDbFailure, f"原取消收场申请仍未完成: {resumed.error}", resumed)
+        pending_targets = set(pending_obtain_settlements)
+        pending_targets.update(pending.action_id for pending in pending_canceled_publications.values())
+        for target_id in sorted(pending_targets):
+            await settlement.settle(target_id)
+        async def discover(query, after):
+            return await database.read(lambda owned: _fetch_page(
+                owned.connection, query, (after, discovery_limit)))
+
+        targets = await discover(
+            "SELECT id FROM actions WHERE type=4 AND status=2 AND cancel_requested=1"
+            " AND id>? ORDER BY id LIMIT ?", target_cursor)
+        for (target_id,) in targets:
+            await settlement.settle(int(target_id))
+        target_cursor = int(targets[-1][0]) if len(targets) == discovery_limit else 0
+        deliveries = await discover(
+            "SELECT d.id FROM deliveries d JOIN actions a ON a.id=d.action_id"
+            " WHERE d.status=5 AND d.withdrawal_state=2 AND d.id>?"
+            " ORDER BY d.id LIMIT ?", withdrawal_cursor)
+        for (delivery_id,) in deliveries:
+            await execute_withdrawal(int(delivery_id))
+        withdrawal_cursor = int(deliveries[-1][0]) if len(deliveries) == discovery_limit else 0
+        if target_cursor or withdrawal_cursor:
+            from camctl.scheduling.notifications import WakeReason
+            notifier = getattr(context, "wake", None)
+            if notifier is not None:
+                notifier.mark_changed(WakeReason.READ_OPPORTUNITY)
         now_us = None if unscheduled_only else occurred()
         due = await database.read(lambda owned: _due_cancel_actions(owned, now_us))
         for action_id, status, spec_json in due:

@@ -2,11 +2,43 @@
 
 import importlib.util
 from enum import IntEnum
+from importlib.abc import MetaPathFinder
 from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import patch
+
+
+class BlockCamctl(MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "camctl" or fullname.startswith("camctl."):
+            raise AssertionError(f"测试没有隔离生产模块: {fullname}")
+        return None
+
+
+def _forbidden_resource(*args, **kwargs):
+    raise AssertionError("单元测试不得读取真实包资源")
+
+
+_blocker = BlockCamctl()
+_resources = ModuleType("camctl.resources")
+_resources.resource_bytes = _forbidden_resource
+_resource_patch = None
+
+
+def setUpModule():
+    global _resource_patch
+    if any(name == "camctl" or name.startswith("camctl.") for name in sys.modules):
+        raise AssertionError("隔离单元测试必须在未加载 camctl 的进程内运行")
+    sys.meta_path.insert(0, _blocker)
+    _resource_patch = patch.dict(sys.modules, {"camctl.resources": _resources})
+    _resource_patch.start()
+
+
+def tearDownModule():
+    _resource_patch.stop()
+    sys.meta_path.remove(_blocker)
 
 
 class DeliveryStatus(IntEnum):
