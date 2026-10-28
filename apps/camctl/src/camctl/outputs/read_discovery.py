@@ -257,6 +257,8 @@ class ReadDiscoveryOwner:
             "reads",
             "local",
             "failed",
+            "canceled_read_ends",
+            "ready_read_ends",
             "capture",
             "residual",
             "software_recovery",

@@ -226,6 +226,8 @@ async def advance_obtain(runtime: ObtainRuntime) -> None:
     await retry_read_ends(runtime)
     now = runtime.occurred_at()
     await runtime.discovery.begin_round(runtime.database, now)
+    await _settle_canceled_read_ends(runtime, now)
+    await _settle_ready_read_ends(runtime, now)
     await _settle_failed_reads(runtime)
     await _start_due(runtime, now)
     for (action_id,) in (await runtime.discovery.rows(runtime.database, "actions", now,
@@ -581,7 +583,7 @@ async def _publish_and_finish(
 
     def inputs(owned):
         facts = load_obtain_facts(owned.connection, action_id)
-        deliveries = (_prepared_deliveries(owned.connection, action_id, limit=publish_limit)
+        deliveries = (_prepared_deliveries(owned.connection, action_id, limit=publish_limit, read_succeeded=True)
                       if publish_limit else ())
         return facts, deliveries
     facts, deliveries = await runtime.database.read(inputs)
@@ -589,6 +591,9 @@ async def _publish_and_finish(
     if not decision.may_publish:
         return 0
     for delivery_id in deliveries:
+        from camctl.persistence.repositories.outputs import delivery_read_succeeded
+        if not await runtime.database.read(lambda owned: delivery_read_succeeded(owned.connection, delivery_id)):
+            continue
         await _publish_delivery(runtime, int(delivery_id), now)
     if await runtime.database.read(lambda owned: _prepared_deliveries(owned.connection, action_id, limit=1)):
         return len(deliveries)
@@ -605,14 +610,17 @@ async def _publish_and_finish(
     return len(deliveries)
 
 
-def _prepared_deliveries(connection, action_id: int, *, limit: int) -> list[int]:
+def _prepared_deliveries(connection, action_id: int, *, limit: int, read_succeeded: bool = False) -> list[int]:
     """汇总确定后仍待发布的成功交付。"""
     with closing(connection.execute(
         "SELECT d.id FROM deliveries d"
         " JOIN obtain_items i ON i.delivery_id = d.id"
         " JOIN obtain_source_selections s ON s.id = i.selection_id"
         " JOIN action_dependencies dep ON dep.id = s.dependency_id"
-        " WHERE dep.action_id = ? AND d.status = ? ORDER BY d.id LIMIT ?",
+        " WHERE dep.action_id = ? AND d.status = ?"
+        + (" AND EXISTS (SELECT 1 FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id"
+           " WHERE c.delivery_id=d.id AND r.kind=3 AND r.status=3)" if read_succeeded else "")
+        + " ORDER BY d.id LIMIT ?",
         (action_id, int(_DELIVERY_STATUS.PREPARED), limit),
     )) as cursor:
         return [int(row[0]) for row in cursor.fetchall()]
@@ -988,6 +996,108 @@ async def _fail_read_delivery(
                          source_verification_failed=source_verification_failed),
         runtime.outputs.fail_read_delivery, on_completed=on_completed,
         business_saves=business_saves, retry=retry)
+
+
+async def _settle_ready_read_ends(runtime: ObtainRuntime, now: int) -> None:
+    """已校验交付仍有原读取时，先按原 End 补存读取结果。"""
+    from camctl.outputs.read_attempts import HeldReadEnd, unfinished_read_end
+
+    page = await runtime.discovery.rows(runtime.database, "ready_read_ends", now,
+        "SELECT c.id,c.source_device_file_id,ob.device_id,ob.driver_id"
+        " FROM file_copies c JOIN deliveries d ON d.id=c.delivery_id"
+        " JOIN actions a ON a.id=d.action_id"
+        " JOIN operation_runs r ON r.copy_id=c.id AND r.kind=3"
+        " LEFT JOIN device_files df ON df.id=c.source_device_file_id"
+        " LEFT JOIN actions ob ON ob.id=df.observer_action_id"
+        " WHERE a.status=2 AND a.cancel_requested=0 AND d.status IN (1,2,3)"
+        " AND r.status IN (1,2) AND c.verification_state IN (3,5)"
+        " AND c.read_end_event_id IS NOT NULL", identity="c.id")
+    for copy_id, source_id, device_id, driver_id in page.items:
+        saved = await runtime.database.read(lambda owned: unfinished_read_end(owned, copy_id))
+        if saved is None or saved[1] is None or saved[1][3] is not None:
+            continue
+        ticket, (_ticket, end, occurred_at, _slot) = saved
+        if source_id is None:
+            evidence = _LOCAL_READ_EVIDENCE
+            config = await runtime.database.read(lambda owned: _stored_read_attempt_config(owned.connection, copy_id))
+            resume = lambda current, value, original=runtime, cfg=config: _resume_local_host_end(current, value, original, cfg)
+        else:
+            assembly = runtime.devices.get(device_id)
+            if assembly is None:
+                if runtime.recovery_evidence_for is None:
+                    continue
+                evidence = runtime.recovery_evidence_for(DeviceBinding(device_id, driver_id), "read")
+                if evidence is None:
+                    continue
+                assembly = SimpleNamespace(evidence=evidence, max_recopies=None, max_read_attempts=1)
+            evidence = assembly.evidence
+            resume = lambda current, value, original=runtime, current_assembly=assembly: _resume_local_delivery_end(current, value, original, current_assembly)
+        held = runtime.pending_read_ends.get(copy_id)
+        if held is None:
+            held = HeldReadEnd(ticket, end, occurred_at, resume=resume, evidence=evidence)
+            runtime.pending_read_ends[copy_id] = held
+        elif held.ticket != ticket or held.end != end:
+            raise ConsistencyError("已校验交付的读取结束与原拥有者不一致")
+        await resume(runtime, held)
+
+
+async def _settle_canceled_read_ends(runtime: ObtainRuntime, now: int) -> None:
+    """重启后按原完整结束与原票据完成已取消交付的读取结果。"""
+    from camctl.outputs.read_attempts import HeldReadEnd, unfinished_read_end
+
+    page = await runtime.discovery.rows(runtime.database, "canceled_read_ends", now,
+        "SELECT c.id,c.source_device_file_id,ob.device_id,ob.driver_id"
+        " FROM file_copies c JOIN deliveries d ON d.id=c.delivery_id"
+        " JOIN actions a ON a.id=d.action_id"
+        " JOIN operation_runs r ON r.copy_id=c.id AND r.kind=3"
+        " LEFT JOIN device_files df ON df.id=c.source_device_file_id"
+        " LEFT JOIN actions ob ON ob.id=df.observer_action_id"
+        " WHERE a.status=2 AND a.cancel_requested=1 AND d.status IN (1,2,3)"
+        " AND r.status IN (1,2) AND c.read_end_event_id IS NOT NULL", identity="c.id")
+    for copy_id, source_id, device_id, driver_id in page.items:
+        saved = await runtime.database.read(lambda owned: unfinished_read_end(owned, copy_id))
+        if saved is None or saved[1] is None:
+            continue
+        ticket, (saved_ticket, end, occurred_at, _slot) = saved
+        if ticket != saved_ticket:
+            raise ConsistencyError("取消交付的原读取票据与完整结束不一致")
+        if source_id is None:
+            evidence = _LOCAL_READ_EVIDENCE
+        else:
+            assembly = runtime.devices.get(device_id)
+            evidence = None if assembly is None else assembly.evidence
+            if evidence is None and runtime.recovery_evidence_for is not None:
+                evidence = runtime.recovery_evidence_for(DeviceBinding(device_id, driver_id), "read")
+            if evidence is None:
+                continue
+        held = runtime.pending_read_ends.get(copy_id)
+        if held is None:
+            held = HeldReadEnd(ticket, end, occurred_at,
+                resume=lambda current, value, original=runtime, registry=evidence:
+                    _resume_canceled_delivery_end(current, value, original, registry),
+                evidence=evidence)
+            runtime.pending_read_ends[copy_id] = held
+        elif held.ticket != ticket or held.end != end:
+            raise ConsistencyError("取消交付的读取结束与原拥有者不一致")
+
+        await _resume_canceled_delivery_end(runtime, held, runtime, evidence)
+
+
+async def _resume_canceled_delivery_end(current, held, original_runtime, evidence):
+    from camctl.outputs.read_attempts import (
+        canceled_complete_read_result, current_local_read_end, run_owned_read,
+    )
+
+    runtime = replace(original_runtime, database=current.database)
+    copy_id = int(held.ticket.target_id)
+    async def finish(_control):
+        if not await current_local_read_end(runtime, copy_id, held, allow_held_slot=True):
+            return
+        pending = await canceled_complete_read_result(runtime, held.ticket, evidence)
+        if pending is not None:
+            await _save_read_result_and_settle(runtime, pending)
+
+    await run_owned_read(runtime, copy_id, finish)
 
 
 async def _settle_failed_reads(runtime: ObtainRuntime) -> None:

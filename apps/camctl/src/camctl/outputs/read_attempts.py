@@ -309,7 +309,7 @@ async def retry_read_ends(runtime):
         await held.resume(runtime, held)
 
 
-async def current_local_read_end(runtime, copy_id, held):
+async def current_local_read_end(runtime, copy_id, held, *, allow_held_slot=False):
     """取得文件资格后重新核对原票据及当前轮次的本机结束依据。"""
     from camctl.persistence.repositories.read_end import load_read_end
 
@@ -324,7 +324,7 @@ async def current_local_read_end(runtime, copy_id, held):
             return False
         if saved[0] != held.ticket or saved[1] != held.end:
             raise ConsistencyError("本机续接的当前轮结束依据已经改变")
-        return saved[3] is None
+        return allow_held_slot or saved[3] is None
 
     return await runtime.database.read(read)
 
