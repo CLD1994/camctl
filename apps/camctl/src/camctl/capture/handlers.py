@@ -1959,6 +1959,8 @@ async def _control_call(runtime: CaptureRuntime, action, operation: str,
                 dispatch_check=lambda: _capture_dispatch_check(runtime, action["id"]),
                 start_entry=permit,
                 prepared_by=prepared_ticket,
+                output_storage=(action["execution_spec_json"]["output_storage"]
+                                if is_hasselblad_photo(action) else None),
             ))
             returned_at, returned_ns = runtime.wall_us(), runtime.monotonic_ns()
     finally:

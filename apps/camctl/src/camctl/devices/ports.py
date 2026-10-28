@@ -121,6 +121,8 @@ class ControlRequest:
     prepared_by: AttemptTicket | None = None
     #: 整体 timeout_s 中独立授予首次设备配置的部分，普通设置使用剩余部分。
     session_setup_timeout_s: Decimal = Decimal("0")
+    #: 首次受理时冻结的来源模式；未声明来源模式的其他调用留空。
+    output_storage: str | None = None
 
 
 @dataclass(frozen=True)
