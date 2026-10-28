@@ -1,5 +1,6 @@
 """拍摄候选读取仅使用隔离的连接替身。"""
 
+import ast
 from decimal import Decimal
 from types import ModuleType, SimpleNamespace
 import importlib.util
@@ -102,6 +103,21 @@ def test_saved_selection_input_round_trips_and_requires_complete_facts(selection
     document.pop("identity")
     with pytest.raises(module.ConsistencyError):
         module.CaptureSelectionInput.from_document(document)
+
+
+def test_history_structure_uses_same_selection_parser(selection):
+    module, _ = selection
+    source = Path(__file__).parents[3] / "src/camctl/history/validators.py"
+    tree = ast.parse(source.read_text())
+    function = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                    and node.name == "_check_evidence_member")
+    program = ast.Module(body=[function], type_ignores=[])
+    namespace = {"Any": object, "_fail": lambda message: (_ for _ in ()).throw(ValueError(message))}
+    exec(compile(ast.fix_missing_locations(program), str(source), "exec"), namespace)
+    with patch.dict(sys.modules, {"camctl.persistence.repositories.capture_selection": module}):
+        namespace["_check_evidence_member"](1, "capture_selection", request(selection, 10).document(), 1)
+        with pytest.raises(ValueError, match="拍摄选择申请无效"):
+            namespace["_check_evidence_member"](1, "capture_selection", {"device_id": "camera"}, 1)
 
 
 def test_selection_skips_candidates_without_resource_qualification(selection, monkeypatch):
