@@ -109,6 +109,45 @@ def load_reads():
 
 
 class RetryReadFactsTests(unittest.TestCase):
+    def test_internal_unknown_exhaustion_checks_original_owner_and_source(self):
+        module, modules = load_reads()
+        operations = modules["camctl.persistence.repositories.operations"]
+        outputs = modules["camctl.persistence.repositories.outputs"]
+        outputs._internal_input_requirement = lambda row: row["reason"]
+        rows = {("operation_runs", 7): {"copy_id": 9, "action_id": 1},
+            ("file_copies", 9): {"id": 9, "delivery_id": None, "processing_id": 8,
+                "inspection_id": None, "source_device_file_id": 15, "slot_device_id": None},
+            ("recording_processing", 8): {"action_id": 1, "reason": None},
+            ("segment_inspections", 6): {"action_id": 1, "source_device_file_id": 15},
+            ("actions", 1): {"status": 2, "cancel_requested": 0, "scheduled_at": 10},
+            ("actions", 2): {"device_id": "camera", "driver_id": "driver"},
+            ("actions", 3): {"device_id": "camera", "driver_id": "driver"},
+            ("device_files", 15): {"observer_action_id": 2, "source_action_id": 3, "completion_state": 3}}
+        operations._load_row = lambda connection, table, identity: rows.get((table, identity))
+        reads = module.RetryWaitReads(None)
+        with patch.dict(sys.modules, modules):
+            self.assertTrue(reads.unknown_exhaustion_eligible(7, 20))
+            action = rows[("actions", 1)]
+            action["cancel_requested"] = 1
+            self.assertFalse(reads.unknown_exhaustion_eligible(7, 20))
+            action["cancel_requested"] = 0
+            processing = rows[("recording_processing", 8)]
+            processing["reason"] = "input_not_needed"
+            self.assertFalse(reads.unknown_exhaustion_eligible(7, 20))
+            processing["reason"] = None
+            source = rows[("device_files", 15)]
+            source["completion_state"] = 2
+            self.assertFalse(reads.unknown_exhaustion_eligible(7, 20))
+            source["completion_state"] = 3
+            rows[("actions", 3)]["device_id"] = "other"
+            with self.assertRaises(module.ConsistencyError): reads.unknown_exhaustion_eligible(7, 20)
+            rows[("actions", 3)]["device_id"] = "camera"
+            copy = rows[("file_copies", 9)]
+            copy.update(processing_id=None, inspection_id=6)
+            self.assertTrue(reads.unknown_exhaustion_eligible(7, 20))
+            rows[("segment_inspections", 6)]["source_device_file_id"] = 16
+            with self.assertRaises(module.ConsistencyError): reads.unknown_exhaustion_eligible(7, 20)
+
     def test_recovered_unknown_requires_original_result_and_no_unsettled_call(self):
         module, modules = load_reads()
         status = SimpleNamespace(UNKNOWN=object())
@@ -414,8 +453,7 @@ class ExhaustReadTests(unittest.TestCase):
             def __init__(self, connection): pass
             def last_attempt(self, run_id, used): return (12, 4, "{}", 101)
             def recovered_unknown(self, run_id, used): return (12, 4, "{}", 101)
-            def read_eligible(self, run_id, now, *, allow_unheld=False):
-                assert allow_unheld
+            def unknown_exhaustion_eligible(self, run_id, now):
                 return self.eligible
 
         command, intent, module = load_exhaust_command(Reads, {"status": 2, "attempts_used": 2})

@@ -154,6 +154,52 @@ class RetryWaitReads:
             return None
         return last
 
+    def unknown_exhaustion_eligible(self, run_id, occurred_at):
+        """按原副本归属核对无需新读取机会的未知结果耗尽。"""
+        from .operations import _load_row
+        from .outputs import _internal_input_requirement, _read_is_due, _read_owner_eligible
+        from camctl.outputs.read_discovery import read_copy_dispatch_eligible
+
+        run = _load_row(self.connection, "operation_runs", run_id)
+        copy = None if run is None else _load_row(self.connection, "file_copies", run["copy_id"])
+        if run is None or copy is None:
+            raise ConsistencyError("读取耗尽缺少原流程或副本")
+        parents = [("deliveries", copy.get("delivery_id")),
+                   ("recording_processing", copy.get("processing_id")),
+                   ("segment_inspections", copy.get("inspection_id"))]
+        parents = [(table, identity) for table, identity in parents if identity is not None]
+        if len(parents) != 1:
+            raise ConsistencyError("读取耗尽缺少唯一所属责任")
+        table, identity = parents[0]
+        parent = _load_row(self.connection, table, identity)
+        if parent is None or parent.get("action_id") != run.get("action_id"):
+            raise ConsistencyError("读取耗尽的所属责任不一致")
+        action = _load_row(self.connection, "actions", run["action_id"])
+        if not _read_owner_eligible(action) or not _read_is_due(action, occurred_at):
+            return False
+        if not read_copy_dispatch_eligible(self.connection, copy["id"]):
+            return False
+        if table == "deliveries":
+            return self.read_eligible(run_id, occurred_at, allow_unheld=True)
+        if table == "recording_processing" and _internal_input_requirement(parent) is not None:
+            return False
+        if table == "segment_inspections" and parent.get("source_device_file_id") != copy.get("source_device_file_id"):
+            raise ConsistencyError("读取耗尽的分段检查来源不一致")
+        source_id = copy.get("source_device_file_id")
+        source = None if source_id is None else _load_row(self.connection, "device_files", source_id)
+        if source is None:
+            raise ConsistencyError("内部读取耗尽缺少原设备来源")
+        observer = _load_row(self.connection, "actions", source["observer_action_id"])
+        origin = _load_row(self.connection, "actions", source["source_action_id"])
+        if observer is None or origin is None:
+            raise ConsistencyError("内部读取耗尽缺少原来源动作")
+        binding = (observer.get("device_id"), observer.get("driver_id"))
+        if (not all(isinstance(value, str) and value for value in binding)
+                or binding != (origin.get("device_id"), origin.get("driver_id"))
+                or (copy.get("slot_device_id") is not None and copy["slot_device_id"] != binding[0])):
+            raise ConsistencyError("内部读取耗尽的原来源绑定不一致")
+        return source.get("completion_state") == int(enum_for("device_files.completion_state").COMPLETE)
+
     def completed(self, run_id, attempts_used):
         from camctl.history.events import reason_for_branch
         from .operations import _RETRY_WAIT_EVENT

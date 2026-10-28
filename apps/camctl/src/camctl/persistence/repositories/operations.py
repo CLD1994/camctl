@@ -1664,7 +1664,7 @@ class _ExhaustBlockedReadCommand(BeginAttemptCommand):
                 or last[0] != self._exhaust_attempt_id
                 or (last[1] != int(_ATTEMPT_STATUS.FAILED)
                     and reads.recovered_unknown(run_id, run["attempts_used"]) is None)
-                or not (reads.read_eligible(run_id, intent.occurred_at, allow_unheld=True)
+                or not (reads.unknown_exhaustion_eligible(run_id, intent.occurred_at)
                         if last[1] == int(_ATTEMPT_STATUS.UNKNOWN)
                         else reads.read_eligible(run_id, intent.occurred_at))):
             return self._rejected("qualification_changed")
@@ -2241,6 +2241,8 @@ def _operation_finish_guard(event, context) -> None:
                     if (owner.get("id") != after.get("action_id") or not _read_owner_eligible(owner)
                             or not _read_is_due(owner, event.occurred_at)
                             or not read_copy_dispatch_eligible(reads.connection, copy["id"])
+                            or (copy.get("source_device_file_id") is not None
+                                and not reads.unknown_exhaustion_eligible(row.row_id, event.occurred_at))
                             or (processing_id is not None and (processing is None
                                 or _internal_input_requirement(processing) is not None))):
                         _fail("未知读取耗尽要求所属工作仍需要原副本")
