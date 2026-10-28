@@ -7,7 +7,7 @@ import pytest
 
 from camctl.contracts import enums
 from camctl.contracts.values import ConsistencyError
-from camctl.persistence.repositories.binding_read_cancel import binding_cancel_event
+from camctl.persistence.repositories.binding_read_cancel import binding_cancel_event, saved_binding_read_failure
 
 
 @pytest.fixture
@@ -47,3 +47,33 @@ def test_cancel_event_returns_fixed_reference_and_limits_history(history_stubs):
 def test_cancel_event_rejects_missing_duplicate_or_incomplete_history(history_stubs, rows):
     with pytest.raises(ConsistencyError):
         binding_cancel_event(Connection(rows), 8, 5)
+
+
+@pytest.mark.parametrize("damage", [None, "wrong_copy", "wrong_error", "cancel_selected", "unknown_result"])
+def test_retirement_requires_exact_saved_read_result(monkeypatch, damage):
+    error = {"code": "device_binding_unavailable", "stage": "execution", "details": {"reason": "missing"}}
+    result = {"settlement": {"basis": "observed", "evidence": {"type": "read_returned", "version": 1, "data": {}}}}
+    attempt = {"run_id": 3, "result_event_id": 11, "status": 2, "result_json": result, "error_json": None}
+    run = {"id": 3, "action_id": 4, "copy_id": 5, "status": 4, "error_json": error}
+    evidence = {"error": error, "cancel_event": None}
+    events = [{"type": 12, "reason": 1, "event_id": 11, "body": {"rows": [{
+        "table": "operation_attempts", "id": 6, "after": {"values": {"status": 2, "result_json": result}}}]}},
+        {"type": 10, "reason": 3, "body": {"evidence": {"binding_read_finish": evidence}, "rows": [{
+            "table": "operation_runs", "id": 3, "after": {"values": {"status": 4, "error_json": error}}}]}}]
+    if damage == "wrong_copy":
+        run["copy_id"] = 99
+    elif damage == "wrong_error":
+        evidence["error"] = {"code": "other"}
+    elif damage == "cancel_selected":
+        evidence["cancel_event"] = {"event_id": 20}
+    elif damage == "unknown_result":
+        events[0]["reason"] = 3
+    transaction = ModuleType("camctl.persistence.transaction")
+    transaction.saved_transaction_events = lambda connection, key: events
+    transaction.row_facts = lambda connection, table, identity: attempt if table == "operation_attempts" else run
+    monkeypatch.setitem(sys.modules, transaction.__name__, transaction)
+    if damage is None:
+        assert saved_binding_read_failure(object(), "original-key", 4, 5, error)
+    else:
+        with pytest.raises(ConsistencyError):
+            saved_binding_read_failure(object(), "original-key", 4, 5, error)

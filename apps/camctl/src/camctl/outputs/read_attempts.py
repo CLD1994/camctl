@@ -504,7 +504,19 @@ async def held_binding_read_result(runtime, copy_id, binding_result, business):
     finish = AttemptFinish(held.ticket, validate_outcome(held.ticket, outcome, held.evidence),
         held.occurred_at if binding_read else runtime.occurred_at(),
         run_finish=run_finish)
-    return hold_read_result(runtime, finish, business=selected_business,
+    key = new_operation_key()
+    if binding_read and isinstance(selected_business, PendingReadBusiness):
+        from camctl.persistence.repositories.outputs import FailReadBinding
+        from camctl.persistence.repositories.capture import FinishBindingFailure
+        request = selected_business.request
+        if isinstance(request, FailReadBinding):
+            request = replace(request, read_result_key=key)
+        elif isinstance(request, FinishBindingFailure):
+            request = replace(request, read_result_key=key, read_copy_id=copy_id)
+        else:
+            raise ConsistencyError("原读取绑定业务申请类型不符")
+        selected_business = replace(selected_business, request=request)
+    return hold_read_result(runtime, finish, business=selected_business, key=key,
                             preserved_run_terminal=status[0] not in (1, 2),
                             binding_read=binding_read, suppress_diagnostic=binding_read)
 
@@ -620,9 +632,16 @@ async def save_read_result(runtime, pending, *, retry=False):
             prepared = await _prepare_stopped_read(runtime, pending)
         if prepared is None:
             return None
-        outcome = await runtime.database.write(
-            lambda owned: (runtime.operations.finish_binding_read(prepared.finish, prepared.key, owned)
-                if prepared.binding_read else runtime.operations.finish_attempt(prepared.finish, prepared.key, owned)), key=prepared.key)
+        control_error = None
+        try:
+            outcome = await runtime.database.write(
+                lambda owned: (runtime.operations.finish_binding_read(prepared.finish, prepared.key, owned)
+                    if prepared.binding_read else runtime.operations.finish_attempt(prepared.finish, prepared.key, owned)), key=prepared.key)
+        except BaseException as error:
+            outcome = db_outcome_for(error)
+            if outcome is None or outcome.kind is not DbOutcomeKind.COMPLETED:
+                raise
+            control_error = error
         if outcome.kind is not DbOutcomeKind.COMPLETED:
             raise db_failure(ConsistencyError,
                 f"原读取结果未可靠保存（{outcome.kind.value}）: {outcome.error}", outcome)
@@ -637,11 +656,15 @@ async def save_read_result(runtime, pending, *, retry=False):
             identity = (prepared.finish.ticket.run_id, prepared.finish.ticket.attempt_id)
             if runtime.pending_read_results.get(identity) is pending:
                 runtime.pending_read_results[identity] = prepared
+            if result.run_status is RunStatus.FAILED and prepared.business is not None:
+                _record_read_business_error(prepared.business)
         if result.run_was_terminal or result.disposition is FinishDisposition.ALREADY_ENDED:
             prepared = replace(prepared, preserved_run_terminal=True)
             identity = (prepared.finish.ticket.run_id, prepared.finish.ticket.attempt_id)
             if runtime.pending_read_results.get(identity) is pending:
                 runtime.pending_read_results[identity] = prepared
+        if control_error is not None:
+            raise control_error
         return prepared
 
     return await pending.result_save.run(save)

@@ -120,6 +120,7 @@ def isolate(monkeypatch):
     monkeypatch.setattr(enums, "resource_bytes", lambda name: pytest.fail("禁止读取真实包资源"))
     for item in stub_modules:
         monkeypatch.setitem(sys.modules, item.__name__, item)
+    monkeypatch.setattr(read_attempts, "_record_read_business_error", lambda pending: None)
 
 
 def setup(monkeypatch, status, canceled, *, digest_missing=True):
@@ -278,6 +279,28 @@ def test_cancel_transaction_receipt_retires_binding_business(monkeypatch):
     assert runtime.pending_read_results[(5, 1)] is result
 
 
+@pytest.mark.parametrize("capture", [False, True])
+def test_binding_business_retains_original_read_result_key(monkeypatch, capture):
+    @dataclass(frozen=True)
+    class DeliveryRequest:
+        read_result_key: object = None
+    @dataclass(frozen=True)
+    class CaptureRequest:
+        read_result_key: object = None
+        read_copy_id: object = None
+    output = sys.modules["camctl.persistence.repositories.outputs"]
+    monkeypatch.setattr(output, "FailReadBinding", DeliveryRequest, raising=False)
+    capture_module = module("camctl.persistence.repositories.capture", FinishBindingFailure=CaptureRequest)
+    monkeypatch.setitem(sys.modules, capture_module.__name__, capture_module)
+    runtime, _, _ = setup(monkeypatch, 2, 0)
+    business = read_attempts.PendingReadBusiness(object(), CaptureRequest() if capture else DeliveryRequest(), "business-key")
+    pending = asyncio.run(read_attempts.held_binding_read_result(runtime, 2, object(), business))
+    assert pending.business.key == "business-key"
+    assert pending.business.request.read_result_key == pending.key
+    if capture:
+        assert pending.business.request.read_copy_id == 2
+
+
 def test_unknown_then_canceled_receipt_reuses_original_candidate_and_key(monkeypatch):
     runtime, _, _ = setup(monkeypatch, 2, 0)
     pending = asyncio.run(read_attempts.held_binding_read_result(
@@ -298,6 +321,28 @@ def test_unknown_then_canceled_receipt_reuses_original_candidate_and_key(monkeyp
     result = asyncio.run(read_attempts.save_read_result(runtime, pending, retry=True))
     assert calls == [(pending.finish, pending.key), (pending.finish, pending.key)]
     assert result.business is None and result.finish.run_finish.status is RunOutcome.CANCELED
+
+
+@pytest.mark.parametrize("status,recorded", [(RunStatus.FAILED, True), (RunStatus.CANCELED, False)])
+def test_completed_receipt_survives_control_error_and_records_only_selected_failure(monkeypatch, status, recorded):
+    runtime, _, _ = setup(monkeypatch, 2, 0)
+    business = SimpleNamespace(diagnostic=object())
+    pending = asyncio.run(read_attempts.held_binding_read_result(runtime, 2, object(), business))
+    receipt = SimpleNamespace(kind=DbOutcomeKind.COMPLETED, value=SimpleNamespace(
+        run_was_terminal=False, disposition=FinishDisposition.SAVED, run_status=status))
+    control = KeyboardInterrupt("after commit")
+    async def write(callback, *, key):
+        raise control
+    runtime.database.write = write
+    monkeypatch.setattr(read_attempts, "db_outcome_for", lambda error: receipt)
+    errors = []
+    monkeypatch.setattr(read_attempts, "_record_read_business_error", errors.append)
+    with pytest.raises(KeyboardInterrupt):
+        asyncio.run(read_attempts.save_read_result(runtime, pending))
+    held = runtime.pending_read_results[(5, 1)]
+    assert held.key == pending.key
+    assert (held.business is business) is recorded
+    assert errors == ([business] if recorded else [])
 
 
 def test_business_held_before_diagnostic_control_error(monkeypatch):
