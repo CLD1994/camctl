@@ -318,11 +318,18 @@ class SessionContext:
                 f"poll_interval_s 必须是有限正秒数: {self.poll_interval_s!r}")
 
 
-def _outcome_error(reason: str, details: Mapping[str, Any] | None = None) -> SessionOutcome:
+def _outcome_error(
+    reason: str, details: Mapping[str, Any] | None = None, *,
+    error: BaseException | None = None,
+    sources: tuple[tuple[Mapping[str, Any], BaseException], ...] = (),
+) -> SessionOutcome:
     from types import MappingProxyType
 
+    if error is not None and details is not None and "exception" in details:
+        sources = (*sources, (details["exception"], error))
     return SessionOutcome(
-        succeeded=False, reason=reason, details=details or MappingProxyType({})
+        succeeded=False, reason=reason, details=details or MappingProxyType({}),
+        _diagnostic_sources=sources,
     )
 
 
@@ -512,6 +519,7 @@ def _ordered_sources_outcome(
     )
     if include_unknown_commit:
         details["unknown_commit"] = True
+    diagnostic_sources = [(details["exception"], primary)]
     secondary: list[dict[str, Any]] = []
     for leaf, facts in sources[1:]:
         secondary_reason, secondary_details = _exception_details(
@@ -521,11 +529,13 @@ def _ordered_sources_outcome(
             facts_override=facts,
         )
         secondary.append({"reason": secondary_reason, "details": secondary_details})
+        diagnostic_sources.append((secondary_details["exception"], leaf))
     if secondary:
         details["secondary_errors"] = secondary
     if diagnostic_error is not None:
         details["exception"] = exception_diagnostic(diagnostic_error)
-    return _outcome_error(reason, details)
+        diagnostic_sources.append((details["exception"], diagnostic_error))
+    return _outcome_error(reason, details, sources=tuple(diagnostic_sources))
 
 
 def _is_typed_sync_control(error: BaseException) -> bool:
@@ -557,12 +567,14 @@ def _merge_failure_outcome(
         secondary = list(details.pop("secondary_errors", ()))
         secondary.extend(_secondary_outcomes(current))
         details["secondary_errors"] = secondary
-        return _outcome_error(added.reason or "state_db_error", details)
+        return _outcome_error(added.reason or "state_db_error", details,
+                              sources=(*added._diagnostic_sources, *current._diagnostic_sources))
     details = dict(current.details)
     secondary = list(details.pop("secondary_errors", ()))
     secondary.extend(_secondary_outcomes(added))
     details["secondary_errors"] = secondary
-    return _outcome_error(current.reason or "state_db_error", details)
+    return _outcome_error(current.reason or "state_db_error", details,
+                          sources=(*current._diagnostic_sources, *added._diagnostic_sources))
 
 
 def _remember_error(errors: list[BaseException], error: BaseException | None) -> None:
@@ -722,11 +734,13 @@ async def _submit_session(
             outcome = _outcome_error(
                 "configuration_error",
                 {"error": str(error), "exception": exception_diagnostic(error)},
+                error=error,
             )
         except Exception as error:
             outcome = _outcome_error(
                 "state_db_error",
                 {"error": str(error), "exception": exception_diagnostic(error)},
+                error=error,
             )
         if database is not None:
             try:
@@ -818,7 +832,7 @@ async def _run_session(
                 await context.on_session_locked()
             except Exception as error:
                 return _outcome_error(
-                    "state_db_error", {"error": f"日志启动收场未能启动: {error}", "exception": exception_diagnostic(error)})
+                    "state_db_error", {"error": f"日志启动收场未能启动: {error}", "exception": exception_diagnostic(error)}, error=error)
         if context.startup_outcome is not None:
             return context.startup_outcome
         try:
@@ -826,9 +840,9 @@ async def _run_session(
             context.database = database
         except (RuntimeLibraryError, DirectoryBindingError) as error:
             # 同 submit：运行库不满足部署要求归配置错误，先于业务库打开拒绝。
-            return _outcome_error("configuration_error", {"error": str(error), "exception": exception_diagnostic(error)})
+            return _outcome_error("configuration_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
         except Exception as error:
-            return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)})
+            return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
         context.report_change_wm = lambda: database.read(
             lambda owned: _read_report_change_wm(owned.connection),
             description="报告业务水位")
@@ -836,7 +850,7 @@ async def _run_session(
             try:
                 await context.on_session_open(database)
             except Exception as error:
-                return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)})
+                return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
         if source is not None:
             try:
                 await accept_input(
@@ -860,13 +874,13 @@ async def _run_session(
                         stage="input_handling",
                         include_unknown_commit=True,
                     )
-                return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)})
+                return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
 
         try:
             policy = await database.read(
                 lambda owned: context.clock_policy(owned.connection), description="启动时钟依据")
         except Exception as error:
-            return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)})
+            return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
         check = check_clock(policy, context.clock)
         try:
             mode = await enter_execution(
@@ -874,7 +888,7 @@ async def _run_session(
                 _clock_context(context, database),
             )
         except Exception as error:
-            return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)})
+            return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
         if mode is ExecutionMode.FATAL:
             return _outcome_error("state_db_error", {"error": "可信时间下界保存失败"})
         if mode is ExecutionMode.RESTRICTED:
@@ -945,7 +959,7 @@ async def _run_session(
             try:
                 await context.snapshot_owner.start()
             except Exception as error:
-                return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)})
+                return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
         while True:
             observed_wake = None if context.wake is None else context.wake.snapshot()
             try:
@@ -953,7 +967,7 @@ async def _run_session(
                     try:
                         await context.snapshot_owner.discover()
                     except Exception as error:
-                        return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)})
+                        return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
                 fatal = await _drive_flows(context)
             except ClockBecameUntrusted as clock_error:
                 async def transition_to_restricted() -> SessionOutcome:
@@ -978,7 +992,7 @@ async def _run_session(
                         )
                         details = dict(outcome.details)
                         details["clock_error"] = str(clock_error)
-                        return _outcome_error(outcome.reason, details)
+                        return _outcome_error(outcome.reason, details, sources=outcome._diagnostic_sources)
                     except BaseException as error:
                         if _is_typed_sync_control(error):
                             waiter.record_sync_control(error)
@@ -1007,7 +1021,7 @@ async def _run_session(
                 return await waiter.run(
                     "late-clock-restricted-transition", transition_to_restricted)
             except (DirectoryBindingError, DeviceConfigurationError) as error:
-                return _outcome_error("configuration_error", {"error": str(error), "exception": exception_diagnostic(error)})
+                return _outcome_error("configuration_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
             if fatal is not None:
                 # 状态库错误：停止依赖已失效条件的工作，接纳随进程退出。
                 return fatal
@@ -1016,7 +1030,7 @@ async def _run_session(
                 # 责任；本地发现任务不能使等待它结束的收场入口永远跳过。
                 decision = classify_work(await _run_work_facts(context, include_local=False))
             except Exception as error:
-                return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)})
+                return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
             if decision.kind is not WorkDecisionKind.NEEDS_DRIVER:
                 async def settle_before_close() -> Exception | None:
                     try:
@@ -1048,7 +1062,7 @@ async def _run_session(
             try:
                 await _wait_for_more_work(context, database, observed=observed_wake)
             except Exception as error:
-                return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)})
+                return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
 
     outcome: SessionOutcome | None = None
     original: BaseException | None = None
@@ -1249,9 +1263,11 @@ async def _merge_emergency_stops(
     """执行应急停止并把诊断并入原错误；收场失败不掩盖原错误。"""
     from dataclasses import replace as _replace
 
+    emergency_error = None
     try:
         stops = list(await context.emergency_settlement())
     except Exception as error:
+        emergency_error = error
         stops = [{"outcome": "not_attempted", "attempts_used": 0,
                   "record_status": "not_recorded",
                   "error": f"应急收场失败: {error}"}]
@@ -1260,7 +1276,10 @@ async def _merge_emergency_stops(
     details = dict(outcome.details)
     existing = list(details.get("emergency_stops", ()))
     details["emergency_stops"] = existing + stops
-    return _replace(outcome, details=details)
+    sources = outcome._diagnostic_sources
+    if emergency_error is not None:
+        sources = (*sources, (None, emergency_error))
+    return _replace(outcome, details=details, _diagnostic_sources=sources)
 
 
 def _work_facts_query(context: SessionContext):
@@ -1395,12 +1414,12 @@ async def _drive_flows(context: SessionContext) -> SessionOutcome | None:
         except StateDbFailure as error:
             return _outcome_error("state_db_error", {
                 "error": str(error), "exception": exception_diagnostic(error),
-            })
+            }, error=error)
         except Exception as error:
             return _outcome_error("state_db_error", {
                 "error": f"后台流程异常: {error}",
                 "exception": exception_diagnostic(error),
-            })
+            }, error=error)
         try:
             from camctl.logging_runtime.diagnostics import diagnostic_scope
 
@@ -1416,12 +1435,12 @@ async def _drive_flows(context: SessionContext) -> SessionOutcome | None:
         except StateDbFailure as error:
             return _outcome_error("state_db_error", {
                 "error": str(error), "exception": exception_diagnostic(error),
-            })
+            }, error=error)
         except Exception as error:
             return _outcome_error("state_db_error", {
                 "error": f"流程 {name} 异常: {error}",
                 "exception": exception_diagnostic(error),
-            })
+            }, error=error)
     return None
 
 
@@ -1942,12 +1961,12 @@ async def _run_restricted_flows(
         try:
             await flow(context)
         except (DirectoryBindingError, DeviceConfigurationError) as error:
-            return _outcome_error("configuration_error", {"error": str(error), "exception": exception_diagnostic(error)})
+            return _outcome_error("configuration_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
         except Exception as error:
             # 期间的状态库等会话错误保留为实际主错误，不再执行
             # 依赖已失效条件的报告工作。
             return _outcome_error("state_db_error",
-                                  {"error": f"受限收场流程 {name} 失败: {error}", "exception": exception_diagnostic(error)})
+                                  {"error": f"受限收场流程 {name} 失败: {error}", "exception": exception_diagnostic(error)}, error=error)
     return None
 
 
@@ -1960,10 +1979,10 @@ async def _restricted_once_report(context: SessionContext) -> SessionOutcome:
             raise
         except (DirectoryBindingError, DeviceConfigurationError) as error:
             await _trigger_failure_log(context, error)
-            return _outcome_error("configuration_error", {"error": str(error), "exception": exception_diagnostic(error)})
+            return _outcome_error("configuration_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
         except StateDbFailure as error:
             await _trigger_failure_log(context, error)
-            return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)})
+            return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
         except Exception as error:
             # 一次报告机会失败：保留诊断与责任，本次不循环重试，
             # 仍按时钟异常退出。

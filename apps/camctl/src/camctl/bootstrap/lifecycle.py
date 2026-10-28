@@ -290,7 +290,8 @@ def build_runtime(
             configured_directory_binding(getattr(config.paths, name), name)
     except DirectoryBindingError as error:
         startup_error = SessionOutcome(succeeded=False, reason="configuration_error",
-                                       details={"error": str(error)})
+                                       details={"error": str(error)},
+                                       _diagnostic_sources=((None, error),))
     state_db = Path(config.paths.state_db).expanduser().resolve()
     state_db_present: bool | None = None
     state_db_regular: bool | None = None
@@ -303,6 +304,7 @@ def build_runtime(
             startup_error = SessionOutcome(
                 succeeded=False, reason="state_db_error",
                 details={"error": f"状态库不存在: {state_db}: {error}"},
+                _diagnostic_sources=((None, error),),
             )
         except OSError as error:
             # 不能把 stat 权限错误推断成缺失；没有可靠存在事实时，
@@ -312,6 +314,7 @@ def build_runtime(
             startup_error = SessionOutcome(
                 succeeded=False, reason="state_db_error",
                 details={"error": f"状态库存在性无法确认: {state_db}: {error}"},
+                _diagnostic_sources=((None, error),),
             )
         else:
             state_db_present = True
@@ -338,6 +341,7 @@ def build_runtime(
                     startup_error = SessionOutcome(
                         succeeded=False, reason="configuration_error",
                         details={"error": str(error)},
+                        _diagnostic_sources=((None, error),),
                     )
                 except (StateDatabaseError, OSError) as error:
                     # stat 已确认是普通文件；后续损坏、权限或打开错误
@@ -345,6 +349,7 @@ def build_runtime(
                     startup_error = SessionOutcome(
                         succeeded=False, reason="state_db_error",
                         details={"error": str(error)},
+                        _diagnostic_sources=((None, error),),
                     )
     session_lock, admission_lock = lock_file_paths(state_db)
     deps = RuntimeDeps(
@@ -486,9 +491,9 @@ def _log_wiring(
     )
 
 
-async def _emit_session_error(deps: RuntimeDeps, message: str) -> None:
+async def _emit_session_error(deps: RuntimeDeps, message: str, *, structured: bool = False) -> None:
     """会话诊断等待实际写入凭据，不可用时沿原入口转交 stderr。"""
-    await _emit_log_diagnostic(deps, message)
+    await _emit_log_diagnostic(deps, message, structured=structured)
 
 
 def _format_session_exception(error: BaseException) -> str:
@@ -507,12 +512,46 @@ def _attach_session_diagnostic_error(target: BaseException, label: str, error: B
 
 
 def _failed_outcome_message(deps: RuntimeDeps, outcome: SessionOutcome) -> str:
-    details = json.dumps(dict(outcome.details), ensure_ascii=False, separators=(",", ":"))
-    return f"{deps.mode.value} 会话失败: {outcome.reason}\n诊断详情: {details}"
+    """单独投影日志，机器结果及异常快照保持原样。"""
+    from camctl.logging_runtime.diagnostics import diagnostic_snapshot
+    from camctl.logging_runtime.formatting import encode_record
+    from camctl.logging_runtime.models import LogLevel
+
+    def project(value):
+        for snapshot, error in outcome._diagnostic_sources:
+            if snapshot is value and snapshot is not None:
+                return error
+        if isinstance(value, Mapping):
+            return {key: project(item) for key, item in value.items()}
+        if isinstance(value, (tuple, list)):
+            return [project(item) for item in value]
+        return value
+
+    details = project(outcome.details)
+    unplaced = [error for snapshot, error in outcome._diagnostic_sources if snapshot is None]
+    document = {"event": "session_failed", "command": deps.mode.value,
+                "reason": outcome.reason, "details": details}
+    if unplaced:
+        document["exceptions"] = unplaced
+    return encode_record(LogLevel.ERROR, diagnostic_snapshot(document))
+
+
+def _direct_exception_message(deps: RuntimeDeps, error: BaseException) -> str | None:
+    """未准备过的异常由最终会话边界完整交付。"""
+    from camctl.logging_runtime.diagnostics import diagnostic_reference_for, diagnostic_snapshot
+    from camctl.logging_runtime.formatting import encode_record
+    from camctl.logging_runtime.models import LogLevel
+
+    if diagnostic_reference_for(error) is not None:
+        return None
+    return encode_record(LogLevel.ERROR, diagnostic_snapshot({
+        "event": "session_exception", "command": deps.mode.value,
+        "exception": error,
+    }))
 
 
 async def _emit_log_diagnostic(
-    deps: RuntimeDeps, message: str, *, stderr_only: bool = False,
+    deps: RuntimeDeps, message: str, *, stderr_only: bool = False, structured: bool = False,
 ) -> None:
     """等待普通日志实际写入；不可用时写一次 stderr，不触发副本。"""
     if (not stderr_only and not deps.log_path_unsafe
@@ -522,7 +561,7 @@ async def _emit_log_diagnostic(
 
         try:
             result = await deps.log_runtime.channel.deliver_important(
-                LogRecord(level=LogLevel.ERROR, message=message))
+                LogRecord(level=LogLevel.ERROR, message=message, structured=structured))
             if result.delivered is True or result.fallback_written is True:
                 return
         except Exception as error:
@@ -1127,10 +1166,10 @@ async def _execute_command(
     )
     if deps.startup_error is not None and not minimal_bad_database_run:
         finish_command(business_succeeded=False, business_reason=deps.startup_error.reason)
-        if deps.log_runtime is not None:
-            try:
-                await _emit_session_error(deps, _failed_outcome_message(deps, deps.startup_error))
-            finally:
+        try:
+            await _emit_session_error(deps, _failed_outcome_message(deps, deps.startup_error), structured=True)
+        finally:
+            if deps.log_runtime is not None:
                 await _close_log_runtime(deps)
         return deps.startup_error
 
@@ -1457,11 +1496,11 @@ async def _execute_command(
         # 所有必要业务与资源收场先结束，文件接纳不能成为它们的前置。
         try:
             if primary_error is not None:
-                from camctl.logging_runtime.diagnostics import diagnostic_state_for
-                if diagnostic_state_for(primary_error) is None:
-                    await _emit_session_error(deps, _format_session_exception(primary_error))
+                message = _direct_exception_message(deps, primary_error)
+                if message is not None:
+                    await _emit_session_error(deps, message, structured=True)
             if outcome is not None and not outcome.succeeded:
-                await _emit_session_error(deps, _failed_outcome_message(deps, outcome))
+                await _emit_session_error(deps, _failed_outcome_message(deps, outcome), structured=True)
         except BaseException as error:
             remember_cleanup_error("会话失败诊断异常", error)
         record_event("session.cleanup", cleanup_error_count=len(cleanup_errors))
@@ -1582,14 +1621,17 @@ def _shutdown_state_outcome(
                "message": f"{failure.error_code}: {failure.error_message}",
                "worker_failure": _worker_failure_details(failure)}
     if outcome.succeeded:
-        return SessionOutcome(succeeded=False, reason="state_db_error", details=details)
+        return SessionOutcome(succeeded=False, reason="state_db_error", details=details,
+                              _diagnostic_sources=outcome._diagnostic_sources)
     previous = dict(outcome.details)
     secondary = list(previous.pop("secondary_errors", ()))
     if outcome.reason == "report_error":
         details["secondary_errors"] = [{"reason": outcome.reason, "details": previous}, *secondary]
-        return SessionOutcome(succeeded=False, reason="state_db_error", details=details)
+        return SessionOutcome(succeeded=False, reason="state_db_error", details=details,
+                              _diagnostic_sources=outcome._diagnostic_sources)
     previous["secondary_errors"] = [*secondary, {"reason": "state_db_error", "details": details}]
-    return SessionOutcome(succeeded=False, reason=outcome.reason, details=previous)
+    return SessionOutcome(succeeded=False, reason=outcome.reason, details=previous,
+                          _diagnostic_sources=outcome._diagnostic_sources)
 
 
 def _shutdown_configuration_outcome(
@@ -1599,14 +1641,17 @@ def _shutdown_configuration_outcome(
     details = {"stage": "shutdown", "message": failure.error_message,
                "worker_failure": _worker_failure_details(failure)}
     if outcome.succeeded:
-        return SessionOutcome(succeeded=False, reason="configuration_error", details=details)
+        return SessionOutcome(succeeded=False, reason="configuration_error", details=details,
+                              _diagnostic_sources=outcome._diagnostic_sources)
     previous = dict(outcome.details)
     secondary = list(previous.pop("secondary_errors", ()))
     if outcome.reason == "report_error":
         details["secondary_errors"] = [{"reason": outcome.reason, "details": previous}, *secondary]
-        return SessionOutcome(succeeded=False, reason="configuration_error", details=details)
+        return SessionOutcome(succeeded=False, reason="configuration_error", details=details,
+                              _diagnostic_sources=outcome._diagnostic_sources)
     previous["secondary_errors"] = [*secondary, {"reason": "configuration_error", "details": details}]
-    return SessionOutcome(succeeded=False, reason=outcome.reason, details=previous)
+    return SessionOutcome(succeeded=False, reason=outcome.reason, details=previous,
+                          _diagnostic_sources=outcome._diagnostic_sources)
 
 
 def close_runtime(

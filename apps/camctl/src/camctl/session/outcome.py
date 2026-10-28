@@ -31,6 +31,9 @@ class SessionOutcome:
     needs_run: bool | None = None
     reason: str | None = None
     details: Mapping[str, Any] = field(default_factory=_empty_details)
+    # 快照与原异常只供日志投影使用，不属于机器结果或持久化内容。
+    _diagnostic_sources: tuple[tuple[Mapping[str, Any] | None, BaseException], ...] = field(
+        default=(), repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.succeeded, bool):
