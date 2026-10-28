@@ -122,7 +122,7 @@ class AvailabilityAssembly:
             return AvailabilityProgress.READY
         max_attempts = _device_attempts(declaration, "copy", 3, "max_read_attempts")
         if candidate.held:
-            if candidate.attempts_used == 0 or candidate.retry_wait_required != 0:
+            if candidate.retry_wait_required != 0:
                 return AvailabilityProgress.READY
             from camctl.persistence.repositories.retry_wait_reads import held_read_ready_for_availability
             eligible = await runtime.database.read(lambda owned: held_read_ready_for_availability(

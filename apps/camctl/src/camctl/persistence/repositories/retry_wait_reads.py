@@ -74,7 +74,7 @@ def read_attempt_budget_available(connection, copy_id, max_attempts):
 
 
 def held_read_ready_for_availability(connection, copy_id, device_id, occurred_at, max_attempts):
-    """原持槽读取的间隔和调用均已结束时，才可为它检查设备。"""
+    """持槽读取尚未尝试，或原调用及间隔已结束时可检查设备。"""
     from camctl.outputs.read_discovery import device_holder
 
     if device_holder(connection, device_id) != copy_id:
@@ -83,9 +83,13 @@ def held_read_ready_for_availability(connection, copy_id, device_id, occurred_at
     if run is None:
         return False
     run_id, _, used, waiting = run
-    if not used or waiting != 0:
+    if waiting != 0:
         return False
     reads = RetryWaitReads(connection)
+    if not used:
+        if not reads.no_attempts(run_id):
+            raise ConsistencyError("零次读取责任存在原尝试")
+        return reads.read_eligible(run_id, occurred_at)
     return reads.completed(run_id, used) and reads.read_eligible(run_id, occurred_at)
 
 
