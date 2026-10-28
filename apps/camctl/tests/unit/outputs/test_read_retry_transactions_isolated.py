@@ -86,6 +86,7 @@ def load_reads():
     values.ConsistencyError = type("ConsistencyError", (Exception,), {})
     discovery = ModuleType("camctl.outputs.read_discovery")
     discovery.read_copy_dispatch_eligible = lambda connection, copy_id: True
+    discovery.device_holder = lambda connection, device_id: 9
     outputs = ModuleType("camctl.persistence.repositories.outputs")
     outputs._read_owner_eligible = lambda action: action["status"] == 2 and action["cancel_requested"] == 0
     outputs._read_is_due = lambda action, now: action["scheduled_at"] <= now
@@ -108,6 +109,29 @@ def load_reads():
 
 
 class RetryReadFactsTests(unittest.TestCase):
+    def test_held_check_requires_original_holder_completed_wait_and_active_owner(self):
+        module, modules = load_reads()
+        owner = (2, 0, 10, 9, "camera", 2, 1, 3, "camera", "driver", "camera", "driver")
+        class HeldConnection(Connection):
+            def __init__(self, run=(7, 2, 1, 0), **kwargs):
+                super().__init__(**kwargs)
+                self.run = run
+            def execute(self, query, parameters=()):
+                if "SELECT id,status,attempts_used,retry_wait_required FROM operation_runs" in query:
+                    return Cursor([] if self.run is None else [self.run])
+                return super().execute(query, parameters)
+        with patch.dict(sys.modules, modules):
+            check = module.held_read_ready_for_availability
+            self.assertTrue(check(HeldConnection(owner=owner, event=event(2)), 9, "camera", 20))
+            self.assertFalse(check(HeldConnection(owner=owner, event=event(2)), 10, "camera", 20))
+            self.assertFalse(check(HeldConnection(run=(7, 2, 1, 1), owner=owner), 9, "camera", 20))
+            self.assertFalse(check(HeldConnection(run=(7, 4, 1, 0), owner=owner, event=event(2)), 9, "camera", 20))
+            self.assertFalse(check(HeldConnection(owner=owner, event=event(3)), 9, "camera", 20))
+            self.assertFalse(check(HeldConnection(owner=owner, event=event(2), running=True), 9, "camera", 20))
+            self.assertFalse(check(HeldConnection(owner=(2, 1, *owner[2:]), event=event(2)), 9, "camera", 20))
+            with self.assertRaises(module.ConsistencyError):
+                check(HeldConnection(run=None), 9, "camera", 20)
+
     def test_control_preserves_reservation_and_requires_settled_failure(self):
         module, modules = load_reads()
         class ReservationConnection(Connection):

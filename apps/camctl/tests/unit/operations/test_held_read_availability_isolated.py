@@ -1,6 +1,7 @@
 """持槽读取沿原顺序触发检查的资格分类。"""
 
 import ast
+from contextlib import closing
 from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
@@ -20,22 +21,25 @@ import pytest
 ])
 def test_held_check_requires_original_settled_retry(
         monkeypatch, holder, blocked, status, used, waiting, completed, eligible, expected):
-    path = Path(__file__).parents[3] / "src/camctl/persistence/repositories/availability_create.py"
+    path = Path(__file__).parents[3] / "src/camctl/persistence/repositories/retry_wait_reads.py"
     source = ast.parse(path.read_text())
-    function = next(node for node in source.body if isinstance(node, ast.FunctionDef) and node.name == "_held_read_eligible")
+    function = next(node for node in source.body if isinstance(node, ast.FunctionDef)
+                    and node.name == "held_read_ready_for_availability")
     program = ast.Module(body=[function], type_ignores=[])
     discovery = ModuleType("camctl.outputs.read_discovery")
     discovery.device_holder = lambda connection, device: holder
-    retry = ModuleType("camctl.persistence.repositories.retry_wait_reads")
-    retry.read_reservation_blocks_control = lambda connection, device: blocked
-    retry.RetryWaitReads = lambda connection: SimpleNamespace(
-        completed=lambda run, count: completed, read_eligible=lambda run, now: eligible)
     monkeypatch.setitem(sys.modules, discovery.__name__, discovery)
-    monkeypatch.setitem(sys.modules, retry.__name__, retry)
+    class Cursor:
+        def fetchmany(self, limit): return [(9, status, used, waiting)]
+        def close(self): pass
+    class Connection:
+        def execute(self, *args): return Cursor()
     enums = {"operation_runs.kind": SimpleNamespace(READ_FILE=3),
              "operation_runs.status": SimpleNamespace(PENDING=1, ACTIVE=2)}
     namespace = {"__package__": "camctl.persistence.repositories", "enum_for": lambda name: enums[name],
-                 "_one": lambda *args: (9, status, used, waiting), "ConsistencyError": ValueError}
+                 "closing": closing, "ConsistencyError": ValueError,
+                 "RetryWaitReads": lambda connection: SimpleNamespace(
+                     completed=lambda run, count: completed and not blocked,
+                     read_eligible=lambda run, now: eligible)}
     exec(compile(ast.fix_missing_locations(program), str(path), "exec"), namespace)
-    assert namespace["_held_read_eligible"](object(), {"id": 7, "slot_device_id": "camera"},
-                                           "camera", 100) is expected
+    assert namespace["held_read_ready_for_availability"](Connection(), 7, "camera", 100) is expected

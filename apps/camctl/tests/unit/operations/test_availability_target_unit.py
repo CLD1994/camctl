@@ -416,6 +416,7 @@ def test_device_trigger_fixes_original_copy_and_camera(creation_module, monkeypa
     monkeypatch.setitem(sys.modules, discovery.__name__, discovery)
     retry_reads = ModuleType("camctl.persistence.repositories.retry_wait_reads")
     retry_reads.read_reservation_blocks_control = lambda *args: False
+    retry_reads.held_read_ready_for_availability = lambda *args: True
     monkeypatch.setitem(sys.modules, retry_reads.__name__, retry_reads)
     preparation = ModuleType("camctl.devices.capture_preparation")
     preparation.CAPTURE_ACTION_TYPES = (1, 2, 3)
@@ -433,6 +434,21 @@ def test_device_trigger_fixes_original_copy_and_camera(creation_module, monkeypa
     connection = _PagedConnection([])
     _, check, count = creation_module._qualify(connection, request, 99)
     assert (check["action_id"], check["trigger_copy_id"], check["device_id"], count) == (12, 8, "hb0", 1)
+    rows[("file_copies", 8)]["slot_device_id"] = "hb0"
+    discovery.device_holder = lambda *args: 8
+    _, check, count = creation_module._qualify(connection, request, 99)
+    assert (check["trigger_copy_id"], count) == (8, 1)
+    retry_reads.held_read_ready_for_availability = lambda *args: False
+    with pytest.raises(creation_module.AvailabilityTargetBlocked):
+        creation_module._qualify(connection, request, 99)
+    retry_reads.held_read_ready_for_availability = lambda *args: True
+    discovery.device_holder = lambda *args: 9
+    with pytest.raises(creation_module.AvailabilityTargetBlocked):
+        creation_module._qualify(connection, request, 99)
+    rows[("file_copies", 8)]["slot_device_id"] = None
+    with pytest.raises(creation_module.AvailabilityTargetBlocked):
+        creation_module._qualify(connection, request, 99)
+    discovery.device_holder = lambda *args: None
     fixed.serial = "OTHER"
     with pytest.raises(creation_module.AvailabilityTargetIdentityMismatch):
         creation_module._qualify(connection, request, 99)
@@ -1030,6 +1046,15 @@ def test_first_check_intent_uses_original_facts(intent_guard):
     guard.verify(event, context, 3)
 
 
+def test_check_intent_rechecks_original_read_qualification(intent_guard, monkeypatch):
+    module, guard, event, context, _ = intent_guard
+    def rejected(*args, **kwargs):
+        raise module.AvailabilityTargetBlocked("原读取资格已改变")
+    monkeypatch.setattr(module, "_qualify", rejected)
+    with pytest.raises(module.AvailabilityTargetBlocked):
+        guard.verify(event, context, 3)
+
+
 def test_check_intent_rejects_different_attempt_and_flow_budgets(intent_guard):
     module, guard, event, context, _ = intent_guard
     event.rows[0].after.values["max_attempts_used"] = 4
@@ -1124,3 +1149,8 @@ def test_dispatch_recheck_uses_original_ticket_and_excludes_its_own_attempt(inte
             return _Cursor([(5,)])
     result = module.recheck_availability_dispatch(Connection(), ticket, request)
     assert result.allowed and calls == [{"existing_check": check, "exclude_attempt_id": 5}]
+    def rejected(*args, **kwargs):
+        raise module.AvailabilityTargetBlocked("原读取资格已改变")
+    monkeypatch.setattr(module, "_qualify", rejected)
+    result = module.recheck_availability_dispatch(Connection(), ticket, request)
+    assert not result.allowed and result.reason == "not_eligible"

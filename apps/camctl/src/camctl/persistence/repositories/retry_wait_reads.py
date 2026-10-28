@@ -30,6 +30,28 @@ def read_reservation_blocks_control(connection, device_id):
     return waiting != 1 and not reads.completed(run_id, used)
 
 
+def held_read_ready_for_availability(connection, copy_id, device_id, occurred_at):
+    """原持槽读取的间隔和调用均已结束时，才可为它检查设备。"""
+    from camctl.outputs.read_discovery import device_holder
+
+    if device_holder(connection, device_id) != copy_id:
+        return False
+    with closing(connection.execute(
+        "SELECT id,status,attempts_used,retry_wait_required FROM operation_runs"
+        " WHERE copy_id=? AND kind=? LIMIT 2",
+        (copy_id, int(enum_for("operation_runs.kind").READ_FILE)),
+    )) as cursor:
+        rows = cursor.fetchmany(2)
+    if len(rows) != 1:
+        raise ConsistencyError("持槽读取缺少唯一的原流程")
+    run_id, status, used, waiting = rows[0]
+    runs = enum_for("operation_runs.status")
+    if status not in (int(runs.PENDING), int(runs.ACTIVE)) or not used or waiting != 0:
+        return False
+    reads = RetryWaitReads(connection)
+    return reads.completed(run_id, used) and reads.read_eligible(run_id, occurred_at)
+
+
 class RetryWaitReads:
     def __init__(self, connection):
         self.connection = connection
