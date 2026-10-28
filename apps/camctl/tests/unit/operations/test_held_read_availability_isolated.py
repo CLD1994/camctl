@@ -38,8 +38,10 @@ def test_held_check_requires_original_settled_retry(
              "operation_runs.status": SimpleNamespace(PENDING=1, ACTIVE=2)}
     namespace = {"__package__": "camctl.persistence.repositories", "enum_for": lambda name: enums[name],
                  "closing": closing, "ConsistencyError": ValueError,
+                 "read_attempt_budget_available": lambda connection, copy_id, maximum:
+                     (9, status, used, waiting) if status in (1, 2) and used < maximum else None,
                  "RetryWaitReads": lambda connection: SimpleNamespace(
                      completed=lambda run, count: completed and not blocked,
                      read_eligible=lambda run, now: eligible)}
     exec(compile(ast.fix_missing_locations(program), str(path), "exec"), namespace)
-    assert namespace["held_read_ready_for_availability"](Connection(), 7, "camera", 100) is expected
+    assert namespace["held_read_ready_for_availability"](Connection(), 7, "camera", 100, 2) is expected

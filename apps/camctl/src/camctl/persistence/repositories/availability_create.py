@@ -29,6 +29,7 @@ class CreateAvailabilityCheck:
     occurred_at: int
     batch_size: int = 128
     trigger_copy_id: int | None = None
+    max_read_attempts: int | None = None
 
     def __post_init__(self):
         ObjectId(self.action_id)
@@ -36,6 +37,11 @@ class CreateAvailabilityCheck:
         UtcMicros(self.occurred_at)
         if self.trigger_copy_id is not None:
             ObjectId(self.trigger_copy_id)
+        if (self.max_read_attempts is not None
+                and (type(self.max_read_attempts) is not int or self.max_read_attempts < 1)):
+            raise ValueError("读取上限必须为正整数")
+        if self.trigger_copy_id is None and self.max_read_attempts is not None:
+            raise ValueError("拍摄检查不能携带读取上限")
         if (not isinstance(self.identity, CameraIdentity) or not isinstance(self.prepare_lead_s, Decimal)
                 or not self.prepare_lead_s.is_finite() or self.prepare_lead_s < 0
                 or type(self.batch_size) is not int or not 1 <= self.batch_size <= 128):
@@ -66,17 +72,18 @@ def _request_document(request):
     return {"action_id": request.action_id, "identity": {"serial": request.identity.serial,
         "product_id": request.identity.product_id}, "trusted_wall_now": request.trusted_wall_now,
         "prepare_lead_s": request.prepare_lead_s, "occurred_at": request.occurred_at,
-        "batch_size": request.batch_size, "trigger_copy_id": request.trigger_copy_id}
+        "batch_size": request.batch_size, "trigger_copy_id": request.trigger_copy_id,
+        "max_read_attempts": request.max_read_attempts}
 
 
 def _request(raw):
     if not isinstance(raw, dict) or set(raw) != {"action_id", "identity", "trusted_wall_now",
-            "prepare_lead_s", "occurred_at", "batch_size", "trigger_copy_id"}:
+            "prepare_lead_s", "occurred_at", "batch_size", "trigger_copy_id", "max_read_attempts"}:
         raise ConsistencyError("检查创建缺少完整申请")
     try:
         return CreateAvailabilityCheck(raw["action_id"], CameraIdentity(**raw["identity"]),
             raw["trusted_wall_now"], Decimal(raw["prepare_lead_s"]), raw["occurred_at"], raw["batch_size"],
-            raw["trigger_copy_id"])
+            raw["trigger_copy_id"], raw["max_read_attempts"])
     except (TypeError, ValueError, KeyError) as error:
         raise ConsistencyError("检查创建申请无效") from error
 
@@ -99,6 +106,8 @@ def _qualify(connection, request, boundary, *, existing_check=None, exclude_atte
             raise AvailabilityTargetBlocked("触发拍摄已有 START 责任")
         device_id, driver_id = action["device_id"], action["driver_id"]
     else:
+        if request.max_read_attempts is None:
+            raise AvailabilityTargetBlocked("读取检查缺少本次采用的读取上限")
         copy = row_facts(connection, "file_copies", request.trigger_copy_id)
         delivery = None if copy is None or copy["delivery_id"] is None else row_facts(connection, "deliveries", copy["delivery_id"])
         source = None if copy is None or copy["source_device_file_id"] is None else row_facts(connection, "device_files", copy["source_device_file_id"])
@@ -124,11 +133,15 @@ def _qualify(connection, request, boundary, *, existing_check=None, exclude_atte
             raise ConsistencyError("原设备来源绑定与拍摄动作不一致")
         if (fixed.serial, fixed.product_id) != (request.identity.serial, request.identity.product_id):
             raise AvailabilityTargetIdentityMismatch("设备来源的固定机身身份不同")
+        from .retry_wait_reads import read_attempt_budget_available
+        if read_attempt_budget_available(connection, copy["id"], request.max_read_attempts) is None:
+            raise AvailabilityTargetBlocked("读取已结束或没有剩余次数")
         if copy["slot_device_id"] is not None:
             if copy["slot_device_id"] != device_id:
                 raise ConsistencyError("读取机会与原来源设备不一致")
             from .retry_wait_reads import held_read_ready_for_availability
-            if not held_read_ready_for_availability(connection, copy["id"], device_id, request.trusted_wall_now):
+            if not held_read_ready_for_availability(connection, copy["id"], device_id,
+                                                    request.trusted_wall_now, request.max_read_attempts):
                 raise AvailabilityTargetBlocked("持槽读取的原调用或重试等待尚未结束")
         else:
             from camctl.outputs.read_discovery import first_eligible_read

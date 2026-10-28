@@ -44,13 +44,15 @@ def assembly(monkeypatch):
         prepare_lead_s: Decimal
         occurred_at: int
         trigger_copy_id: int | None = None
+        max_read_attempts: int | None = None
 
     class Files:
         @staticmethod
         def from_source(identity, locator):
             return SimpleNamespace(serial="serial", product_id=10, binding=Binding("camera", "hb"))
 
-    stub("camctl.bootstrap.capture_assembly", _hasselblad_identity=lambda value: Identity("serial", 10),
+    stub("camctl.bootstrap.capture_assembly", _device_attempts=lambda *args: 3,
+         _hasselblad_identity=lambda value: Identity("serial", 10),
          query_attempt_config=lambda value: "query-config")
     stub("camctl.devices.bindings", DeviceBinding=Binding)
     stub("camctl.devices.drivers.hasselblad.definitions", DRIVER_ID="hb")
@@ -135,7 +137,7 @@ async def test_settled_reserved_read_can_request_check(assembly, monkeypatch):
 async def test_held_read_checks_new_restriction_only_after_original_settles(assembly, monkeypatch, eligible):
     instance, coordinator, _, _, _, Progress = assembly
     retries = ModuleType("camctl.persistence.repositories.retry_wait_reads")
-    retries.held_read_ready_for_availability = lambda connection, copy_id, device_id, now: eligible
+    retries.held_read_ready_for_availability = lambda connection, copy_id, device_id, now, maximum: eligible
     monkeypatch.setitem(sys.modules, retries.__name__, retries)
     connection = SimpleNamespace(source={"identity_key": "source", "locator_json": {}})
     database = SimpleNamespace(read=AsyncMock(side_effect=lambda callback: callback(SimpleNamespace(connection=connection))))
@@ -145,5 +147,6 @@ async def test_held_read_checks_new_restriction_only_after_original_settles(asse
     assert await instance.read(runtime, candidate) is (Progress.WAIT if eligible else Progress.READY)
     if eligible:
         assert coordinator.request.await_args.args[1].trigger_copy_id == 9
+        assert coordinator.request.await_args.args[1].max_read_attempts == 3
     else:
         coordinator.request.assert_not_awaited()

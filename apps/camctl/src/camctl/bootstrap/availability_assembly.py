@@ -2,7 +2,7 @@
 
 from decimal import Decimal
 
-from camctl.bootstrap.capture_assembly import _hasselblad_identity, query_attempt_config
+from camctl.bootstrap.capture_assembly import _device_attempts, _hasselblad_identity, query_attempt_config
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
 from camctl.devices.drivers.hasselblad.files import CameraFileIdentity
@@ -108,23 +108,26 @@ class AvailabilityAssembly:
     async def read(self, runtime, candidate):
         if candidate.driver_id != DRIVER_ID:
             return AvailabilityProgress.READY
+        declaration = self.devices.get(candidate.device_id)
+        if declaration is None:
+            return AvailabilityProgress.READY
+        max_attempts = _device_attempts(declaration, "copy", 3, "max_read_attempts")
         if candidate.held:
             if candidate.attempts_used == 0 or candidate.retry_wait_required != 0:
                 return AvailabilityProgress.READY
             from camctl.persistence.repositories.retry_wait_reads import held_read_ready_for_availability
             eligible = await runtime.database.read(lambda owned: held_read_ready_for_availability(
-                owned.connection, candidate.copy_id, candidate.device_id, runtime.occurred_at()))
+                owned.connection, candidate.copy_id, candidate.device_id, runtime.occurred_at(), max_attempts))
             if not eligible:
                 return AvailabilityProgress.READY
         source = await runtime.database.read(lambda owned: row_facts(owned.connection, "device_files", candidate.source_file_id))
         fixed = CameraFileIdentity.from_source(source["identity_key"], source["locator_json"])
-        declaration = self.devices.get(candidate.device_id)
-        if declaration is None or _hasselblad_identity(declaration) != CameraIdentity(fixed.serial, fixed.product_id):
+        if _hasselblad_identity(declaration) != CameraIdentity(fixed.serial, fixed.product_id):
             return AvailabilityProgress.READY
         now = runtime.occurred_at()
         request = CreateAvailabilityCheck(candidate.action_id, CameraIdentity(fixed.serial, fixed.product_id),
             now, self.preparation_leads.get(candidate.device_id, Decimal(0)), now,
-            trigger_copy_id=candidate.copy_id)
+            trigger_copy_id=candidate.copy_id, max_read_attempts=max_attempts)
         entry = self.drivers.entry(DRIVER_ID)
         return await self.coordinator.request(runtime.database, request, query_attempt_config(declaration),
             entry.driver, entry.evidence, fixed.binding)

@@ -122,15 +122,18 @@ class RetryReadFactsTests(unittest.TestCase):
                 return super().execute(query, parameters)
         with patch.dict(sys.modules, modules):
             check = module.held_read_ready_for_availability
-            self.assertTrue(check(HeldConnection(owner=owner, event=event(2)), 9, "camera", 20))
-            self.assertFalse(check(HeldConnection(owner=owner, event=event(2)), 10, "camera", 20))
-            self.assertFalse(check(HeldConnection(run=(7, 2, 1, 1), owner=owner), 9, "camera", 20))
-            self.assertFalse(check(HeldConnection(run=(7, 4, 1, 0), owner=owner, event=event(2)), 9, "camera", 20))
-            self.assertFalse(check(HeldConnection(owner=owner, event=event(3)), 9, "camera", 20))
-            self.assertFalse(check(HeldConnection(owner=owner, event=event(2), running=True), 9, "camera", 20))
-            self.assertFalse(check(HeldConnection(owner=(2, 1, *owner[2:]), event=event(2)), 9, "camera", 20))
+            self.assertTrue(check(HeldConnection(owner=owner, event=event(2)), 9, "camera", 20, 2))
+            self.assertFalse(check(HeldConnection(owner=owner, event=event(2)), 9, "camera", 20, 1))
+            self.assertFalse(check(HeldConnection(owner=owner, event=event(2), last=(12, 4, "{}", 101)),
+                                   9, "camera", 20, 1))
+            self.assertFalse(check(HeldConnection(owner=owner, event=event(2)), 10, "camera", 20, 2))
+            self.assertFalse(check(HeldConnection(run=(7, 2, 1, 1), owner=owner), 9, "camera", 20, 2))
+            self.assertFalse(check(HeldConnection(run=(7, 4, 1, 0), owner=owner, event=event(2)), 9, "camera", 20, 2))
+            self.assertFalse(check(HeldConnection(owner=owner, event=event(3)), 9, "camera", 20, 2))
+            self.assertFalse(check(HeldConnection(owner=owner, event=event(2), running=True), 9, "camera", 20, 2))
+            self.assertFalse(check(HeldConnection(owner=(2, 1, *owner[2:]), event=event(2)), 9, "camera", 20, 2))
             with self.assertRaises(module.ConsistencyError):
-                check(HeldConnection(run=None), 9, "camera", 20)
+                check(HeldConnection(run=None), 9, "camera", 20, 2)
 
     def test_control_preserves_reservation_and_requires_settled_failure(self):
         module, modules = load_reads()
@@ -329,6 +332,16 @@ def load_exhaust_command(reads_type, run):
 
 
 class ExhaustReadTests(unittest.TestCase):
+    def test_unknown_result_is_not_rewritten_as_explicit_read_failure(self):
+        class Reads:
+            def __init__(self, connection): pass
+            def last_attempt(self, run_id, used): return (12, 4, "{}", 101)
+            def read_eligible(self, run_id, now): raise AssertionError("未知结果不应进入明确失败收场")
+
+        command, intent, module = load_exhaust_command(Reads, {"status": 2, "attempts_used": 2})
+        with patch.dict(sys.modules, {module.__name__: module}):
+            self.assertEqual(command(intent(2), 12, "key").plan(SimpleNamespace(connection=None)), "qualification_changed")
+
     def test_reduced_budget_finishes_settled_read(self):
         class Reads:
             def __init__(self, connection): pass
