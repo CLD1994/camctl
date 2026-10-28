@@ -156,3 +156,14 @@ def selected_pending_capture(connection, request, boundary, *, exclude_attempt_i
             continue
         return candidate
     return None
+
+
+def read_capture_priority(connection, request, boundary, *, device_id, identity, occurred_at):
+    """核对当前读取与实际采用的同机选择输入，再由原连接选择。"""
+    from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+
+    if (not isinstance(request, CaptureSelectionInput) or request.device_id != device_id
+            or request.driver_id != DRIVER_ID or request.identity != identity
+            or request.trusted_wall_now != occurred_at):
+        raise ConsistencyError("读取的拍摄选择输入与实际机身或时刻不符")
+    return selected_pending_capture(connection, request, boundary)

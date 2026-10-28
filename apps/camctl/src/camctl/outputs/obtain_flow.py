@@ -745,9 +745,12 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
     parallel = frozenset(
         device_id for device_id, assembly in runtime.devices.items()
         if assembly.capture_read_parallel)
+    selections = ({item.device_id: runtime.availability.capture_selection(item.device_id, now)
+                   for item in candidates if item.device_id is not None}
+                  if runtime.availability is not None else None)
     work_items = await runtime.database.read(lambda owned: plan_device_work(
         owned.connection, now, capture_read_parallel=parallel,
-        candidates=candidates))
+        candidates=candidates, capture_selections=selections))
     selected = {copy_id for work in work_items
                 if not work.yield_reads and not (work.dispatch_captures and not work.capture_read_parallel)
                 for copy_id in (*work.grant_reads, *work.resume_reads)}
@@ -804,7 +807,11 @@ async def _advance_read(
     if await _read_wait_remaining(runtime, copy_id, assembly.retry_interval_s, assembly.max_read_attempts) \
             is not None:
         return False
-    slot = await _save_repository(runtime, runtime.outputs.grant_read_slot, SlotRequest(copy_id=copy_id, occurred_at=runtime.occurred_at()), new_operation_key())
+    current = runtime.occurred_at()
+    selection = (None if runtime.availability is None else
+                 runtime.availability.capture_selection(assembly.binding.device_id, current))
+    slot = await _save_repository(runtime, runtime.outputs.grant_read_slot,
+        SlotRequest(copy_id=copy_id, occurred_at=current, capture_selection=selection), new_operation_key())
     if slot.kind is not DbOutcomeKind.COMPLETED:
         raise db_failure(ConsistencyError,
             f"读取机会事务未完成（{slot.kind.value}）: {slot.error}", slot)
@@ -873,7 +880,10 @@ async def _begin_read_attempt(
         runtime: ObtainRuntime, assembly: DeviceReadAssembly,
         facts: Mapping, now: int):
     """提交读取意图；预算耗尽把交付结束为终局失败并交还机会。"""
-    intent = _read_intent(assembly, facts, now)
+    current = runtime.occurred_at()
+    selection = (None if runtime.availability is None else
+                 runtime.availability.capture_selection(assembly.binding.device_id, current))
+    intent = _read_intent(assembly, facts, current, selection)
     ticket, reason = await acquire_read_attempt(runtime, intent)
     if ticket is not None:
         return ticket
@@ -882,7 +892,7 @@ async def _begin_read_attempt(
     return None
 
 
-def _read_intent(assembly, facts, now):
+def _read_intent(assembly, facts, now, capture_selection=None):
     return AttemptIntent(
         operation="read",
         action_id=facts["action_id"],
@@ -894,7 +904,7 @@ def _read_intent(assembly, facts, now):
             timeout_s=assembly.read_idle_timeout_s,
             retry_interval_s=assembly.retry_interval_s),
         occurred_at=now,
-        copy_round=facts["round"])
+        copy_round=facts["round"], capture_selection=capture_selection)
 
 
 async def _fail_read_delivery(

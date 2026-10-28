@@ -528,6 +528,7 @@ class MediaFlow:
     pending_media_results: dict = field(default_factory=dict)
     pending_segment_inspection_results: dict = field(default_factory=dict)
     read_discovery_batch_size: int | None = None
+    capture_selection: Callable[[int], Any] | None = None
 
     def saves(self, *, file_ids=()) -> CaptureProcessingSaves:
         return CaptureProcessingSaves(self.database, self.pending_media_results, file_ids=file_ids)
@@ -611,16 +612,20 @@ async def run_recording_media(
                 max_attempts_used=flow.max_read_attempts, interval_s=flow.retry_interval_s,
                 now_ns=flow.monotonic_ns()) is not None:
             return InputStep(InputPhase.RETRY_WAITING, copy_id=copy_id)
-        request = SlotRequest(copy_id, flow.occurred_at())
+        current = flow.occurred_at()
+        selection = None if flow.capture_selection is None else flow.capture_selection(current)
+        request = SlotRequest(copy_id, current, capture_selection=selection)
         from camctl.outputs.read_attempts import save_read_business
         slot = await save_read_business(flow, copy_id, "grant_read_slot", request,
             copies.repository.grant_read_slot)
         if slot.value.outcome in (SlotOutcome.WAIT, SlotOutcome.FINISHED):
             return InputStep(InputPhase.WAITING, copy_id=copy_id)
+        current = flow.occurred_at()
+        selection = None if flow.capture_selection is None else flow.capture_selection(current)
         ticket, reason = await acquire_read_attempt(flow, AttemptIntent(
             "read", action_id, OperationKind.READ_FILE, AttemptTarget(copy_id=copy_id), None,
             AttemptConfig(flow.max_read_attempts, flow.read_idle_timeout_s, flow.retry_interval_s),
-            flow.occurred_at(), copy_round=state.round))
+            current, copy_round=state.round, capture_selection=selection))
         if ticket is None:
             if reason == "budget_exhausted":
                 await _fail_internal_read_input(flow, copy_id=copy_id)

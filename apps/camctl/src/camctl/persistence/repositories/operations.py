@@ -745,6 +745,12 @@ class BeginAttemptCommand:
                     if source_physical_alias_conflict(connection, source, observer, origin):
                         return self._rejected("physical_identity_conflict")
                     identity = source_physical_identity(connection, source, observer, origin)
+                    from .capture_selection import read_capture_priority
+                    if intent.capture_selection is None:
+                        return self._rejected("capture_selection_unavailable")
+                    if read_capture_priority(connection, intent.capture_selection, scope.max_event_id,
+                            device_id=slot, identity=identity, occurred_at=intent.occurred_at) is not None:
+                        return self._rejected("capture_priority")
                 from .preparation import PreparationReads
                 preparation_reads = PreparationReads(connection)
                 if preparation_reads.availability_in_flight(slot, identity):
@@ -833,6 +839,8 @@ class BeginAttemptCommand:
         if intent.kind is OperationKind.CHECK_DEVICE_AVAILABILITY:
             from .availability_create import _request_document
             evidence = {"availability_intent_request": _request_document(self._availability_request)}
+        elif intent.kind is OperationKind.READ_FILE and intent.capture_selection is not None:
+            evidence = {"capture_selection": intent.capture_selection.document()}
         event = _envelope(
             event_id,
             allocation.txn_id,
@@ -944,6 +952,10 @@ class BeginAttemptCommand:
         if attempt_values is None:
             raise TransactionError("已保存意图缺少尝试事实")
         intent = self._intent
+        if intent.kind is OperationKind.READ_FILE:
+            expected = None if intent.capture_selection is None else intent.capture_selection.document()
+            if not json_equal(started[0]["body"].get("evidence", {}).get("capture_selection"), expected):
+                raise TransactionError("原读取意图的拍摄选择输入与重送不同")
         expected_config = {"max_attempts_used": intent.config.max_attempts,
                            "timeout_s_json": intent.config.timeout_s,
                            "retry_interval_s_json": intent.config.retry_interval_s,
@@ -2041,6 +2053,16 @@ def _attempt_intent_guard(event, context) -> None:
                 if source_physical_alias_conflict(context.preparation_reads.connection, source, observer, origin):
                     _fail("读取意图越过了其他逻辑设备的机身责任")
                 fixed_identity = source_physical_identity(context.preparation_reads.connection, source, observer, origin)
+                from .capture_selection import CaptureSelectionInput, read_capture_priority
+                try:
+                    selection = CaptureSelectionInput.from_document(event.evidence.get("capture_selection"))
+                    selected = read_capture_priority(context.preparation_reads.connection, selection,
+                        context.transaction.first_event_id - 1, device_id=slot, identity=fixed_identity,
+                        occurred_at=event.occurred_at)
+                except (ConsistencyError, ValueError) as error:
+                    raise EventValidationError(f"读取意图缺少原拍摄选择资格: {error}") from error
+                if selected is not None:
+                    _fail("读取意图越过了已选中的拍摄")
             if context.preparation_reads.availability_in_flight(slot, fixed_identity):
                 _fail("读取意图越过了尚未收场的设备检查")
             if observer["driver_id"] == DRIVER_ID:

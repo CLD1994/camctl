@@ -954,6 +954,55 @@ def test_ordinary_attempt_guard_independently_rejects_in_flight_check(isolated_r
         module._attempt_intent_guard(event, context)
 
 
+def test_read_intent_guard_rejects_selected_capture(isolated_result_guard, monkeypatch):
+    module = isolated_result_guard
+    module._RUN_KIND.RESOLVE_OUTPUT_SCOPE = 11
+    module._RUN_KIND.CHECK_CAPTURE_RESULTS = 7
+    module._RUN_KIND.READ_FILE = 3
+    module._ATTEMPT_STATUS.RUNNING = 1
+    module._EFFECT_STATE.UNKNOWN = 1
+    preparation = ModuleType("camctl.persistence.repositories.preparation")
+    class Reads:
+        connection = object()
+        def device_start_in_flight(self, device_id):
+            return False
+    preparation.PreparationReads = Reads
+    definitions = ModuleType("camctl.devices.drivers.hasselblad.definitions")
+    definitions.DRIVER_ID = "hasselblad_cfv100c"
+    alias = ModuleType("camctl.persistence.repositories.physical_alias")
+    alias.source_physical_alias_conflict = lambda *args: False
+    alias.source_physical_identity = lambda *args: "identity"
+    selection = ModuleType("camctl.persistence.repositories.capture_selection")
+    selection.CaptureSelectionInput = SimpleNamespace(from_document=lambda value: value)
+    selection.read_capture_priority = lambda *args, **kwargs: SimpleNamespace(action_id=42)
+    outputs = ModuleType("camctl.persistence.repositories.outputs")
+    outputs._read_owner_eligible = lambda action: True
+    outputs._slot_owner_action = lambda context, copy: context.state_rows["actions"][10]
+    for dependency in (preparation, definitions, alias, selection, outputs):
+        monkeypatch.setitem(sys.modules, dependency.__name__, dependency)
+    run = {"kind": 3, "action_id": 10, "copy_id": 30, "attempts_used": 0}
+    attempt = {"run_id": 3, "attempt_no": 1, "intent_event_id": 7, "status": 1,
+               "effect_state": 1, "result_event_id": None, "result_json": None,
+               "error_json": None, "copy_round": 1}
+    attempt_row = SimpleNamespace(table="operation_attempts", row_id=5,
+        before=SimpleNamespace(exists=False), after=SimpleNamespace(values=attempt))
+    run_row = SimpleNamespace(table="operation_runs", row_id=3,
+        before=SimpleNamespace(exists=True, values={"attempts_used": 0}),
+        after=SimpleNamespace(values={"attempts_used": 1}))
+    event = SimpleNamespace(event_id=7, occurred_at=10, rows=(attempt_row, run_row),
+                            evidence={"capture_selection": {}})
+    state = {"operation_runs": {3: run},
+             "actions": {10: {"id": 10},
+                         11: {"id": 11, "device_id": "camera", "driver_id": definitions.DRIVER_ID}},
+             "file_copies": {30: {"id": 30, "source_device_file_id": 40,
+                                  "source_intermediate_file_id": None, "slot_device_id": "camera", "round": 1}},
+             "device_files": {40: {"observer_action_id": 11, "source_action_id": 11}}}
+    context = SimpleNamespace(state_rows=state, preparation_reads=Reads(),
+                              transaction=SimpleNamespace(first_event_id=7))
+    with pytest.raises(module.EventValidationError, match="已选中的拍摄"):
+        module._attempt_intent_guard(event, context)
+
+
 def test_release_group_rejects_partial_transaction(release_module, release_group):
     group, events = release_group
     for event in events[:2]:

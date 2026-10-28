@@ -21,6 +21,15 @@ class AvailabilityAssembly:
         self._recovery_after = 0
         self._finish_after = 0
 
+    def capture_selection(self, device_id, now):
+        """取得本会话对该机身实际采用的拍摄选择输入。"""
+        declaration = self.devices.get(device_id)
+        if declaration is None or declaration.get("driver") != DRIVER_ID:
+            return None
+        from camctl.persistence.repositories.capture_selection import CaptureSelectionInput
+        return CaptureSelectionInput(device_id, DRIVER_ID, _hasselblad_identity(declaration),
+                                     self.preparation_leads[device_id], now)
+
     async def resume(self, context):
         """发现旧检查的未交付结果，包括触发动作已经终态的责任。"""
         self.coordinator.wake = context.wake

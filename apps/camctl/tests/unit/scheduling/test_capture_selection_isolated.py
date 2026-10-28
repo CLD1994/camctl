@@ -153,3 +153,30 @@ def test_selection_does_not_hide_database_failure(selection, monkeypatch):
                                  transaction.__name__: transaction}):
         with pytest.raises(OSError, match="database unavailable"):
             module.selected_pending_capture(Connection([]), request(selection, 0), 9)
+
+
+def test_read_work_plan_yields_to_selected_photo_without_activity():
+    path = Path(__file__).parents[3] / "src/camctl/outputs/dispatch.py"
+    spec = importlib.util.spec_from_file_location("camctl.outputs._dispatch_selection_test", path)
+    module = importlib.util.module_from_spec(spec)
+    discovery = ModuleType("camctl.outputs.read_discovery")
+    discovery.DEFAULT_BATCH_SIZE = 100
+    discovery.ReadDiscoveryScope = discovery.database_identity = discovery.read_candidates = object()
+    discovery.device_holder = lambda *args: None
+    recovery = ModuleType("camctl.capture.software_recovery")
+    recovery.recovery_locked = lambda *args: False
+    resources = ModuleType("camctl.scheduling.resources")
+    resources.current_preparation_holder = lambda *args: None
+    selected = ModuleType("camctl.persistence.repositories.capture_selection")
+    selected.selected_pending_capture = lambda *args: SimpleNamespace(action_id=42, scheduled_at=10)
+    class PlanConnection:
+        def execute(self, sql, parameters=()):
+            return Cursor([(9,)] if "history_events" in sql else [])
+    candidate = SimpleNamespace(device_id="camera", copy_id=11, held=False)
+    with patch.dict(sys.modules, {spec.name: module, discovery.__name__: discovery,
+            recovery.__name__: recovery, resources.__name__: resources, selected.__name__: selected}):
+        spec.loader.exec_module(module)
+        plan = module.plan_device_work(PlanConnection(), 10, candidates=(candidate,),
+                                       capture_selections={"camera": object()})
+    assert plan[0].dispatch_captures == (42,)
+    assert plan[0].grant_reads == ()
