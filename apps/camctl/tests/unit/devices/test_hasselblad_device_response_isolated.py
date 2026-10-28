@@ -86,3 +86,30 @@ def test_device_rejects_conflicting_control_marker(responses):
     with pytest.raises(api.CliParseError):
         api.parse_device_capture(b"capture: OK\ncapture: ERROR\ncamera file: /mnt/a.3FR\n", b"",
             output_complete=True, capture_format=fmt.RAW, output_directory="/workspace")
+
+
+@pytest.mark.parametrize("record,valid_role,missing_role", [
+    (b"saved /workspace/a.3FR (10 bytes)\n", "original", "preview"),
+    (b"saved /workspace/a.3FR.thumbnail.jpg (2 bytes)\n", "preview", "original"),
+])
+def test_device_keeps_independently_identified_single_host_record(responses, record, valid_role, missing_role):
+    api, fmt = responses
+    result = api.parse_device_capture(b"capture: OK\n" + record + b"camera file: /mnt/a.3FR\n", b"",
+        output_complete=True, capture_format=fmt.RAW, output_directory="/workspace")
+    assert getattr(result, valid_role) is not None
+    assert getattr(result, missing_role) is None
+    assert getattr(result, valid_role + "_error") is None
+    assert getattr(result, missing_role + "_error") is not None
+
+
+def test_invalid_preview_record_does_not_remove_independently_valid_original(responses):
+    api, fmt = responses
+    result = api.parse_device_capture(
+        b"capture: OK\nsaved /workspace/a.3FR (10 bytes)\n"
+        b"saved /outside/a.3FR.thumbnail.jpg (2 bytes)\n"
+        b"camera file: /mnt/a.3FR\n", b"", output_complete=True,
+        capture_format=fmt.RAW, output_directory="/workspace")
+    assert result.original.host_name == "a.3FR"
+    assert result.original_error is None
+    assert result.preview is None
+    assert result.preview_error is not None
