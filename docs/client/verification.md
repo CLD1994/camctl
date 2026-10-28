@@ -2,6 +2,16 @@
 
 本页记录软件组件的实际验证结果，并区分部署、设备联调和物理断电验证。完整业务验收依据为[客户端六组场景](acceptance.md)，实现进度由[客户端规格同步计划](../superpowers/plans/2026-10-09-client-spec-sync.md)跟踪。
 
+## 用户测试部署包构建（2026-10-29）
+
+用户要求制作交付包后，在独立源码快照中使用 Node.js 24.22.1、npm 11.21.1 执行 `npm ci --engine-strict --no-audit --no-fund` 和 `npm run build`，均退出 0；后者包含 TypeScript 类型检查和 Vite 生产构建。保留 npm 的 esbuild 安装脚本提示及 Vite 大 chunk 提示，未放宽构建配置。生成四个网页产物，客户端交付还包含源码、锁文件、Node.js 启动和 Docker Compose 材料。
+
+打包时补齐 Dockerfile 构建与运行阶段对 `protocol/errors/workflow-codes.json` 的复制，修复提交为 `77f43729`；Sol 静态评审无阻断。实际编译基线为 `179e6bee`，客户端编译输入未因该 Docker 复制修复变化；最终 96 个客户端源文件逐字节核对交付提交，四个构建文件单独保存摘要。配套能力说明由本包 camctl 的实际驱动导出，快门为规范分数字符串。
+
+ZIP 与 tar.gz 位于 `.local/delivery/camctl-user-test-20261029-77f43729.*`，包含预构建客户端、camctl wheel、锁定依赖、C 源码、新目录安装脚本和操作说明。116 个载荷文件的压缩包内容及摘要核对通过；内部 `SHA256SUMS` 与外部压缩包摘要分别提供。构建与归档原始收据保存在 `.local/delivery/camctl-user-test-20261029-179e6bee/receipts/`。
+
+本项仅完成用户交付所需构建和打包检查，未运行单元或软件集成测试、客户端服务、浏览器、Docker 镜像构建或容器，也未执行用户目标机安装。安装脚本仅通过语法、帮助入口与静态审查；相机工具须由目标机提供匹配架构的版本，未随包交付。
+
 ## Hasselblad 快门分数字符串同步（2026-10-29）
 
 参数契约采用[单张参数规格](../superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md#快门档位与分数字符串)。`23a7a7c5` 将客户端有限照片样例的三个短快门改为字符串 `const`，并同步对象分支恢复、预设保存与重开、应用到独立草稿及计划导出的现有断言；通用精确数字覆盖保持。样例不维护设备的完整快门目录，实际选项继续来自 camctl 导出的能力说明。
