@@ -1551,7 +1551,7 @@ class FailBindingPreparationCommand:
                         "error_details_json": request.details})):
                 raise TransactionError("绑定失败原事件与动作或申请不符")
             verify_unstarted_final(connection, action, saved)
-            return result(FailPreparationOutcome.ALREADY)
+            return result(FailPreparationOutcome.ALREADY, "saved")
         if action["status"] in _ACTION_TERMINAL:
             return result(FailPreparationOutcome.ALREADY)
         if action["cancel_requested"]:

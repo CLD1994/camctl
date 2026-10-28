@@ -7,8 +7,8 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any
 
-from camctl.contracts.values import ConsistencyError, new_operation_key
-from camctl.logging_runtime.diagnostics import DiagnosticState, record_availability_error, record_call_outcome
+from camctl.contracts.values import ConsistencyError, ObjectId, new_operation_key
+from camctl.logging_runtime.diagnostics import DiagnosticState, record_availability_error, record_call_outcome, record_error
 from camctl.operations.attempts import (
     AttemptFinish, AttemptIntent, AttemptTarget, OperationKind, RetryWaitGate,
     RunFinish, RunOutcome,
@@ -27,6 +27,7 @@ class AvailabilityProgress(Enum):
     READY = "ready"
     WAIT = "wait"
     FAILED = "failed"
+    IDENTITY_MISMATCH = "identity_mismatch"
 
 
 class _DispatchCancelled(asyncio.CancelledError):
@@ -115,6 +116,8 @@ class AvailabilityCoordinator:
         self.tasks: dict[tuple, asyncio.Task] = {}
         self.results: dict[tuple, Any] = {}
         self.recovery_diagnostics: dict[int, DiagnosticState] = {}
+        self.binding_diagnostics: dict[int, DiagnosticState] = {}
+        self.binding_diagnostics_by_request: dict[tuple, DiagnosticState] = {}
         self._locks: dict[tuple, asyncio.Lock] = {}
         self._stopping = False
         self._deadlines: dict[int, int] = {}
@@ -236,6 +239,92 @@ class AvailabilityCoordinator:
         await asyncio.sleep(0)
         return AvailabilityProgress.WAIT
 
+    async def finish_binding(self, database, request, config, evidence, binding, details, current_identity,
+                             *, has_read_copy=True):
+        """先收场原检查及实际调用，再结束不能继续的检查责任。"""
+        from camctl.persistence.repositories.availability_release import ResolveDisposition, finish_if_resolved
+        from camctl.persistence.repositories.availability_wait_finish import (
+            WaitingBindingResult, WaitingFinishDisposition, finish_waiting_availability,
+        )
+        identity = (request.action_id, request.trigger_copy_id)
+        write_identity = (request.action_id, ("item", request.trigger_copy_id)) if not has_read_copy else identity
+        lock = self._locks.setdefault(write_identity, asyncio.Lock())
+        async with lock:
+            checks = await database.read(lambda owned: _action_binding_checks(owned, request))
+            for check_id, run_id, copy_id in checks:
+                owner = self.calls.get(run_id)
+                if owner is not None:
+                    if not owner.saved:
+                        await owner.advance()
+                    if not owner.saved:
+                        return False
+                    self.calls.pop(run_id, None)
+                run = await database.read(lambda owned: _run_facts(owned, run_id))
+                if run["running_attempt"] is not None:
+                    await self._recover_attempt(database, run, check_id,
+                        replace(request, trigger_copy_id=copy_id), evidence, binding, None)
+                    run = await database.read(lambda owned: _run_facts(owned, run_id))
+                    if run["running_attempt"] is not None:
+                        return False
+                resolved = await self._write(database, (*write_identity, "resolve", check_id),
+                    (check_id, self.occurred_at()),
+                    lambda args, key, owned: finish_if_resolved(*args, key, owned))
+                if resolved is ResolveDisposition.SUCCEEDED:
+                    continue
+                if resolved is ResolveDisposition.TERMINAL:
+                    terminal = await database.read(lambda owned: _run_facts(owned, run_id))
+                    if terminal["status"] == 3:
+                        continue
+                    error = terminal.get("error_json")
+                    if terminal["status"] in (4, 6) and isinstance(error, dict):
+                        if error.get("code") == "device_binding_unavailable":
+                            state = self.binding_diagnostics.setdefault(run_id, DiagnosticState())
+                            self.binding_diagnostics_by_request[write_identity] = state
+                            continue
+                        if request.trigger_copy_id is not None and not has_read_copy:
+                            continue
+                        await self._deliver_failure(database, identity, check_id)
+                    return False
+                now = self.occurred_at()
+                result = await self._write(database, (*write_identity, "binding-finish", check_id),
+                    (check_id, now, now, None if config is None else config.max_attempts, details, current_identity),
+                    lambda args, key, owned: finish_waiting_availability(
+                        *args[:4], key, owned, binding_details=args[4], current_identity=args[5]))
+                if isinstance(result, WaitingBindingResult):
+                    if result.error is None:
+                        return False
+                    if result.error.get("code") != "device_binding_unavailable":
+                        raise ConsistencyError("绑定收场返回了其他检查错误")
+                    state = self.binding_diagnostics.setdefault(run_id, DiagnosticState())
+                    error = result.error
+                    record_error(ErrorValue(error["code"], error["stage"], error["details"]),
+                        stage=error["stage"], context={"action_id": request.action_id,
+                        "check_id": check_id, "run_id": run_id}, state=state,
+                        details={"current_identity": current_identity})
+                    self.binding_diagnostics_by_request[write_identity] = state
+                    result = WaitingFinishDisposition.FINISHED
+                if result is WaitingFinishDisposition.RESOLVED:
+                    return False
+                if result is WaitingFinishDisposition.TERMINAL:
+                    terminal = await database.read(lambda owned: _run_facts(owned, run_id))
+                    if terminal["status"] == 3:
+                        continue
+                    error = terminal.get("error_json")
+                    if terminal["status"] in (4, 6) and isinstance(error, dict):
+                        if error.get("code") == "device_binding_unavailable":
+                            state = self.binding_diagnostics.setdefault(run_id, DiagnosticState())
+                            self.binding_diagnostics_by_request[write_identity] = state
+                            continue
+                        if request.trigger_copy_id is not None and not has_read_copy:
+                            continue
+                        await self._deliver_failure(database, identity, check_id)
+                    return False
+                if result is not WaitingFinishDisposition.FINISHED:
+                    return False
+                self._deadlines.pop(check_id, None)
+                self.retry_gate.cleared(f"availability/{check_id}")
+            return True
+
     async def advance(self, database, request, config, driver, evidence, binding):
         """推进已具普通资格的触发工作；READY 后由原调度重新判断。"""
         from camctl.persistence.repositories.availability_create import CreateDisposition, ensure_check
@@ -247,11 +336,15 @@ class AvailabilityCoordinator:
             if self._stopping:
                 return AvailabilityProgress.WAIT
             existing = await database.read(lambda owned: _open_check(owned, request))
+            if existing == ("identity_mismatch",):
+                return AvailabilityProgress.IDENTITY_MISMATCH
             if existing is None:
                 created = await self._write(database, (*identity, "create"), request, ensure_check)
                 if created.disposition is CreateDisposition.NOT_REQUIRED:
                     return AvailabilityProgress.READY
-                if created.disposition in (CreateDisposition.WAIT, CreateDisposition.IDENTITY_MISMATCH):
+                if created.disposition is CreateDisposition.IDENTITY_MISMATCH:
+                    return AvailabilityProgress.IDENTITY_MISMATCH
+                if created.disposition is CreateDisposition.WAIT:
                     return AvailabilityProgress.WAIT
                 check_id, run_id = created.check_id, created.run_id
             else:
@@ -275,6 +368,9 @@ class AvailabilityCoordinator:
                 self._deadlines.pop(check_id, None)
                 if run["status"] == 3:
                     return AvailabilityProgress.READY
+                if (run["status"] == 4 and isinstance(run.get("error_json"), dict)
+                        and run["error_json"].get("code") == "device_binding_unavailable"):
+                    return AvailabilityProgress.IDENTITY_MISMATCH
                 if run["status"] in (4, 6):
                     await self._deliver_failure(database, identity, check_id)
                 return AvailabilityProgress.FAILED
@@ -320,6 +416,8 @@ class AvailabilityCoordinator:
             begun = await self._write(database, (*identity, "intent"), (intent, current),
                 lambda args, key, owned: self.operations.begin_availability_attempt(*args, key, owned))
             if begun.ticket is None:
+                if begun.reason == "availability_identity_mismatch":
+                    return AvailabilityProgress.IDENTITY_MISMATCH
                 return AvailabilityProgress.WAIT
             owner = self._attempt_owner(database, begun.ticket, current, config, driver, evidence, binding, check_id)
             owner.action_id = request.action_id
@@ -439,6 +537,8 @@ def _run_facts(owned, run_id):
 
 
 def _open_check(owned, request):
+    from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+    from camctl.persistence.transaction import row_facts
     rows = owned.connection.execute(
         "SELECT c.id,r.id,c.trigger_copy_id FROM device_availability_checks c"
         " JOIN operation_runs r ON r.availability_check_id=c.id"
@@ -447,7 +547,68 @@ def _open_check(owned, request):
     ).fetchall()
     if len(rows) > 1:
         raise ConsistencyError("同一动作与机身存在多个开放检查")
-    return None if not rows else tuple(rows[0])
+    if not rows:
+        return None
+    check = row_facts(owned.connection, "device_availability_checks", rows[0][0])
+    try:
+        if check is None:
+            raise ValueError("缺少固定检查")
+        fixed = CameraIdentity(**check["expected_identity_json"])
+        if check["resource_key"] != fixed.resource_key:
+            raise ValueError("固定检查资源键不符")
+    except (KeyError, TypeError, ValueError) as error:
+        raise ConsistencyError("开放检查缺少可靠固定机身身份") from error
+    return ("identity_mismatch",) if fixed != request.identity else tuple(rows[0])
+
+
+def _action_binding_checks(owned, request):
+    from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+    from camctl.persistence.transaction import row_facts
+    if request.trigger_copy_id is None:
+        condition, params = "c.trigger_copy_id IS NULL", (request.action_id,)
+    else:
+        condition, params = "c.trigger_copy_id IS NOT NULL AND c.resource_key=?", (request.action_id, request.identity.resource_key)
+    after, matching = 0, []
+    while True:
+        rows = owned.connection.execute(
+            "SELECT c.id,r.id,c.trigger_copy_id,r.status FROM device_availability_checks c"
+            " JOIN operation_runs r ON r.availability_check_id=c.id"
+            " WHERE c.action_id=? AND " + condition + " AND r.status IN (1,2,4,6) AND c.id>? ORDER BY c.id LIMIT 128",
+            (*params, after),
+        ).fetchall()
+        if not rows:
+            break
+        ids = tuple(ObjectId(row[0]) for row in rows)
+        if any(left >= right for left, right in zip((after, *ids), ids)):
+            raise ConsistencyError("检查读取页不是严格递增的唯一身份")
+        for check_id, run_id, copy_id, status in rows:
+            check = row_facts(owned.connection, "device_availability_checks", check_id)
+            try:
+                if check is None:
+                    raise ValueError("缺少固定检查")
+                fixed = CameraIdentity(**check["expected_identity_json"])
+                if check["resource_key"] != fixed.resource_key:
+                    raise ValueError("固定检查资源键不符")
+            except (KeyError, TypeError, ValueError) as error:
+                raise ConsistencyError("检查缺少可靠固定机身身份") from error
+            if request.trigger_copy_id is not None and fixed != request.identity:
+                continue
+            if status in (4, 6):
+                run = row_facts(owned.connection, "operation_runs", run_id)
+                if run is None:
+                    raise ConsistencyError("终态检查缺少原流程")
+                error = run.get("error_json")
+                if not isinstance(error, dict) or error.get("code") != "device_binding_unavailable":
+                    from camctl.persistence.repositories.availability_failure import failure_basis
+                    if failure_basis(owned.connection, check_id, request.action_id) is None:
+                        continue
+            matching.append((check_id, run_id, copy_id))
+        after = rows[-1][0]
+        if len(rows) < 128:
+            break
+    if len(matching) > 1:
+        raise ConsistencyError("同一触发工作存在多个未交付的检查")
+    return tuple(matching)
 
 
 def _action_facts(owned, action_id):

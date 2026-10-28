@@ -1712,14 +1712,14 @@ class _GrantFileCommand:
             observer = self._state["actions"][source_file["observer_action_id"]]
             from .physical_alias import source_physical_alias_conflict
             origin = self._state["actions"][source_file["source_action_id"]]
-            if not source_physical_alias_conflict(connection, source_file, observer, origin):
+            if not source_physical_alias_conflict(connection, source_file, observer, origin, action_id=command.action_id):
                 binding_failure = None
         if binding_failure is not None and binding_failure["reason"] == "physical_identity_mismatch":
             from .physical_alias import verify_source_identity_mismatch
             observer = self._state["actions"][source_file["observer_action_id"]]
             origin = self._state["actions"][source_file["source_action_id"]]
             if not verify_source_identity_mismatch(connection, source_file, observer, origin,
-                                                   command.binding_result.current_identity):
+                                                   command.binding_result.current_identity, action_id=command.action_id):
                 raise TransactionError("读取机身不符申请与固定来源一致")
         if binding_failure is not None:
             if command.item_id is None:
@@ -4466,7 +4466,7 @@ class _ReadBindingFailCommand(_DeliveryPublicationMixin):
             observer = self._state["actions"][source["observer_action_id"]]
             origin = self._state["actions"][source["source_action_id"]]
             if not verify_source_identity_mismatch(scope.connection, source, observer, origin,
-                                                   self._command.binding_result.current_identity):
+                                                   self._command.binding_result.current_identity, action_id=action["id"]):
                 raise TransactionError("读取机身不符申请与固定来源一致")
             if not read_mismatch_can_finish(owner_eligible=_read_owner_eligible(action),
                     attempts=self._state["operation_attempts"].values()):
@@ -4476,7 +4476,7 @@ class _ReadBindingFailCommand(_DeliveryPublicationMixin):
             source = self._state["device_files"][self._command.source_device_file_id]
             observer = self._state["actions"][source["observer_action_id"]]
             origin = self._state["actions"][source["source_action_id"]]
-            if not source_physical_alias_conflict(scope.connection, source, observer, origin):
+            if not source_physical_alias_conflict(scope.connection, source, observer, origin, action_id=action["id"]):
                 return self._decision(FailureSaveOutcome(FailureSaveDisposition.RETIRED), read_only=True)
         if (delivery["status"] not in (1, 2) or not _read_owner_eligible(action)
                 or not self._run_can_close(run, details) or item["source_dependency"] != 1):
@@ -6660,10 +6660,12 @@ def _delivery_guard(event, context) -> None:
                 source = _guard_facts(context, "device_files", copies[0]["source_device_file_id"])
                 observer = _guard_facts(context, "actions", source["observer_action_id"])
                 origin = _guard_facts(context, "actions", source["source_action_id"])
+                delivery = _guard_facts(context, "deliveries", row.row_id)
                 valid = (verify_source_identity_mismatch(context.preparation_reads.connection, source, observer, origin,
-                                                         event.evidence.get("read_current_identity"))
+                                                         event.evidence.get("read_current_identity"), action_id=delivery["action_id"])
                          if details["reason"] == "physical_identity_mismatch"
-                         else source_physical_alias_conflict(context.preparation_reads.connection, source, observer, origin))
+                         else source_physical_alias_conflict(context.preparation_reads.connection, source, observer, origin,
+                                                             action_id=delivery["action_id"]))
                 if (details.get("device_id") != observer["device_id"]
                         or details.get("expected_driver_id") != observer["driver_id"]
                         or not valid):
@@ -7436,10 +7438,13 @@ def _read_permission_guard(event, context) -> None:
             source = _guard_facts(context, "device_files", output["device_file_id"])
             observer = _guard_facts(context, "actions", source["observer_action_id"])
             origin = _guard_facts(context, "actions", source["source_action_id"])
+            selection = _guard_facts(context, "obtain_source_selections", item["selection_id"])
+            dependency = _guard_facts(context, "action_dependencies", selection["dependency_id"])
             valid = (verify_source_identity_mismatch(context.preparation_reads.connection, source, observer, origin,
-                                                     event.evidence.get("read_current_identity"))
+                                                     event.evidence.get("read_current_identity"), action_id=dependency["action_id"])
                      if details["reason"] == "physical_identity_mismatch"
-                     else source_physical_alias_conflict(context.preparation_reads.connection, source, observer, origin))
+                     else source_physical_alias_conflict(context.preparation_reads.connection, source, observer, origin,
+                                                         action_id=dependency["action_id"]))
             if (details.get("device_id") != observer["device_id"]
                     or details.get("expected_driver_id") != observer["driver_id"]
                     or not valid):

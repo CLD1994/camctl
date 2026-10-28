@@ -107,19 +107,39 @@ def source_physical_identity(connection, source, observer, origin):
     return fixed
 
 
-def source_physical_alias_conflict(connection, source, observer, origin):
+def source_physical_alias_conflict(connection, source, observer, origin, *, action_id=None):
     """核对原身份后检查其他逻辑设备的责任。"""
     fixed = source_physical_identity(connection, source, observer, origin)
-    return physical_alias_conflict(connection, observer["device_id"], fixed)
+    if physical_alias_conflict(connection, observer["device_id"], fixed):
+        return True
+    if action_id is None:
+        return False
+    from .availability_wait_finish import saved_binding_check_failure
+    saved = saved_binding_check_failure(connection, action_id, resource_key=fixed.resource_key, expected_identity=fixed)
+    return (saved is not None and saved[0].get("reason") == "physical_identity_conflict"
+            and saved[0].get("device_id") == observer["device_id"]
+            and saved[0].get("expected_driver_id") == observer["driver_id"])
 
 
-def verify_source_identity_mismatch(connection, source, observer, origin, current):
-    """按固定来源与完整配置身份独立核对不符。"""
+def verify_source_identity_mismatch(connection, source, observer, origin, current, *, action_id=None):
+    """按固定来源、配置及同逻辑设备旧限制独立核对不符。"""
     try:
         identity = CameraIdentity(**current)
     except (TypeError, ValueError) as error:
         raise ConsistencyError("读取绑定失败缺少当前机身身份") from error
-    return source_physical_identity(connection, source, observer, origin) != identity
+    fixed = source_physical_identity(connection, source, observer, origin)
+    from .availability_target import logical_held_identity_mismatch
+    mismatch = logical_held_identity_mismatch(connection, observer["device_id"], identity)
+    if fixed != identity or mismatch:
+        return True
+    if action_id is None:
+        return False
+    from .availability_wait_finish import saved_binding_check_failure
+    saved = saved_binding_check_failure(connection, action_id, resource_key=fixed.resource_key, expected_identity=fixed)
+    return (saved is not None and saved[0].get("reason") == "physical_identity_mismatch"
+            and saved[0].get("device_id") == observer["device_id"]
+            and saved[0].get("expected_driver_id") == observer["driver_id"]
+            and saved[1] == current)
 
 
 def read_mismatch_can_finish(*, owner_eligible, attempts):

@@ -25,7 +25,7 @@ def target_rules(monkeypatch):
         "device_activities.ownership_mode": SimpleNamespace(TASK_SCOPE=1),
         "device_activities.dispatch_state": SimpleNamespace(MAY_HAVE_DISPATCHED=2, SUCCESS_RETURNED=3),
         "operation_attempts.status": SimpleNamespace(RUNNING=1, SUCCEEDED=2, FAILED=3, UNKNOWN=4),
-        "operation_runs.status": SimpleNamespace(PENDING=1, ACTIVE=2, SUCCEEDED=3, FAILED=4, UNCONFIRMED=6),
+        "operation_runs.status": SimpleNamespace(PENDING=1, ACTIVE=2, SUCCEEDED=3, FAILED=4, CANCELED=5, UNCONFIRMED=6, EXPIRED=7),
         "operation_runs.kind": SimpleNamespace(START=1, QUERY_ACTIVITY=6, CHECK_DEVICE_AVAILABILITY=12),
         "operation_runs.query_purpose": SimpleNamespace(START_CONFIRMATION=2),
     }
@@ -234,7 +234,8 @@ def test_existing_check_is_reused_before_classifying_unsettled_original_call(tar
 
 def test_creation_targets_reject_logical_identity_mismatch(target_rules, creation_facts):
     check, activity = creation_facts
-    activity["resource_key"] = "other"
+    activity["expected_identity_json"] = {"serial": "CAMERA-2", "product_id": 10}
+    activity["resource_key"] = target_rules.CameraIdentity("CAMERA-2", 10).resource_key
     with pytest.raises(target_rules.AvailabilityTargetIdentityMismatch):
         list(target_rules.iter_creation_targets(_CreationConnection(25), check, batch_size=2))
 
@@ -1264,3 +1265,109 @@ def test_dispatch_recheck_uses_original_ticket_and_excludes_its_own_attempt(inte
     monkeypatch.setattr(module, "_qualify", rejected)
     result = module.recheck_availability_dispatch(Connection(), ticket, request)
     assert not result.allowed and result.reason == "not_eligible"
+
+
+@pytest.mark.parametrize("serial,product,expected", [
+    ("CAMERA-2", 10, True), ("CAMERA-1", 11, True), ("CAMERA-1", 10, False),
+])
+def test_logical_held_identity_compares_full_fixed_identity(target_rules, creation_facts, serial, product, expected):
+    check, activity = creation_facts
+    activity["expected_identity_json"] = {"serial": serial, "product_id": product}
+    activity["resource_key"] = target_rules.CameraIdentity(serial, product).resource_key
+    assert target_rules.logical_held_identity_mismatch(
+        _CreationConnection(25), check["device_id"], target_rules.CameraIdentity("CAMERA-1", 10), batch_size=2) is expected
+
+
+def test_logical_held_identity_rejects_contradictory_resource_key(target_rules, creation_facts):
+    check, activity = creation_facts
+    activity["resource_key"] = "contradictory"
+    from camctl.contracts.values import ConsistencyError
+    with pytest.raises(ConsistencyError):
+        target_rules.logical_held_identity_mismatch(
+            _CreationConnection(25), check["device_id"], target_rules.CameraIdentity("CAMERA-1", 10), batch_size=2)
+
+
+def test_logical_held_identity_without_old_restriction_is_not_mismatch(target_rules, creation_facts):
+    assert not target_rules.logical_held_identity_mismatch(
+        _PagedConnection([]), "hb0", target_rules.CameraIdentity("CAMERA-1", 10), batch_size=2)
+
+
+def test_logical_held_identity_checks_every_page_before_returning_mismatch(target_rules, facts, monkeypatch):
+    check, activity, action = deepcopy(facts)
+    activity["expected_identity_json"] = {"serial": "OTHER", "product_id": 10}
+    activity["resource_key"] = target_rules.CameraIdentity("OTHER", 10).resource_key
+    damaged = {**activity, "id": 26, "action_id": 8, "resource_key": "invalid"}
+    rows = {("device_activities", 25): activity, ("actions", 7): action,
+            ("device_activities", 26): damaged, ("actions", 8): {**action, "id": 8}}
+    transaction = ModuleType("camctl.persistence.transaction")
+    transaction.row_facts = lambda connection, table, identity: rows.get((table, identity))
+    monkeypatch.setitem(sys.modules, transaction.__name__, transaction)
+    from camctl.contracts.values import ConsistencyError
+    with pytest.raises(ConsistencyError):
+        target_rules.logical_held_identity_mismatch(
+            _PagedConnection([(7, 25), (8, 26)]), check["device_id"],
+            target_rules.CameraIdentity("CAMERA-1", 10), batch_size=1)
+
+
+@pytest.mark.parametrize("fault", ["missing_activity", "missing_action", "wrong_owner", "missing_identity"])
+def test_logical_held_identity_rejects_missing_or_contradictory_facts(target_rules, facts, monkeypatch, fault):
+    check, activity, action = deepcopy(facts)
+    if fault == "missing_identity":
+        activity["expected_identity_json"] = None
+    if fault == "wrong_owner":
+        activity["action_id"] = 8
+    rows = {("device_activities", 25): None if fault == "missing_activity" else activity,
+            ("actions", 7): None if fault == "missing_action" else action}
+    transaction = ModuleType("camctl.persistence.transaction")
+    transaction.row_facts = lambda connection, table, identity: rows.get((table, identity))
+    monkeypatch.setitem(sys.modules, transaction.__name__, transaction)
+    from camctl.contracts.values import ConsistencyError
+    with pytest.raises(ConsistencyError):
+        target_rules.logical_held_identity_mismatch(
+            _PagedConnection([(7, 25)]), check["device_id"], target_rules.CameraIdentity("CAMERA-1", 10))
+
+
+@pytest.mark.parametrize("current,expected", [(('CAMERA-2', 10), True),
+                                               (('CAMERA-1', 11), True),
+                                               (('CAMERA-1', 10), False)])
+def test_existing_photo_check_keeps_its_full_fixed_identity(target_rules, facts, monkeypatch, current, expected):
+    check, _, _ = deepcopy(facts)
+    check.update(id=31, trigger_copy_id=None)
+    action = {"id": 12, "device_id": "hb0", "driver_id": "hasselblad_cfv100c"}
+    run = {"id": 3, "action_id": 12, "availability_check_id": 31, "responsibility_key": "availability/31", "status": 3, "kind": 12}
+    transaction = ModuleType("camctl.persistence.transaction")
+    transaction.row_facts = lambda connection, table, ident: check if table == "device_availability_checks" else run
+    monkeypatch.setitem(sys.modules, transaction.__name__, transaction)
+    class Connection:
+        def execute(self, sql, params):
+            return _Cursor([(31,)] if "device_availability_checks c" in sql else [(3,)])
+    assert target_rules.photo_check_identity_mismatch(Connection(), action, target_rules.CameraIdentity(*current)) is expected
+
+
+@pytest.mark.parametrize("fault,expected", [(None, False), ("released", True), ("wrong_kind", None),
+    ("no_target", None), ("missing_activity", None), ("wrong_owner", None),
+    ("wrong_identity", None), ("wrong_occupancy", None)])
+def test_binding_check_targets_validate_direct_facts_without_reopening_old_start(
+        target_rules, facts, monkeypatch, fault, expected):
+    check, activity, action = deepcopy(facts)
+    check["id"] = 31
+    run = {"id": 3, "kind": 12, "action_id": 12, "availability_check_id": 31,
+           "responsibility_key": "availability/31"}
+    if fault == "wrong_kind": run["kind"] = 1
+    if fault == "released": activity["occupancy_state"] = 2
+    if fault == "wrong_owner": action["device_id"] = "other"
+    if fault == "wrong_identity": activity["expected_identity_json"] = {"serial": "CAMERA-1", "product_id": 11}
+    if fault == "wrong_occupancy": activity["occupancy_state"] = True
+    rows = {("device_activities", 25): None if fault == "missing_activity" else activity,
+            ("actions", 7): action}
+    transaction = ModuleType("camctl.persistence.transaction")
+    transaction.row_facts = lambda connection, table, ident: rows.get((table, ident))
+    monkeypatch.setitem(sys.modules, transaction.__name__, transaction)
+    monkeypatch.setattr(target_rules, "iter_fixed_targets", lambda *args:
+                        iter(()) if fault == "no_target" else iter([((1, 12, 25),)]))
+    from camctl.contracts.values import ConsistencyError
+    if expected is None:
+        with pytest.raises(ConsistencyError):
+            target_rules.verify_binding_check_targets(object(), check, run)
+    else:
+        assert target_rules.verify_binding_check_targets(object(), check, run) is expected

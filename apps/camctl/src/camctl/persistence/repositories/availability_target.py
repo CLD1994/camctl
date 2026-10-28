@@ -6,7 +6,7 @@ from copy import deepcopy
 
 from camctl.contracts.enums import enum_for
 from camctl.contracts.json_values import json_equal
-from camctl.contracts.values import ObjectId
+from camctl.contracts.values import ConsistencyError, ObjectId
 from camctl.devices.drivers.hasselblad.identity import CameraIdentity
 from camctl.devices.start_entry import is_hasselblad_photo
 from camctl.history.events import load_event_registry
@@ -145,6 +145,93 @@ def iter_logical_held_activities(connection, device_id: str, *, batch_size: int 
             return
 
 
+def logical_held_identity_mismatch(connection, device_id, current, *, batch_size=128):
+    """读取同逻辑设备所有仍持有限制的固定机身，核对完整身份。"""
+    from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+    from camctl.persistence.transaction import row_facts
+
+    if not isinstance(current, CameraIdentity):
+        raise ConsistencyError("当前配置缺少可靠固定机身身份")
+    mismatch = False
+    for page in iter_logical_held_activities(connection, device_id, batch_size=batch_size):
+        for action_id, activity_id in page:
+            activity = row_facts(connection, "device_activities", activity_id)
+            action = row_facts(connection, "actions", action_id)
+            if (activity is None or action is None or activity.get("id") != activity_id
+                    or activity.get("action_id") != action_id or action.get("id") != action_id
+                    or action.get("device_id") != device_id
+                    or not isinstance(action.get("driver_id"), str) or not action["driver_id"]
+                    or type(activity.get("occupancy_state")) is not int
+                    or activity.get("occupancy_state") != int(enum_for("device_activities.occupancy_state").HELD)):
+                raise ConsistencyError("同逻辑设备的旧活动归属或占用事实矛盾")
+            if action.get("driver_id") != DRIVER_ID:
+                continue
+            try:
+                fixed = CameraIdentity(**activity["expected_identity_json"])
+            except (KeyError, TypeError, ValueError) as error:
+                raise ConsistencyError("旧活动缺少可靠固定机身身份") from error
+            if activity.get("resource_key") != fixed.resource_key:
+                raise ConsistencyError("旧活动资源键与固定机身身份不符")
+            mismatch |= fixed != current
+    return mismatch
+
+
+def photo_check_identity_mismatch(connection, action, current, *, batch_size=128):
+    """按尚可采用的原拍摄检查固定身份核对当前机身。"""
+    from camctl.persistence.transaction import row_facts
+    if not isinstance(current, CameraIdentity):
+        raise ConsistencyError("当前配置缺少可靠固定机身身份")
+    if type(batch_size) is not int or not 1 <= batch_size <= 128:
+        raise ValueError("检查读取每批必须为 1 至 128 项")
+    after, mismatch = 0, False
+    while True:
+        with closing(connection.execute(
+            "SELECT c.id FROM device_availability_checks c"
+            " WHERE c.action_id=? AND c.trigger_copy_id IS NULL AND c.id>? ORDER BY c.id LIMIT ?",
+            (action["id"], after, batch_size),
+        )) as cursor:
+            page = tuple(cursor.fetchmany(batch_size))
+        if not page:
+            return mismatch
+        ids = tuple(ObjectId(row[0]) for row in page)
+        if any(left >= right for left, right in zip((after, *ids), ids)):
+            raise ConsistencyError("原拍摄检查读取页不是严格递增的有效身份")
+        for (check_id,) in page:
+            check = row_facts(connection, "device_availability_checks", check_id)
+            with closing(connection.execute(
+                "SELECT id FROM operation_runs WHERE availability_check_id=? ORDER BY id LIMIT 2", (check_id,),
+            )) as cursor:
+                runs = tuple(cursor.fetchmany(2))
+            if len(runs) != 1:
+                raise ConsistencyError("原拍摄检查缺少唯一操作责任")
+            run_id = runs[0][0]
+            run = row_facts(connection, "operation_runs", run_id)
+            if (check is None or run is None or check.get("action_id") != action["id"]
+                    or check.get("trigger_copy_id") is not None or run.get("action_id") != action["id"]
+                    or run.get("availability_check_id") != check_id
+                    or run.get("kind") != int(enum_for("operation_runs.kind").CHECK_DEVICE_AVAILABILITY)
+                    or run.get("responsibility_key") != f"availability/{check_id}"
+                    or (check.get("device_id"), check.get("driver_id")) != (action["device_id"], action["driver_id"])):
+                raise ConsistencyError("原拍摄检查的身份或归属不一致")
+            statuses = enum_for("operation_runs.status")
+            valid = (statuses.PENDING, statuses.ACTIVE, statuses.SUCCEEDED, statuses.FAILED,
+                     statuses.CANCELED, statuses.UNCONFIRMED, statuses.EXPIRED)
+            if type(run.get("status")) is not int or run["status"] not in tuple(map(int, valid)):
+                raise ConsistencyError("原拍摄检查状态无效")
+            if run["status"] not in (int(statuses.PENDING), int(statuses.ACTIVE), int(statuses.SUCCEEDED)):
+                continue
+            try:
+                fixed = CameraIdentity(**check["expected_identity_json"])
+            except (KeyError, TypeError, ValueError) as error:
+                raise ConsistencyError("原拍摄检查缺少可靠固定身份") from error
+            if check.get("resource_key") != fixed.resource_key:
+                raise ConsistencyError("原拍摄检查资源键不一致")
+            mismatch |= fixed != current
+        after = page[-1][0]
+        if len(page) < batch_size:
+            return mismatch
+
+
 def require_target_facts(check: Mapping, activity: Mapping, action: Mapping) -> None:
     """核对一项仍持有限制的旧活动，不判断调用收场或目标集合完整性。"""
     if (not {"action_id", "device_id", "driver_id", "expected_identity_json", "resource_key"} <= check.keys()
@@ -242,14 +329,9 @@ def iter_creation_targets(connection, check: Mapping, *, batch_size: int = 128):
     """从原写事务读取检查的完整旧目标；结果不授予设备执行资格。"""
     from camctl.persistence.transaction import row_facts
 
-    for page in iter_logical_held_activities(connection, check["device_id"], batch_size=batch_size):
-        for action_id, activity_id in page:
-            activity = row_facts(connection, "device_activities", activity_id)
-            if (activity is None or activity.get("action_id") != action_id
-                    or not activity.get("resource_key")):
-                raise AvailabilityTargetStateError("逻辑设备旧活动缺少固定身份或归属矛盾")
-            if activity["resource_key"] != check["resource_key"]:
-                raise AvailabilityTargetIdentityMismatch("逻辑设备旧活动的固定机身身份不同")
+    if logical_held_identity_mismatch(connection, check["device_id"],
+                                      CameraIdentity(**check["expected_identity_json"]), batch_size=batch_size):
+        raise AvailabilityTargetIdentityMismatch("逻辑设备旧活动的固定机身身份不同")
 
     seen = False
     for page in iter_held_activity_ids(connection, check["resource_key"], batch_size=batch_size):
@@ -295,6 +377,42 @@ def iter_fixed_targets(connection, check_id: int, *, batch_size: int = 128):
         after = ids[-1]
         if len(page) < batch_size:
             return
+
+
+def verify_binding_check_targets(connection, check, run):
+    """核对原检查的直接归属与全部固定目标，返回目标是否全部释放。"""
+    from camctl.persistence.transaction import row_facts
+    if (run.get("kind") != int(enum_for("operation_runs.kind").CHECK_DEVICE_AVAILABILITY)
+            or run.get("action_id") != check.get("action_id")
+            or run.get("availability_check_id") != check.get("id")
+            or run.get("responsibility_key") != f"availability/{check.get('id')}"):
+        raise ConsistencyError("检查流程与原检查归属不一致")
+    try:
+        fixed = CameraIdentity(**check["expected_identity_json"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ConsistencyError("检查缺少可靠固定机身身份") from error
+    if check.get("resource_key") != fixed.resource_key:
+        raise ConsistencyError("检查资源键与固定机身身份不一致")
+    occupancy = enum_for("device_activities.occupancy_state")
+    count, all_released = 0, True
+    for targets in iter_fixed_targets(connection, check["id"]):
+        for _, target_action, activity_id in targets:
+            activity = row_facts(connection, "device_activities", activity_id)
+            owner = None if activity is None else row_facts(connection, "actions", activity.get("action_id"))
+            if (target_action != check["action_id"] or activity is None or owner is None
+                    or activity.get("id") != activity_id or owner.get("id") != activity.get("action_id")
+                    or (owner.get("device_id"), owner.get("driver_id")) != (check["device_id"], check["driver_id"])
+                    or activity.get("resource_key") != fixed.resource_key
+                    or not json_equal(activity.get("expected_identity_json"), check["expected_identity_json"])):
+                raise ConsistencyError("检查固定目标与原机身或动作不一致")
+            state = activity.get("occupancy_state")
+            if type(state) is not int or state not in (int(occupancy.HELD), int(occupancy.RELEASED)):
+                raise ConsistencyError("检查固定目标的占用状态无效")
+            all_released &= state == int(occupancy.RELEASED)
+            count += 1
+    if not count:
+        raise ConsistencyError("检查缺少固定目标")
+    return all_released
 
 
 def iter_release_targets(connection, check: Mapping, *, batch_size: int = 128):

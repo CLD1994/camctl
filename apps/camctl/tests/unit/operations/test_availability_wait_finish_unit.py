@@ -30,6 +30,7 @@ def finish_module(monkeypatch):
     target = ModuleType("camctl.persistence.repositories.availability_target")
     target.AvailabilityTargetBlocked = type("AvailabilityTargetBlocked", (ValueError,), {})
     target.iter_release_targets = lambda connection, check: iter([(1,)])
+    target.verify_binding_check_targets = lambda connection, check, run: False
     settled = ModuleType("camctl.persistence.repositories.availability_finish")
     settled.AvailabilityFinishReads = lambda connection: SimpleNamespace(require_settled=lambda run_id: None)
     for item in (history, transaction, target, settled):
@@ -272,3 +273,127 @@ def test_read_failure_requires_complete_exact_event_group(failure_module, monkey
     else:
         with pytest.raises(failure_module.ConsistencyError):
             failure_module.verify_read_failure_group(connection, events[0], events, transaction)
+
+
+@pytest.mark.parametrize("settled,targets,action_status,canceled,now,expected", [
+    (False, True, 1, 0, 10, "wait"),
+    (True, False, 1, 0, 10, "resolved"),
+    (True, True, 1, 1, 10, "canceled"),
+    (True, True, 1, 0, 11, "expired"),
+    (True, True, 4, 0, 10, "wait"),
+    (True, True, 1, 0, 10, "binding_failed"),
+])
+def test_binding_changed_finishes_only_after_original_result_and_priority(
+        finish_module, monkeypatch, settled, targets, action_status, canceled, now, expected):
+    class Reads:
+        def __init__(self, connection): pass
+        def require_settled(self, run_id):
+            if not settled:
+                raise finish_module.ConsistencyError("原结果未收场")
+    monkeypatch.setattr(finish_module, "AvailabilityFinishReads", Reads)
+    monkeypatch.setattr(finish_module, "iter_release_targets", lambda *args: iter([(1,)] if targets else []))
+    monkeypatch.setattr(finish_module, "_verify_binding_failure", lambda *args: True, raising=False)
+    details = {"device_id": "camera", "expected_driver_id": "hb", "reason": "physical_identity_mismatch"}
+    request = finish_module.WaitingFinishRequest(9, now, 20, 3, details, {"serial": "new", "product_id": 10})
+    check = {"id": 9, "trigger_copy_id": None, "device_id": "camera"}
+    run = {"id": 3, "status": 2, "attempts_used": 1, "retry_wait_required": 1}
+    action = {"status": action_status, "cancel_requested": canceled, "scheduled_at": 10, "max_delay_ms": 0}
+    disposition, status, error = finish_module._decision(object(), request, check, run, action)
+    if expected in ("wait", "resolved"):
+        assert disposition is getattr(finish_module.WaitingFinishDisposition, expected.upper())
+    else:
+        assert disposition is finish_module.WaitingFinishDisposition.FINISHED
+        assert status == {"canceled": 5, "expired": 7, "binding_failed": 4}[expected]
+        assert error == ({"code": "device_binding_unavailable", "stage": "execution", "details": details}
+                         if expected == "binding_failed" else None)
+    assert run["attempts_used"] == 1
+
+
+@pytest.mark.parametrize("fixed,current,old_mismatch,expected", [
+    (("old", 10), ("new", 10), False, True),
+    (("old", 10), ("old", 11), False, True),
+    (("old", 10), ("old", 10), True, True),
+    (("old", 10), ("old", 10), False, False),
+])
+def test_binding_check_failure_independently_rechecks_complete_identity(
+        finish_module, monkeypatch, fixed, current, old_mismatch, expected):
+    errors = ModuleType("camctl.contracts.workflow_errors")
+    errors.validate_error_details = lambda *args: None
+    identity_api = ModuleType("camctl.devices.drivers.hasselblad.identity")
+    class Identity:
+        def __init__(self, serial, product_id): self.serial, self.product_id = serial, product_id
+        def __eq__(self, other): return (self.serial, self.product_id) == (other.serial, other.product_id)
+        @property
+        def resource_key(self): return self.serial
+    identity_api.CameraIdentity = Identity
+    target = sys.modules["camctl.persistence.repositories.availability_target"]
+    calls = []
+    target.logical_held_identity_mismatch = lambda connection, device, identity: calls.append((connection, device, identity)) or old_mismatch
+    monkeypatch.setitem(sys.modules, errors.__name__, errors)
+    monkeypatch.setitem(sys.modules, identity_api.__name__, identity_api)
+    check = {"device_id": "camera", "driver_id": "hb", "resource_key": fixed[0],
+             "expected_identity_json": {"serial": fixed[0], "product_id": fixed[1]}}
+    details = {"device_id": "camera", "expected_driver_id": "hb", "reason": "physical_identity_mismatch"}
+    request = finish_module.WaitingFinishRequest(9, 10, 20, 3, details,
+                                                  {"serial": current[0], "product_id": current[1]})
+    connection = object()
+    assert finish_module._verify_binding_failure(connection, check, request) is expected
+    assert len(calls) == 1 and calls[0][:2] == (connection, "camera")
+
+
+def test_saved_binding_failure_reuses_original_request_not_current_configuration(finish_module, monkeypatch):
+    monkeypatch.setattr(finish_module, "load_event_registry", lambda: {"events": {
+        "OPERATION_CONFIGURED": {"id": 10, "branches": {"FINISH": {"reason": 3}}}}})
+    details = {"device_id": "camera", "expected_driver_id": "hb", "reason": "physical_identity_mismatch"}
+    identity_api = ModuleType("camctl.devices.drivers.hasselblad.identity")
+    class Identity:
+        def __init__(self, serial, product_id): self.serial, self.product_id = serial, product_id
+        @property
+        def resource_key(self): return self.serial
+    identity_api.CameraIdentity = Identity
+    monkeypatch.setitem(sys.modules, identity_api.__name__, identity_api)
+    original_identity = {"serial": "new", "product_id": 10}
+    original = {"check_id": 9, "trusted_wall_now": 10, "occurred_at": 20, "max_attempts": 3,
+                "binding_details": details, "current_identity": original_identity}
+    run = {"id": 3, "action_id": 1, "availability_check_id": 9, "status": 4,
+           "responsibility_key": "availability/9", "retry_wait_required": 0, "error_json": {
+               "code": "device_binding_unavailable", "stage": "execution", "details": details}}
+    check = {"id": 9, "action_id": 1, "trigger_copy_id": None, "device_id": "camera", "driver_id": "hb",
+             "expected_identity_json": {"serial": "old", "product_id": 10}, "resource_key": "old"}
+    monkeypatch.setattr(finish_module, "row_facts", lambda connection, table, ident:
+                        check if table == "device_availability_checks" else run)
+    event = {"type": 10, "reason": 3, "occurred_at": 20, "body": {
+        "evidence": {"availability_wait_finish_request": original}, "rows": [{
+            "table": "operation_runs", "id": 3, "before": {"exists": True}, "after": {"exists": True, "values": {
+                "status": 4, "retry_wait_required": 0, "error_json": run["error_json"]}}}]}}
+    monkeypatch.setattr(finish_module, "saved_transaction_events", lambda connection, key: [event])
+    connection = SimpleNamespace(execute=lambda sql, *args: SimpleNamespace(
+        fetchall=lambda: [(9, 3)] if "device_availability_checks c" in sql else [("original-key",)], close=lambda: None))
+    assert finish_module.saved_binding_check_failure(connection, 1) == (details, original_identity)
+    class Unsettled:
+        def __init__(self, connection): pass
+        def require_settled(self, run_id):
+            raise finish_module.ConsistencyError("原检查尝试尚未收场")
+    previous = finish_module.AvailabilityFinishReads
+    monkeypatch.setattr(finish_module, "AvailabilityFinishReads", Unsettled)
+    with pytest.raises(finish_module.ConsistencyError):
+        finish_module.saved_binding_check_failure(connection, 1)
+    monkeypatch.setattr(finish_module, "AvailabilityFinishReads", previous)
+    event["body"]["rows"][0]["after"]["values"]["error_json"] = {"code": "different"}
+    with pytest.raises(finish_module.ConsistencyError):
+        finish_module.saved_binding_check_failure(connection, 1)
+
+
+def test_binding_failure_does_not_invent_missing_query_budget(finish_module, monkeypatch):
+    monkeypatch.setattr(finish_module, "_verify_binding_failure", lambda *args: True)
+    details = {"device_id": "camera", "expected_driver_id": "hb", "reason": "missing"}
+    request = finish_module.WaitingFinishRequest(9, 10, 20, None, details, None)
+    check = {"id": 9, "trigger_copy_id": None, "device_id": "camera"}
+    run = {"id": 3, "status": 1, "attempts_used": 0}
+    action = {"status": 1, "cancel_requested": 0, "scheduled_at": 10, "max_delay_ms": 0}
+    disposition, status, error = finish_module._decision(object(), request, check, run, action)
+    assert disposition is finish_module.WaitingFinishDisposition.FINISHED and status == 4
+    assert error["details"] == details
+    assert finish_module._request(finish_module._document(request)).max_attempts is None
+    with pytest.raises(ValueError):
+        finish_module.WaitingFinishRequest(9, 10, 20, None)

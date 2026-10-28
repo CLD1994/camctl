@@ -38,11 +38,11 @@ def record_selection(snapshot, *, action_id, selection_id, source_action_id):
                      "source_action_id": source_action_id}, state=snapshot.diagnostic)
 
 
-def record_qualification(result, candidate):
+def record_qualification(result, candidate, *, state=None):
     if result.outcome is not QualificationOutcome.REJECTED_FINAL or result.error_code is None:
         return
     error = registered_result_error("item_error_ids.obtain_items", result.error_code, result.error_details)
-    record_error(error, stage=error.stage, state=result.diagnostic,
+    record_error(error, stage=error.stage, state=result.diagnostic if state is None else state,
         context={"action_id": candidate.action_id, "item_id": candidate.item_id,
             "output_id": candidate.output_id, "source_device_file_id": candidate.source_device_file_id,
             "source_intermediate_file_id": candidate.source_intermediate_file_id})

@@ -21,6 +21,10 @@ class AvailabilityAssembly:
         self._recovery_after = 0
         self._finish_after = 0
 
+    def binding_diagnostic(self, action_id, copy_id=None, *, has_read_copy=True):
+        key = (action_id, copy_id) if has_read_copy else (action_id, ("item", copy_id))
+        return self.coordinator.binding_diagnostics_by_request.get(key)
+
     def capture_selection(self, device_id, now):
         """取得本会话对该机身实际采用的拍摄选择输入。"""
         declaration = self.devices.get(device_id)
@@ -114,6 +118,35 @@ class AvailabilityAssembly:
         return await self.coordinator.request(runtime.database, request, runtime.query_config,
             entry.driver, entry.evidence, DeviceBinding(action["device_id"], DRIVER_ID))
 
+    async def finish_capture_binding(self, runtime, action, details):
+        """沿原检查身份完成已开始的结果及绑定失败收场。"""
+        from camctl.capture.preparation import effective_preparation_lead_s
+        now = runtime.wall_us()
+        identity = runtime.fixed_camera_identity
+        if identity is None:
+            from types import SimpleNamespace
+            from camctl.operations.availability import _action_binding_checks
+            def original(owned):
+                rows = _action_binding_checks(owned, SimpleNamespace(action_id=action["id"], trigger_copy_id=None))
+                if not rows:
+                    return None
+                found = row_facts(owned.connection, "device_availability_checks", rows[0][0])
+                if found is None:
+                    from camctl.contracts.values import ConsistencyError
+                    raise ConsistencyError("开放检查缺少固定事实")
+                return found
+            check = await runtime.database.read(original)
+            if check is None:
+                return True
+            identity = CameraIdentity(**check["expected_identity_json"])
+        request = CreateAvailabilityCheck(action["id"], identity, now,
+            effective_preparation_lead_s(runtime, action), now)
+        entry = self.drivers.entry(DRIVER_ID)
+        current = None if details["reason"] not in ("physical_identity_mismatch", "physical_identity_conflict") else {
+            "serial": identity.serial, "product_id": identity.product_id}
+        return await self.coordinator.finish_binding(runtime.database, request, runtime.query_config,
+            entry.evidence, DeviceBinding(action["device_id"], DRIVER_ID), details, current)
+
     async def read(self, runtime, candidate):
         if candidate.driver_id != DRIVER_ID:
             return AvailabilityProgress.READY
@@ -140,3 +173,34 @@ class AvailabilityAssembly:
         entry = self.drivers.entry(DRIVER_ID)
         return await self.coordinator.request(runtime.database, request, query_attempt_config(declaration),
             entry.driver, entry.evidence, fixed.binding)
+
+    async def finish_read_binding(self, runtime, candidate, result):
+        """读取项绑定失败前先收场其原可用性检查。"""
+        from camctl.devices.bindings import binding_failure_details
+        source = await runtime.database.read(lambda owned: row_facts(
+            owned.connection, "device_files", candidate.source_file_id))
+        if source is None:
+            from camctl.contracts.values import ConsistencyError
+            raise ConsistencyError("读取绑定失败缺少原设备来源")
+        fixed = CameraFileIdentity.from_source(source["identity_key"], source["locator_json"])
+        identity = CameraIdentity(fixed.serial, fixed.product_id)
+        now = runtime.occurred_at()
+        request = CreateAvailabilityCheck(candidate.action_id, identity, now,
+            self.preparation_leads.get(candidate.device_id, Decimal(0)), now, trigger_copy_id=candidate.copy_id)
+        declaration = self.devices.get(candidate.device_id)
+        config = (query_attempt_config(declaration)
+                  if declaration is not None and declaration.get("driver") == DRIVER_ID else None)
+        entry = self.drivers.entry(DRIVER_ID)
+        details = binding_failure_details(result)
+        current = result.current_identity
+        if details["reason"] == "physical_identity_conflict":
+            from camctl.persistence.repositories.availability_wait_finish import saved_binding_check_failure
+            saved = await runtime.database.read(lambda owned: saved_binding_check_failure(
+                owned.connection, candidate.action_id, resource_key=identity.resource_key, expected_identity=identity))
+            if saved is not None and saved[0] == details:
+                current = saved[1]
+            else:
+                configured = _hasselblad_identity(declaration)
+                current = {"serial": configured.serial, "product_id": configured.product_id}
+        return await self.coordinator.finish_binding(runtime.database, request, config, entry.evidence,
+            fixed.binding, details, current, has_read_copy=getattr(candidate, "has_read_copy", True))

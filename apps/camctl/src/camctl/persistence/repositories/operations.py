@@ -2292,7 +2292,8 @@ def _operation_finish_guard(event, context) -> None:
                 observer = None if source is None else row_facts(reads.connection, "actions", source["observer_action_id"])
                 origin = None if source is None else row_facts(reads.connection, "actions", source["source_action_id"])
                 if (source is None or observer is None or origin is None or identity is None
-                        or not verify_source_identity_mismatch(reads.connection, source, observer, origin, identity)):
+                        or not verify_source_identity_mismatch(reads.connection, source, observer, origin, identity,
+                                                               action_id=after["action_id"])):
                     _fail("读取结果的原次机身身份与固定来源不构成不符")
             elif identity is not None:
                 _fail("非机身不符的读取结果不能携带当前机身身份")

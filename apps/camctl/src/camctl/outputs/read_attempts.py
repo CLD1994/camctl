@@ -425,7 +425,7 @@ async def retry_read_business(runtime):
 
 
 async def save_read_business(runtime, copy_id, operation, request, save, *, on_completed=None, retry=False,
-                             business_saves=None):
+                             business_saves=None, diagnostic=None):
     """共同等待原申请的保存与应用；明确恢复时才重新核实失败结果。"""
     identity = (copy_id, operation)
     # 原结果仍持有后续各申请；全局恢复完成并删除活动责任后也能交付原回执。
@@ -433,7 +433,8 @@ async def save_read_business(runtime, copy_id, operation, request, save, *, on_c
     if pending is None:
         pending = runtime.pending_read_business.get(identity)
     if pending is None:
-        pending = PendingReadBusiness(save, request, new_operation_key(), on_completed)
+        pending = PendingReadBusiness(save, request, new_operation_key(), on_completed,
+                                      diagnostic=diagnostic or DiagnosticState())
         runtime.pending_read_business[identity] = pending
     if business_saves is not None:
         business_saves[identity] = pending

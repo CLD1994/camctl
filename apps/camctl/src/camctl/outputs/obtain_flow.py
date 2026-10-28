@@ -410,12 +410,21 @@ async def _qualify_selected_items(
         action = await runtime.database.read(lambda owned: _action_facts(owned.connection, action_id))
         candidate = await _delivery_candidate(
             runtime, action, int(item_id), int(output_id), int(selection_id), now)
+        if candidate is None:
+            continue
         outcome = await _save_repository(runtime, runtime.outputs.grant_file, candidate, new_operation_key())
         if outcome.kind is not DbOutcomeKind.COMPLETED:
             raise db_failure(ConsistencyError,
                 f"读取资格事务未完成（{outcome.kind.value}）:"
                 f" {outcome.error}", outcome)
-        record_qualification(outcome.value, candidate)
+        diagnostic = None
+        if candidate.binding_result is not None and getattr(runtime, "availability", None) is not None:
+            from camctl.contracts.workflow_errors import item_error_id
+            from camctl.devices.bindings import binding_failure_details
+            if (outcome.value.error_code == item_error_id("obtain_items", "device_binding_unavailable")
+                    and outcome.value.error_details == binding_failure_details(candidate.binding_result)):
+                diagnostic = runtime.availability.binding_diagnostic(action_id, item_id, has_read_copy=False)
+        record_qualification(outcome.value, candidate, state=diagnostic)
 
 
 async def _delivery_candidate(
@@ -489,10 +498,14 @@ async def _device_source_candidate(
         raise ConsistencyError(f"产物源文件缺失: {device_file_id}")
     original_name, device_id, driver_id = row
     binding = DeviceBinding(device_id=device_id, driver_id=driver_id)
-    binding_result = runtime.binding_check(binding) if runtime.binding_check is not None else None
+    from camctl.outputs.physical_binding import saved_source_binding
+    binding_result = await saved_source_binding(runtime, device_file_id, action["id"], device_id, driver_id)
+    if binding_result is None:
+        binding_result = runtime.binding_check(binding) if runtime.binding_check is not None else None
     assembly = runtime.devices.get(device_id)
     failed_binding = binding_result is not None and binding_result.status in (
-        BindingStatus.DEVICE_MISSING, BindingStatus.DRIVER_MISMATCH)
+        BindingStatus.DEVICE_MISSING, BindingStatus.DRIVER_MISMATCH,
+        BindingStatus.PHYSICAL_IDENTITY_MISMATCH, BindingStatus.PHYSICAL_IDENTITY_CONFLICT)
     if assembly is None and not failed_binding:
         raise ConsistencyError(
             f"读取设备未装配读取协作者: {device_id!r}")
@@ -501,6 +514,17 @@ async def _device_source_candidate(
         physical = await source_physical_binding(runtime, device_file_id, device_id, driver_id)
         if physical is not None:
             binding_result = physical
+    if (binding_result is not None and binding_result.status in (
+            BindingStatus.DEVICE_MISSING, BindingStatus.DRIVER_MISMATCH,
+            BindingStatus.PHYSICAL_IDENTITY_MISMATCH, BindingStatus.PHYSICAL_IDENTITY_CONFLICT)
+            and getattr(runtime, "availability", None) is not None):
+        from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID as HASSELBLAD_DRIVER_ID
+        if driver_id == HASSELBLAD_DRIVER_ID:
+            from types import SimpleNamespace
+            candidate = SimpleNamespace(action_id=action["id"], copy_id=item_id,
+                device_id=device_id, source_file_id=device_file_id, has_read_copy=False)
+            if not await runtime.availability.finish_read_binding(runtime, candidate, binding_result):
+                return None
     stem = _original_stem(original_name)
     extension = _extension_of(original_name)
     return FileCandidate(
@@ -704,11 +728,16 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
             continue
         await _resume_local_delivery_end(runtime, held, runtime, assembly)
         local_end.add(item.copy_id)
-    if runtime.binding_check is not None:
-        candidates = ((item.copy_id, item.source_file_id, item.device_id, item.driver_id)
-                      for item in page.items if item.copy_id not in local_end)
-        for copy_id, source_id, device_id, driver_id in candidates:
-            result = runtime.binding_check(DeviceBinding(device_id, driver_id))
+    if runtime.binding_check is not None or getattr(runtime, "availability", None) is not None:
+        candidates = (item for item in page.items if item.copy_id not in local_end and item.copy_id not in digest_end)
+        for item in candidates:
+            copy_id, source_id, device_id, driver_id = item.copy_id, item.source_file_id, item.device_id, item.driver_id
+            from camctl.outputs.physical_binding import saved_source_binding
+            result = await saved_source_binding(runtime, source_id, item.action_id, device_id, driver_id)
+            if result is None:
+                if runtime.binding_check is None:
+                    continue
+                result = runtime.binding_check(DeviceBinding(device_id, driver_id))
             if result.status is BindingStatus.MATCHED:
                 from camctl.outputs.physical_binding import source_physical_binding
                 physical = await source_physical_binding(runtime, source_id, device_id, driver_id)
@@ -718,13 +747,20 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
             if result.status in (BindingStatus.DEVICE_MISSING, BindingStatus.DRIVER_MISMATCH,
                                  BindingStatus.PHYSICAL_IDENTITY_MISMATCH, BindingStatus.PHYSICAL_IDENTITY_CONFLICT):
                 binding_blocked.add(copy_id)
+                from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID as HASSELBLAD_DRIVER_ID
+                if (driver_id == HASSELBLAD_DRIVER_ID and getattr(runtime, "availability", None) is not None
+                        and not await runtime.availability.finish_read_binding(runtime, item, result)):
+                    continue
                 from camctl.outputs.read_attempts import PendingReadBusiness, held_binding_read_result
                 from camctl.outputs.handoff import FailureSaveDisposition
 
+                diagnostic = (None if getattr(runtime, "availability", None) is None else
+                              runtime.availability.binding_diagnostic(item.action_id, copy_id))
                 business = PendingReadBusiness(runtime.outputs.fail_read_binding,
                     FailReadBinding(copy_id, source_id, result, now), new_operation_key(),
                     lambda value, identity=copy_id: runtime.retry_gate.cleared(f"read/{identity}")
-                        if value.disposition is not FailureSaveDisposition.RETIRED else None)
+                        if value.disposition is not FailureSaveDisposition.RETIRED else None,
+                    diagnostic=diagnostic or DiagnosticState())
                 pending = await held_binding_read_result(runtime, copy_id, result, business)
                 if pending is not None:
                     await _save_read_result_and_settle(runtime, pending)
@@ -734,7 +770,7 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
                 from camctl.outputs.read_attempts import save_read_business
 
                 failed = await save_read_business(runtime, copy_id, "read_binding_failure", FailReadBinding(
-                    copy_id, source_id, result, now), runtime.outputs.fail_read_binding)
+                    copy_id, source_id, result, now), runtime.outputs.fail_read_binding, diagnostic=diagnostic)
                 if failed.kind is not DbOutcomeKind.COMPLETED:
                     raise db_failure(ConsistencyError,
                         f"读取绑定失败事务未完成（{failed.kind.value}）: {failed.error}", failed)

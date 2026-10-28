@@ -211,10 +211,23 @@ def _observed_activity(response: Any) -> int | None:
     return None
 
 
+async def _saved_binding_failure(runtime: Any, action: Mapping[str, Any]):
+    from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+    if (action.get("driver_id") != DRIVER_ID or action.get("type") != 1
+            or action.get("status") != 1 or action.get("execution_started") != 0):
+        return None
+    from camctl.persistence.repositories.availability_wait_finish import saved_binding_check_failure
+    return await runtime.database.read(lambda owned: saved_binding_check_failure(owned.connection, action["id"]),
+                                       description="读取原检查绑定失败")
+
+
 async def _original_binding_failure(runtime: Any, action: Mapping[str, Any]):
     """核对保存的设备及驱动；没有绑定端口的调用方提供匹配前提。"""
     from camctl.capture.handlers import _binding
 
+    saved = await _saved_binding_failure(runtime, action)
+    if saved is not None:
+        return saved[0]
     if runtime.binding_check is None:
         return None
     failure = binding_failure_details(runtime.binding_check(_binding(action)))
@@ -226,6 +239,8 @@ async def _original_binding_failure(runtime: Any, action: Mapping[str, Any]):
     from camctl.devices.drivers.hasselblad.identity import CameraIdentity
     from camctl.persistence.transaction import row_facts
     from camctl.persistence.repositories.physical_alias import physical_alias_conflict
+    from camctl.persistence.repositories.availability_target import (logical_held_identity_mismatch,
+        photo_check_identity_mismatch)
     current = runtime.fixed_camera_identity
     if not isinstance(current, CameraIdentity):
         raise ConsistencyError("当前 Hasselblad 配置缺少固定机身身份")
@@ -233,10 +248,18 @@ async def _original_binding_failure(runtime: Any, action: Mapping[str, Any]):
         found = owned.connection.execute(
             "SELECT id FROM device_activities WHERE action_id=?", (action["id"],)).fetchone()
         activity = None if found is None else row_facts(owned.connection, "device_activities", found[0])
-        conflict = (action["status"] == 1 and action["execution_started"] == 0
-                    and physical_alias_conflict(owned.connection, action["device_id"], current))
-        return activity, conflict
-    activity, conflict = await runtime.database.read(read, description="读取固定机身身份")
+        eligible = action["status"] == 1 and action["execution_started"] == 0
+        mismatch = False
+        if activity is None and eligible:
+            old_mismatch = logical_held_identity_mismatch(owned.connection, action["device_id"], current)
+            check_mismatch = photo_check_identity_mismatch(owned.connection, action, current)
+            mismatch = old_mismatch or check_mismatch
+        conflict = eligible and physical_alias_conflict(owned.connection, action["device_id"], current)
+        return activity, mismatch, conflict
+    activity, mismatch, conflict = await runtime.database.read(read, description="读取固定机身身份")
+    if mismatch:
+        return {"device_id": action["device_id"], "expected_driver_id": DRIVER_ID,
+                "reason": "physical_identity_mismatch"}
     if activity is None:
         original = None
     else:

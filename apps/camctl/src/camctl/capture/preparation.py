@@ -76,6 +76,7 @@ class RuntimePreparationCache:
     request_saves: dict[OperationKey, SharedSave] = field(default_factory=dict)
     changed_actions: set[int] = field(default_factory=set)
     scope_diagnostics: dict[int, DiagnosticState] = field(default_factory=dict)
+    binding_diagnostics: dict[int, DiagnosticState] = field(default_factory=dict)
 
     def take_wakeup(self, action_id):
         """合并本动作尚未交给调度的实际返回和首次保存应用。"""
@@ -212,6 +213,14 @@ async def _save_cached_request(database, cache, action_id, *, scheduling, captur
                 raise
             notification_error = error
         value = _completed(receipt, message)
+        if kind == "fail_binding_preparation":
+            outcome = getattr(value.outcome, "value", None)
+            if outcome == "failed" or outcome == "already" and value.reason == "saved":
+                state = cache.binding_diagnostics.setdefault(action_id, DiagnosticState())
+                error = ErrorValue("device_binding_unavailable", "execution", request.details)
+                record_error(error, stage="execution", context={"action_id": action_id}, state=state)
+            else:
+                cache.binding_diagnostics.pop(action_id, None)
         if kind == "release" and value.outcome.value == "rejected":
             raise ConsistencyError(f"准备释放条件未成立: {value.reason}")
         del requests[action_id]
@@ -417,8 +426,10 @@ async def _recover_old_preparation(runtime, action_id):
     return True
 
 
-async def _end(runtime, action_id, kind, request):
+async def _end(runtime, action_id, kind, request, *, diagnostic=None):
     cache = runtime.preparation_cache
+    if kind == "fail_binding_preparation":
+        cache.binding_diagnostics.setdefault(action_id, diagnostic or DiagnosticState())
     if action_id not in cache.endings:
         cache.endings[action_id] = kind, request, new_operation_key()
     (await resume_preparation_saves(runtime.database, cache, operations=runtime.operations,

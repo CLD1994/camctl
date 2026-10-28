@@ -24,10 +24,11 @@ def coordinator_module(monkeypatch):
         modules[name] = module
 
     keys = itertools.count(1)
-    stub("camctl.contracts.values", ConsistencyError=ValueError, new_operation_key=lambda: next(keys))
+    stub("camctl.contracts.values", ConsistencyError=ValueError, ObjectId=int, new_operation_key=lambda: next(keys))
     stub("camctl.logging_runtime.diagnostics", DiagnosticState=type("DiagnosticState", (), {}),
          record_call_outcome=lambda *args, **kwargs: None,
-         record_availability_error=lambda *args, **kwargs: None)
+         record_availability_error=lambda *args, **kwargs: None,
+         record_error=lambda *args, **kwargs: None)
     class RunOutcome(Enum):
         SUCCEEDED = 1
         FAILED = 2
@@ -192,10 +193,16 @@ def install_repositories(monkeypatch):
         RESOLVED = 3
         TERMINAL = 4
 
+    @dataclass(frozen=True)
+    class WaitingBindingResult:
+        status: int
+        error: object
+
     for name, members in (
         ("availability_create", {"CreateDisposition": CreateDisposition, "ensure_check": object()}),
         ("availability_release", {"ResolveDisposition": ResolveDisposition, "finish_if_resolved": object()}),
         ("availability_wait_finish", {"WaitingFinishDisposition": WaitingFinishDisposition,
+                                     "WaitingBindingResult": WaitingBindingResult,
                                      "finish_waiting_availability": object()}),
     ):
         full = "camctl.persistence.repositories." + name
@@ -347,3 +354,304 @@ async def test_recovery_saves_unknown_then_uses_current_budget_and_trigger(
     assert finish.outcome.outcome.status is module.AttemptStatus.UNKNOWN
     assert finish.run_finish is None and finish.recovery_max_event_id == 20
     assert coordinator._write.await_args_list[1].args[2][-1] == current_max
+
+
+@pytest.mark.asyncio
+async def test_creation_identity_mismatch_is_not_reported_as_wait(coordinator_module, monkeypatch):
+    module, _ = coordinator_module
+    install_repositories(monkeypatch)
+    from camctl.persistence.repositories.availability_create import CreateDisposition
+    coordinator = make_coordinator(module)
+    monkeypatch.setattr(module, "_open_check", lambda owned, request: None)
+    coordinator._write = AsyncMock(return_value=SimpleNamespace(disposition=CreateDisposition.IDENTITY_MISMATCH))
+    database = SimpleNamespace(read=AsyncMock(side_effect=lambda callback: callback(None)))
+    request = Request(action_id=1, trigger_copy_id=None)
+    result = await coordinator.advance(database, request, SimpleNamespace(max_attempts=2), None, None, None)
+    assert result is module.AvailabilityProgress.IDENTITY_MISMATCH
+    coordinator._write.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state,expected", [("no_check", True), ("original_in_flight", False),
+                                             ("resolved", True), ("binding_failed", True), ("wait", False)])
+async def test_binding_change_waits_for_original_check_and_uses_its_result(coordinator_module, monkeypatch, state, expected):
+    module, _ = coordinator_module
+    resolve, waiting = install_repositories(monkeypatch)
+    coordinator = make_coordinator(module)
+    monkeypatch.setattr(module, "_action_binding_checks", lambda owned, request:
+                        () if state == "no_check" else ((9, 7, None),))
+    monkeypatch.setattr(module, "_run_facts", lambda owned, run: {
+        "running_attempt": 3 if state == "original_in_flight" else None})
+    coordinator._recover_attempt = AsyncMock()
+    if state == "resolved":
+        results = [resolve.SUCCEEDED]
+    elif state == "binding_failed":
+        results = [resolve.WAIT, waiting.FINISHED]
+    elif state == "wait":
+        results = [resolve.WAIT, waiting.WAIT]
+    else:
+        results = []
+    coordinator._write = AsyncMock(side_effect=results)
+    database = SimpleNamespace(read=AsyncMock(side_effect=lambda callback: callback(None)))
+    request = Request(action_id=1, trigger_copy_id=None)
+    details = {"device_id": "hb0", "expected_driver_id": "hb", "reason": "physical_identity_mismatch"}
+    result = await coordinator.finish_binding(database, request, SimpleNamespace(max_attempts=2),
+                                               None, None, details, {"serial": "new", "product_id": 10})
+    assert result is expected
+    if state == "original_in_flight":
+        coordinator._recover_attempt.assert_awaited_once()
+        coordinator._write.assert_not_awaited()
+    if state == "binding_failed":
+        finish = coordinator._write.await_args_list[-1].args[2]
+        assert finish[4:] == (details, {"serial": "new", "product_id": 10})
+
+
+@pytest.mark.asyncio
+async def test_reused_check_identity_mismatch_is_not_advanced(coordinator_module, monkeypatch):
+    module, _ = coordinator_module
+    install_repositories(monkeypatch)
+    coordinator = make_coordinator(module)
+    monkeypatch.setattr(module, "_open_check", lambda owned, request: ("identity_mismatch",))
+    coordinator._write = AsyncMock()
+    database = SimpleNamespace(read=AsyncMock(side_effect=lambda callback: callback(None)))
+    result = await coordinator.advance(database, Request(1, None), SimpleNamespace(max_attempts=2), None, None, None)
+    assert result is module.AvailabilityProgress.IDENTITY_MISMATCH
+    coordinator._write.assert_not_awaited()
+
+
+@pytest.mark.parametrize("fixed,current,expected", [(("s", 1), ("s", 1), (9, 7, None)),
+                                                       (("s", 1), ("s", 2), ("identity_mismatch",))])
+def test_open_check_compares_product_as_well_as_resource_key(coordinator_module, monkeypatch, fixed, current, expected):
+    module, _ = coordinator_module
+    identity_api = ModuleType("camctl.devices.drivers.hasselblad.identity")
+    class Identity:
+        def __init__(self, serial, product_id): self.serial, self.product_id = serial, product_id
+        def __eq__(self, other): return (self.serial, self.product_id) == (other.serial, other.product_id)
+        @property
+        def resource_key(self): return self.serial
+    identity_api.CameraIdentity = Identity
+    transaction = ModuleType("camctl.persistence.transaction")
+    transaction.row_facts = lambda connection, table, ident: {
+        "expected_identity_json": {"serial": fixed[0], "product_id": fixed[1]}, "resource_key": fixed[0]}
+    monkeypatch.setitem(sys.modules, identity_api.__name__, identity_api)
+    monkeypatch.setitem(sys.modules, transaction.__name__, transaction)
+    connection = SimpleNamespace(execute=lambda *args: SimpleNamespace(fetchall=lambda: [(9, 7, None)]))
+    request = SimpleNamespace(action_id=1, identity=Identity(*current))
+    assert module._open_check(SimpleNamespace(connection=connection), request) == expected
+
+
+@pytest.mark.asyncio
+async def test_prior_availability_failure_is_delivered_before_binding_failure(coordinator_module, monkeypatch):
+    module, _ = coordinator_module
+    resolve, _ = install_repositories(monkeypatch)
+    coordinator = make_coordinator(module)
+    monkeypatch.setattr(module, "_action_binding_checks", lambda owned, request: ((9, 7, None),))
+    monkeypatch.setattr(module, "_run_facts", lambda owned, run: {
+        "running_attempt": None, "status": 6, "error_json": {"code": "device_availability_unconfirmed"}})
+    coordinator._write = AsyncMock(return_value=resolve.TERMINAL)
+    coordinator._deliver_failure = AsyncMock()
+    database = SimpleNamespace(read=AsyncMock(side_effect=lambda callback: callback(None)))
+    details = {"device_id": "camera", "expected_driver_id": "hb", "reason": "physical_identity_mismatch"}
+    assert not await coordinator.finish_binding(database, Request(1, None), SimpleNamespace(max_attempts=1),
+                                                None, None, details, {"serial": "new", "product_id": 10})
+    coordinator._deliver_failure.assert_awaited_once_with(database, (1, None), 9)
+    coordinator._write.assert_awaited_once()
+
+
+@pytest.mark.parametrize("product,expected", [(10, ((9, 7, 8),)), (11, ())])
+def test_read_check_discovery_uses_complete_source_identity(coordinator_module, monkeypatch, product, expected):
+    module, _ = coordinator_module
+    identity_api = ModuleType("camctl.devices.drivers.hasselblad.identity")
+    class Identity:
+        def __init__(self, serial, product_id): self.serial, self.product_id = serial, product_id
+        def __eq__(self, other): return (self.serial, self.product_id) == (other.serial, other.product_id)
+        @property
+        def resource_key(self): return self.serial
+    identity_api.CameraIdentity = Identity
+    transaction = ModuleType("camctl.persistence.transaction")
+    transaction.row_facts = lambda connection, table, ident: {
+        "expected_identity_json": {"serial": "s", "product_id": 10}, "resource_key": "s"}
+    monkeypatch.setitem(sys.modules, identity_api.__name__, identity_api)
+    monkeypatch.setitem(sys.modules, transaction.__name__, transaction)
+    connection = SimpleNamespace(execute=lambda *args: SimpleNamespace(fetchall=lambda: [(9, 7, 8, 2)]))
+    request = SimpleNamespace(action_id=1, trigger_copy_id=8, identity=Identity("s", product))
+    assert module._action_binding_checks(SimpleNamespace(connection=connection), request) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("has_copy,expected_result,expected_delivery", [(True, False, (1, 22)), (False, True, None)])
+async def test_shared_failed_check_delivers_to_current_copy_or_ungranted_item(
+        coordinator_module, monkeypatch, has_copy, expected_result, expected_delivery):
+    module, _ = coordinator_module
+    resolve, _ = install_repositories(monkeypatch)
+    coordinator = make_coordinator(module)
+    monkeypatch.setattr(module, "_action_binding_checks", lambda owned, request: ((9, 7, 8),))
+    monkeypatch.setattr(module, "_run_facts", lambda owned, run: {
+        "running_attempt": None, "status": 6, "error_json": {"code": "source_device_unavailable"}})
+    coordinator._write = AsyncMock(return_value=resolve.TERMINAL)
+    coordinator._deliver_failure = AsyncMock()
+    database = SimpleNamespace(read=AsyncMock(side_effect=lambda callback: callback(None)))
+    details = {"device_id": "camera", "expected_driver_id": "hb", "reason": "physical_identity_mismatch"}
+    result = await coordinator.finish_binding(database, Request(1, 22), SimpleNamespace(max_attempts=1),
+                                               None, None, details, {"serial": "new", "product_id": 10},
+                                               has_read_copy=has_copy)
+    assert result is expected_result
+    if expected_delivery is None:
+        coordinator._deliver_failure.assert_not_awaited()
+    else:
+        coordinator._deliver_failure.assert_awaited_once_with(database, expected_delivery, 9)
+
+
+@pytest.mark.parametrize("new_check,expected", [(False, ()), (True, ((10, 8, 22),))])
+def test_released_old_failed_check_does_not_block_new_read(coordinator_module, monkeypatch, new_check, expected):
+    module, _ = coordinator_module
+    identity_api = ModuleType("camctl.devices.drivers.hasselblad.identity")
+    class Identity:
+        def __init__(self, serial, product_id): self.serial, self.product_id = serial, product_id
+        def __eq__(self, other): return (self.serial, self.product_id) == (other.serial, other.product_id)
+        @property
+        def resource_key(self): return self.serial
+    identity_api.CameraIdentity = Identity
+    transaction = ModuleType("camctl.persistence.transaction")
+    transaction.row_facts = lambda connection, table, ident: (
+        {"expected_identity_json": {"serial": "s", "product_id": 10}, "resource_key": "s"}
+        if table == "device_availability_checks" else {"error_json": {"code": "source_device_unavailable"}})
+    failure = ModuleType("camctl.persistence.repositories.availability_failure")
+    failure.failure_basis = lambda *args: None
+    for dependency in (identity_api, transaction, failure):
+        monkeypatch.setitem(sys.modules, dependency.__name__, dependency)
+    rows = [(9, 7, 8, 4)] + ([(10, 8, 22, 2)] if new_check else [])
+    connection = SimpleNamespace(execute=lambda *args: SimpleNamespace(fetchall=lambda: rows))
+    request = SimpleNamespace(action_id=1, trigger_copy_id=22, identity=Identity("s", 10))
+    assert module._action_binding_checks(SimpleNamespace(connection=connection), request) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal", ["binding", "canceled", "expired"])
+async def test_binding_check_result_delivers_one_shared_diagnostic_only_for_real_error(
+        coordinator_module, monkeypatch, terminal):
+    module, _ = coordinator_module
+    resolve, _ = install_repositories(monkeypatch)
+    from camctl.persistence.repositories.availability_wait_finish import WaitingBindingResult
+    coordinator = make_coordinator(module)
+    monkeypatch.setattr(module, "_action_binding_checks", lambda owned, request: ((9, 7, 8),))
+    monkeypatch.setattr(module, "_run_facts", lambda owned, run: {"running_attempt": None})
+    details = {"device_id": "camera", "expected_driver_id": "hb", "reason": "physical_identity_mismatch"}
+    error = {"code": "device_binding_unavailable", "stage": "execution", "details": details}
+    result = WaitingBindingResult(4 if terminal == "binding" else (5 if terminal == "canceled" else 7),
+                                  error if terminal == "binding" else None)
+    coordinator._write = AsyncMock(side_effect=[resolve.WAIT, result, resolve.WAIT, result])
+    delivered, seen = [], set()
+    def consumer(actual, *, stage, context, state, details):
+        if id(state) not in seen:
+            seen.add(id(state))
+            delivered.append((actual.args, stage, context, details))
+    monkeypatch.setattr(module, "record_error", consumer)
+    database = SimpleNamespace(read=AsyncMock(side_effect=lambda callback: callback(None)))
+    identity = {"serial": "new", "product_id": 10}
+    for copy_id in (22, 23):
+        complete = await coordinator.finish_binding(database, Request(1, copy_id), SimpleNamespace(max_attempts=1),
+                                                     None, None, details, identity)
+        assert complete is (terminal == "binding")
+    if terminal == "binding":
+        assert len(delivered) == 1
+        assert delivered[0][0] == ("device_binding_unavailable", "execution", details)
+        assert delivered[0][2] == {"action_id": 1, "check_id": 9, "run_id": 7}
+        assert delivered[0][3] == {"current_identity": identity}
+        assert coordinator.binding_diagnostics_by_request[(1, 22)] is coordinator.binding_diagnostics_by_request[(1, 23)]
+    else:
+        assert delivered == []
+
+
+@pytest.mark.asyncio
+async def test_binding_check_error_reaches_real_diagnostic_consumer_once(coordinator_module, monkeypatch):
+    import json
+    from unit.operations.test_h4_diagnostic_consumer_isolated import diagnostic_module, ErrorValue
+    module, _ = coordinator_module
+    resolve, _ = install_repositories(monkeypatch)
+    from camctl.persistence.repositories.availability_wait_finish import WaitingBindingResult
+    diagnostics, admission_kind = diagnostic_module()
+    module.DiagnosticState = diagnostics.DiagnosticState
+    module.ErrorValue = ErrorValue
+    module.record_error = diagnostics.record_error
+    coordinator = make_coordinator(module)
+    monkeypatch.setattr(module, "_action_binding_checks", lambda owned, request: ((9, 7, 8),))
+    monkeypatch.setattr(module, "_run_facts", lambda owned, run: {"running_attempt": None})
+    details = {"device_id": "camera", "expected_driver_id": "hb", "reason": "physical_identity_mismatch"}
+    error = {"code": "device_binding_unavailable", "stage": "execution", "details": details}
+    coordinator._write = AsyncMock(side_effect=[resolve.WAIT, WaitingBindingResult(4, error),
+                                                resolve.WAIT, WaitingBindingResult(4, error)])
+    database = SimpleNamespace(read=AsyncMock(side_effect=lambda callback: callback(None)))
+    records = []
+    class Channel:
+        def submit(self, record, *, receipt):
+            records.append(record)
+            receipt.complete_admission(SimpleNamespace(decision=SimpleNamespace(kind=admission_kind.ACCEPTED)))
+            return receipt
+    identity = {"serial": "new", "product_id": 10}
+    with diagnostics.error_diagnostics_context(Channel(), lambda message: pytest.fail(message)):
+        for copy_id in (22, 23):
+            assert await coordinator.finish_binding(database, Request(1, copy_id), SimpleNamespace(max_attempts=1),
+                                                     None, None, details, identity)
+        await diagnostics.flush_diagnostics()
+    assert len(records) == 1
+    document = json.loads(records[0].message)
+    assert document["error"] == error
+    assert document["context"] == {"action_id": 1, "check_id": 9, "run_id": 7}
+    assert document["details"] == {"current_identity": identity}
+
+
+@pytest.mark.asyncio
+async def test_recovered_failed_check_shares_one_diagnostic_among_read_waiters(coordinator_module, monkeypatch):
+    import json
+    from unit.operations.test_h4_diagnostic_consumer_isolated import diagnostic_module, ErrorValue
+    module, _ = coordinator_module
+    resolve, _ = install_repositories(monkeypatch)
+    diagnostics, admission_kind = diagnostic_module()
+    module.DiagnosticState = diagnostics.DiagnosticState
+    module.ErrorValue = ErrorValue
+    module.record_error = diagnostics.record_error
+    coordinator = make_coordinator(module)
+    monkeypatch.setattr(module, "_action_binding_checks", lambda owned, request: ((9, 7, 8),))
+    details = {"device_id": "camera", "expected_driver_id": "hb", "reason": "physical_identity_mismatch"}
+    error = {"code": "device_binding_unavailable", "stage": "execution", "details": details}
+    monkeypatch.setattr(module, "_run_facts", lambda owned, run: {
+        "running_attempt": None, "status": 4, "error_json": error})
+    coordinator._write = AsyncMock(return_value=resolve.TERMINAL)
+    database = SimpleNamespace(read=AsyncMock(side_effect=lambda callback: callback(None)))
+    records = []
+    class Channel:
+        def submit(self, record, *, receipt):
+            records.append(record)
+            receipt.complete_admission(SimpleNamespace(decision=SimpleNamespace(kind=admission_kind.ACCEPTED)))
+            return receipt
+    with diagnostics.error_diagnostics_context(Channel(), lambda message: pytest.fail(message)):
+        for copy_id in (22, 23):
+            assert await coordinator.finish_binding(database, Request(1, copy_id), SimpleNamespace(max_attempts=1),
+                                                     None, None, details, {"serial": "new", "product_id": 10})
+            diagnostics.record_error(ErrorValue(**error), stage="execution",
+                context={"copy_id": copy_id}, state=coordinator.binding_diagnostics_by_request[(1, copy_id)])
+        await diagnostics.flush_diagnostics()
+    assert len(records) == 1
+    assert json.loads(records[0].message)["error"] == error
+    assert coordinator.binding_diagnostics_by_request[(1, 22)] is coordinator.binding_diagnostics_by_request[(1, 23)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal,expected", [("binding", True), ("canceled", False)])
+async def test_check_can_finish_between_resolution_and_binding_write(coordinator_module, monkeypatch, terminal, expected):
+    module, _ = coordinator_module
+    resolve, waiting = install_repositories(monkeypatch)
+    coordinator = make_coordinator(module)
+    monkeypatch.setattr(module, "_action_binding_checks", lambda owned, request: ((9, 7, 8),))
+    details = {"device_id": "camera", "expected_driver_id": "hb", "reason": "physical_identity_mismatch"}
+    error = {"code": "device_binding_unavailable", "stage": "execution", "details": details}
+    runs = iter([{"running_attempt": None},
+                 {"status": 4 if terminal == "binding" else 5, "error_json": error if terminal == "binding" else None}])
+    monkeypatch.setattr(module, "_run_facts", lambda owned, run: next(runs))
+    coordinator._write = AsyncMock(side_effect=[resolve.WAIT, waiting.TERMINAL])
+    database = SimpleNamespace(read=AsyncMock(side_effect=lambda callback: callback(None)))
+    result = await coordinator.finish_binding(database, Request(1, 22), SimpleNamespace(max_attempts=1),
+                                               None, None, details, {"serial": "new", "product_id": 10})
+    assert result is expected
+    assert ((1, 22) in coordinator.binding_diagnostics_by_request) is expected

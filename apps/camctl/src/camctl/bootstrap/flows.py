@@ -326,11 +326,12 @@ class CaptureFlow:
                 for action_id in action_ids:
                     if self._stopping:
                         return
-                    from camctl.capture.residual import _original_binding_failure
+                    from camctl.capture.residual import _original_binding_failure, _saved_binding_failure
                     action = await runtime.action(action_id)
-                    binding_failure = await _original_binding_failure(runtime, action)
+                    saved_binding = await _saved_binding_failure(runtime, action)
+                    binding_failure = saved_binding[0] if saved_binding is not None else await _original_binding_failure(runtime, action)
                     if binding_failure is not None:
-                        if binding_failure["reason"] == "physical_identity_conflict":
+                        if binding_failure["reason"] in ("physical_identity_mismatch", "physical_identity_conflict"):
                             from camctl.capture.preparation import _end, session_setup_budget
                             from camctl.devices.capture_preparation import preparation_lead_s
                             current = context.clock.utc_micros()
@@ -338,9 +339,19 @@ class CaptureFlow:
                             if (action["status"] == 1 and not action["cancel_requested"]
                                     and action["scheduled_at"] - lead * 1_000_000 <= current
                                     <= action["scheduled_at"] + action["max_delay_ms"] * 1000):
+                                if (self._availability is not None and not await
+                                        self._availability.finish_capture_binding(runtime, action, binding_failure)):
+                                    continue
+                                if saved_binding is not None and saved_binding[1] is not None:
+                                    from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+                                    current_identity = CameraIdentity(**saved_binding[1])
+                                else:
+                                    current_identity = runtime.fixed_camera_identity
                                 await _end(runtime, action_id, "fail_binding_preparation",
                                     FailBindingPreparationRequest(action_id, current, current, binding_failure,
-                                        prepare_lead_s=lead, current_identity=runtime.fixed_camera_identity))
+                                        prepare_lead_s=lead, current_identity=current_identity),
+                                    diagnostic=(None if self._availability is None else
+                                                self._availability.binding_diagnostic(action_id)))
                                 wakeup_required |= (await runtime.action(action_id))["status"] == 4
                         continue
                     if self._availability is not None:
@@ -366,7 +377,7 @@ class CaptureFlow:
                     wakeup_required |= outcome.value.outcome is ExpireOutcome.EXPIRED
                     continue
                 if runtime is not None:
-                    from camctl.capture.residual import pass_residual_gate, _original_binding_failure
+                    from camctl.capture.residual import pass_residual_gate, _original_binding_failure, _saved_binding_failure
                     if not await pass_residual_gate(runtime, await runtime.action(action_id),
                                                     on_progress=progressed):
                         continue
@@ -386,16 +397,27 @@ class CaptureFlow:
                 current = context.clock.utc_micros()
                 if runtime is not None:
                     action = await runtime.action(action_id)
-                    binding_failure = await _original_binding_failure(runtime, action)
+                    saved_binding = await _saved_binding_failure(runtime, action)
+                    binding_failure = saved_binding[0] if saved_binding is not None else await _original_binding_failure(runtime, action)
                     if (action["driver_id"] == HASSELBLAD_DRIVER_ID
                             and action["type"] == 1 and binding_failure is not None):
                         from camctl.capture.preparation import _end, recover_preparation
+                        if (self._availability is not None and not await
+                                self._availability.finish_capture_binding(runtime, action, binding_failure)):
+                            continue
                         if not await recover_preparation(runtime, action_id, on_progress=progressed):
                             continue
+                        if saved_binding is not None and saved_binding[1] is not None:
+                            from camctl.devices.drivers.hasselblad.identity import CameraIdentity
+                            current_identity = CameraIdentity(**saved_binding[1])
+                        else:
+                            current_identity = runtime.fixed_camera_identity
                         await _end(runtime, action_id, "fail_binding_preparation",
                             FailBindingPreparationRequest(action_id, current, current, binding_failure,
-                                current_identity=(runtime.fixed_camera_identity
-                                    if binding_failure["reason"] in ("physical_identity_mismatch", "physical_identity_conflict") else None)))
+                                current_identity=(current_identity
+                                    if binding_failure["reason"] in ("physical_identity_mismatch", "physical_identity_conflict") else None)),
+                            diagnostic=(None if self._availability is None else
+                                        self._availability.binding_diagnostic(action_id)))
                         wakeup_required |= (await runtime.action(action_id))["status"] == 4
                         continue
                 outcome = await _save_command(database, scheduling.start_action,

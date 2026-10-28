@@ -380,6 +380,63 @@ class BindingPreparationIneligible(ConsistencyError):
     """真实业务事实不允许此时终结绑定失败。"""
 
 
+def verify_unstarted_availability_checks(connection, action, details, current_identity):
+    """仅接受归属完整且已收场的原可用性检查，不采信调用方结论。"""
+    from contextlib import closing
+    after = 0
+    while True:
+        with closing(connection.execute(
+            "SELECT id FROM operation_runs WHERE action_id=? AND id>? ORDER BY id LIMIT 128",
+            (action["id"], after),
+        )) as cursor:
+            page = tuple(cursor.fetchmany(128))
+        if not page:
+            return
+        from camctl.persistence.transaction import row_facts
+        from .availability_finish import AvailabilityFinishReads
+        from .availability_target import verify_binding_check_targets
+        for (run_id,) in page:
+            run = row_facts(connection, "operation_runs", run_id)
+            if (run is None or run.get("kind") != int(enum_for("operation_runs.kind").CHECK_DEVICE_AVAILABILITY)
+                    or run.get("action_id") != action["id"] or run.get("availability_check_id") is None
+                    or run.get("responsibility_key") != f"availability/{run['availability_check_id']}"):
+                raise ConsistencyError("无活动动作的操作责任不是原可用性检查")
+            check = row_facts(connection, "device_availability_checks", run["availability_check_id"])
+            if (check is None or check.get("action_id") != action["id"] or check.get("trigger_copy_id") is not None
+                    or (check.get("device_id"), check.get("driver_id")) != (action["device_id"], action["driver_id"])):
+                raise ConsistencyError("检查与原拍摄绑定或归属不一致")
+            all_released = verify_binding_check_targets(connection, check, run)
+            try:
+                AvailabilityFinishReads(connection).require_settled(run_id)
+            except ConsistencyError as error:
+                raise BindingPreparationIneligible("原检查调用或结果尚未收场") from error
+            if run.get("status") == int(enum_for("operation_runs.status").SUCCEEDED):
+                if not all_released or run.get("retry_wait_required") != 0 or run.get("error_json") is not None:
+                    raise ConsistencyError("成功检查的目标或终态事实不一致")
+                continue
+            statuses = enum_for("operation_runs.status")
+            error = run.get("error_json")
+            if (run.get("status") in (int(statuses.FAILED), int(statuses.UNCONFIRMED))
+                    and isinstance(error, dict) and error.get("code") != "device_binding_unavailable"):
+                if run.get("retry_wait_required") != 0:
+                    raise ConsistencyError("已终态检查仍保留重试等待")
+                from .availability_failure import failure_basis
+                if failure_basis(connection, check["id"], action["id"]) is None:
+                    continue
+                raise BindingPreparationIneligible("原检查有限失败仍阻挡触发工作")
+            if (run.get("status") != int(enum_for("operation_runs.status").FAILED)
+                    or run.get("retry_wait_required") != 0
+                    or run.get("error_json") != {"code": "device_binding_unavailable",
+                        "stage": "execution", "details": details}):
+                raise BindingPreparationIneligible("原检查尚未按绑定失败收场")
+            from .availability_wait_finish import saved_binding_check_failure
+            if saved_binding_check_failure(connection, action["id"]) != (details, current_identity):
+                raise ConsistencyError("原检查绑定失败缺少一致的完整历史")
+        after = page[-1][0]
+        if len(page) < 128:
+            return
+
+
 def verify_binding_preparation_failure(connection, action, request):
     """在原连接核对尚无活动及调用的逻辑绑定失败。"""
     from decimal import Decimal
@@ -412,12 +469,25 @@ def verify_binding_preparation_failure(connection, action, request):
         except (TypeError, ValueError) as error:
             raise BindingPreparationIneligible("缺少当前物理身份") from error
         if not physical_alias_conflict(connection, action["device_id"], current):
-            raise BindingPreparationIneligible("当前机身没有其他逻辑设备的活动限制")
+            from .availability_wait_finish import saved_binding_check_failure
+            saved = saved_binding_check_failure(connection, action["id"])
+            if saved != (details, request["current_identity"]):
+                raise BindingPreparationIneligible("没有原检查或其他逻辑设备的活动限制")
     if facts.activity is None:
         if details["reason"] == "physical_identity_mismatch":
-            raise BindingPreparationIneligible("没有固定机身可核对物理身份")
-        if connection.execute("SELECT 1 FROM operation_runs WHERE action_id=? LIMIT 1", (action["id"],)).fetchone():
-            raise ConsistencyError("无活动但已有原操作责任")
+            from .availability_target import logical_held_identity_mismatch, photo_check_identity_mismatch
+            try:
+                current = CameraIdentity(**request["current_identity"])
+            except (TypeError, ValueError) as error:
+                raise BindingPreparationIneligible("缺少当前物理身份") from error
+            old_mismatch = logical_held_identity_mismatch(connection, action["device_id"], current)
+            check_mismatch = photo_check_identity_mismatch(connection, action, current)
+            if not old_mismatch and not check_mismatch:
+                from .availability_wait_finish import saved_binding_check_failure
+                saved = saved_binding_check_failure(connection, action["id"])
+                if saved != (details, request["current_identity"]):
+                    raise BindingPreparationIneligible("没有原检查或同逻辑旧限制证明身份不符")
+        verify_unstarted_availability_checks(connection, action, details, request["current_identity"])
         return
     if details["reason"] == "physical_identity_mismatch":
         raw = facts.activity["expected_identity_json"]
