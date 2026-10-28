@@ -431,6 +431,96 @@ async def _persist_outputs(runtime, action_id: int, files, artifacts, occurred_a
         occurred_at=occurred_at)))
 
 
+async def _device_source_drafts(runtime, action_id: int, ticket):
+    """按原结果页和完成事实取得两个固定相机来源。"""
+    from camctl.capture.files import file_identity_key
+    from camctl.capture.result_scans import SourceResultEntries
+    from camctl.devices.drivers.hasselblad.files import CameraFileIdentity, DownloadVariant
+
+    action = await runtime.action(action_id)
+    sources = {}
+    async for entry, file, file_id in SourceResultEntries(runtime.capture, runtime.database, ticket).records():
+        if not file.complete:
+            continue
+        identity = CameraFileIdentity.from_source(
+            file_identity_key(action["device_id"], action["driver_id"], entry.identity), entry.locator)
+        if identity.variant in sources:
+            raise ConsistencyError("照片同一来源角色出现多个完整文件")
+        sources[identity.variant] = (entry, file_id, identity)
+    original = sources.get(DownloadVariant.ORIGINAL)
+    preview = sources.get(DownloadVariant.THUMBNAIL)
+    if original is None:
+        return ()
+    drafts = [OutputDraft(OutputKind.ORIGINAL, FileReference(device_file_id=original[1]), True, original[2].sha256)]
+    if preview is not None:
+        if preview[0].paired_identity != original[0].identity:
+            raise ConsistencyError("照片预览没有指向原可靠原图")
+        drafts.append(OutputDraft(OutputKind.PREVIEW, FileReference(device_file_id=preview[1]), True,
+                                  preview[2].sha256, original_batch_file_id=original[1]))
+    return tuple(drafts)
+
+
+async def _device_photo_results(runtime, action_id: int):
+    """推进原 RESULTS，可靠关闭后交付已固定来源草稿。"""
+    from camctl.capture.handlers import (
+        ListingPhase, _close_check_unconfirmed, _conclude_activity, _finish_listing_result,
+        _listing_round_input, _original_ticket,
+    )
+    from camctl.capture.media import RecordingFailure
+    from camctl.operations.attempts import RunOutcome
+
+    await runtime.resume_capture_completions(action_id)
+    action = await runtime.action(action_id)
+    if action["status"] in (int(_ACTION_STATUS.SUCCEEDED), int(_ACTION_STATUS.FAILED),
+                            int(_ACTION_STATUS.CANCELED), int(_ACTION_STATUS.EXPIRED)):
+        return None
+    listing = await _listing_round_input(runtime, action_id)
+    if listing.phase in (ListingPhase.IN_FLIGHT, ListingPhase.RETRY_WAIT):
+        return None
+    invalid = False
+    unconfirmed = False
+    binding_error = None
+    if listing.phase is ListingPhase.LISTED:
+        if listing.outcome.error is not None:
+            invalid = listing.outcome.error.details.get("classification") == "invalid"
+            if listing.outcome.error.code == "device_binding_unavailable":
+                binding_error = listing.outcome.error
+            if invalid or binding_error is not None:
+                await _finish_listing_result(runtime, listing, end_run=RunOutcome.FAILED,
+                                             run_error=listing.outcome.error)
+            else:
+                await _finish_listing_result(runtime, listing, retry_wait=True)
+                return None
+        else:
+            await _finish_listing_result(runtime, listing, end_run=RunOutcome.SUCCEEDED)
+    elif listing.phase is ListingPhase.EXHAUSTED:
+        await _close_check_unconfirmed(runtime, action_id)
+        unconfirmed = True
+    elif listing.phase is ListingPhase.CLOSED and listing.outcome is not None and listing.outcome.error is not None:
+        invalid = listing.outcome.error.details.get("classification") == "invalid"
+        if listing.outcome.error.code == "device_binding_unavailable":
+            binding_error = listing.outcome.error
+        unconfirmed = not invalid and binding_error is None
+    ticket = listing.ticket
+    if ticket is None:
+        ticket = await _original_ticket(runtime, f"results/{await _activity_id(runtime, action_id)}", "result")
+    drafts = await _device_source_drafts(runtime, action_id, ticket)
+    if binding_error is not None:
+        failure = RecordingFailure("device_binding_unavailable", dict(binding_error.details))
+    elif unconfirmed:
+        failure = RecordingFailure("capture_result_unconfirmed", {
+            "activity_id": str(await _activity_id(runtime, action_id)), "reason": "outputs_unknown"})
+    elif invalid:
+        failure = RecordingFailure("capture_failed", {
+            "activity_id": str(await _activity_id(runtime, action_id)), "reason": "invalid_outputs"})
+    else:
+        failure = None
+        if len(drafts) != 2:
+            raise ConsistencyError("照片 RESULTS 成功但两个原角色尚未可靠完成")
+    await _conclude_activity(runtime, action_id)
+    return drafts, failure
+
+
 @owned_tool_call
 async def advance_host_photo(runtime, action_id: int) -> None:
     """消费原 START 结果、归档双文件并按固定模式登记正式产物。"""
@@ -445,6 +535,9 @@ async def advance_host_photo(runtime, action_id: int) -> None:
     from camctl.scheduling.rules import WindowPhase, window_phase
 
     action = (await runtime.action(action_id))
+    if is_saved_capture_photo(action) and not is_saved_host_photo(action):
+        await runtime.resume_capture_completions(action_id)
+        action = await runtime.action(action_id)
     if action["status"] in (
             int(_ACTION_STATUS.SUCCEEDED), int(_ACTION_STATUS.FAILED),
             int(_ACTION_STATUS.CANCELED), int(_ACTION_STATUS.EXPIRED)):
@@ -526,6 +619,30 @@ async def advance_host_photo(runtime, action_id: int) -> None:
                     return
         else:
             raise ConsistencyError("主机单张 START 的结果事件缺失但尝试已终态")
+
+    if not is_saved_host_photo(action):
+        outcome = _load_outcome(saved)
+        if outcome.status.value != "succeeded" or outcome.effect is not EffectState.CONFIRMED:
+            await _failure_after_return(runtime, action_id, saved, outcome)
+            return
+        photos = [item for item in outcome.observations if item.type == "photo_taken" and item.version == 2]
+        if photos:
+            if len(photos) != 1 or photos[0].data.get("activity_id") != saved.ticket.target_id:
+                raise ConsistencyError("DEVICE 单张缺少原可靠相机控制观察")
+            result = await _device_photo_results(runtime, action_id)
+            if result is None:
+                return
+            drafts, failure = result
+            current = await runtime.action(action_id)
+            if current["cancel_requested"]:
+                from camctl.persistence.repositories.capture import FinishCanceledCapture
+                request = FinishCanceledCapture(action_id, runtime.wall_us(), drafts,
+                                                OutputCatalogFacts(action_id, True))
+            else:
+                request = FinishCapture(action_id, drafts, OutputCatalogFacts(action_id, True),
+                                        runtime.wall_us(), failure=failure)
+            await runtime.save_capture_completion(request)
+            return
 
     outcome, artifacts = (await _photo_artifacts(runtime, action_id, saved))
     if artifacts is None:

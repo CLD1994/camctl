@@ -204,6 +204,7 @@ def _harness(
         ),
         timeout_s=Decimal("180"),
         dispatch_check=AsyncMock(side_effect=lambda: None),
+        output_storage="host",
     )
     workspace = staging / "capture-work" / _ACTIVITY_ID
     return driver, request, roots, executable, call_log, workspace

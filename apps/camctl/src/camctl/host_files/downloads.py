@@ -12,7 +12,7 @@ import threading
 import re
 from itertools import islice
 
-from camctl.contracts.values import ObjectId
+from camctl.contracts.values import ObjectId, parse_object_id
 from camctl.host_files.segments import DEFAULT_CHUNK_SIZE_BYTES
 from camctl.operations.models import AttemptTicket
 
@@ -84,6 +84,20 @@ def download_path(staging: Path, ticket: AttemptTicket) -> Path:
     return staging / "read-downloads" / f"{ticket.run_id}-{ticket.attempt_id}"
 
 
+def result_download_path(staging: Path, ticket: AttemptTicket, role: str) -> Path:
+    """由原 RESULTS 尝试和实际读取角色确定独占工作目录。"""
+    if not isinstance(ticket, AttemptTicket) or ticket.operation != "result":
+        raise ValueError("来源下载必须属于原 RESULTS 尝试")
+    ObjectId(ticket.run_id)
+    ObjectId(ticket.attempt_id)
+    parse_object_id(ticket.target_id)
+    if ticket.responsibility_key != f"results/{ticket.target_id}":
+        raise ValueError("来源下载责任与原活动不符")
+    if role not in ("original", "thumbnail"):
+        raise ValueError("来源下载角色无效")
+    return staging / "result-downloads" / f"{ticket.run_id}-{ticket.attempt_id}-{role}"
+
+
 async def settled_file_io(function, *args, dispose=None):
     """取消后仍等待实际文件操作；新打开资源按原结果关闭。"""
     worker = asyncio.create_task(asyncio.to_thread(function, *args))
@@ -112,7 +126,10 @@ class DownloadWorkspace:
     """先独占创建再使用；仅删除当前拥有或上层已授权恢复的目录。"""
 
     def __init__(self, staging: Path, ticket: AttemptTicket):
-        self.path = download_path(staging, ticket)
+        self._initialize(download_path(staging, ticket), ticket)
+
+    def _initialize(self, path: Path, ticket: AttemptTicket):
+        self.path = path
         self.ticket = ticket
         self.owned = False
         self.claimed = False
@@ -222,6 +239,43 @@ class DownloadWorkspace:
                 self.close_error = error
                 raise
             self.fd = None
+
+
+class ResultDownloadWorkspace(DownloadWorkspace):
+    """原来源观察目录；删除责任须由结果及后续文件事实单独授权。"""
+
+    def __init__(self, staging: Path, ticket: AttemptTicket, role: str):
+        self._initialize(result_download_path(staging, ticket, role), ticket)
+        self.role = role
+
+    def remove(self):
+        raise ValueError("来源观察目录须沿已保存的文件责任清理")
+
+    async def observe(self, media_type: str):
+        return await settled_file_io(self._observe, media_type)
+
+    def _observe(self, media_type: str):
+        from camctl.host_files.capture_sources import (
+            CapturedArtifact, CaptureFileError, _open_directory, _read_file_facts_at,
+            _stat_entry, _sync_directory_fd,
+        )
+        if not self.owned or not self.claimed:
+            raise ValueError("来源观察目录没有当前实际拥有者")
+        with _open_directory(self.path, "source_workspace_open") as directory_fd:
+            with os.scandir(directory_fd) as entries:
+                names = [entry.name for entry in islice(entries, 2)]
+            if len(names) != 1:
+                raise CaptureFileError("source_file_count", self.path,
+                                       detail="指定下载必须生成唯一文件")
+            name = names[0]
+            path = self.path / name
+            observed = _stat_entry(directory_fd, name, path, "source_observe")
+            if observed is None or not stat.S_ISREG(observed.st_mode) or observed.st_size <= 0:
+                raise CaptureFileError("source_type", path, detail="下载不是非空普通文件")
+            facts = _read_file_facts_at(directory_fd, name, path, media_type,
+                expected_size=observed.st_size, expected_sha256=None, file_kind="source")
+            _sync_directory_fd(directory_fd, self.path, "source_workspace_sync")
+            return CapturedArtifact(name, facts.size_bytes, facts.sha256, media_type)
 
 
 class DownloadStream:

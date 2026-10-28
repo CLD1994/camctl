@@ -720,14 +720,29 @@ class FileRegistration:
 
 
 @dataclass(frozen=True)
+class ResultPageFileInput:
+    """已保存结果页中首次发现的文件与原事实时刻。"""
+
+    page: ResultPageRef
+    file_id: int
+    identity: str
+    occurred_at: int
+
+
+@dataclass(frozen=True)
+class ResultPageFileRef:
+    file_id: int
+
+
+@dataclass(frozen=True)
 class PendingFileObservation:
     """独立于 RESULTS 收场的原文件发现请求及其可靠首次响应。"""
 
-    command: FileObservationSave
+    command: FileObservationSave | ResultPageFileInput
     key: OperationKey
     entries: tuple[ObservedFile, ...]
     registered_files: Mapping[str, tuple[CaptureFile, int]]
-    response: ObservationOutcome | None = None
+    response: ObservationOutcome | ResultPageFileRef | None = None
     facts: dict[FileFactStage, PendingFileFact] = field(default_factory=dict)
     registration: FileRegistration = field(default_factory=FileRegistration)
     shared: SharedSave = field(default_factory=SharedSave, compare=False, repr=False)
@@ -738,6 +753,8 @@ def _same_file_request(left, right) -> bool:
     """文件保存申请的标量保持原类型契约，JSON 按精确值核对。"""
     if type(left) is not type(right):
         return False
+    if isinstance(left, ResultPageFileInput):
+        return left == right
     if isinstance(left, FileObservationSave):
         return (replace(left, locator=right.locator) == right
                 and json_equal(left.locator, right.locator))
@@ -1554,8 +1571,10 @@ class CaptureRuntime(_FileObservationSaves):
                 pending = (await _settle_recovered_listing(self, self.pending_start_results[identity]))
             else:
                 entries = None if last is None else SavedResultEntries(self.capture, self.database, last.ref)
+                action = await self.action(await self.action_id_of_ticket(ticket))
+                recovered_type = "local_result_recovery" if is_hasselblad_photo(action) else "adb_foreground_recovery"
                 pending = PendingCallResult(new_operation_key(), AttemptFinish(
-                    ticket, validate_outcome(ticket, _recovered_call_outcome(), evidence), self.wall_us(),
+                    ticket, validate_outcome(ticket, _recovered_call_outcome(recovered_type), evidence), self.wall_us(),
                     retry_wait=retry_wait),
                     None, returned_ns=self.monotonic_ns(), result_listing=entries)
                 pending = (await _settle_recovered_listing(self, pending))
@@ -2372,6 +2391,74 @@ async def _register_observed(
             raise ConsistencyError("待存文件发现的原完整请求不可替换")
     shared.retry_failed()
     return await shared.run(lambda: _apply_observed(runtime, action_id, entries, saved_files, registration))
+
+
+async def _register_photo_result_page(runtime, action_id: int, page_ref: ResultPageRef) -> None:
+    """先消费可靠角色页的文件子责任，再允许同轮读取下一角色。"""
+    from camctl.capture.files import file_identity_key
+    from camctl.devices.drivers.hasselblad.files import CameraFileIdentity, DownloadVariant
+
+    action = await runtime.action(action_id)
+    if not is_hasselblad_photo(action) or action["execution_spec_json"]["output_storage"] != "device":
+        raise ConsistencyError("照片角色页不属于冻结的 DEVICE 单张动作")
+    saved = await runtime.database.read(
+        lambda owned: runtime.capture.read_result_page(page_ref, owned), description="读取已保存照片角色页")
+    observations = [item for item in saved.page.outcome.observations
+                    if item.type == "result_files_listed" and item.version == 3]
+    if not observations:
+        return
+    if len(observations) != 1 or len(saved.page.entries) != 1 or len(saved.file_ids) != 1:
+        raise ConsistencyError("照片角色页缺少唯一原文件及可靠引用")
+    entry = saved.page.entries[0]
+    identity, file_id = saved.file_ids[0]
+    if identity != entry.identity:
+        raise ConsistencyError("照片角色页的文件引用改变原身份")
+    source = CameraFileIdentity.from_source(
+        file_identity_key(action["device_id"], action["driver_id"], identity), entry.locator)
+    if source.variant is DownloadVariant.THUMBNAIL and entry.paired_identity is None:
+        # 没有原片时保留实际页和发现事实，不虚构独立预览配对。
+        return
+    pairing = {}
+    if entry.paired_identity is not None:
+        async for original, file, original_id in SourceResultEntries(
+                runtime.capture, runtime.database, page_ref.ticket).records():
+            if original.identity == entry.paired_identity:
+                if not file.complete:
+                    raise ConsistencyError("照片预览配对的原片尚未可靠完成")
+                pairing[original.identity] = (original, original_id)
+                break
+        if not pairing:
+            raise ConsistencyError("照片预览缺少原可靠角色来源")
+    def read_start_event(owned):
+        with closing(owned.connection.execute(
+                "SELECT a.result_event_id FROM operation_runs r JOIN operation_attempts a ON a.run_id=r.id"
+                " WHERE r.responsibility_key=? ORDER BY a.attempt_no DESC LIMIT 2",
+                (f"start/{action_id}",))) as reader:
+            rows = reader.fetchall()
+        if len(rows) != 1 or rows[0][0] is None:
+            raise ConsistencyError("照片角色文件缺少唯一原 START 结果引用")
+        return rows[0][0]
+    start_event = await runtime.database.read(read_start_event, description="读取照片原 START 结果引用")
+    entry = replace(entry, evidence={**entry.evidence, "photo_source": {
+        "start_result_event_id": start_event, "result_page_event_id": page_ref.event_id,
+        "role": source.variant.value}})
+    registration = FileRegistration(pairing_files=pairing,
+        ownership_method=int(enum_for("device_files.ownership_evidence_json.method").DRIVER_TASK_ASSOCIATION),
+        captured_checksums={identity: source.sha256})
+    original = ResultPageFileInput(page_ref, file_id, identity, saved.occurred_at)
+    key = (action_id, identity)
+    pending = runtime.pending_file_observations.get(key)
+    if pending is None:
+        pending = PendingFileObservation(original, new_operation_key(), (entry,), {},
+            response=ResultPageFileRef(file_id), registration=registration)
+        runtime.pending_file_observations[key] = pending
+    elif (not _same_file_request(pending.command, original)
+            or not _same_observed_files(pending.entries, (entry,))
+            or pending.registration != registration):
+        raise ConsistencyError("照片结果页文件子责任的原申请不可替换")
+    pending.registration_shared.retry_failed()
+    await pending.registration_shared.run(lambda: _apply_observed(
+        runtime, action_id, pending.entries, pending.registered_files, pending.registration))
 
 
 async def _apply_observed(runtime, action_id, entries, saved_files, registration):
@@ -5410,7 +5497,16 @@ async def _register_listing(runtime: CaptureRuntime, action_id: int, listing: Li
     """已登记事实直接消费；只有尚未登记的原观察产生文件保存责任。"""
     from camctl.devices.tasks import CaptureResultPolicy
 
-    if (await runtime.action(action_id))["execution_spec_json"].get("result_policy") in (
+    action = await runtime.action(action_id)
+    if is_hasselblad_photo(action) and action["execution_spec_json"]["output_storage"] == "device":
+        if isinstance(listing.entries, SavedResultEntries):
+            async for saved in listing.entries.pages():
+                await _register_photo_result_page(runtime, action_id, saved.ref)
+        if listing.ticket is None:
+            return ()
+        return RegisteredSourceFiles(SourceResultEntries(runtime.capture, runtime.database, listing.ticket))
+
+    if action["execution_spec_json"].get("result_policy") in (
         CaptureResultPolicy.OSMO360II_RECORD_SEGMENTS_V1.value,
         CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value,
     ):
@@ -5540,11 +5636,14 @@ async def _held_listing(runtime: CaptureRuntime, ticket: AttemptTicket) -> Listi
 
 def _uses_result_pages(runtime: CaptureRuntime) -> bool:
     """分页能力由驱动正式证据登记决定。"""
-    try:
-        contract = runtime.evidence.contract("result_files_listed", 2)
-    except EvidenceError:
-        return False
-    return contract.operation == "result"
+    for version in (2, 3):
+        try:
+            contract = runtime.evidence.contract("result_files_listed", version)
+        except EvidenceError:
+            continue
+        if contract.operation == "result":
+            return True
+    return False
 
 
 def _recovered_call_outcome(evidence_type="adb_foreground_recovery") -> CallOutcome:
@@ -5576,6 +5675,20 @@ async def _settle_recovered_listing(runtime: CaptureRuntime, pending: PendingCal
     """独立保存原真实结束依据；绑定失败不判定正常集合结论。"""
     completion = None
     if isinstance(pending.result_listing, SavedResultEntries):
+        action_id = await runtime.action_id_of_ticket(pending.finish.ticket)
+        action = await runtime.action(action_id)
+        if is_hasselblad_photo(action) and action["execution_spec_json"]["output_storage"] == "device":
+            async for page in pending.result_listing.pages():
+                await _register_photo_result_page(runtime, action_id, page.ref)
+            actual = pending.finish.outcome.outcome
+            if actual.error is None:
+                finish = replace(pending.finish, retry_wait=False, run_finish=RunFinish(RunOutcome.SUCCEEDED))
+            elif (actual.error.details.get("classification") == "invalid"
+                  or actual.error.code == "device_binding_unavailable"):
+                finish = replace(pending.finish, retry_wait=False, run_finish=RunFinish(RunOutcome.FAILED, actual.error))
+            else:
+                finish = replace(pending.finish, retry_wait=True, run_finish=None)
+            return replace(pending, finish=finish, result_disposition_ready=True)
         saved = await pending.result_listing.completion_page()
         activity = (await runtime.database.read(lambda owned, inputs=("device_activities", int(pending.finish.ticket.target_id)): row_facts(owned.connection, *inputs), description="读取拍摄直接事实"))
         if saved is not None and activity["activity_state"] != 3:
@@ -5609,6 +5722,11 @@ async def _continue_result_scan(runtime: CaptureRuntime, pending: PendingResultS
             SavedResultEntries(runtime.capture, runtime.database, pending.last_ref))
         return (await _natural_read_ready(runtime, action_id, entries, ticket=pending.ticket))
     async def page_qualified(saved):
+        action = await runtime.action(action_id)
+        if (is_hasselblad_photo(action)
+                and action["execution_spec_json"]["output_storage"] == "device"):
+            await _register_photo_result_page(runtime, action_id, saved.ref)
+            return True
         bound = (await _natural_source_lower_bound(runtime, action_id, pending.ticket))
         return bound is None or saved.occurred_at >= bound
     if not await advance_result_scan(pending, runtime=runtime,
@@ -5648,7 +5766,7 @@ async def _saved_result_listing_input(runtime: CaptureRuntime, action_id: int, *
                            None if row[8] is None else parse_exact_json(row[8]))
     last = (await runtime.database.read(lambda owned, inputs=(ticket,), options=dict(): runtime.capture.read_last_result_page(*inputs, owned, **options), description="读取已保存拍摄事实"))
     if last is not None:
-        partial_recovery = actual == _recovered_call_outcome() and not _result_page_returned(last)
+        partial_recovery = actual in (_recovered_call_outcome(), _recovered_call_outcome("local_result_recovery")) and not _result_page_returned(last)
         if not partial_recovery and (last.page.outcome != actual or last.occurred_at != row[9]):
             raise ConsistencyError("RESULTS 结束记录改变原末页实际返回或时刻")
         entries = SavedResultEntries(runtime.capture, runtime.database, last.ref)
@@ -5687,6 +5805,7 @@ async def _saved_result_listing_input(runtime: CaptureRuntime, action_id: int, *
 
 async def _finish_listing_result(runtime: CaptureRuntime, listing: ListingRound, *,
                            retry_wait: bool = False, end_run: RunOutcome | None = None,
+                           run_error: ErrorValue | None = None,
                            result_set: ResultSetSave | None = None,
                            finalize_output_set: bool = False) -> None:
     """首次固定真实处置后沿原 key 保存；已保存的 CLOSED 输入不再改写。"""
@@ -5710,7 +5829,7 @@ async def _finish_listing_result(runtime: CaptureRuntime, listing: ListingRound,
     if pending is None or pending.finish.ticket != ticket or pending.finish.outcome.outcome is not listing.outcome:
         raise ConsistencyError("RESULTS 原返回及其保存责任不可替换")
     finish = replace(pending.finish, retry_wait=retry_wait,
-                     run_finish=None if end_run is None else RunFinish(end_run))
+                     run_finish=None if end_run is None else RunFinish(end_run, run_error))
     completion_page = pending.completion_page
     finalized_page = pending.finalized_page
     if finalize_output_set and _listing_finalized(listing):

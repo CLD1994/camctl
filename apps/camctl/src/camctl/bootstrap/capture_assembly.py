@@ -274,6 +274,90 @@ class DriverDigestReader:
                 raw_outcome=raw, diagnostic_error=error)
 
 
+class HasselbladPhotoListing:
+    """从原 START 与可靠角色页装配一次指定来源读取。"""
+
+    def __init__(self, driver, binding, evidence, *, capture_repository, database):
+        self._driver, self._binding, self._evidence = driver, binding, evidence
+        self._capture_repository, self._database = capture_repository, database
+
+    def close_scan(self, ticket):
+        pass
+
+    async def list_page(self, ticket, *, cursor, timeout_s, output_scope=None,
+                        completion_context=None, reading_context=None, **kwargs):
+        from camctl.capture.files import file_identity_key
+        from camctl.devices.drivers.hasselblad.files import CameraFileIdentity, DownloadVariant, PhotoResultCursor
+        from camctl.operations.result_format import read_result_document
+
+        def load(owned):
+            connection = owned.connection
+            activity = row_facts(connection, "device_activities", int(ticket.target_id))
+            action = None if activity is None else row_facts(connection, "actions", activity["action_id"])
+            if (action is None or activity["action_id"] != action["id"]
+                    or DeviceBinding(action["device_id"], action["driver_id"]) != self._binding
+                    or action["execution_spec_json"].get("output_storage") != "device"):
+                raise ConsistencyError("照片来源读取缺少原 DEVICE 动作及设备绑定")
+            with closing(connection.execute(
+                    "SELECT r.id,a.attempt_no,a.status,a.effect_state,a.result_json,a.error_json"
+                    " FROM operation_runs r JOIN operation_attempts a ON a.run_id=r.id"
+                    " WHERE r.responsibility_key=? ORDER BY a.attempt_no DESC LIMIT 2",
+                    (f"start/{action['id']}",))) as reader:
+                rows = reader.fetchall()
+            if len(rows) != 1:
+                raise ConsistencyError("照片来源读取缺少唯一原 START 尝试")
+            run_id, attempt_no, status, effect, result, error = rows[0]
+            start_ticket = AttemptTicket(attempt_no, "control", ticket.target_id, f"start/{action['id']}", run_id)
+            outcome = read_result_document(status, effect, parse_exact_json(result),
+                None if error is None else parse_exact_json(error))
+            validate_outcome(start_ticket, outcome, self._evidence)
+            photos = [item for item in outcome.observations if item.type == "photo_taken" and item.version == 2]
+            if outcome.status.value != "succeeded" or outcome.effect.value != "confirmed" or len(photos) != 1:
+                raise ConsistencyError("照片来源读取缺少原可靠 DEVICE START")
+            original = None
+            position = None
+            while True:
+                page = self._capture_repository.read_result_sources(ticket, position, 32, owned)
+                for entry, file, _file_id in page.items:
+                    identity = CameraFileIdentity.from_source(
+                        file_identity_key(action["device_id"], action["driver_id"], entry.identity), entry.locator)
+                    if identity.variant is DownloadVariant.ORIGINAL and file.complete:
+                        if original is not None:
+                            raise ConsistencyError("照片来源存在多个已完成原图")
+                        original = entry.identity
+                if page.next_cursor is None:
+                    break
+                position = page.next_cursor
+            return action, photos[0].data, original
+
+        action, start, original = await self._database.read(load, description="读取原照片 START 和角色来源")
+        if cursor is not None:
+            if not isinstance(cursor, PhotoResultCursor) or cursor.binding != self._binding or cursor.activity_id != ticket.target_id:
+                raise ConsistencyError("照片来源页改变原游标")
+            previous = await self._database.read(
+                lambda owned: self._capture_repository.read_last_result_page(ticket, owned),
+                description="核对照片来源原末页")
+            if previous is None or previous.ref.next_cursor != cursor:
+                raise ConsistencyError("照片来源后续页缺少原可靠末游标")
+            if original is None:
+                raise ConsistencyError("照片预览前缺少原图完整子责任")
+            role = cursor.role
+        else:
+            role = DownloadVariant.THUMBNAIL if original is not None else DownloadVariant.ORIGINAL
+        request = ControlRequest("result", self._binding, {
+            "activity_id": ticket.target_id, "camera_identity": start["camera_identity"],
+            "camera_locator": start["camera_locator"],
+            "capture_format": action["effective_params_json"]["capture_format"],
+            "role": role.value, "cursor": None if cursor is None else cursor.as_json(),
+            "original_identity": original if role is DownloadVariant.THUMBNAIL else None,
+        }, ticket=ticket, timeout_s=timeout_s)
+        result = await self._driver.list_results(request, 1)
+        if result.outcome is None:
+            raise ConsistencyError("照片来源读取缺少原实际返回")
+        validate_outcome(ticket, result.outcome, self._evidence)
+        return page_from_outcome(ticket, result.outcome, cursor=cursor, binding=self._binding)
+
+
 class DriverResultListing:
     """结果列举端口的驱动适配：list_results 观察转候选产物文件。
 
@@ -905,7 +989,8 @@ def session_capture_assembly(
             except CapabilityNotDeclaredError:
                 results_port = None
             else:
-                results_port = DriverResultListing(
+                listing_type = HasselbladPhotoListing if driver_id == HASSELBLAD_DRIVER_ID else DriverResultListing
+                results_port = listing_type(
                     result_port,
                     DeviceBinding(device_id=device_id, driver_id=str(driver_id)),
                     entry.evidence,

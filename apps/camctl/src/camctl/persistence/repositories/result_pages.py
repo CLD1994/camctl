@@ -797,7 +797,19 @@ def _complete_source_entry(connection, ticket, identity, file_id, facts, activit
         for event_id, in reader:
             saved, _ = _at(connection, event_id)
             entry = next(item for item in saved.page.entries if item.identity == identity)
-            if not json_equal(entry.evidence, observation):
+            actual_observation = observation
+            if isinstance(observation, dict) and "photo_source" in observation:
+                reference = observation["photo_source"]
+                photo_pages = [item for item in saved.page.outcome.observations
+                               if item.type == RESULT_LISTED_TYPE and item.version == 3]
+                if (not isinstance(reference, dict)
+                        or set(reference) != {"start_result_event_id", "result_page_event_id", "role"}
+                        or reference["result_page_event_id"] != event_id or len(photo_pages) != 1
+                        or photo_pages[0].data.get("role") != reference["role"]):
+                    continue
+                ObjectId(reference["start_result_event_id"])
+                actual_observation = {key: value for key, value in observation.items() if key != "photo_source"}
+            if not json_equal(entry.evidence, actual_observation):
                 continue
             source = load_result_source(connection, saved.ref.ticket)
             if (source.natural_lower_bound is not None and saved.occurred_at < source.natural_lower_bound
@@ -1086,6 +1098,11 @@ def _verify_append_difference(event, context, page, raw, reads, action, activity
             or scope.run_id != run["id"] or scope.attempt_id != attempt["id"]
             or scope.page_no != page.ref.page_no):
         raise ConsistencyError("结果页窄写入范围与原动作、活动、流程、尝试或页号不同")
+    photo = [item for item in page.page.outcome.observations
+             if item.type == RESULT_LISTED_TYPE and item.version == 3]
+    if photo:
+        from .capture_facts import PhotoResultReads
+        PhotoResultReads(reads.connection).verify_device_page(action["id"], activity["id"], attempt["id"], page)
     _verify_attempt_transition(event, attempt)
     if (activity["ownership_mode"] == _OWNERSHIP.BASELINE_COMPARISON
             and activity["baseline_state"] != enum_for("device_activities.baseline_state").FIXED):
