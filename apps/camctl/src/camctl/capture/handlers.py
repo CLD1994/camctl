@@ -2638,7 +2638,7 @@ def _activity_id_of_connection(connection, action_id: int) -> int:
 
 @owned_tool_call
 async def _stop_call(runtime: CaptureRuntime, action,
-                     operation: str = "stop_recording") -> HandlerOutcome:
+                     operation: str = "stop_recording", *, normal_recording=False) -> HandlerOutcome:
     """按原停止预算发起一次设备停止调用并保存尝试结果。
 
     意图先提交才派发；可靠确认结束停止流程，调用错误单独保存；
@@ -2686,6 +2686,33 @@ async def _stop_call(runtime: CaptureRuntime, action,
     if outcome.value.disposition is not BeginDisposition.GRANTED:
         return HandlerOutcome("stop_not_granted", outcome.value.reason)
     ticket = outcome.value.ticket
+    normal_source = None
+    if (normal_recording and segmented_recording
+            and action["execution_spec_json"].get("result_policy")
+            == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value
+            and stop_state.anchor_from_current_session and stop_state.stop_target_ns is not None
+            and stop_state.stop_attempts_used == 0 and ticket.attempt_id == 1):
+        def read_start(owned):
+            with closing(owned.connection.execute(
+                "SELECT a.result_event_id FROM operation_runs r JOIN operation_attempts a ON a.run_id=r.id "
+                "WHERE r.responsibility_key=? AND r.activity_id=? AND a.status=? "
+                "AND a.effect_state=? AND a.error_json IS NULL AND a.result_event_id IS NOT NULL "
+                "ORDER BY a.attempt_no DESC LIMIT 1",
+                (f"start/{action['id']}", int(ticket.target_id), int(_ATTEMPT_STATUS.SUCCEEDED),
+                 int(_EFFECT_STATE.CONFIRMED)),
+            )) as cursor:
+                return cursor.fetchone()
+        start = await runtime.database.read(read_start, description="读取正常录像原启动结果")
+        canceled_before_stop = (await runtime.action(action["id"]))["cancel_requested"]
+        elapsed = runtime.monotonic_ns() - (stop_state.stop_target_ns - (
+            _target_duration_ms(action) + action["execution_spec_json"].get("startup_margin_ms", 0)
+        ) * 1_000_000)
+        if start is not None and not canceled_before_stop and elapsed >= (
+            _target_duration_ms(action) + action["execution_spec_json"].get("startup_margin_ms", 0)
+        ) * 1_000_000:
+            from camctl.capture.models import NormalRecordingStop
+
+            normal_source = NormalRecordingStop(start[0], elapsed)
     with measure_stage("capture.stop", action_id=action["id"],
             device_id=action["device_id"], activity_id=ticket.target_id,
             run_id=ticket.run_id, attempt_id=ticket.attempt_id, operation=operation):
@@ -2716,7 +2743,9 @@ async def _stop_call(runtime: CaptureRuntime, action,
                         + action["execution_spec_json"].get("startup_margin_ms", 0)
                     ) * 1_000_000
                     elapsed = returned_ns - (state.stop_target_ns - duration_ns)
-                host_stop = HostTimerStopSave(elapsed)
+                host_stop = HostTimerStopSave(elapsed, normal_source if (
+                    call.status is AttemptStatus.SUCCEEDED and call.error is None
+                ) else None)
             if (action["type"] == int(_ACTION_TYPE.CAMERA_TIMELAPSE)
                     and action["execution_spec_json"]["end_control"] == int(EndControl.HOST_TIMER)):
                 deadline = runtime.timelapse_deadlines.get(action["id"])
@@ -2904,6 +2933,9 @@ async def _finish_canceled_capture(runtime: CaptureRuntime, action_id: int, *,
         if pending is not None and pending.read_owner is not None:
             return
     action = (await runtime.action(action_id))
+    from camctl.capture.canceled_internal_reads import settle_canceled_processing_read
+    if not await settle_canceled_processing_read(_read_result_scope(runtime), action_id):
+        return
     policy = action["execution_spec_json"].get("result_policy")
     if policy == CaptureResultPolicy.ACTION6_VIDEO_SEGMENTS_V1.value:
         from camctl.capture.action6_recovery import finalize_pending_action6_inspections
@@ -3253,7 +3285,8 @@ async def _resume_bound_local_read(runtime, action, copy_id, ticket, saved_end):
             pending_read_results=runtime.pending_read_results,
             pending_read_business=runtime.pending_read_business,
             pending_read_ends=runtime.pending_read_ends,
-            continuing_read_tickets=runtime.continuing_read_tickets)
+            continuing_read_tickets=runtime.continuing_read_tickets,
+            pending_segment_inspection_results=runtime.pending_segment_inspection_results)
     else:
         flow = replace(runtime.media, evidence=evidence)
     if action["cancel_requested"]:
@@ -3310,7 +3343,7 @@ async def _saved_internal_binding_failure(runtime, action):
 
     def read(owned):
         with closing(owned.connection.execute(
-            "SELECT c.id,r.error_json FROM operation_runs r JOIN file_copies c ON c.id=r.copy_id"
+            "SELECT c.id,r.error_json,c.processing_id,c.inspection_id FROM operation_runs r JOIN file_copies c ON c.id=r.copy_id"
             " WHERE r.action_id=? AND r.kind=3 AND r.status=4 AND c.delivery_id IS NULL"
             " AND json_extract(r.error_json,'$.code')='device_binding_unavailable' LIMIT 2",
             (action["id"],),
@@ -3320,11 +3353,13 @@ async def _saved_internal_binding_failure(runtime, action):
             return None
         if len(rows) != 1:
             raise ConsistencyError("拍摄存在多个未收场的原读取绑定失败")
-        copy_id, stored = rows[0]
+        copy_id, stored, processing_id, inspection_id = rows[0]
+        if (processing_id is None) == (inspection_id is None):
+            raise ConsistencyError("原内部读取绑定失败缺少唯一处理或检查归属")
         error = parse_exact_json(stored)
-        key, identity, _occurred_at = load_saved_binding_read_failure(
+        key, identity, occurred_at = load_saved_binding_read_failure(
             owned.connection, action["id"], copy_id, error)
-        return copy_id, error["details"], key, identity
+        return copy_id, error["details"], key, identity, occurred_at, inspection_id
 
     return await runtime.database.read(read, description="读取原内部读取绑定失败")
 
@@ -3343,7 +3378,7 @@ async def _handle_binding_failure(
         details = binding_failure_details(binding_result)
     else:
         from camctl.devices.bindings import BindingStatus
-        copy_id, details, _key, identity = saved_read
+        copy_id, details, _key, identity, _occurred_at, _inspection_id = saved_read
         statuses = {"missing": BindingStatus.DEVICE_MISSING, "mismatch": BindingStatus.DRIVER_MISMATCH,
                     "physical_identity_mismatch": BindingStatus.PHYSICAL_IDENTITY_MISMATCH,
                     "physical_identity_conflict": BindingStatus.PHYSICAL_IDENTITY_CONFLICT}
@@ -3391,14 +3426,12 @@ async def _handle_binding_failure(
                 if original is None:
                     raise ConsistencyError("内部读取绑定失败缺少原未结束尝试")
                 ticket, intent_id = original
-                read_scope = SimpleNamespace(
-                    recovery_boundary=runtime.recovery_boundary, recovery_max_event_id=runtime.recovery_max_event_id,
-                    continuing_read_tickets=runtime.continuing_read_tickets,
-                    pending_read_results=runtime.pending_read_results, pending_read_ends=runtime.pending_read_ends,
-                    pending_read_business=runtime.pending_read_business, database=runtime.database, operations=runtime.operations,
-                    occurred_at=runtime.wall_us, last_recovery_diagnostic=runtime.last_recovery_diagnostic,
-                    recovery_evidence_for=runtime.recovery_evidence_for,
-                    on_recovery_diagnostic=runtime.record_recovery_diagnostic)
+                read_scope = _read_result_scope(runtime)
+                read_scope.recovery_boundary = runtime.recovery_boundary
+                read_scope.recovery_max_event_id = runtime.recovery_max_event_id
+                read_scope.last_recovery_diagnostic = runtime.last_recovery_diagnostic
+                read_scope.recovery_evidence_for = runtime.recovery_evidence_for
+                read_scope.on_recovery_diagnostic = runtime.record_recovery_diagnostic
                 from camctl.outputs.read_attempts import PendingReadBusiness, held_binding_read_result
                 from camctl.capture.media_flow import _save_internal_read_and_settle
 
@@ -3460,7 +3493,27 @@ async def _handle_binding_failure(
     from camctl.outputs.read_attempts import save_read_business
 
     if saved_read is not None:
-        copy_id, details, key, _identity = saved_read
+        copy_id, details, key, _identity, occurred_at, inspection_id = saved_read
+        if inspection_id is not None:
+            from types import SimpleNamespace
+            from camctl.capture.segment_inspections import (
+                settle_inspection_read_failure, settle_terminal_inspection_read_slot,
+            )
+            flow = runtime.media or SimpleNamespace(
+                database=runtime.database, occurred_at=runtime.wall_us,
+                pending_segment_inspection_results=runtime.pending_segment_inspection_results,
+                pending_read_business=runtime.pending_read_business,
+                pending_read_results=runtime.pending_read_results, pending_read_ends=runtime.pending_read_ends,
+                continuing_read_tickets=runtime.continuing_read_tickets,
+                operations=runtime.operations, evidence=runtime.evidence,
+                file_executor=runtime.file_executor,
+            )
+            if not await settle_inspection_read_failure(flow, copy_id, occurred_at):
+                current_action = await runtime.action(action["id"])
+                return not bool(current_action["cancel_requested"])
+            if not await settle_terminal_inspection_read_slot(flow, copy_id, runtime.wall_us()):
+                return True
+            return False
         request = replace(await _binding_failure_request(runtime, action, details),
                           read_result_key=key, read_copy_id=copy_id)
         receipt = await save_read_business(_read_result_scope(runtime), action["id"],
@@ -3870,15 +3923,18 @@ async def _advance_record_start(runtime, action, attempt) -> bool:
 
 
 def _read_result_scope(runtime):
-    from types import SimpleNamespace
+    from camctl.capture.media_flow import internal_read_scope
 
-    return SimpleNamespace(database=runtime.database, operations=runtime.operations, occurred_at=runtime.wall_us,
+    return internal_read_scope(runtime.database, runtime.operations, occurred_at=runtime.wall_us,
         pending_read_results=runtime.pending_read_results, pending_read_business=runtime.pending_read_business,
-        pending_read_ends=runtime.pending_read_ends, continuing_read_tickets=runtime.continuing_read_tickets)
+        pending_read_ends=runtime.pending_read_ends, continuing_read_tickets=runtime.continuing_read_tickets,
+        pending_segment_inspection_results=runtime.pending_segment_inspection_results,
+        file_executor=runtime.file_executor, evidence=runtime.evidence)
 
 
 async def _resume_internal_read_results(runtime):
-    pending_maps = (runtime.pending_read_business, runtime.pending_read_results, runtime.pending_read_ends)
+    pending_maps = (runtime.pending_read_business, runtime.pending_read_results, runtime.pending_read_ends,
+                    runtime.pending_segment_inspection_results)
     original = tuple(tuple(pending.items()) for pending in pending_maps)
     if not any(original):
         return False
@@ -3890,6 +3946,8 @@ async def _resume_internal_read_results(runtime):
     (await retry_read_business(scope))
     for pending in tuple(scope.pending_read_results.values()):
         (await _save_internal_read_and_settle(scope, pending))
+    from camctl.capture.segment_inspections import resume_pending_inspection_results
+    await resume_pending_inspection_results(scope)
     await retry_read_ends(scope)
     # 原申请被消费或替换才交付进展；保留原对象的强引用以比较实际拥有权。
     if any(len(pending) != len(items)
@@ -3958,7 +4016,7 @@ async def _record_handler(action_id: int, context: CaptureRuntime) -> HandlerOut
         if await _confirm_stop_by_query(context, action):
             # 停止核实本轮已收场或占用：重入按已保存事实推进。
             return
-        step = await _stop_call(context, action)
+        step = await _stop_call(context, action, normal_recording=not canceled)
         if step.phase == "confirmed":
             # 停止确认：活动以可靠停止事实收场，重入进入终态分支。
             (await _conclude_activity(context, action_id))

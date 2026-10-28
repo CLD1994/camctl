@@ -661,6 +661,11 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
         if getattr(item, "read_end_event_id", None) is None:
             continue
         assembly = runtime.devices.get(item.device_id)
+        if assembly is not None and assembly.binding != DeviceBinding(item.device_id, item.driver_id):
+            evidence = _original_read_evidence(runtime, item.device_id, item.driver_id)
+            if evidence is None:
+                continue
+            assembly = replace(assembly, evidence=evidence)
         if assembly is None:
             if runtime.binding_check is None or runtime.recovery_evidence_for is None:
                 continue
@@ -998,6 +1003,17 @@ async def _fail_read_delivery(
         business_saves=business_saves, retry=retry)
 
 
+def _original_read_evidence(runtime, device_id, driver_id):
+    """结果契约属于源文件的原驱动，不能由同名设备的新驱动替代。"""
+    binding = DeviceBinding(device_id, driver_id)
+    assembly = runtime.devices.get(device_id)
+    if assembly is not None and assembly.binding == binding:
+        return assembly.evidence
+    if runtime.recovery_evidence_for is None:
+        return None
+    return runtime.recovery_evidence_for(binding, "read")
+
+
 async def _settle_ready_read_ends(runtime: ObtainRuntime, now: int) -> None:
     """已校验交付仍有原读取时，先按原 End 补存读取结果。"""
     from camctl.outputs.read_attempts import HeldReadEnd, unfinished_read_end
@@ -1023,14 +1039,13 @@ async def _settle_ready_read_ends(runtime: ObtainRuntime, now: int) -> None:
             resume = lambda current, value, original=runtime, cfg=config: _resume_local_host_end(current, value, original, cfg)
         else:
             assembly = runtime.devices.get(device_id)
+            evidence = _original_read_evidence(runtime, device_id, driver_id)
+            if evidence is None:
+                continue
             if assembly is None:
-                if runtime.recovery_evidence_for is None:
-                    continue
-                evidence = runtime.recovery_evidence_for(DeviceBinding(device_id, driver_id), "read")
-                if evidence is None:
-                    continue
                 assembly = SimpleNamespace(evidence=evidence, max_recopies=None, max_read_attempts=1)
-            evidence = assembly.evidence
+            elif assembly.evidence is not evidence:
+                assembly = replace(assembly, evidence=evidence)
             resume = lambda current, value, original=runtime, current_assembly=assembly: _resume_local_delivery_end(current, value, original, current_assembly)
         held = runtime.pending_read_ends.get(copy_id)
         if held is None:
@@ -1064,10 +1079,7 @@ async def _settle_canceled_read_ends(runtime: ObtainRuntime, now: int) -> None:
         if source_id is None:
             evidence = _LOCAL_READ_EVIDENCE
         else:
-            assembly = runtime.devices.get(device_id)
-            evidence = None if assembly is None else assembly.evidence
-            if evidence is None and runtime.recovery_evidence_for is not None:
-                evidence = runtime.recovery_evidence_for(DeviceBinding(device_id, driver_id), "read")
+            evidence = _original_read_evidence(runtime, device_id, driver_id)
             if evidence is None:
                 continue
         held = runtime.pending_read_ends.get(copy_id)

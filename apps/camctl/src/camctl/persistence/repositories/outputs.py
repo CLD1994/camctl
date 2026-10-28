@@ -2462,6 +2462,22 @@ def _copy_action_id(connection, copy, state) -> int:
     return parent["action_id"]
 
 
+def _canceled_binding_processing_settled(connection, copy, run, action):
+    """取消已生效的处理副本只按原绑定读取结果释放机会。"""
+    error = run.get("error_json")
+    if (copy.get("processing_id") is None or action.get("cancel_requested") != 1
+            or action.get("status") not in (2, 6) or run.get("status") != int(_RUN_STATUS.FAILED)
+            or not isinstance(error, Mapping) or error.get("code") != "device_binding_unavailable"):
+        return None
+    from .binding_read_cancel import load_saved_binding_read_failure
+    load_saved_binding_read_failure(connection, action["id"], copy["id"], error)
+    with closing(connection.execute(
+        "SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
+        " WHERE r.action_id=? AND (t.status=1 OR t.result_json IS NULL) LIMIT 1", (action["id"],),
+    )) as cursor:
+        return cursor.fetchone() is None
+
+
 class _SlotChangeCommand:
     """相机读取机会的授予或释放事务命令。
 
@@ -2664,6 +2680,10 @@ class _SlotChangeCommand:
                     and RetryWaitReads(scope.connection).no_attempts(run["id"])):
                 return self._cancel_unstarted_inspection(scope, copy, device_id, run, action)
         self._load_attempts(scope.connection, run["id"])
+        if copy.get("processing_id") is not None:
+            action = self._load_owner_action(scope.connection, copy)
+            if _canceled_binding_processing_settled(scope.connection, copy, run, action) is False:
+                return self._decision(SlotOutcome.WAIT, "action_active")
         if any(attempt["status"] == int(_ATTEMPT_STATUS.RUNNING)
                for attempt in self._state["operation_attempts"].values()):
             return self._decision(SlotOutcome.WAIT, "read_active")
@@ -7336,6 +7356,10 @@ def _read_slot_guard(event, context) -> None:
         reads = context.retry_wait_reads
         if type(reads) is not RetryWaitReads or not reads.no_unsettled_attempts(run["id"], context.validated_events):
             raise EventValidationError("实际读取未结束，不能释放机会")
+        if copy.get("processing_id") is not None:
+            action = _slot_owner_action(context, copy)
+            if _canceled_binding_processing_settled(reads.connection, copy, run, action) is False:
+                raise EventValidationError("取消处理的原实际调用未全部收场")
         if run["retry_wait_required"] != 0:
             raise EventValidationError("重试等待期间保留机会")
         if run["status"] not in _RUN_TERMINAL and copy["committed_bytes"] < copy["source_size"]:

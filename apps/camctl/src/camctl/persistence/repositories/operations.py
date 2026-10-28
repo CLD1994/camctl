@@ -1074,10 +1074,12 @@ from .binding_read_cancel import binding_cancel_event as _binding_cancel_event
 class FinishAttemptCommand:
     """一次尝试结束结果的完整事务命令。"""
 
-    def __init__(self, finish: AttemptFinish, key: OperationKey, *, binding_read=False, current_identity=None) -> None:
+    def __init__(self, finish: AttemptFinish, key: OperationKey, *, binding_read=False,
+                 current_identity=None, normal_recording_stop=None) -> None:
         self._finish = finish
         self._key = key
         self._binding_read = binding_read
+        self._normal_recording_stop = normal_recording_stop
         self._binding_identity = None if current_identity is None else dict(current_identity)
         self._owners: dict[tuple[str, int], tuple[str, int]] = {}
         self._state: dict[str, dict[int, dict[str, Any]]] = {}
@@ -1211,6 +1213,8 @@ class FinishAttemptCommand:
                 ),
             ),
             finish.occurred_at,
+            None if self._normal_recording_stop is None else {
+                "normal_recording_stop": self._normal_recording_stop.document()},
         )
         events = [result_event]
         run_status_after = RunStatus[_run_status_name(run_facts["status"])]
@@ -1278,6 +1282,10 @@ class FinishAttemptCommand:
         if (len(saved) not in (1, 2) or saved[0]["type"] != _ATTEMPT_RESULT_EVENT
                 or saved[0]["reason"] not in _RESULT_REASON.values()):
             raise TransactionError("操作身份已用于其他阶段，不能作为结果重送")
+        expected_stop = (None if self._normal_recording_stop is None
+                         else self._normal_recording_stop.document())
+        if not json_equal(saved[0]["body"].get("evidence", {}).get("normal_recording_stop"), expected_stop):
+            raise TransactionError("原停止结果重送改变正常停止来源")
         rows = saved[0]["body"]["rows"]
         if (len(rows) != 1 or rows[0]["table"] != "operation_attempts"
                 or not rows[0]["before"]["exists"] or not rows[0]["after"]["exists"]):
@@ -2170,6 +2178,12 @@ def _attempt_result_guard(event, context) -> None:
         if not isinstance(observations, list):
             _fail("结果正文必须保存观察数组")
         run = _guard_facts(context, "operation_runs", after.get("run_id"))
+        if "normal_recording_stop" in event.evidence:
+            from .normal_recording_stop import verify_normal_stop_group
+            try:
+                verify_normal_stop_group(event, context, after, run)
+            except (ConsistencyError, ValueError, KeyError, TypeError) as error:
+                raise EventValidationError(f"正常录像停止来源无效: {error}") from error
         if (run.get("kind") == int(_RUN_KIND.CHECK_DEVICE_AVAILABILITY)
                 and status == int(_ATTEMPT_STATUS.SUCCEEDED)):
             from .availability_release import require_result_group

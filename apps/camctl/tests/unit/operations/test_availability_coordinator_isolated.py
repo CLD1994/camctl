@@ -272,6 +272,50 @@ async def test_last_failed_attempt_finishes_without_retry_wait(coordinator_modul
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("copy_id", [None, 9])
+async def test_successful_check_delivers_original_result_to_release_transaction(coordinator_module, monkeypatch, copy_id):
+    module, _ = coordinator_module
+    coordinator = make_coordinator(module)
+    coordinator._write = AsyncMock()
+    driver_module = ModuleType("camctl.devices.drivers.hasselblad.driver")
+    driver_module.AvailabilityCancelled = type("AvailabilityCancelled", (asyncio.CancelledError,), {})
+    intent_module = ModuleType("camctl.persistence.repositories.availability_intent")
+    intent_module.recheck_availability_dispatch = lambda *args: SimpleNamespace(allowed=True)
+    release_module = ModuleType("camctl.persistence.repositories.availability_release")
+    release_module.finish_availability = object()
+    for item in (driver_module, intent_module, release_module):
+        monkeypatch.setitem(sys.modules, item.__name__, item)
+    database = SimpleNamespace(read=AsyncMock(side_effect=lambda callback: callback(SimpleNamespace(connection=None))))
+    ticket = SimpleNamespace(attempt_id=1, run_id=7)
+    request = SimpleNamespace(action_id=1, trigger_copy_id=copy_id,
+        identity=SimpleNamespace(serial="original", product_id=10), occurred_at=100, trusted_wall_now=100)
+    # replace() 需要正式请求的不可变值对象。
+    @dataclass(frozen=True)
+    class CheckRequest:
+        action_id: int
+        trigger_copy_id: int | None
+        identity: object
+        occurred_at: int
+        trusted_wall_now: int
+    request = CheckRequest(**vars(request))
+    outcome = module.CallOutcome(status=module.AttemptStatus.SUCCEEDED, effect=module.EffectState.UNKNOWN)
+    actual = SimpleNamespace(to_device_result=lambda identity: SimpleNamespace(outcome=outcome, diagnostic_error=None))
+    driver = SimpleNamespace(check_availability=AsyncMock(return_value=actual))
+    binding = SimpleNamespace(device_id="camera")
+    config = SimpleNamespace(max_attempts=2, timeout_s=5)
+    owner = coordinator._attempt_owner(database, ticket, request, config, driver, None, binding, 9)
+
+    observed = await owner.invoke()
+    await owner.save(observed, object())
+
+    driver.check_availability.assert_awaited_once_with(binding, expected_serial="original", expected_product_id=10, timeout_s=5)
+    saved = coordinator._write.await_args.args
+    assert saved[1] == (1, copy_id, "result", 7, 1)
+    assert saved[2].ticket is ticket and saved[2].run_finish.status is module.RunOutcome.SUCCEEDED
+    assert saved[3] is release_module.finish_availability
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("current_max,canceled,waiting_result", [(2, 0, "WAIT"), (2, 1, "FINISHED")])
 async def test_recovery_saves_unknown_then_uses_current_budget_and_trigger(
         coordinator_module, monkeypatch, current_max, canceled, waiting_result):

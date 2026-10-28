@@ -228,6 +228,16 @@ async def finalize_pending_action6_inspections(runtime, action_id: int, *, reaso
     return True
 
 
+def _saved_inspection_without_media(existing):
+    from camctl.capture.segment_inspections import _step_from_ref
+    from camctl.contracts.enums import enum_for
+
+    saved = existing.inspection
+    if saved is None or saved.state == int(enum_for("segment_inspections.state").PENDING):
+        return None
+    return _step_from_ref(saved, None if existing.copy is None else existing.copy.copy_id)
+
+
 async def advance_action6_recovery(runtime, action, decision=None):
     """实际处理器的异常入口；检查事实可跨推进和会话恢复。"""
     from dataclasses import replace
@@ -268,9 +278,16 @@ async def advance_action6_recovery(runtime, action, decision=None):
             return
         await advance_action6_segmented_recording(runtime, action, decision)
         return
-    # 受限时钟会话只保存控制和文件进度；媒体检查由正常会话执行。
     if runtime.media is None:
-        return
+        saved_failure = await runtime.database.read(lambda owned: owned.connection.execute(
+            "SELECT 1 FROM segment_inspections s JOIN file_copies c ON c.inspection_id=s.id"
+            " JOIN operation_runs r ON r.copy_id=c.id AND r.kind=3"
+            " WHERE s.action_id=? AND s.state=? AND r.status=4"
+            " AND json_extract(r.error_json,'$.code')='device_binding_unavailable' LIMIT 1",
+            (action_id, int(enum_for("segment_inspections.state").FAILED)),
+        ).fetchone())
+        if saved_failure is None:
+            return
     repository = SegmentRepository()
     ref = await prepare_action6_segment_set(runtime, action, None)
     if ref is None:
@@ -288,20 +305,23 @@ async def advance_action6_recovery(runtime, action, decision=None):
         enum_for("actions.type")(action["type"]).name.lower(),
     )
     flow = runtime.media
-    budget = OperationConfig(flow.max_read_attempts, flow.read_idle_timeout_s,
-                             flow.retry_interval_s)
+    budget = (None if flow is None else OperationConfig(
+        flow.max_read_attempts, flow.read_idle_timeout_s, flow.retry_interval_s))
     explicit_media_failure = False
 
     async def inspect(stored):
         nonlocal explicit_media_failure
         existing = await runtime.database.read(lambda owned: read_inspection_for_member(action_id, stored.member_id, owned))
         saved = existing.inspection
-        adopted_budget = budget if saved is None else OperationConfig.from_document(
-            saved.budget_json
-        )
-        step = await inspect_segment(flow, SegmentInspectionRequest(
-            action_id, stored.member_id, target, adopted_budget, runtime.wall_us(),
-        ))
+        if flow is None:
+            step = _saved_inspection_without_media(existing)
+            if step is None:
+                return None
+        else:
+            adopted_budget = budget if saved is None else OperationConfig.from_document(saved.budget_json)
+            step = await inspect_segment(flow, SegmentInspectionRequest(
+                action_id, stored.member_id, target, adopted_budget, runtime.wall_us(),
+            ))
         if step.phase is SegmentInspectionPhase.WAITING:
             return None
         # FAILED 还包括读次数耗尽和媒体工具异常；它们只让覆盖前缀

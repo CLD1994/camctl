@@ -540,6 +540,14 @@ def _check_evidence_member(event_id: int, member: str, value: Any, reason: int) 
             _fail(f"事件 {event_id} 的 evidence.entries 必须是数组")
     elif member == "preparation_request":
         parse_preparation_request(value)
+    elif member == "normal_recording_stop":
+        from camctl.capture.models import NormalRecordingStop
+        try:
+            if not isinstance(value, Mapping) or set(value) != {"start_result_event_id", "elapsed_before_stop_ns"}:
+                raise ValueError("正常停止来源成员不符")
+            NormalRecordingStop(**value)
+        except (TypeError, ValueError) as error:
+            _fail(f"事件 {event_id} 的正常停止来源无效: {error}")
     elif member == "capture_selection":
         from camctl.persistence.repositories.capture_selection import CaptureSelectionInput
         try:

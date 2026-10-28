@@ -4112,7 +4112,10 @@ class _CaptureStopCommand:
                 or activity["control_elapsed_ns"] is not None):
             raise ConsistencyError("原 STOP 不具备新的拍摄结束事实")
         sub = _CompositeScope(scope, scope.max_event_id + 1)
-        result = FinishAttemptCommand(finish, self._key).plan(sub)
+        result = FinishAttemptCommand(
+            finish, self._key,
+            normal_recording_stop=None if self._stop is None else self._stop.normal_recording_stop,
+        ).plan(sub)
         if result.read_only:
             raise ConsistencyError("已保存的普通 STOP 结果不能补写为共同停止事实")
         before, after = {"activity_state": activity["activity_state"]}, {"activity_state": 3}
@@ -4134,7 +4137,10 @@ class _CaptureStopCommand:
 
     def _reuse(self, scope, saved):
         cut = 1 + int(len(saved) > 1 and saved[1]["type"] in (_RUN_END_EVENT, _RETRY_WAIT_EVENT))
-        result = FinishAttemptCommand(self._finish, self._key)._reuse(scope, saved[:cut])
+        result = FinishAttemptCommand(
+            self._finish, self._key,
+            normal_recording_stop=None if self._stop is None else self._stop.normal_recording_stop,
+        )._reuse(scope, saved[:cut])
         if self._stop is None and len(saved) == cut:
             return result
         if len(saved) != cut + 1:
@@ -4613,6 +4619,20 @@ class _FinishBindingFailureCommand:
         if action is None:
             raise TransactionError("绑定失败动作不存在")
         self._verify_binding(action)
+        if request.read_result_key is not None:
+            copy = row_facts(connection, "file_copies", request.read_copy_id)
+            if copy is None:
+                raise ConsistencyError("原绑定读取缺少拷贝")
+            if copy.get("inspection_id") is not None:
+                inspection = row_facts(connection, "segment_inspections", copy["inspection_id"])
+                if inspection is None or inspection["action_id"] != action["id"]:
+                    raise ConsistencyError("原绑定读取的分段检查归属不符")
+                plan = row_facts(connection, "plans", action["plan_id"])
+                if plan is None:
+                    raise ConsistencyError("原动作缺少所属计划")
+                return CommandPlan(events=(), owners={}, read_only=True,
+                    state_rows={"actions": {action["id"]: action}, "plans": {plan["id"]: plan}},
+                    result=CaptureResult(action["status"], plan["status"], (), FinishDisposition.RETIRED))
         if request.read_result_key is not None and action["cancel_requested"] and action["status"] in (2, 6):
             plan = row_facts(connection, "plans", action["plan_id"])
             if plan is None:

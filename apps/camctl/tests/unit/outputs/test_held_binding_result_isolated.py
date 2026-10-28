@@ -139,7 +139,7 @@ def setup(monkeypatch, status, canceled, *, digest_missing=True):
     monkeypatch.setattr(sys.modules["camctl.persistence.repositories.outputs"], "OutputsRepository", Repository)
     monkeypatch.setattr(read_attempts, "running_read_ticket", lambda owned, copy_id: (ticket, 10))
     async def read_one(database, sql, params):
-        return status, canceled
+        return status, canceled, None
     monkeypatch.setattr(read_attempts, "read_one", read_one)
     class Database:
         async def read(self, callback):
@@ -163,6 +163,21 @@ def test_clean_end_selects_terminal_then_cancel_then_binding(monkeypatch, status
     assert (None if pending.finish.run_finish is None else pending.finish.run_finish.status) is expected
     assert pending.business is (business if expected is RunOutcome.FAILED else None)
     assert pending.preserved_run_terminal is (status not in (1, 2))
+
+
+def test_inspection_binding_result_keeps_original_read_without_capture_business(monkeypatch):
+    runtime, ticket, _ = setup(monkeypatch, 2, 0)
+    async def inspection_owner(database, sql, params): return 2, 0, 8
+    monkeypatch.setattr(read_attempts, "read_one", inspection_owner)
+    recorded = []
+    monkeypatch.setattr(read_attempts, "record_error", lambda error, **kwargs: recorded.append(error))
+    pending = asyncio.run(read_attempts.held_binding_read_result(
+        runtime, 2, object(), SimpleNamespace(diagnostic=object())))
+    assert pending.finish.ticket is ticket
+    assert pending.finish.run_finish.status is RunOutcome.FAILED
+    assert pending.binding_read is True
+    assert pending.business is None
+    assert len(recorded) == 1
 
 
 def test_determined_result_is_not_replaced_after_cancel(monkeypatch):
@@ -205,7 +220,7 @@ def test_result_determined_during_read_takes_precedence(monkeypatch):
 def test_cancel_observed_during_lookup_keeps_original_binding_candidate(monkeypatch):
     runtime, _, _ = setup(monkeypatch, 2, 0)
     async def canceled_during_lookup(database, sql, params):
-        return 2, 1
+        return 2, 1, None
     monkeypatch.setattr(read_attempts, "read_one", canceled_during_lookup)
     pending = asyncio.run(read_attempts.held_binding_read_result(runtime, 2, object(), SimpleNamespace(diagnostic=object())))
     assert pending.finish.run_finish.status is RunOutcome.FAILED
