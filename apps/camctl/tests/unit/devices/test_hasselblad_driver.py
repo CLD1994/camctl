@@ -680,7 +680,7 @@ async def test_saved_capture_preserves_named_pair_and_locator(host_files, captur
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("shutter", [Decimal("0.000667"),Decimal("0.000333"),Decimal("0.00025")])
+@pytest.mark.parametrize("shutter", ["1/1500", "1/3000", "1/4000"])
 async def test_photo_driver_uses_saved_values_in_structured_argv(host_files, shutter):
     roots, _, _ = host_files
     params = _photo_params()
@@ -688,7 +688,7 @@ async def test_photo_driver_uses_saved_values_in_structured_argv(host_files, shu
     transport = FakeTransport()
     result = await _driver(transport, roots).control(_request(params=params))
     assert result.outcome.status is AttemptStatus.SUCCEEDED
-    assert ("set","shutter",format(shutter,"f")) in _subcommands(transport)
+    assert ("set","shutter",shutter) in _subcommands(transport)
     assert transport.calls[-1].argv[3:] == ("capture","--output",str(WORKSPACE))
     assert all(isinstance(call.argv, tuple) and call.argv[:3]==(EXECUTABLE,"--pid","0x000a") for call in transport.calls)
 

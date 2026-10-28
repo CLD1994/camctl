@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sqlite3
-from decimal import Decimal
 from pathlib import Path
 
 from camctl.acceptance.input import ParsedInput
@@ -72,7 +71,7 @@ def _host_photo_input() -> ParsedInput:
                     "scheduled_at": "2026-10-12 09:00:00",
                     "params": {
                         "type": "hasselblad_photo", "capture_format": "raw",
-                        "exposure": {"mode": "M", "iso": 800, "aperture": 8, "shutter_s": Decimal("0.008")},
+                        "exposure": {"mode": "M", "iso": 800, "aperture": 8, "shutter_s": "1/125"},
                         "white_balance": {"mode": "manual", "temperature_k": 5500},
                         "focus": {"mode": "MF", "relative_move": 5},
                     },

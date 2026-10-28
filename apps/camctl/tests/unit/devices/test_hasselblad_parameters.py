@@ -3,6 +3,8 @@
 from decimal import Decimal
 
 import pytest
+import referencing
+
 
 from camctl.acceptance.schema import BodySchemaError
 from camctl.devices.drivers.hasselblad.parameters import (
@@ -17,11 +19,15 @@ from camctl.devices.drivers.hasselblad.parameters import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_schema_resources(monkeypatch):
+    monkeypatch.setattr("camctl.contracts.schemas.schema_registry", lambda: referencing.Registry())
+
 def _photo():
     return {
         "type": "hasselblad_photo",
         "capture_format": "raw",
-        "exposure": {"mode": "M", "iso": 800, "aperture": 8, "shutter_s": Decimal("0.008")},
+        "exposure": {"mode": "M", "iso": 800, "aperture": 8, "shutter_s": "1/125"},
         "white_balance": {"mode": "manual", "temperature_k": 5500},
         "focus": {"mode": "MF", "relative_move": 5},
     }
@@ -119,9 +125,9 @@ def test_photo_schema_has_closed_independent_branches():
     for bad in (
         {**_photo(), "focus": None},
         {**_photo(), "capture_format": 7},
-        {**_photo(), "exposure": {"mode": "M", "iso": True, "aperture": 8, "shutter_s": Decimal("0.008")}},
+        {**_photo(), "exposure": {"mode": "M", "iso": True, "aperture": 8, "shutter_s": "1/125"}},
         {**_photo(), "white_balance": {"mode": "manual", "temperature_k": 5500, "tint": 0}},
-        {**_photo(), "exposure": {"mode": "M", "iso": 800, "aperture": 8, "shutter_s": Decimal("0.008"), "extra": 1}},
+        {**_photo(), "exposure": {"mode": "M", "iso": 800, "aperture": 8, "shutter_s": "1/125", "extra": 1}},
         {**_photo(), "exposure": {"mode": "P", "iso": 800, "aperture": 8}},
         {**_photo(), "white_balance": {"mode": "auto", "temperature_k": 5500}},
         {**_photo(), "focus": {"mode": "AF-S", "relative_move": 5}},
@@ -143,8 +149,12 @@ def test_photo_domains_are_exact_and_positive():
     assert len(shutter_values) == 34 and len(set(shutter_values)) == 34
     assert {64, 800, 25600}.issubset(iso_values)
     assert {Decimal("4"), Decimal("4.8"), Decimal("32")}.issubset(aperture_values)
-    assert {Decimal("32"), Decimal("0.008"), Decimal("0.000667"), Decimal("0.00025")}.issubset(shutter_values)
-    assert all(value > 0 for value in (*aperture_values, *shutter_values))
+    assert manual["properties"]["shutter_s"]["type"] == "string"
+    assert all(isinstance(value, str) for value in shutter_values)
+    assert shutter_values[:3] == ["32/1", "23/1", "16/1"]
+    assert shutter_values[-4:] == ["1/1500", "1/2000", "1/3000", "1/4000"]
+    assert {"7/5", "1/125"}.issubset(shutter_values)
+    assert all(value > 0 for value in aperture_values)
 
     for field, values in (("iso", iso_values), ("aperture", aperture_values), ("shutter_s", shutter_values)):
         for value in values:
@@ -152,28 +162,24 @@ def test_photo_domains_are_exact_and_positive():
             params["exposure"][field] = value
             parse_photo_settings(params)
 
-    for field, outside in (("iso", 65), ("aperture", Decimal("4.1")), ("shutter_s", Decimal("0.000668"))):
+    for field, outside in (("iso", 65), ("aperture", Decimal("4.1")), ("shutter_s", "1/1499")):
         params = _photo()
         params["exposure"][field] = outside
         with pytest.raises(BodySchemaError):
             parse_photo_settings(params)
 
 
-def test_short_shutters_keep_distinct_decimal_values():
+def test_shutter_strings_are_preserved_and_unregistered_inputs_rejected():
     manual = next(branch for branch in _branches(photo_schema(), "exposure") if _branch_value(branch) == "M")
     choices = {choice["const"]: choice["title"] for choice in manual["properties"]["shutter_s"]["oneOf"]}
-
-    assert choices[Decimal("0.167")] == "1/6 秒"
-    assert choices[Decimal("0.00556")] == "1/180 秒"
-    assert choices[Decimal("0.008")] == "1/125 秒"
-    short_values = [Decimal("0.000667"), Decimal("0.000333"), Decimal("0.00025")]
-    assert len(set(short_values)) == 3
-    for value in short_values:
+    assert choices["1/6"] == "1/6 秒"
+    assert choices["1/180"] == "1/180 秒"
+    assert choices["7/5"] == "1.4 秒"
+    for value in ("32/1", "7/5", "1/1500", "1/3000", "1/4000"):
         params = _photo()
         params["exposure"]["shutter_s"] = value
-        settings = parse_photo_settings(params)
-        assert settings.exposure.shutter_s == value
-    for outside in (Decimal("0.000666"), Decimal("0.000334"), Decimal("0.000249")):
+        assert parse_photo_settings(params).exposure.shutter_s == value
+    for outside in (32, Decimal("0.000667"), "0.000667", "2/3000", "32", None, True):
         params = _photo()
         params["exposure"]["shutter_s"] = outside
         with pytest.raises(BodySchemaError):
@@ -221,13 +227,13 @@ def test_parse_photo_settings_preserves_machine_values_and_exact_numbers():
     params = _photo()
     params["capture_format"] = "jpeg"
     params["exposure"]["aperture"] = Decimal("4.8")
-    params["exposure"]["shutter_s"] = Decimal("0.000333")
+    params["exposure"]["shutter_s"] = "1/3000"
     parsed = parse_photo_settings(params)
 
     assert isinstance(parsed, PhotoSettings)
     assert parsed.capture_format is CaptureFormat.JPEG
     assert parsed.exposure.iso == 800
     assert parsed.exposure.aperture == Decimal("4.8")
-    assert parsed.exposure.shutter_s == Decimal("0.000333")
+    assert parsed.exposure.shutter_s == "1/3000"
     assert parsed.white_balance.temperature_k == 5500
     assert parsed.focus.relative_move == 5

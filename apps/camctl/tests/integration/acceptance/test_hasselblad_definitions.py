@@ -41,7 +41,7 @@ PHOTO_PARAMS = {
     "capture_format": "raw",
     "exposure": {
         "mode": "M", "iso": 800, "aperture": Decimal("8"),
-        "shutter_s": Decimal("0.000667"),
+        "shutter_s": "1/1500",
     },
     "white_balance": {"mode": "manual", "temperature_k": 5500},
     "focus": {"mode": "MF", "relative_move": 5},
@@ -162,7 +162,7 @@ async def test_describe_exports_hasselblad_without_device_or_executable(tmp_path
     assert parameter["type"] == PARAMETER_TYPE
     assert parameter["name"] == "Hasselblad 单张拍照"
     assert parameter["preview_supported"] is True
-    assert Decimal("0.000667") in {
+    assert "1/1500" in {
         choice["const"]
         for branch in parameter["schema"]["properties"]["exposure"]["oneOf"]
         for choice in branch["properties"].get("shutter_s", {}).get("oneOf", ())
@@ -171,7 +171,7 @@ async def test_describe_exports_hasselblad_without_device_or_executable(tmp_path
     assert stderr.getvalue() == ""
 
 
-async def test_first_import_under_low_decimal_precision_keeps_shutter_domain_exact():
+async def test_first_import_under_low_decimal_precision_keeps_shutter_strings_exact():
     script = """
 import sys
 sys.dont_write_bytecode = True
@@ -186,10 +186,10 @@ manual = next(
     if branch["properties"]["mode"]["const"] == "M"
 )
 shutters = {choice["const"] for choice in manual["properties"]["shutter_s"]["oneOf"]}
-assert Decimal("0.00025") in shutters
-assert Decimal("0.0002") not in shutters
-assert Decimal("0.167") in shutters
-assert Decimal("0.00556") in shutters
+assert "1/4000" in shutters
+assert "1/5000" not in shutters
+assert "1/6" in shutters
+assert "1/180" in shutters
 
 def params(shutter):
     return {
@@ -197,25 +197,25 @@ def params(shutter):
         "capture_format": "raw",
         "exposure": {
             "mode": "M", "iso": 800, "aperture": Decimal("8"),
-            "shutter_s": Decimal(shutter),
+            "shutter_s": shutter,
         },
         "white_balance": {"mode": "auto"},
         "focus": {"mode": "MF"},
     }
 
-assert parse_photo_settings(params("0.00025")).exposure.shutter_s == Decimal("0.00025")
+assert parse_photo_settings(params("1/4000")).exposure.shutter_s == "1/4000"
 from camctl.acceptance.schema import BodySchemaError
 try:
-    parse_photo_settings(params("0.0002"))
+    parse_photo_settings(params("1/5000"))
 except BodySchemaError:
     pass
 else:
-    raise AssertionError("0.0002 must be rejected")
-print("finite=0.00025; invalid=0.0002; recurring=0.167,0.00556")
+    raise AssertionError("1/5000 must be rejected")
+print("valid=1/4000; invalid=1/5000; fractions=1/6,1/180")
 """
     result = subprocess.run(
         [sys.executable, "-c", script], capture_output=True, text=True, timeout=30,
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "finite=0.00025; invalid=0.0002; recurring=0.167,0.00556"
+    assert result.stdout.strip() == "valid=1/4000; invalid=1/5000; fractions=1/6,1/180"

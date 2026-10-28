@@ -25,7 +25,7 @@ from camctl.devices.tasks import CaptureStorage
 PHOTO_PARAMS = {
     "type": "hasselblad_photo",
     "capture_format": "raw",
-    "exposure": {"mode": "M", "iso": 800, "aperture": Decimal("8"), "shutter_s": Decimal("0.008")},
+    "exposure": {"mode": "M", "iso": 800, "aperture": Decimal("8"), "shutter_s": "1/125"},
     "white_balance": {"mode": "manual", "temperature_k": 5500},
     "focus": {"mode": "MF", "relative_move": 5},
 }

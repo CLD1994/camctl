@@ -28,7 +28,7 @@ ACTION_NAME = "Hasselblad 参数合同"
 def _photo_params(
     *,
     capture_format: str = '"raw"',
-    exposure: str = '{"mode":"M","iso":400,"aperture":5.6,"shutter_s":0.001}',
+    exposure: str = '{"mode":"M","iso":400,"aperture":5.6,"shutter_s":"1/1000"}',
     white_balance: str = '{"mode":"auto"}',
     focus: str = '{"mode":"MF"}',
     type_value: str = '"hasselblad_photo"',
@@ -54,11 +54,11 @@ def _case(name: str, params_text: str, valid: bool) -> dict[str, Any]:
 
 # 每项只保存一个代表输入及独立预期，不在测试中复制完整设备档位。
 PARAMETER_CASES = (
-    _case("raw-manual-short-1-1000", _photo_params(exposure='{"mode":"M","iso":400,"aperture":5.6,"shutter_s":0.001}'), True),
-    _case("raw-manual-short-1-2000", _photo_params(exposure='{"mode":"M","iso":400,"aperture":5.6,"shutter_s":0.0005}'), True),
-    _case("raw-manual-short-1-4000", _photo_params(exposure='{"mode":"M","iso":400,"aperture":5.6,"shutter_s":0.00025}'), True),
+    _case("raw-manual-short-1-1000", _photo_params(exposure='{"mode":"M","iso":400,"aperture":5.6,"shutter_s":"1/1000"}'), True),
+    _case("raw-manual-short-1-2000", _photo_params(exposure='{"mode":"M","iso":400,"aperture":5.6,"shutter_s":"1/2000"}'), True),
+    _case("raw-manual-short-1-4000", _photo_params(exposure='{"mode":"M","iso":400,"aperture":5.6,"shutter_s":"1/4000"}'), True),
     _case("jpeg-aperture-priority", _photo_params(capture_format='"jpeg"', exposure='{"mode":"A","iso":800,"aperture":8}', white_balance='{"mode":"daylight"}', focus='{"mode":"AF-S"}'), True),
-    _case("jpeg-shutter-priority", _photo_params(capture_format='"jpeg"', exposure='{"mode":"S","iso":200,"shutter_s":0.001}', white_balance='{"mode":"cloudy"}', focus='{"mode":"MF","relative_move":-5}'), True),
+    _case("jpeg-shutter-priority", _photo_params(capture_format='"jpeg"', exposure='{"mode":"S","iso":200,"shutter_s":"1/1000"}', white_balance='{"mode":"cloudy"}', focus='{"mode":"MF","relative_move":-5}'), True),
     _case("raw-program", _photo_params(exposure='{"mode":"P","iso":100}', white_balance='{"mode":"shade"}', focus='{"mode":"MF","relative_move":5}'), True),
     _case("white-balance-auto", _photo_params(white_balance='{"mode":"auto"}'), True),
     _case("white-balance-daylight", _photo_params(white_balance='{"mode":"daylight"}'), True),
@@ -72,14 +72,14 @@ PARAMETER_CASES = (
     _case("focus-manual-without-move", _photo_params(focus='{"mode":"MF"}'), True),
     _case("focus-manual-with-move", _photo_params(focus='{"mode":"MF","relative_move":5}'), True),
     _case("focus-autofocus", _photo_params(focus='{"mode":"AF-S"}'), True),
-    _case("short-shutter-beyond-1-4000-rounded-token", _photo_params(exposure='{"mode":"M","iso":400,"aperture":5.6,"shutter_s":0.0002500000000000000001}'), False),
+    _case("numeric-shutter-rejected", _photo_params(exposure='{"mode":"M","iso":400,"aperture":5.6,"shutter_s":0.0002500000000000000001}'), False),
     _case("white-balance-manual-below-minimum", _photo_params(white_balance='{"mode":"manual","temperature_k":1999}'), False),
     _case("white-balance-manual-above-maximum", _photo_params(white_balance='{"mode":"manual","temperature_k":10001}'), False),
-    _case("manual-exposure-extra-compensation", _photo_params(exposure='{"mode":"M","iso":400,"aperture":5.6,"shutter_s":0.001,"compensation_ev":0}'), False),
-    _case("aperture-priority-extra-shutter", _photo_params(exposure='{"mode":"A","iso":400,"aperture":5.6,"shutter_s":0.001}'), False),
-    _case("shutter-priority-extra-aperture", _photo_params(exposure='{"mode":"S","iso":400,"shutter_s":0.001,"aperture":5.6}'), False),
+    _case("manual-exposure-extra-compensation", _photo_params(exposure='{"mode":"M","iso":400,"aperture":5.6,"shutter_s":"1/1000","compensation_ev":0}'), False),
+    _case("aperture-priority-extra-shutter", _photo_params(exposure='{"mode":"A","iso":400,"aperture":5.6,"shutter_s":"1/1000"}'), False),
+    _case("shutter-priority-extra-aperture", _photo_params(exposure='{"mode":"S","iso":400,"shutter_s":"1/1000","aperture":5.6}'), False),
     _case("program-extra-aperture", _photo_params(exposure='{"mode":"P","iso":400,"aperture":5.6}'), False),
-    _case("program-extra-shutter", _photo_params(exposure='{"mode":"P","iso":400,"shutter_s":0.001}'), False),
+    _case("program-extra-shutter", _photo_params(exposure='{"mode":"P","iso":400,"shutter_s":"1/1000"}'), False),
     _case("auto-white-balance-extra-temperature", _photo_params(white_balance='{"mode":"auto","temperature_k":5600}'), False),
     _case("manual-white-balance-extra-tint", _photo_params(white_balance='{"mode":"manual","temperature_k":5600,"tint":0}'), False),
     _case("auto-white-balance-extra-tint", _photo_params(white_balance='{"mode":"auto","tint":0}'), False),
@@ -95,12 +95,12 @@ PARAMETER_CASES = (
     _case("null-white-balance", _photo_params(white_balance="null"), False),
     _case("missing-focus", _photo_params(omit=frozenset({"focus"})), False),
     _case("null-focus", _photo_params(focus="null"), False),
-    _case("missing-exposure-mode", _photo_params(exposure='{"iso":400,"aperture":5.6,"shutter_s":0.001}'), False),
-    _case("null-exposure-mode", _photo_params(exposure='{"mode":null,"iso":400,"aperture":5.6,"shutter_s":0.001}'), False),
-    _case("missing-exposure-iso", _photo_params(exposure='{"mode":"M","aperture":5.6,"shutter_s":0.001}'), False),
-    _case("null-exposure-iso", _photo_params(exposure='{"mode":"M","iso":null,"aperture":5.6,"shutter_s":0.001}'), False),
-    _case("missing-exposure-aperture", _photo_params(exposure='{"mode":"M","iso":400,"shutter_s":0.001}'), False),
-    _case("null-exposure-aperture", _photo_params(exposure='{"mode":"M","iso":400,"aperture":null,"shutter_s":0.001}'), False),
+    _case("missing-exposure-mode", _photo_params(exposure='{"iso":400,"aperture":5.6,"shutter_s":"1/1000"}'), False),
+    _case("null-exposure-mode", _photo_params(exposure='{"mode":null,"iso":400,"aperture":5.6,"shutter_s":"1/1000"}'), False),
+    _case("missing-exposure-iso", _photo_params(exposure='{"mode":"M","aperture":5.6,"shutter_s":"1/1000"}'), False),
+    _case("null-exposure-iso", _photo_params(exposure='{"mode":"M","iso":null,"aperture":5.6,"shutter_s":"1/1000"}'), False),
+    _case("missing-exposure-aperture", _photo_params(exposure='{"mode":"M","iso":400,"shutter_s":"1/1000"}'), False),
+    _case("null-exposure-aperture", _photo_params(exposure='{"mode":"M","iso":400,"aperture":null,"shutter_s":"1/1000"}'), False),
     _case("missing-exposure-shutter", _photo_params(exposure='{"mode":"M","iso":400,"aperture":5.6}'), False),
     _case("null-exposure-shutter", _photo_params(exposure='{"mode":"M","iso":400,"aperture":5.6,"shutter_s":null}'), False),
     _case("missing-white-balance-mode", _photo_params(white_balance="{}"), False),
@@ -292,12 +292,12 @@ def _installed_plan(cases: tuple[dict[str, Any], ...], scheduled_at: str, reques
     return body
 
 
-def _number_token(document: str, field: str) -> str:
+def _value_token(document: str, field: str) -> str:
     match = re.search(
         rf'"{re.escape(field)}"\s*:\s*([^,}}\s]+)',
         document,
     )
-    assert match is not None, f"找不到字段 {field} 的原始数字词元: {document}"
+    assert match is not None, f"找不到字段 {field} 的原始值词元: {document}"
     return match.group(1)
 
 
@@ -348,12 +348,12 @@ def test_installed_hasselblad_parameter_validation_agrees_across_consumers(
     for case in PARAMETER_CASES:
         if '"shutter_s"' not in case["params_text"]:
             continue
-        expected_token = _number_token(case["params_text"], "shutter_s")
+        expected_token = _value_token(case["params_text"], "shutter_s")
         observed = next(row for row in receipt["cases"] if row["name"] == case["name"])
         for consumer_text in (observed["browser_params"], observed["shared_params"]):
-            assert _number_token(consumer_text, "shutter_s") == expected_token, case["name"]
+            assert _value_token(consumer_text, "shutter_s") == expected_token, case["name"]
         if case["valid"]:
-            assert _number_token(observed["exported"], "shutter_s") == expected_token, case["name"]
+            assert _value_token(observed["exported"], "shutter_s") == expected_token, case["name"]
 
     scheduled_at = _scheduled_at(3600)
     status_text = installed_camctl.run([
