@@ -249,6 +249,27 @@ def pending_result_type():
 
 
 class OriginalSaveTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stale_owner_does_not_replay_applied_save_after_delivery_error(self):
+        pending_type = pending_result_type()
+        owner = pending_type("original-key", SimpleNamespace(ticket=object()), None)
+        identity = (8, 1)
+        pending = {identity: owner}
+        writes = []
+        async def save():
+            writes.append(owner.key)
+            pending.pop(identity)
+            raise RuntimeError("receipt delivery failed")
+        with self.assertRaises(RuntimeError):
+            await owner.shared.run(save)
+        owner.retry_if_owned(pending, identity)
+        with self.assertRaises(RuntimeError):
+            await owner.shared.run(save)
+        pending[identity] = pending_type("new-key", SimpleNamespace(ticket=object()), None)
+        owner.retry_if_owned(pending, identity)
+        with self.assertRaises(RuntimeError):
+            await owner.shared.run(save)
+        self.assertEqual(writes, ["original-key"])
+
     async def test_derived_original_result_keeps_owner_ticket_and_key(self):
         pending_type = pending_result_type()
         ticket = SimpleNamespace(run_id=8, attempt_id=1, responsibility_key="start/21")

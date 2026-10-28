@@ -10,9 +10,9 @@
 PYTHONDONTWRITEBYTECODE=1 /workspaces/camctl/apps/camctl/.venv311/bin/python -m unittest discover -s apps/camctl/tests/unit/capture -p 'test_h1_recovery_boundaries_isolated.py' -v
 ```
 
-命令退出码为 0，9 项通过，前台输出未另存。测试加载目标源码前阻断真实 `camctl` 导入，其他协作者和报告登记均使用内存替身；未访问真实包资源、数据库、设备或现场数据。
+命令退出码为 0，10 项通过，前台输出未另存。测试加载目标源码前阻断真实 `camctl` 导入，其他协作者和报告登记均使用内存替身；未访问真实包资源、数据库、设备或现场数据。
 
-`capture.recovery.recovery_block_reason` 覆盖旧本地收场未确认、固定历史范围缺失或不包含原意图、证据查找缺失、本地控制仍在途、原驱动证据缺失和合格边界；生产 `_attempt_recovery_evidence` 按原顺序消费该判定。`recovery_registry` 覆盖原驱动声明及其恢复证据契约，通用 `operations.recovery.recover_attempt` 的分类另作独立单元验证，该通用函数不直接驱动拍摄恢复。原结果拥有者和 `SharedSave` 的测试覆盖派生申请保留原票据、操作键和同一保存任务，两个等待者共同消费结果，回执未知后显式按原申请重送。活动释放判定覆盖可靠无效果、准备未收场、可能启动以及输出范围未确定；报告投影解释器在登记替身下保持原错误与 `end_unconfirmed`，不把占用变化解释为设备结束。
+`capture.recovery.recovery_block_reason` 覆盖旧本地收场未确认、固定历史范围缺失或不包含原意图、证据查找缺失、本地控制仍在途、原驱动证据缺失和合格边界；生产 `_attempt_recovery_evidence` 按原顺序消费该判定。`recovery_registry` 覆盖原驱动声明及其恢复证据契约，通用 `operations.recovery.recover_attempt` 的分类另作独立单元验证，该通用函数不直接驱动拍摄恢复。原结果拥有者和 `SharedSave` 的测试覆盖派生申请保留原票据、操作键和同一保存任务，两个等待者共同消费结果，回执未知后显式按原申请重送；原结果已应用并移除时，旧快照不能重开保存。活动释放判定覆盖可靠无效果、准备未收场、可能启动以及输出范围未确定；报告投影解释器在登记替身下保持原错误与 `end_unconfirmed`，不把占用变化解释为设备结束。
 
 静态核对显示，`session_capture_assembly` 固定本会话恢复边界与历史上界；`recover_attempt` 优先处理同会话已持有结果，已保存结果不重新生成，原调用结果缺失且上述前提成立时形成原票据的 `UNKNOWN/result_not_saved`，没有重新派发旧 START。调用结果及派生申请沿 `PendingCallResult` 的原键提交；文件及报告事实仍由原生产责任处理。上述隔离测试不构成真实报告登记、完整会话组装、数据库事务或跨组件组合证明；安装版、跨组件和真机验收仍按计划单独跟踪。
 

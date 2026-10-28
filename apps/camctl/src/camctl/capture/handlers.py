@@ -329,6 +329,11 @@ class PendingCallResult:
     def validated(self) -> bool:
         return isinstance(self.finish, AttemptFinish)
 
+    def retry_if_owned(self, pending_results, identity) -> None:
+        current = pending_results.get(identity)
+        if current is not None and current.shared is self.shared:
+            self.shared.retry_failed()
+
 
 # 启动装配和既有调用方使用同一个公共责任集合。
 PendingStartResult = PendingCallResult
@@ -1370,7 +1375,7 @@ class CaptureRuntime(_FileObservationSaves):
     async def _save_call_result(self, identity, pending: PendingCallResult, *, retry=False) -> None:
         """最多重送一次原事务；可靠回滚与提交后错误使用同一身份。"""
         if retry:
-            pending.shared.retry_failed()
+            pending.retry_if_owned(self.pending_start_results, identity)
         # 校验不进入有限 DB 重送循环；本次失败不自动重复校验。
         async def save_and_apply():
             nonlocal pending
