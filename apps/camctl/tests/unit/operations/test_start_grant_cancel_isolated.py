@@ -312,7 +312,8 @@ def test_canceled_origin_abandons_uncommitted_entry_transaction(entries, monkeyp
     tree = ast.parse(path.read_text())
     cls = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "_FixPhotoEntriesCommand")
     method = next(node for node in cls.body if isinstance(node, ast.FunctionDef) and node.name == "plan")
-    program = ast.Module(body=[method], type_ignores=[])
+    helper = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_cancel_origin_abandoned")
+    program = ast.Module(body=[helper, method], type_ignores=[])
     module_map = {
         "camctl.devices.evidence": ("EvidenceRegistry",),
         "camctl.operations.models": ("CallOutcome", "AttemptStatus", "EffectState", "ErrorValue", "Settlement", "SettlementBasis", "EvidenceValue"),
@@ -340,6 +341,34 @@ def test_canceled_origin_abandons_uncommitted_entry_transaction(entries, monkeyp
     plan = namespace["plan"](command, SimpleNamespace(connection=object()))
 
     assert plan.read_only and plan.result.disposition == dispositions.ABANDONED
+
+
+@pytest.mark.parametrize("saved", [False, True])
+def test_plain_cancel_fix_checks_original_key_before_abandoning(saved):
+    path = Path(__file__).parents[3] / "src/camctl/persistence/repositories/cancellation.py"
+    tree = ast.parse(path.read_text())
+    cls = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "_FixCancelTargetsCommand")
+    method = next(node for node in cls.body if isinstance(node, ast.FunctionDef) and node.name == "plan")
+    helper = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_cancel_origin_abandoned")
+    program = ast.Module(body=[helper, method], type_ignores=[])
+    class Result:
+        def __init__(self, disposition): self.disposition = disposition
+    dispositions = SimpleNamespace(ABANDONED="abandoned")
+    namespace = {"saved_transaction_events": lambda *args: ["event"] if saved else None,
+        "row_facts": lambda *args: {"type": 6, "status": 6, "cancel_requested": 1,
+                                     "target_selection_state": 1},
+        "_CANCEL_ACTION_TYPE": 6, "_TARGET_PENDING": 1, "ConsistencyError": ValueError,
+        "CancelTargetsSaved": Result, "CancelTargetsDisposition": dispositions,
+        "CommandPlan": lambda *args, **kwargs: SimpleNamespace(result=args[3], read_only=kwargs["read_only"])}
+    exec(compile(ast.fix_missing_locations(program), str(path), "exec"), namespace)
+    command = SimpleNamespace(_command=SimpleNamespace(action_id=8), _key="key", _reuse=lambda *args: "original")
+
+    plan = namespace["plan"](command, SimpleNamespace(connection=object()))
+
+    if saved:
+        assert plan == "original"
+    else:
+        assert plan.read_only and plan.result.disposition == dispositions.ABANDONED
 
 
 @pytest.mark.asyncio
