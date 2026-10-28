@@ -632,7 +632,7 @@ def test_photo_source_guard_rejects_artifact_that_differs_from_actual_page(photo
     page = page_api.page_from_outcome(ticket, outcome, binding=binding)
     saved = SimpleNamespace(page=page, ref=SimpleNamespace(ticket=ticket, page_no=1, event_id=40))
     reader = guard.PhotoResultReads(object())
-    reader.read_device_start = lambda action, activity_id, before_event_id: (
+    reader.read_device_start = lambda action, activity_id, before_event_id, output_directory=None: (
         12, {"camera_identity": {"serial": "serial", "product_id": 10},
              "original": None, "original_error": "主机记录不可用"}, locator)
     _, identity = reader.verify_device_page(1, 7, 5, saved)
@@ -645,6 +645,29 @@ def test_photo_source_guard_rejects_artifact_that_differs_from_actual_page(photo
     attempt.data["steps"][-1]["artifact"]["sha256"] = "b" * 64
     with pytest.raises(ValueError):
         reader.verify_device_page(1, 7, 5, saved)
+
+
+def test_sync_candidate_must_equal_actual_start_response(photo_page_guard_api):
+    from dataclasses import dataclass
+    guard, _, _, _, _ = photo_page_guard_api
+    @dataclass
+    class Candidate:
+        host_path: str
+        host_name: str
+        size: int
+        media_type: str
+    candidate = Candidate("/staging/capture-work/7/file.3FR", "file.3FR", 100, "image/x-hasselblad-3fr")
+    response = SimpleNamespace(original=candidate, preview=None, original_error=None, preview_error="无预览")
+    data = {"original": {"host_path": candidate.host_path, "host_name": candidate.host_name,
+                         "size": 100, "media_type": candidate.media_type},
+            "preview": None, "original_error": None, "preview_error": "无预览"}
+    guard._require_sync_start_response(response, data)
+    data["original"]["host_path"] = "/staging/capture-work/7/other.3FR"
+    with pytest.raises(ValueError):
+        guard._require_sync_start_response(response, data)
+    data["original"] = None
+    with pytest.raises(ValueError):
+        guard._require_sync_start_response(response, data)
 
 
 def test_device_start_saves_reliable_camera_effect_without_verifying_bad_host_copy(photo_driver_api):

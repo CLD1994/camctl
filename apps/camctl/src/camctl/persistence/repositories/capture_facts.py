@@ -6,7 +6,7 @@
 """
 
 from contextlib import closing
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from typing import Any, Mapping
 
 from camctl.contracts.enums import enum_for
@@ -32,13 +32,24 @@ def _require_photo_camera(camera, activity):
         raise ValueError("原照片观察与活动固定机身不一致")
 
 
+def _require_sync_start_response(response, data):
+    """核对原拍摄双流中的每个本地候选，不能信任投影中的路径。"""
+    from camctl.contracts.json_values import json_equal
+
+    for role in ("original", "preview"):
+        candidate = getattr(response, role)
+        if (not json_equal(None if candidate is None else asdict(candidate), data[role])
+                or getattr(response, role + "_error") != data[role + "_error"]):
+            raise ConsistencyError("照片同步候选与原 START 实际响应不同")
+
+
 class PhotoResultReads:
     """从原事务连接核对设备双源与可靠 START 结果。"""
 
     def __init__(self, connection):
         self.connection = connection
 
-    def read_device_start(self, action, activity_id, *, before_event_id):
+    def read_device_start(self, action, activity_id, *, before_event_id, output_directory=None):
         """从原连接和完整历史核对 DEVICE 单张 START 的真实结果。"""
         import hashlib
         from camctl.contracts.json_values import json_equal
@@ -187,9 +198,11 @@ class PhotoResultReads:
             raise ConsistencyError("照片 START 的实际机身与固定身份不符")
         capture = diagnostics.calls[-1]
         response = parse_device_capture(capture.stdout.data, capture.stderr.data, output_complete=True,
-            capture_format=saved_photo_format(action), output_directory="/unused")
+            capture_format=saved_photo_format(action), output_directory=output_directory or "/unused")
         if response.camera_locator != locator:
             raise ConsistencyError("照片 START 的实际机内定位与保存结果不符")
+        if output_directory is not None:
+            _require_sync_start_response(response, data)
         return attempt["result_event_id"], data, locator
 
     def verify_device_page(self, action_id, activity_id, attempt_id, page):
@@ -257,8 +270,15 @@ class PhotoResultReads:
             raise ConsistencyError("照片来源下载参数不是原机身指定角色与文件")
         path = PurePosixPath(args[4])
         if (not path.is_absolute() or path.parent.name != "result-downloads"
+                or str(path) != args[4]
                 or path.name != f"{page.ref.ticket.run_id}-{page.ref.ticket.attempt_id}-{identity.variant.value}"):
             raise ConsistencyError("照片来源下载工作目录与原尝试不符")
+        if attempts[0].version == 2:
+            verified_start_id, verified_start, _ = self.read_device_start(action, activity_id,
+                before_event_id=attempt["intent_event_id"],
+                output_directory=str(path.parent.parent / "capture-work" / str(activity_id)))
+            if verified_start_id != start_id or not json_equal(verified_start, start):
+                raise ConsistencyError("照片同步候选改变原 START 事实")
         artifact = steps[2].get("artifact")
         try:
             observed_artifact = CapturedArtifact.from_json(artifact)
