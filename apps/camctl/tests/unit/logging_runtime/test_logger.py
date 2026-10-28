@@ -447,7 +447,8 @@ async def test_exception_message_failure_retains_full_original_graph(diagnostic_
     assert payload["exception"]["arguments"] == ["original argument"]
     assert payload["exception"]["notes"] == ["original note"]
     assert payload["exception"]["cause"]["arguments"] == ["original cause"]
-    assert "exception_format_error" in payload
+    assert payload["diagnostic_format_error"]["type"] == "builtins.RuntimeError"
+    assert payload["diagnostic_format_error"]["arguments"] == ["format failure"]
 
 
 @pytest.mark.asyncio
@@ -459,7 +460,8 @@ async def test_exception_graph_formatter_failure_uses_shared_safe_original_field
     await get_logger("test").error("fact", exc_info=error)
     payload = json.loads(diagnostic_sink.records[0].message)
     assert payload["exception"]["arguments"] == [{"1": {"bytes_hex": b"original argument".hex()}}]
-    assert "exception_format_error" in payload
+    assert payload["diagnostic_format_error"]["type"] == "builtins.ValueError"
+    assert payload["diagnostic_format_error"]["arguments"] == ["message unavailable"]
 
 
 def test_unknown_extra_object_does_not_change_original_business_execution():

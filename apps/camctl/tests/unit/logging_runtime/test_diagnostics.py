@@ -492,7 +492,8 @@ async def test_successful_call_with_run_error_still_records_all_known_facts():
     assert payload["outcome"]["effect"] == "confirmed"
     assert payload["outcome"]["call_info"]["local_exit_code"] == 0
     assert payload["ticket"]["run_id"] == 5
-    assert payload["run_error"]["stage"] == "save"
+    assert payload["error"]["stage"] == "save"
+    assert payload["run_error"] == {"$ref": "#/error"}
 
 
 async def test_call_error_and_run_error_are_one_diagnostic_with_both_facts():
@@ -502,8 +503,10 @@ async def test_call_error_and_run_error_are_one_diagnostic_with_both_facts():
         async with diagnostic_scope():
             record_call_outcome(outcome, run_error=ValueError("save"))
     assert len(channel.records) == 1
-    assert document(channel)["outcome"]["error"]["code"] == "E1"
-    assert document(channel)["run_error"]["message"] == "save"
+    payload = document(channel)
+    assert payload["error"]["code"] == "E1"
+    assert payload["outcome"]["error"] == {"$ref": "#/error"}
+    assert payload["run_error"]["message"] == "save"
 
 
 async def test_call_without_error_has_no_diagnostic():
@@ -530,7 +533,7 @@ async def test_complete_exception_graph_and_nested_details_are_frozen():
     assert len(error["exceptions"]) == 2
     assert error["exceptions"][0]["notes"] == ["known note"]
     assert error["exceptions"][1]["diagnostic_details"] == {"known": [1]}
-    assert error["exceptions"][0]["cause"] == {"$ref": "#/exceptions/1"}
+    assert error["exceptions"][0]["cause"] == {"$ref": "#/error/exceptions/1"}
     assert state.status is DiagnosticStatus.ADMITTED
 
 

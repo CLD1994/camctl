@@ -102,7 +102,11 @@ async def test_prepared_log_has_exception_identity_before_admission_without_new_
         assert not channel.records
         assert await diagnostics.admit_diagnostic(state) is state
     assert state.status is diagnostics.DiagnosticStatus.ADMITTED
-    assert [item.message for item in channel.records] == [record.message]
+    assert channel.records == [diagnostics.diagnostic_record_for(state)]
+    original = json.loads(record.message)
+    frozen = json.loads(channel.records[0].message)
+    assert frozen.pop("diagnostic_id") == diagnostics.diagnostic_reference_for(state)["diagnostic_ref"]
+    assert frozen == original
 
 
 async def test_single_admission_preserves_other_pending_records_and_first_exception_facts():

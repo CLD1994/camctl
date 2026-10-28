@@ -1,6 +1,7 @@
 """原诊断与副本持有同一实际写入事实，协作者全部使用内存。"""
 
 import asyncio
+import json
 from unittest.mock import patch
 
 import pytest
@@ -193,7 +194,10 @@ async def test_late_scope_control_settles_every_shared_receipt_before_propagatio
     assert [result.delivered for result in results] == [False, False]
     assert [result.fallback_written for result in results] == [False, True]
     assert all(result.appended is False and result.durable is False for result in results)
-    assert messages == ["first", "second"]
+    documents = [json.loads(message) for message in messages]
+    assert [document["message"] for document in documents] == ["first", "second"]
+    assert [document["diagnostic_id"] for document in documents] == [
+        diagnostics.diagnostic_reference_for(state)["diagnostic_ref"] for state in states]
 
 
 @pytest.mark.parametrize("call_outcome", [False, True])
