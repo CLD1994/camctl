@@ -380,7 +380,7 @@ class HasselbladDriver:
             interrupted = None
             try:
                 with log_context(device_id=binding.device_id, driver_id=binding.driver_id,
-                                 command=(name,)):
+                                 command=(name,), step_name=name):
                     raw = await self.transport.run(spec, _NeverStop())
             except ToolCallCancelled as error:
                 raw = error.outcome
@@ -595,7 +595,10 @@ class HasselbladDriver:
             if remaining <= 0:
                 raise ValueError("source_call_timeout")
             in_call = True
-            raw = await self._run_step(config=config, name=name, args=args, timeout_s=remaining, steps=steps)
+            with log_context(device_id=request.binding.device_id, driver_id=request.binding.driver_id,
+                             activity_id=ticket.target_id, run_id=ticket.run_id,
+                             attempt_id=ticket.attempt_id):
+                raw = await self._run_step(config=config, name=name, args=args, timeout_s=remaining, steps=steps)
             in_call = False
             steps[-1]["argv"] = list(args)
             complete = raw is not None and raw.output is not None and raw.stderr is not None and raw.output_failure is None
@@ -793,7 +796,7 @@ class HasselbladDriver:
             self.terminate_grace_s,
         )
         try:
-            with log_context(command=args):
+            with log_context(command=args, step_name=name):
                 raw = await self.transport.run(spec, _NeverStop())
         except ToolStartError as failure:
             steps.append({

@@ -2,19 +2,23 @@
 
 from dataclasses import replace
 from decimal import Decimal
+import json
+from unittest.mock import create_autospec
 
 import pytest
 
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.drivers.hasselblad.driver import EVIDENCE
 from camctl.devices.start_entry import EntryPhase, StartEntryPermit
+from camctl.logging_runtime.events import event_logging, log_context
+from camctl.logging_runtime.service import LogChannel
 from camctl.operations.models import AttemptStatus, AttemptTicket, EffectState, SettlementBasis
 from camctl.operations.process import LocalExit, RawToolOutcome, ToolStartError
 from camctl.operations.validation import validate_outcome
 
 from .test_hasselblad_driver import (
     ACTIVITY_ID, DRIVER_ID, SERIAL, WORKSPACE, FakeTransport, _declaration,
-    _driver, _photo_params, _request, _subcommands, host_files,
+    _driver, _photo_params, _request, _subcommands, host_files, LIST_OUTPUT, INFO_OUTPUT,
 )
 
 
@@ -24,6 +28,69 @@ def _prepare_request(**kwargs):
 
 def _prepared_start(preparation, **kwargs):
     return replace(_request(**kwargs), prepared_by=preparation.ticket)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed_setting", [False, True])
+async def test_preparation_logs_each_tool_with_step_and_attempt_context(host_files, monkeypatch, failed_setting):
+    from camctl.operations import process as process_module
+    from ..operations.test_process import FakeProcess
+
+    async def spawn(spec, *, stdout_sink=None):
+        command = spec.argv[3:]
+        output = LIST_OUTPUT if command == ("list",) else INFO_OUTPUT if command == ("info",) else b""
+        process = FakeProcess(output)
+        process.stderr = b""
+        process.exit(exit_code=17 if failed_setting and command[:2] == ("set", "exposure-mode") else 0)
+        return process
+
+    monkeypatch.setattr(process_module, "spawn_subprocess", spawn)
+    channel = create_autospec(LogChannel, instance=True, spec_set=True)
+    driver = _driver(None, host_files[0])
+    with event_logging(channel), log_context(action_id=13):
+        result = await driver.prepare_capture(_prepare_request())
+
+    records = [json.loads(call.args[0].rendered_message()) for call in channel.slog.call_args_list]
+    calls = [item for item in records if item["stage"] == "external_tool" and item["event"] == "returned"]
+    names = ["list", "info", "drive_mode_single", "capture_format", "exposure_mode"]
+    if failed_setting:
+        assert result.outcome.error.details["step"] == "exposure_mode"
+        assert calls[-1]["local_exit_code"] == 17
+    else:
+        names += ["iso", "white_balance_mode", "focus_mode"]
+        assert result.outcome.status is AttemptStatus.SUCCEEDED
+    assert [item["step_name"] for item in calls] == names
+    assert len({item["tool_call_id"] for item in calls}) == len(calls)
+    assert all(item["elapsed_ms"] >= 0 and item["action_id"] == 13
+               and item["activity_id"] == ACTIVITY_ID and item["device_id"] == "camera-1"
+               and item["run_id"] == 9 and item["attempt_id"] == 2
+               and "tool_argv" in item and "timeout_s" in item for item in calls)
+
+
+@pytest.mark.asyncio
+async def test_availability_logs_step_names_and_device_context(monkeypatch):
+    from camctl.operations import process as process_module
+    from ..operations.test_process import FakeProcess
+
+    async def spawn(spec, *, stdout_sink=None):
+        output = {"list": LIST_OUTPUT, "info": INFO_OUTPUT, "doctor": b"doctor: PASS\n"}[spec.argv[3]]
+        process = FakeProcess(output)
+        process.stderr = b""
+        process.exit(exit_code=0)
+        return process
+
+    monkeypatch.setattr(process_module, "spawn_subprocess", spawn)
+    channel = create_autospec(LogChannel, instance=True, spec_set=True)
+    driver = _driver(None, None)
+    binding = DeviceBinding("camera-1", DRIVER_ID)
+    with event_logging(channel):
+        result = await driver.check_availability(binding, expected_serial=SERIAL,
+            expected_product_id=10, timeout_s=Decimal("5"))
+    assert result.available
+    records = [json.loads(call.args[0].rendered_message()) for call in channel.slog.call_args_list]
+    calls = [item for item in records if item["stage"] == "external_tool" and item["event"] == "returned"]
+    assert [item["step_name"] for item in calls] == ["list", "info", "doctor"]
+    assert all(item["device_id"] == "camera-1" and item["elapsed_ms"] >= 0 for item in calls)
 
 
 @pytest.mark.asyncio
