@@ -94,6 +94,12 @@ RESULT_PHOTO_PAGE_CONTRACT = EvidenceContract(
     frozenset({"activity_id", "binding", "role", "entries", "cursor", "next_cursor"}),
     identity_field="activity_id")
 
+# 本地文件驱动与历史消费者共用未派发依据，不借用拍摄控制的同名契约。
+FILE_DELETE_NOT_DISPATCHED = EvidenceContract(
+    "file_delete_not_dispatched", 1, "delete", frozenset(), max_diagnostic_calls=3)
+FILE_QUERY_NOT_DISPATCHED = EvidenceContract(
+    "file_query_not_dispatched", 1, "query", frozenset(), max_diagnostic_calls=3)
+
 
 @dataclass(frozen=True)
 class DeviceObservation:

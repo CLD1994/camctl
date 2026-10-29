@@ -23,6 +23,8 @@ from camctl.devices.evidence import (
     EvidenceContract,
     EvidenceRegistry,
     RESULT_PHOTO_PAGE_CONTRACT,
+    FILE_DELETE_NOT_DISPATCHED,
+    FILE_QUERY_NOT_DISPATCHED,
 )
 from camctl.devices.ports import ControlRequest, DeviceCallResult
 from camctl.devices.start_entry import ENTERED, PREVENTED, entered_observation
@@ -147,8 +149,7 @@ EVIDENCE = EvidenceRegistry((
     _PHOTO_RESULT_ATTEMPT, _PHOTO_RESULT_COMPARISON,
     EvidenceContract("delete_returned", 1, "delete", frozenset(), max_diagnostic_calls=3),
     EvidenceContract("query_returned", 1, "query", frozenset(), max_diagnostic_calls=3),
-    EvidenceContract("file_delete_not_dispatched", 1, "delete", frozenset(), max_diagnostic_calls=3),
-    EvidenceContract("file_query_not_dispatched", 1, "query", frozenset(), max_diagnostic_calls=3),
+    FILE_DELETE_NOT_DISPATCHED, FILE_QUERY_NOT_DISPATCHED,
     EvidenceContract("local_file_recovery", 1, "delete", frozenset()),
     EvidenceContract("file_absent", 1, "delete", frozenset({"cleanup_item_id"}),
                      identity_field="cleanup_item_id"),
@@ -941,7 +942,9 @@ class HasselbladDriver:
         def finish(*, reason=None, observations=(), diagnostic=None):
             returned = target_dispatched
             basis = SettlementBasis.OBSERVED if returned else SettlementBasis.NOT_DISPATCHED
-            evidence = (operation + "_returned" if returned else f"file_{operation}_not_dispatched")
+            evidence = (operation + "_returned" if returned else
+                        (FILE_DELETE_NOT_DISPATCHED if operation == "delete"
+                         else FILE_QUERY_NOT_DISPATCHED).type)
             effect = (EffectState.CONFIRMED if observations else
                       EffectState.UNKNOWN if returned else EffectState.NO_EFFECT)
             details = {"reason": reason, "steps": deepcopy(steps)}
