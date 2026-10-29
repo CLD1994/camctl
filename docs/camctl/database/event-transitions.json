@@ -4253,7 +4253,8 @@
             "source_selection"
           ],
           "evidence": [
-            "segment_selection_request"
+            "segment_selection_request",
+            "preview_validation_version"
           ]
         },
         "CLEANUP": {

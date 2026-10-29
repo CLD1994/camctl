@@ -2,6 +2,14 @@
 
 本页记录软件组件的实际验证结果，并区分部署、设备联调和物理断电验证。完整业务验收依据为[客户端六组场景](acceptance.md)，实现进度由[客户端规格同步计划](../superpowers/plans/2026-10-09-client-spec-sync.md)跟踪。
 
+## 预览失败身份与原始报告复核（2026-10-29）
+
+客户端对 `preview_missing`、`preview_unconfirmed` 使用详情中的原片身份区分逐项失败，单份报告与跨报告历史沿同一规则去重；继续拒绝同一原片重复失败、错误来源及错误产物类别，兼容旧来源级预览汇总。
+
+Linux 开发容器、Node.js 24.22.1 中，在 `apps/client` 执行 `node node_modules/vitest/vitest.mjs run tests/unit/reports.test.ts --maxWorkers=2`，454 项通过，退出 0；`npm run typecheck` 退出 0。原样读取用户报告 114、118，通过实际 `parseReport` 校验文件名、原字节 SHA-256、Schema 和关联，两份分别自校验并通过双向历史检查。没有修改报告字节或客户端数据库。
+
+日志及诊断回放入口为 `tmp/adb-preview-client-unit.log`、`tmp/adb-preview-client-typecheck.log`、`tmp/adb-preview-report-replay.ts` 和 `tmp/adb-preview-report-replay.log`。本项未运行集成测试、生产构建、浏览器或实际数据库导入；解析与历史校验通过不替代完整导入事务验收。配套生产及状态库验证边界见[ADB 结果读取验证](../camctl/verification.md#adb-结果扫描与预览失败分类2026-10-29)。
+
 ## 用户测试部署包构建（2026-10-29）
 
 用户要求制作交付包后，在独立源码快照中使用 Node.js 24.22.1、npm 11.21.1 执行 `npm ci --engine-strict --no-audit --no-fund` 和 `npm run build`，均退出 0；后者包含 TypeScript 类型检查和 Vite 生产构建。保留 npm 的 esbuild 安装脚本提示及 Vite 大 chunk 提示，未放宽构建配置。生成四个网页产物，客户端交付还包含源码、锁文件、Node.js 启动和 Docker Compose 材料。

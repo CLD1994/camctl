@@ -140,7 +140,7 @@ class _BoundedRead:
             return self.wait_error(reason)
         return None
 
-    async def scan_preview(self, filesystem, scope, preview, complete, observation, observed_originals):
+    async def scan_preview(self, filesystem, preview, complete, observation, observed_originals):
         profile = self.profile
         preview_suffix = profile.preview_format.suffix.casefold()
         original_suffixes = frozenset(item.suffix.casefold() for item in profile.formats
@@ -153,38 +153,31 @@ class _BoundedRead:
             return None
         original_count = preview_count = 0
         original_candidate = preview_candidate = None
-        scan_cursor = None
-        while True:
-            if not self.available():
-                observation["state"] = "scan_unavailable"
-                return None
-            listing = await filesystem.read_directory(DirectoryRequest(self.request.binding,
-                tuple(scope["directories"]), scan_cursor, self.batch, self.remaining()), stop=_NeverStop())
-            self.remember(listing.outcome, "preview_directory")
-            if listing.error is not None:
-                observation.update(state="scan_failed", error_code=listing.error.code)
-                return None
-            for identity in listing.page.items:
-                suffix = PurePosixPath(identity.path).suffix.casefold()
-                if (suffix != preview_suffix and suffix not in original_suffixes
-                        or _stem(identity.path) != _stem(preview.path)):
-                    continue
-                if suffix == preview_suffix:
-                    preview_count += 1
-                    if preview_count == 1:
-                        preview_candidate = identity
-                    if len(observation["observed_preview_identities"]) < 2:
-                        observation["observed_preview_identities"].append(identity.path)
-                else:
-                    original_count += 1
-                    if original_count == 1:
-                        original_candidate = identity
-                    if len(observation["observed_original_identities"]) < 2:
-                        observation["observed_original_identities"].append(identity.path)
-            scan_cursor = listing.page.next_cursor
-            del listing
-            if scan_cursor is None:
-                break
+        if not self.available():
+            observation["state"] = "scan_unavailable"
+            return None
+        listing = await filesystem.read_family(preview, timeout_s=self.remaining(), stop=_NeverStop())
+        self.remember(listing.outcome, "preview_directory")
+        if listing.error is not None:
+            observation.update(state="scan_failed", error_code=listing.error.code)
+            return None
+        for identity in listing.value:
+            suffix = PurePosixPath(identity.path).suffix.casefold()
+            if (suffix != preview_suffix and suffix not in original_suffixes
+                    or _stem(identity.path) != _stem(preview.path)):
+                continue
+            if suffix == preview_suffix:
+                preview_count += 1
+                if preview_count == 1:
+                    preview_candidate = identity
+                if len(observation["observed_preview_identities"]) < 2:
+                    observation["observed_preview_identities"].append(identity.path)
+            else:
+                original_count += 1
+                if original_count == 1:
+                    original_candidate = identity
+                if len(observation["observed_original_identities"]) < 2:
+                    observation["observed_original_identities"].append(identity.path)
         observation[profile.original_count_field] = original_count
         observation[profile.preview_count_field] = preview_count
         observation["scan_complete"] = True
@@ -273,7 +266,7 @@ async def list_declared_results(driver, request, batch, profile):
     if type(scope_only) is not bool:
         raise ValueError("范围读取标记必须是布尔值")
     raw_page = scope_only or profile.preview_read_mode is PreviewReadMode.RAW_PAGE_FILES
-    if raw_page and request.result_directory_reader is not None:
+    if request.result_directory_reader is not None:
         listing = await request.result_directory_reader(filesystem, directory_request, stop=_NeverStop())
     else:
         listing = await filesystem.read_directory(directory_request, stop=_NeverStop())
@@ -287,13 +280,21 @@ async def list_declared_results(driver, request, batch, profile):
         "set_finalized": False, "completion_evidence": None}
 
     by_suffix = {item.suffix.casefold(): item for item in profile.formats}
+    page_formats = {**by_suffix, profile.preview_format.suffix.casefold(): profile.preview_format}
+    raw_files = tuple(
+        (identity, file_format)
+        for identity in listing.page.items
+        if (file_format := page_formats.get(PurePosixPath(identity.path).suffix.casefold())) is not None
+    )
+    if not scope_only:
+        candidates = (tuple(identity for identity, _ in raw_files)
+            if request.result_candidates is None else
+            await request.result_candidates(tuple(identity for identity, _ in raw_files)))
+        candidate_set = set(candidates)
+        if (len(candidate_set) != len(candidates)
+                or candidates != tuple(identity for identity, _ in raw_files if identity in candidate_set)):
+            raise ValueError("结果候选筛选必须返回原页中保持次序的文件身份子集")
     if raw_page:
-        page_formats = {**by_suffix, profile.preview_format.suffix.casefold(): profile.preview_format}
-        raw_files = tuple(
-            (identity, file_format)
-            for identity in listing.page.items
-            if (file_format := page_formats.get(PurePosixPath(identity.path).suffix.casefold())) is not None
-        )
         page_entries = [
             _entry(identity, None, False, file_format)
             for identity, file_format in raw_files
@@ -303,13 +304,6 @@ async def list_declared_results(driver, request, batch, profile):
             # 完整路径范围独立于大小和文件完成；原停止等待仍由上方执行。
             page["set_finalized"] = complete and listing.page.next_cursor is None
             return read.reply(page=page)
-        candidates = (tuple(identity for identity, _ in raw_files)
-            if request.result_candidates is None else
-            await request.result_candidates(tuple(identity for identity, _ in raw_files)))
-        candidate_set = set(candidates)
-        if (len(candidate_set) != len(candidates)
-                or candidates != tuple(identity for identity, _ in raw_files if identity in candidate_set)):
-            raise ValueError("结果候选筛选必须返回原页中保持次序的文件身份子集")
         metadata_files = tuple((index, identity, file_format)
             for index, (identity, file_format) in enumerate(raw_files) if identity in candidate_set)
         if metadata_files:
@@ -334,6 +328,8 @@ async def list_declared_results(driver, request, batch, profile):
     for identity in listing.page.items:
         suffix = PurePosixPath(identity.path).suffix.casefold()
         if suffix == profile.preview_format.suffix.casefold():
+            if identity not in candidate_set:
+                continue
             observation = {"preview_identity": identity.path, "state": "not_checked"}
             read.previews.append(observation)
             preview_inputs.append((identity, observation))
@@ -344,27 +340,37 @@ async def list_declared_results(driver, request, batch, profile):
             original_observations[identity.path] = observation
 
     entries = {}
+    metadata_files = []
     for identity in listing.page.items:
         file_format = by_suffix.get(PurePosixPath(identity.path).suffix.casefold())
         if file_format is None:
             continue
-        if not read.available():
-            error = ErrorValue("adb_metadata_failed", "device_file_access", {"reason": "call_unavailable"})
-            page["entries"] = [entries[item.path] for item in listing.page.items if item.path in entries]
-            return read.reply(error, page)
-        metadata = await filesystem.metadata(identity, timeout_s=read.remaining(), stop=_NeverStop())
-        read.remember(metadata.outcome, "metadata")
-        entry = _entry(identity, metadata.value if metadata.error is None else None,
-            complete if metadata.error is None else False, file_format)
-        entries[identity.path] = entry
-        if metadata.error is not None:
-            page["entries"] = [entries[item.path] for item in listing.page.items if item.path in entries]
-            return read.reply(metadata.error, page)
+        entries[identity.path] = _entry(identity, None, False, file_format)
+        if identity in candidate_set:
+            metadata_files.append((identity, file_format))
         if file_format.format_id == profile.paired_original_format_id:
             originals.append(identity)
 
+    if metadata_files:
+        if not read.available():
+            error = ErrorValue("adb_metadata_failed", "device_file_access", {"reason": "call_unavailable"})
+            page["entries"] = list(entries.values())
+            return read.reply(error, page)
+        metadata = await filesystem.metadata_many(tuple(identity for identity, _ in metadata_files),
+            timeout_s=read.remaining(), stop=_NeverStop())
+        read.remember(metadata.outcome, "metadata")
+        for index, item in enumerate(metadata.items):
+            identity, file_format = metadata_files[index]
+            if item.identity != identity:
+                raise ValueError("结果元数据改变本次候选文件身份")
+            if item.error is None:
+                entries[identity.path] = _entry(identity, item.value, complete, file_format)
+        if metadata.error is not None:
+            page["entries"] = list(entries.values())
+            return read.reply(metadata.error, page)
+
     for preview, observation in preview_inputs:
-        paired = await read.scan_preview(filesystem, scope, preview, complete, observation, originals)
+        paired = await read.scan_preview(filesystem, preview, complete, observation, originals)
         for original in originals:
             if _stem(original.path) == _stem(preview.path):
                 original_observations[original.path].update(observation, original_identity=original.path)

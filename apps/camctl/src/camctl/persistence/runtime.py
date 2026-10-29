@@ -39,6 +39,7 @@ CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
 PHOTO_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V5)
 OUTPUT_SCOPE_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V6)
 DEFERRED_PHOTO_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V7)
+PREVIEW_SELECTION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V8)
 _ACTION_TYPES = enum_for("actions.type")
 
 _PRAGMA_LIMIT = 2_147_483_647
@@ -298,6 +299,17 @@ def require_output_scope_format(format_version: int | None) -> None:
         )
 
 
+def require_preview_selection_format(format_version: int | None) -> None:
+    """新预览选择须能分别保存可靠缺席与依据尚未确认。"""
+    if (isinstance(format_version, bool) or not isinstance(format_version, int)
+            or format_version not in SUPPORTED_FORMAT_VERSIONS
+            or format_version < PREVIEW_SELECTION_MINIMUM_FORMAT_VERSION):
+        raise DatabaseUnsupportedFormatError(
+            f"数据库整体格式 {format_version!r} 不支持预览未确认分类；"
+            "请先执行 init --upgrade-preview-selection"
+        )
+
+
 def _known_integer_check_values(sql: str | None, column: str) -> frozenset[int] | None:
     """读取指定已知列声明中的简单整数等值或 IN 检查，不解析通用 SQL。"""
     if not isinstance(sql, str):
@@ -417,6 +429,13 @@ def _verify_structure(connection: sqlite3.Connection, format_version: int) -> No
             raise DatabaseInvalidError(f"状态库缺少必要结构: {sorted(missing)}")
         _verify_format_constraints(connection, format_version)
         _verify_read_end_structure(connection)
+        if format_version >= PREVIEW_SELECTION_MINIMUM_FORMAT_VERSION:
+            from camctl.persistence.preview_selection_structure import verify_preview_selection_structure
+
+            try:
+                verify_preview_selection_structure(connection)
+            except (ValueError, sqlite3.Error) as error:
+                raise DatabaseInvalidError(f"预览选择格式结构无效: {error}") from error
         if format_version >= DEFERRED_PHOTO_MINIMUM_FORMAT_VERSION:
             from camctl.persistence.photo_source_structure import verify_photo_source_structure
 

@@ -67,7 +67,7 @@ CREATE TABLE database_metadata (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     application_id TEXT NOT NULL CHECK (application_id = 'camctl'),
     instance_id TEXT NOT NULL CHECK (length(instance_id) = 32 AND instance_id NOT GLOB '*[^0-9a-f]*'),
-    format_version INTEGER NOT NULL CHECK (format_version IN (1,2,3,4,5,6,7)),
+    format_version INTEGER NOT NULL CHECK (format_version IN (1,2,3,4,5,6,7,8)),
     staging_path TEXT NOT NULL CHECK (length(staging_path) > 1 AND substr(staging_path, 1, 1) = '/' AND instr(staging_path, char(0)) = 0),
     ready_path TEXT NOT NULL CHECK (length(ready_path) > 1 AND substr(ready_path, 1, 1) = '/' AND instr(ready_path, char(0)) = 0),
     processing_path TEXT NOT NULL CHECK (length(processing_path) > 1 AND substr(processing_path, 1, 1) = '/' AND instr(processing_path, char(0)) = 0),

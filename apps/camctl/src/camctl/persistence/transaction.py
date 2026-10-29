@@ -216,6 +216,8 @@ def _bind_event_reads(context, event, transaction, segment_guard_state,
     context = replace(context, read_end_reads=ReadEndReads(connection))
     from camctl.persistence.repositories.capture_facts import PhotoResultReads
     context = replace(context, photo_result_reads=PhotoResultReads(connection))
+    from camctl.persistence.repositories.preview_reads import PreviewReads
+    context = replace(context, preview_reads=PreviewReads(connection))
     from camctl.persistence.repositories.baseline_reads import bind_intent
     context = bind_intent(context, event, transaction, connection, operation_key)
     if baseline_read_group is not None:

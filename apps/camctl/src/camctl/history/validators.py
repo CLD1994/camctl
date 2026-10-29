@@ -72,6 +72,7 @@ class EventContext:
     baseline_read_reads: object | None = None
     preparation_reads: object | None = None
     photo_result_reads: object | None = None
+    preview_reads: object | None = None
     availability_reads: object | None = None
     availability_finish_reads: object | None = None
     retry_wait_reads: object | None = None

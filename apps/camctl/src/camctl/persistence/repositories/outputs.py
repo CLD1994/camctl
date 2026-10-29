@@ -686,6 +686,10 @@ class _FixSelectionCommand:
             mode, requested = read_selection_request(owner["execution_spec_json"], owner["input_fields_json"])
         except ValueError as error:
             raise ConsistencyError("已保存的取回选择定义或原请求无法解释") from error
+        if mode is SelectionMode.PREVIEW:
+            from .preview_reads import PreviewReads
+
+            PreviewReads(connection).require_writable()
         members = reads.catalog(source_action_id)
         entries = tuple(member.entry for member in members)
         facts = SelectionFacts(
@@ -694,6 +698,8 @@ class _FixSelectionCommand:
             entries,
             checked_output_sources=reads.checked_sources(entries, requested),
             source_failed=(source["status"] == int(_ACTION_STATUS.FAILED)),
+            unconfirmed_preview_ids=(_unconfirmed_preview_ids(reads, source, members)
+                                     if mode is SelectionMode.PREVIEW else frozenset()),
         )
         expected = select_outputs(
             SourceResolution(state=ResolutionState.FIXED, member_action_ids=(source_action_id,),
@@ -757,6 +763,8 @@ class _FixSelectionCommand:
             tuple(rows),
             command.occurred_at,
         )
+        from camctl.outputs.preview_facts import PREVIEW_VALIDATION_FIELD, PREVIEW_VALIDATION_VERSION
+        event = replace(event, evidence={PREVIEW_VALIDATION_FIELD: PREVIEW_VALIDATION_VERSION})
         return CommandPlan(
             events=(event,),
             owners=self._owners,
@@ -1376,6 +1384,7 @@ def load_selection_facts(
     *,
     requested_output_ids: tuple[int, ...] = (),
     previously_confirmed_ids: frozenset[int] = frozenset(),
+    preview_requested: bool = False,
 ) -> SelectionFacts:
     """读取一个来源动作的选择事实。
 
@@ -1393,7 +1402,9 @@ def load_selection_facts(
         source["status"] in _ACTION_TERMINAL
         and _processing_completed(connection, source_action_id)
     )
-    entries = tuple(member.entry for member in _catalog_members(connection, source_action_id))
+    reads = _CatalogReads(connection)
+    members = reads.catalog(source_action_id)
+    entries = tuple(member.entry for member in members)
     return SelectionFacts(
         source_action_id=source_action_id,
         source_completed=completed,
@@ -1401,7 +1412,34 @@ def load_selection_facts(
         checked_output_sources=_checked_output_sources(connection, entries, requested | previous),
         previously_confirmed_ids=previous,
         source_failed=(source["status"] == int(_ACTION_STATUS.FAILED)),
+        unconfirmed_preview_ids=(_unconfirmed_preview_ids(reads, source, members)
+                                 if preview_requested else frozenset()),
     )
+
+
+def _unconfirmed_preview_ids(reads, source, members):
+    """仅为尚无正式预览的设备原片解释同源结果证据。"""
+    if (source["execution_spec_json"] or {}).get("video_result_mode") is None:
+        return frozenset()
+    paired = {member.entry.original_output_id for member in members
+              if member.entry.kind is OutputKind.PREVIEW}
+    originals = {}
+    for member in members:
+        if (member.entry.kind is not OutputKind.ORIGINAL or member.entry.output_id in paired
+                or member.row["device_file_id"] is None):
+            continue
+        file = reads.required("device_files", member.row["device_file_id"])
+        originals[member.entry.output_id] = file["locator_json"]["path"]
+    if not originals:
+        return frozenset()
+    from .preview_reads import PreviewReads
+    if isinstance(reads, _CurrentCatalogReads):
+        reader = reads.context.preview_reads
+        if type(reader) is not PreviewReads:
+            raise ConsistencyError("预览选择缺少来源结果读取端口")
+    else:
+        reader = PreviewReads(reads.connection)
+    return reader.unconfirmed(source, originals)
 
 
 def _checked_output_sources(connection, entries, identities) -> dict[int, int | None]:
@@ -6617,7 +6655,7 @@ def _selection_initialization_guard(event, context) -> None:
         raise EventValidationError("取回初始化缺少可靠原申请")
 
 
-def _current_selection_snapshot(context, selection_id: int) -> tuple[int, SelectionSnapshot]:
+def _current_selection_snapshot(context, selection_id: int, *, preview_validation_version=0) -> tuple[int, SelectionSnapshot]:
     """只按完整当前事实解释首次选择，不采用事件结果或未来事务行。"""
     reads = _CurrentCatalogReads(context)
     selection = reads.required("obtain_source_selections", selection_id)
@@ -6656,12 +6694,15 @@ def _current_selection_snapshot(context, selection_id: int) -> tuple[int, Select
     if context.complete_rows("obtain_items", "selection_id", selection_id):
         raise EventValidationError("PENDING 选择已有条目，不能追加首次选择")
     mode, requested = read_selection_request(owner["execution_spec_json"], owner["input_fields_json"])
+    if preview_validation_version and mode is SelectionMode.PREVIEW:
+        context.preview_reads.require_writable()
     processing = context.complete_rows("recording_processing", "action_id", source_id)
     if len(processing) > 1:
         raise EventValidationError("来源动作不能存在多条处理记录")
     if not _processing_completed_facts(next(iter(processing.values()), None)):
         raise EventValidationError("来源适用产物处理未完成")
-    entries = tuple(member.entry for member in reads.catalog(source_id))
+    members = reads.catalog(source_id)
+    entries = tuple(member.entry for member in members)
     local_ids = {entry.output_id for entry in entries}
     checked = {}
     for identity in requested:
@@ -6684,6 +6725,9 @@ def _current_selection_snapshot(context, selection_id: int) -> tuple[int, Select
             entries,
             checked_output_sources=checked,
             source_failed=(source["status"] == int(_ACTION_STATUS.FAILED)),
+            unconfirmed_preview_ids=(_unconfirmed_preview_ids(reads, source, members)
+                                     if preview_validation_version and mode is SelectionMode.PREVIEW else frozenset()),
+            preview_validation_version=preview_validation_version,
         ), mode, requested,
         excluded_output_ids=read_excluded_output_ids(owner["input_fields_json"]))
     return source_id, expected
@@ -6714,7 +6758,12 @@ def _source_selection_guard(event, context) -> None:
     if selection.before.values.get("status") != int(_SELECTION_STATUS.PENDING):
         raise EventValidationError("只有 PENDING 选择能固定")
     try:
-        source_id, expected = _current_selection_snapshot(context, selection.row_id)
+        from camctl.outputs.preview_facts import read_preview_validation_version
+
+        source_id, expected = _current_selection_snapshot(
+            context, selection.row_id,
+            preview_validation_version=read_preview_validation_version(event.evidence),
+        )
     except (KeyError, TypeError, ValueError) as error:
         raise EventValidationError(f"首次选择的当前事实无法解释: {error}") from error
     items.sort(key=lambda row: row.row_id)

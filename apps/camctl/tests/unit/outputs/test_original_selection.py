@@ -34,6 +34,7 @@ def _isolated_sources():
         ("obtain_items", "output_cleanup_started"): 4,
         ("obtain_items", "source_file_unconfirmed"): 6,
         ("obtain_items", "preview_missing"): 8,
+        ("obtain_items", "preview_unconfirmed"): 9,
         ("obtain_source_selections", "source_action_failed"): 5,
         ("obtain_source_selections", "no_outputs"): 1,
         ("obtain_source_selections", "preview_missing"): 2,
@@ -87,6 +88,16 @@ REPAIRED = CatalogEntry(103, OutputKind.REPAIRED, 1, original_output_id=101, siz
 def test_default_without_repair_selects_original():
     result = sources.select_for_original(11, ORIGINAL, SelectionMode.DEFAULT, preview=PREVIEW)
     assert (result.output_id, result.basis, result.status, result.original_output_id) == (101, 1, ItemStatus.SELECTED, None)
+
+
+def test_unconfirmed_preview_has_distinct_failure_and_keeps_original_identity():
+    result = sources.select_for_original(11, ORIGINAL, SelectionMode.PREVIEW, preview_unconfirmed=True)
+
+    assert result.status == ItemStatus.FAILED and result.error_code == 9
+    assert result.output_id is None and result.original_output_id == 101
+    assert result.error_details == {"source_action_instance_id": "11", "original_output_id": "101"}
+    default = sources.select_for_original(11, ORIGINAL, SelectionMode.DEFAULT, preview_unconfirmed=True)
+    assert default.output_id == 101 and default.status == ItemStatus.SELECTED
 
 
 @pytest.mark.parametrize("availability,status,code", [

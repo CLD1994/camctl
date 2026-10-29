@@ -64,7 +64,7 @@ def test_init_cli_forwards_output_scope_option_and_keeps_stdout_empty(monkeypatc
     out, err = StringIO(), StringIO()
     assert cli._run_init(cli.parse_command(["init", "--upgrade-output-scope"]), out, err) == 0
     initialize.assert_called_once_with(config, state_db, upgrade_software_recovery=False,
-        upgrade_capture_preparation=False, upgrade_output_scope=True, upgrade_photo_source=False)
+        upgrade_capture_preparation=False, upgrade_output_scope=True, upgrade_photo_source=False, upgrade_preview_selection=False)
     assert out.getvalue() == "" and err.getvalue() == ""
 
 
@@ -113,4 +113,4 @@ def test_initial_publish_race_preserves_the_output_scope_upgrade_request(monkeyp
     result = initialization._create_new(state_db, roots, binding, upgrade_output_scope=True)
     assert result.outcome is initialization.InitOutcome.VERIFIED_EXISTING
     verify.assert_called_once_with(state_db, roots, binding, upgrade_software_recovery=False,
-        upgrade_capture_preparation=False, upgrade_output_scope=True, upgrade_photo_source=False)
+        upgrade_capture_preparation=False, upgrade_output_scope=True, upgrade_photo_source=False, upgrade_preview_selection=False)

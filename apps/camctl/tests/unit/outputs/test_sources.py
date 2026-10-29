@@ -332,7 +332,7 @@ def test_failed_source_with_formal_output_keeps_existing_selection(mode) -> None
         _facts((_entry(101, OutputKind.ORIGINAL),), source_failed=True),
         mode,
     )
-    assert selection.source_error_code == (None if mode is SelectionMode.DEFAULT else 2)
+    assert selection.source_error_code is None
     if mode is SelectionMode.DEFAULT:
         assert selection.selected_output_ids == (101,)
     else:
@@ -625,7 +625,10 @@ def test_preview_mode_selects_preview_or_not_larger_repaired() -> None:
     assert missing.output_id is None
 
 
-def test_preview_mode_without_any_preview_records_source_error() -> None:
+@pytest.mark.parametrize("version, source_error", [(0, 2), (1, None)])
+def test_preview_mode_records_each_original_and_preserves_saved_selection_version(version, source_error) -> None:
+    from dataclasses import replace
+
     entries = (_entry(631, OutputKind.ORIGINAL),)
     selection = select_outputs(
         SourceResolution(
@@ -633,10 +636,10 @@ def test_preview_mode_without_any_preview_records_source_error() -> None:
             member_action_ids=(11,),
             source_plan_id=1,
         ),
-        _facts(entries),
+        replace(_facts(entries), preview_validation_version=version),
         SelectionMode.PREVIEW,
     )
-    assert selection.source_error_code == 2  # preview_missing
+    assert selection.source_error_code == source_error
     (item,) = selection.items
     assert item.error_code == 8
 

@@ -2,6 +2,7 @@
 
 import asyncio
 from decimal import Decimal
+from pathlib import PurePosixPath
 from types import SimpleNamespace
 
 import pytest
@@ -59,6 +60,7 @@ class Filesystem:
         self.sizes = sizes or {}
         self.metadata_error = metadata_error
         self.directory_calls = []
+        self.family_calls = []
         self.metadata_calls = []
         self.metadata_batches = []
 
@@ -75,6 +77,12 @@ class Filesystem:
         output = b"\0".join((b"CAMCTL-DIRECTORY/1", *(path.encode() for path in selected), marker, b""))
         return DirectoryRead(_tool_result(output), None,
             Page(tuple(FileIdentity(BINDING, path) for path in selected), cursor))
+
+    async def read_family(self, identity, *, timeout_s, stop):
+        self.family_calls.append(identity)
+        target = PurePosixPath(identity.path)
+        return FileAccessRead(None, tuple(FileIdentity(identity.binding, path) for path in self.paths
+            if PurePosixPath(path).parent == target.parent and PurePosixPath(path).stem == target.stem), None)
 
     async def metadata(self, identity, *, timeout_s, stop):
         assert identity.binding == BINDING and timeout_s > 0

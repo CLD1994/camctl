@@ -128,6 +128,61 @@ class _MetadataTransport:
         return self.raw
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stdout", [b"", b"73", b"00\n", b"73\r\n", b"diagnostic\xff\n73\n"])
+async def test_single_metadata_failure_retains_exact_response_and_file(stdout):
+    path = "/DCIM/a 'quoted'\nclip.MP4"
+    raw = _metadata_raw(stdout, stderr=b"remote diagnostic\xff\n")
+    transport = _MetadataTransport(raw)
+    filesystem = AdbFilesystem(BINDING, "serial-1", transport, tools=ShellFileTools())
+
+    result = await filesystem.metadata(FileIdentity(BINDING, path), timeout_s=Decimal("3.125"), stop=object())
+
+    assert result.value is None and result.outcome is raw
+    assert result.error.code == "adb_metadata_failed"
+    details = result.error.details
+    assert details["identity"] == path
+    assert details["stdout_hex"] == stdout.hex()
+    assert details["stdout_text"] == stdout.decode("utf-8", "backslashreplace")
+    assert details["stderr_hex"] == raw.stderr.hex()
+    assert details["local_exit_code"] == 0
+    assert details["timeout_s"] == "3.125"
+    assert details["elapsed_ms"] >= 0
+
+
+@pytest.mark.asyncio
+async def test_family_read_returns_only_complete_exact_directory_and_stem():
+    paths = ("/DCIM/a 'quoted'\nclip.LRF", "/DCIM/a 'quoted'\nclip.OSV")
+    raw = _raw(b"CAMCTL-FAMILY/1\0" + b"".join(p.encode() + b"\0" for p in paths) + b"END\0")
+    transport = _MetadataTransport(raw)
+    filesystem = AdbFilesystem(BINDING, "serial-1", transport, tools=ShellFileTools())
+
+    result = await filesystem.read_family(FileIdentity(BINDING, paths[0]), timeout_s=Decimal("3"), stop=object())
+
+    assert result.error is None
+    assert tuple(item.path for item in result.value) == paths
+    assert len(transport.calls) == 1
+    script = shlex.split(transport.calls[0][0].argv[5])[2]
+    assert shlex.quote("/DCIM/a 'quoted'\nclip") in script
+    assert "-maxdepth 1" in script
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("data", [
+    b"", b"CAMCTL-FAMILY/1\0/OTHER/clip.OSV\0END\0",
+    b"CAMCTL-FAMILY/1\0/DCIM/other.OSV\0END\0",
+    b"CAMCTL-FAMILY/1\0/DCIM/clip.OSV\0/DCIM/clip.OSV\0END\0",
+    b"CAMCTL-FAMILY/1\0/DCIM/clip.OSV\0", b"CAMCTL-FAMILY/1\0END\0extra",
+])
+async def test_family_read_failure_cannot_prove_missing_pair(data):
+    filesystem = AdbFilesystem(BINDING, "serial-1", _MetadataTransport(_raw(data)), tools=ShellFileTools())
+
+    result = await filesystem.read_family(FileIdentity(BINDING, "/DCIM/clip.LRF"), timeout_s=Decimal("3"), stop=object())
+
+    assert result.value is None and result.error.code == "adb_directory_failed"
+    assert result.error.details["stdout_hex"] == data.hex()
+
+
 async def _metadata_many(filesystem, identities, *, timeout_s=Decimal("9"), stop=None):
     method = getattr(filesystem, "metadata_many", None)
     assert callable(method), "AdbFilesystem must expose metadata_many"
@@ -200,6 +255,12 @@ async def test_metadata_many_requires_exact_size_stdout_for_remote_success(stdou
     assert result.items[0].error.details["stdout_hex"] == stdout.hex()
     assert result.items[0].error.details["stderr_hex"] == b"raw diagnostic\xff".hex()
     assert result.error.details["item_errors"] == [dict(result.items[0].error.details)]
+    assert result.error.details["stdout_hex"] == transport.raw.output.hex()
+    assert result.error.details["stdout_text"] == transport.raw.output.decode("utf-8", "backslashreplace")
+    assert result.error.details["identities"] == [path]
+    assert result.error.details["command"] == list(transport.calls[0][0].argv)
+    assert result.error.details["timeout_s"] == "9"
+    assert result.error.details["elapsed_ms"] >= 0
 
 
 @pytest.mark.asyncio

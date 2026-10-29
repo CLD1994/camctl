@@ -1084,6 +1084,88 @@ describe("mergeReport", () => {
 });
 
 describe("原请求选择范围", () => {
+  function missingPreviews(code = "preview_missing"): StatusReport {
+    const r = report();
+    r.plans![0].actions![0].outputs!.push(output("3"));
+    const action = r.plans![0].actions![1];
+    action.status = "failed";
+    action.error = {
+      code: "obtain_items_failed",
+      stage: "execution",
+      details: {},
+    };
+    action.input_params = {
+      source: { action_instance_id: "1" },
+      filter: "preview",
+    };
+    delete action.deliveries;
+    action.result = {
+      failures: ["1", "3"].map((original) => ({
+        source_action_instance_id: "1",
+        error: {
+          code,
+          stage: "output_selection",
+          details: {
+            source_action_instance_id: "1",
+            original_output_id: original,
+          },
+        },
+      })),
+    };
+    return r;
+  }
+  it.each(["preview_missing", "preview_unconfirmed"])(
+    "区分多份原片的 %s 失败并保持历史身份",
+    (code) => {
+      const r = missingPreviews(code);
+      expect(parse(r)).toEqual(r);
+      const n = structuredClone(r);
+      n.report_id = "2";
+      n.from_wm = 20;
+      n.to_wm = 30;
+      expect(() => validateReportAgainstHistory(r, n)).not.toThrow();
+    },
+  );
+  it("接受包含来源汇总和逐原片预览缺失项的既有报告", () => {
+    const r = missingPreviews();
+    const result = r.plans![0].actions![1].result as {
+      failures: { source_action_instance_id: string; error: typeof error }[];
+    };
+    result.failures.unshift({
+      source_action_instance_id: "1",
+      error: {
+        code: "preview_missing",
+        stage: "output_selection",
+        details: { source_action_instance_id: "1" },
+      },
+    });
+    expect(parse(r)).toEqual(r);
+  });
+  it("同一原片的重复预览失败仍被拒绝", () => {
+    const r = missingPreviews("preview_unconfirmed");
+    const result = r.plans![0].actions![1].result as { failures: unknown[] };
+    result.failures.push(structuredClone(result.failures[0]));
+    expect(() => parse(r)).toThrow();
+  });
+  it.each(["source", "kind", "id"])(
+    "拒绝预览失败项中错误的原片 %s",
+    (change) => {
+      const r = missingPreviews("preview_unconfirmed");
+      const original = r.plans![0].actions![0].outputs![1];
+      if (change === "source") original.source_action_instance_id = "other";
+      if (change === "kind") {
+        original.kind = "preview";
+        original.preview_of_output_id = "1";
+      }
+      if (change === "id") {
+        const result = r.plans![0].actions![1].result as {
+          failures: { error: { details: { original_output_id: string } } }[];
+        };
+        result.failures[1].error.details.original_output_id = "03";
+      }
+      expect(() => parse(r)).toThrow();
+    },
+  );
   it.each([
     { action_instance_id: "other" },
     { action_name: "另一录像" },

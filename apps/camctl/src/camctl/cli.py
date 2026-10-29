@@ -61,6 +61,7 @@ class Command:
     upgrade_capture_preparation: bool = False
     upgrade_output_scope: bool = False
     upgrade_photo_source: bool = False
+    upgrade_preview_selection: bool = False
 
 
 class _Parser(argparse.ArgumentParser):
@@ -96,6 +97,7 @@ def _build_parser(stdout: TextIO | None = None) -> argparse.ArgumentParser:
     upgrade.add_argument("--upgrade-capture-preparation", action="store_true", help="备份并显式升级拍摄准备格式")
     upgrade.add_argument("--upgrade-output-scope", action="store_true", help="备份并显式升级输出范围格式")
     upgrade.add_argument("--upgrade-photo-source", action="store_true", help="备份并显式升级照片来源格式")
+    upgrade.add_argument("--upgrade-preview-selection", action="store_true", help="备份并显式升级预览选择格式")
 
     run_parser = subparsers.add_parser("run")
     run_parser.add_argument("plan_path", nargs="?")
@@ -143,7 +145,8 @@ def parse_command(argv: Sequence[str], *, stdout: TextIO | None = None) -> Comma
                    upgrade_software_recovery=getattr(parsed, "upgrade_software_recovery", False),
                    upgrade_capture_preparation=getattr(parsed, "upgrade_capture_preparation", False),
                    upgrade_output_scope=getattr(parsed, "upgrade_output_scope", False),
-                   upgrade_photo_source=getattr(parsed, "upgrade_photo_source", False))
+                   upgrade_photo_source=getattr(parsed, "upgrade_photo_source", False),
+                   upgrade_preview_selection=getattr(parsed, "upgrade_preview_selection", False))
 
 
 def encode_session_result(
@@ -442,7 +445,8 @@ def _run_init(command: Command, out: TextIO, err: TextIO) -> int:
                     upgrade_software_recovery=command.upgrade_software_recovery,
                     upgrade_capture_preparation=command.upgrade_capture_preparation,
                     upgrade_output_scope=command.upgrade_output_scope,
-                    upgrade_photo_source=command.upgrade_photo_source)
+                    upgrade_photo_source=command.upgrade_photo_source,
+                    upgrade_preview_selection=command.upgrade_preview_selection)
             record_event("initialization", event="result", outcome=result.outcome.value)
     except (ConfigError, OSError) as error:
         _diagnose_error(err, "camctl init: 初始化失败", error)

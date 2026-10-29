@@ -162,6 +162,7 @@
 | 5 | `V5` |
 | 6 | `V6` |
 | 7 | `V7` |
+| 8 | `V8` |
 
 ### `deliveries.status`
 
@@ -1032,6 +1033,7 @@
 | 6 | `source_file_unconfirmed` | `source_read` |
 | 7 | `source_device_unavailable` | `source_read` |
 | 8 | `preview_missing` | `output_selection` |
+| 9 | `preview_unconfirmed` | `output_selection` |
 
 ### `obtain_source_selections.error_code`
 

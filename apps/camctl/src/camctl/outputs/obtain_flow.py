@@ -374,7 +374,7 @@ async def _fix_pending_selections(
                 parse_exact_json(action["execution_spec_json"]),
                 parse_exact_json(action["input_fields_json"]))
             facts = load_selection_facts(connection, int(member_id),
-                requested_output_ids=requested)
+                requested_output_ids=requested, preview_requested=mode is SelectionMode.PREVIEW)
             return action, mode, requested, facts
         inputs_value = await runtime.database.read(inputs)
         action, mode, requested, facts = inputs_value

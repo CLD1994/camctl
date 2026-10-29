@@ -78,6 +78,20 @@
         "obtain_items": 8
       }
     },
+    "preview_unconfirmed": {
+      "stage": "output_selection",
+      "description": "来源原片已确认，但尚未取得完整、唯一配对且可用的预览依据。",
+      "details_schema": {
+        "type": "object",
+        "properties": {
+          "source_action_instance_id": { "$ref": "status-report.schema.json#/$defs/entity_id" },
+          "original_output_id": { "$ref": "status-report.schema.json#/$defs/entity_id" }
+        },
+        "required": ["source_action_instance_id", "original_output_id"],
+        "additionalProperties": false
+      },
+      "item_error_ids": { "obtain_items": 9 }
+    },
     "output_not_found": {
       "stage": "output_selection",
       "description": "显式取回所请求产物 ID 可靠确认不存在。",

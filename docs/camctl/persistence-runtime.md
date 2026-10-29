@@ -47,9 +47,11 @@
 
 拍摄准备和输出范围升级共用完整副本发布路径。升级先通过 SQLite backup 保存带唯一标识的一致备份并同步文件和父目录，再在状态库同目录的独立准备文件中执行全部权威 SQL。原表的可写列按 128 行分批复制，只有 `database_metadata.format_version` 改为当前格式；生成列由目标结构计算。逐表数量和全部列内容、实例身份、原目录绑定、外键和 SQLite 完整性全部核对后，准备文件完成落盘，原连接完成 WAL 检查点并实际关闭，辅助文件结束后才原子替换正式库并同步父目录。提交或替换返回未知时只重新打开核实实际结果，不重发复制或替换。实例、历史、投影、水位和产物保持原值，已有备份保留；失败后再次执行仍按实际库的格式判定。
 
-`camctl init --upgrade-output-scope --config <config.toml>` 将有效 V5 库升级到当前格式，保留全部原表、历史、实例和目录绑定。备份名称包含 `before-output-scope-v7` 与唯一标识。V3/V4 先使用拍摄准备升级入口；已经为当前格式时只核验，目标不存在时按当前格式创建新库。独立范围责任的写入入口先核对格式资格；旧格式不通过普通 `init`、`run` 或 `submit` 自动启用。
+`camctl init --upgrade-output-scope --config <config.toml>` 将有效 V5 库升级到当前格式，保留全部原表、历史、实例和目录绑定。备份名称包含 `before-output-scope`、目标格式与唯一标识。V3/V4 先使用拍摄准备升级入口；已经为当前格式时只核验，目标不存在时按当前格式创建新库。独立范围责任的写入入口先核对格式资格；旧格式不通过普通 `init`、`run` 或 `submit` 自动启用。
 
-`camctl init --upgrade-photo-source --config <config.toml>` 将有效 V6 库升级到当前格式 V7，使用同一完整副本发布与校验过程，备份名称包含 `before-photo-source-v7` 与唯一标识。V5 及以下先走各自已有升级入口；已有当前格式只核验。新 Hasselblad DEVICE 动作的受理要求 V7，旧动作继续使用首次保存的执行定义。
+`camctl init --upgrade-photo-source --config <config.toml>` 将有效 V6 库升级到当前格式，使用同一完整副本发布与校验过程，备份名称包含 `before-photo-source`、目标格式与唯一标识。V5 及以下先走各自已有升级入口；已有当前格式只核验。新 Hasselblad DEVICE 动作的受理要求 V7，旧动作继续使用首次保存的执行定义。
+
+`camctl init --upgrade-preview-selection --config <config.toml>` 将有效 V7 库升级到当前 V8，使用同一完整副本发布与核验过程。备份名称包含 `before-preview-selection-v8` 与唯一标识，历史、实例身份、目录绑定和全部原始行保持；只有整体格式更新。V8 打开时对照权威 SQL 核对 `obtain_items` 全部建表约束，拒绝仍只允许旧预览错误的表。新预览选择的申请与守卫都先核对 V8 资格；旧选择、旧报告和旧快照继续沿其原事实消费。普通 `init` 不升级，日常入口遇到不支持的格式时给出此显式升级指引。
 
 `camctl init --upgrade-software-recovery --config <config.toml>` 是格式 2 到 3 的显式升级入口。目标不存在时按当前格式创建新库。已有库须使用原目录绑定；升级不能与目录切换合并。入口持有目标库会话锁，先以 SQLite backup 保存一致副本 `<state-db>.before-software-recovery-v3.sqlite`，同步备份文件及父目录，再在单一事务内创建新责任表及更新元信息版本约束。原实例身份、历史编号、全部业务历史与投影保持；旧备份不被覆盖。已有备份只有在完整性、外键、实例元信息和完整历史边界与原 V2 库一致时才可复用，否则停止并保留诊断。
 

@@ -19,6 +19,11 @@ from camctl.history.events import business_columns, load_event_registry
 from camctl.history.reads import PlanReadScope, ReadCoverage
 from camctl.history.validators import EventContext
 from camctl.outputs.catalog import OutputKind
+from camctl.outputs.preview_facts import (
+    PREVIEW_VALIDATION_FIELD,
+    PREVIEW_VALIDATION_VERSION,
+    read_preview_validation_version,
+)
 from camctl.outputs.definitions import SelectionMode, read_excluded_output_ids, read_selection_request
 from camctl.outputs.sources import (
     SourceResolution,
@@ -180,7 +185,8 @@ def _has_formal_output_at(db, source_action_id, saved):
         return cursor.fetchone() is not None
 
 
-def qualify(db, request, *, saved=None, batch=128):
+def qualify(db, request, *, saved=None, batch=128,
+            preview_validation_version=PREVIEW_VALIDATION_VERSION):
     from .outputs import _processing_completed
 
     selection = row_facts(db, "obtain_source_selections", request.selection_id)
@@ -234,6 +240,10 @@ def qualify(db, request, *, saved=None, batch=128):
     mode, requested = read_selection_request(
         owner["execution_spec_json"], owner["input_fields_json"]
     )
+    if preview_validation_version and mode is SelectionMode.PREVIEW:
+        from .preview_reads import PreviewReads
+
+        PreviewReads(db).require_writable()
     scope = DefaultScopeState.UNKNOWN
     if setrow is not None and setrow["assessment_json"] is not None:
         scope = assessment_from_document(setrow["assessment_json"]).default_scope.state
@@ -312,6 +322,7 @@ def qualify(db, request, *, saved=None, batch=128):
         details=details,
         batch=batch,
         saved=saved,
+        preview_validation_version=preview_validation_version,
     )
     q["count"] = sum(1 for _ in items(db, q))
     if saved is None:
@@ -417,12 +428,13 @@ def _selected_items(db, q):
             page = cursor.fetchmany(q["batch"])
         if not page:
             return
+        families = []
+        unconfirmed_candidates = {}
         for ordinal, output_id in page:
             if output_id is None:
                 raise ConsistencyError("已发布默认范围缺少正式原片身份")
-            family = tuple(
-                member.entry for member in _family(db, output_id, q["saved"])
-            )
+            members = _family(db, output_id, q["saved"])
+            family = tuple(member.entry for member in members)
             original = next(
                 entry for entry in family if entry.kind is OutputKind.ORIGINAL
             )
@@ -434,14 +446,27 @@ def _selected_items(db, q):
             repaired = next(
                 (entry for entry in family if entry.kind is OutputKind.REPAIRED), None
             )
+            families.append((original, preview, repaired))
+            if q["preview_validation_version"] and mode is SelectionMode.PREVIEW and preview is None:
+                original_row = next(member.row for member in members if member.entry.output_id == output_id)
+                if original_row["device_file_id"] is not None:
+                    file = row_facts(db, "device_files", original_row["device_file_id"])
+                    unconfirmed_candidates[output_id] = file["locator_json"]["path"]
+        from .preview_reads import PreviewReads
+        unconfirmed = PreviewReads(db).unconfirmed(q["source"], unconfirmed_candidates,
+            before_event_id=None if q["saved"] is None else q["saved"].first_event_id)
+        for original, preview, repaired in families:
             yield select_for_original(
-                source_id, original, mode, preview=preview, repaired=repaired
+                source_id, original, mode, preview=preview, repaired=repaired,
+                preview_unconfirmed=original.output_id in unconfirmed,
             )
         after = page[-1][0]
 
 
 def header(q):
     return {
+        **({PREVIEW_VALIDATION_FIELD: q["preview_validation_version"]}
+           if q["preview_validation_version"] else {}),
         "selection_id": q["request"].selection_id,
         "occurred_at": q["request"].occurred_at,
         "set_id": None if q["setrow"] is None else q["setrow"]["id"],
@@ -568,7 +593,8 @@ class _Command:
                 or raw.get("occurred_at") != self.request.occurred_at
             ):
                 raise ConsistencyError("原选择键与完整有限申请不同")
-            q = qualify(db, self.request, saved=transaction, batch=raw["batch_size"])
+            q = qualify(db, self.request, saved=transaction, batch=raw["batch_size"],
+                        preview_validation_version=read_preview_validation_version(raw))
             actual = iter(_saved_events(db, self.key, transaction))
             for expected, saved in zip_longest(canonical(db, q, transaction), actual):
                 if (
@@ -635,7 +661,8 @@ def bind(db, event, transaction, reads, state):
         ):
             raise ConsistencyError("分段选择缺少原首事件及可靠读取范围")
         request = FixSegmentSelection(raw["selection_id"], raw["occurred_at"])
-        q = qualify(db, request, batch=reads.scope.batch_size)
+        q = qualify(db, request, batch=reads.scope.batch_size,
+                    preview_validation_version=read_preview_validation_version(raw))
         if (
             not json_equal(raw, header(q))
             or q["event_count"]
