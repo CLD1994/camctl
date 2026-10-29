@@ -58,6 +58,8 @@ python3 install-host.py \
 
 安装器把 `paths` 设置到新实例，并用生成的同一份 TOML 执行 `describe`、`init` 和生成启动入口。检测继承当前 `ADB_SERVER_SOCKET`；已设置时将其保存到检测报告并写入启动脚本，使后续调用使用相同 ADB 服务。
 
+生成的 TOML 每台设备使用一个 `[devices.<id>]` 节，设备内部采用 `adb.serial`、`hasselblad.executable`、`recording.start_timeout_s` 等点分键。其他顶层配置各用一个节；字面含点或空格的名称保留引号，空表及精确数值保留原语义。
+
 终端须汇报工具路径、每台相机的驱动、设备 ID、serial、适用设备的正式源选择与所有显式策略，以及未配置设备的原因。未显式写入的策略采用 camctl 内置默认值，身份检测不推断设备的拍摄设置或固件结果模式。`camera-discovery.json` 保留查询参数、stdout/stderr 文本及可还原原字节的 Base64、退出码或超时事实和生成的设备配置；`install-receipt.json` 包含同一份检测结果。安装后将新导出的 `device-capabilities.json` 交给客户端。安装不启动主程序；失败时保留安装日志及收据，使用新的目标目录重试。
 
 `placeholder_devices` 在检测报告及安装收据中列出占位设备和待修改字段，终端同时展示。包含占位项时可以完成软件安装，能力说明中的这些条目只提供对应驱动的配置结构，不代表现场设备已绑定；使用前须填写真实值并重新执行 `describe --config <target>/config.toml` 导出能力说明，再交给客户端。

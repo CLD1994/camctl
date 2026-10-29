@@ -80,15 +80,22 @@ class DeploymentFiles(unittest.TestCase):
             self.assertEqual(actual["devices"], original["devices"])
             self.assertEqual(actual["paths"]["ready"], str(target / "ready"))
             self.assertEqual(len(actual["paths"]), 5)
-            self.assertIn('[devices."带点.空格 id".adb]', text)
-            self.assertIn('[devices.hasselblad.hasselblad]', text)
+            self.assertIn('[devices."带点.空格 id"]', text)
+            self.assertIn('[devices.hasselblad]', text)
+            self.assertIn('adb.serial = "A"', text)
+            self.assertIn('hasselblad.executable = "/opt/hb_cli"', text)
+            self.assertIn('connection.prepare_lead_s = 0.1234567890123456789', text)
+            self.assertNotIn('[devices."带点.空格 id".adb]', text)
+            self.assertNotIn('[devices.hasselblad.hasselblad]', text)
+            self.assertNotIn('[devices]', text)
             self.assertNotIn("{", text)
 
     def test_toml_types_and_empty_tables_round_trip(self):
         config = {"devices": {}, "空.表": {}, "metadata": {
             "date": datetime.date(2026, 10, 29), "time": datetime.time(12, 30, 0),
             "stamp": datetime.datetime(2026, 10, 29, tzinfo=datetime.timezone.utc),
-            "array": ["引号\"和换行\n", {"a.b": True}], "boolean": False}}
+            "array": ["引号\"和换行\n", {"a.b": True}], "boolean": False,
+            "a.b": {"space key": {"empty": {}}}}}
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "config.toml"
             support.write_config(path, config)

@@ -29,22 +29,32 @@ def toml_value(value):
 
 
 def write_config(path, config):
-    # 沿用已有的精确值编码，只把嵌套配置展开为便于人工编辑的 TOML 节。
+    # 每台设备一个节，嵌套字段用点分键；其余顶层表各自一个节。
     lines = []
 
-    def table(values, parents=()):
-        if parents:
-            if lines:
-                lines.append("")
-            lines.append("[" + ".".join(map(toml_key, parents)) + "]")
+    def fields(values, parents=()):
         for key, value in values.items():
-            if not isinstance(value, dict):
-                lines.append(f"{toml_key(key)} = {toml_value(value)}")
-        for key, value in values.items():
-            if isinstance(value, dict):
-                table(value, (*parents, key))
+            keys = (*parents, key)
+            if isinstance(value, dict) and value:
+                fields(value, keys)
+            else:
+                lines.append(f"{'.'.join(map(toml_key, keys))} = {toml_value(value)}")
 
-    table(config)
+    def table(values, parents):
+        if lines:
+            lines.append("")
+        lines.append("[" + ".".join(map(toml_key, parents)) + "]")
+        fields(values)
+
+    fields({key: value for key, value in config.items() if not isinstance(value, dict)})
+    for key, value in config.items():
+        if not isinstance(value, dict):
+            continue
+        if key == "devices" and value and all(isinstance(device, dict) for device in value.values()):
+            for device_id, device in value.items():
+                table(device, (key, device_id))
+        else:
+            table(value, (key,))
     contents = "\n".join(lines) + "\n"
     if tomllib.loads(contents, parse_float=Decimal) != config:
         raise ValueError("生成的配置与输入配置不一致")
