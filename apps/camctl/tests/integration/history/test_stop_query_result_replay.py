@@ -19,7 +19,6 @@ import pytest
 from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.flows import cancel_flow, capture_flow
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
-from camctl.capture.handlers import CaptureRuntime, SessionRecordingState
 from camctl.capture.result_inputs import RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT
 from camctl.capture.results import FileKind as ResultFileKind
 from camctl.capture.timelapse import CaptureWaitConfig
@@ -153,35 +152,15 @@ class PreflightThenBlockingIdleQuery:
 
 
 def _replay_factory(driver, stopper, results, clock, *, state_query=None):
-    """会话共享锚点表与重试等待门槛：推进循环每轮重建运行时。"""
-    anchors: dict[int, tuple[int, int]] = {}
-    retry_gate = RetryWaitGate()
+    """正式会话工厂拥有同会话锚点和原重试等待。"""
+    from ..support.capture import capture_assembly
 
-    def build(owned, device_id: str) -> CaptureRuntime:
-        runtime = CaptureRuntime(
-            owned=owned,
-            scheduling=SchedulingRepository(),
-            operations=OperationRepository(),
-            capture=CaptureRepository(),
-            timelapse=TimelapseRepository(),
-            driver=driver,
-            results=results,
-            evidence=_REPLAY_EVIDENCE,
-            wall_us=lambda: int(time.time() * 1_000_000),
-            monotonic_ns=lambda: clock["ns"],
-            window_of=lambda action: LaunchWindow(
-                scheduled_at=action["scheduled_at"],
-                window_end=action["scheduled_at"] + action["max_delay_ms"] * 1000),
-            wait_config=lambda params: CaptureWaitConfig(
-                target_duration_ms=600_000, driver_margin_ms=0),
-            stopper=stopper,
-            retry_gate=retry_gate,
-            state_query=state_query,
-        )
-        runtime.recording_state = SessionRecordingState(runtime, anchors)
-        return runtime
-
-    return build
+    return capture_assembly(
+        driver=driver, stopper=stopper, query=state_query, results=results,
+        evidence=_REPLAY_EVIDENCE, staging=Path("/srv/camctl/staging"),
+        wall_us=lambda: int(time.time() * 1_000_000),
+        monotonic_ns=lambda: clock["ns"], recording_anchors={}, retry_wait_gate=RetryWaitGate(),
+        wait_config=lambda params: CaptureWaitConfig(target_duration_ms=600_000, driver_margin_ms=0))
 
 
 async def _replay_session(tmp_path, name, *, stopper, state_query=None):

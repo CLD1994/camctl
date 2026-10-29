@@ -24,7 +24,6 @@ from .test_selection_event_sequence import _Sequence
 def test_foreign_file_cannot_be_registered_as_derivative(
     selection_database, monkeypatch, case, table, column, file_id,
 ):
-    monkeypatch.setattr(validators, "NAMED_GUARDS", dict(validators.NAMED_GUARDS))
     register_capture_guards()
     _, _, registrations, context = _scenario(selection_database, SelectionMode.DEFAULT, case)
     connection = selection_database.connection
@@ -43,7 +42,6 @@ def test_foreign_file_cannot_be_registered_as_derivative(
 @pytest.mark.parametrize("kind,case", [(2, "repair_only"), (3, "preview_only")])
 @pytest.mark.parametrize("cleaned", [False, True])
 def test_existing_derivative_keeps_its_role_after_cleanup(selection_database, monkeypatch, kind, case, cleaned):
-    monkeypatch.setattr(validators, "NAMED_GUARDS", dict(validators.NAMED_GUARDS))
     register_capture_guards()
     _, _, registrations, context = _scenario(selection_database, SelectionMode.DEFAULT, case)
     connection = selection_database.connection
@@ -55,11 +53,11 @@ def test_existing_derivative_keeps_its_role_after_cleanup(selection_database, mo
             connection.execute("UPDATE device_files SET presence_state=3 WHERE id=?", (file_id,))
     connection.commit()
     # 重新读取同一原片的完整集合；新事件的关联使用独立身份。
-    reads = outputs._CatalogReads(connection)
-    reads.required("outputs", 998)
-    assert reads.related(705) == (998,)
-    for table, rows in reads.state_rows.items():
+    from ..support.output_planning import read_state, complete_reads
+    current = read_state(connection)
+    for table, rows in current.items():
         context.state_rows.setdefault(table, {}).update(rows)
+    context = replace(context, read_coverage=complete_reads(connection, context.state_rows))
     registration = registrations[0]
     origin = registration.rows[1]
     context.owners.pop(("output_origins", origin.row_id))

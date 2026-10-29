@@ -1,0 +1,21 @@
+[
+  {
+    "nodeid": "tests/integration/reporting/test_result_error_state.py::test_uninterpretable_frozen_error_stops_worker_without_publish",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.004561876994557679
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 4.495868492987938
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0042784999968716875
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 4.504708869979368
+  }
+]

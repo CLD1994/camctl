@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "session_id": "dc88f680-3d10-4826-8a13-dfca36d89403",
+  "node_pid": 1542398,
+  "counts": {
+    "node_process_starts": 1,
+    "application_starts": 0,
+    "files_starts": 0,
+    "http_server_starts": 0,
+    "browser_starts": 0
+  },
+  "browser_processes": [],
+  "commands": [
+    {
+      "id": 1,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/wrong-store",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/body.json",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/invalid-plan.json",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/failed-export.json"
+      ],
+      "started_monotonic_ns": "100682929800795",
+      "outcome": "failed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 0,
+        "files_starts": 0,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "error": {
+        "message": "客户端命令store与会话store不一致",
+        "stack": "Error: 客户端命令store与会话store不一致\n    at dispatchClientCommand (/tmp/camctl-quality-client-session-20261026/tests/integration/client_driver.ts:1351:11)\n    at worldClientSession (/tmp/camctl-quality-client-session-20261026/tests/integration/client_driver.ts:1254:35)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async main (/tmp/camctl-quality-client-session-20261026/tests/integration/client_driver.ts:1360:5)"
+      },
+      "finished_monotonic_ns": "100682938206867",
+      "elapsed_seconds": 0.008406072,
+      "node_cpu_microseconds": {
+        "user": 28561,
+        "system": 9845
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 0,
+        "files_starts": 0,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    }
+  ],
+  "node_cpu_scope": "process.cpuUsage只包含当前Node进程，不含Chromium或其他子进程。",
+  "status": "failed",
+  "node_cpu_at_ready_microseconds": {
+    "user": 1288353,
+    "system": 99958
+  },
+  "node_cpu_total_microseconds": {
+    "user": 1328016,
+    "system": 110668
+  }
+}

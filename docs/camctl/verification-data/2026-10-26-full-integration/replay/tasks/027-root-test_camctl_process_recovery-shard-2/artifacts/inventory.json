@@ -1,0 +1,5 @@
+[
+  "tests/integration/test_camctl_process_recovery.py::test_abnormal_restart_keeps_shared_budget",
+  "tests/integration/test_camctl_process_recovery.py::test_unknown_scan_keeps_call_and_pending_request",
+  "tests/integration/test_camctl_process_recovery.py::test_original_group_does_not_kill_parallel_submit_or_other_groups[racing]"
+]

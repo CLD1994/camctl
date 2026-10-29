@@ -15,16 +15,14 @@ from ..cancellation.test_report_sync_lifecycle import _fault_owned
 from .test_output_binding_changes import _CONTENT, _NOW, environment
 from .test_output_binding_transactions import pending_read
 from .test_read_execution_runtime import (
-    ReadRequests, _MEDIA_CONTENT, _apply_read_business_cancel, _configured_factory, _real_recording_media_flow,
+    ReadRequests, _MEDIA_CONTENT, _apply_read_business_cancel, _real_recording_media_flow,
 )
 
 pytestmark = pytest.mark.asyncio
 
 
-async def _assert_complete_finish_time(owned, runtime, reader, target, advance, monkeypatch):
+async def _assert_complete_finish_time(owned, runtime, reader, target, advance, monkeypatch, clock):
     raw_time, cancel_time, finish_time, retry_time = (_NOW + value for value in (10, 20, 30, 40))
-    clock = [raw_time]
-    runtime.occurred_at = lambda: clock[0]
     completion_entered, allowed = asyncio.Event(), asyncio.Event()
     complete = RecordingInputCopies.complete
 
@@ -51,15 +49,15 @@ async def _assert_complete_finish_time(owned, runtime, reader, target, advance, 
     try:
         await asyncio.wait_for(completion_entered.wait(), timeout=5)
         ticket = reader.requests[0][0]
-        held = runtime.pending_read_ends[int(ticket.target_id)]
-        assert held.occurred_at == raw_time and held.end.stopped and held.end.error is None
+        end, ended_at = reader.ends[0]
+        assert ended_at == raw_time and end.stopped and end.error is None
         assert owned.connection.execute(
             "SELECT status,result_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
             (ticket.run_id, ticket.attempt_id)).fetchone() == (1, None)
         assert owned.connection.execute(
             "SELECT status FROM operation_runs WHERE id=?", (ticket.run_id,)).fetchone() == (2,)
         clock[0] = cancel_time
-        _apply_read_business_cancel(owned, target, occurred_at=cancel_time)
+        await _apply_read_business_cancel(owned, target, occurred_at=cancel_time, database=runtime.database)
         assert owned.connection.execute(
             "SELECT occurred_at FROM history_events WHERE event_type=25 AND json_extract(body_json,'$.evidence.cancel_request.mode')='with_stop' ORDER BY id DESC LIMIT 1"
         ).fetchone() == (cancel_time,)
@@ -90,20 +88,66 @@ async def _assert_complete_finish_time(owned, runtime, reader, target, advance, 
             await task
 
 
-async def test_obtain_complete_read_finish_uses_first_complete_input_time_and_retains_it(pending_read, monkeypatch):
+class TimedReadRequests(ReadRequests):
+    """记录真实 ReadSession 交付 End 时使用的受控时钟。"""
+
+    def __init__(self, owned, content, clock):
+        super().__init__(owned, content)
+        self.clock, self.ends = clock, []
+
+    async def open_read(self, source, offset, ticket, *, idle_timeout_s):
+        session = await super().open_read(source, offset, ticket, idle_timeout_s=idle_timeout_s)
+        owner = self
+
+        class ObservedEnd:
+            def position(self):
+                return session.position()
+
+            def read_chunk(self, limit):
+                return session.read_chunk(limit)
+
+            def request_stop(self):
+                session.request_stop()
+
+            def poll_stopped(self):
+                return session.poll_stopped()
+
+            async def wait_stopped(self):
+                end = await session.wait_stopped()
+                owner.ends.append((end, owner.clock[0]))
+                return end
+
+        return ObservedEnd()
+
+
+async def test_obtain_complete_read_finish_uses_first_complete_input_time_and_retains_it(pending_read, environment, monkeypatch):
+    from pathlib import Path
+    from camctl.bootstrap.obtain_assembly import session_obtain_assembly
+    from .test_output_binding_changes import _read_registry
+    from .test_read_execution_runtime import _SETTINGS
+
     cfg, owned, command = pending_read
-    reader = ReadRequests(owned, _CONTENT)
-    runtime = _configured_factory(cfg, reader, maximum=7)(owned)
+    clock = [_NOW + 10]
+    reader = TimedReadRequests(owned, _CONTENT, clock)
+    factory = session_obtain_assembly(
+        devices={key: {**value, "copy": _SETTINGS} for key, value in cfg.devices.items()},
+        drivers=_read_registry(reader), staging=Path(cfg.paths.staging),
+        ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing), segment_size=4,
+        occurred_at=lambda: clock[0], monotonic_ns=lambda: 0)
+    runtime = factory(environment[2].database)
     target = owned.connection.execute("SELECT action_id FROM operation_runs WHERE copy_id=?", (command.copy_id,)).fetchone()[0]
-    await _assert_complete_finish_time(owned, runtime, reader, target, lambda: advance_obtain(runtime), monkeypatch)
+    await _assert_complete_finish_time(owned, runtime, reader, target,
+        lambda: advance_obtain(runtime), monkeypatch, clock)
 
 
 async def test_internal_complete_read_finish_uses_first_complete_input_time_and_retains_it(tmp_path, monkeypatch):
-    flow, source_id = await _real_recording_media_flow(tmp_path)
-    reader = ReadRequests(flow.owned, _MEDIA_CONTENT)
-    flow.sessions = flow.sessions.__class__(flow.owned, reader, None)
+    clock = [_NOW + 10]
+    flow, source_id = await _real_recording_media_flow(tmp_path,
+        reader_factory=lambda owned: TimedReadRequests(owned, _MEDIA_CONTENT, clock),
+        wall_us=lambda: clock[0])
+    reader = flow.reader
     try:
-        await _assert_complete_finish_time(flow.owned, flow, reader, 1,
-            lambda: run_recording_media(flow, 1, 1, source_id), monkeypatch)
+        await _assert_complete_finish_time(flow.owned, flow.media, reader, 1,
+            lambda: run_recording_media(flow.media, 1, 1, source_id), monkeypatch, clock)
     finally:
         flow.owned.connection.close()

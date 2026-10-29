@@ -10,7 +10,8 @@ import pytest
 from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.history.decoding import decode_event_row
-from camctl.history.validators import EventContext, EventValidationError, validate_event
+from camctl.history.validators import EventValidationError
+from ..support.output_planning import capture_operation, proposal_state, validate_static_event as validate_event
 from camctl.outputs.qualification import QualificationOutcome
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories import outputs
@@ -20,7 +21,7 @@ from camctl.persistence.transaction import TransactionScope
 from .test_grant_reuse import read_request, _save_grant
 from .test_local_read import local_read
 from .test_read_associations import read_targets, _command
-from .test_product_competition import _static_product_facts
+from ..support.output_planning import event_case
 from .test_read_rejections import _availability
 
 
@@ -105,34 +106,10 @@ def _scheduled_event(request, kind, event_type):
     else:
         owned.connection.execute("UPDATE actions SET status=3 WHERE id=11")
     owned.connection.commit()
-    owned.connection.execute("BEGIN")
-    try:
-        plan = outputs._GrantFileCommand(command, new_operation_key()).plan(
-            TransactionScope(owned.connection, 1, 1))
-        if kind != "internal":
-            plan = _static_product_facts(plan, owned.connection, command.action_id, command.output_id, command.occurred_at)
-    finally:
-        owned.connection.rollback()
-    _save_grant(owned, command)
-    with closing(owned.connection.execute(
-        "SELECT id, transaction_id, event_type, event_version, occurred_at, clock_status, change_seq, body_json"
-        " FROM history_events WHERE event_type=?", (event_type,),
-    )) as cursor:
-        event = decode_event_row(cursor.fetchone())
-    with closing(owned.connection.execute(
-        "SELECT first_event_id, last_event_id FROM history_transactions WHERE id=?", (event.transaction_id,),
-    )) as cursor:
-        start, end = cursor.fetchone()
-    state = deepcopy(plan.state_rows)
-    proposed = deepcopy(plan.state_rows)
-    for step in plan.events:
-        for row in step.rows:
-            proposed.setdefault(row.table, {}).setdefault(row.row_id, {}).update(row.after.values)
-            if step.event_id < event.event_id:
-                state.setdefault(row.table, {}).setdefault(row.row_id, {}).update(row.after.values)
-    context = EventContext(TransactionRange(event.transaction_id, start, end),
-                           plan.owners, state, proposed, plan.read_coverage)
-    return event, context, command.action_id
+    plan = capture_operation(owned, lambda target: OutputsRepository().grant_file(
+        command, new_operation_key(), target))
+    event, proposal = event_case(plan, event_type)
+    return event, proposal, command.action_id
 
 
 @pytest.fixture(params=[("device", 22), ("host", 22), ("internal", 22),

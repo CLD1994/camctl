@@ -1,0 +1,26 @@
+证据目录 /tmp/camctl-quality-repair-evidence/final-history-after-latest/run
+进度 camctl/history pid=- preparing
+启动 camctl/history pid=1751680 cwd=/tmp/camctl-quality-repair-evidence/final-history-after-latest/run/tasks/001-camctl-history/source
+进度 camctl/history pid=1751680 tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window
+进度 camctl/history pid=1751680 tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window
+进度 camctl/history pid=1751680 tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window
+进度 camctl/history pid=1751680 tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window
+进度 camctl/history pid=1751680 tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window
+进度 camctl/history pid=1751680 tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window
+进度 camctl/history pid=1751680 tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window
+进度 camctl/history pid=1751680 tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity
+进度 camctl/history pid=1751680 tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity
+进度 camctl/history pid=1751680 tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity
+进度 camctl/history pid=1751680 tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity
+进度 camctl/history pid=1751680 tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity
+进度 camctl/history pid=1751680 tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity
+进度 camctl/history pid=1751680 tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity
+进度 camctl/history pid=1751680 tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity
+进度 camctl/history pid=1751680 tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity
+进度 camctl/history pid=1751680 tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity
+进度 camctl/history pid=1751680 tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity
+进度 camctl/history pid=1751680 tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity
+进度 camctl/history pid=1751680 tests/integration/history/test_report_selection.py::test_independent_entry_rejects_missing_target_or_any_required_owner[delivery-plans-2-2-0]
+进度 camctl/history pid=1751680 tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[integer_as_text-forward]
+结束 camctl/history status=passed exit=0 seconds=342.108
+汇总 /tmp/camctl-quality-repair-evidence/final-history-after-latest/run/summary.json exit=0

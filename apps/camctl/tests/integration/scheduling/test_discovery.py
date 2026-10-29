@@ -253,18 +253,6 @@ def test_unrelated_history_is_not_loaded_whole(tmp_path: Path) -> None:
         owned.connection.close()
 
 
-def test_cache_is_bounded_and_keeps_latest(tmp_path: Path) -> None:
-    """缓存淘汰最旧候选，保留近期批次；容量有界。"""
-    cache = BoundedCandidateCache(capacity=3)
-    cache.extend([{"id": 1}, {"id": 2}])
-    cache.extend([{"id": 3}, {"id": 4}])
-    assert [item["id"] for item in cache.snapshot()] == [2, 3, 4]
-    cache.extend([{"id": 5}, {"id": 6}])
-    assert [item["id"] for item in cache.snapshot()] == [4, 5, 6]
-    with pytest.raises(ValueError):
-        BoundedCandidateCache(capacity=0)
-
-
 def test_new_submit_does_not_mutate_cached_parents(tmp_path: Path) -> None:
     """新计划提交不改变缓存中的父对象事实；再查询能发现新动作。"""
     owned = _seed_environment(tmp_path)

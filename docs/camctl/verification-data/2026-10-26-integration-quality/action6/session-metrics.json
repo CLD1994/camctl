@@ -1,0 +1,122 @@
+{
+  "helper_original_commit": "aff87d6b979b5970aa49d6e5e0f96697bedb2733",
+  "helper_local_commit": "ce808f27",
+  "node_counts": {
+    "node_process_starts": 1,
+    "application_starts": 1,
+    "files_starts": 1,
+    "http_server_starts": 0,
+    "browser_starts": 0
+  },
+  "node_status": "closed",
+  "python_startup": {
+    "started_monotonic_ns": 100883300802170,
+    "finished_monotonic_ns": 100884376566778,
+    "elapsed_seconds": 1.075764608,
+    "outcome": "passed"
+  },
+  "python_close": {
+    "started_monotonic_ns": 100892387587706,
+    "finished_monotonic_ns": 100892428349841,
+    "elapsed_seconds": 0.040762135,
+    "outcome": "passed"
+  },
+  "phase_timeout_seconds": 120,
+  "commands": [
+    {
+      "id": 1,
+      "operation": "export",
+      "elapsed_seconds": 0.21084854,
+      "outcome": "passed",
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 2,
+      "operation": "export",
+      "elapsed_seconds": 0.202483049,
+      "outcome": "passed",
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 3,
+      "operation": "export",
+      "elapsed_seconds": 0.006921285,
+      "outcome": "passed",
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 4,
+      "operation": "close",
+      "elapsed_seconds": 0.003586962,
+      "outcome": "passed",
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    }
+  ],
+  "unique_receipts": [
+    {
+      "id": 1,
+      "path": "/tmp/camctl-quality-evidence/action6/session-native/data/test_installed_action6_native_0/action6-native/client-export-session-1.json",
+      "exists": true
+    },
+    {
+      "id": 2,
+      "path": "/tmp/camctl-quality-evidence/action6/session-native/data/test_installed_action6_native_0/action6-native/client-export-session-2.json",
+      "exists": true
+    },
+    {
+      "id": 3,
+      "path": "/tmp/camctl-quality-evidence/action6/session-native/data/test_installed_action6_native_0/action6-native/client-export-session-3.json",
+      "exists": true
+    }
+  ],
+  "business_outcome": "原生产state_db_error；未执行到媒体、报告导入或ACK，不能记业务通过。",
+  "mode_freeze": {
+    "exit_code": 0,
+    "passed": 1,
+    "pytest_seconds": 10.09,
+    "setup_seconds": 1.09,
+    "call_seconds": 8.51,
+    "teardown_seconds": 0.01
+  },
+  "native_prepath": {
+    "exit_code": 1,
+    "pytest_seconds": 22.64,
+    "setup_seconds": 10.37,
+    "call_seconds": 11.67,
+    "teardown_seconds": 0.06
+  },
+  "full_module_executed": false,
+  "collected_nodes": 8,
+  "assertions": {
+    "baseline_assertions": 127,
+    "candidate_assertions": 127,
+    "all_assertions_unchanged_in_order": true,
+    "baseline_source": "baseline/source.py",
+    "candidate_source": "session-mode/source.py"
+  },
+  "session_commit": "5b0d15a1"
+}

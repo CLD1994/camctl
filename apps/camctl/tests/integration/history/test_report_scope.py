@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -18,7 +19,6 @@ from camctl.acceptance.input import parse_input, read_input
 from camctl.acceptance.ports import ParameterDefinition
 from camctl.acceptance.service import AcceptanceContext, CommandMode, accept_input
 from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
-from camctl.capture.handlers import CaptureRuntime
 from camctl.capture.results import FileKind as ResultFileKind
 from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.contracts.history_values import HistoryBoundary
@@ -58,6 +58,7 @@ from ..capture.test_capture_contract import (
     _entry,
 )
 from ..persistence.test_runtime import _create_valid_database
+from ..support.database import business_database, database_path
 
 register_acceptance_guards()
 register_operation_guards()
@@ -130,34 +131,36 @@ async def _submit(owned, tmp_path, request_id: str, scheduled_at: str | None = N
     body = _plan_body(request_id, scheduled_at or _past_schedule())
     target = tmp_path / f"plan-{request_id}.json"
     target.write_text(json.dumps(body), encoding="utf-8")
-    result = await accept_input(
-        parse_input(await read_input(str(target), _Reader())),
-        AcceptanceContext(
-            mode=CommandMode.RUN,
-            catalog=_Catalog(),
-            repository=AcceptanceRepository(),
-            clock=type("C", (), {"utc_micros": staticmethod(lambda: 1)})(),
-        ),
-        new_operation_key(),
-        owned,
-    )
+    async with business_database(database_path(owned)) as database:
+        result = await accept_input(
+            parse_input(await read_input(str(target), _Reader())),
+            AcceptanceContext(
+                mode=CommandMode.RUN,
+                catalog=_Catalog(),
+                repository=AcceptanceRepository(),
+                clock=type("C", (), {"utc_micros": staticmethod(lambda: 1)})(),
+            ),
+            new_operation_key(),
+            database,
+        )
     assert result.plan_id is not None
 
 
 async def _submit_diagnostic(owned, tmp_path, name: str):
     target = tmp_path / f"{name}.json"
     target.write_text(json.dumps({"request_id": f"bad-{name}", "plan": {}}), encoding="utf-8")
-    await accept_input(
-        parse_input(await read_input(str(target), _Reader())),
-        AcceptanceContext(
-            mode=CommandMode.RUN,
-            catalog=_Catalog(),
-            repository=AcceptanceRepository(),
-            clock=type("C", (), {"utc_micros": staticmethod(lambda: 1)})(),
-        ),
-        new_operation_key(),
-        owned,
-    )
+    async with business_database(database_path(owned)) as database:
+        await accept_input(
+            parse_input(await read_input(str(target), _Reader())),
+            AcceptanceContext(
+                mode=CommandMode.RUN,
+                catalog=_Catalog(),
+                repository=AcceptanceRepository(),
+                clock=type("C", (), {"utc_micros": staticmethod(lambda: 1)})(),
+            ),
+            new_operation_key(),
+            database,
+        )
 
 
 class _ActivityDriver(DriverDouble):
@@ -183,24 +186,15 @@ class _ActivityDriver(DriverDouble):
         )
 
 
-def _runtime(owned) -> CaptureRuntime:
-    return CaptureRuntime(
-        owned=owned,
-        scheduling=SchedulingRepository(),
-        operations=OperationRepository(),
-        capture=CaptureRepository(),
-        timelapse=TimelapseRepository(),
-        driver=_ActivityDriver(activity_target="1"),
+@asynccontextmanager
+async def _runtime(owned):
+    from ..support.capture import capture_runtime
+
+    yield await capture_runtime(
+        owned, driver=_ActivityDriver(activity_target="1"), evidence=_PAGE_EVIDENCE,
         results=ResultsDouble({1: (_entry("shot-1", kind=ResultFileKind.PHOTO),)}),
-        evidence=_PAGE_EVIDENCE,
-        wall_us=lambda: int(time.time() * 1_000_000),
-        monotonic_ns=time.monotonic_ns,
-        window_of=lambda action: LaunchWindow(
-            scheduled_at=action["scheduled_at"],
-            window_end=action["scheduled_at"] + action["max_delay_ms"] * 1000),
-        wait_config=lambda params: CaptureWaitConfig(
-            target_duration_ms=600_000, driver_margin_ms=0),
-    )
+        wall_us=lambda: int(time.time() * 1_000_000), monotonic_ns=time.monotonic_ns,
+        wait_config=lambda params: CaptureWaitConfig(target_duration_ms=600_000, driver_margin_ms=0))
 
 
 async def _finish_action(owned) -> None:
@@ -212,7 +206,8 @@ async def _finish_action(owned) -> None:
         new_operation_key(), owned)
     assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
     descriptors = ready_capture_actions(owned.connection, now)
-    await dispatch_ready(_runtime(owned), descriptors)
+    async with _runtime(owned) as runtime:
+        await dispatch_ready(runtime, descriptors)
 
 
 def _boundary(connection) -> HistoryBoundary:

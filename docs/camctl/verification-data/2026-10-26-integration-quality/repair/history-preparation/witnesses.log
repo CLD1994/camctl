@@ -1,0 +1,8 @@
+.....                                                                    [100%]
+============================= slowest 5 durations ==============================
+0.96s call     tests/integration/history/test_report_selection.py::test_late_corruption_is_visible_before_candidate_limit[actions]
+0.92s call     tests/integration/history/test_report_selection.py::test_late_corruption_is_visible_before_candidate_limit[plans]
+0.61s setup    tests/integration/history/test_report_selection.py::test_all_five_targets_keep_pages_parent_filter_and_legal_empty[4096]
+0.22s setup    tests/integration/history/test_report_selection.py::test_all_five_targets_keep_pages_parent_filter_and_legal_empty[0]
+0.16s call     tests/integration/history/test_report_selection.py::test_selection_pages_preserve_targets_and_necessary_ancestors
+5 passed in 5.11s

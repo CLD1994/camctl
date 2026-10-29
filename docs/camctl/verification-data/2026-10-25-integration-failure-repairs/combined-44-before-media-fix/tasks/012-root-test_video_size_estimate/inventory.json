@@ -1,0 +1,3 @@
+[
+  "tests/integration/test_video_size_estimate.py::test_record_estimate_stays_out_of_execution_and_report"
+]

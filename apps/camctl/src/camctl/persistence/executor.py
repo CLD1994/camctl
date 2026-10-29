@@ -209,9 +209,12 @@ class DbExecutor:
             raise DbExecutorError("submit_read 只接受读任务")
         return self._submit(job)
 
-    async def withdraw(self, key: OperationKey) -> WithdrawalResult:
+    async def withdraw(self, key: OperationKey, *,
+                       expected_result: asyncio.Future | None = None) -> WithdrawalResult:
         """撤回一项操作；不在执行器范围内时明确报错。"""
         with self._lock:
+            if expected_result is not None and self._results.get(key) is not expected_result:
+                raise DbExecutorError(f"操作 {key} 的原结果已离开执行器范围")
             status = self._core.withdraw(key)
             if status is None:
                 raise DbExecutorError(f"操作 {key} 不在执行器范围内")

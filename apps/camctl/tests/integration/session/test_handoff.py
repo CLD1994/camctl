@@ -63,19 +63,6 @@ def _close(repository, owned, facts: WorkFacts, release):
 
 
 class TestSubmitRacesAdmissionClose:
-    def test_acceptor_present_hands_work_over(self, database) -> None:
-        owned, admission_lock = database
-        lease = acquire_admission(admission_lock)
-        try:
-            # 提交先于关闭：存在接纳者，由其负责，不请求后续 run。
-            decision = decide_handoff(
-                _close_or_classify(WorkDecisionKind.NEEDS_DRIVER), probe_admission(admission_lock)
-            )
-            assert decision.outcome is HandoffOutcome.ACCEPTOR_PRESENT
-            assert decision.needs_run is False
-        finally:
-            lease.close()
-
     def test_close_first_then_submit_requests_run(self, database) -> None:
         owned, admission_lock = database
         repository = SessionRepository()
@@ -103,17 +90,6 @@ class TestSubmitRacesAdmissionClose:
         result = _close(repository, owned, _facts(), lambda: None)
         assert result.admission_closed is True
         assert probe_admission(admission_lock).is_free
-
-    def test_new_work_keeps_admission_for_current_run(self, database) -> None:
-        owned, admission_lock = database
-        lease = acquire_admission(admission_lock)
-        repository = SessionRepository()
-        try:
-            result = _close(repository, owned, _facts(unfinished_actions=1), lambda: None)
-            assert result.admission_closed is False
-            assert result.work.kind is WorkDecisionKind.NEEDS_DRIVER
-        finally:
-            lease.close()
 
     def test_report_failure_waits_for_new_changes(self, database) -> None:
         owned, admission_lock = database

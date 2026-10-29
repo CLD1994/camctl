@@ -1,0 +1,3 @@
+[
+  "tests/integration/test_device_capability_declarations.py::test_installed_metadata_reaches_parameter_form_and_device_guide"
+]

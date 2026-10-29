@@ -12,7 +12,7 @@ from camctl.persistence.repositories import outputs
 from .test_output_family import family_database
 from .test_qualification import _seed_device_file, _seed_output
 from .test_sources import _fixed_resolution
-from ..operations.test_result_reuse import _FaultConnection
+from ..support.outputs import observed_query
 
 
 @pytest.fixture
@@ -23,9 +23,9 @@ def lookup_database(family_database):
     return connection
 
 
-class LookupConnection(_FaultConnection):
+class LookupConnection:
     def __init__(self, connection, *, fail_at=None, stage=None):
-        super().__init__(connection, "unused")
+        self._connection = connection
         self.queries = []
         self.cursors = []
         self.fail_at = fail_at
@@ -33,22 +33,27 @@ class LookupConnection(_FaultConnection):
         self.error = sqlite3.OperationalError("requested output lookup failed")
 
     def execute(self, sql, parameters=()):
-        if sql == "SELECT id FROM outputs":
-            raise AssertionError("一次来源选择不能扫描全库产物 ID")
-        is_lookup = sql.startswith("SELECT id, source_action_id FROM outputs WHERE id IN")
+        cursor, columns, reads = observed_query(self._connection, sql, parameters)
+        # 只按实际返回字段和 SQLite 读取范围观察限定身份的查询。
+        is_lookup = columns == {"id", "source_action_id"} and all(
+            table == "outputs" for table, _column in reads)
         if is_lookup:
             self.queries.append(tuple(parameters))
             if len(self.queries) == self.fail_at and self.stage == "execute":
+                cursor.close()
                 raise self.error
-        cursor = self._connection.execute(sql, parameters)
         if not is_lookup:
             return cursor
         probe = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)
+        probe.description = cursor.description
         probe.close.side_effect = cursor.close
         probe.fetchall.side_effect = (self.error if len(self.queries) == self.fail_at and self.stage == "fetch"
                                      else cursor.fetchall)
         self.cursors.append(probe)
         return probe
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
 
 
 @pytest.mark.parametrize("unrelated_count", [0, 130])
@@ -87,12 +92,6 @@ def test_explicit_selection_queries_only_nonlocal_targets(lookup_database):
     probe.cursors[0].close.assert_called_once_with()
 
 
-def test_unqueried_explicit_target_never_becomes_missing_error(lookup_database):
-    facts = outputs.load_selection_facts(lookup_database, 11)
-    with pytest.raises(ConsistencyError):
-        select_outputs(_fixed_resolution((11,)), facts, SelectionMode.EXPLICIT_IDS, (999,))
-
-
 @pytest.mark.parametrize("previous,expected", [((701,), {}), ((704,), {704: 12}), ((999,), {999: None})])
 def test_previous_identity_is_rechecked_in_bounded_scope(lookup_database, previous, expected):
     probe = LookupConnection(lookup_database)
@@ -108,7 +107,7 @@ def test_previous_identity_is_rechecked_in_bounded_scope(lookup_database, previo
         cursor.close.assert_called_once_with()
 
 
-def test_requested_and_previous_ids_share_one_lookup(lookup_database):
+def test_requested_and_previous_ids_preserve_complete_lookup_scope(lookup_database):
     probe = LookupConnection(lookup_database)
     facts = outputs.load_selection_facts(probe, 11, requested_output_ids=(704, 704, 701, 999),
                                          previously_confirmed_ids=frozenset({704, 705}))

@@ -23,17 +23,17 @@ from ..capture.test_capture_contract import ResultsDouble
 from ..cancellation.test_report_sync_lifecycle import _fault_owned
 from .test_output_binding_changes import _NOW, _read_registry as _registry
 from .test_output_read_recovery import _start_unended_read
-from .test_read_execution_runtime import ReadRequests, _MEDIA_CONTENT, _real_recording_media_flow
+from .test_read_execution_runtime import ReadRequests, _MEDIA_CONTENT, _SETTINGS, _real_recording_media_flow
 
 pytestmark = pytest.mark.asyncio
 
 
 async def _binding_ready(tmp_path, *, preclosed):
-    flow, source_id = await _real_recording_media_flow(tmp_path)
-    driver = ReadRequests(flow.owned, _MEDIA_CONTENT, fail=True)
-    flow.sessions = flow.sessions.__class__(flow.owned, driver, None)
-    flow.max_read_attempts = 1 if preclosed else 7
-    await run_recording_media(flow, 1, 1, source_id)
+    flow, source_id = await _real_recording_media_flow(tmp_path,
+        reader_factory=lambda owned: ReadRequests(owned, _MEDIA_CONTENT, fail=True),
+        copy_settings={**_SETTINGS, "max_read_attempts": 1 if preclosed else 7})
+    driver = flow.reader
+    await run_recording_media(flow.media, 1, 1, source_id)
     copy_id = flow.owned.connection.execute("SELECT id FROM file_copies WHERE processing_id=1").fetchone()[0]
     if preclosed:
         assert flow.owned.connection.execute(
@@ -57,7 +57,7 @@ async def _binding_ready(tmp_path, *, preclosed):
 
 
 @pytest.mark.parametrize("preclosed", [False, True])
-async def test_internal_binding_unknown_commit_reuses_original_nulls_and_slot(tmp_path, monkeypatch, preclosed):
+async def test_internal_binding_unknown_commit_reuses_original_nulls_and_slot(tmp_path, monkeypatch, preclosed, capture_resources):
     flow, driver, factory = await _binding_ready(tmp_path, preclosed=preclosed)
     result_run = flow.owned.connection.execute(
         "SELECT id,status,retry_wait_required,error_json FROM operation_runs WHERE responsibility_key='results/1'").fetchone()
@@ -79,12 +79,13 @@ async def test_internal_binding_unknown_commit_reuses_original_nulls_and_slot(tm
     try:
         from camctl.contracts.values import ConsistencyError
         with pytest.raises(ConsistencyError):
-            await capture_handler("camera_record")(1, factory(flow.owned, "cam-1"))
+            await capture_handler("camera_record")(1, await factory(flow.database, "cam-1"))
         path = flow.owned.connection.execute("PRAGMA database_list").fetchone()[2]
         before = tuple(flow.owned.connection.iterdump())
         flow.owned.connection.close()
+        flow.database = await capture_resources.restart_database(path)
         flow.owned = open_existing(Path(path), DbOpenMode.EXISTING_RW, DbConfig())
-        await capture_handler("camera_record")(1, factory(flow.owned, "cam-1"))
+        await capture_handler("camera_record")(1, await factory(flow.database, "cam-1"))
         assert saved[0] == saved[1]
         assert tuple(flow.owned.connection.iterdump()) == before
         assert len(driver.requests) == 1
@@ -135,7 +136,7 @@ async def test_internal_binding_original_key_rejects_changed_semantic_input(tmp_
 
     monkeypatch.setattr(CaptureRepository, "finish_binding_failure", capture)
     try:
-        await capture_handler("camera_record")(1, factory(flow.owned, "cam-1"))
+        await capture_handler("camera_record")(1, await factory(flow.database, "cam-1"))
         request, key = saves[0]
         if changed == "time":
             changed_request = replace(request, occurred_at=request.occurred_at + 1)

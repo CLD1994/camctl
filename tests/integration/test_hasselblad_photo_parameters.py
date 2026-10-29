@@ -1,6 +1,8 @@
 """安装版 Hasselblad 参数在 Python、浏览器和客户端后端保持一致。"""
 from __future__ import annotations
 
+from camctl_memory_plugin import run_test_command
+
 from datetime import datetime, timedelta, timezone
 import json
 import os
@@ -119,12 +121,12 @@ class InstalledCamctl:
         self.python = python
         self.environment = environment
 
-    def run(self, command, *, cwd: Path | None = None, timeout: int = 180):
+    def run(self, command, *, cwd: Path | None = None, timeout: int = 180, camctl=False):
         argv = [str(part) for part in command]
         working_directory = cwd or self.root
         started = datetime.now(timezone.utc).isoformat()
-        completed = subprocess.run(
-            argv,
+        completed = run_test_command(
+            argv, camctl=camctl, receipt_root=self.root,
             cwd=working_directory,
             env=self.environment,
             capture_output=True,
@@ -153,7 +155,7 @@ class InstalledCamctl:
         return completed
 
     def cli(self, *args: str):
-        return self.run([self.python, "-m", "camctl", *args])
+        return self.run([self.python, "-m", "camctl", *args], camctl=True)
 
 
 def _clean_environment() -> dict[str, str]:

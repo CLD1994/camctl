@@ -1,0 +1,636 @@
+{
+  "source_head": "d896d4b28194258cb5da71b160d5ef22d642d48e",
+  "test_sha256": "0ccace8d6d61f22413fd54ec60596a37b0731f58539702da03129d819fa387e2",
+  "exitcode": 0,
+  "wall_seconds": 397.34485664000385,
+  "finished_at_utc": "2026-10-25T21:21:36.336774+00:00",
+  "pytest_phases": [
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[normal-indexes0-2-succeeded]",
+      "when": "setup",
+      "duration": 26.261600362005993,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[normal-indexes0-2-succeeded]",
+      "when": "call",
+      "duration": 66.3035423419933,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[normal-indexes0-2-succeeded]",
+      "when": "teardown",
+      "duration": 0.11175800100318156,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[overrun-indexes1-3-succeeded]",
+      "when": "setup",
+      "duration": 0.006522828000015579,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[overrun-indexes1-3-succeeded]",
+      "when": "call",
+      "duration": 57.546120867991704,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[overrun-indexes1-3-succeeded]",
+      "when": "teardown",
+      "duration": 0.1268931880040327,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[short-set-indexes2-2-succeeded]",
+      "when": "setup",
+      "duration": 0.0013991019950481132,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[short-set-indexes2-2-succeeded]",
+      "when": "call",
+      "duration": 45.234907054997166,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[short-set-indexes2-2-succeeded]",
+      "when": "teardown",
+      "duration": 0.09243999799946323,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[gap-indexes3-2-failed]",
+      "when": "setup",
+      "duration": 0.0036898600083077326,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[gap-indexes3-2-failed]",
+      "when": "call",
+      "duration": 46.9395106479933,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[gap-indexes3-2-failed]",
+      "when": "teardown",
+      "duration": 0.0994834279990755,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[zero-gap-indexes4-2-failed]",
+      "when": "setup",
+      "duration": 0.0022216170036699623,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[zero-gap-indexes4-2-failed]",
+      "when": "call",
+      "duration": 45.10092998399341,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[zero-gap-indexes4-2-failed]",
+      "when": "teardown",
+      "duration": 0.08051538300060201,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[empty-indexes5-0-failed]",
+      "when": "setup",
+      "duration": 0.002066674001980573,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[empty-indexes5-0-failed]",
+      "when": "call",
+      "duration": 42.803612144998624,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[empty-indexes5-0-failed]",
+      "when": "teardown",
+      "duration": 0.08500566300062928,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[unknown-indexes6-0-failed]",
+      "when": "setup",
+      "duration": 0.001910908002173528,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[unknown-indexes6-0-failed]",
+      "when": "call",
+      "duration": 38.39564321700891,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[unknown-indexes6-0-failed]",
+      "when": "teardown",
+      "duration": 0.06375459999253508,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[native-tail-indexes7-2-succeeded]",
+      "when": "setup",
+      "duration": 0.0017286090005654842,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[native-tail-indexes7-2-succeeded]",
+      "when": "call",
+      "duration": 27.223576196993235,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[native-tail-indexes7-2-succeeded]",
+      "when": "teardown",
+      "duration": 0.10198961201240309,
+      "outcome": "passed"
+    }
+  ],
+  "worlds": [
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[normal-indexes0-2-succeeded]",
+      "scenario": "normal-indexes0-2-succeeded",
+      "counts": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "status": "closed",
+      "phase_timeout_seconds": 120,
+      "startup_seconds": 3.445149264,
+      "operation_count": 16,
+      "operation_seconds": 2.5783702669999995,
+      "operations": {
+        "export": {
+          "count": 7,
+          "elapsed_seconds": 1.509994113
+        },
+        "import": {
+          "count": 4,
+          "elapsed_seconds": 0.50129861
+        },
+        "import-media": {
+          "count": 5,
+          "elapsed_seconds": 0.567077544
+        }
+      },
+      "all_operations_passed": true,
+      "close": {
+        "started_monotonic_ns": 110327520584221,
+        "finished_monotonic_ns": 110327599780573,
+        "elapsed_seconds": 0.079196352,
+        "outcome": "passed"
+      },
+      "cli_group_count": 17,
+      "groups_removed": true,
+      "all_combined_limits_2GiB": true,
+      "max_combined_peak_bytes": 123322368,
+      "oom_or_limit_events": [
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {}
+      ]
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[overrun-indexes1-3-succeeded]",
+      "scenario": "overrun-indexes1-3-succeeded",
+      "counts": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "status": "closed",
+      "phase_timeout_seconds": 120,
+      "startup_seconds": 1.774502933,
+      "operation_count": 18,
+      "operation_seconds": 3.5905248700000008,
+      "operations": {
+        "export": {
+          "count": 7,
+          "elapsed_seconds": 1.170476687
+        },
+        "import": {
+          "count": 4,
+          "elapsed_seconds": 1.077046379
+        },
+        "import-media": {
+          "count": 7,
+          "elapsed_seconds": 1.343001804
+        }
+      },
+      "all_operations_passed": true,
+      "close": {
+        "started_monotonic_ns": 110385189499744,
+        "finished_monotonic_ns": 110385267081010,
+        "elapsed_seconds": 0.077581266,
+        "outcome": "passed"
+      },
+      "cli_group_count": 19,
+      "groups_removed": true,
+      "all_combined_limits_2GiB": true,
+      "max_combined_peak_bytes": 114749440,
+      "oom_or_limit_events": [
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {}
+      ]
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[short-set-indexes2-2-succeeded]",
+      "scenario": "short-set-indexes2-2-succeeded",
+      "counts": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "status": "closed",
+      "phase_timeout_seconds": 120,
+      "startup_seconds": 1.859600593,
+      "operation_count": 16,
+      "operation_seconds": 2.8524469560000005,
+      "operations": {
+        "export": {
+          "count": 7,
+          "elapsed_seconds": 1.3179761499999998
+        },
+        "import": {
+          "count": 4,
+          "elapsed_seconds": 0.7825232040000001
+        },
+        "import-media": {
+          "count": 5,
+          "elapsed_seconds": 0.751947602
+        }
+      },
+      "all_operations_passed": true,
+      "close": {
+        "started_monotonic_ns": 110430562209550,
+        "finished_monotonic_ns": 110430637670102,
+        "elapsed_seconds": 0.075460552,
+        "outcome": "passed"
+      },
+      "cli_group_count": 15,
+      "groups_removed": true,
+      "all_combined_limits_2GiB": true,
+      "max_combined_peak_bytes": 113164288,
+      "oom_or_limit_events": [
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {}
+      ]
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[gap-indexes3-2-failed]",
+      "scenario": "gap-indexes3-2-failed",
+      "counts": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "status": "closed",
+      "phase_timeout_seconds": 120,
+      "startup_seconds": 1.689455746,
+      "operation_count": 16,
+      "operation_seconds": 2.634882843,
+      "operations": {
+        "export": {
+          "count": 7,
+          "elapsed_seconds": 1.2635548859999999
+        },
+        "import": {
+          "count": 4,
+          "elapsed_seconds": 0.5815459199999999
+        },
+        "import-media": {
+          "count": 5,
+          "elapsed_seconds": 0.7897820369999999
+        }
+      },
+      "all_operations_passed": true,
+      "close": {
+        "started_monotonic_ns": 110477598979886,
+        "finished_monotonic_ns": 110477676977723,
+        "elapsed_seconds": 0.077997837,
+        "outcome": "passed"
+      },
+      "cli_group_count": 17,
+      "groups_removed": true,
+      "all_combined_limits_2GiB": true,
+      "max_combined_peak_bytes": 114786304,
+      "oom_or_limit_events": [
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {}
+      ]
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[zero-gap-indexes4-2-failed]",
+      "scenario": "zero-gap-indexes4-2-failed",
+      "counts": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "status": "closed",
+      "phase_timeout_seconds": 120,
+      "startup_seconds": 1.641953626,
+      "operation_count": 16,
+      "operation_seconds": 2.8523709650000004,
+      "operations": {
+        "export": {
+          "count": 7,
+          "elapsed_seconds": 1.044128861
+        },
+        "import": {
+          "count": 4,
+          "elapsed_seconds": 0.8845439129999999
+        },
+        "import-media": {
+          "count": 5,
+          "elapsed_seconds": 0.923698191
+        }
+      },
+      "all_operations_passed": true,
+      "close": {
+        "started_monotonic_ns": 110522788752820,
+        "finished_monotonic_ns": 110522869039116,
+        "elapsed_seconds": 0.080286296,
+        "outcome": "passed"
+      },
+      "cli_group_count": 15,
+      "groups_removed": true,
+      "all_combined_limits_2GiB": true,
+      "max_combined_peak_bytes": 115073024,
+      "oom_or_limit_events": [
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {}
+      ]
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[empty-indexes5-0-failed]",
+      "scenario": "empty-indexes5-0-failed",
+      "counts": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "status": "closed",
+      "phase_timeout_seconds": 120,
+      "startup_seconds": 1.532969852,
+      "operation_count": 12,
+      "operation_seconds": 1.871368182,
+      "operations": {
+        "export": {
+          "count": 7,
+          "elapsed_seconds": 1.0571672010000002
+        },
+        "import": {
+          "count": 4,
+          "elapsed_seconds": 0.6704048309999999
+        },
+        "import-media": {
+          "count": 1,
+          "elapsed_seconds": 0.14379615
+        }
+      },
+      "all_operations_passed": true,
+      "close": {
+        "started_monotonic_ns": 110565682934945,
+        "finished_monotonic_ns": 110565761801277,
+        "elapsed_seconds": 0.078866332,
+        "outcome": "passed"
+      },
+      "cli_group_count": 17,
+      "groups_removed": true,
+      "all_combined_limits_2GiB": true,
+      "max_combined_peak_bytes": 113086464,
+      "oom_or_limit_events": [
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {}
+      ]
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[unknown-indexes6-0-failed]",
+      "scenario": "unknown-indexes6-0-failed",
+      "counts": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "status": "closed",
+      "phase_timeout_seconds": 120,
+      "startup_seconds": 1.561547904,
+      "operation_count": 12,
+      "operation_seconds": 1.1438894800000001,
+      "operations": {
+        "export": {
+          "count": 7,
+          "elapsed_seconds": 0.709248277
+        },
+        "import": {
+          "count": 4,
+          "elapsed_seconds": 0.31022227300000005
+        },
+        "import-media": {
+          "count": 1,
+          "elapsed_seconds": 0.12441893
+        }
+      },
+      "all_operations_passed": true,
+      "close": {
+        "started_monotonic_ns": 110604221311449,
+        "finished_monotonic_ns": 110604264149134,
+        "elapsed_seconds": 0.042837685,
+        "outcome": "passed"
+      },
+      "cli_group_count": 15,
+      "groups_removed": true,
+      "all_combined_limits_2GiB": true,
+      "max_combined_peak_bytes": 116154368,
+      "oom_or_limit_events": [
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {}
+      ]
+    },
+    {
+      "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[native-tail-indexes7-2-succeeded]",
+      "scenario": "native-tail-indexes7-2-succeeded",
+      "counts": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "status": "closed",
+      "phase_timeout_seconds": 120,
+      "startup_seconds": 1.347346738,
+      "operation_count": 16,
+      "operation_seconds": 1.217844303,
+      "operations": {
+        "export": {
+          "count": 7,
+          "elapsed_seconds": 0.6305231609999999
+        },
+        "import": {
+          "count": 4,
+          "elapsed_seconds": 0.241051096
+        },
+        "import-media": {
+          "count": 5,
+          "elapsed_seconds": 0.34627004600000005
+        }
+      },
+      "all_operations_passed": true,
+      "close": {
+        "started_monotonic_ns": 110631518477529,
+        "finished_monotonic_ns": 110631559902839,
+        "elapsed_seconds": 0.04142531,
+        "outcome": "passed"
+      },
+      "cli_group_count": 17,
+      "groups_removed": true,
+      "all_combined_limits_2GiB": true,
+      "max_combined_peak_bytes": 114069504,
+      "oom_or_limit_events": [
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {}
+      ]
+    }
+  ],
+  "world_count": 8,
+  "launcher_errors": [],
+  "delegation_removed": true,
+  "remaining_pids": [],
+  "concurrent_load": "Other agents may run independent workspaces; no performance comparison claimed."
+}

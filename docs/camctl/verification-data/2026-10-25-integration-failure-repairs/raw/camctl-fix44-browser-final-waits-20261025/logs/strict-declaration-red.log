@@ -1,0 +1,35 @@
+
+ RUN  v5.0.1 /tmp/camctl-fix44-browser-20261025/apps/client
+
+ ❯ tests/integration/metadata-support.test.ts (15 tests | 1 failed | 12 skipped) 5116ms
+   × 同设备的错误重复删除声明不能被忽略（style="display:none"） 13ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/integration/metadata-support.test.ts > 同设备的错误重复删除声明不能被忽略（style="display:none"）
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ tests/integration/metadata-support.test.ts:114:87
+    112|     await page.setContent(`<section class="guide-device"><div class="g…
+    113|       <p class="guide-cleanup-support"><strong>支持删除</strong><strong ${…
+    114|     await expect(checkVisibleCleanupSupport(page, [{ device: "host", t…
+       |                                                                                       ^
+    115|   },
+    116| );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 2 passed | 12 skipped (15)
+   Start at  17:58:50
+   Duration  5.57s (tests 93%, import 6%, transform 1%)
+

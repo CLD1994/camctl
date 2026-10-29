@@ -1,0 +1,1696 @@
+[
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/memory-budget/camctl-87a6d9d6210d46b6bf9b6491c04dca58.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/tools/camctl",
+      "submit",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-plan-1.json",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/deployment/config.toml"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "pid": 1706331,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1706331-c9eb5b3f3e9e4421817592088e73f1fd",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 44982272,
+      "combined_peak_bytes": 44982272,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/memory-budget/camctl-604810cc049d46d2b205d00e6e7a6b19.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/tools/camctl",
+      "submit",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-plan-4.json",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/deployment/config.toml"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "pid": 1706270,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1706270-8eb2bdaea92b4efc91dab944cf3a53c3",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 46784512,
+      "combined_peak_bytes": 46784512,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/memory-budget/camctl-4fdcd2877f514f2da7cfee1caa36cd69.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/tools/camctl",
+      "run",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/deployment/config.toml",
+      "--host-notification-fd",
+      "4"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "pid": 1706330,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1706330-03e1b056badc47b6a17b386dfe723c44",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 132751360,
+      "combined_peak_bytes": 132751360,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/memory-budget/camctl-1fc10ae517d04deeba55721c35b68869.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/tools/camctl",
+      "run",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/deployment/config.toml",
+      "--host-notification-fd",
+      "4"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "pid": 1705559,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1705559-28032874c54c44c8b94d29f714352799",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 154476544,
+      "combined_peak_bytes": 154476544,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/memory-budget/camctl-9e1157aa415c45619bcef2902dd89288.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "completed",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/tools/camctl",
+      "describe",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/deployment/config.toml"
+    ],
+    "requested_limit": "2GiB",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1700833-03a9312e76ee4a4fa3a88f03b8e424b4",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "pid": 1705413,
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 38158336,
+      "combined_peak_bytes": 38158336,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "completed",
+    "group_removed": true,
+    "elapsed_seconds": 1.115500081999926,
+    "returncode": 0
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/memory-budget/camctl-4141aedebe7e4086b59b50060c400cfe.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/tools/camctl",
+      "submit",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-plan-1.json",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/deployment/config.toml"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "pid": 1705560,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1705560-d366ca4db382461fac60d21278f68fef",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 46911488,
+      "combined_peak_bytes": 46911488,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/memory-budget/camctl-7e800483dcb24126b4fb978316babf1e.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/tools/camctl",
+      "submit",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-plan-3.json",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/deployment/config.toml"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "pid": 1705791,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1705791-0c68baaa38a848b2be35d7186b089e0c",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 49213440,
+      "combined_peak_bytes": 49213440,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/memory-budget/camctl-565842d4588641ea868ba0c921bd8c34.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "completed",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/tools/camctl",
+      "init",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/deployment/config.toml"
+    ],
+    "requested_limit": "2GiB",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1700833-be220b0879b841288869bc3d8d6c7a13",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "pid": 1705387,
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 40415232,
+      "combined_peak_bytes": 40415232,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "completed",
+    "group_removed": true,
+    "elapsed_seconds": 0.7866796750022331,
+    "returncode": 0
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/memory-budget/camctl-c934014bbaea463494d0acdedc61e324.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/tools/camctl",
+      "submit",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-plan-2.json",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/deployment/config.toml"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "pid": 1705728,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1705728-06c800ccf82544cc9ccd5c2e1bdefa34",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 48631808,
+      "combined_peak_bytes": 48631808,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/memory-budget/camctl-f8ce7b19ccac45ff9d55c602d119a476.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/tools/camctl",
+      "submit",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/client-plan-3.json",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/deployment/config.toml"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "pid": 1704073,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1704073-ba678e6914bd49cb9c6e986f792b3d1a",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 46923776,
+      "combined_peak_bytes": 46923776,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/memory-budget/camctl-cfc2a99fd97e461386aaef44c308a82f.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/tools/camctl",
+      "run",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/deployment/config.toml",
+      "--host-notification-fd",
+      "4"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "pid": 1703838,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1703838-4897015a8a974d9da21a0fc2b76f396e",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 144048128,
+      "combined_peak_bytes": 144048128,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/memory-budget/camctl-6d87813599894aa89533348f616c4bc1.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/tools/camctl",
+      "run",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/deployment/config.toml",
+      "--host-notification-fd",
+      "4"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "pid": 1704504,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1704504-d7e59ea7131c4d2580a9c54ea6b123e7",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 142336000,
+      "combined_peak_bytes": 142336000,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/memory-budget/camctl-72bf7c57d7c04c2ba67df2fd60eb43b1.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "completed",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/tools/camctl",
+      "init",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/deployment/config.toml"
+    ],
+    "requested_limit": "2GiB",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1700833-763ebfc4eefb4f7cb748163a1fa43510",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "pid": 1703731,
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 40415232,
+      "combined_peak_bytes": 40415232,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "completed",
+    "group_removed": true,
+    "elapsed_seconds": 0.8202008579974063,
+    "returncode": 0
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/memory-budget/camctl-4f5f7df1a2e64f4c920e5bfc00db1b60.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/tools/camctl",
+      "submit",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/client-plan-1.json",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/deployment/config.toml"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "pid": 1704505,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1704505-bd1e6062d03f47d2b8d0ae7db996dd3d",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 44941312,
+      "combined_peak_bytes": 44941312,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/memory-budget/camctl-c82f17687dc1475096d130f1053bab97.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/tools/camctl",
+      "submit",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/client-plan-2.json",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/deployment/config.toml"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "pid": 1704021,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1704021-c868293929bd450690b513ff086210cb",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 46764032,
+      "combined_peak_bytes": 46764032,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/memory-budget/camctl-3099de4c6e5846d2bc02ec0d7a23316c.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "completed",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/tools/camctl",
+      "describe",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/deployment/config.toml"
+    ],
+    "requested_limit": "2GiB",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1700833-9f608153fd1c4a6d94b345efa4e34ec2",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "pid": 1703739,
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 38268928,
+      "combined_peak_bytes": 38268928,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "completed",
+    "group_removed": true,
+    "elapsed_seconds": 1.2672237329970812,
+    "returncode": 0
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/memory-budget/camctl-6dc4317818c649e68ca90757794a157a.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/tools/camctl",
+      "submit",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/client-plan-5.json",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/deployment/config.toml"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "pid": 1705032,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1705032-7a1e971dbbdd4d70ab5a296f55c7dcc7",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 46845952,
+      "combined_peak_bytes": 46845952,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/memory-budget/camctl-191f42f85a84425c84e92f9589052be2.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/tools/camctl",
+      "submit",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/client-plan-1.json",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/deployment/config.toml"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "pid": 1703839,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1703839-57086c7f5e044818800d42f5db003dbd",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 46690304,
+      "combined_peak_bytes": 46690304,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/memory-budget/camctl-085950615b0d41f7b64b993c0e3f0b34.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/tools/camctl",
+      "submit",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/client-plan-4.json",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar1/action6-record/deployment/config.toml"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "pid": 1704767,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1704767-1a7edc858bf74d1da56f31c1c33c7863",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 48439296,
+      "combined_peak_bytes": 48439296,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/memory-budget/camctl-2d0b628af0924ca1998f54a2454bd89f.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "completed",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/tools/camctl",
+      "init",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/deployment/config.toml"
+    ],
+    "requested_limit": "2GiB",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1700833-7dd8a74736bc4ccbae3695afd42d02d1",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "pid": 1701737,
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 71880704,
+      "combined_peak_bytes": 71880704,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "completed",
+    "group_removed": true,
+    "elapsed_seconds": 1.3096966489974875,
+    "returncode": 0
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/memory-budget/camctl-b34a125c38ba4c5987575c40734434f7.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/tools/camctl",
+      "submit",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/client-plan-3.json",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/deployment/config.toml"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "pid": 1702261,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1702261-c8fe756b62e24c5cb086e273b4e22080",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 51220480,
+      "combined_peak_bytes": 51220480,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/memory-budget/camctl-9645a8d6aa84469ba81993d052304671.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "completed",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/tools/camctl",
+      "describe",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/deployment/config.toml"
+    ],
+    "requested_limit": "2GiB",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1700833-00354b6102f6407db6cb2e5791200fb2",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "pid": 1701746,
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 39755776,
+      "combined_peak_bytes": 39755776,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "completed",
+    "group_removed": true,
+    "elapsed_seconds": 1.0759015640069265,
+    "returncode": 0
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/memory-budget/camctl-a644e91d6e1e4310a49bc810de7775f3.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/tools/camctl",
+      "submit",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/client-plan-1.json",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/deployment/config.toml"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "pid": 1702898,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1702898-dfed464c17ca47b7b953561a771ce69e",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 45338624,
+      "combined_peak_bytes": 45338624,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/memory-budget/camctl-c0c3f0fd668f4684b3490ed6988eb8d1.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/tools/camctl",
+      "run",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/deployment/config.toml",
+      "--host-notification-fd",
+      "4"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "pid": 1701917,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1701917-ea6e71317110441399ef74902b8943e6",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 149454848,
+      "combined_peak_bytes": 149454848,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/memory-budget/camctl-3e1a96368f3d4aa08c5d8f9574a4df45.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/tools/camctl",
+      "submit",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/client-plan-2.json",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/deployment/config.toml"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "pid": 1702154,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1702154-cd8d7ff76d0b429180cb47a1de9f2d12",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 47517696,
+      "combined_peak_bytes": 47517696,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/memory-budget/camctl-d6b1185939464662b9e73bb5dfb4b095.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/tools/camctl",
+      "run",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/deployment/config.toml",
+      "--host-notification-fd",
+      "4"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "pid": 1702897,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1702897-a7ac33adfb754ad0b8be1996382c3adc",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 144224256,
+      "combined_peak_bytes": 144224256,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/memory-budget/camctl-21f816b78f85461cb9e53179cb1623dc.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/tools/camctl",
+      "submit",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/client-plan-5.json",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/deployment/config.toml"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "pid": 1703435,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1703435-39347a04affd4c769acba74e5c802abb",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 46608384,
+      "combined_peak_bytes": 46608384,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/memory-budget/camctl-5969bf41b0724ce1ada234bd8bb7811f.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/tools/camctl",
+      "submit",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/client-plan-4.json",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/deployment/config.toml"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "pid": 1703285,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1703285-fa6713ca081e41529f7ec3d45d0a9c67",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 46895104,
+      "combined_peak_bytes": 46895104,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "file": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/memory-budget/camctl-f96ecdb4a03a46d387a338983f38264e.json",
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/tools/camctl",
+      "submit",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/client-plan-1.json",
+      "--config",
+      "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar0/action6-record/deployment/config.toml"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "pid": 1701918,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0/camctl-memory-1701918-0d203482cf944688926d4595c3eb7153",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1700823-9d3532e660b9485aa862a738442d1ff0",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 56090624,
+      "combined_peak_bytes": 56090624,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  }
+]

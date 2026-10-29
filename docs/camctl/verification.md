@@ -10,6 +10,11 @@
 
 后续改造由[集成测试耗时优化计划](../superpowers/plans/2026-10-25-integration-test-optimization.md)推进，实际覆盖映射、测量结果及验证边界保存在[优化记录](integration-test-optimization-2026-10-25.md)。
 
+[集成测试耗时分析（2026-10-25）](integration-test-cost-analysis-2026-10-25.md)核对完整记录与修复后专项的区别，重算耗时集中度和并行任务占用，并保存当前源码三个分阶段样本及下一步优先项。
+
+[合计内存预算测试结果](memory-budget-test-results.md)记录测试侧统一进程树预算、sudo 委派及批量持久化用例的改造。在该报告标明的基线上，真实限额专项、513 条输入的容量测试及 CLI／host 部署检查均已通过；逐项耗时、实际峰值和有限负载边界由原报告维护。严格无交换运行能力另行验证，目标与运行入口见[内存预算测试说明](memory-budget-testing.md)。
+
+[完整集成回归与测试接口审计（2026-10-26）](integration-regression-2026-10-26.md)保存同步 `272fda66` 后的失败结果及补跑。当前容量测试被共享环境准备阻断，清理目录复用还导致部分最终预算收据丢失；历史通过记录不能替代该基线的完整验收。公开接口、失败归因、合并修复和后续迁移边界集中在该记录中。
 ## 相机首次准备的省电与 USB 模式设置（2026-10-26）
 
 Action6 与 OSMO 360 II 在本会话首次拍摄准备时共同请求关闭延时摄影熄屏省电及选择仅充电；普通录像、原生延时和软件重启后的恢复准备复用同一命令组合。命令值由[相机会话设置](../hardware/camera-control-handoff.md#相机会话设置)维护，缓存与失败语义沿用[相机会话准备](../architecture/camera-parameters.md#相机会话准备)，进度见[实施计划](../superpowers/plans/2026-10-26-camera-idle-settings.md)。

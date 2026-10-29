@@ -1,13 +1,18 @@
 """真实候选查询的全体顺序、容量和错误边界。"""
 
+import asyncio
+from contextlib import asynccontextmanager
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.outputs.slots import SlotOutcome
 from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.business import BusinessDatabase
 from camctl.persistence.repositories.outputs import OutputsRepository
+from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from .test_read_associations import read_targets, _command  # noqa: F401
 from .test_read_slot import two_copies, _slot  # noqa: F401
@@ -15,9 +20,13 @@ from .test_local_read import local_read  # noqa: F401
 from .test_qualification import _NOW
 from .test_product_competition import competition_database, _seed_many_actions  # noqa: F401
 from .test_qualification import qualification_environment, _candidate, _Seedling  # noqa: F401
-from .test_obtain_summary import prepared_env, _publish  # noqa: F401
+from .test_obtain_summary import _roots
 from camctl.persistence.repositories import outputs
-from camctl.persistence.transaction import TransactionScope
+from camctl.persistence.transaction import commit_operation
+from ..support.output_planning import EventSequence
+from ..support.output_storage_cases import QueryProbe, capture_scoped_operation
+from ..support.outputs import observed_query
+from ..persistence.transaction_fixtures import decorate_transaction_command
 from camctl.outputs.read_discovery import ReadDiscoveryScope, read_candidates
 
 
@@ -37,11 +46,13 @@ class _BoundedConnection:
         return getattr(self.real, name)
 
     def execute(self, sql, parameters=()):
-        cursor = self.real.execute(sql, parameters)
-        if not sql.startswith("SELECT fc.id"):
+        cursor, columns, reads = observed_query(self.real, sql, parameters)
+        if not (
+            ("file_copies", "id") in reads and ("actions", "scheduled_at") in reads
+        ):
             return cursor
         owner = self
-        if " ORDER BY " in sql and self.query_plan is None:
+        if self.query_plan is None:
             explain = self.real.execute("EXPLAIN QUERY PLAN " + sql, parameters)
             try:
                 self.query_plan = explain.fetchall()
@@ -64,6 +75,88 @@ class _BoundedConnection:
                 return row
 
         return Cursor()
+
+
+@asynccontextmanager
+async def _discovery_database(path, *, batch_size=None):
+    bounded = []
+
+    def open_connection():
+        owned = open_existing(Path(path), DbOpenMode.EXISTING_RW, DbConfig())
+        if batch_size is None:
+            return owned
+        connection = _BoundedConnection(owned.connection, batch_size)
+        bounded.append(connection)
+        return replace(owned, connection=connection)
+
+    database = await BusinessDatabase.open(open_connection)
+    try:
+        yield database, bounded
+    finally:
+        await database.close()
+
+
+@pytest.fixture
+def prepared_env(read_targets, tmp_path):
+    import hashlib
+    from decimal import Decimal
+    from camctl.devices.read_session import ReadSession, SourceFile
+    from camctl.outputs.copy import (
+        CompletionContext, CompletionPhase, CopyContext, SegmentContext, SegmentOutcome,
+        complete_copy, copy_next_segment, prepare_copy,
+    )
+    from .test_copy_resume import _command as copy_command, _qualified
+    from .test_copy_segments import _ByteStream, _CONTENT
+
+    owned = read_targets
+    owned.connection.execute("UPDATE actions SET status=3 WHERE id=11")
+    owned.connection.execute("UPDATE device_files SET size_bytes=10,checksum_support=2,sha256=? WHERE id=501",
+        (hashlib.sha256(_CONTENT).hexdigest(),))
+    owned.connection.commit()
+    qualification = _qualified(owned, copy_command())
+    roots = _roots(tmp_path)
+
+    async def prepare():
+        async with _discovery_database(_scope(owned.connection).database) as (database, _):
+            repository = OutputsRepository()
+            await prepare_copy(qualification.copy_id, CopyContext(
+                repository=repository, database=database, roots=roots, occurred_at=_NOW + 1))
+            session = ReadSession(SourceFile("501", {}, len(_CONTENT)), 0,
+                _ByteStream(_CONTENT), Decimal("10"))
+            try:
+                for index in range(99):
+                    step = await copy_next_segment(qualification.copy_id, SegmentContext(
+                        repository=repository, database=database, roots=roots,
+                        occurred_at=_NOW + 1 + index, segment_size=10, session=session))
+                    if step.plan.outcome is SegmentOutcome.ALL_COMMITTED:
+                        break
+            finally:
+                session.request_stop()
+                await session.wait_stopped()
+            completed = await complete_copy(qualification.copy_id, CompletionContext(
+                repository=repository, database=database, roots=roots, occurred_at=_NOW + 5))
+            assert completed.phase is CompletionPhase.PREPARED
+
+    asyncio.run(prepare())
+    return owned, roots, qualification
+
+
+def _publish(owned, roots, delivery_id, tmp_path):
+    from camctl.outputs.handoff import DeliveryContext, DeliveryDirectories, DeliveryPhase, publish_delivery
+
+    ready, processing = tmp_path / "ready", tmp_path / "processing"
+    ready.mkdir(exist_ok=True)
+    processing.mkdir(exist_ok=True)
+
+    async def publish():
+        async with _discovery_database(_scope(owned.connection).database) as (database, _):
+            result = await publish_delivery(delivery_id, DeliveryContext(
+                repository=OutputsRepository(), database=database,
+                directories=DeliveryDirectories(staging=roots.staging, ready=ready, processing=processing),
+                occurred_at=_NOW + 10))
+            assert result.phase is DeliveryPhase.PUBLISHED
+
+    asyncio.run(publish())
 
 
 def test_later_registered_earlier_action_wins_without_full_load(two_copies):
@@ -97,16 +190,24 @@ def test_missing_candidate_basis_is_not_filtered_away(two_copies, fault):
     assert isinstance(result.error, ConsistencyError)
 
 
-def test_product_predecessor_scan_retains_only_current_batch(competition_database):
-    connection = competition_database.connection
-    _seed_many_actions(connection, "active")
-    connection.execute("BEGIN")
-    try:
-        plan = outputs._GrantFileCommand(_candidate(_Seedling(31, 101, 701, 501)),
-            new_operation_key()).plan(TransactionScope(connection, 1, 1))
-        assert len(plan.state_rows["actions"]) < 10, "资格前序判断累计了全部候选详情"
-    finally:
-        connection.rollback()
+def test_product_predecessor_scan_retains_only_current_batch(
+    competition_database, monkeypatch
+):
+    owned = competition_database
+    _seed_many_actions(owned.connection, "active")
+    sizes = []
+
+    def observe(command, scope):
+        plan = command.plan(scope)
+        sizes.append(len(plan.state_rows["actions"]))
+        return plan
+
+    decorate_transaction_command(monkeypatch, outputs, observe)
+    result = OutputsRepository().grant_file(
+        _candidate(_Seedling(31, 101, 701, 501)), new_operation_key(), owned
+    )
+    assert result.kind is DbOutcomeKind.COMPLETED, result.error
+    assert sizes and max(sizes) < 10, "资格前序判断累计了全部候选详情"
 
 
 def test_scope_cannot_read_another_database(two_copies):
@@ -170,7 +271,8 @@ def test_held_retry_copy_precedes_new_candidates(two_copies):
     assert repository.grant_read_slot(_slot(late.copy_id), new_operation_key(), owned).value.outcome is SlotOutcome.WAIT
 
 
-def test_newly_eligible_low_key_is_rediscovered(read_targets):
+@pytest.mark.asyncio
+async def test_newly_eligible_low_key_is_rediscovered(read_targets):
     from camctl.outputs.read_discovery import ReadDiscoveryOwner
     from .test_read_slot import _later_read_command
 
@@ -181,75 +283,86 @@ def test_newly_eligible_low_key_is_rediscovered(read_targets):
     late = repository.grant_file(_later_read_command(), new_operation_key(), owned)
     assert late.kind is DbOutcomeKind.COMPLETED, late.error
     owner = ReadDiscoveryOwner(1)
-    owner.begin_round(owned.connection, _NOW)
-    assert owner.reads(owned.connection, "reads", _NOW).items[0].copy_id == late.value.copy_id
-    generation = owner.generation
-    early = repository.grant_file(_command(), new_operation_key(), owned)
-    assert early.kind is DbOutcomeKind.COMPLETED, early.error
-    owner.begin_round(owned.connection, _NOW)
-    assert owner.generation > generation
-    assert owner.reads(owned.connection, "reads", _NOW).items[0].copy_id == early.value.copy_id
+    async with _discovery_database(_scope(owned.connection).database) as (database, _):
+        await owner.begin_round(database, _NOW)
+        assert (await owner.reads(database, "reads", _NOW)).items[0].copy_id == late.value.copy_id
+        generation = owner.generation
+        key = new_operation_key()
+        early = await database.write(lambda current: repository.grant_file(_command(), key, current), key=key)
+        assert early.kind is DbOutcomeKind.COMPLETED, early.error
+        await owner.begin_round(database, _NOW)
+        assert owner.generation > generation
+        assert (await owner.reads(database, "reads", _NOW)).items[0].copy_id == early.value.copy_id
 
 
-def test_evicted_read_resumes_after_restart(two_copies):
+@pytest.mark.asyncio
+async def test_evicted_read_resumes_after_restart(two_copies):
     import weakref
-    from pathlib import Path
     from camctl.outputs.read_discovery import ReadDiscoveryOwner
-    from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
     from ..bootstrap.test_output_read_recovery import _start_unended_read
 
     owned, early, _ = two_copies
     repository = OutputsRepository(read_batch_size=1)
     assert repository.grant_read_slot(_slot(early.copy_id), new_operation_key(), owned).kind is DbOutcomeKind.COMPLETED
     ticket = _start_unended_read(owned, early.copy_id)
-    database = _scope(owned.connection).database
-    owner = ReadDiscoveryOwner(1)
-    owner.begin_round(owned.connection, _NOW)
-    page = owner.reads(owned.connection, "reads", _NOW)
-    reference = weakref.ref(page.items[0])
-    del page, owner
-    assert reference() is None
+    path = _scope(owned.connection).database
+    async with _discovery_database(path) as (database, _):
+        owner = ReadDiscoveryOwner(1)
+        await owner.begin_round(database, _NOW)
+        page = await owner.reads(database, "reads", _NOW)
+        reference = weakref.ref(page.items[0])
+        del page, owner
+        # 当前asyncio交付Handle仍持有结果Future；让该回调退出，不推进数据库业务。
+        await asyncio.sleep(0)
+        assert reference() is None
     before = tuple(owned.connection.iterdump())
     owned.connection.close()
-    fresh = open_existing(Path(database), DbOpenMode.EXISTING_RW, DbConfig())
-    try:
+    async with _discovery_database(path) as (database, _):
         restarted = ReadDiscoveryOwner(1)
-        restarted.begin_round(fresh.connection, _NOW)
-        assert restarted.reads(fresh.connection, "reads", _NOW).items[0].copy_id == early.copy_id
-        decision = repository.grant_read_slot(_slot(early.copy_id), new_operation_key(), fresh)
+        await restarted.begin_round(database, _NOW)
+        assert (await restarted.reads(database, "reads", _NOW)).items[0].copy_id == early.copy_id
+        key = new_operation_key()
+        decision = await database.write(lambda current: repository.grant_read_slot(_slot(early.copy_id), key, current), key=key)
         assert decision.kind is DbOutcomeKind.COMPLETED and decision.value.outcome is SlotOutcome.HELD
-        assert fresh.connection.execute("SELECT id,attempts_used FROM operation_runs WHERE copy_id=?",
-            (early.copy_id,)).fetchone() == (ticket.run_id, 1)
-        assert tuple(fresh.connection.iterdump()) == before
-    finally:
-        fresh.connection.close()
+        assert await database.read(lambda current: current.connection.execute(
+            "SELECT id,attempts_used FROM operation_runs WHERE copy_id=?",
+            (early.copy_id,)).fetchone()) == (ticket.run_id, 1)
+        assert await database.read(lambda current: tuple(current.connection.iterdump())) == before
 
 
-def test_guard_independently_rejects_skipped_predecessor(competition_database, monkeypatch):
+def test_guard_independently_rejects_skipped_predecessor(competition_database):
     import json
     from camctl.history.validators import EventValidationError
 
     owned = competition_database
-    owned.connection.execute("UPDATE actions SET input_fields_json=?,execution_spec_json=? WHERE id=91",
-        (json.dumps({"params": {"source": {"plan_instance_id": "2"}}}), json.dumps({"selection_mode": 1})))
+    proposal = capture_scoped_operation(
+        owned,
+        outputs,
+        lambda current: OutputsRepository(read_batch_size=1).grant_file(
+            _candidate(_Seedling(31, 101, 701, 501)), new_operation_key(), current
+        ),
+    )
+    # 已形成的合法提案不能越过提交时当前出现的同产物前序。
+    owned.connection.execute(
+        "UPDATE actions SET input_fields_json=?,execution_spec_json=? WHERE id=91",
+        (
+            json.dumps({"params": {"source": {"plan_instance_id": "2"}}}),
+            json.dumps({"selection_mode": 1}),
+        ),
+    )
     owned.connection.commit()
-    real = outputs.has_product_predecessor
-    calls = []
-
-    def skip_once(*args):
-        calls.append(args[0])
-        return False if len(calls) == 1 else real(*args)
-
-    monkeypatch.setattr(outputs, "has_product_predecessor", skip_once)
     before = tuple(owned.connection.iterdump())
-    result = OutputsRepository(read_batch_size=1).grant_file(_candidate(_Seedling(31, 101, 701, 501)), new_operation_key(), owned)
-    assert len(calls) == 2
-    assert result.kind is DbOutcomeKind.ROLLED_BACK
+    result = commit_operation(
+        EventSequence(proposal.events, proposal), new_operation_key(), owned
+    )
+    assert result.kind == "rolled_back"
     assert isinstance(result.error, EventValidationError), result.error
     assert tuple(owned.connection.iterdump()) == before
 
 
-def test_finishing_obtain_does_not_materialize_plan_siblings(prepared_env, tmp_path):
+def test_finishing_obtain_does_not_materialize_plan_siblings(
+    prepared_env, tmp_path, monkeypatch
+):
     from .test_qualification import _seed_action
     from camctl.persistence.repositories.outputs import FinishObtain
 
@@ -258,16 +371,23 @@ def test_finishing_obtain_does_not_materialize_plan_siblings(prepared_env, tmp_p
     for identity in range(1000, 1131):
         _seed_action(owned.connection, identity, 1, action_type=2, status=3)
     owned.connection.commit()
-    owned.connection.execute("BEGIN")
-    try:
-        plan = outputs._FinishObtainCommand(FinishObtain(31, _NOW + 20), new_operation_key()).plan(
-            TransactionScope(owned.connection, 1, 1))
-        assert len(plan.state_rows["actions"]) < 10
-    finally:
-        owned.connection.rollback()
+    sizes = []
+
+    def observe(command, scope):
+        plan = command.plan(scope)
+        sizes.append(len(plan.state_rows["actions"]))
+        return plan
+
+    decorate_transaction_command(monkeypatch, outputs, observe)
+    result = OutputsRepository().finish_obtain(
+        FinishObtain(31, _NOW + 20), new_operation_key(), owned
+    )
+    assert result.kind is DbOutcomeKind.COMPLETED, result.error
+    assert sizes and max(sizes) < 10
 
 
-def test_candidate_capacity_tracks_batch_not_total(two_copies):
+@pytest.mark.asyncio
+async def test_candidate_capacity_tracks_batch_not_total(two_copies):
     import gc
     import json
     import weakref
@@ -287,25 +407,30 @@ def test_candidate_capacity_tracks_batch_not_total(two_copies):
             assert result.kind is DbOutcomeKind.COMPLETED and result.value.copy_id is not None, result
         seeded = total
         before = tuple(owned.connection.iterdump())
-        owner = ReadDiscoveryOwner(batch_size)
-        connection = _BoundedConnection(owned.connection, batch_size)
-        owner.begin_round(connection, _NOW)
-        returned = seen = largest = 0
-        while True:
-            page = owner.reads(connection, "reads", _NOW)
-            returned = len(page.items)
-            seen += returned
-            largest = max(largest, returned)
-            assert returned <= batch_size and owner.cursor_count <= 1
-            references = tuple(weakref.ref(candidate) for candidate in page.items)
-            exhausted = page.exhausted
-            del page
-            gc.collect()
-            assert all(reference() is None for reference in references)
-            if exhausted:
-                break
-        assert seen == total + 2
-        assert connection.query_plan and max(connection.returned) == batch_size
+        async with _discovery_database(_scope(owned.connection).database, batch_size=batch_size) as (database, bounded):
+            owner = ReadDiscoveryOwner(batch_size)
+            await owner.begin_round(database, _NOW)
+            returned = seen = largest = 0
+            while True:
+                page = await owner.reads(database, "reads", _NOW)
+                returned = len(page.items)
+                seen += returned
+                largest = max(largest, returned)
+                assert returned <= batch_size and owner.cursor_count <= 1
+                references = tuple(weakref.ref(candidate) for candidate in page.items)
+                exhausted = page.exhausted
+                del page
+                # 等当前asyncio交付Handle退出后核对释放，不触发下一次数据库查询。
+                await asyncio.sleep(0)
+                # 已释放的候选无需扫描整个堆；仍存活时保留循环回收后的释放检查。
+                if any(reference() is not None for reference in references):
+                    gc.collect()
+                assert all(reference() is None for reference in references), "发现器保留了已消费页的候选详情"
+                if exhausted:
+                    break
+            connection, = bounded
+            assert seen == total + 2
+            assert connection.query_plan and max(connection.returned) == batch_size
         assert tuple(owned.connection.iterdump()) == before
         print(json.dumps({"candidates": seen, "batch_size": batch_size,
                           "max_returned": largest, "retained_after_page": 0,
@@ -313,71 +438,138 @@ def test_candidate_capacity_tracks_batch_not_total(two_copies):
                           "query_plan": connection.query_plan}))
 
 
+@pytest.mark.asyncio
+async def test_release_observation_detects_page_retained_by_discovery_owner(two_copies):
+    import gc
+    import weakref
+    from camctl.outputs.read_discovery import ReadDiscoveryOwner
+
+    owned, _, _ = two_copies
+    async with _discovery_database(_scope(owned.connection).database) as (database, _):
+        owner = ReadDiscoveryOwner(1)
+        await owner.begin_round(database, _NOW)
+        page = await owner.reads(database, "reads", _NOW)
+        reference = weakref.ref(page.items[0])
+        # 主动保留一页作为反例；交付回调退出不能掩盖发现器持有候选详情。
+        owner.retained_page_for_control = page
+        del page
+        await asyncio.sleep(0)
+        if reference() is not None:
+            gc.collect()
+        with pytest.raises(AssertionError, match="发现器保留了已消费页的候选详情"):
+            assert reference() is None, "发现器保留了已消费页的候选详情"
+
+
 def test_query_failure_is_not_exhaustion(two_copies):
-    from ..operations.test_result_reuse import _FaultConnection
     import sqlite3
 
     owned, _, _ = two_copies
     with pytest.raises(sqlite3.OperationalError):
-        read_candidates(_FaultConnection(owned.connection, "SELECT fc.id"), _scope(owned.connection), limit=1)
+        read_candidates(
+            QueryProbe(
+                owned.connection,
+                lambda columns, reads, parameters: ("file_copies", "id") in reads
+                and ("actions", "scheduled_at") in reads,
+                failure="execute",
+            ),
+            _scope(owned.connection),
+            limit=1,
+        )
 
 
-def test_terminal_actions_do_not_expand_discovered_details(two_copies):
+@pytest.mark.asyncio
+async def test_terminal_actions_do_not_expand_discovered_details(two_copies):
     from camctl.outputs.read_discovery import ReadDiscoveryOwner
 
     owned, early, late = two_copies
     _seed_many_actions(owned.connection, "plan")
-    connection = _BoundedConnection(owned.connection)
-    owner = ReadDiscoveryOwner(1)
-    owner.begin_round(connection, _NOW)
-    discovered = []
-    while True:
-        page = owner.reads(connection, "reads", _NOW)
-        discovered.extend(candidate.copy_id for candidate in page.items)
-        if page.exhausted:
-            break
-    assert discovered == [early.copy_id, late.copy_id]
-    assert max(connection.returned) == 1 and owner.cursor_count == 0
+    async with _discovery_database(_scope(owned.connection).database, batch_size=1) as (database, bounded):
+        owner = ReadDiscoveryOwner(1)
+        await owner.begin_round(database, _NOW)
+        discovered = []
+        while True:
+            page = await owner.reads(database, "reads", _NOW)
+            discovered.extend(candidate.copy_id for candidate in page.items)
+            if page.exhausted:
+                break
+        connection, = bounded
+        assert discovered == [early.copy_id, late.copy_id]
+        assert max(connection.returned) == 1 and owner.cursor_count == 0
 
 
-@pytest.mark.parametrize("phase,expected", [("window", 1.0), ("expired", 0.0), ("future", 1.0)])
-def test_idle_deadline_returns_only_nearest_pending_metadata(competition_database, phase, expected):
-    from types import SimpleNamespace
-    from camctl.session.service import _pending_deadline_seconds
+@pytest.mark.parametrize(
+    "phase,expected", [("window", 1.0), ("expired", 0.0), ("future", 1.0)]
+)
+@pytest.mark.asyncio
+async def test_idle_deadline_returns_only_nearest_pending_metadata(
+    competition_database, phase, expected
+):
+    from camctl.session.service import run_session
+    from camctl.session.work import WorkFacts
+    from camctl.scheduling.notifications import WorkNotifier
+    from ..support.session import session_context, open_session_database, cancel_session
+    from ..session.test_session import FixedClock
 
     owned = competition_database
     _seed_many_actions(owned.connection, "active")
     if phase == "expired":
-        owned.connection.execute("UPDATE actions SET scheduled_at=? WHERE id=1130", (_NOW - 2_000_000,))
+        owned.connection.execute(
+            "UPDATE actions SET scheduled_at=? WHERE id=1130", (_NOW - 2_000_000,)
+        )
     elif phase == "future":
-        owned.connection.execute("UPDATE actions SET scheduled_at=? WHERE id>=1000", (_NOW + 2_000_000,))
-        owned.connection.execute("UPDATE actions SET scheduled_at=? WHERE id=1130", (_NOW + 1_000_000,))
+        owned.connection.execute(
+            "UPDATE actions SET scheduled_at=? WHERE id>=1000", (_NOW + 2_000_000,)
+        )
+        owned.connection.execute(
+            "UPDATE actions SET scheduled_at=? WHERE id=1130", (_NOW + 1_000_000,)
+        )
     owned.connection.commit()
-    returned = []
+    probes = []
 
-    class Connection:
-        def execute(self, sql, parameters=()):
-            cursor = owned.connection.execute(sql, parameters)
+    class Notifier(WorkNotifier):
+        def __init__(self):
+            super().__init__()
+            self.waiting = asyncio.Event()
+            self.delays = []
 
-            class Cursor:
-                def close(self):
-                    cursor.close()
+        async def wait_changed(self, observed, deadline):
+            self.delays.append(deadline - asyncio.get_running_loop().time())
+            self.waiting.set()
+            return await super().wait_changed(observed, deadline)
 
-                def fetchall(self):
-                    rows = cursor.fetchall()
-                    returned.append(len(rows))
-                    return rows
+    notifier = Notifier()
+    path = Path(_scope(owned.connection).database)
 
-                def fetchone(self):
-                    row = cursor.fetchone()
-                    returned.append(int(row is not None))
-                    return row
+    def factory():
+        current = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
+        probe = QueryProbe(
+            current.connection,
+            lambda columns, reads, parameters: ("actions", "scheduled_at") in reads
+            and len(columns) == 1,
+        )
+        probes.append(probe)
+        return replace(current, connection=probe)
 
-            return Cursor()
-
-    context = SimpleNamespace(clock=SimpleNamespace(utc_micros=lambda: _NOW))
-    assert _pending_deadline_seconds(context, replace(owned, connection=Connection())) == expected
-    assert returned and max(returned) <= 1, "等待入口向 Python 返回了全部待执行动作"
+    context = session_context(
+        path,
+        clock=FixedClock(_NOW),
+        flows={},
+        wake=notifier,
+        poll_interval_s=3.0,
+        facts_query=lambda connection: WorkFacts(
+            1, 0, False, False, False, False, False, False
+        ),
+        open_database=lambda: open_session_database(path, factory=factory),
+    )
+    task = asyncio.create_task(run_session(context, None))
+    try:
+        await asyncio.wait_for(notifier.waiting.wait(), 10)
+        assert notifier.delays[0] == pytest.approx(expected, abs=0.05)
+        assert (
+            probes and probes[0].returned and max(probes[0].returned) <= 1
+        ), "等待入口向 Python 返回了全部待执行动作"
+    finally:
+        await cancel_session(task)
 
 
 def test_device_holder_query_detects_multiple_holders():
@@ -422,20 +614,33 @@ def test_obtain_summary_folds_many_items_without_full_materialization(prepared_e
     assert (decision.phase.value, decision.prepared, decision.failed) == (phase, prepared, failed)
 
 
-def test_plan_guard_independently_rejects_skipped_unfinished_sibling(prepared_env, tmp_path, monkeypatch):
+def test_plan_guard_independently_rejects_skipped_unfinished_sibling(
+    prepared_env, tmp_path, monkeypatch
+):
     from camctl.history import validators
     from camctl.history.validators import EventValidationError
     from camctl.persistence.repositories.capture import register_capture_guards
     from camctl.persistence.repositories.outputs import FinishObtain
 
-    # 按默认装配注册实际终态守卫，隔离其他用例的受理专用同名注册。
     monkeypatch.setattr(validators, "NAMED_GUARDS", dict(validators.NAMED_GUARDS))
     register_capture_guards()
     owned, roots, qualified = prepared_env
     _publish(owned, roots, qualified.delivery_id, tmp_path)
-    monkeypatch.setattr(outputs, "_completion_siblings", lambda connection, action: {action["id"]: action})
+
+    def finish_without_pending_siblings(current):
+        current.connection.execute(
+            "UPDATE actions SET status=3 WHERE plan_id=1 AND id!=31"
+        )
+        current.connection.commit()
+        return OutputsRepository(read_batch_size=1).finish_obtain(
+            FinishObtain(31, _NOW + 20), new_operation_key(), current
+        )
+
+    proposal = capture_scoped_operation(owned, outputs, finish_without_pending_siblings)
     before = tuple(owned.connection.iterdump())
-    result = OutputsRepository(read_batch_size=1).finish_obtain(FinishObtain(31, _NOW + 20), new_operation_key(), owned)
-    assert result.kind is DbOutcomeKind.ROLLED_BACK
+    result = commit_operation(
+        EventSequence(proposal.events, proposal), new_operation_key(), owned
+    )
+    assert result.kind == "rolled_back"
     assert isinstance(result.error, EventValidationError), result.error
     assert tuple(owned.connection.iterdump()) == before

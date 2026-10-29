@@ -4,17 +4,20 @@ from datetime import datetime, timezone
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import create_autospec
 
 from camctl.acceptance.input import ParsedInput
 from camctl.acceptance.ports import ParameterDefinition
-from camctl.acceptance.service import CommandMode
+from camctl.acceptance.service import AcceptanceContext, CommandMode, accept_input
 from camctl.cancellation.models import (
     ApplyCancelTarget, CancelApplyMode, CancellationEffect, FixedCancelSet,
     FixedTarget, FixCancelTargets, SelectionBasis, StartCancelAction,
 )
-from camctl.capture.handlers import _advance_timelapse_natural_wait, _control_call, _stop_call, capture_handler
-from camctl.capture.models import ActivityConcludeSave
+from camctl.capture.handlers import capture_handler
+from camctl.capture.models import WaitCompletedSave
+from camctl.persistence.repositories.capture import CaptureRepository
+from camctl.persistence.repositories.timelapse import TimelapseRepository
 from camctl.capture.processing import CheckBasis, CheckDecisionChoice, CheckDecisionSave, CheckReason
 from camctl.contracts.values import new_operation_key
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
@@ -34,6 +37,7 @@ from ..bootstrap.test_media_assembly import _config
 from ..bootstrap.test_recording_stop import _RecordCatalog
 from ..bootstrap.test_timelapse_finish import _TimelapseCatalog
 from .test_capture_contract import _NOW, _runtime
+from ..support.capture import capture_database, restart_capture_database
 
 register_acceptance_guards()
 register_cancellation_guards()
@@ -93,11 +97,75 @@ def returned(operation, observation, activity_id):
     )
 
 
-def complete_natural_wait(runtime, action_id):
-    """正常自然结果的手工消费者先可靠保存原实际等待，不制造设备结果。"""
-    event_id = _advance_timelapse_natural_wait(runtime, runtime.action(action_id))
-    assert event_id is not None
-    return event_id
+def result_driver(case, outcome=None, *, side_effect=None):
+    """在正式装配已有的结果端口提交下一次设备返回脚本。"""
+    from camctl.bootstrap.capture_assembly import DriverResultListing
+    from camctl.devices.bindings import DeviceBinding
+    from camctl.devices.ports import ResultDriver
+
+    driver = create_autospec(ResultDriver, instance=True)
+    if outcome is not None:
+        driver.list_results.return_value = DeviceCallResult.from_outcome(outcome)
+    driver.list_results.side_effect = side_effect
+    case.results.delegate = DriverResultListing(
+        driver, DeviceBinding("cam-1", "camctl-adb"), case.evidence)
+    return driver
+
+
+async def complete_natural_wait(runtime, action_id):
+    """按已由处理器安排的等待，公开保存当前可靠 UTC 到期事实。"""
+    request = WaitCompletedSave(action_id, runtime.wall_us())
+    key = new_operation_key()
+    receipt = await runtime.database.write(
+        lambda owned: TimelapseRepository().complete_wait(request, key, owned),
+        key=key, description="保存测试等待完成事实")
+    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+    return receipt.value.event_id
+
+
+class _SavedPreparation(Exception):
+    """准备阶段在明确的已提交存储边界结束。"""
+
+
+class _PreparationBoundary(CaptureRepository):
+    """真实仓储完成保存后中断处理器，避免预先消费被测 RESULTS。"""
+
+    def __init__(self, boundary):
+        self.boundary = boundary
+        self.saved = False
+
+    def _after(self, boundary, receipt):
+        if self.boundary == boundary and receipt.kind is DbOutcomeKind.COMPLETED:
+            self.saved = True
+            self.boundary = None
+            return replace(receipt, handoff_error=_SavedPreparation(boundary))
+        return receipt
+
+    def finish_start_result(self, *args, **kwargs):
+        return self._after("start", super().finish_start_result(*args, **kwargs))
+
+    def finish_capture_stop(self, *args, **kwargs):
+        return self._after("stop", super().finish_capture_stop(*args, **kwargs))
+
+    def conclude_activity(self, *args, **kwargs):
+        return self._after("conclude", super().conclude_activity(*args, **kwargs))
+
+    def release_occupancy(self, *args, **kwargs):
+        return self._after("release", super().release_occupancy(*args, **kwargs))
+
+
+async def _prepare_through_handler(runtime, action_id, handler, boundary):
+    repository = _PreparationBoundary(boundary)
+    runtime.capture = repository
+    try:
+        try:
+            await capture_handler(handler)(action_id, runtime)
+        except _SavedPreparation:
+            assert repository.saved
+        else:
+            assert boundary is None, "处理器必须实际保存指定准备事实"
+    finally:
+        runtime.capture = CaptureRepository()
 
 
 async def consumer_world(
@@ -110,6 +178,10 @@ async def consumer_world(
     record_control_elapsed_ns=None,
     invalid_sibling=False,
     pending_capture_group=None,
+    runtime_factory=None,
+    runtime_options=None,
+    max_delay_ms=5000,
+    now_us=_NOW,
 ):
     """只执行本地公开事务和真实拍摄处理器，不补写历史或投影。"""
     cfg = _config(tmp_path)
@@ -117,7 +189,7 @@ async def consumer_world(
     assert initialize_state(cfg, path).outcome is InitOutcome.CREATED
     owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
     handler, parameter_type, operation, observation = CASES[consumer]
-    instant = datetime.fromtimestamp(_NOW // 1_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    instant = datetime.fromtimestamp(now_us // 1_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     actions = []
     if invalid_sibling:
         actions.append({"name":"无效设备任务","type":"camera_record","device_id":"missing-device",
@@ -126,7 +198,7 @@ async def consumer_world(
         actions.append({"name": "报告", "type": "report_status", "params": {"scope": "full"}})
     action_id = len(actions) + 1
     actions.append({"name": "拍摄", "type": handler, "device_id": "cam-1", "scheduled_at": instant,
-                    "params": {"type": parameter_type}, "policy": {"max_delay_ms": 5000}})
+                    "params": {"type": parameter_type}, "policy": {"max_delay_ms": max_delay_ms}})
     if pending_capture_group is not None:
         actions[-1]["group"] = pending_capture_group
         actions.append(
@@ -136,14 +208,18 @@ async def consumer_world(
         actions.append({"name": "取消", "type": "cancel_task", "params": {
             "target": {"action_instance_id": str(action_id)}}})
     try:
-        accepted = AcceptanceRepository().process_input(ProcessInput(ParsedInput("results.json", {
+        database = await capture_database(owned)
+        accepted = await accept_input(ParsedInput("results.json", {
             "request_id": "1", "created_at": instant, "name": "产物核实", "actions": actions,
-        }), ResultCatalog() if catalog is None else catalog, CommandMode.RUN, _NOW), new_operation_key(), owned)
-        assert accepted.kind is DbOutcomeKind.COMPLETED, accepted.error
+        }),
+            AcceptanceContext(CommandMode.RUN, ResultCatalog() if catalog is None else catalog,
+                AcceptanceRepository(), clock=SimpleNamespace(utc_micros=lambda: now_us)),
+            new_operation_key(), database)
+        assert accepted.plan_id is not None, accepted
         scheduling = SchedulingRepository()
         for save, request in (
-            (scheduling.observe_window, ObserveWindowRequest(action_id, _NOW, _NOW)),
-            (scheduling.start_action, StartActionRequest(action_id, _NOW, _NOW)),
+            (scheduling.observe_window, ObserveWindowRequest(action_id, now_us, now_us)),
+            (scheduling.start_action, StartActionRequest(action_id, now_us, now_us)),
         ):
             receipt = save(request, new_operation_key(), owned)
             assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
@@ -151,45 +227,29 @@ async def consumer_world(
             "SELECT id FROM device_activities WHERE action_id=?", (action_id,)).fetchone()
         control = create_autospec(ControlDriver, instance=True)
         control.control.return_value = DeviceCallResult.from_outcome(returned("operation", observation, activity_id))
-        runtime = _runtime(owned, driver=control)
-        runtime.evidence = RESULT_EVIDENCE
-        runtime.check_config = AttemptConfig(3, Decimal("1.25"), Decimal("2"))
         from camctl.contracts.pages import Page
         from camctl.devices.directory import DirectoryRead
         from .test_baseline_prepare import Directory
 
-        runtime.baseline_directory = Directory(
-            [lambda request: DirectoryRead(None, None, Page((), None))]
-        )
+        options = {"evidence": RESULT_EVIDENCE,
+            "check_config": AttemptConfig(3, Decimal("1.25"), Decimal("2")),
+            "directory": Directory([lambda request: DirectoryRead(None, None, Page((), None))])}
+        options.update({} if runtime_options is None else runtime_options)
+        runtime = (await _runtime(owned, driver=control, **options)
+            if runtime_factory is None else await runtime_factory(owned, driver=control))
         if not start:
             return owned, runtime, action_id, handler
-        if handler == "camera_record":
-            await capture_handler(handler)(action_id, runtime)
+        if handler == "camera_take_photo":
+            await _prepare_through_handler(runtime, action_id, handler, "start")
         else:
-            facts = {"sent_at": _NOW}
-            if handler == "camera_take_photo":
-                facts.update(started_at=_NOW, activity_state=2)
-            await _control_call(runtime, runtime.action(action_id), operation, observation, activity_facts=facts)
-        if consumer in ("record", "winddown", "cancel"):
-            if record_control_elapsed_ns is not None:
-                from camctl.capture.models import HostTimerStopSave
-                original_finish = runtime.finish
-                def finish_with_control(ticket, actual, **kwargs):
-                    if ticket.operation == 'stop':
-                        kwargs['host_timer_stop'] = HostTimerStopSave(record_control_elapsed_ns)
-                    return original_finish(ticket, actual, **kwargs)
-                runtime.finish = finish_with_control
+            await capture_handler(handler)(action_id, runtime)
+        if consumer in ("record", "winddown"):
             runtime.wall_us = lambda: _NOW + 60_000_000
-            runtime.monotonic_ns = lambda: 65_000_000_000
+            runtime.monotonic_ns = lambda: 5_000_000_000 + (60_000_000_000 if record_control_elapsed_ns is None else record_control_elapsed_ns)
             stop = create_autospec(StopDriver, instance=True)
             stop.stop.return_value = DeviceCallResult.from_outcome(returned("stop", "stop_confirmed", activity_id))
             runtime.stopper = stop
-            stopped = await _stop_call(runtime, runtime.action(action_id),
-                "stop_timelapse" if handler == "camera_timelapse" else "stop_recording")
-            assert stopped.phase == "confirmed", stopped
-            concluded = runtime.capture.conclude_activity(ActivityConcludeSave(action_id, runtime.wall_us()),
-                new_operation_key(), owned)
-            assert concluded.kind is DbOutcomeKind.COMPLETED, concluded.error
+            await _prepare_through_handler(runtime, action_id, handler, "conclude")
         if handler == "camera_record":
             processing_id, = owned.connection.execute(
                 "SELECT id FROM recording_processing WHERE action_id=?", (action_id,)).fetchone()
@@ -209,11 +269,19 @@ async def consumer_world(
             applied = repository.apply_cancel_target(ApplyCancelTarget(item_id, CancelApplyMode.WITH_STOP,
                 runtime.wall_us()), new_operation_key(), owned)
             assert applied.kind is DbOutcomeKind.COMPLETED, applied.error
+            runtime.wall_us = lambda: _NOW + 60_000_000
+            runtime.monotonic_ns = lambda: 65_000_000_000
+            stop = create_autospec(StopDriver, instance=True)
+            stop.stop.return_value = DeviceCallResult.from_outcome(returned("stop", "stop_confirmed", activity_id))
+            runtime.stopper = stop
+            await _prepare_through_handler(runtime, action_id, handler, "stop")
         if consumer == "timelapse":
-            # 消费测试从已保存的前次 START 恢复，不带入旧运行的
-            # 单调钟锚点；本次可靠 UTC 已越过原自主任务等待。
-            runtime = replace(runtime, natural_wait_states={}, timelapse_deadlines={},
-                              wall_us=lambda: _NOW + 700_000_000)
+            # 前次 START 会话的文件责任和 worker 实际结束；新工厂只消费
+            # 已保存事实，本次可靠 UTC 已越过原自主任务等待。
+            database = await restart_capture_database(owned)
+            runtime = (await _runtime(database, driver=control,
+                **{**options, "wall_us": lambda: _NOW + 700_000_000})
+                if runtime_factory is None else await runtime_factory(owned, driver=control))
         return owned, runtime, action_id, handler
     except BaseException:
         owned.connection.close()

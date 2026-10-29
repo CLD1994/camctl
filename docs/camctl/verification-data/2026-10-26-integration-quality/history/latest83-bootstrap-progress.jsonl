@@ -1,0 +1,6 @@
+{"utc": "2026-10-25T18:52:12.937615+00:00", "event": "node_started", "nodeid": "tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost"}
+{"utc": "2026-10-25T18:52:13.120195+00:00", "event": "phase_completed", "nodeid": "tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost", "phase": "setup", "outcome": "passed"}
+{"utc": "2026-10-25T18:52:13.523767+00:00", "event": "phase_completed", "nodeid": "tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost", "phase": "call", "outcome": "failed"}
+{"utc": "2026-10-25T18:52:13.532801+00:00", "event": "phase_completed", "nodeid": "tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost", "phase": "teardown", "outcome": "passed"}
+{"utc": "2026-10-25T18:52:13.533106+00:00", "event": "node_finished", "nodeid": "tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost"}
+{"utc": "2026-10-25T18:52:13.534031+00:00", "event": "session_finished", "exit_code": 1}

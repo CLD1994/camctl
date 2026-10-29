@@ -43,6 +43,7 @@ from camctl.operations.process import LocalExit, RawToolOutcome
 from ..acceptance.test_acceptance import _accept, _plan_body, _owned, environment
 from ..acceptance.test_adb_camera_definitions import _params
 from .adb_camera_fixtures import software_contract
+from .result_page_storage import allow_dispatch
 
 
 @pytest.fixture
@@ -144,12 +145,16 @@ def test_builtin_camera_contracts_declare_file_cleanup_independently_of_capture_
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("model", [CameraModel.ACTION6, CameraModel.OSMO360II])
-async def test_real_session_open_resets_settings_but_catalog_reads_do_not(isolated_registration, environment, model):
-    from camctl.bootstrap.lifecycle import _initialize_recovery
+async def test_real_session_open_resets_settings_but_catalog_reads_do_not(isolated_registration, tmp_path, model):
+    from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
+    from camctl.acceptance.service import CommandMode
+    from camctl.persistence.initialization import initialize_state, InitOutcome
     from camctl.devices.drivers.adb_cameras.commands import OSMO_RECORD_FORMAT
 
     config = load_config({"devices": {"cam-1": {"kind": "camera", "driver": model,
-                           "adb": {"serial": "serial-1"}}}}, ConfigDefaults())
+                           "adb": {"serial": "serial-1"}}}, "paths": {
+        "state_db": str(tmp_path / "session.db"), "staging": str(tmp_path / "staging"),
+        "ready": str(tmp_path / "ready"), "processing": str(tmp_path / "processing")}}, ConfigDefaults())
     registration.register_builtin_camera_drivers(config)
     driver = drivers_runtime.current_registry().entry(model).driver
     commands = []
@@ -164,7 +169,7 @@ async def test_real_session_open_resets_settings_but_catalog_reads_do_not(isolat
     driver.transport = Transport()
     request = ControlRequest("start_recording", DeviceBinding("cam-1", model),
         _params(model, "camera_record"),
-        AttemptTicket(1, "control", "7", "start/7", 9), Decimal("10"), lambda: None)
+        AttemptTicket(1, "control", "7", "start/7", 9), Decimal("10"), allow_dispatch)
     assert (await driver.control(request)).error is None
     before = len(commands)
     registration.register_builtin_camera_drivers(config)
@@ -175,7 +180,14 @@ async def test_real_session_open_resets_settings_but_catalog_reads_do_not(isolat
     if model is CameraModel.OSMO360II:
         fixed = (*fixed, shlex.join(OSMO_RECORD_FORMAT))
     assert all(commands.count(command) == 1 for command in fixed)
-    _initialize_recovery(SimpleNamespace(work_files=None), _owned(environment))
+    assert initialize_state(config, Path(config.paths.state_db)).outcome is InitOutcome.CREATED
+    deps = build_runtime(CommandMode.RUN, config, catalog=build_catalog(
+        config, definitions_runtime.current_driver_definitions()))
+    try:
+        outcome = await execute_command(deps, None, flows={})
+        assert outcome.succeeded, outcome
+    finally:
+        close_runtime(deps)
     assert (await driver.control(request)).error is None
     assert all(commands.count(command) == 2 for command in fixed)
     action6 = drivers_runtime.current_registry().entry(CameraModel.ACTION6).declaration

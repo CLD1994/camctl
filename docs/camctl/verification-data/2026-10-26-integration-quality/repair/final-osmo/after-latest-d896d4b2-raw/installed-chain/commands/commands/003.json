@@ -1,0 +1,14 @@
+{
+  "cwd": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/osmo-builtin-package0",
+  "python": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+  "argv": [
+    "uv",
+    "venv",
+    "--python",
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/osmo-builtin-package0/venv"
+  ],
+  "exitcode": 0,
+  "stdout": "",
+  "stderr": "Using CPython 3.11.17 interpreter at: /workspaces/camctl/apps/camctl/.venv311/bin/python\nCreating virtual environment at: venv\nActivate with: source venv/bin/activate\n"
+}

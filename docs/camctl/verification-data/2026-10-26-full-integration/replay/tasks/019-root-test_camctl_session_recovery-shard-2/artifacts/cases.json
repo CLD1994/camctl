@@ -1,0 +1,40 @@
+[
+  {
+    "nodeid": "tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001955940999323502
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 21.01065177799319
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.045346807994064875
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 21.057954526986578
+  },
+  {
+    "nodeid": "tests/integration/test_camctl_session_recovery.py::test_late_result_preserves_terminal_decision",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001923693998833187
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 16.575869279011386
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.014071062003495172
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 16.591864035013714
+  }
+]

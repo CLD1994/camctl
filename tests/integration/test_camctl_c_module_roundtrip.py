@@ -121,7 +121,7 @@ def test_capture_obtain_cleanup_roundtrip_via_c_module(
     """三种拍摄、普通取回与清理经 C 模块递交链：客户端导出计划、
     主程序递交并驱动执行、产物与报告领取进 processing、客户端导入
     并在下一份导出的 ACK 经同一递交入口吸收。"""
-    deployment = Deployment(tmp_path)
+    deployment = Deployment(tmp_path, controlled_clock=True)
     spec = stub_driver_spec(
         {"1": [photo_file("cm-shot")],
          "2": [video_file("cm-clip")],
@@ -132,7 +132,7 @@ def test_capture_obtain_cleanup_roundtrip_via_c_module(
     _init_with_capabilities(deployment, spec)
     state_db = deployment.state_db
 
-    shoot_at = future_schedule(1)
+    shoot_at = deployment.schedule(1)
     body = {
         "request_id": "0",
         "created_at": "2026-01-15 08:00:00",
@@ -185,7 +185,7 @@ def test_capture_obtain_cleanup_roundtrip_via_c_module(
                 "type": "delete_action_outputs",
                 # 排期在两种取回完成后：清理依赖来源终态即可执行，
                 # 与正在拷贝的取回同窗口会先删除设备内容。
-                "scheduled_at": future_schedule(10),
+                "scheduled_at": deployment.schedule(10),
                 "params": {"source": {"action_name": "拍照"}},
             },
         ],
@@ -201,11 +201,30 @@ def test_capture_obtain_cleanup_roundtrip_via_c_module(
     try:
         demo.start()
         demo.submit(plan_path)
+        deadline = time.monotonic() + 180
+        deployment.freeze_at(shoot_at)
+        wait_for(lambda: query_state(state_db,
+            "SELECT r.id FROM operation_runs r JOIN actions a ON a.id=r.action_id"
+            " WHERE a.name='拍录' AND r.responsibility_key='start/' || a.id"
+            " AND r.status IN (3,4)") or None,
+            timeout_s=max(0, deadline - time.monotonic()),
+            message="录像 START 责任未收场", failure=failure)
+        # 真实录像 START 后推进其一秒目标；后续延时仍在原五秒窗口内。
+        frozen = deployment.freeze_at(deployment.schedule(1))
+        wait_for(lambda: query_state(state_db,
+            "SELECT r.id FROM operation_runs r JOIN actions a ON a.id=r.action_id"
+            " WHERE a.name='延时' AND r.responsibility_key='start/' || a.id"
+            " AND r.status IN (3,4)") or None,
+            timeout_s=max(0, deadline - time.monotonic()),
+            message="延时 START 责任未收场", failure=failure)
+        running = deployment.resume_clock()
+        assert running["utc_anchor_us"] == frozen["utc_us"]
+        assert running["monotonic_anchor_ns"] == frozen["monotonic_ns"]
         # 主程序驱动的 run 会话完成三种拍摄、两次取回与一次清理。
         wait_for(lambda: query_state(
             state_db, "SELECT status FROM actions ORDER BY id"
         ) == [(3,)] * 6 or None,
-            timeout_s=180, message="六动作未全部成功",
+            timeout_s=max(0, deadline - time.monotonic()), message="六动作未全部成功",
             failure=failure)
         assert query_state(state_db, "SELECT status FROM plans") == [(3,)]
         # 三种拍摄各自登记原片产物；被取回来源建立交付（部分取回）。
@@ -263,7 +282,7 @@ def test_capture_obtain_cleanup_roundtrip_via_c_module(
                 {
                     "name": "sync",
                     "type": "report_status",
-                    "scheduled_at": future_schedule(1),
+                    "scheduled_at": deployment.schedule(1),
                     "params": {"scope": "full"},
                 }
             ],
@@ -395,7 +414,7 @@ def test_late_cancel_roundtrip_via_c_module(
     """迟到取消经 C 模块递交链：录像与取回完成后交付已领取，取消计
     划按不可撤回收场；携带 ACK 的取消计划一次递交完成取消与累计
     确认吸收，交付字节与原请求终态保持。"""
-    deployment = Deployment(tmp_path)
+    deployment = Deployment(tmp_path, controlled_clock=True)
     spec = stub_driver_spec(
         {"1": [video_file("lc-clip")]},
         device_files={"lc-clip": _CANCEL_CLIP_CONTENT})
@@ -411,14 +430,14 @@ def test_late_cancel_roundtrip_via_c_module(
                 "name": "拍录",
                 "type": "camera_record",
                 "device_id": "cam-1",
-                "scheduled_at": future_schedule(1),
+                "scheduled_at": deployment.schedule(1),
                 "params": {"type": "video"},
                 "policy": {"max_delay_ms": 5000},
             },
             {
                 "name": "取回",
                 "type": "obtain_action_outputs",
-                "scheduled_at": future_schedule(2),
+                "scheduled_at": deployment.schedule(2),
                 "params": {
                     "source": {"action_name": "拍录"},
                     "purpose": "manual",
@@ -438,10 +457,20 @@ def test_late_cancel_roundtrip_via_c_module(
     try:
         demo.start()
         demo.submit(plan_path)
+        deadline = time.monotonic() + 180
+        deployment.freeze_at(body["actions"][0]["scheduled_at"])
+        wait_for(lambda: query_state(state_db,
+            "SELECT r.id FROM operation_runs r JOIN actions a ON a.id=r.action_id"
+            " WHERE a.name='拍录' AND r.responsibility_key='start/' || a.id"
+            " AND r.status IN (3,4)") or None,
+            timeout_s=max(0, deadline - time.monotonic()),
+            message="录像 START 责任未收场", failure=failure)
+        deployment.resume_clock()
         wait_for(lambda: query_state(
             state_db, "SELECT status FROM actions ORDER BY id"
         ) == [(3,), (3,)] or None,
-            timeout_s=180, message="录像与取回未全部成功",
+            timeout_s=max(0, deadline - time.monotonic()),
+            message="录像与取回未全部成功",
             failure=failure)
         report = wait_for(lambda: _report_with_statuses(
             deployment.ready,

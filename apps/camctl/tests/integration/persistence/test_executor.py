@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from dataclasses import replace
 
 import pytest
 
@@ -176,6 +177,26 @@ class TestAdmissionAndTimeout:
 
 
 class TestHandover:
+    async def test_duplicate_in_flight_key_preserves_worker_result_and_later_verification(self) -> None:
+        stock: list[FakeOwned] = []
+        executor = DbExecutor(_fake_factory_reopen(stock), capacity=2)
+        blocking = BlockingWrite()
+        original = executor.submit_write(blocking.job)
+        try:
+            assert await asyncio.get_running_loop().run_in_executor(None, blocking.started.wait, 5)
+            duplicate = replace(_write_job("wrong result"), key=blocking.key)
+            with pytest.raises(DbExecutorError):
+                executor.submit_write(duplicate)
+            assert not original.done()
+            blocking.release.set()
+            assert (await asyncio.wait_for(asyncio.shield(original), 5)).value == "done"
+            assert blocking.executions == 1
+            verification = executor.submit_write(replace(_write_job("verified"), key=blocking.key))
+            assert (await asyncio.wait_for(asyncio.shield(verification), 5)).value == "verified"
+        finally:
+            blocking.release.set()
+            await executor.close()
+
     async def test_started_job_survives_waiter_cancel(self) -> None:
         stock: list[FakeOwned] = []
         executor = DbExecutor(
@@ -233,7 +254,7 @@ class TestFailurePaths:
         assert outcome.kind is DbOutcomeKind.UNKNOWN
         assert isinstance(outcome.error, RuntimeError)
         assert created[0].connection.closed is True
-        outcome2 = await executor.submit_write(_write_job("after"))
+        outcome2 = await executor.submit_write(replace(_write_job("after"), key=bad.key))
         assert outcome2.kind is DbOutcomeKind.COMPLETED
         assert len(created) == 2
         await executor.close()
@@ -272,10 +293,13 @@ class TestFailurePaths:
             return FakeOwned(FakeConnection())
 
         executor = DbExecutor(factory, capacity=2, enqueue_timeout_seconds=1.0)
-        outcome = await executor.submit_write(_write_job("first"))
+        first = _write_job("first")
+        outcome = await executor.submit_write(first)
         assert outcome.kind is DbOutcomeKind.ROLLED_BACK
         assert isinstance(outcome.error, RuntimeError)
-        outcome2 = await executor.submit_write(_write_job("second"))
+        with pytest.raises(DbExecutorError):
+            await executor.withdraw(first.key)
+        outcome2 = await executor.submit_write(replace(_write_job("second"), key=first.key))
         assert outcome2.kind is DbOutcomeKind.COMPLETED
         await executor.close()
 

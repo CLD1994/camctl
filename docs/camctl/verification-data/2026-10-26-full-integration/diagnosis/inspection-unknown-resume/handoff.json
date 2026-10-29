@@ -1,0 +1,137 @@
+{
+  "commit": "69c9857f40b7d65385ec9538425c0849db9f56fd",
+  "baseline": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+  "worktree": "/tmp/camctl-merge-272f-inspection-resume",
+  "status_clean": true,
+  "source": "merge regression: a775 parent complete phase used RequiredSaveStage that cleared task; upstream SharedSave caches successful return; merged inspection UNKNOWN returns normally before release, making partial progress sticky success",
+  "contract": "Read result, inspection result and slot release remain a single original responsibility. UNKNOWN stops dependent release and retains original input/key. Explicit recovery resumes failed complete phase. Late observers cannot replay completed phase or replace later pending. Waiter cancellation is separate from actual business completion. Actual COMPLETED notification errors preserve identity after applied facts.",
+  "change": "Private incomplete marker leaves SharedSave phase retryable; shielded adapter converts only that marker back to waiting, then delivers external waiter cancellation. Preserve true read delivery error ahead of incomplete marker. Explicit retry checks same held settlement identity.",
+  "files": [
+    "apps/camctl/src/camctl/capture/media_flow.py",
+    "apps/camctl/tests/unit/capture/test_internal_read_save_owner.py"
+  ],
+  "verification": {
+    "red-original": {
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/bootstrap/test_inspection_read_dispatch.py::test_inspection_binding_failure_unknown_reuses_original_requests[False-inspection]",
+        "apps/camctl/tests/integration/bootstrap/test_inspection_read_dispatch.py::test_inspection_binding_failure_unknown_reuses_original_requests[True-inspection]",
+        "-q",
+        "--junitxml=/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/red-original.xml",
+        "--basetemp=/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/red-original-tmp"
+      ],
+      "cwd": "/tmp/camctl-merge-272f-inspection-resume",
+      "pid": 2028660,
+      "module_file": "/tmp/camctl-merge-272f-inspection-resume/apps/camctl/src/camctl/capture/media_flow.py",
+      "PYTHONPATH": "/tmp/camctl-merge-272f-inspection-resume/apps/camctl/src:/tmp/camctl-merge-272f-inspection-resume/apps/camctl/tests:",
+      "source": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+      "python": "Python 3.11.17",
+      "exit_code": 1,
+      "timed_out": false,
+      "elapsed_seconds": 7.081807994007249,
+      "process_reaped": true
+    },
+    "red-unit": {
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/unit/capture/test_internal_read_save_owner.py",
+        "-q",
+        "--junitxml=/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/red-unit.xml",
+        "--basetemp=/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/red-unit-tmp"
+      ],
+      "cwd": "/tmp/camctl-merge-272f-inspection-resume",
+      "pid": 2034746,
+      "module_file": "/tmp/camctl-merge-272f-inspection-resume/apps/camctl/src/camctl/capture/media_flow.py",
+      "PYTHONPATH": "/tmp/camctl-merge-272f-inspection-resume/apps/camctl/src:/tmp/camctl-merge-272f-inspection-resume/apps/camctl/tests:",
+      "source": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+      "python": "Python 3.11.17",
+      "exit_code": 1,
+      "timed_out": false,
+      "elapsed_seconds": 3.0867663889948744,
+      "process_reaped": true
+    },
+    "green-original": {
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/bootstrap/test_inspection_read_dispatch.py::test_inspection_binding_failure_unknown_reuses_original_requests[False-inspection]",
+        "apps/camctl/tests/integration/bootstrap/test_inspection_read_dispatch.py::test_inspection_binding_failure_unknown_reuses_original_requests[True-inspection]",
+        "-q",
+        "--junitxml=/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/green-original.xml",
+        "--basetemp=/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/green-original-tmp"
+      ],
+      "cwd": "/tmp/camctl-merge-272f-inspection-resume",
+      "pid": 2037348,
+      "module_file": "/tmp/camctl-merge-272f-inspection-resume/apps/camctl/src/camctl/capture/media_flow.py",
+      "PYTHONPATH": "/tmp/camctl-merge-272f-inspection-resume/apps/camctl/src:/tmp/camctl-merge-272f-inspection-resume/apps/camctl/tests:",
+      "source": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+      "python": "Python 3.11.17",
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 3.192644114998984,
+      "process_reaped": true
+    },
+    "green-narrow-unit": {
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/unit/capture/test_internal_read_save_owner.py",
+        "apps/camctl/tests/unit/capture/test_media_stopped_read_resume.py",
+        "apps/camctl/tests/unit/outputs/test_read_save_handoff.py",
+        "-q",
+        "--junitxml=/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/green-narrow-unit.xml",
+        "--basetemp=/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/green-narrow-unit-tmp"
+      ],
+      "cwd": "/tmp/camctl-merge-272f-inspection-resume",
+      "pid": 2041145,
+      "module_file": "/tmp/camctl-merge-272f-inspection-resume/apps/camctl/src/camctl/capture/media_flow.py",
+      "PYTHONPATH": "/tmp/camctl-merge-272f-inspection-resume/apps/camctl/src:/tmp/camctl-merge-272f-inspection-resume/apps/camctl/tests:",
+      "source": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+      "python": "Python 3.11.17",
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 4.342000339005608,
+      "process_reaped": true
+    },
+    "green-inspection-file": {
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/bootstrap/test_inspection_read_dispatch.py",
+        "-q",
+        "--junitxml=/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/green-inspection-file.xml",
+        "--basetemp=/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/green-inspection-file-tmp"
+      ],
+      "cwd": "/tmp/camctl-merge-272f-inspection-resume",
+      "pid": 2041564,
+      "module_file": "/tmp/camctl-merge-272f-inspection-resume/apps/camctl/src/camctl/capture/media_flow.py",
+      "PYTHONPATH": "/tmp/camctl-merge-272f-inspection-resume/apps/camctl/src:/tmp/camctl-merge-272f-inspection-resume/apps/camctl/tests:",
+      "source": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+      "python": "Python 3.11.17",
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 9.376153997000074,
+      "process_reaped": true
+    }
+  },
+  "verified_counts": {
+    "original_red_fail": 2,
+    "new_unit_red_fail": 2,
+    "original_green_pass": 2,
+    "narrow_unit_pass": 86,
+    "inspection_file_pass": 24
+  },
+  "counting": "Original 2 green and internal read file subsets are included in later complete file/86 unit runs; do not add them as unique coverage.",
+  "limits": "No full bootstrap/session/root suite rerun; inheriting production bugs such as missing closing import not changed.",
+  "at": "2026-10-26T01:08:05.779599+00:00",
+  "final_provenance": "/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/final-provenance.json",
+  "source_receipt_boundary": "Each run receipt source field records HEAD before command. Original red ran clean 9fbb; green runs used explicit module_file/PYTHONPATH in the independent worktree plus the then-uncommitted repair. They must not be described as clean-9fbb green tests or tests of an already committed 69c. Final committed repair is proven byte-equal to integrated root at 4e42; older green receipts have not been rewritten.",
+  "integrated_commit": "4e42c81c965ecb6e901abf5f477b09cb163dc29e"
+}

@@ -161,7 +161,7 @@
 
 ## 文件拷贝
 
-`file_copies` 通过 `delivery_id` 或 `processing_id` 指定唯一用途，两者恰好一个非空；前者关联普通交付，后者关联录像内部处理。`source_device_file_id` 或 `source_intermediate_file_id` 恰好一个非空，`target_file_id` 必填且不能等于本地主机源文件。唯一读取流程通过 `operation_runs.copy_id` 单向引用该拷贝；读取次数与尝试只由公共操作表保存。
+`file_copies` 通过 `delivery_id`、`processing_id` 或 `inspection_id` 指定唯一用途，三者恰好一个非空；分别关联普通交付、单原片录像内部处理或逐段媒体检查。逐段检查沿固定成员使用独立副本，不与单原片处理共用输入槽。`source_device_file_id` 或 `source_intermediate_file_id` 恰好一个非空，`target_file_id` 必填且不能等于本地主机源文件。唯一读取流程通过 `operation_runs.copy_id` 单向引用该拷贝；读取次数与尝试只由公共操作表保存。
 
 | 字段 | 含义与初始值 |
 | --- | --- |
@@ -185,7 +185,7 @@
 
 来源产物使用 `outputs_source` 按 ID 分页；预览及修复成品通过 `origins_reverse` 反查并验证角色唯一性。设备文件按稳定身份唯一键复用，通过 `device_files_source` 枚举本次来源文件。取回的交付使用 `delivery_action`；未完成交接及独立撤回分别使用 `delivery_recovery`、`delivery_withdrawals`，不依赖原动作是否仍在运行。
 
-中间文件按责任外键查询，历史清理使用 `intermediate_cleanup` 及 `id > cursor` / 固定范围上界分批读取，到末尾后依预算最多绕回一次。拷贝通过交付或录像处理唯一键定位。文件操作必须在数据库事务外完成；实际结果与相关依赖、产物、交付及历史在规定的结果事务中一起保存。
+中间文件按责任外键查询，历史清理使用 `intermediate_cleanup` 及 `id > cursor` / 固定范围上界分批读取，到末尾后依预算最多绕回一次。拷贝通过交付、单原片录像处理或逐段检查的唯一键定位；检查副本还须核对检查动作、集合、成员、源文件与原读取流程的归属一致。文件操作必须在数据库事务外完成；实际结果与相关依赖、产物、交付及历史在规定的结果事务中一起保存。
 
 跨表校验包含：来源绑定相同、正式登记的文件已经完成、产物与来源角色一致、读取流程责任一致、交付与取回项一致、准备状态对应完整校验、文件提升后不再自动清理。失败或未知不能通过清空外键消除责任。
 

@@ -6,28 +6,23 @@ from unittest.mock import create_autospec
 import pytest
 
 from camctl.bootstrap.capture_assembly import DriverResultListing
-from camctl.capture.handlers import ListingPhase, ListingRound, _listing_round, _finish_listing_result, _saved_result_listing, _register_listing
-from camctl.capture.result_scans import SavedResultEntries
+from camctl.persistence.repositories.capture import CaptureRepository
+from camctl.persistence.models import DbOutcome
+from ..support.result_cases import result_case, result_case_for, current_result_ticket, saved_result_pages
 from camctl.capture.handlers import capture_handler
-from camctl.capture.handlers import _advance_recording_outcome
-from camctl.capture.recording import RecordingPhase
-from types import SimpleNamespace
 import json
-from camctl.operations.attempts import RunOutcome
 from camctl.operations.attempts import AttemptConfig
 from camctl.operations.models import CallOutcome, AttemptStatus, ErrorValue, EffectState, Settlement, SettlementBasis, EvidenceValue
 from decimal import Decimal
 from camctl.devices.ports import ResultDriver, DeviceCallResult
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.contracts.values import ConsistencyError
-from .result_consumer_fixtures import consumer_world, ResultCatalog
-from .test_capture_contract import _runtime
+from .result_consumer_fixtures import ResultCatalog
 from .test_result_page_history import _REGISTRY, _BINDING, _CURSOR, _actual, _entry, _baseline_world, _request, _path_entry
 from .test_baseline_start import owned
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
 from camctl.contracts.workflow_errors import registered_error
-from .test_result_file_recovery import FileWriteFault
 
 pytestmark = pytest.mark.asyncio
 
@@ -41,21 +36,36 @@ def _pages(runtime, *, first=None, last=None, finalized=True):
             cursor=cursor, next_cursor=_CURSOR if cursor is None else None, finalized=finalized and cursor is not None)
         return DeviceCallResult.from_outcome(actual)
     driver.list_results.side_effect = read
-    runtime.evidence = _REGISTRY
-    runtime.results = DriverResultListing(driver, _BINDING, _REGISTRY)
+    try:
+        case = result_case_for()
+    except RuntimeError:
+        runtime.evidence = _REGISTRY
+        runtime.results = DriverResultListing(driver, _BINDING, _REGISTRY)
+    else:
+        case.results.delegate = DriverResultListing(driver, _BINDING, _REGISTRY)
     return driver
 
 
 async def test_runtime_reads_and_saves_two_pages_in_one_results_attempt(tmp_path):
-    owned, runtime, action_id, _ = await consumer_world(tmp_path, "record")
+    class ObserveConclusion(CaptureRepository):
+        def __init__(self):
+            self.before = []
+        def finish_result_check(self, finish, confirm, key, owned, **options):
+            self.before.append(owned.connection.execute(
+                "SELECT status,result_json FROM operation_attempts WHERE run_id=?",
+                (finish.ticket.run_id,)).fetchone())
+            return super().finish_result_check(finish, confirm, key, owned, **options)
+    owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "record")
     driver = _pages(runtime)
+    observer = ObserveConclusion()
+    runtime.capture = observer
     try:
-        listing = await _listing_round(runtime, action_id)
-        assert listing.phase is ListingPhase.LISTED
-        assert [entry.identity for entry in listing.entries] == ["/DCIM/a.mp4", "/DCIM/b.mp4"]
-        assert listing.scan_complete and listing.set_finalized
+        await capture_handler(handler)(action_id, runtime)
+        pages = saved_result_pages(owned, action_id)
+        assert [entry.identity for page in pages for entry in page.page.entries] == ["/DCIM/a.mp4", "/DCIM/b.mp4"]
+        assert pages[-1].page.scan_complete and pages[-1].page.set_finalized
+        assert observer.before == [(1, None)]
         assert owned.connection.execute("SELECT attempts_used FROM operation_runs WHERE kind=7").fetchone() == (1,)
-        assert owned.connection.execute("SELECT status,result_json FROM operation_attempts WHERE run_id=?", (listing.ticket.run_id,)).fetchone() == (1, None)
         assert owned.connection.execute("SELECT COUNT(*) FROM device_files").fetchone() == (2,)
         assert driver.list_results.await_count == 2
     finally:
@@ -63,60 +73,63 @@ async def test_runtime_reads_and_saves_two_pages_in_one_results_attempt(tmp_path
 
 
 async def test_runtime_reopens_unknown_first_page_before_reading_second_page(tmp_path):
-    owned, runtime, action_id, _ = await consumer_world(tmp_path, "record")
+    class UnknownPage(CaptureRepository):
+        def __init__(self):
+            self.requests = []
+        def save_result_page(self, request, key, owned):
+            self.requests.append((request, key))
+            saved = super().save_result_page(request, key, owned)
+            assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+            return DbOutcome(DbOutcomeKind.UNKNOWN, error=ConsistencyError("原页提交回执未知"))
+    owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "record")
     path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
     driver = _pages(runtime)
-    fault = FileWriteFault(owned.connection, "commit_after")
-    runtime.owned = replace(owned, connection=fault)
+    repository = UnknownPage()
+    runtime.capture = repository
     try:
         with pytest.raises(ConsistencyError):
-            await _listing_round(runtime, action_id)
+            await capture_handler(handler)(action_id, runtime)
         driver.list_results.assert_awaited_once()
-        pending, = runtime.pending_result_scans.values()
-        original = pending.saves.pending
-        assert original.request.page_no == 1 and not pending.finished
+        original, key = repository.requests[0]
+        assert all(request == original and saved_key == key for request, saved_key in repository.requests)
+        assert original.page_no == 1
         owned.connection.close()
         owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-        resumed = _runtime(owned)
-        resumed.results, resumed.evidence = runtime.results, runtime.evidence
-        resumed.pending_result_scans = runtime.pending_result_scans
-        resumed.wall_us = lambda: original.request.occurred_at + 5_000_000
-        listing = await _listing_round(resumed, action_id)
-        assert listing.phase is ListingPhase.LISTED and listing.set_finalized
+        resumed = await result_case_for().reopen(owned)
+        result_case_for().clock.wall = original.occurred_at + 5_000_000
+        await capture_handler(handler)(action_id, resumed)
         assert driver.list_results.await_count == 2
-        pages = resumed.capture.read_result_pages(listing.ticket, None, 128, owned).items
-        assert len(pages) == 2 and pages[0].occurred_at == original.request.occurred_at
-        assert pages[0].page.outcome == original.request.outcome.outcome
+        pages = saved_result_pages(owned, action_id)
+        assert len(pages) == 2 and pages[0].occurred_at == original.occurred_at
+        assert pages[0].page.outcome == original.outcome.outcome
+        assert pages[-1].page.scan_complete and pages[-1].page.set_finalized
     finally:
         owned.connection.close()
 
 
 async def test_closed_scan_recovers_original_pages_without_device_or_current_clock(tmp_path):
-    owned, runtime, action_id, _ = await consumer_world(tmp_path, "record")
+    owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "record")
     driver = _pages(runtime)
     try:
-        original = await _listing_round(runtime, action_id)
-        _finish_listing_result(runtime, original, end_run=RunOutcome.SUCCEEDED)
-        resumed = _runtime(owned)
-        resumed.wall_us = lambda: pytest.fail("已保存的结果输入不能取得新的时钟")
-        listing = _saved_result_listing(resumed, action_id)
-        assert listing.phase is ListingPhase.CLOSED and listing.already_saved
-        assert listing.set_finalized and listing.scan_complete
-        assert [entry.identity for entry in listing.entries] == ["/DCIM/a.mp4", "/DCIM/b.mp4"]
-        assert listing.outcome == original.outcome and listing.occurred_at == original.occurred_at
+        await capture_handler(handler)(action_id, runtime)
+        original = saved_result_pages(owned, action_id)
+        resumed = await result_case_for().reopen(owned, cold=True)
+        result_case_for().clock.wall_error = "已保存的结果输入不能取得新的时钟"
+        pages = saved_result_pages(owned, action_id)
+        assert pages == original
+        assert pages[-1].page.set_finalized and pages[-1].page.scan_complete
+        assert [entry.identity for page in pages for entry in page.page.entries] == ["/DCIM/a.mp4", "/DCIM/b.mp4"]
         assert driver.list_results.await_count == 2
     finally:
         owned.connection.close()
 
 
 async def test_page_registration_resolves_preview_from_another_page(tmp_path):
-    owned, runtime, action_id, _ = await consumer_world(tmp_path, "record")
+    owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "record")
     preview = {**_entry("a"), "paired_identity": "/DCIM/b.mp4", "kind": "other"}
     _pages(runtime, first=[preview])
     try:
-        listing = await _listing_round(runtime, action_id)
-        registered = _register_listing(runtime, action_id, listing)
-        assert len(tuple(registered)) == 2
+        await capture_handler(handler)(action_id, runtime)
         rows = owned.connection.execute("SELECT role,original_device_file_id,completion_state,source_action_id FROM device_files ORDER BY id").fetchall()
         assert rows == [(3, 2, 3, action_id), (2, None, 3, action_id)]
     finally:
@@ -130,12 +143,21 @@ async def test_page_registration_uses_original_fixed_baseline_difference(owned, 
     request = _request(runtime, ticket, actual)
     receipt = runtime.capture.save_result_page(request, new_operation_key(), owned)
     assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-    entries = SavedResultEntries(runtime.capture, owned, receipt.value)
-    listing = ListingRound(ListingPhase.LISTED, entries, ticket, actual, request.occurred_at,
-                           scan_complete=True, set_finalized=True)
-    registered = tuple(_register_listing(runtime, 1, listing))
-    assert len(registered) == 1 and registered[0][0].file_id == f"{root}/b.mp4"
-    import json
+    from camctl.capture.files import FileCompletionSave, OwnershipSave
+    page = runtime.capture.read_result_page(receipt.value, owned)
+    assert len(page.file_ids) == 1
+    identity, file_id = page.file_ids[0]
+    assert identity == f"{root}/b.mp4"
+    for save, command in (
+        (runtime.capture.save_file_ownership,
+         OwnershipSave(file_id, 1, 2, 2, {"result_page_event_id": page.ref.event_id},
+                       page.occurred_at, activity_id=int(ticket.target_id))),
+        (runtime.capture.save_file_completion,
+         FileCompletionSave(file_id, 3, page.occurred_at, basis=1,
+                            observation={"size_verified": True}, size_bytes=50)),
+    ):
+        saved = save(command, new_operation_key(), owned)
+        assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
     row = owned.connection.execute("SELECT source_action_id,ownership_evidence_json,completion_state FROM device_files").fetchone()
     assert row[0] == 1 and row[2] == 3
     assert json.loads(row[1])["method"] == 2 and json.loads(row[1])["activity_id"] == int(ticket.target_id)
@@ -143,7 +165,7 @@ async def test_page_registration_uses_original_fixed_baseline_difference(owned, 
 
 @pytest.mark.parametrize("case", ["photos", "empty", "wrong_kind", "not_finalized", "incomplete"])
 async def test_photo_consumes_original_pages_and_precise_output_failure(tmp_path, case):
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, "photo", independent_activity=True)
+    owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "photo", independent_activity=True)
     first = [{**_entry("a"), "kind": "photo", "complete": case != "incomplete"}]
     last = [{**_entry("b"), "kind": "photo"}]
     if case == "empty":
@@ -170,7 +192,7 @@ async def test_photo_consumes_original_pages_and_precise_output_failure(tmp_path
 
 @pytest.mark.parametrize("case", ["video", "empty", "wrong_kind"])
 async def test_recording_consumes_finalized_pages_and_distinguishes_output_failures(tmp_path, case):
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, "record", independent_activity=True)
+    owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "record", independent_activity=True)
     if case == "empty":
         first = last = []
     elif case == "wrong_kind":
@@ -205,13 +227,13 @@ async def test_recording_uses_product_rules_fixed_at_acceptance(tmp_path, case):
             definition = super().parameter_definition(device_id, action_type, parameter_type)
             return replace(definition, task_factory=lambda params: replace(
                 definition.task_factory(params), product_rules=tuple(rules)))
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, "record", catalog=Catalog())
+    owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "record", catalog=Catalog())
     first, last = _entry("a"), _entry("b")
     if case in ("wrong_format", "unknown_format"):
         first["format_id"] = last["format_id"] = "mov" if case == "wrong_format" else None
     _pages(runtime, first=[first], last=[last])
     try:
-        assert runtime.action(action_id)["execution_spec_json"]["product_rules"] == rules
+        assert (await runtime.action(action_id))["execution_spec_json"]["product_rules"] == rules
         await capture_handler(handler)(action_id, runtime)
         status, error_code, details = owned.connection.execute("SELECT status,error_code,error_details_json FROM actions").fetchone()
         if case == "matching":
@@ -228,7 +250,7 @@ async def test_recording_uses_product_rules_fixed_at_acceptance(tmp_path, case):
 
 @pytest.mark.parametrize("case", ["video", "empty", "wrong_kind"])
 async def test_timelapse_uses_wait_and_finalized_pages_without_fabricating_device_end(tmp_path, case):
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, "timelapse", independent_activity=True)
+    owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "timelapse", independent_activity=True)
     first = last = [] if case == "empty" else None
     if case == "wrong_kind":
         first, last = [{**_entry("a"), "kind": "photo"}], []
@@ -253,25 +275,25 @@ async def test_timelapse_uses_wait_and_finalized_pages_without_fabricating_devic
 
 
 async def test_later_page_read_error_keeps_previous_completed_files_at_exhaustion(tmp_path):
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, "record")
+    owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "record",
+        assembly_options={"check_config": AttemptConfig(2, Decimal("1.25"), Decimal("2"))})
     driver = _pages(runtime, finalized=False)
-    runtime.check_config = AttemptConfig(2, Decimal("1.25"), Decimal("2"))
     try:
         await capture_handler(handler)(action_id, runtime)
-        assert runtime.action(action_id)["status"] == 2
+        assert (await runtime.action(action_id))["status"] == 2
         actual = CallOutcome(status=AttemptStatus.FAILED,
             error=ErrorValue("directory_read_failed", "device", {"received_bytes": 17}),
             effect=EffectState.UNKNOWN,
             settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("results_returned", 1, {})))
         driver.list_results.return_value = DeviceCallResult.from_outcome(actual)
         driver.list_results.side_effect = None
-        runtime.monotonic_ns = lambda: 70_000_000_000
-        runtime.wall_us = lambda: 1_750_000_070_000_000
+        result_case_for().clock.monotonic = 70_000_000_000
+        result_case_for().clock.wall = 1_750_000_070_000_000
         await capture_handler(handler)(action_id, runtime)
-        runtime.monotonic_ns = lambda: 75_000_000_000
-        runtime.wall_us = lambda: 1_750_000_075_000_000
+        result_case_for().clock.monotonic = 75_000_000_000
+        result_case_for().clock.wall = 1_750_000_075_000_000
         await capture_handler(handler)(action_id, runtime)
-        assert runtime.action(action_id)["status"] == 4
+        assert (await runtime.action(action_id))["status"] == 4
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs WHERE source_action_id=?", (action_id,)).fetchone() == (2,)
         assert driver.list_results.await_count == 3
         error, = owned.connection.execute("SELECT error_json FROM operation_attempts WHERE run_id IN (SELECT id FROM operation_runs WHERE kind=7) ORDER BY attempt_no DESC LIMIT 1").fetchone()
@@ -281,47 +303,52 @@ async def test_later_page_read_error_keeps_previous_completed_files_at_exhaustio
 
 
 async def test_source_file_consumer_continues_after_its_first_batch(tmp_path):
-    owned, runtime, action_id, _ = await consumer_world(tmp_path, "record")
+    owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "record")
     _pages(runtime, first=[_entry(f"a{index:02d}") for index in range(33)], last=[])
     try:
-        listing = await _listing_round(runtime, action_id)
-        registered = _register_listing(runtime, action_id, listing)
-        first = runtime.capture.read_result_sources(listing.ticket, None, 32, owned)
+        await capture_handler(handler)(action_id, runtime)
+        ticket = current_result_ticket(owned, action_id)
+        first = runtime.capture.read_result_sources(ticket, None, 32, owned)
         assert len(first.items) == 32 and first.next_cursor == 32
-        tail = runtime.capture.read_result_sources(listing.ticket, first.next_cursor, 32, owned)
+        tail = runtime.capture.read_result_sources(ticket, first.next_cursor, 32, owned)
         assert [entry.identity for entry, _, _ in tail.items] == ["/DCIM/a32.mp4"] and tail.next_cursor is None
-        assert len(tuple(registered)) == 33
+        assert owned.connection.execute("SELECT COUNT(*) FROM device_files WHERE source_action_id=?", (action_id,)).fetchone() == (33,)
     finally:
         owned.connection.close()
 
 
-@pytest.mark.parametrize("cached", [False, True])
-async def test_completed_scan_pending_disposition_uses_reopened_database(tmp_path, cached):
-    owned, runtime, action_id, _ = await consumer_world(tmp_path, "record")
+@pytest.mark.parametrize("registered", [False, True])
+async def test_completed_scan_pending_disposition_uses_reopened_database(tmp_path, registered):
+    class UnknownDisposition(CaptureRepository):
+        def finish_result_check(self, finish, confirm, key, owned, **options):
+            saved = super().finish_result_check(finish, confirm, key, owned, **options)
+            if not registered:
+                assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+                return DbOutcome(DbOutcomeKind.UNKNOWN, error=ConsistencyError("原结果交接回执未知"))
+            return saved
+        def finish_capture(self, request, key, owned):
+            saved = super().finish_capture(request, key, owned)
+            assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+            return DbOutcome(DbOutcomeKind.UNKNOWN, error=ConsistencyError("已登记文件的完成回执未知"))
+    owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "record")
     path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
     driver = _pages(runtime)
+    runtime.capture = UnknownDisposition()
     try:
-        original = await _listing_round(runtime, action_id)
-        if cached:
-            registered = _register_listing(runtime, action_id, original)
-            runtime.listing_cache = {action_id: (registered.entries, registered)}
+        with pytest.raises(ConsistencyError):
+            await capture_handler(handler)(action_id, runtime)
+        original = saved_result_pages(owned, action_id)
         owned.connection.close()
         owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-        resumed = _runtime(owned)
-        resumed.pending_start_results = runtime.pending_start_results
-        resumed.pending_result_scans = runtime.pending_result_scans
-        resumed.listing_cache = runtime.listing_cache
-        resumed.wall_us = lambda: pytest.fail("原轮次不能读取新的时钟")
-        held = await _listing_round(resumed, action_id)
-        assert held.set_finalized and held.scan_complete
-        assert held.outcome is original.outcome and held.occurred_at == original.occurred_at
-        assert [entry.identity for entry in held.entries] == ["/DCIM/a.mp4", "/DCIM/b.mp4"]
+        resumed = await result_case_for().reopen(owned)
+        result_case_for().clock.wall_error = "原轮次读取不能取得新的时钟"
+        held = saved_result_pages(owned, action_id)
+        assert held == original and held[-1].page.set_finalized and held[-1].page.scan_complete
+        assert [entry.identity for page in held for entry in page.page.entries] == ["/DCIM/a.mp4", "/DCIM/b.mp4"]
         assert driver.list_results.await_count == 2
-        if cached:
-            resumed.wall_us = runtime.wall_us
-            await _advance_recording_outcome(resumed, resumed.action(action_id),
-                SimpleNamespace(phase=RecordingPhase.CONTROL_COMPLETE))
-            assert resumed.action(action_id)["status"] == 3
+        result_case_for().clock.wall_error = None
+        await capture_handler(handler)(action_id, resumed)
+        assert (await resumed.action(action_id))["status"] == 3
     finally:
         owned.connection.close()
 
@@ -335,13 +362,13 @@ async def test_timelapse_accepts_declared_photo_and_video_products(tmp_path):
             definition = super().parameter_definition(device_id, action_type, parameter_type)
             return replace(definition, task_factory=lambda params: replace(
                 definition.task_factory(params), product_rules=rules))
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, "timelapse", catalog=Catalog())
+    owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "timelapse", catalog=Catalog())
     photo = {**_entry("a"), "identity": "/DCIM/a.jpg", "locator": {"path": "/DCIM/a.jpg"},
              "kind": "photo", "format_id": "jpeg"}
     _pages(runtime, first=[photo])
     try:
         await capture_handler(handler)(action_id, runtime)
-        assert runtime.action(action_id)["status"] == 3
+        assert (await runtime.action(action_id))["status"] == 3
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs WHERE source_action_id=?", (action_id,)).fetchone() == (2,)
         assert owned.connection.execute("SELECT completion_basis FROM device_activities").fetchone() == (3,)
     finally:

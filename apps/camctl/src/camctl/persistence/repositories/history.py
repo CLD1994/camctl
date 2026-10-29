@@ -1606,7 +1606,7 @@ class SqliteSnapshotStore:
         except asyncio.CancelledError:
             if not future.done():
                 try:
-                    await self._executor.withdraw(job.key)
+                    await self._executor.withdraw(job.key, expected_result=future)
                 except DbExecutorError:
                     # 工作已结束但结果投递尚未到事件循环时，key已离开队列；
                     # 原Future仍是唯一真实结果责任，继续等待其投递。

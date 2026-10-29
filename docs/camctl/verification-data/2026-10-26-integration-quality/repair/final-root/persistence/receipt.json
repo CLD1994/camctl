@@ -1,0 +1,24 @@
+{
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "apps/camctl/tests/integration/persistence/test_executor.py",
+    "-q",
+    "-x",
+    "--durations=15",
+    "--junitxml=/tmp/camctl-quality-repair-evidence/final-root/persistence/result.xml"
+  ],
+  "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+  "head": "3fcc19004845b5e96f2af0bce4045db959972174",
+  "started_at_utc": "2026-10-25T20:37:10.977286+00:00",
+  "environment_override": {
+    "PYTHONPATH": "apps/camctl/src"
+  },
+  "pid": 1705475,
+  "exit_code": 0,
+  "finished_at_utc": "2026-10-25T20:37:11.907407+00:00",
+  "wall_seconds": 0.9300890429876745,
+  "head_after": "3fcc19004845b5e96f2af0bce4045db959972174",
+  "tracked_status_after": ""
+}

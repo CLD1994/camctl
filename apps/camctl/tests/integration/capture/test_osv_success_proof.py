@@ -1,5 +1,4 @@
 """修复成功的保存、独立守卫及提升共同核对原媒体事实与身份。"""
-from copy import deepcopy
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
@@ -12,23 +11,19 @@ from camctl.contracts.json_values import parse_exact_json
 from camctl.persistence.transaction import encode_json_value
 from camctl.contracts.values import new_operation_key
 from camctl.host_files.media import MediaProbe
-from camctl.host_files.tasks import FileTaskResult, FileTaskId
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
-from .test_osv_input_failure import prepared_input, Tools
+from .test_osv_input_failure import prepared_input
 from .test_recording_media_link import _NOW
-
-
-class PauseTools(Tools):
-    async def repair(self, input, output, **kwargs):
-        return FileTaskResult(FileTaskId("not-started"), ran=False)
+from ..support.capture_media_cases import (
+    processing_success_event, promotion_event, validate_media_event, capture_finish_request, media_cases,
+)
 
 
 async def prepared_repair(tmp_path, *, check_required=False):
-    owned, runtime, flow, source_id, source, tools, entry = prepared_input(tmp_path, check_required, "valid")
-    flow.tools = PauseTools(source)
-    await run_recording_media(flow, 1, 41, source_id, target_extension="osv")
-    status = load_processing_status(owned, 41)
+    owned, runtime, flow, source_id, source, tools, entry = (await prepared_input(tmp_path, check_required, "valid"))
+    await run_recording_media(flow, 1, 1, source_id, target_extension="osv")
+    status = load_processing_status(owned, 1)
     assert status.repair_state == 4
     output = replace(source, duration_s=Decimal("60"), streams=tuple(
         replace(s, duration_s=Decimal("60")) for s in source.streams if s.attached_pic is not True))
@@ -54,8 +49,8 @@ async def test_saved_reliable_input_failure_survives_later_observation_and_missi
         if not copy_present:
             owned.connection.execute("DELETE FROM file_copies")
         owned.connection.commit()
-        assert any(issue.code == "container_too_short" for issue in saved_osv_input_issues(owned.connection,41,60000))
-        assert CaptureRepository().complete_repair_output(RepairSuccess(41,output_id,2048,"a"*64,_NOW+200,
+        assert any(issue.code == "container_too_short" for issue in saved_osv_input_issues(owned.connection,1,60000))
+        assert CaptureRepository().complete_repair_output(RepairSuccess(1,output_id,2048,"a"*64,_NOW+200,
             output_probe=output),new_operation_key(),owned).kind is DbOutcomeKind.ROLLED_BACK
     finally:
         owned.connection.close()
@@ -109,7 +104,7 @@ async def test_both_success_commands_reject_incomplete_media_or_wrong_identity(t
                 "source_container":"container", "source_stream_short":"short_video"}[fault]
             alter_source_history(owned, lambda original: probe_document(mutate(read_probe(original), mutation)))
         if fault == "source_identity":
-            owned.connection.execute("UPDATE recording_processing SET source_device_file_id=NULL WHERE id=41")
+            owned.connection.execute("UPDATE recording_processing SET source_device_file_id=NULL WHERE id=1")
             owned.connection.commit()
         if fault == "copy_missing":
             owned.connection.execute("DELETE FROM file_copies")
@@ -131,12 +126,12 @@ async def test_both_success_commands_reject_incomplete_media_or_wrong_identity(t
         if not fault.startswith(("source_", "copy_")) and fault != "wrong_output":
             output = mutate(output, fault)
         if entry == "complete":
-            command = RepairSuccess(41, output_id, 2048, "a"*64, _NOW+200, output_probe=output)
+            command = RepairSuccess(1, output_id, 2048, "a"*64, _NOW+200, output_probe=output)
             save = CaptureRepository().complete_repair_output
         else:
             owned.connection.execute("UPDATE intermediate_files SET size_bytes=2048,sha256=? WHERE id=?", ("a"*64, output_id))
             owned.connection.commit()
-            command = RepairResultSave(41, RepairOutcome.SUCCEEDED, _NOW+200,
+            command = RepairResultSave(1, RepairOutcome.SUCCEEDED, _NOW+200,
                 output_file_id=output_id, output_probe=output)
             save = CaptureRepository().save_repair_result
         before = tuple(owned.connection.iterdump())
@@ -150,33 +145,23 @@ async def test_both_success_commands_reject_incomplete_media_or_wrong_identity(t
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scope", ["missing", "wrong_plan"])
 async def test_independent_success_guards_require_the_original_plan_reader(tmp_path, scope):
-    from types import SimpleNamespace
-    from camctl.history.reads import PlanReadScope
     from camctl.history.validators import EventValidationError
-    from camctl.persistence.event_reads import SqlEventReads
-    from camctl.persistence.repositories.capture import _RepairSuccessCommand, _require_repair_success
-    from camctl.persistence.repositories.outputs import _processed_processing_guard
-    from camctl.persistence.transaction import TransactionScope
     owned, output_id, source, output = await prepared_repair(tmp_path)
     try:
-        command = RepairSuccess(41,output_id,2048,"a"*64,_NOW+200,output_probe=output)
-        owned.connection.execute("BEGIN")
-        last = owned.connection.execute("SELECT MAX(id) FROM history_transactions").fetchone()[0]
-        last_event = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
-        plan = _RepairSuccessCommand(command,new_operation_key()).plan(TransactionScope(owned.connection,last,last_event))
-        state = deepcopy(plan.state_rows)
-        for row in plan.events[0].rows:
-            state[row.table][row.row_id].update(row.after.values)
-        context = SimpleNamespace(state_rows=state,current_reads=None if scope == "missing" else
-            SqlEventReads(owned.connection,PlanReadScope(2,128)))
+        command = RepairSuccess(1, output_id, 2048, 'a' * 64, _NOW + 200, output_probe=output)
+        event, proposal = processing_success_event(owned, command)
+        owned.connection.execute('BEGIN')
+        validate_media_event(owned, event, proposal)
         with pytest.raises(EventValidationError):
-            _processed_processing_guard(plan.events[-1],context)
+            validate_media_event(owned, event, proposal, scope=scope)
         owned.connection.rollback()
-        assert CaptureRepository().complete_repair_output(command,new_operation_key(),owned).kind is DbOutcomeKind.COMPLETED
-        owned.connection.execute("BEGIN")
-        context.state_rows["recording_processing"][41].update(repair_state=5,repair_output_file_id=output_id)
+        outcome = CaptureRepository().complete_repair_output(command, new_operation_key(), owned)
+        assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+        event, proposal = promotion_event(owned, output_id)
+        owned.connection.execute('BEGIN')
+        validate_media_event(owned, event, proposal)
         with pytest.raises(EventValidationError):
-            _require_repair_success(context,1,output_id)
+            validate_media_event(owned, event, proposal, scope=scope)
     finally:
         owned.connection.rollback()
         owned.connection.close()
@@ -185,29 +170,18 @@ async def test_independent_success_guards_require_the_original_plan_reader(tmp_p
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fault", ["missing_probe", "missing_video", "short_container", "short_audio", "codec"])
 async def test_independent_processed_guard_rejects_bad_output_even_with_complete_bytes(tmp_path, fault):
-    from types import SimpleNamespace
-    from camctl.history.reads import PlanReadScope
+    from camctl.capture.media_facts import probe_document
     from camctl.history.validators import EventValidationError
-    from camctl.persistence.event_reads import SqlEventReads
-    from camctl.persistence.repositories.capture import _RepairSuccessCommand
-    from camctl.persistence.repositories.outputs import _processed_processing_guard
-    from camctl.persistence.transaction import TransactionScope
     owned, output_id, source, output = await prepared_repair(tmp_path)
     try:
-        owned.connection.execute("BEGIN")
-        last = owned.connection.execute("SELECT MAX(id) FROM history_transactions").fetchone()[0]
-        last_event = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
-        plan = _RepairSuccessCommand(RepairSuccess(41, output_id, 2048, "a"*64,
-            _NOW+200, output_probe=output), new_operation_key()).plan(TransactionScope(owned.connection, last, last_event))
-        state = deepcopy(plan.state_rows)
-        for row in plan.events[0].rows:
-            state[row.table][row.row_id].update(row.after.values)
-        event = replace(plan.events[-1], evidence={} if fault == "missing_probe" else {
-            "output_probe": __import__('camctl.capture.media_facts', fromlist=['probe_document']).probe_document(mutate(output, fault))})
-        context = SimpleNamespace(state_rows=state,
-            current_reads=SqlEventReads(owned.connection, PlanReadScope(1, 128)))
+        command = RepairSuccess(1, output_id, 2048, 'a' * 64, _NOW + 200, output_probe=output)
+        event, proposal = processing_success_event(owned, command)
+        owned.connection.execute('BEGIN')
+        validate_media_event(owned, event, proposal)
+        mutated = replace(event, evidence={} if fault == 'missing_probe' else {
+            'output_probe': probe_document(mutate(output, fault))})
         with pytest.raises(EventValidationError):
-            _processed_processing_guard(event, context)
+            validate_media_event(owned, mutated, proposal)
     finally:
         owned.connection.rollback()
         owned.connection.close()
@@ -215,24 +189,16 @@ async def test_independent_processed_guard_rejects_bad_output_even_with_complete
 
 @pytest.mark.asyncio
 async def test_promotion_rejects_saved_success_with_missing_media_proof(tmp_path):
-    from types import SimpleNamespace
-    from camctl.history.reads import PlanReadScope
-    from camctl.history.validators import EventValidationError
-    from camctl.persistence.event_reads import SqlEventReads
-    from camctl.persistence.repositories.capture import _require_repair_success
     owned, output_id, source, output = await prepared_repair(tmp_path)
     try:
-        owned.connection.execute("UPDATE recording_processing SET repair_state=5,repair_output_file_id=? WHERE id=41", (output_id,))
-        owned.connection.execute("UPDATE intermediate_files SET size_bytes=2048,sha256=? WHERE id=?", ("a"*64, output_id))
+        owned.connection.execute('UPDATE recording_processing SET repair_state=5,repair_output_file_id=? WHERE id=1', (output_id,))
+        owned.connection.execute('UPDATE intermediate_files SET size_bytes=2048,sha256=? WHERE id=?', ('a' * 64, output_id))
         owned.connection.commit()
-        owned.connection.execute("BEGIN")
-        context = SimpleNamespace(state_rows={"recording_processing": {41: {
-            "id":41,"action_id":1,"repair_state":5,"repair_output_file_id":output_id}}},
-            current_reads=SqlEventReads(owned.connection, PlanReadScope(1,128)))
-        with pytest.raises(EventValidationError):
-            _require_repair_success(context, 1, output_id)
+        before = tuple(owned.connection.iterdump())
+        result = CaptureRepository().finish_capture(capture_finish_request(owned, output_id), new_operation_key(), owned)
+        assert result.kind is DbOutcomeKind.ROLLED_BACK
+        assert tuple(owned.connection.iterdump()) == before
     finally:
-        owned.connection.rollback()
         owned.connection.close()
 
 
@@ -244,12 +210,12 @@ async def test_qualified_success_reopens_and_replays_original_probe_without_new_
     from ..bootstrap.test_binding_transactions import _CommitFailure
     owned, output_id, source, output = await prepared_repair(tmp_path)
     if entry == "complete":
-        command = RepairSuccess(41, output_id, 2048, "a"*64, _NOW+200, output_probe=output)
+        command = RepairSuccess(1, output_id, 2048, "a"*64, _NOW+200, output_probe=output)
         save = CaptureRepository().complete_repair_output
     else:
         owned.connection.execute("UPDATE intermediate_files SET size_bytes=2048,sha256=? WHERE id=?", ("a"*64, output_id))
         owned.connection.commit()
-        command = RepairResultSave(41, RepairOutcome.SUCCEEDED, _NOW+200,
+        command = RepairResultSave(1, RepairOutcome.SUCCEEDED, _NOW+200,
             output_file_id=output_id, output_probe=output)
         save = CaptureRepository().save_repair_result
     key = new_operation_key()
@@ -262,7 +228,7 @@ async def test_qualified_success_reopens_and_replays_original_probe_without_new_
     try:
         recovered = save(command, key, reopened)
         assert recovered.kind is DbOutcomeKind.COMPLETED, recovered.error
-        assert load_processing_status(reopened, 41).source_probe == source
+        assert load_processing_status(reopened, 1).source_probe == source
         before = tuple(reopened.connection.iterdump())
         assert save(command, key, reopened).kind is DbOutcomeKind.COMPLETED
         assert tuple(reopened.connection.iterdump()) == before
@@ -275,9 +241,9 @@ async def test_qualified_success_reopens_and_replays_original_probe_without_new_
         from camctl.persistence.event_reads import SqlEventReads
         from camctl.contracts.values import ConsistencyError
         reopened.connection.execute("BEGIN")
-        SqlEventReads(reopened.connection, PlanReadScope(1,128)).repair_media_proof(1,41,output_id,saved=True)
+        SqlEventReads(reopened.connection, PlanReadScope(1,128)).repair_media_proof(1,1,output_id,saved=True)
         with pytest.raises(ConsistencyError):
-            SqlEventReads(reopened.connection, PlanReadScope(2,128)).repair_media_proof(1,41,output_id,saved=True)
+            SqlEventReads(reopened.connection, PlanReadScope(2,128)).repair_media_proof(1,1,output_id,saved=True)
         with pytest.raises(ConsistencyError):
             SqlEventReads(reopened.connection, PlanReadScope(1,128)).repair_media_proof(1,42,output_id,saved=True)
         reopened.connection.rollback()
@@ -295,7 +261,7 @@ async def test_promotion_and_reuse_recheck_saved_media_qualification(tmp_path, f
     from camctl.contracts.values import ConsistencyError
     from camctl.capture.media_facts import probe_document
     owned, output_id, source, output = await prepared_repair(tmp_path)
-    command = RepairSuccess(41, output_id, 2048, "a"*64, _NOW+200, output_probe=output)
+    command = RepairSuccess(1, output_id, 2048, "a"*64, _NOW+200, output_probe=output)
     key = new_operation_key()
     try:
         assert CaptureRepository().complete_repair_output(command,key,owned).kind is DbOutcomeKind.COMPLETED
@@ -310,7 +276,7 @@ async def test_promotion_and_reuse_recheck_saved_media_qualification(tmp_path, f
         owned.connection.commit()
         owned.connection.execute("BEGIN")
         with pytest.raises(ConsistencyError):
-            SqlEventReads(owned.connection, PlanReadScope(1,128)).repair_media_proof(1,41,output_id,saved=True)
+            SqlEventReads(owned.connection, PlanReadScope(1,128)).repair_media_proof(1,1,output_id,saved=True)
         owned.connection.rollback()
         bad_command = replace(command,output_probe=candidate)
         assert CaptureRepository().complete_repair_output(bad_command,key,owned).kind is DbOutcomeKind.ROLLED_BACK

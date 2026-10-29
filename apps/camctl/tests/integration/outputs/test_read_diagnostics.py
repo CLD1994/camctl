@@ -1,28 +1,31 @@
-"""读取错误随原结果持有，日志接纳不进入原业务保存阶段。"""
+"""正式读取消费者保留原异常、票据与保存前诊断责任。"""
 
 import json
-from decimal import Decimal
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from dataclasses import replace
 
 import pytest
 
-from camctl.capture import media_flow
-from camctl.capture.input_copy import InputPhase, InputStep
+from camctl.capture.media_flow import run_recording_media
+from camctl.contracts.values import ConsistencyError, new_operation_key
+from camctl.devices.drivers.hasselblad.driver import CameraReadError, EVIDENCE
+from camctl.devices.read_session import ReadSession, ReadEnd
+from camctl.host_files.io import LocalSourceReader, PositionedWriter
+from camctl.host_files.tasks import FileTaskExecutor
+from camctl.session.supervision import Supervisor
 from camctl.logging_runtime.admission import AdmissionDecision, AdmissionKind
-from camctl.logging_runtime.diagnostics import (
-    diagnostic_scope, error_diagnostics_context, flush_diagnostics,
-)
-from camctl.logging_runtime.service import AdmissionResult
+from camctl.logging_runtime.diagnostics import diagnostic_scope, error_diagnostics_context, flush_diagnostics
 from camctl.logging_runtime.models import LogLevel
-from camctl.operations.attempts import AttemptConfig, RetryWaitGate
-from camctl.operations.models import AttemptTicket
+from camctl.logging_runtime.service import AdmissionResult
 from camctl.outputs import obtain_flow
-from camctl.outputs.copy import RecopyExhausted
-from camctl.outputs.read_attempts import ReadContinuation, ReadDispatchPrevented, prevented_read_result
-from camctl.devices.drivers.hasselblad.driver import CameraReadError
-from camctl.devices.read_session import ReadEnd
-from camctl.outputs.read_attempts import stopped_read_result
+from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.persistence.repositories.operations import OperationRepository
+from camctl.persistence.repositories.outputs import OutputsRepository
+
+from ..support.outputs import read_test_runtime, prepare_cancel_target
+from ..bootstrap.test_output_binding_changes import Catalog
+from .test_grant_reuse import local_read, read_targets
+from .test_read_associations import _command
+from .test_source_digest_failure_settlement import _ReadDriver, _CONTENT
 
 
 class Channel:
@@ -34,138 +37,265 @@ class Channel:
         return AdmissionResult(AdmissionDecision(AdmissionKind.ACCEPTED, LogLevel.ERROR), 0)
 
 
-def runtime():
-    return SimpleNamespace(pending_read_results={}, pending_read_ends={},
-        pending_read_business={}, continuing_read_tickets={}, occurred_at=lambda: 123,
-        max_read_attempts=3, evidence=obtain_flow._LOCAL_READ_EVIDENCE,
-        database=SimpleNamespace(read=AsyncMock(return_value=False)), retry_gate=RetryWaitGate())
+@pytest.fixture
+def consumer():
+    return "device"
+
+
+def prepare_diagnostic_read_case(request, consumer, *, known_digest=False):
+    if consumer == "host":
+        owned, command = request.getfixturevalue("local_read")
+    else:
+        owned = request.getfixturevalue("read_targets")
+        command = _command(internal=consumer == "internal")
+    if consumer == "internal":
+        owned.connection.execute("DELETE FROM obtain_items")
+        owned.connection.execute("DELETE FROM outputs")
+    else:
+        owned.connection.execute("UPDATE actions SET status=3 WHERE id=11")
+    owned.connection.execute("UPDATE actions SET scheduled_at=? WHERE id=32", (command.occurred_at + 60_000_000,))
+    owned.connection.execute("UPDATE recording_processing SET check_basis_json=? WHERE id=5", ('{"target_duration_ms":1000}',))
+    if known_digest:
+        if consumer == "host":
+            owned.connection.execute("UPDATE intermediate_files SET size_bytes=?,sha256=? WHERE id=801", (len(_CONTENT), "a" * 64))
+        else:
+            owned.connection.execute("UPDATE device_files SET size_bytes=?,checksum_support=2,sha256=? WHERE id=501", (len(_CONTENT), "a" * 64))
+    owned.connection.commit()
+    grant = OutputsRepository().grant_file(command, new_operation_key(), owned)
+    assert grant.kind is DbOutcomeKind.COMPLETED, grant.error
+    return owned, command, grant.value
+
+
+@pytest.fixture
+def diagnostic_read_case(request, consumer):
+    return prepare_diagnostic_read_case(request, consumer)
+
+
+@pytest.fixture
+def diagnostic_checksum_case(request, consumer):
+    return prepare_diagnostic_read_case(request, consumer, known_digest=True)
+
+
+async def execute_read(runtime, command):
+    if command.processing_id is not None:
+        return await run_recording_media(runtime, command.action_id, command.processing_id, 501,
+                                         target_extension="part")
+    return await obtain_flow.advance_obtain(runtime)
+
+
+class SaveReadPort(OperationRepository):
+    def __init__(self, *, failed=False):
+        self.failed = failed
+        self.calls = []
+        self.error = OSError(5, "result not saved")
+
+    def finish_attempt(self, request, key, worker):
+        if request.ticket.operation == "read":
+            self.calls.append((request, key))
+            if self.failed:
+                return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=self.error)
+        return super().finish_attempt(request, key, worker)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("consumer", ["device", "host", "internal"])
 @pytest.mark.parametrize("save_failed", [False, True])
-async def test_actual_read_error_is_held_before_result_save(monkeypatch, consumer, save_failed):
-    flow = runtime()
-    ticket = AttemptTicket(1, "read", "2", "read/2", 5)
+async def test_actual_read_error_is_held_before_result_save(monkeypatch, consumer, save_failed, diagnostic_read_case, tmp_path):
+    owned, command, prepared = diagnostic_read_case
     error = OSError(5, "actual source read failed", "/source/original.mov")
-    step = InputStep(InputPhase.SEGMENT_FAILED, copy_id=2, error=error, source_failed=True)
-    save = AsyncMock(side_effect=RuntimeError("result not saved") if save_failed else None)
-    monkeypatch.setattr(obtain_flow, "_save_read_result_and_settle", save)
-    monkeypatch.setattr(media_flow, "_save_internal_read_and_settle", save)
-    facts = {"id": 2, "output_id": 7, "action_id": 11,
-        "source_device_file_id": 13, "source_intermediate_file_id": None}
-    channel = Channel()
-    fallback = []
-    with error_diagnostics_context(channel, fallback.append):
-        try:
+    error.__cause__ = PermissionError(13, "original source permission")
+    tickets = []
+    class Driver:
+        async def open_read(self, source, offset, ticket, *, idle_timeout_s):
+            tickets.append(ticket)
+            raise error
+    if consumer == "host":
+        def open_source(self, path, offset):
+            raise error
+        monkeypatch.setattr(LocalSourceReader, "__init__", open_source)
+    port = SaveReadPort(failed=save_failed)
+    channel, fallback = Channel(), []
+    async with read_test_runtime(owned, Driver(), EVIDENCE, staging=tmp_path / "staging",
+            internal=consumer == "internal", occurred_at=lambda: command.occurred_at + 20) as runtime:
+        runtime.operations = port
+        with error_diagnostics_context(channel, fallback.append):
             async with diagnostic_scope():
-                if consumer == "device":
-                    await obtain_flow._finish_read_attempt_phase(flow,
-                        SimpleNamespace(evidence=flow.evidence, max_read_attempts=3), facts, ticket, step)
-                elif consumer == "host":
-                    await obtain_flow._finish_local_attempt_phase(flow, facts, ticket, step,
-                        AttemptConfig(3, Decimal(10), Decimal(3)))
+                if save_failed:
+                    with pytest.raises(ConsistencyError) as caught:
+                        await execute_read(runtime, command)
+                    assert caught.value.__cause__ is port.error
                 else:
-                    await media_flow._finish_internal_read_result(flow, ticket, step, max_attempts=3)
+                    await execute_read(runtime, command)
                 assert not channel.records
-        except RuntimeError as failure:
-            assert save_failed and str(failure) == "result not saved"
-        await flush_diagnostics()
+            await flush_diagnostics()
+            await flush_diagnostics()
+    request, key = port.calls[0]
+    assert len(port.calls) == 1
+    ticket = request.ticket
+    assert ticket.target_id == str(prepared.copy_id)
+    if consumer != "host":
+        assert tickets == [ticket]
+    state, stored = owned.connection.execute("SELECT status,error_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
+        (ticket.run_id, ticket.attempt_id)).fetchone()
+    assert state == (1 if save_failed else 3)
+    assert (stored is None) == save_failed
     assert len(channel.records) == 1 and not fallback
     recorded = channel.records[0]
-    assert "actual source read failed" in json.dumps(recorded)
-    assert "/source/original.mov" in json.dumps(recorded)
-    assert recorded["ticket"]["run_id"] == 5
-    assert recorded["ticket"]["attempt_id"] == 1
-    assert flow.pending_read_results[(5, 1)].diagnostic is not None
+    text = json.dumps(recorded)
+    assert "actual source read failed" in text and "/source/original.mov" in text
+    assert "original source permission" in text
+    assert recorded["ticket"]["run_id"] == ticket.run_id
+    assert recorded["ticket"]["attempt_id"] == ticket.attempt_id
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("consumer", ["device", "host", "internal"])
-async def test_checksum_exhaustion_records_verification_error(monkeypatch, consumer):
-    flow = runtime()
-    ticket = AttemptTicket(1, "read", "2", "read/2", 5)
-    step = InputStep(InputPhase.CHECKSUM_EXHAUSTED, copy_id=2, error=RecopyExhausted(1, 1))
-    monkeypatch.setattr(obtain_flow, "_save_read_result_and_settle", AsyncMock())
-    monkeypatch.setattr(media_flow, "_save_internal_read_and_settle", AsyncMock())
+async def test_checksum_exhaustion_records_verification_error(monkeypatch, consumer, diagnostic_checksum_case, tmp_path):
+    owned, command, prepared = diagnostic_checksum_case
+    # 已固定的来源摘要与实际内容不同，先完成一次真实重拷登记，再观察耗尽。
+    staging = tmp_path / "staging"
+    (staging / "derived").mkdir(parents=True)
+    (staging / "derived/801.mp4").write_bytes(_CONTENT)
     channel = Channel()
-    with error_diagnostics_context(channel, lambda _: None):
-        async with diagnostic_scope():
-            if consumer == "device":
-                await obtain_flow._finish_read_attempt_phase(flow,
-                    SimpleNamespace(evidence=flow.evidence, max_read_attempts=3),
-                    {"id": 2, "output_id": 7}, ticket, step)
-            elif consumer == "host":
-                await obtain_flow._finish_local_attempt_phase(flow, {"id": 2}, ticket, step,
-                    AttemptConfig(3, Decimal(10), Decimal(3)))
-            else:
-                await media_flow._finish_internal_read_result(flow, ticket, step, max_attempts=3)
+    async with read_test_runtime(owned, _ReadDriver(), EVIDENCE, staging=staging,
+            internal=consumer == "internal", segment_size=len(_CONTENT),
+            occurred_at=lambda: command.occurred_at + 20) as runtime:
+        await execute_read(runtime, command)
+        assert owned.connection.execute("SELECT round,recopies_used FROM file_copies WHERE id=?", (prepared.copy_id,)).fetchone() == (2, 1)
+        with error_diagnostics_context(channel, lambda _: None):
+            async with diagnostic_scope():
+                await execute_read(runtime, command)
     assert len(channel.records) == 1
     assert channel.records[0]["stage"] == "checksum_exhausted"
     assert "RecopyExhausted" in json.dumps(channel.records[0])
+    assert owned.connection.execute("SELECT verification_state,recopies_used FROM file_copies WHERE id=?", (prepared.copy_id,)).fetchone() == (4, 1)
 
 
 @pytest.mark.asyncio
-async def test_normal_cancellation_before_dispatch_has_no_error_record():
-    flow = runtime()
-    ticket = AttemptTicket(1, "read", "2", "read/2", 5)
-    flow.continuing_read_tickets[2] = ReadContinuation(ticket, True)
+async def test_normal_cancellation_before_dispatch_has_no_error_record(diagnostic_read_case, tmp_path):
+    owned, command, prepared = diagnostic_read_case
+    driver = _ReadDriver()
+    class CancelAtIntent(OperationRepository):
+        tickets = []
+        def begin_attempt(self, intent, key, worker):
+            result = super().begin_attempt(intent, key, worker)
+            if intent.operation == "read":
+                self.tickets.append(result.value.ticket)
+                prepare_cancel_target(worker, catalog=Catalog(), now=command.occurred_at + 20,
+                                      action_id=command.action_id)
+            return result
+    port = CancelAtIntent()
     channel = Channel()
-    with error_diagnostics_context(channel, lambda _: None):
-        async with diagnostic_scope():
-            assert prevented_read_result(flow, ticket,
-                ReadDispatchPrevented("canceled_before_dispatch", canceled=True), flow.evidence)
+    async with read_test_runtime(owned, driver, EVIDENCE, staging=tmp_path / "staging",
+            occurred_at=lambda: command.occurred_at + 20) as runtime:
+        runtime.operations = port
+        with error_diagnostics_context(channel, lambda _: None):
+            async with diagnostic_scope():
+                await execute_read(runtime, command)
+    assert port.tickets and driver.offsets == []
     assert channel.records == []
+    assert owned.connection.execute("SELECT attempts_used FROM operation_runs WHERE copy_id=?", (prepared.copy_id,)).fetchone() == (1,)
 
 
 @pytest.mark.asyncio
-async def test_download_read_error_keeps_complete_readable_and_raw_stderr(monkeypatch):
-    flow = runtime()
+async def test_download_read_error_keeps_complete_readable_and_raw_stderr(diagnostic_read_case, tmp_path):
+    owned, command, prepared = diagnostic_read_case
     raw = "USB传输失败\n".encode() + b"\xff" + b"x" * 2048
     error = CameraReadError("download failed", [{"name": "download", "local_exit_code": 17,
                                                 "stderr_hex": raw.hex()}])
-    monkeypatch.setattr(obtain_flow, "_save_read_result_and_settle", AsyncMock())
-    channel = Channel()
-    with error_diagnostics_context(channel, lambda _: None):
-        async with diagnostic_scope():
-            await obtain_flow._finish_read_attempt_phase(flow,
-                SimpleNamespace(evidence=flow.evidence, max_read_attempts=3), {"id": 2, "output_id": 7},
-                AttemptTicket(1, "read", "2", "read/2", 5),
-                InputStep(InputPhase.SEGMENT_FAILED, copy_id=2, error=error, source_failed=True))
-    assert len(channel.records) == 1
+    class Driver:
+        tickets = []
+        async def open_read(self, source, offset, ticket, *, idle_timeout_s):
+            self.tickets.append(ticket)
+            raise error
+    driver, channel = Driver(), Channel()
+    async with read_test_runtime(owned, driver, EVIDENCE, staging=tmp_path / "staging",
+            occurred_at=lambda: command.occurred_at + 20) as runtime:
+        with error_diagnostics_context(channel, lambda _: None):
+            async with diagnostic_scope():
+                await execute_read(runtime, command)
+    assert len(driver.tickets) == len(channel.records) == 1
     details = channel.records[0]["error"]["details"]["exception"]["diagnostic_details"]["steps"][0]
     assert details["stderr_hex"] == raw.hex()
     assert details["stderr_text"] == raw.decode("utf-8", "backslashreplace")
 
 
+class StopReadExecutor(FileTaskExecutor):
+    """通过正式文件任务控制对象请求停止，不改写业务结果。"""
+    control = None
+    async def run_owned_async_file_task(self, task):
+        body = task.body
+        async def run(control):
+            self.control = control
+            return await body(control)
+        return await super().run_owned_async_file_task(replace(task, body=run))
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("actual_write_error", [False, True])
-async def test_stopped_source_preserves_real_write_error_without_logging_control_stop(actual_write_error):
-    flow = runtime()
-    ticket = AttemptTicket(1, "read", "2", "read/2", 5)
-    step = InputStep(InputPhase.SEGMENT_FAILED, copy_id=2, stop_requested=True,
-        read_end=ReadEnd(True, 10, "stopped"),
-        error=OSError(28, "disk full") if actual_write_error else RuntimeError("stopped"))
-    channel = Channel()
-    with error_diagnostics_context(channel, lambda _: None):
-        async with diagnostic_scope():
-            original = stopped_read_result(flow, ticket, step, flow.evidence, 123)
-            assert original is not None
-    assert len(channel.records) == int(actual_write_error)
+async def test_stopped_source_preserves_real_write_error_without_logging_control_stop(actual_write_error, diagnostic_read_case, tmp_path, monkeypatch):
+    owned, command, prepared = diagnostic_read_case
+    supervisor = Supervisor()
+    executor = StopReadExecutor(supervisor)
+    original = OSError(28, "disk full")
+    class Stream:
+        def read(self, limit):
+            if not actual_write_error:
+                executor.control.request_stop()
+            return b"x" * limit
+        def cancel(self):
+            pass
+        def close(self):
+            pass
+    class Driver:
+        sessions = []
+        async def open_read(self, source, offset, ticket, *, idle_timeout_s):
+            session = ReadSession(source, offset, Stream(), idle_timeout_s)
+            self.sessions.append(session)
+            return session
+    def fail_write(self, data):
+        executor.control.request_stop()
+        raise original
     if actual_write_error:
-        assert channel.records[0]["error"]["errno"] == 28
+        monkeypatch.setattr(PositionedWriter, "write", fail_write)
+    driver, channel = Driver(), Channel()
+    async with read_test_runtime(owned, driver, EVIDENCE, staging=tmp_path / "staging",
+            file_executor=executor, occurred_at=lambda: command.occurred_at + 20) as runtime:
+        with error_diagnostics_context(channel, lambda _: None):
+            async with diagnostic_scope():
+                await execute_read(runtime, command)
+    settled = await supervisor.drain_required()
+    assert not settled.failed
+    assert len(driver.sessions) == 1
+    assert (await driver.sessions[0].wait_stopped()).error == "stopped"
+    assert len(channel.records) == int(actual_write_error)
+    assert owned.connection.execute("SELECT status,result_json FROM operation_attempts WHERE run_id=?", (prepared.run_id,)).fetchone() == (1, None)
+    if actual_write_error:
+        record = json.dumps(channel.records[0])
+        assert '"errno": 28' in record and "disk full" in record
 
 
 @pytest.mark.asyncio
-async def test_local_read_normal_stopped_result_is_not_error(monkeypatch):
-    flow = runtime()
-    monkeypatch.setattr(obtain_flow, "_save_read_result_and_settle", AsyncMock())
+@pytest.mark.parametrize("consumer", ["host"])
+async def test_local_read_normal_stopped_result_is_not_error(monkeypatch, diagnostic_read_case, tmp_path):
+    owned, command, prepared = diagnostic_read_case
+    supervisor = Supervisor()
+    executor = StopReadExecutor(supervisor)
+    staging = tmp_path / "staging"
+    (staging / "derived").mkdir(parents=True)
+    (staging / "derived/801.mp4").write_bytes(b"x" * 4096)
+    read_chunk = LocalSourceReader.read_chunk
+    def stop_after_read(self, limit):
+        result = read_chunk(self, limit)
+        executor.control.request_stop()
+        return result
+    monkeypatch.setattr(LocalSourceReader, "read_chunk", stop_after_read)
     channel = Channel()
-    with error_diagnostics_context(channel, lambda _: None):
-        async with diagnostic_scope():
-            await obtain_flow._finish_local_attempt_phase(flow, {"id": 2},
-                AttemptTicket(1, "read", "2", "read/2", 5),
-                InputStep(InputPhase.SEGMENT_FAILED, copy_id=2, stop_requested=True,
-                    read_end=ReadEnd(True, 10, "stopped"), error=RuntimeError("stopped")),
-                AttemptConfig(3, Decimal(10), Decimal(3)))
-    assert channel.records == []
+    async with read_test_runtime(owned, _ReadDriver(), EVIDENCE, staging=staging,
+            file_executor=executor, occurred_at=lambda: command.occurred_at + 20) as runtime:
+        with error_diagnostics_context(channel, lambda _: None):
+            async with diagnostic_scope():
+                await execute_read(runtime, command)
+    assert not (await supervisor.drain_required()).failed
+    assert not channel.records, json.dumps({"records": channel.records, "attempt": owned.connection.execute("SELECT status,error_json,result_json FROM operation_attempts WHERE run_id=?", (prepared.run_id,)).fetchone()}, ensure_ascii=False)
+    assert owned.connection.execute("SELECT status,result_json FROM operation_attempts WHERE run_id=?", (prepared.run_id,)).fetchone() == (1, None)

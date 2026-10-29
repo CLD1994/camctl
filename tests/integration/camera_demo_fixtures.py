@@ -238,19 +238,46 @@ class WorldTransport:
         return script.replace("/mnt/media_rw/",
                               (self.world.root / "mnt/media_rw").as_posix() + "/")
 
+    def _directory_scan(self, script):
+        for line in script.splitlines():
+            try:
+                words = shlex.split(line)
+            except ValueError:
+                return False
+            if words[:1] == ["find"] and len(words) > 1:
+                return script == ShellFileTools().directory_scan_script(words[1])
+        return False
+
     async def run_stream(self, spec, stop, stdout_sink):
         script = self._script(spec)
+        # 完整目录扫描经流式接口交付；只转换其 NUL 字段中的本机根，
+        # 媒体读取仍逐字节交付。字段可横跨任意传输块。
+        directory_scan = self._directory_scan(script)
+        pending = bytearray()
+        local_prefix = self.world.root.as_posix().encode()
         first = True
         async def gated_sink(data):
             nonlocal first
-            await stdout_sink(data)
-            if first and (self.world.gates / "hold-read").exists():
+            if directory_scan:
+                pending.extend(data)
+                while (end := pending.find(b"\0")) >= 0:
+                    field = bytes(pending[:end])
+                    del pending[:end + 1]
+                    if field.startswith(local_prefix + b"/"):
+                        field = field[len(local_prefix):]
+                    await stdout_sink(field + b"\0")
+            else:
+                await stdout_sink(data)
+            if not directory_scan and first and (self.world.gates / "hold-read").exists():
                 first = False
                 (self.world.gates / "read-started").touch()
                 while not (self.world.gates / "release-read").exists():
                     await asyncio.sleep(0.01)
-        return await AdbTransport().run_stream(
+        result = await AdbTransport().run_stream(
             replace(spec, argv=self._bash_argv(script)), stop, gated_sink)
+        if pending:
+            await stdout_sink(bytes(pending))
+        return result
 
 
 def _contract(model, world):

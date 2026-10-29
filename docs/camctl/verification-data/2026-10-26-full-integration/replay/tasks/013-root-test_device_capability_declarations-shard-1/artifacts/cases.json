@@ -1,0 +1,21 @@
+[
+  {
+    "nodeid": "tests/integration/test_device_capability_declarations.py::test_installed_metadata_reaches_parameter_form_and_device_guide",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 15.137289074002183
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 41.99862781599222
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.01046830000996124
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 57.14638519000437
+  }
+]

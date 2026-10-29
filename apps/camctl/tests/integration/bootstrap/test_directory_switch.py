@@ -27,10 +27,9 @@ from camctl.persistence.directory_switch import (
 )
 from camctl.persistence.initialization import (
     InitOutcome,
-    _canonical_binding,
     initialize_state,
 )
-from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+from camctl.persistence.runtime import DbConfig, DbOpenMode, canonical_directory_binding, open_existing
 
 from .test_initialization import _expected_staging_subdirs, _config, _dump
 
@@ -243,7 +242,7 @@ class TestSwitchDirectoryBinding:
         state_db = Path(cfg.paths.state_db)
         assert initialize_state(cfg, state_db).outcome is InitOutcome.CREATED
         moved = _config(tmp_path, prefix="new-")
-        new_binding = tuple(_canonical_binding(Path(value)) for value in (
+        new_binding = tuple(canonical_directory_binding(Path(value)) for value in (
             moved.paths.staging, moved.paths.ready, moved.paths.processing))
         owned = open_existing(state_db, DbOpenMode.EXISTING_RW, DbConfig())
 
@@ -273,7 +272,7 @@ class TestSwitchDirectoryBinding:
         state_db = Path(cfg.paths.state_db)
         assert initialize_state(cfg, state_db).outcome is InitOutcome.CREATED
         moved = _config(tmp_path, prefix="new-")
-        new_binding = tuple(_canonical_binding(Path(value)) for value in (
+        new_binding = tuple(canonical_directory_binding(Path(value)) for value in (
             moved.paths.staging, moved.paths.ready, moved.paths.processing))
         owned = open_existing(state_db, DbOpenMode.EXISTING_RW, DbConfig())
         try:
@@ -294,9 +293,9 @@ class TestSwitchDirectoryBinding:
         assert initialize_state(cfg, state_db).outcome is InitOutcome.CREATED
         moved = _config(tmp_path, prefix="new-")
         new_binding = (
-            _canonical_binding(Path(moved.paths.staging)),
-            _canonical_binding(Path(moved.paths.ready)),
-            _canonical_binding(Path(moved.paths.processing)),
+            canonical_directory_binding(Path(moved.paths.staging)),
+            canonical_directory_binding(Path(moved.paths.ready)),
+            canonical_directory_binding(Path(moved.paths.processing)),
         )
         owned = open_existing(state_db, DbOpenMode.EXISTING_RW, DbConfig())
         try:
@@ -322,9 +321,9 @@ class TestSwitchDirectoryBinding:
         assert initialize_state(cfg, state_db).outcome is InitOutcome.CREATED
         moved = _config(tmp_path, prefix="new-")
         new_binding = (
-            _canonical_binding(Path(moved.paths.staging)),
-            _canonical_binding(Path(moved.paths.ready)),
-            _canonical_binding(Path(moved.paths.processing)),
+            canonical_directory_binding(Path(moved.paths.staging)),
+            canonical_directory_binding(Path(moved.paths.ready)),
+            canonical_directory_binding(Path(moved.paths.processing)),
         )
         owned = open_existing(state_db, DbOpenMode.EXISTING_RW, DbConfig())
         old_binding = (owned.metadata.staging_path,
@@ -376,9 +375,9 @@ class TestSwitchDirectoryBinding:
         _seed_liabilities(state_db)
         moved = _config(tmp_path, prefix="new-")
         new_binding = (
-            _canonical_binding(Path(moved.paths.staging)),
-            _canonical_binding(Path(moved.paths.ready)),
-            _canonical_binding(Path(moved.paths.processing)),
+            canonical_directory_binding(Path(moved.paths.staging)),
+            canonical_directory_binding(Path(moved.paths.ready)),
+            canonical_directory_binding(Path(moved.paths.processing)),
         )
         owned = open_existing(state_db, DbOpenMode.EXISTING_RW, DbConfig())
         try:
@@ -478,7 +477,7 @@ class TestInitializeStateDirectorySwitch:
         with sqlite3.connect(state_db) as connection:
             assert tuple(connection.execute(
                 "SELECT staging_path, ready_path, processing_path FROM database_metadata"
-            ).fetchone()) == tuple(_canonical_binding(Path(value)) for value in (
+            ).fetchone()) == tuple(canonical_directory_binding(Path(value)) for value in (
                 moved.paths.staging, moved.paths.ready, moved.paths.processing))
 
     @pytest.mark.skipif(os.name == "nt", reason="需要创建真实符号链接对象")
@@ -523,9 +522,9 @@ class TestInitializeStateDirectorySwitch:
         new_meta = after["database_metadata"][0]
         assert new_meta[1:4] == old_meta[1:4]
         assert new_meta[4:7] == (
-            _canonical_binding(Path(moved.paths.staging)),
-            _canonical_binding(Path(moved.paths.ready)),
-            _canonical_binding(Path(moved.paths.processing)),
+            canonical_directory_binding(Path(moved.paths.staging)),
+            canonical_directory_binding(Path(moved.paths.ready)),
+            canonical_directory_binding(Path(moved.paths.processing)),
         )
         for table, rows in before.items():
             if table != "database_metadata":
@@ -579,7 +578,7 @@ class TestInitializeStateDirectorySwitch:
         confirmed = open_existing(state_db, DbOpenMode.EXISTING_RW, DbConfig())
         try:
             assert (confirmed.metadata.ready_path
-                    == _canonical_binding(Path(cfg.paths.ready)))
+                    == canonical_directory_binding(Path(cfg.paths.ready)))
         finally:
             confirmed.connection.close()
 
@@ -597,7 +596,7 @@ class TestInitializeStateDirectorySwitch:
         confirmed = open_existing(state_db, DbOpenMode.EXISTING_RW, DbConfig())
         try:
             assert (confirmed.metadata.staging_path
-                    == _canonical_binding(Path(cfg.paths.staging)))
+                    == canonical_directory_binding(Path(cfg.paths.staging)))
         finally:
             confirmed.connection.close()
 
@@ -634,13 +633,21 @@ class TestInitializeStateDirectorySwitch:
         state_db = tmp_path / "state.db"
         processing = tmp_path / "cross-processing"
         processing.mkdir()
-        devices = {str(processing): 42}
+        actual_stat = os.stat
 
-        def fake_device_of(path):
-            return devices.get(str(path), 1)
+        class OtherDevice:
+            def __init__(self, actual):
+                self.actual = actual
+                self.st_dev = actual.st_dev + 1
 
-        monkeypatch.setattr(
-            "camctl.persistence.directory_switch._device_of", fake_device_of)
+            def __getattr__(self, name):
+                return getattr(self.actual, name)
+
+        def stat(path, *args, **kwargs):
+            result = actual_stat(path, *args, **kwargs)
+            return OtherDevice(result) if os.fspath(path) == str(processing) else result
+
+        monkeypatch.setattr(os, "stat", stat)
         spread = _config_roots(
             tmp_path, str(tmp_path / "cross-staging"),
             str(tmp_path / "cross-ready"), str(processing))
@@ -663,7 +670,7 @@ class TestInitializeStateDirectorySwitch:
         confirmed = open_existing(state_db, DbOpenMode.EXISTING_RW, DbConfig())
         try:
             assert (confirmed.metadata.staging_path
-                    == _canonical_binding(Path(cfg.paths.staging)))
+                    == canonical_directory_binding(Path(cfg.paths.staging)))
         finally:
             confirmed.connection.close()
 
@@ -690,7 +697,7 @@ class TestInitializeStateDirectorySwitch:
         confirmed = open_existing(state_db, DbOpenMode.EXISTING_RW, DbConfig())
         try:
             assert (confirmed.metadata.staging_path
-                    == _canonical_binding(Path(cfg.paths.staging)))
+                    == canonical_directory_binding(Path(cfg.paths.staging)))
         finally:
             confirmed.connection.close()
 
@@ -705,6 +712,6 @@ class TestInitializeStateDirectorySwitch:
         confirmed = open_existing(state_db, DbOpenMode.EXISTING_RW, DbConfig())
         try:
             assert (confirmed.metadata.ready_path
-                    == _canonical_binding(Path(cfg.paths.ready)))
+                    == canonical_directory_binding(Path(cfg.paths.ready)))
         finally:
             confirmed.connection.close()

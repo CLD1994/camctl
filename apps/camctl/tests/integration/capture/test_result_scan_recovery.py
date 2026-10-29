@@ -10,11 +10,12 @@ from unittest.mock import create_autospec
 import pytest
 
 from camctl.bootstrap.capture_assembly import DriverResultListing
-from camctl.capture.handlers import ListingPhase, _listing_round, capture_handler
+from camctl.capture.handlers import capture_handler
+from ..support.result_cases import result_case, result_case_for, current_result_ticket
 from camctl.capture.recovery import RecoveryBoundary, RecoveryBlockedReason
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
-from camctl.devices.bindings import BindingResult, BindingStatus
+from camctl.devices.bindings import BindingStatus
 from camctl.devices.evidence import DeviceObservation
 from camctl.devices.ports import DeviceCallResult, ResultDriver
 from camctl.operations.attempts import AttemptConfig
@@ -25,8 +26,6 @@ from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.contracts.workflow_errors import registered_error
 
-from .result_consumer_fixtures import consumer_world
-from .test_capture_contract import _runtime
 from .test_result_page_history import _actual, _entry, _BINDING, _CURSOR, _REGISTRY
 from .test_result_device_completion import DeviceCompletionCatalog, _COMPLETION
 
@@ -39,22 +38,22 @@ _RECOVERY = EvidenceRegistry((
 ))
 
 
-def _resumed(owned, runtime, horizon):
-    resumed = _runtime(owned, check_config=runtime.check_config)
-    resumed.evidence = runtime.evidence
-    resumed.recovery_boundary = RecoveryBoundary.HOST_LOCAL_SETTLED
-    resumed.recovery_max_event_id = horizon
-    resumed.recovery_evidence_for = lambda binding, operation: (
-        _RECOVERY if binding == _BINDING and operation == "result" else None)
-    resumed.wall_us = lambda: runtime.wall_us() + 5_000_000
+async def _resumed(owned, runtime, horizon, *, warm=False):
+    case = result_case_for()
+    case.clock.wall += 5_000_000
+    resumed = await case.reopen(owned, cold=not warm, assembly_options=None if warm else {
+        "recovery_boundary": RecoveryBoundary.HOST_LOCAL_SETTLED,
+        "recovery_max_event_id": lambda: horizon, "result_recovery": True})
     return resumed
 
 
 async def _interrupted(tmp_path, *, maximum=1, terminal=False, finalized=None,
                        consumer="record", completion=False, first_entries=None):
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, consumer,
-        catalog=DeviceCompletionCatalog() if completion else None)
-    runtime.check_config = AttemptConfig(maximum, Decimal("2"), Decimal("0"))
+    owned, runtime, action_id, handler = await result_case_for().world(tmp_path, consumer,
+        catalog=DeviceCompletionCatalog() if completion else None,
+        prepare_start_only=completion,
+        assembly_options={"check_config": AttemptConfig(maximum, Decimal("2"), Decimal("0"))},
+        evidence_contracts=(_COMPLETION, _RECOVERY.contract("adb_foreground_recovery", 1)))
     driver = create_autospec(ResultDriver, instance=True)
     entered = asyncio.Event()
     entries = first_entries if first_entries is not None else [
@@ -73,13 +72,16 @@ async def _interrupted(tmp_path, *, maximum=1, terminal=False, finalized=None,
                     "version": 1, "data": {"activity_id": request.ticket.target_id}}}),))
         return DeviceCallResult.from_outcome(actual)
     driver.list_results.side_effect = read
-    runtime.evidence = _RECOVERY
-    runtime.results = DriverResultListing(driver, _BINDING, runtime.evidence)
+    result_case_for().results.delegate = DriverResultListing(driver, _BINDING, _RECOVERY)
     try:
         if terminal:
-            def crash(*args, **kwargs):
-                raise ConsistencyError("测试在实际末页可靠保存后中断")
-            runtime.hold_call_result = crash
+            class InterruptedPage(CaptureRepository):
+                def save_result_page(self, request, key, owned):
+                    saved = super().save_result_page(request, key, owned)
+                    assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+                    return DbOutcome(DbOutcomeKind.UNKNOWN,
+                        error=ConsistencyError("测试在实际末页可靠保存后中断"))
+            runtime.capture = InterruptedPage()
             with pytest.raises(ConsistencyError, match="测试"):
                 await capture_handler(handler)(action_id, runtime)
         else:
@@ -90,15 +92,15 @@ async def _interrupted(tmp_path, *, maximum=1, terminal=False, finalized=None,
                 task.cancel()
                 with pytest.raises(asyncio.CancelledError):
                     await task
-        pending, = runtime.pending_result_scans.values()
-        original = runtime.capture.read_result_page(pending.last_ref, owned)
+        ticket = current_result_ticket(owned, action_id)
+        original = CaptureRepository().read_last_result_page(ticket, owned)
+        assert original is not None
         assert owned.connection.execute("SELECT source_action_id FROM device_files").fetchall() == [(None,)] * len(entries)
         path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
         horizon = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
         owned.connection.close()
         owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-        resumed = _resumed(owned, runtime, horizon)
-        resumed.results = DriverResultListing(driver, _BINDING, runtime.evidence)
+        resumed = (await _resumed(owned, runtime, horizon))
         return owned, resumed, action_id, handler, driver, original
     except BaseException:
         owned.connection.close()
@@ -168,10 +170,8 @@ async def test_partial_scan_keeps_actual_device_end_separate_from_unknown_set(tm
 async def test_binding_failure_preserves_old_pages_before_business_failure(tmp_path, terminal, binding, consumer):
     owned, runtime, action_id, handler, driver, original = await _interrupted(tmp_path,
         consumer=consumer, completion=consumer == "timelapse", terminal=terminal)
-    runtime.evidence = None
-    runtime.results = None
-    runtime.binding_check = lambda saved: BindingResult(binding, saved,
-        "other" if binding is BindingStatus.DRIVER_MISMATCH else None)
+    runtime = await result_case_for().reopen(owned, cold=True, assembly_options={
+        "devices": {} if binding is BindingStatus.DEVICE_MISSING else {"cam-1": {"driver": "other"}}})
     try:
         await capture_handler(handler)(action_id, runtime)
         assert owned.connection.execute("SELECT status,error_code FROM actions WHERE id=?", (action_id,)).fetchone() == (
@@ -220,21 +220,19 @@ async def test_unknown_recovery_save_keeps_original_key_and_input_across_connect
         with pytest.raises(ConsistencyError):
             await capture_handler(handler)(action_id, runtime)
         assert len(repository.requests) == 2 and repository.requests[0] == repository.requests[1]
-        pending, = runtime.pending_start_results.values()
-        assert pending.result_disposition_ready
-        assert pending.finish.outcome.outcome.observations == ()
+        finish, key = repository.requests[0]
+        assert finish.outcome.outcome.observations == ()
         if committed:
-            changed = replace(pending.finish, occurred_at=pending.finish.occurred_at + 1)
-            assert OperationRepository().finish_attempt(changed, pending.key, owned).kind is DbOutcomeKind.ROLLED_BACK
+            changed = replace(finish, occurred_at=finish.occurred_at + 1)
+            assert OperationRepository().finish_attempt(changed, key, owned).kind is DbOutcomeKind.ROLLED_BACK
         owned.connection.close()
         owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-        resumed = _resumed(owned, runtime, runtime.recovery_max_event_id)
-        resumed.pending_start_results = runtime.pending_start_results
-        resumed.wall_us = lambda: pending.finish.occurred_at + 8_000_000
+        resumed = await _resumed(owned, runtime, None, warm=True)
+        result_case_for().clock.wall = finish.occurred_at + 8_000_000
         await capture_handler(handler)(action_id, resumed)
         assert owned.connection.execute("SELECT status FROM actions").fetchone() == (4,)
         assert owned.connection.execute("SELECT occurred_at FROM history_events WHERE id=(SELECT result_event_id"
-            " FROM operation_attempts WHERE run_id=?)", (original.ref.ticket.run_id,)).fetchone() == (pending.finish.occurred_at,)
+            " FROM operation_attempts WHERE run_id=?)", (original.ref.ticket.run_id,)).fetchone() == (finish.occurred_at,)
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (1,)
         assert runtime.capture.read_result_page(original.ref, owned) == original
         assert driver.list_results.await_count == 2
@@ -263,17 +261,16 @@ async def test_unknown_partial_completion_save_keeps_same_end_reference_and_key(
         with pytest.raises(ConsistencyError):
             await capture_handler(handler)(action_id, runtime)
         assert len(repository.requests) == 2 and repository.requests[0] == repository.requests[1]
-        pending, = runtime.pending_start_results.values()
-        assert pending.completion_page == original.ref and pending.result_set is None
-        assert pending.finish.outcome.outcome.observations == ()
+        finish, result_set, key, completion_page = repository.requests[0]
+        assert completion_page == original.ref and result_set is None
+        assert finish.outcome.outcome.observations == ()
         if committed:
-            assert OperationRepository().finish_attempt(pending.finish, pending.key,
+            assert OperationRepository().finish_attempt(finish, key,
                 owned).kind is DbOutcomeKind.ROLLED_BACK
         owned.connection.close()
         owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-        resumed = _resumed(owned, runtime, runtime.recovery_max_event_id)
-        resumed.pending_start_results = runtime.pending_start_results
-        resumed.wall_us = lambda: pending.finish.occurred_at + 8_000_000
+        resumed = await _resumed(owned, runtime, None, warm=True)
+        result_case_for().clock.wall = finish.occurred_at + 8_000_000
         await capture_handler(handler)(action_id, resumed)
         result_txn, = owned.connection.execute(
             "SELECT e.transaction_id FROM operation_attempts t JOIN history_events e"
@@ -315,25 +312,25 @@ async def test_interrupted_scan_starts_new_round_with_own_cursor_and_same_budget
 @pytest.mark.parametrize("case,reason", [
     ("boundary", RecoveryBlockedReason.UNCONFIRMED_BOUNDARY),
     ("horizon", RecoveryBlockedReason.MISSING_HORIZON),
-    ("lookup", RecoveryBlockedReason.MISSING_EVIDENCE_LOOKUP),
     ("evidence", RecoveryBlockedReason.EVIDENCE_UNAVAILABLE),
     ("late_intent", RecoveryBlockedReason.INTENT_OUTSIDE_HORIZON),
 ])
 async def test_missing_recovery_qualification_preserves_running_scan(tmp_path, case, reason):
-    owned, runtime, action_id, _, driver, original = await _interrupted(tmp_path)
+    owned, runtime, action_id, handler, driver, original = await _interrupted(tmp_path)
+    settings = {"recovery_boundary": RecoveryBoundary.HOST_LOCAL_SETTLED,
+                "result_recovery": True}
     if case == "boundary":
-        runtime.recovery_boundary = RecoveryBoundary.UNCONFIRMED
+        settings["recovery_boundary"] = RecoveryBoundary.UNCONFIRMED
     elif case == "horizon":
-        runtime.recovery_max_event_id = None
-    elif case == "lookup":
-        runtime.recovery_evidence_for = None
+        settings["recovery_max_event_id"] = None
     elif case == "evidence":
-        runtime.recovery_evidence_for = lambda binding, operation: None
+        settings["result_recovery"] = False
     else:
-        runtime.recovery_max_event_id = 0
+        settings["recovery_max_event_id"] = lambda: 0
+    runtime = await result_case_for().reopen(owned, cold=True, assembly_options=settings)
     try:
-        assert (await _listing_round(runtime, action_id)).phase is ListingPhase.IN_FLIGHT
-        assert runtime.last_recovery_diagnostic.reason is reason
+        await capture_handler(handler)(action_id, runtime)
+        assert result_case_for().diagnostics[-1].reason is reason
         assert owned.connection.execute("SELECT status,result_event_id FROM operation_attempts WHERE run_id=?",
             (original.ref.ticket.run_id,)).fetchone() == (1, None)
         assert runtime.capture.read_result_page(original.ref, owned) == original
@@ -377,7 +374,7 @@ async def test_new_round_interrupted_before_first_return_keeps_previous_v2_files
         # 完整实际返回但集合未定的旧轮先交还消费者；下一次推进开新轮。
         for _ in range(2):
             await capture_handler(handler)(action_id, runtime)
-            assert runtime.action(action_id)["status"] == 2
+            assert (await runtime.action(action_id))["status"] == 2
     path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
     try:
         task = asyncio.create_task(advance())
@@ -393,7 +390,7 @@ async def test_new_round_interrupted_before_first_return_keeps_previous_v2_files
         horizon = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
         owned.connection.close()
         owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-        resumed = _resumed(owned, runtime, horizon)
+        resumed = (await _resumed(owned, runtime, horizon))
         await capture_handler(handler)(action_id, resumed)
         assert owned.connection.execute("SELECT attempts_used FROM operation_runs WHERE id=?",
             (original.ref.ticket.run_id,)).fetchone() == (2,)
@@ -426,13 +423,13 @@ async def test_committed_attempt_without_file_facts_restores_pages_before_new_qu
         assert owned.connection.execute("SELECT source_action_id FROM device_files").fetchone() == (None,)
         owned.connection.close()
         owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-        resumed = _resumed(owned, runtime, runtime.recovery_max_event_id)
+        resumed = (await _resumed(owned, runtime, result_case_for().options["recovery_max_event_id"]()))
         async def complete(request, batch):
             assert request.ticket.attempt_id == 2
             assert owned.connection.execute("SELECT source_action_id,completion_state FROM device_files").fetchone() == (action_id, 3)
             return DeviceCallResult.from_outcome(_actual(request.ticket, entries=[_entry("a")], finalized=True))
         driver.list_results.side_effect = complete
-        resumed.results = DriverResultListing(driver, _BINDING, resumed.evidence)
+        result_case_for().results.delegate = DriverResultListing(driver, _BINDING, _RECOVERY)
         await capture_handler(handler)(action_id, resumed)
         assert owned.connection.execute("SELECT status FROM actions").fetchone() == (3,)
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (1,)

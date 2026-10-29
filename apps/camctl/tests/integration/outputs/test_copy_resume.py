@@ -8,10 +8,12 @@ from decimal import Decimal
 
 import pytest
 
-from camctl.contracts.history_values import TransactionRange
+from ..support.outputs import output_operation
+from ..support.output_planning import capture_operation, validate_static_event
+
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
-from camctl.history.validators import EventContext, EventValidationError, validate_event
+from camctl.history.validators import EventValidationError
 from camctl.host_files.models import BoundDirectories, FilePurpose
 from camctl.operations.attempts import (
     AttemptConfig, AttemptFinish, AttemptIntent, AttemptTarget, BeginDisposition,
@@ -29,10 +31,8 @@ from camctl.outputs.copy import (
 from camctl.outputs.qualification import QualificationOutcome
 from camctl.outputs.slots import SlotOutcome, SlotRequest
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
-from camctl.persistence.transaction import TransactionScope
 
 from .test_local_read import local_read  # noqa: F401  主机源建档夹具
 from .test_qualification import _NOW
@@ -152,9 +152,12 @@ def _seed_failed_attempts(owned, run_id: int, count: int) -> None:
         assert cursor.fetchone() == (count, 5, 1)
 
 
-def _context(owned, roots, occurred_at=_NOW + 1):
-    return CopyContext(
-        repository=OutputsRepository(), owned=owned, roots=roots, occurred_at=occurred_at,
+async def _prepare(owned, copy_id, roots, occurred_at=_NOW + 1):
+    return await output_operation(
+        owned, prepare_copy, copy_id, CopyContext,
+        repository=OutputsRepository(),
+        roots=roots,
+        occurred_at=occurred_at,
     )
 
 
@@ -171,7 +174,7 @@ def _reset_events(owned):
 
 def test_prepare_creates_missing_target_from_zero(copy_env):
     owned, roots, first = copy_env
-    step = asyncio.run(prepare_copy(first.copy_id, _context(owned, roots)))
+    step = asyncio.run(_prepare(owned, first.copy_id, roots))
     assert step.decision.outcome is ResumeOutcome.CREATE
     assert step.decision.offset == 0
     assert step.attempt.plan is AttemptPlan.NEW_REQUIRED
@@ -184,12 +187,12 @@ def test_prepare_truncates_unconfirmed_tail_then_continues(copy_env):
     path = _target_path(roots, owned, first.target_file_id)
     path.write_bytes(b"abcde")
     _seed_progress(owned, first.copy_id, 3)
-    step = asyncio.run(prepare_copy(first.copy_id, _context(owned, roots)))
+    step = asyncio.run(_prepare(owned, first.copy_id, roots))
     assert step.decision.outcome is ResumeOutcome.TRUNCATE
     assert step.decision.truncate_to == 3
     assert step.decision.offset == 3
     assert path.read_bytes() == b"abc"
-    again = asyncio.run(prepare_copy(first.copy_id, _context(owned, roots, _NOW + 2)))
+    again = asyncio.run(_prepare(owned, first.copy_id, roots, _NOW + 2))
     assert again.decision.outcome is ResumeOutcome.CONTINUE
     assert again.decision.offset == 3
     assert path.read_bytes() == b"abc"
@@ -201,7 +204,7 @@ def test_prepare_continues_in_place_without_rewriting(copy_env):
     path.write_bytes(b"abc")
     _seed_progress(owned, first.copy_id, 3)
     before = path.read_bytes()
-    step = asyncio.run(prepare_copy(first.copy_id, _context(owned, roots)))
+    step = asyncio.run(_prepare(owned, first.copy_id, roots))
     assert step.decision.outcome is ResumeOutcome.CONTINUE
     assert path.read_bytes() == before
 
@@ -220,7 +223,7 @@ def test_sync_failure_blocks_resume_without_progress_change(copy_env, monkeypatc
 
     monkeypatch.setattr(host_io, "_fsync", _refuse)
     with pytest.raises(CopyPreparationError) as caught:
-        asyncio.run(prepare_copy(first.copy_id, _context(owned, roots)))
+        asyncio.run(_prepare(owned, first.copy_id, roots))
     assert caught.value.stage == "target_sync_failed"
     monkeypatch.undo()
     committed = owned.connection.execute(
@@ -238,7 +241,7 @@ def test_complete_target_enters_verification_without_writes(copy_env):
     path.write_bytes(b"x" * size)
     _seed_progress(owned, first.copy_id, size)
     events_before = _reset_events(owned)
-    step = asyncio.run(prepare_copy(first.copy_id, _context(owned, roots)))
+    step = asyncio.run(_prepare(owned, first.copy_id, roots))
     assert step.decision.outcome is ResumeOutcome.VERIFY
     assert step.decision.offset is None
     assert path.stat().st_size == size
@@ -250,7 +253,7 @@ def test_missing_target_with_confirmed_progress_keeps_facts(copy_env):
     _seed_progress(owned, first.copy_id, 3)
     before = tuple(owned.connection.iterdump())
     with pytest.raises(ConsistencyError):
-        asyncio.run(prepare_copy(first.copy_id, _context(owned, roots)))
+        asyncio.run(_prepare(owned, first.copy_id, roots))
     assert tuple(owned.connection.iterdump()) == before
 
 
@@ -259,7 +262,7 @@ def test_directory_at_target_path_is_not_a_missing_file(copy_env):
     owned, roots, first = copy_env
     _target_path(roots, owned, first.target_file_id).mkdir()
     with pytest.raises(ConsistencyError):
-        asyncio.run(prepare_copy(first.copy_id, _context(owned, roots)))
+        asyncio.run(_prepare(owned, first.copy_id, roots))
 
 
 def test_changed_device_source_identity_rejects_preparation(copy_env):
@@ -269,7 +272,7 @@ def test_changed_device_source_identity_rejects_preparation(copy_env):
         "UPDATE device_files SET size_bytes=8192 WHERE id=501")
     owned.connection.commit()
     with pytest.raises(ConsistencyError):
-        asyncio.run(prepare_copy(first.copy_id, _context(owned, roots)))
+        asyncio.run(_prepare(owned, first.copy_id, roots))
 
 
 def test_changed_host_source_identity_rejects_preparation(local_read, tmp_path):
@@ -280,13 +283,13 @@ def test_changed_host_source_identity_rejects_preparation(local_read, tmp_path):
         "UPDATE intermediate_files SET size_bytes=8192 WHERE id=801")
     owned.connection.commit()
     with pytest.raises(ConsistencyError):
-        asyncio.run(prepare_copy(qualification.copy_id, _context(owned, roots)))
+        asyncio.run(_prepare(owned, qualification.copy_id, roots))
 
 
 def test_same_entry_prepares_internal_and_delivery_copies(copy_env):
     """取回交付与录像内部输入通过同一准备入口，目标按各自用途定位。"""
     owned, roots, first = copy_env
-    step = asyncio.run(prepare_copy(first.copy_id, _context(owned, roots)))
+    step = asyncio.run(_prepare(owned, first.copy_id, roots))
     purpose = owned.connection.execute(
         "SELECT purpose FROM intermediate_files WHERE id=?", (first.target_file_id,)).fetchone()[0]
     expected = (FilePurpose.DELIVERY_COPY if purpose == 1 else FilePurpose.RECORDING_INPUT)
@@ -300,7 +303,7 @@ def test_host_source_copy_preparation_uses_local_facts(local_read, tmp_path):
     owned, command = local_read
     qualification = _qualified(owned, command)
     roots = _make_roots(tmp_path)
-    step = asyncio.run(prepare_copy(qualification.copy_id, _context(owned, roots)))
+    step = asyncio.run(_prepare(owned, qualification.copy_id, roots))
     assert step.decision.outcome is ResumeOutcome.CREATE
     assert step.decision.offset == 0
     assert _target_path(roots, owned, qualification.target_file_id).stat().st_size == 0
@@ -324,7 +327,7 @@ def test_in_flight_attempt_is_resumed_not_duplicated(copy_env):
     granted = OperationRepository().begin_attempt(intent, new_operation_key(), owned)
     assert granted.kind is DbOutcomeKind.COMPLETED, granted.error
     before = tuple(owned.connection.iterdump())
-    step = asyncio.run(prepare_copy(first.copy_id, _context(owned, roots, _NOW + 3)))
+    step = asyncio.run(_prepare(owned, first.copy_id, roots, _NOW + 3))
     assert step.attempt.plan is AttemptPlan.RESUME_EXISTING
     assert step.attempt.attempt_id == granted.value.ticket.attempt_id
     assert tuple(owned.connection.iterdump()) == before
@@ -338,7 +341,7 @@ def test_failed_attempt_requires_new_legal_attempt(copy_env):
         "SELECT * FROM operation_attempts WHERE run_id=? ORDER BY attempt_no",
         (first.run_id,))) as cursor:
         attempts_before = cursor.fetchall()
-    step = asyncio.run(prepare_copy(first.copy_id, _context(owned, roots, _NOW + 3)))
+    step = asyncio.run(_prepare(owned, first.copy_id, roots, _NOW + 3))
     assert step.attempt.plan is AttemptPlan.NEW_REQUIRED
     intent = AttemptIntent(
         operation="read", action_id=_run_action(owned, first.run_id),
@@ -367,7 +370,7 @@ def test_attempts_of_earlier_round_do_not_resume(copy_env):
     owned.connection.execute(
         "UPDATE file_copies SET round=3, recopies_used=2 WHERE id=?", (first.copy_id,))
     owned.connection.commit()
-    step = asyncio.run(prepare_copy(first.copy_id, _context(owned, roots, _NOW + 3)))
+    step = asyncio.run(_prepare(owned, first.copy_id, roots, _NOW + 3))
     assert step.attempt.plan is AttemptPlan.NEW_REQUIRED
 
 
@@ -380,7 +383,7 @@ def test_reset_pending_truncates_and_saves_reset_event(copy_env):
     path = _target_path(roots, owned, first.target_file_id)
     path.write_bytes(b"old-round")
     _seed_reset_pending(owned, first.copy_id)
-    step = asyncio.run(prepare_copy(first.copy_id, _context(owned, roots)))
+    step = asyncio.run(_prepare(owned, first.copy_id, roots))
     assert step.decision.outcome is ResumeOutcome.RESET_TARGET
     assert step.decision.offset == 0
     assert step.reset is TargetResetOutcome.COMPLETED
@@ -396,7 +399,7 @@ def test_reset_recovers_after_truncate_before_save(copy_env):
     path = _target_path(roots, owned, first.target_file_id)
     path.write_bytes(b"")
     _seed_reset_pending(owned, first.copy_id)
-    step = asyncio.run(prepare_copy(first.copy_id, _context(owned, roots)))
+    step = asyncio.run(_prepare(owned, first.copy_id, roots))
     assert step.reset is TargetResetOutcome.COMPLETED
     assert owned.connection.execute(
         "SELECT reset_state FROM file_copies WHERE id=?", (first.copy_id,)).fetchone()[0] == 1
@@ -436,25 +439,15 @@ def test_reset_key_returns_first_response_and_rejects_changed_input(copy_env):
 
 
 def _reset_proposal(owned, copy_id: int, occurred_at: int = _NOW + 1):
-    owned.connection.execute("BEGIN")
-    try:
-        plan = outputs._CopyResetCommand(
-            TargetResetRequest(copy_id, occurred_at), new_operation_key(),
-        ).plan(TransactionScope(owned.connection, 1, 1))
-    finally:
-        owned.connection.rollback()
-    assert plan.events, "重置提案必须产生事件"
-    return plan
+    return capture_operation(owned, lambda database: OutputsRepository().reset_copy_target(
+        TargetResetRequest(copy_id, occurred_at), new_operation_key(), database))
 
 
 def test_reset_guard_accepts_real_event(copy_env):
     owned, roots, first = copy_env
     _seed_reset_pending(owned, first.copy_id)
     plan = _reset_proposal(owned, first.copy_id)
-    context = EventContext(
-        TransactionRange(2, 2, 2), dict(plan.owners), deepcopy(plan.state_rows),
-        read_coverage=plan.read_coverage)
-    assert validate_event(plan.events[0], context).branch_name == "RESET"
+    assert validate_static_event(plan.events[0], plan).branch_name == "RESET"
 
 
 def test_reset_guard_rejects_nonzero_progress_or_missing_facts(copy_env):
@@ -463,18 +456,12 @@ def test_reset_guard_rejects_nonzero_progress_or_missing_facts(copy_env):
     plan = _reset_proposal(owned, first.copy_id)
     nonzero = deepcopy(plan.state_rows)
     nonzero["file_copies"][first.copy_id]["committed_bytes"] = 2
-    context = EventContext(
-        TransactionRange(2, 2, 2), dict(plan.owners), nonzero,
-        read_coverage=plan.read_coverage)
     with pytest.raises(EventValidationError):
-        validate_event(plan.events[0], context)
+        validate_static_event(plan.events[0], replace(plan, state_rows=nonzero))
     empty = {table: dict(rows) for table, rows in deepcopy(plan.state_rows).items()}
     del empty["file_copies"][first.copy_id]
-    context = EventContext(
-        TransactionRange(2, 2, 2), dict(plan.owners), empty,
-        read_coverage=plan.read_coverage)
     with pytest.raises(EventValidationError):
-        validate_event(plan.events[0], context)
+        validate_static_event(plan.events[0], replace(plan, state_rows=empty))
 
 
 def test_reset_guard_rejects_ready_start(copy_env):
@@ -486,8 +473,5 @@ def test_reset_guard_rejects_ready_start(copy_env):
     row = event.rows[0]
     already_ready = replace(
         row, before=replace(row.before, values={"reset_state": 1}))
-    context = EventContext(
-        TransactionRange(2, 2, 2), dict(plan.owners), deepcopy(plan.state_rows),
-        read_coverage=plan.read_coverage)
     with pytest.raises(EventValidationError):
-        validate_event(replace(event, rows=(already_ready,)), context)
+        validate_static_event(replace(event, rows=(already_ready,)), plan)

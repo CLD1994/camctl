@@ -20,8 +20,8 @@ from .test_selection_reuse import _save, selection_database, family_database
 from .test_read_associations import _command as _read_command
 from .test_selection_authority import _NOW
 from .test_sources import _seed_output
-from .test_selection_reuse_boundaries import _ReadProbe
-from ..operations.test_result_reuse import _FaultConnection
+from ..support.output_source_cases import QueryProbe, reads_table
+from ..support.output_planning import capture_operation, EventSequence, event_case, validate_static_event
 
 
 @pytest.mark.parametrize("entry", ["read", "new_key", "original_key"])
@@ -136,39 +136,25 @@ def test_saved_comparison_is_not_recomputed_from_current_files(selection_databas
             first.preview_size, first.repaired_size) == (703, 701, 702, 100, 80)
 
 
-class _IncompleteGrant:
-    def __init__(self, key, missing):
-        self.key, self.missing = key, missing
-
-    def plan(self, scope):
-        plan = outputs._GrantFileCommand(_candidate(), self.key).plan(scope)
-        state = {**plan.state_rows, "outputs": dict(plan.state_rows["outputs"])}
-        state["outputs"].pop(self.missing)
-        return replace(plan, state_rows=state)
-
-
 @pytest.mark.parametrize("missing", [701, 702])
 def test_formal_grant_cannot_consume_incomplete_current_references(selection_database, missing, monkeypatch):
-    from camctl.history import validators
-
-    owned = selection_database
-    _save(owned, SelectionMode.PREVIEW)
+    from copy import deepcopy
+    owned=selection_database
+    _save(owned,SelectionMode.PREVIEW)
     register_operation_guards()
-    original = validators.NAMED_GUARDS["read_permission"]
-    reached = []
-
-    def inspect(event, context):
-        reached.append((event.event_type, event.reason))
-        original(event, context)
-
-    monkeypatch.setitem(validators.NAMED_GUARDS, "read_permission", inspect)
-    before = tuple(owned.connection.iterdump())
-    key = new_operation_key()
-    receipt = commit_operation(_IncompleteGrant(key, missing), key, owned)
-    assert (21, 1) in reached
-    assert receipt.kind == "rolled_back", receipt.error
-    assert isinstance(receipt.error, EventValidationError), receipt.error
-    assert tuple(owned.connection.iterdump()) == before
+    proposal=capture_operation(owned,lambda copy: outputs.OutputsRepository().grant_file(
+        _candidate(),new_operation_key(),copy))
+    event,context=event_case(proposal,21)
+    validate_static_event(event,context)
+    current=deepcopy(proposal.state_rows)
+    current['outputs'].pop(missing)
+    incomplete=replace(proposal,state_rows=current)
+    before=tuple(owned.connection.iterdump())
+    key=new_operation_key()
+    receipt=commit_operation(EventSequence(proposal.events,incomplete),key,owned)
+    assert receipt.kind=='rolled_back',receipt.error
+    assert isinstance(receipt.error,EventValidationError),receipt.error
+    assert tuple(owned.connection.iterdump())==before
 
 
 @pytest.mark.parametrize("entry", ["read", "new_key"])
@@ -176,7 +162,8 @@ def test_formal_grant_cannot_consume_incomplete_current_references(selection_dat
 def test_current_reference_lookup_preserves_error_and_closes_cursor(selection_database, entry, failure):
     owned = selection_database
     command, _ = _save(owned, SelectionMode.PREVIEW)
-    probe = _ReadProbe(owned.connection, "SELECT 1 FROM outputs", failure)
+    probe = QueryProbe(owned.connection,lambda reads,columns,args: ('outputs','id') in reads
+        and all(column in ('','id') for table,column in reads if table=='outputs'),failure)
     before = tuple(owned.connection.iterdump())
     if entry == "read":
         with pytest.raises(sqlite3.OperationalError) as raised:
@@ -200,15 +187,11 @@ def test_grant_reference_query_error_does_not_create_preparation(selection_datab
     _save(owned, SelectionMode.PREVIEW)
     error = sqlite3.OperationalError("原片引用查询失败")
 
-    class MissingReference(_FaultConnection):
-        def execute(self, sql, parameters=()):
-            if sql.startswith("SELECT * FROM outputs") and parameters == (701,):
-                raise error
-            return self._connection.execute(sql, parameters)
-
-    before = tuple(owned.connection.iterdump())
-    result = outputs.OutputsRepository().grant_file(_candidate(source), new_operation_key(),
-        replace(owned, connection=MissingReference(owned.connection, "unused")))
+    probe=QueryProbe(owned.connection,lambda reads,columns,args:
+        reads_table(reads,'outputs') and args==(701,), 'execute',error=error)
+    before=tuple(owned.connection.iterdump())
+    result=outputs.OutputsRepository().grant_file(_candidate(source),new_operation_key(),
+        replace(owned,connection=probe))
     assert result.kind is DbOutcomeKind.ROLLED_BACK
     assert result.error is error
     assert tuple(owned.connection.iterdump()) == before
@@ -221,25 +204,15 @@ def test_current_items_are_read_in_bounded_batches_without_partial_result(select
     sizes, cursors = [], []
     error = sqlite3.OperationalError("第二批明细读取失败")
 
-    class BatchedRead(_FaultConnection):
-        def execute(self, sql, parameters=()):
-            cursor = self._connection.execute(sql, parameters)
-            if not sql.startswith("SELECT requested_output_id"):
-                return cursor
-            probe = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)
-
-            def fetchmany(size):
-                sizes.append(size)
-                if fail_second_batch and len(sizes) == 2:
-                    raise error
-                return cursor.fetchmany(size)
-
-            probe.fetchmany.side_effect = fetchmany
-            probe.close.side_effect = cursor.close
-            cursors.append(probe)
-            return probe
-
-    probe = BatchedRead(owned.connection, "unused")
+    def fetchmany(cursor,size):
+        sizes.append(size)
+        if fail_second_batch and len(sizes)==2:
+            raise error
+        return cursor.fetchmany(size)
+    probe=QueryProbe(owned.connection,lambda reads,columns,args:
+        reads_table(reads,'obtain_items') and 'requested_output_id' in columns,
+        fetchmany=fetchmany)
+    cursors=probe.cursors
     before = tuple(owned.connection.iterdump())
     if fail_second_batch:
         with pytest.raises(sqlite3.OperationalError) as raised:

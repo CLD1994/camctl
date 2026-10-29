@@ -182,6 +182,18 @@ def bound_waiters_at_publication(
             after_selection_id = int(rows[-1][2])
 
 
+def selection_is_bound_at_publication(
+        *, source_action_id: int, obtain_action_id: int, selection_id: int,
+        published_event_id: int, owned,
+) -> tuple[HistoryBoundary, bool]:
+    """在可靠只读事务内核对一项选择是否属于来源 H 的等待集合。"""
+    with _read_scope(owned.connection):
+        return _selection_is_bound_at_publication(
+            source_action_id=source_action_id, obtain_action_id=obtain_action_id,
+            selection_id=selection_id, published_event_id=published_event_id,
+            owned=owned)
+
+
 def _selection_is_bound_at_publication(
         *, source_action_id: int, obtain_action_id: int, selection_id: int,
         published_event_id: int, owned,
@@ -235,6 +247,17 @@ def read_bound_check_copy(
         obtain_action_id: int, selection_id: int, owned,
 ) -> BoundCheckCopy | None:
     """读取本取回在 H 绑定的同原片完整检查副本；无效时返回空。"""
+    bound = read_bound_check_copy_identity(
+        source_action_id=source_action_id, source_device_file_id=source_device_file_id,
+        obtain_action_id=obtain_action_id, selection_id=selection_id, owned=owned)
+    return bound if bound is not None and copy_is_reusable(bound.copy) else None
+
+
+def read_bound_check_copy_identity(
+        *, source_action_id: int, source_device_file_id: int,
+        obtain_action_id: int, selection_id: int, owned,
+) -> BoundCheckCopy | None:
+    """核对原 H 授权和完整检查副本身份，清理后仍可核实原交付责任。"""
     ObjectId(source_action_id)
     ObjectId(source_device_file_id)
     ObjectId(obtain_action_id)
@@ -260,7 +283,7 @@ def read_bound_check_copy(
         if not rows:
             return None
         member_id, published_event_id = rows[0]
-        boundary, bound = _selection_is_bound_at_publication(
+        boundary, bound = selection_is_bound_at_publication(
             source_action_id=source_action_id,
             obtain_action_id=obtain_action_id,
             selection_id=selection_id,
@@ -270,13 +293,27 @@ def read_bound_check_copy(
             return None
         facts = read_inspection_for_member(
             source_action_id, member_id, owned)
-        if facts.inspection is None or not copy_is_reusable(facts.copy):
+        if (facts.inspection is None or facts.copy is None
+                or facts.copy.inspection_state != int(enum_for("segment_inspections.state").COMPLETED)
+                or facts.copy.verification_state not in (
+                    int(_COPY_VERIFICATION.MATCHED),
+                    int(_COPY_VERIFICATION.SOURCE_CHECKSUM_UNAVAILABLE))
+                or facts.copy.committed_bytes != facts.copy.source_size):
             return None
         if facts.inspection.set_id != row_facts(
                 connection, "segment_members", member_id)["set_id"]:
             raise ConsistencyError("检查副本与发布的分段集合不一致")
         if facts.copy.source_device_file_id != source_device_file_id:
             raise ConsistencyError("检查副本与正式产物的原片身份不一致")
+        original = row_facts(connection, "device_files", source_device_file_id)
+        check_copy = row_facts(connection, "file_copies", facts.copy.copy_id)
+        if (original is None or check_copy is None
+                or original["source_action_id"] != source_action_id
+                or original["role"] != int(enum_for("device_files.role").ORIGINAL)
+                or original["completion_state"] != int(enum_for("device_files.completion_state").COMPLETE)
+                or check_copy["source_device_file_id"] != source_device_file_id
+                or check_copy["source_intermediate_file_id"] is not None):
+            raise ConsistencyError("检查副本的实际读取源与同源完整原片不一致")
         return BoundCheckCopy(
             source_action_id, source_device_file_id, obtain_action_id,
             selection_id, boundary, facts.inspection, facts.copy)
@@ -313,9 +350,26 @@ async def check_copy_is_locally_usable(
 
 
 def all_bound_waiters_terminal(
-        source_action_id: int, published_event_id: int, owned,
+        source_action_id: int, published_event_id: int, owned, *, copy=None,
 ) -> bool:
-    """检查 H 固定的每个取回都已终态；H 之后的新取回不延长保留。"""
+    """检查 H 上需要本副本的取回均已终态，后到请求不延长保留。"""
+    _publication_boundary(owned.connection, published_event_id)
+    if copy is not None and not copy_is_reusable(copy):
+        return True
+    from camctl.persistence.repositories.segment_selections import selection_uses_output
+
+    output_id = None
+    if copy is not None:
+        with closing(owned.connection.execute(
+            "SELECT id FROM outputs WHERE source_action_id=? AND device_file_id=?",
+            (source_action_id, copy.source_device_file_id),
+        )) as cursor:
+            outputs = cursor.fetchmany(2)
+        if len(outputs) > 1:
+            raise ConsistencyError("检查副本原片对应多个正式产物")
+        if not outputs:
+            return True
+        output_id = outputs[0][0]
     waiters = bound_waiters_at_publication(
         source_action_id, published_event_id, owned)
     terminal = {
@@ -330,7 +384,8 @@ def all_bound_waiters_terminal(
                 row = cursor.fetchone()
             if row is None:
                 raise ConsistencyError(f"已绑定的取回动作缺失: {waiter.action_id}")
-            if row[0] not in terminal:
+            if (row[0] not in terminal and (output_id is None
+                    or selection_uses_output(waiter.selection_id, output_id, owned))):
                 return False
         return True
     finally:

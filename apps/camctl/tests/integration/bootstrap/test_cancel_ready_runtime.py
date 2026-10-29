@@ -21,7 +21,7 @@ pytestmark = pytest.mark.asyncio
 async def _published(environment):
     cfg, owned, context, driver = environment
     await _save_photos(cfg, owned, context, driver)
-    _accept(owned, "2", [{"name": "取回已发布", "type": "obtain_action_outputs",
+    await _accept(owned, "2", [{"name": "取回已发布", "type": "obtain_action_outputs",
         "scheduled_at": "2026-01-15 09:00:00",
         "params": {"source": {"plan_instance_id": "1", "group": "files"}}}])
     target = owned.connection.execute("SELECT id FROM actions WHERE type=4").fetchone()[0]
@@ -37,8 +37,8 @@ async def _published(environment):
     files = {row[0]: (ready / row[0]).read_bytes() for row in owned.connection.execute("SELECT file_name FROM deliveries ORDER BY id")}
     assert len(files) == 2
     runtime = WorkFileRuntime(staging=Path(cfg.paths.staging), limits=WorkFileLimits(32, 1))
-    runtime.initialize(owned)
-    _accept(owned, "3", [{"name": "撤回已发布取回", "type": "cancel_task",
+    await runtime.initialize(context.database)
+    await _accept(owned, "3", [{"name": "撤回已发布取回", "type": "cancel_task",
         "scheduled_at": "2026-01-15 09:00:00",
         "params": {"target": {"action_instance_id": str(target)}}}])
     return target, files, runtime

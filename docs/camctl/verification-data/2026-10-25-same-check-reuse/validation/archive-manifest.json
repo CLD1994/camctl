@@ -1,0 +1,107 @@
+{
+  "root": "/tmp/camctl-same-check-options-ykdqfnct",
+  "validation": "/tmp/camctl-same-check-options-ykdqfnct/validation",
+  "files": [
+    {
+      "path": "/tmp/camctl-same-check-options-ykdqfnct/validation/README.md",
+      "bytes": 1585,
+      "sha256": "4d9a1fc55c650d01b24440e0d49b28efc23ea5190b9ded771a1b148690f4d63f"
+    },
+    {
+      "path": "/tmp/camctl-same-check-options-ykdqfnct/validation/summary.json",
+      "bytes": 6174,
+      "sha256": "02f4b068a2c59768dccdbb33b29b59f1b2d8f995864cb9ada973f485887f8d85"
+    },
+    {
+      "path": "/tmp/camctl-same-check-options-ykdqfnct/validation/execution.json",
+      "bytes": 8345,
+      "sha256": "a85ca1073d9cb45180e34f7b430a3532735d84db0536e7fe52d286f824d94f1f"
+    },
+    {
+      "path": "/tmp/camctl-same-check-options-ykdqfnct/validation/command.txt",
+      "bytes": 3388,
+      "sha256": "42f226d2e3ac3462eafd3601ff095f5d2e01b22051b564f657d00c13ffa0b9c3"
+    },
+    {
+      "path": "/tmp/camctl-same-check-options-ykdqfnct/validation/targets.json",
+      "bytes": 1704,
+      "sha256": "a05a8249d9333bb6205496e3b6424b441e8694050c31ea24af475e7eb73f98c0"
+    },
+    {
+      "path": "/tmp/camctl-same-check-options-ykdqfnct/validation/prototype_validation_plugin.py",
+      "bytes": 4041,
+      "sha256": "6193751661f3845f46b05aaa7d29187bdb78ebecf2edd9f7a4f57b095fca73d3"
+    },
+    {
+      "path": "/tmp/camctl-same-check-options-ykdqfnct/validation/run_validation.py",
+      "bytes": 3588,
+      "sha256": "c5cdf3d21378388cd690fb5ec215e57fb4880ef71464fcf77b13948388ec6497"
+    },
+    {
+      "path": "/tmp/camctl-same-check-options-ykdqfnct/validation/pytest.log",
+      "bytes": 18773,
+      "sha256": "612ce76c3eba952b2293224e43ffb94e9b779e92e8c25ef4f7a3782bc924485b"
+    },
+    {
+      "path": "/tmp/camctl-same-check-options-ykdqfnct/validation/junit.xml",
+      "bytes": 16533,
+      "sha256": "25530f142e768f82db84d9fc24cb8f5ccbffb4d38cd49cc9e242c4eaf62812d6"
+    },
+    {
+      "path": "/tmp/camctl-same-check-options-ykdqfnct/validation/pytest-progress.json",
+      "bytes": 124834,
+      "sha256": "5f2ee63a60033446eb8cc2838f59d7d95cbcc11731ef68f6e63b64fd9bf37335"
+    },
+    {
+      "path": "/tmp/camctl-same-check-options-ykdqfnct/validation/capacity-source.txt",
+      "bytes": 4278,
+      "sha256": "fcb2f4f7ef4d1957d97611fe20021708785a52b1116e7271f80c469ced3c8c42"
+    },
+    {
+      "path": "/tmp/camctl-same-check-options-ykdqfnct/validation/source-baseline-audit.json",
+      "bytes": 269,
+      "sha256": "42a4ce60ea45dd2b1ba1a5bd92434414cc33450e7d55af190c5848d709e73a35"
+    },
+    {
+      "path": "/tmp/camctl-same-check-options-ykdqfnct/validation/source-hashes-before.json",
+      "bytes": 150987,
+      "sha256": "b438358d2c97cdde86bae72d7c1a8b4f5c939587e90de7b775b2e06092b7d8df"
+    },
+    {
+      "path": "/tmp/camctl-same-check-options-ykdqfnct/validation/source-hashes-after.json",
+      "bytes": 150987,
+      "sha256": "b438358d2c97cdde86bae72d7c1a8b4f5c939587e90de7b775b2e06092b7d8df"
+    },
+    {
+      "path": "/tmp/camctl-same-check-options-ykdqfnct/validation/same-check-member-options.json",
+      "bytes": 27675,
+      "sha256": "2d7d31d5f1e0a6142bb87e47d784744972db3b6fb3e90456579f02eac4426826"
+    },
+    {
+      "path": "/tmp/camctl-same-check-options-ykdqfnct/validation/same-check-member-options.md",
+      "bytes": 5910,
+      "sha256": "24f6ec7af497ba115bd9f9ae970a8641e4da525e45ab6fc2762e3375891633e7"
+    }
+  ],
+  "prototype_inputs": [
+    {
+      "path": "/tmp/camctl-same-check-options-ykdqfnct/candidate-functions.py",
+      "bytes": 15770,
+      "sha256": "fbecead1324540cffa3f7c4078fc741d9d1734c5d826cff4cc64ae1c0185b512"
+    },
+    {
+      "path": "/tmp/camctl-same-check-options-ykdqfnct/candidate-preview.patch",
+      "bytes": 5838,
+      "sha256": "4b0380284b0c9e2c11de4448bd9832d45319f50a35408dd4055e2c211efb2ecb"
+    },
+    {
+      "path": "/tmp/camctl-same-check-options-ykdqfnct/metadata.json",
+      "bytes": 1139,
+      "sha256": "3afb96553cb1fd4a78835a66f588fa0d9ac66c1f35ff7e4ce2a0ff9cca0a39f6"
+    }
+  ],
+  "excluded": [
+    "validation/tmp中的测试数据库",
+    "validation/pycache"
+  ]
+}

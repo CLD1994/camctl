@@ -5,7 +5,7 @@ from decimal import Decimal
 import pytest
 
 from camctl.capture import segment_storage as models
-from camctl.capture.handlers import _begin_check_round
+from .result_page_fixtures import begin_result_check
 from camctl.capture.result_pages import ResultPageSave
 from camctl.contracts.values import new_operation_key
 from camctl.history.validators import EventContext
@@ -39,7 +39,7 @@ async def _partial_result_world(tmp_path,*,maximum=3,retained=False):
         owned,runtime,action_id,_=await consumer_world(tmp_path,'record',catalog=SegmentedCatalog())
     try:
         runtime.check_config=AttemptConfig(maximum,Decimal('1.25'),Decimal('2'))
-        ticket=_begin_check_round(runtime,action_id).ticket
+        ticket=begin_result_check(owned,runtime,action_id).ticket
         actual=_actual(ticket,entries=[],finalized=False)
         saved=_ok(runtime.capture.save_result_page(ResultPageSave(ticket,1,None,
             validate_outcome(ticket,actual,_REGISTRY),runtime.wall_us()),new_operation_key(),owned))

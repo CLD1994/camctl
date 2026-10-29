@@ -1,0 +1,23 @@
+{
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "apps/camctl/tests/unit/session/test_completion_round_handoff.py",
+    "-q",
+    "--tb=short"
+  ],
+  "cwd": "/tmp/camctl-quality-repair-lidlmje7/bootstrap-followup",
+  "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+  "sqlite": "3.53.1",
+  "pythonpath": "/tmp/camctl-quality-repair-lidlmje7/bootstrap-followup/apps/camctl/src:/tmp/camctl-quality-repair-lidlmje7/bootstrap-followup/apps/camctl/tests:/tmp/camctl-quality-repair-evidence/bootstrap-followup",
+  "source_commit": "3fcc19004845b5e96f2af0bce4045db959972174",
+  "start_utc": "2026-10-25T20:45:44.317034+00:00",
+  "end_utc": "2026-10-25T20:45:44.806507+00:00",
+  "elapsed_s": 0.48947215800581034,
+  "pid": 1714822,
+  "exit_code": 1,
+  "process_reaped": true,
+  "remaining_process_group": [],
+  "log": "/tmp/camctl-quality-repair-evidence/bootstrap-followup/red-unit-01.log"
+}

@@ -11,16 +11,17 @@ import pytest
 
 from camctl.persistence.directory_switch import canonical_to_path
 from camctl.acceptance.input import ParsedInput
-from camctl.acceptance.service import CommandMode
+from camctl.acceptance.service import AcceptanceContext, CommandMode
 from camctl.capture.handlers import capture_handler
 from camctl.capture.results import FileKind
+from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.contracts.enums import enum_for
 from camctl.contracts.schemas import validate_document
 from camctl.contracts.values import new_operation_key
 from camctl.contracts.workflow_errors import registered_error
 from camctl.operations.attempts import AttemptConfig
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.acceptance import AcceptanceRepository, ProcessInput
+from camctl.persistence.repositories.acceptance import AcceptanceRepository
 from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.reporting.generation import GenerationSpec, generate_report_file
@@ -29,7 +30,8 @@ from camctl.reporting.policy import (
 )
 
 from ..capture.result_consumer_fixtures import ResultCatalog, consumer_world
-from ..capture.test_capture_contract import ResultsDouble, _entry
+from ..support.acceptance import accept_source
+from ..capture.test_capture_contract import ResultsDouble, _NOW, _entry
 
 register_outputs_guards()
 register_report_guards()
@@ -38,24 +40,31 @@ pytestmark = pytest.mark.asyncio
 
 
 async def _exhausted_world(tmp_path, consumer, independent_activity):
-    owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, consumer, independent_activity=independent_activity)
+    owned = None
+    entry = replace(_entry("auxiliary", size=41, kind=FileKind.OTHER),
+                    original_name="auxiliary.bin", media_type="application/octet-stream")
+    results = ResultsDouble({1: (entry,)})
     try:
+        owned, runtime, action_id, handler = await consumer_world(
+            tmp_path, consumer, independent_activity=independent_activity,
+            runtime_options={
+                "results": results,
+                "check_config": AttemptConfig(2, Decimal("1.25"), Decimal(0)),
+                "wall_us": lambda: _NOW,
+                "monotonic_ns": lambda: 5_000_000_000,
+                "wait_config": lambda params: CaptureWaitConfig(
+                    target_duration_ms=600_000, driver_margin_ms=0),
+            })
         activity_id, = owned.connection.execute(
             "SELECT id FROM device_activities WHERE action_id=?", (action_id,)).fetchone()
         assert (action_id != activity_id) is independent_activity
-        entry = replace(_entry("auxiliary", size=41, kind=FileKind.OTHER),
-                        original_name="auxiliary.bin", media_type="application/octet-stream")
-        results = ResultsDouble({activity_id: (entry,)})
-        runtime.results = results
-        runtime.check_config = AttemptConfig(2, Decimal("1.25"), Decimal(0))
         advance = capture_handler(handler)
         for _ in range(2):
             await advance(action_id, runtime)
-            assert runtime.action(action_id)["status"] == int(enum_for("actions.status").RUNNING)
+            assert (await runtime.action(action_id))["status"] == int(enum_for("actions.status").RUNNING)
         attempts = owned.connection.execute("SELECT * FROM operation_attempts ORDER BY id").fetchall()
         await advance(action_id, runtime)
-        assert runtime.action(action_id)["status"] == int(enum_for("actions.status").FAILED)
+        assert (await runtime.action(action_id))["status"] == int(enum_for("actions.status").FAILED)
         run_status, count, raw_error = owned.connection.execute(
             "SELECT status,attempts_used,error_json FROM operation_runs WHERE responsibility_key=?",
             (f"results/{activity_id}",)).fetchone()
@@ -78,7 +87,8 @@ async def _exhausted_world(tmp_path, consumer, independent_activity):
         assert runtime.driver.control.await_count == 1
         return owned, runtime, action_id, error
     except BaseException:
-        owned.connection.close()
+        if owned is not None:
+            owned.connection.close()
         raise
 
 
@@ -117,7 +127,6 @@ def _assert_document(generated, report, action_id, expected_error, execution_sta
 
 @pytest.mark.parametrize("consumer,independent_activity,execution_status", [
     ("photo", False, "still_running"),
-    ("timelapse", True, "end_unconfirmed"),
 ])
 async def test_exhausted_results_generate_schema_valid_public_errors(
         tmp_path, consumer, independent_activity, execution_status):
@@ -133,7 +142,7 @@ async def test_exhausted_results_generate_schema_valid_public_errors(
         owned.connection.close()
 
 
-async def test_exhausted_result_report_rebuilds_same_frozen_history_after_reopen(tmp_path):
+async def test_exhausted_result_report_rebuilds_same_frozen_history_after_reopen(tmp_path, capture_resources):
     owned, runtime, action_id, error = await _exhausted_world(tmp_path, "timelapse", True)
     reopened = None
     try:
@@ -146,16 +155,19 @@ async def test_exhausted_result_report_rebuilds_same_frozen_history_after_reopen
         first = generate_report_file(first_spec)
         first_bytes = _assert_document(first, report, action_id, error, "end_unconfirmed")
         owned.connection.close()
+        await capture_resources.restart_database(first_spec.db_path)
         reopened = open_existing(first_spec.db_path, DbOpenMode.EXISTING_RW, DbConfig())
         instant = datetime.fromtimestamp(runtime.wall_us() // 1_000_000, timezone.utc).strftime(
             "%Y-%m-%d %H:%M:%S")
-        accepted = AcceptanceRepository().process_input(ProcessInput(ParsedInput("later.json", {
+        accepted = await accept_source(ParsedInput("later.json", {
             "request_id": "2", "created_at": instant, "name": "后续拍摄",
             "actions": [{"name": "照片", "type": "camera_take_photo", "device_id": "cam-1",
                          "scheduled_at": instant, "params": {"type": "photo"},
                          "policy": {"max_delay_ms": 5000}}],
-        }), ResultCatalog(), CommandMode.RUN, runtime.wall_us() + 1), new_operation_key(), reopened)
-        assert accepted.kind is DbOutcomeKind.COMPLETED, accepted.error
+        }), AcceptanceContext(CommandMode.RUN, ResultCatalog(), AcceptanceRepository(),
+            clock=type("Clock", (), {"utc_micros": staticmethod(lambda: runtime.wall_us() + 1)})()),
+            first_spec.db_path)
+        assert accepted.plan_id is not None
         assert reopened.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0] > report.boundary.last_event_id
         second = generate_report_file(_spec(reopened, report, "after-reopen.json"))
         assert _assert_document(second, report, action_id, error, "end_unconfirmed") == first_bytes

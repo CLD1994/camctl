@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "session_id": "647dfb20-8e64-4ef2-846f-2ffae145f4d6",
+  "nodeid": "",
+  "command_prefix": [
+    "node",
+    "--import",
+    "tsx",
+    "/tmp/camctl-quality-client-session-20261026/tests/integration/client_driver.ts"
+  ],
+  "phase_timeout_seconds": 120,
+  "startup": {
+    "started_monotonic_ns": 100674266027686,
+    "finished_monotonic_ns": 100675385447968,
+    "elapsed_seconds": 1.119420282,
+    "outcome": "passed"
+  },
+  "commands": [
+    {
+      "id": 1,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/world/client-store",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/body.json",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/plan-1.json"
+      ],
+      "receipt_path": "/tmp/camctl-quality-evidence/client-session/smoke-locked/export-1.json",
+      "started_monotonic_ns": 100675386275081,
+      "finished_monotonic_ns": 100675606353916,
+      "elapsed_seconds": 0.220078835,
+      "outcome": "passed"
+    },
+    {
+      "id": 2,
+      "operation": "import",
+      "arguments": [
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/reports",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/world/client-store"
+      ],
+      "receipt_path": "/tmp/camctl-quality-evidence/client-session/smoke-locked/import-1.json",
+      "started_monotonic_ns": 100675606682501,
+      "finished_monotonic_ns": 100675642394288,
+      "elapsed_seconds": 0.035711787,
+      "outcome": "passed"
+    },
+    {
+      "id": 3,
+      "operation": "import-media",
+      "arguments": [
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/world/client-store",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/1.mp4"
+      ],
+      "receipt_path": "/tmp/camctl-quality-evidence/client-session/smoke-locked/media-1.json",
+      "started_monotonic_ns": 100675642708846,
+      "finished_monotonic_ns": 100675695604194,
+      "elapsed_seconds": 0.052895348,
+      "outcome": "passed"
+    },
+    {
+      "id": 4,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/world/client-store",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/body.json",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/plan-2.json"
+      ],
+      "receipt_path": "/tmp/camctl-quality-evidence/client-session/smoke-locked/export-2.json",
+      "started_monotonic_ns": 100675695912671,
+      "finished_monotonic_ns": 100675710280471,
+      "elapsed_seconds": 0.0143678,
+      "outcome": "passed"
+    },
+    {
+      "id": 5,
+      "operation": "browser-plan-export",
+      "arguments": [
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/body.json",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/browser-plan.json"
+      ],
+      "receipt_path": "/tmp/camctl-quality-evidence/client-session/smoke-locked/browser-export.json",
+      "started_monotonic_ns": 100675711658484,
+      "finished_monotonic_ns": 100678473704908,
+      "elapsed_seconds": 2.762046424,
+      "outcome": "passed"
+    },
+    {
+      "id": 6,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/world/client-store",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/body.json",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/plan-3.json"
+      ],
+      "receipt_path": "/tmp/camctl-quality-evidence/client-session/smoke-locked/export-3.json",
+      "started_monotonic_ns": 100678474315845,
+      "finished_monotonic_ns": 100678581934937,
+      "elapsed_seconds": 0.107619092,
+      "outcome": "passed"
+    }
+  ],
+  "close": {
+    "started_monotonic_ns": 100678582292999,
+    "finished_monotonic_ns": 100678621132310,
+    "elapsed_seconds": 0.038839311,
+    "outcome": "passed"
+  },
+  "node_pid": 1542114,
+  "owned_processes": [
+    {
+      "pid": 1542114,
+      "ppid": 1542113,
+      "pgid": 1542114,
+      "starttime": "10067426",
+      "state": "S"
+    },
+    {
+      "pid": 1542173,
+      "ppid": 1542114,
+      "pgid": 1542173,
+      "starttime": "10067617",
+      "state": "S"
+    },
+    {
+      "pid": 1542123,
+      "ppid": 1542114,
+      "pgid": 1542114,
+      "starttime": "10067439",
+      "state": "S"
+    }
+  ]
+}

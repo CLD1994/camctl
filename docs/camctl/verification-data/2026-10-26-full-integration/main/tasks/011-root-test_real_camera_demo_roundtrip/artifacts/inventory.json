@@ -1,0 +1,6 @@
+[
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/011-root-test_real_camera_demo_roundtrip/source/tests/integration/test_real_camera_demo_roundtrip.py::test_camera_demo_capture_obtain_and_report[camera_record-dji-action6]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/011-root-test_real_camera_demo_roundtrip/source/tests/integration/test_real_camera_demo_roundtrip.py::test_camera_demo_capture_obtain_and_report[camera_record-dji-osmo360-ii]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/011-root-test_real_camera_demo_roundtrip/source/tests/integration/test_real_camera_demo_roundtrip.py::test_camera_demo_capture_obtain_and_report[camera_timelapse-dji-action6]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/011-root-test_real_camera_demo_roundtrip/source/tests/integration/test_real_camera_demo_roundtrip.py::test_camera_demo_capture_obtain_and_report[camera_timelapse-dji-osmo360-ii]"
+]

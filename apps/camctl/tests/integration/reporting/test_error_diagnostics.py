@@ -52,7 +52,7 @@ def _oversize_worker_failure(connection):
     error.__cause__ = PermissionError("原始工作进程错误")
     job = JobMessage("oversize-job", 7, 0, 1, 1, "a" * 32,
         "/state.db", "/staging/report.tmp", "/staging", "/ready", "/processing", 1, 1, 1)
-    worker._read_job_metadata = lambda job: (_ for _ in ()).throw(error)
+    worker.open_existing = lambda *args, **kwargs: (_ for _ in ()).throw(error)
     try:
         connection.send_bytes(encode_message(worker.run_job(job)))
     finally:

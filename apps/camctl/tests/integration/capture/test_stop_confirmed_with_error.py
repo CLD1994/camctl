@@ -132,7 +132,7 @@ async def test_normal_record_stop_confirmed_with_error_completes_stop_fact(tmp_p
     """正常录像路径：确认带错误时停止责任按停止事实完成。"""
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result(confirmed=True)))
+        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
         runtime.evidence = _CALL_EVIDENCE
         await _started_driver_ready(owned, runtime)
         stopper = StopWithError()
@@ -164,7 +164,7 @@ async def test_reconcile_entry_stop_confirmed_with_error_completes_stop_fact(tmp
     """跨会话对账路径：计时满足即停止，确认带错误不影响收场。"""
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result(confirmed=True)))
+        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
         runtime.evidence = _CALL_EVIDENCE
         await _started_driver_ready(owned, runtime)
         stopper = StopWithError()
@@ -186,7 +186,7 @@ async def test_winddown_stop_confirmed_with_error_completes_stop_fact(tmp_path):
     """保守收场路径：放弃计时停止，确认带错误时按停止事实收场。"""
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result(confirmed=True)))
+        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
         runtime.evidence = _CALL_EVIDENCE
         await _started_driver_ready(owned, runtime)
         stopper = StopWithError()
@@ -219,7 +219,7 @@ async def test_canceled_capture_stop_confirmed_with_error_completes_stop_fact(tm
     owned = _environment(tmp_path, ((12, 2),))
     try:
         config = AttemptConfig(1, Decimal("10"), Decimal("1"))
-        runtime = _runtime(owned, stop_config=config)
+        runtime = (await _runtime(owned, stop_config=config))
         ticket, reason = runtime.grant(runtime.action(12))
         assert ticket is not None, reason
         _cancel(owned, 12)
@@ -237,7 +237,7 @@ async def test_canceled_capture_stop_confirmed_with_error_completes_stop_fact(tm
                 SettlementBasis.OBSERVED, EvidenceValue("operation_returned", 1, {})),
             observations=()), end_run=RunOutcome.UNCONFIRMED,
             run_error=ErrorValue("result_unconfirmed", "device"))
-        resumed = _runtime(owned, stop_config=config)
+        resumed = (await _runtime(owned, stop_config=config))
         resumed.evidence = _CALL_EVIDENCE
         resumed.stopper = stopper
         await capture_handler("camera_record")(12, resumed)
@@ -406,7 +406,7 @@ async def test_stop_no_effect_keeps_activity_and_waits_for_retry(tmp_path):
     """无效果分区：可靠无效果的停止不结束活动，沿原预算等待重试。"""
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result(confirmed=True)))
+        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
         runtime.evidence = _CALL_EVIDENCE
         await _started_driver_ready(owned, runtime)
         stopper = StopNoEffect()
@@ -445,7 +445,7 @@ async def test_cancel_during_in_flight_stop_waits_for_actual_result(tmp_path):
 
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result(confirmed=True)))
+        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
         runtime.evidence = _CALL_EVIDENCE
         await _started_driver_ready(owned, runtime)
         entered, released = asyncio.Event(), asyncio.Event()

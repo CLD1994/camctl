@@ -13,9 +13,11 @@ from camctl.contracts.values import new_operation_key
 from camctl.operations.attempts import AttemptConfig
 from camctl.persistence.models import DbOutcomeKind
 
-from .result_consumer_fixtures import consumer_world
-from .test_capture_contract import ResultsDouble, _entry, _PAGE_EVIDENCE
-from .test_result_consumer_saves import _actual, _result_port
+from .result_consumer_fixtures import result_driver
+from ..support.result_cases import result_case
+from camctl.persistence.repositories.capture import CaptureRepository
+from .test_capture_contract import ResultsDouble, _entry
+from .test_result_consumer_saves import _actual
 
 pytestmark = pytest.mark.asyncio
 
@@ -55,24 +57,22 @@ def _output_identities(owned, action_id):
 
 @pytest.mark.parametrize("first_files", _UNFINISHED_FILES, ids=_FILE_PARTITIONS)
 async def test_record_rechecks_unfinished_files_in_same_results_run(
-    tmp_path, first_files,
+    tmp_path, result_case, first_files,
 ):
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, "record")
+    owned, runtime, action_id, handler = await result_case.world(tmp_path, "record",
+        assembly_options={"check_config": AttemptConfig(3, Decimal("1.25"), Decimal("3"))})
     activity_id, = owned.connection.execute(
         "SELECT id FROM device_activities WHERE action_id=?", (action_id,)
     ).fetchone()
-    clock = [65_000_000_000]
-    runtime.monotonic_ns = lambda: clock[0]
-    runtime.check_config = AttemptConfig(3, Decimal("1.25"), Decimal("3"))
-    runtime.results = ResultsDouble({activity_id: first_files}, set_finalized=False)
-    runtime.evidence = _PAGE_EVIDENCE
+    results = ResultsDouble({activity_id: first_files}, set_finalized=False)
+    result_case.results.delegate = results
     advance = capture_handler(handler)
     try:
         await advance(action_id, runtime)
 
         first_run = _result_run(owned, activity_id)
         assert first_run[1:] == (2, 1, 1)
-        assert runtime.action(action_id)["status"] == 2
+        assert (await runtime.action(action_id))["status"] == 2
         original = _attempts(owned, first_run[0])
         assert len(original) == 1
         assert original[0][1:4] == (1, 2, 3)
@@ -87,20 +87,20 @@ async def test_record_rechecks_unfinished_files_in_same_results_run(
             " FROM device_activities WHERE id=?", (activity_id,)
         ).fetchone() == (3, 2, None)
 
-        runtime.results.files_by_action[activity_id] = (_entry("clip"),)
-        runtime.results.set_finalized = True
-        clock[0] += 2_999_999_999
+        results.files_by_action[activity_id] = (_entry("clip"),)
+        results.set_finalized = True
+        result_case.clock.monotonic += 2_999_999_999
         await advance(action_id, runtime)
-        assert runtime.results.calls == [activity_id]
+        assert results.calls == [activity_id]
         assert _result_run(owned, activity_id) == first_run
         assert _attempts(owned, first_run[0]) == original
 
-        clock[0] += 1
+        result_case.clock.monotonic += 1
         await advance(action_id, runtime)
 
-        assert runtime.action(action_id)["status"] == 3
+        assert (await runtime.action(action_id))["status"] == 3
         assert _result_run(owned, activity_id) == (first_run[0], 3, 2, 0)
-        assert runtime.results.calls == [activity_id, activity_id]
+        assert results.calls == [activity_id, activity_id]
         assert _attempts(owned, first_run[0])[:1] == original
         assert _output_identities(owned, action_id) == (
             ("auxiliary", "clip")
@@ -115,21 +115,22 @@ async def test_record_rechecks_unfinished_files_in_same_results_run(
         runtime.stopper.stop.assert_awaited_once()
 
         await advance(action_id, runtime)
-        assert runtime.results.calls == [activity_id, activity_id]
+        assert results.calls == [activity_id, activity_id]
     finally:
         owned.connection.close()
 
 
 @pytest.mark.parametrize("files", _UNFINISHED_FILES, ids=_FILE_PARTITIONS)
 @pytest.mark.parametrize("independent_activity", [False, True], ids=["same-id", "independent-activity"])
-async def test_record_result_budget_preserves_complete_files(tmp_path, files, independent_activity):
-    owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, "record", independent_activity=independent_activity)
+async def test_record_result_budget_preserves_complete_files(tmp_path, result_case, files, independent_activity):
+    owned, runtime, action_id, handler = await result_case.world(
+        tmp_path, "record", independent_activity=independent_activity,
+        assembly_options={"check_config": AttemptConfig(2, Decimal("1.25"), Decimal(0))})
     activity_id, = owned.connection.execute(
         "SELECT id FROM device_activities WHERE action_id=?", (action_id,)
     ).fetchone()
-    runtime.check_config = AttemptConfig(2, Decimal("1.25"), Decimal(0))
-    runtime.results = ResultsDouble({activity_id: files})
+    results = ResultsDouble({activity_id: files}, set_finalized=False)
+    result_case.results.delegate = results
     advance = capture_handler(handler)
     try:
         await advance(action_id, runtime)
@@ -143,9 +144,9 @@ async def test_record_result_budget_preserves_complete_files(tmp_path, files, in
 
         await advance(action_id, runtime)
 
-        assert runtime.action(action_id)["status"] == 4
+        assert (await runtime.action(action_id))["status"] == 4
         assert _result_run(owned, activity_id) == (run_id, 6, 2, 0)
-        assert runtime.results.calls == [activity_id, activity_id]
+        assert results.calls == [activity_id, activity_id]
         assert _attempts(owned, run_id) == original
         error_code, error_details = owned.connection.execute(
             "SELECT error_code,error_details_json FROM actions WHERE id=?",
@@ -173,23 +174,24 @@ async def test_record_result_budget_preserves_complete_files(tmp_path, files, in
         runtime.stopper.stop.assert_awaited_once()
 
         await advance(action_id, runtime)
-        assert runtime.results.calls == [activity_id, activity_id]
+        assert results.calls == [activity_id, activity_id]
     finally:
         owned.connection.close()
 
 
 @pytest.mark.parametrize("with_video", [False, True], ids=["no-observation", "complete-video"])
 async def test_record_later_failed_result_preserves_original_files_and_error(
-    tmp_path, with_video,
+    tmp_path, result_case, with_video,
 ):
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, "record")
+    owned, runtime, action_id, handler = await result_case.world(tmp_path, "record",
+        assembly_options={"check_config": AttemptConfig(2, Decimal("1.25"), Decimal(0))})
     activity_id, = owned.connection.execute(
         "SELECT id FROM device_activities WHERE action_id=?", (action_id,)
     ).fetchone()
-    runtime.check_config = AttemptConfig(2, Decimal("1.25"), Decimal(0))
-    runtime.results = ResultsDouble({
+    results = ResultsDouble({
         activity_id: (_entry("auxiliary", kind=FileKind.OTHER),),
-    })
+    }, set_finalized=False)
+    result_case.results.delegate = results
     advance = capture_handler(handler)
     try:
         await advance(action_id, runtime)
@@ -199,7 +201,7 @@ async def test_record_later_failed_result_preserves_original_files_and_error(
         assert len(first) == 1
 
         actual = _actual(activity_id, with_files=with_video, complete=True)
-        driver = _result_port(runtime, actual)
+        driver = result_driver(result_case, actual)
         await advance(action_id, runtime)
         second = _attempts(owned, first_run[0])
         assert len(second) == 2
@@ -225,11 +227,11 @@ async def test_record_later_failed_result_preserves_original_files_and_error(
 
         # 实际读取错误与完整单文件均保留；v1 没有集合保证，预算
         # 耗尽按无法确认结束，不能把后来出现的视频当成完整集合。
-        assert runtime.action(action_id)["status"] == 2
+        assert (await runtime.action(action_id))["status"] == 2
         assert _result_run(owned, activity_id) == (first_run[0], 2, 2, 1)
         await advance(action_id, runtime)
 
-        assert runtime.action(action_id)["status"] == 4
+        assert (await runtime.action(action_id))["status"] == 4
         assert _result_run(owned, activity_id) == (first_run[0], 6, 2, 0)
         assert _output_identities(owned, action_id) == (
             ("auxiliary", "original") if with_video else ("auxiliary",)
@@ -252,34 +254,30 @@ async def test_record_later_failed_result_preserves_original_files_and_error(
 @pytest.mark.parametrize("consumer", ["photo", "timelapse", "record"])
 @pytest.mark.parametrize("independent_activity", [False, True])
 async def test_result_budget_close_uses_original_activity_on_resend(
-    tmp_path, consumer, independent_activity,
+    tmp_path, result_case, consumer, independent_activity,
 ):
-    from camctl.capture.handlers import _finish_listing_result, _listing_round
-
-    owned, runtime, action_id, _ = await consumer_world(
-        tmp_path, consumer, independent_activity=independent_activity)
+    owned, runtime, action_id, world_handler = await result_case.world(
+        tmp_path, consumer, independent_activity=independent_activity,
+        assembly_options={"check_config": AttemptConfig(1, Decimal("1.25"), Decimal(0))})
     activity_id, = owned.connection.execute(
         "SELECT id FROM device_activities WHERE action_id=?", (action_id,)
     ).fetchone()
-    runtime.check_config = AttemptConfig(1, Decimal("1.25"), Decimal(0))
-    runtime.results = ResultsDouble({activity_id: ()})
+    results = ResultsDouble({activity_id: ()}, set_finalized=False)
+    result_case.results.delegate = results
     try:
-        if consumer == "timelapse":
-            from .result_consumer_fixtures import complete_natural_wait
-            complete_natural_wait(runtime, action_id)
-        listing = await _listing_round(runtime, action_id)
-        _finish_listing_result(runtime, listing, retry_wait=True)
+        await capture_handler(world_handler)(action_id, runtime)
+        assert _result_run(owned, activity_id)[1:] == (2, 1, 1)
         if consumer == "record":
-            command = ResultRunClose(action_id, listing.occurred_at)
-            save = runtime.capture.close_unconfirmed_result_run
+            command = ResultRunClose(action_id, result_case.clock.wall)
+            save = CaptureRepository().close_unconfirmed_result_run
         else:
             error = {"code": "capture_result_unconfirmed", "stage": "execution",
                      "details": {"activity_id": str(activity_id), "reason": "outputs_unknown"}}
             command = ResultSetSave(
-                action_id, listing.occurred_at, ResultSetPhase.UNCONFIRMED,
+                action_id, result_case.clock.wall, ResultSetPhase.UNCONFIRMED,
                 contract="task_scope_files", observation={"reason": "attempts_exhausted"},
                 capture={"status": "unconfirmed", "error": error}, error=error)
-            save = runtime.capture.close_result_check_unconfirmed
+            save = CaptureRepository().close_result_check_unconfirmed
         key = new_operation_key()
         first = save(command, key, owned)
         assert first.kind is DbOutcomeKind.COMPLETED, first.error
@@ -296,6 +294,6 @@ async def test_result_budget_close_uses_original_activity_on_resend(
         assert save(replace(command, occurred_at=command.occurred_at + 1), key, owned).kind is DbOutcomeKind.ROLLED_BACK
         assert owned.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall() == history
         assert _attempts(owned, run_id) == attempts
-        assert runtime.results.calls == [activity_id]
+        assert results.calls == [activity_id]
     finally:
         owned.connection.close()

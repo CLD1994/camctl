@@ -1,0 +1,250 @@
+{
+  "started_utc": "2026-10-25T08:29:56.999248+00:00",
+  "source": {
+    "root": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+    "head": "5d20849e53fbfb045d25a2799e268827967196b2",
+    "status": "M tests/integration/test_camctl_media_roundtrip.py",
+    "snapshot_sha256": "091d490b295fd2075968ace1a2aa481d157b2fd5c75eed0f8bd56a0ad8b72597"
+  },
+  "versions": {
+    "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+    "version": [
+      3,
+      11
+    ],
+    "sqlite": "3.53.1",
+    "pytest": "9.1.1",
+    "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+    "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+    "node": "v24.22.1",
+    "git": "git version 2.43.0"
+  },
+  "runner_pid": 1047057,
+  "jobs": 2,
+  "scope": "all",
+  "selection": [
+    "tests/integration/test_camctl_media_roundtrip.py",
+    "apps/camctl/tests/integration/scheduling/test_window_expiration.py",
+    "apps/camctl/tests/integration/bootstrap/test_adb_camera_dispatch.py"
+  ],
+  "status": "finished",
+  "tasks": [
+    {
+      "id": "camctl/bootstrap",
+      "scope": "camctl",
+      "path": "apps/camctl/tests/integration/bootstrap",
+      "targets": [
+        "apps/camctl/tests/integration/bootstrap/test_adb_camera_dispatch.py"
+      ],
+      "estimated_seconds": 733.239981505747,
+      "status": "passed",
+      "number": 1,
+      "worker": 0,
+      "artifacts": "/tmp/camctl-fix44-media-final-20261025/tasks/001-camctl-bootstrap/artifacts",
+      "cwd": "/tmp/camctl-fix44-media-final-20261025/tasks/001-camctl-bootstrap/source",
+      "started_utc": "2026-10-25T08:30:02.406978+00:00",
+      "command": [
+        "/tmp/camctl-fix44-media-final-20261025/tasks/001-camctl-bootstrap/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/bootstrap/test_adb_camera_dispatch.py",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-fix44-media-final-20261025/tasks/001-camctl-bootstrap/tmp/pytest"
+      ],
+      "environment": {
+        "PYTHONPATH": "/tmp/camctl-fix44-media-final-20261025/control:/tmp/camctl-fix44-media-final-20261025/tasks/001-camctl-bootstrap/source/apps/camctl/src",
+        "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-media-final-20261025/workers/0/python-cache",
+        "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-media-final-20261025/workers/0/project-env",
+        "UV_CACHE_DIR": "/tmp/camctl-fix44-media-final-20261025/workers/0/uv-cache",
+        "UV_OFFLINE": "1",
+        "TMPDIR": "/tmp/camctl-fix44-media-final-20261025/tasks/001-camctl-bootstrap/tmp"
+      },
+      "preparations": [
+        {
+          "label": "package-resources",
+          "command": [
+            "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "/tmp/camctl-fix44-media-final-20261025/tasks/001-camctl-bootstrap/source/apps/camctl/scripts/sync_resources.py"
+          ],
+          "cwd": "/tmp/camctl-fix44-media-final-20261025/tasks/001-camctl-bootstrap/source",
+          "started_utc": "2026-10-25T08:30:13.251113+00:00",
+          "pid": 1047503,
+          "exit_code": 0,
+          "finished_utc": "2026-10-25T08:30:13.423861+00:00",
+          "wall_seconds": 0.17274788299982902
+        }
+      ],
+      "preparation": "package-resources",
+      "preparation_pid": 1047503,
+      "pid": 1047519,
+      "execution_started_utc": "2026-10-25T08:30:13.426301+00:00",
+      "progress": {
+        "status": "finished",
+        "exit_code": 0,
+        "collected": 16,
+        "outcomes": {
+          "passed": 16
+        },
+        "subchecks": {},
+        "elapsed_seconds": 18.171448654000415,
+        "utc": "2026-10-25T08:30:33.959472+00:00",
+        "pid": 1047519
+      },
+      "exit_code": 0,
+      "finished_utc": "2026-10-25T08:30:36.645121+00:00",
+      "wall_seconds": 31.08211361299618
+    },
+    {
+      "id": "root/test_camctl_media_roundtrip",
+      "scope": "root",
+      "path": "tests/integration/test_camctl_media_roundtrip.py",
+      "targets": [
+        "tests/integration/test_camctl_media_roundtrip.py"
+      ],
+      "estimated_seconds": 30.225817028000165,
+      "historical_failure_observed": true,
+      "status": "passed",
+      "number": 2,
+      "worker": 1,
+      "artifacts": "/tmp/camctl-fix44-media-final-20261025/tasks/002-root-test_camctl_media_roundtrip/artifacts",
+      "cwd": "/tmp/camctl-fix44-media-final-20261025/tasks/002-root-test_camctl_media_roundtrip/source",
+      "started_utc": "2026-10-25T08:30:02.413648+00:00",
+      "command": [
+        "/tmp/camctl-fix44-media-final-20261025/tasks/002-root-test_camctl_media_roundtrip/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_camctl_media_roundtrip.py",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-fix44-media-final-20261025/tasks/002-root-test_camctl_media_roundtrip/tmp/pytest"
+      ],
+      "environment": {
+        "PYTHONPATH": "/tmp/camctl-fix44-media-final-20261025/control:/tmp/camctl-fix44-media-final-20261025/tasks/002-root-test_camctl_media_roundtrip/source/apps/camctl/src",
+        "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-media-final-20261025/workers/1/python-cache",
+        "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-media-final-20261025/workers/1/project-env",
+        "UV_CACHE_DIR": "/tmp/camctl-fix44-media-final-20261025/workers/1/uv-cache",
+        "UV_OFFLINE": "1",
+        "TMPDIR": "/tmp/camctl-fix44-media-final-20261025/tasks/002-root-test_camctl_media_roundtrip/tmp"
+      },
+      "preparations": [
+        {
+          "label": "package-resources",
+          "command": [
+            "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "/tmp/camctl-fix44-media-final-20261025/tasks/002-root-test_camctl_media_roundtrip/source/apps/camctl/scripts/sync_resources.py"
+          ],
+          "cwd": "/tmp/camctl-fix44-media-final-20261025/tasks/002-root-test_camctl_media_roundtrip/source",
+          "started_utc": "2026-10-25T08:30:30.178963+00:00",
+          "pid": 1048097,
+          "exit_code": 0,
+          "finished_utc": "2026-10-25T08:30:30.370727+00:00",
+          "wall_seconds": 0.1917103279993171
+        }
+      ],
+      "preparation": "package-resources",
+      "preparation_pid": 1048097,
+      "pid": 1048100,
+      "execution_started_utc": "2026-10-25T08:30:30.372934+00:00",
+      "progress": {
+        "status": "finished",
+        "exit_code": 0,
+        "collected": 3,
+        "outcomes": {
+          "passed": 3
+        },
+        "subchecks": {},
+        "elapsed_seconds": 33.3310934619949,
+        "utc": "2026-10-25T08:31:08.874021+00:00",
+        "pid": 1048100
+      },
+      "exit_code": 0,
+      "finished_utc": "2026-10-25T08:31:08.989546+00:00",
+      "wall_seconds": 61.807972901005996
+    },
+    {
+      "id": "camctl/scheduling",
+      "scope": "camctl",
+      "path": "apps/camctl/tests/integration/scheduling",
+      "targets": [
+        "apps/camctl/tests/integration/scheduling/test_window_expiration.py"
+      ],
+      "estimated_seconds": 5.042757732000609,
+      "status": "failed",
+      "number": 3,
+      "worker": 0,
+      "artifacts": "/tmp/camctl-fix44-media-final-20261025/tasks/003-camctl-scheduling/artifacts",
+      "cwd": "/tmp/camctl-fix44-media-final-20261025/tasks/003-camctl-scheduling/source",
+      "started_utc": "2026-10-25T08:30:36.650971+00:00",
+      "command": [
+        "/tmp/camctl-fix44-media-final-20261025/tasks/003-camctl-scheduling/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/scheduling/test_window_expiration.py",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-fix44-media-final-20261025/tasks/003-camctl-scheduling/tmp/pytest"
+      ],
+      "environment": {
+        "PYTHONPATH": "/tmp/camctl-fix44-media-final-20261025/control:/tmp/camctl-fix44-media-final-20261025/tasks/003-camctl-scheduling/source/apps/camctl/src",
+        "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-media-final-20261025/workers/0/python-cache",
+        "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-media-final-20261025/workers/0/project-env",
+        "UV_CACHE_DIR": "/tmp/camctl-fix44-media-final-20261025/workers/0/uv-cache",
+        "UV_OFFLINE": "1",
+        "TMPDIR": "/tmp/camctl-fix44-media-final-20261025/tasks/003-camctl-scheduling/tmp"
+      },
+      "preparations": [
+        {
+          "label": "package-resources",
+          "command": [
+            "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "/tmp/camctl-fix44-media-final-20261025/tasks/003-camctl-scheduling/source/apps/camctl/scripts/sync_resources.py"
+          ],
+          "cwd": "/tmp/camctl-fix44-media-final-20261025/tasks/003-camctl-scheduling/source",
+          "started_utc": "2026-10-25T08:30:37.697533+00:00",
+          "pid": 1048306,
+          "exit_code": 0,
+          "finished_utc": "2026-10-25T08:30:37.787846+00:00",
+          "wall_seconds": 0.09031053898797836
+        }
+      ],
+      "preparation": "package-resources",
+      "preparation_pid": 1048306,
+      "pid": 1048312,
+      "execution_started_utc": "2026-10-25T08:30:37.790203+00:00",
+      "progress": {
+        "status": "finished",
+        "exit_code": 1,
+        "collected": 21,
+        "outcomes": {
+          "passed": 19,
+          "failed": 2
+        },
+        "subchecks": {},
+        "elapsed_seconds": 6.28964249099954,
+        "utc": "2026-10-25T08:30:44.469905+00:00",
+        "pid": 1048312
+      },
+      "exit_code": 1,
+      "finished_utc": "2026-10-25T08:30:44.897663+00:00",
+      "wall_seconds": 8.246652357993298
+    }
+  ],
+  "updated_utc": "2026-10-25T08:31:08.992339+00:00",
+  "wall_seconds": 67.22521273700113,
+  "exit_code": 1,
+  "finished_utc": "2026-10-25T08:31:08.992203+00:00"
+}

@@ -56,6 +56,36 @@ async def test_one_round_uses_shared_database_and_never_reenters(monkeypatch):
     assert calls == [runtime, runtime]
 
 
+async def test_checked_empty_round_yields_then_allows_new_discovery_and_stop():
+    release = asyncio.Event()
+    calls = []
+
+    async def factory(database):
+        calls.append(database)
+        await release.wait()
+        return None
+
+    context, database = _context(WorkNotifier())
+    flow = cleanup_flow(factory)
+    await flow(context)
+    release.set()
+    await asyncio.sleep(0)
+    flow.check_completed()
+    flow.check_completed()
+    assert flow.required_settlements() == 0
+    assert flow._notification_task is None
+
+    await flow(context)
+
+    assert calls == [database] and flow.required_settlements() == 0
+    await flow(context)
+    assert calls == [database, database]
+    flow.stop_new_work()
+    await flow.settle()
+    await flow(context)
+    assert calls == [database, database] and flow.required_settlements() == 0
+
+
 async def test_stop_before_background_body_starts_does_not_open_connection():
     context, _owned = _context()
     factory = AsyncMock(return_value=None)
@@ -381,6 +411,10 @@ async def test_consuming_before_callback_invalidates_old_notification_and_next_r
         owner.check_completed()
     assert owner._notification_task is None and not owner._notified
     assert wake.snapshot().version == 0
+    if not failed:
+        await owner(context)
+        assert calls == [0] and owner.required_settlements() == 0
+        assert owner._notification_task is None
     await owner(context)
     assert calls == [0, 1] and wake.snapshot().version == 0
     assert owner._notification_task is owner._background.unconsumed_task

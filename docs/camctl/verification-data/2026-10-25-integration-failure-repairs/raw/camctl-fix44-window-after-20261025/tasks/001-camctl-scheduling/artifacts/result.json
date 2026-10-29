@@ -1,0 +1,70 @@
+{
+  "id": "camctl/scheduling",
+  "scope": "camctl",
+  "path": "apps/camctl/tests/integration/scheduling",
+  "targets": [
+    "apps/camctl/tests/integration/scheduling/test_window_expiration.py"
+  ],
+  "estimated_seconds": 5.042757732000609,
+  "status": "passed",
+  "number": 1,
+  "worker": 0,
+  "artifacts": "/tmp/camctl-fix44-window-after-20261025/tasks/001-camctl-scheduling/artifacts",
+  "cwd": "/tmp/camctl-fix44-window-after-20261025/tasks/001-camctl-scheduling/source",
+  "started_utc": "2026-10-25T08:32:45.349455+00:00",
+  "command": [
+    "/tmp/camctl-fix44-window-after-20261025/tasks/001-camctl-scheduling/source/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "apps/camctl/tests/integration/scheduling/test_window_expiration.py",
+    "-q",
+    "--durations=0",
+    "-p",
+    "integration_progress",
+    "--basetemp",
+    "/tmp/camctl-fix44-window-after-20261025/tasks/001-camctl-scheduling/tmp/pytest"
+  ],
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-fix44-window-after-20261025/control:/tmp/camctl-fix44-window-after-20261025/tasks/001-camctl-scheduling/source/apps/camctl/src",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-window-after-20261025/workers/0/python-cache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-window-after-20261025/workers/0/project-env",
+    "UV_CACHE_DIR": "/tmp/camctl-fix44-window-after-20261025/workers/0/uv-cache",
+    "UV_OFFLINE": "1",
+    "TMPDIR": "/tmp/camctl-fix44-window-after-20261025/tasks/001-camctl-scheduling/tmp"
+  },
+  "preparations": [
+    {
+      "label": "package-resources",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-fix44-window-after-20261025/tasks/001-camctl-scheduling/source/apps/camctl/scripts/sync_resources.py"
+      ],
+      "cwd": "/tmp/camctl-fix44-window-after-20261025/tasks/001-camctl-scheduling/source",
+      "started_utc": "2026-10-25T08:32:48.450000+00:00",
+      "pid": 1052213,
+      "exit_code": 0,
+      "finished_utc": "2026-10-25T08:32:48.521738+00:00",
+      "wall_seconds": 0.0717391049984144
+    }
+  ],
+  "preparation": "package-resources",
+  "preparation_pid": 1052213,
+  "pid": 1052216,
+  "execution_started_utc": "2026-10-25T08:32:48.522931+00:00",
+  "progress": {
+    "status": "finished",
+    "exit_code": 0,
+    "collected": 21,
+    "outcomes": {
+      "passed": 21
+    },
+    "subchecks": {},
+    "elapsed_seconds": 3.3910666390002007,
+    "utc": "2026-10-25T08:32:53.274612+00:00",
+    "pid": 1052216
+  },
+  "exit_code": 0,
+  "finished_utc": "2026-10-25T08:32:53.584289+00:00",
+  "wall_seconds": 8.23485481699754
+}

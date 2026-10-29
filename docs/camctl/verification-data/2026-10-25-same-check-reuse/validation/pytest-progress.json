@@ -1,0 +1,2289 @@
+{
+  "scope": "外部函数替换的可行性试验，非仓库正式实现或全量回归",
+  "pid": 1334890,
+  "started_utc": "2026-10-25T14:44:17Z",
+  "python": "3.11.17",
+  "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+  "sqlite": "3.53.1",
+  "replacements": [
+    {
+      "module": "camctl.persistence.repositories.result_pages",
+      "module_file": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+      "function": "_verify_page_relations",
+      "old_id": 140614136577408,
+      "new_id": 140614151319008,
+      "old_code_file": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+      "new_code_file": "/tmp/camctl-same-check-options-ykdqfnct/candidate-functions.py",
+      "signature": "(connection, saved, raw, event, transaction)",
+      "is_generator": false,
+      "full_target_globals": true,
+      "candidate_ast_sha256": "cf415bf99d026b1ed4f64c8167d29d2052962ca2534c707868c722326470a6de"
+    },
+    {
+      "module": "camctl.persistence.repositories.segment_transactions",
+      "module_file": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+      "function": "_verify_scope_members",
+      "old_id": 140614123763040,
+      "new_id": 140614136577408,
+      "old_code_file": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+      "new_code_file": "/tmp/camctl-same-check-options-ykdqfnct/candidate-functions.py",
+      "signature": "(request, assessment, reader)",
+      "is_generator": false,
+      "full_target_globals": true,
+      "candidate_ast_sha256": "3e6a74e803518203a8fc4876045439fd15497780fdf30adb0c3e5f9cdd50c015"
+    },
+    {
+      "module": "camctl.persistence.repositories.segment_transactions",
+      "module_file": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+      "function": "_canonical_events",
+      "old_id": 140614123049568,
+      "new_id": 140614123763040,
+      "old_code_file": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+      "new_code_file": "/tmp/camctl-same-check-options-ykdqfnct/candidate-functions.py",
+      "signature": "(request, transaction, header, reader, qualification)",
+      "is_generator": true,
+      "full_target_globals": true,
+      "candidate_ast_sha256": "b1ec7d59e2390d29adebccfe074ad27986fac3b1dad2adef0704355ff7cdf596"
+    }
+  ],
+  "reports": [
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_cross_page_preview_keeps_exact_original_and_origin[False]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.005056884008808993,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_cross_page_preview_keeps_exact_original_and_origin[False]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 1.0264806429913733,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_cross_page_preview_keeps_exact_original_and_origin[False]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0008752440044190735,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_cross_page_preview_keeps_exact_original_and_origin[True]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.002985983999678865,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_cross_page_preview_keeps_exact_original_and_origin[True]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.5168775279889815,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_cross_page_preview_keeps_exact_original_and_origin[True]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0005188329960219562,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_independent_cross_batch_guards_reject_tampered_proposal[short]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.001874390000011772,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_independent_cross_batch_guards_reject_tampered_proposal[short]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.42200521600898355,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_independent_cross_batch_guards_reject_tampered_proposal[short]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0011291029950371012,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_independent_cross_batch_guards_reject_tampered_proposal[extra]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0013581399980466813,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_independent_cross_batch_guards_reject_tampered_proposal[extra]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.4585947489977116,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_independent_cross_batch_guards_reject_tampered_proposal[extra]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0003692659956868738,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_independent_cross_batch_guards_reject_tampered_proposal[wrong_file]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0015540419990429655,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_independent_cross_batch_guards_reject_tampered_proposal[wrong_file]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.8589595130033558,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_independent_cross_batch_guards_reject_tampered_proposal[wrong_file]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0011473920021671802,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_independent_cross_batch_guards_reject_tampered_proposal[wrong_scope]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0016149570001289248,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_independent_cross_batch_guards_reject_tampered_proposal[wrong_scope]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.35034403200552333,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_independent_cross_batch_guards_reject_tampered_proposal[wrong_scope]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0005884239944862202,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_independent_cross_batch_guards_reject_tampered_proposal[fake_marker]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.000936765005462803,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_independent_cross_batch_guards_reject_tampered_proposal[fake_marker]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.33151102499687113,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_independent_cross_batch_guards_reject_tampered_proposal[fake_marker]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0004956500051775947,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_independent_cross_batch_guards_reject_tampered_proposal[duplicate_output]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0015564509958494455,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_independent_cross_batch_guards_reject_tampered_proposal[duplicate_output]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.30470019599306397,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_independent_cross_batch_guards_reject_tampered_proposal[duplicate_output]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0005742880020989105,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_late_batch_or_final_guard_failure_rolls_back_entire_group[2]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0008222589967772365,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_late_batch_or_final_guard_failure_rolls_back_entire_group[2]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.2678174799948465,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_late_batch_or_final_guard_failure_rolls_back_entire_group[2]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0011195400002179667,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_late_batch_or_final_guard_failure_rolls_back_entire_group[5]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.001256968011148274,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_late_batch_or_final_guard_failure_rolls_back_entire_group[5]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.29711228399537504,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_late_batch_or_final_guard_failure_rolls_back_entire_group[5]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.00044018399785272777,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_late_batch_or_final_guard_failure_rolls_back_entire_group[final]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0010916220053331926,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_late_batch_or_final_guard_failure_rolls_back_entire_group[final]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.3278835800010711,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_late_batch_or_final_guard_failure_rolls_back_entire_group[final]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0005171079974388704,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_bounded_terminal_preserves_three_scope_states[unknown]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.001027456994052045,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_bounded_terminal_preserves_three_scope_states[unknown]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.2246787429903634,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_bounded_terminal_preserves_three_scope_states[unknown]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0007720690045971423,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_bounded_terminal_preserves_three_scope_states[empty]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0016274770023301244,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_bounded_terminal_preserves_three_scope_states[empty]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.23811879800632596,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_bounded_terminal_preserves_three_scope_states[empty]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.000857474995427765,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_bounded_terminal_preserves_three_scope_states[nonempty]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0011903349950443953,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_bounded_terminal_preserves_three_scope_states[nonempty]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.3058411249949131,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_bounded_terminal_preserves_three_scope_states[nonempty]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0013191360048949718,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_original_receipt_compares_entire_terminal_before_image",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.00740224399487488,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_original_receipt_compares_entire_terminal_before_image",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.3390196890104562,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_original_receipt_compares_entire_terminal_before_image",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.00042138500430155545,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_original_receipt_rechecks_complete_frozen_gap_relations",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0010203769925283268,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_original_receipt_rechecks_complete_frozen_gap_relations",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.35704779300431255,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_original_receipt_rechecks_complete_frozen_gap_relations",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0006262309907469898,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_original_receipt_does_not_change_after_output_or_file_observation",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0014433009928325191,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_original_receipt_does_not_change_after_output_or_file_observation",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.47194625400879886,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_original_receipt_does_not_change_after_output_or_file_observation",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.000690104003297165,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_saved_range_page_error_does_not_return_success_prefix",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0010632600024109706,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_saved_range_page_error_does_not_return_success_prefix",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.46097909200761933,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_saved_range_page_error_does_not_return_success_prefix",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0007870859990362078,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_both_entries_use_one_canonical_order_and_original_batch[1-bounded]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0014152750081848353,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_both_entries_use_one_canonical_order_and_original_batch[1-bounded]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.8046524460078217,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_both_entries_use_one_canonical_order_and_original_batch[1-bounded]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0005509229958988726,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_both_entries_use_one_canonical_order_and_original_batch[1-finite]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.00371486900257878,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_both_entries_use_one_canonical_order_and_original_batch[1-finite]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.8464945870073279,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_both_entries_use_one_canonical_order_and_original_batch[1-finite]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0005206719943089411,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_both_entries_use_one_canonical_order_and_original_batch[2-bounded]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0010972260060952976,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_both_entries_use_one_canonical_order_and_original_batch[2-bounded]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.8863206149981124,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_both_entries_use_one_canonical_order_and_original_batch[2-bounded]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0008238600130425766,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_both_entries_use_one_canonical_order_and_original_batch[2-finite]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0026057600043714046,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_both_entries_use_one_canonical_order_and_original_batch[2-finite]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 1.3463918519992149,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_both_entries_use_one_canonical_order_and_original_batch[2-finite]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0013836480065947399,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_both_entries_use_one_canonical_order_and_original_batch[128-bounded]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.004761931995744817,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_both_entries_use_one_canonical_order_and_original_batch[128-bounded]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 1.2182806070049992,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_both_entries_use_one_canonical_order_and_original_batch[128-bounded]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.001227820001076907,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_both_entries_use_one_canonical_order_and_original_batch[128-finite]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0012358160020085052,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_both_entries_use_one_canonical_order_and_original_batch[128-finite]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 1.2583688540034927,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_both_entries_use_one_canonical_order_and_original_batch[128-finite]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0006335360085358843,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[F-evidence-bounded]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0017611509974813089,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[F-evidence-bounded]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.5089243200054625,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[F-evidence-bounded]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0014031720056664199,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[F-evidence-finite]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0016816419956739992,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[F-evidence-finite]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.644553496997105,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[F-evidence-finite]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0010715000098571181,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[original-clock-bounded]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0014916080108378083,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[original-clock-bounded]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.4188320149987703,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[original-clock-bounded]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.00040102400816977024,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[original-clock-finite]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.002439001007587649,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[original-clock-finite]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.5101316999935079,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[original-clock-finite]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0006941900064703077,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[original-after-bounded]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0014133219956420362,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[original-after-bounded]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.6228609950048849,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[original-after-bounded]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0009170710109174252,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[original-after-finite]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0019141800003126264,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[original-after-finite]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.4969144200003939,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[original-after-finite]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0009957650036085397,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[preview-name-bounded]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0021228669938864186,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[preview-name-bounded]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.4871309469890548,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[preview-name-bounded]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0007879999902797863,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[preview-name-finite]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0017363109946018085,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[preview-name-finite]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.731691924011102,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[preview-name-finite]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.001352961000520736,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[preview-origin_id-bounded]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0014998959959484637,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[preview-origin_id-bounded]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.4629322190012317,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[preview-origin_id-bounded]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0004774140106746927,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[preview-origin_id-finite]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0011327149986755103,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[preview-origin_id-finite]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.554417908002506,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[preview-origin_id-finite]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0010481990029802546,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[publish-order-bounded]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.002681802012375556,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[publish-order-bounded]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.4724396789970342,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[publish-order-bounded]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0008872659964254126,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[publish-order-finite]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0013462040078593418,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[publish-order-finite]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.5998904439911712,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[publish-order-finite]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0013227720046415925,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[run-time-bounded]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0070142049953574315,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[run-time-bounded]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.640077772011864,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[run-time-bounded]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0012918320135213435,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[run-time-finite]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0033437870006309822,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[run-time-finite]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.4828229149861727,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[run-time-finite]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0005878640076844022,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[run-before-bounded]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0014170549984555691,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[run-before-bounded]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.5528020780038787,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[run-before-bounded]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.000495991000207141,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[run-before-finite]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0009976099972845986,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[run-before-finite]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.5052421660075197,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[run-before-finite]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0005441419925773516,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[plan-clock-bounded]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0010610440076561645,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[plan-clock-bounded]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.4507587280095322,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[plan-clock-bounded]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.00044223399891052395,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[plan-clock-finite]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.002026154994382523,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[plan-clock-finite]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.6685574720031582,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[plan-clock-finite]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0005624860059469938,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[L-time-bounded]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.002719340001931414,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[L-time-bounded]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.6038492179941386,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[L-time-bounded]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0019527669937815517,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[L-time-finite]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.004746525999507867,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[L-time-finite]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.8656191909976769,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[L-time-finite]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0006499919982161373,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_empty_candidate_pages_continue_to_later_valid_members",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0018711799930315465,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_empty_candidate_pages_continue_to_later_valid_members",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.38826185499783605,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_empty_candidate_pages_continue_to_later_valid_members",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0005581650038948283,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_fixed_batch_write_and_verification_have_bounded_residency",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0010230539919575676,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_fixed_batch_write_and_verification_have_bounded_residency",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 150.83724126999732,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_fixed_batch_write_and_verification_have_bounded_residency",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0012672190059674904,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[valid]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.002036403995589353,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[valid]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.30860276499879546,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[valid]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0004085059917997569,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[tail_zero]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0012546249927254394,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[tail_zero]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.2774059259973001,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[tail_zero]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0008236639987444505,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[non_tail_zero]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.002389623987255618,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[non_tail_zero]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.3480855800007703,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[non_tail_zero]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.00040982400241773576,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[original_size_unknown]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.001164529996458441,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[original_size_unknown]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.2538031290023355,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[original_size_unknown]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.000440293995779939,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[original_completion_unknown]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0012749779998557642,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[original_completion_unknown]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.24318403399956878,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[original_completion_unknown]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.00041254899406339973,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[original_incomplete]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0008769590058363974,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[original_incomplete]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.2389994320110418,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[original_incomplete]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0003352659987285733,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[original_ownership_unknown]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.000859345993376337,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[original_ownership_unknown]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.3220048639923334,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[original_ownership_unknown]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0004181399999652058,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[preview_zero]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0026567169988993555,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[preview_zero]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.3155373040062841,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[preview_zero]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0005095810047350824,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[preview_completion_unknown]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.001483012005337514,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[preview_completion_unknown]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.3063797110080486,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[preview_completion_unknown]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0005362179945223033,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[preview_incomplete]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.001535935007268563,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[preview_incomplete]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.28914346799138,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[preview_incomplete]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0005640019953716546,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[preview_unpaired]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0015539409941993654,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[preview_unpaired]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.32329338100680616,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[preview_unpaired]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0005511429917532951,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[preview_pair_unknown]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0009449599892832339,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[preview_pair_unknown]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.26289854900096543,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[preview_pair_unknown]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0003352530038682744,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_pair_outside_frozen_set_is_rejected_even_when_preview_would_be_skipped[10]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0010823039920069277,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_pair_outside_frozen_set_is_rejected_even_when_preview_would_be_skipped[10]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.21719139200286008,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_pair_outside_frozen_set_is_rejected_even_when_preview_would_be_skipped[10]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0004237749963067472,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_pair_outside_frozen_set_is_rejected_even_when_preview_would_be_skipped[0]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.001051992003340274,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_pair_outside_frozen_set_is_rejected_even_when_preview_would_be_skipped[0]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.18253854899376165,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_pair_outside_frozen_set_is_rejected_even_when_preview_would_be_skipped[0]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0006415579991880804,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_candidate_cursor_can_advance_past_empty_page_and_point_reads_keep_fixed_facts",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.001937073000590317,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_candidate_cursor_can_advance_past_empty_page_and_point_reads_keep_fixed_facts",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.19417113199597225,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_candidate_cursor_can_advance_past_empty_page_and_point_reads_keep_fixed_facts",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0004077159974258393,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_activation_refuses_incomplete_or_wrong_identity_scope[omit_scope]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0014783799997530878,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_activation_refuses_incomplete_or_wrong_identity_scope[omit_scope]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.3332889849989442,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_activation_refuses_incomplete_or_wrong_identity_scope[omit_scope]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.00038432099972851574,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_activation_refuses_incomplete_or_wrong_identity_scope[wrong_identity]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0008856110071064904,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_activation_refuses_incomplete_or_wrong_identity_scope[wrong_identity]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.20884189500065986,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_activation_refuses_incomplete_or_wrong_identity_scope[wrong_identity]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.00032820900378283113,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_activation_refuses_incomplete_or_wrong_identity_scope[omit_outputs]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.0008411580056417733,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_activation_refuses_incomplete_or_wrong_identity_scope[omit_outputs]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.17746714400709607,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_storage.py::test_activation_refuses_incomplete_or_wrong_identity_scope[omit_outputs]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.0005279309989418834,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_page_read_rejects_corrupt_relation_without_rebuilding[missing]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.01797671000531409,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_page_read_rejects_corrupt_relation_without_rebuilding[missing]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.06903559500642586,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_page_read_rejects_corrupt_relation_without_rebuilding[missing]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.008339302992681041,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_page_read_rejects_corrupt_relation_without_rebuilding[created_event_id]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.01988663600059226,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_page_read_rejects_corrupt_relation_without_rebuilding[created_event_id]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.06249335399479605,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_page_read_rejects_corrupt_relation_without_rebuilding[created_event_id]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.005791471005068161,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_page_difference_indexes_reused_and_new_files_together",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.021064946995466016,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_page_difference_indexes_reused_and_new_files_together",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.07376386299438309,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_page_difference_indexes_reused_and_new_files_together",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.006797180991270579,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_zero_difference_is_not_an_empty_or_final_device_page",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.01664169499417767,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_zero_difference_is_not_an_empty_or_final_device_page",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.06963731499854475,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_zero_difference_is_not_an_empty_or_final_device_page",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.006910227995831519,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_zero_difference_preserves_raw_page_without_index[empty_device_page]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.02059158298652619,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_zero_difference_preserves_raw_page_without_index[empty_device_page]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.06481319900194649,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_zero_difference_preserves_raw_page_without_index[empty_device_page]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.008904055008315481,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_zero_difference_preserves_raw_page_without_index[nonempty_zero_difference]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.02020575500500854,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_zero_difference_preserves_raw_page_without_index[nonempty_zero_difference]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.06655944600061048,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_zero_difference_preserves_raw_page_without_index[nonempty_zero_difference]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.006074260003515519,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_accepts_only_actual_append_then_index[1]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.022691984006087296,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_accepts_only_actual_append_then_index[1]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.06399330399290193,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_accepts_only_actual_append_then_index[1]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.005312120003509335,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_accepts_only_actual_append_then_index[127]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.01918199499777984,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_accepts_only_actual_append_then_index[127]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.6034310120012378,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_accepts_only_actual_append_then_index[127]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.009600741002941504,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_accepts_only_actual_append_then_index[128]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.01792263200331945,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_accepts_only_actual_append_then_index[128]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.6220935780002037,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_accepts_only_actual_append_then_index[128]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.006524010008433834,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[append_omits_difference]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.020924048993038014,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[append_omits_difference]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.06675538500712719,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[append_omits_difference]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.007425050003803335,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[append_adds_out_of_page_file]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.016543304998776875,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[append_adds_out_of_page_file]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.06173916099942289,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[append_adds_out_of_page_file]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.007232372998259962,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_replaces_identity]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.023707778003881685,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_replaces_identity]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.06786244099203032,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_replaces_identity]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.009501906999503262,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_adds_extra_relation]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.027817555994261056,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_adds_extra_relation]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.06809236100525595,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_adds_extra_relation]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.011254319004365243,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_wrong_page]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.02004160700016655,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_wrong_page]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.06126337600289844,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_wrong_page]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.007815578996087424,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_wrong_created_event]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.019073625007877126,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_wrong_created_event]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.06930584099609405,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_wrong_created_event]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.01307973699294962,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_wrong_family]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.022573969996301457,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_wrong_family]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.09966684700339101,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_wrong_family]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.014094085010583512,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_wrong_owner]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.03937004100589547,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_wrong_owner]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.11145536899857689,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_wrong_owner]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.011031979986000806,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_wrong_row_id]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.03690857799665537,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_wrong_row_id]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.09544358200218994,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_wrong_row_id]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.015049909998197109,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[append_omits_difference]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.02918839899939485,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[append_omits_difference]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.08804847400460858,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[append_omits_difference]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.012077463004970923,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[append_adds_out_of_page_file]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.03478465499938466,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[append_adds_out_of_page_file]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.08127442499971949,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[append_adds_out_of_page_file]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.011254092998569831,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_replaces_identity]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.04392389900749549,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_replaces_identity]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.09540950700466055,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_replaces_identity]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.011927197003387846,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_adds_extra_relation]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.02325976399879437,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_adds_extra_relation]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.07439397800771985,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_adds_extra_relation]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.00820710499829147,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_wrong_page]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.038501568997162394,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_wrong_page]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.08460690300853457,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_wrong_page]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.008086493995506316,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_wrong_created_event]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.03789408199372701,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_wrong_created_event]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.09419315400009509,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_wrong_created_event]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.006730623004841618,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_wrong_family]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.027737294003600255,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_wrong_family]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.06346672799554653,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_wrong_family]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.005599152995273471,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_wrong_owner]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.018940840003779158,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_wrong_owner]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.06158472300739959,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_wrong_owner]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.005444447000627406,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_wrong_row_id]",
+      "when": "setup",
+      "outcome": "passed",
+      "duration": 0.01682475599227473,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_wrong_row_id]",
+      "when": "call",
+      "outcome": "passed",
+      "duration": 0.06313944399880711,
+      "failure": null
+    },
+    {
+      "nodeid": "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_wrong_row_id]",
+      "when": "teardown",
+      "outcome": "passed",
+      "duration": 0.007648790007806383,
+      "failure": null
+    }
+  ],
+  "current": null,
+  "camctl_imports": {
+    "camctl": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/__init__.py",
+    "camctl.capture": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/__init__.py",
+    "camctl.contracts": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/contracts/__init__.py",
+    "camctl.contracts.values": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/contracts/values.py",
+    "camctl.resources": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/resources.py",
+    "camctl.contracts.enums": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/contracts/enums.py",
+    "camctl.contracts.segment_values": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/contracts/segment_values.py",
+    "camctl.contracts.video_coverage": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/contracts/video_coverage.py",
+    "camctl.capture.segment_models": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/segment_models.py",
+    "camctl.persistence": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/__init__.py",
+    "camctl.persistence.runtime": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/runtime.py",
+    "camctl.host_files": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/host_files/__init__.py",
+    "camctl.host_files.models": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/host_files/models.py",
+    "camctl.host_files.photo_formats": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/host_files/photo_formats.py",
+    "camctl.host_files.paths": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/host_files/paths.py",
+    "camctl.contracts.json_values": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/contracts/json_values.py",
+    "camctl.devices": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/__init__.py",
+    "camctl.devices.tasks": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/tasks.py",
+    "camctl.acceptance.ports": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/acceptance/ports.py",
+    "camctl.contracts.pages": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/contracts/pages.py",
+    "camctl.contracts.history_values": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/contracts/history_values.py",
+    "camctl.contracts.schemas": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/contracts/schemas.py",
+    "camctl.history": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/history/__init__.py",
+    "camctl.history.events": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/history/events.py",
+    "camctl.history.changes": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/history/changes.py",
+    "camctl.history.reads": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/history/reads.py",
+    "camctl.history.host_photo_request": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/history/host_photo_request.py",
+    "camctl.logging_runtime": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/logging_runtime/__init__.py",
+    "camctl.logging_runtime.models": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/logging_runtime/models.py",
+    "camctl.logging_runtime.admission": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/logging_runtime/admission.py",
+    "camctl.logging_runtime.service": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/logging_runtime/service.py",
+    "camctl.logging_runtime.performance": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/logging_runtime/performance.py",
+    "camctl.logging_runtime.transaction_timing": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+    "camctl.history.validators": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/history/validators.py",
+    "camctl.history.decoding": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/history/decoding.py",
+    "camctl.persistence.read_reuse": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/read_reuse.py",
+    "camctl.persistence.page_read_cache": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/page_read_cache.py",
+    "camctl.persistence.transaction": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "camctl.capture.files": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/files.py",
+    "camctl.contracts.workflow_errors": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/contracts/workflow_errors.py",
+    "camctl.operations": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/operations/__init__.py",
+    "camctl.devices.evidence": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/evidence.py",
+    "camctl.operations.owned_calls": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/operations/owned_calls.py",
+    "camctl.operations.process": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/operations/process.py",
+    "camctl.operations.tool_diagnostics": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/operations/tool_diagnostics.py",
+    "camctl.operations.models": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/operations/models.py",
+    "camctl.persistence.models": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/models.py",
+    "camctl.operations.attempts": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/operations/attempts.py",
+    "camctl.capture.models": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/models.py",
+    "camctl.devices.segments": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/segments.py",
+    "camctl.outputs": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/outputs/__init__.py",
+    "camctl.outputs.catalog": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/outputs/catalog.py",
+    "camctl.capture.results": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/results.py",
+    "camctl.devices.bindings": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/bindings.py",
+    "camctl.devices.file_identity": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/file_identity.py",
+    "camctl.devices.directory": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/directory.py",
+    "camctl.operations.result_format": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/operations/result_format.py",
+    "camctl.capture.result_inputs": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/result_inputs.py",
+    "camctl.capture.result_pages": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/result_pages.py",
+    "camctl.capture.segment_storage": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/segment_storage.py",
+    "camctl.capture.segments": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/segments.py",
+    "camctl.devices.start_entry": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/start_entry.py",
+    "camctl.capture.finite_cancel": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/finite_cancel.py",
+    "camctl.persistence.repositories": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/__init__.py",
+    "camctl.devices.capture_timing": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/capture_timing.py",
+    "camctl.persistence.repositories.finite_cancel": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/finite_cancel.py",
+    "camctl.devices.read_session": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/read_session.py",
+    "camctl.host_files.segments": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/host_files/segments.py",
+    "camctl.host_files.io": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/host_files/io.py",
+    "camctl.session": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/session/__init__.py",
+    "camctl.session.supervision": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/session/supervision.py",
+    "camctl.host_files.tasks": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/host_files/tasks.py",
+    "camctl.host_files.media": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/host_files/media.py",
+    "camctl.capture.processing": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/processing.py",
+    "camctl.capture.media_facts": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/media_facts.py",
+    "camctl.outputs.work_files": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/outputs/work_files.py",
+    "camctl.capture.media": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/media.py",
+    "camctl.operations.recovery": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/operations/recovery.py",
+    "camctl.capture.recovery": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/recovery.py",
+    "camctl.outputs.copy": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/outputs/copy.py",
+    "camctl.outputs.qualification": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/outputs/qualification.py",
+    "camctl.capture.input_copy": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/input_copy.py",
+    "camctl.devices.ports": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/ports.py",
+    "camctl.operations.validation": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/operations/validation.py",
+    "camctl.outputs.read_attempts": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/outputs/read_attempts.py",
+    "camctl.outputs.slots": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/outputs/slots.py",
+    "camctl.devices.capture_preparation": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/capture_preparation.py",
+    "camctl.capture.baseline_models": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/baseline_models.py",
+    "camctl.acceptance.schema": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/acceptance/schema.py",
+    "camctl.contracts.input_fields": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/contracts/input_fields.py",
+    "camctl.outputs.definitions": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/outputs/definitions.py",
+    "camctl.acceptance.definitions": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/acceptance/definitions.py",
+    "camctl.devices.recording_completion": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/recording_completion.py",
+    "camctl.capture.photo_format": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/photo_format.py",
+    "camctl.persistence.repositories.capture_facts": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/capture_facts.py",
+    "camctl.scheduling": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/scheduling/__init__.py",
+    "camctl.scheduling.rules": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/scheduling/rules.py",
+    "camctl.capture.software_recovery": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/software_recovery.py",
+    "camctl.history.initial_state": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/history/initial_state.py",
+    "camctl.history.replay": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/history/replay.py",
+    "camctl.persistence.row_history": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/row_history.py",
+    "camctl.scheduling.resources": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/scheduling/resources.py",
+    "camctl.persistence.repositories.operations": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/operations.py",
+    "camctl.persistence.repositories.scheduling": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/scheduling.py",
+    "camctl.persistence.repositories.capture": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "camctl.outputs.cleanup_round": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/outputs/cleanup_round.py",
+    "camctl.outputs.cleanup_ownership": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/outputs/cleanup_ownership.py",
+    "camctl.outputs.sources": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/outputs/sources.py",
+    "camctl.outputs.cleanup_flow": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/outputs/cleanup_flow.py",
+    "camctl.scheduling.order": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/scheduling/order.py",
+    "camctl.outputs.competition": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/outputs/competition.py",
+    "camctl.outputs.read_discovery": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/outputs/read_discovery.py",
+    "camctl.host_files.handoff": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/host_files/handoff.py",
+    "camctl.outputs.handoff": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/outputs/handoff.py",
+    "camctl.outputs.obtain_summary": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/outputs/obtain_summary.py",
+    "camctl.persistence.repositories.outputs": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/outputs.py",
+    "camctl.capture.media_flow": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/media_flow.py",
+    "camctl.capture.result_reading": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/result_reading.py",
+    "camctl.devices.capture_completion": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/capture_completion.py",
+    "camctl.capture.result_scans": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/result_scans.py",
+    "camctl.capture.photo": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/photo.py",
+    "camctl.capture.recording": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/recording.py",
+    "camctl.capture.timelapse": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/timelapse.py",
+    "camctl.persistence.repositories.result_sources": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/result_sources.py",
+    "camctl.devices.drivers": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/drivers/__init__.py",
+    "camctl.devices.drivers.registry": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/drivers/registry.py",
+    "camctl.persistence.repositories.timelapse": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/timelapse.py",
+    "camctl.scheduling.service": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/scheduling/service.py",
+    "camctl.capture.handlers": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/handlers.py",
+    "camctl.devices.segment_profiles": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/segment_profiles.py",
+    "camctl.persistence.repositories.segment_profiles": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/segment_profiles.py",
+    "camctl.persistence.repositories.baseline": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/baseline.py",
+    "camctl.persistence.repositories.result_pages": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "camctl.persistence.repositories.segments": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "camctl.acceptance.input": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/acceptance/input.py",
+    "camctl.acceptance.service": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/acceptance/service.py",
+    "camctl.cancellation": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/cancellation/__init__.py",
+    "camctl.cancellation.models": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/cancellation/models.py",
+    "camctl.persistence.directory_switch": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/directory_switch.py",
+    "camctl.session.locks": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/session/locks.py",
+    "camctl.persistence.initialization": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/initialization.py",
+    "camctl.devices.parameter_schemas": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/parameter_schemas.py",
+    "camctl.acceptance.rules": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/acceptance/rules.py",
+    "camctl.acceptance.links": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/acceptance/links.py",
+    "camctl.reporting": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/reporting/__init__.py",
+    "camctl.reporting.ack": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/reporting/ack.py",
+    "camctl.reporting.models": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/reporting/models.py",
+    "camctl.persistence.repositories.reporting": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/reporting.py",
+    "camctl.persistence.repositories.acceptance": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/acceptance.py",
+    "camctl.cancellation.targets": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/cancellation/targets.py",
+    "camctl.persistence.repositories.cancellation": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/cancellation.py",
+    "camctl.bootstrap": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/bootstrap/__init__.py",
+    "camctl.persistence.repositories.host_capture": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/host_capture.py",
+    "camctl.bootstrap.capture_assembly": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/bootstrap/capture_assembly.py",
+    "camctl.bootstrap.config": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/bootstrap/config.py",
+    "camctl.capture.dispatch": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/dispatch.py",
+    "camctl.capture.wakeups": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/wakeups.py",
+    "camctl.capture.residual": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/residual.py",
+    "camctl.acceptance.notification": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/acceptance/notification.py",
+    "camctl.contracts.clock": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/contracts/clock.py",
+    "camctl.logging_runtime.copies": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/logging_runtime/copies.py",
+    "camctl.session.clock": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/session/clock.py",
+    "camctl.session.work": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/session/work.py",
+    "camctl.session.handoff": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/session/handoff.py",
+    "camctl.session.outcome": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/session/outcome.py",
+    "camctl.session.service": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/session/service.py",
+    "camctl.bootstrap.background_flow": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/bootstrap/background_flow.py",
+    "camctl.scheduling.notifications": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/scheduling/notifications.py",
+    "camctl.bootstrap.flows": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/bootstrap/flows.py",
+    "camctl.bootstrap.clocks": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/bootstrap/clocks.py",
+    "camctl.capture.baseline_saves": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/baseline_saves.py",
+    "camctl.capture.baseline": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/baseline.py",
+    "camctl.capture.preparation": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/preparation.py",
+    "camctl.persistence.repositories.session": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/session.py",
+    "camctl.reporting.messages": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/reporting/messages.py",
+    "camctl.bootstrap.lifecycle": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/bootstrap/lifecycle.py",
+    "camctl.persistence.repositories.software_recovery": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/software_recovery.py",
+    "camctl.persistence.repositories.baseline_reads": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/baseline_reads.py",
+    "camctl.persistence.event_reads": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/event_reads.py",
+    "camctl.persistence.repositories.result_file_ownership": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/result_file_ownership.py",
+    "camctl.persistence.repositories.result_file_proofs": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/result_file_proofs.py",
+    "camctl.persistence.repositories.result_file_pairing": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/result_file_pairing.py",
+    "camctl.outputs.cleanup_absence": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/outputs/cleanup_absence.py",
+    "camctl.outputs.cleanup_results": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/outputs/cleanup_results.py",
+    "camctl.persistence.repositories.cleanup_absence": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/cleanup_absence.py",
+    "camctl.contracts.segment_errors": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/contracts/segment_errors.py",
+    "camctl.capture.segment_errors": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/segment_errors.py",
+    "camctl.persistence.repositories.segment_result_sets": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/segment_result_sets.py",
+    "camctl.persistence.repositories.segment_selections": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/segment_selections.py",
+    "camctl.persistence.repositories.segment_queries": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/segment_queries.py",
+    "camctl.reporting.policy": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/reporting/policy.py",
+    "camctl.contracts.public_projection": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/contracts/public_projection.py",
+    "camctl.history.queries": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/history/queries.py",
+    "camctl.history.snapshots": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/history/snapshots.py",
+    "camctl.persistence.executor": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/executor.py",
+    "camctl.persistence.derived_storage": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/derived_storage.py",
+    "camctl.persistence.row_validation": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/row_validation.py",
+    "camctl.persistence.repositories.history": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/history.py",
+    "camctl.reporting.encoding": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/reporting/encoding.py",
+    "camctl.reporting.generation": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/reporting/generation.py",
+    "camctl.host_files.declarations": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/host_files/declarations.py",
+    "camctl.devices.catalog": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/catalog.py",
+    "camctl.devices.drivers.adb_cameras": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/drivers/adb_cameras/__init__.py",
+    "camctl.devices.drivers.adb_cameras.action6_formats": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/drivers/adb_cameras/action6_formats.py",
+    "camctl.devices.drivers.adb_cameras.commands": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/drivers/adb_cameras/commands.py",
+    "camctl.devices.drivers.adb_cameras.timelapse_parameters": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/drivers/adb_cameras/timelapse_parameters.py",
+    "camctl.devices.drivers.adb_cameras.definitions": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/drivers/adb_cameras/definitions.py",
+    "camctl.devices.adb_transport": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/adb_transport.py",
+    "camctl.devices.task_metadata": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/task_metadata.py",
+    "camctl.devices.drivers.adb_cameras.transport": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/drivers/adb_cameras/transport.py",
+    "camctl.devices.drivers.adb_cameras.filesystem": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/drivers/adb_cameras/filesystem.py",
+    "camctl.devices.drivers.adb_cameras.contracts": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/drivers/adb_cameras/contracts.py",
+    "camctl.capture.segment_finish": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/segment_finish.py",
+    "camctl.persistence.repositories.segment_transactions": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "camctl.devices.drivers.hasselblad": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/drivers/hasselblad/__init__.py",
+    "camctl.devices.drivers.hasselblad.parameters": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/drivers/hasselblad/parameters.py",
+    "camctl.devices.drivers.hasselblad.definitions": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/drivers/hasselblad/definitions.py",
+    "camctl.devices.drivers.hasselblad.configuration": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/devices/drivers/hasselblad/configuration.py",
+    "camctl.persistence.recovery_structure": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/recovery_structure.py",
+    "camctl.persistence.repositories.obtain_check_reads": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/obtain_check_reads.py",
+    "camctl.persistence.repositories.preparation": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/preparation.py",
+    "camctl.persistence.repositories.segment_check_conclusions": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/segment_check_conclusions.py",
+    "camctl.persistence.repositories.source_transactions": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/source_transactions.py",
+    "camctl.persistence.repositories.admission_sources": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/admission_sources.py",
+    "camctl.contracts.json_encoding": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/contracts/json_encoding.py",
+    "camctl.capture.segment_completion": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/segment_completion.py",
+    "camctl.capture.baseline_reads": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/baseline_reads.py",
+    "camctl.capture.segment_baseline": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/capture/segment_baseline.py"
+  },
+  "collected": 91,
+  "nodeids": [
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_cross_page_preview_keeps_exact_original_and_origin[False]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_cross_page_preview_keeps_exact_original_and_origin[True]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_independent_cross_batch_guards_reject_tampered_proposal[short]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_independent_cross_batch_guards_reject_tampered_proposal[extra]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_independent_cross_batch_guards_reject_tampered_proposal[wrong_file]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_independent_cross_batch_guards_reject_tampered_proposal[wrong_scope]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_independent_cross_batch_guards_reject_tampered_proposal[fake_marker]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_independent_cross_batch_guards_reject_tampered_proposal[duplicate_output]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_late_batch_or_final_guard_failure_rolls_back_entire_group[2]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_late_batch_or_final_guard_failure_rolls_back_entire_group[5]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_late_batch_or_final_guard_failure_rolls_back_entire_group[final]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_bounded_terminal_preserves_three_scope_states[unknown]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_bounded_terminal_preserves_three_scope_states[empty]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_bounded_terminal_preserves_three_scope_states[nonempty]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_original_receipt_compares_entire_terminal_before_image",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_original_receipt_rechecks_complete_frozen_gap_relations",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_original_receipt_does_not_change_after_output_or_file_observation",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_saved_range_page_error_does_not_return_success_prefix",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_both_entries_use_one_canonical_order_and_original_batch[1-bounded]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_both_entries_use_one_canonical_order_and_original_batch[1-finite]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_both_entries_use_one_canonical_order_and_original_batch[2-bounded]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_both_entries_use_one_canonical_order_and_original_batch[2-finite]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_both_entries_use_one_canonical_order_and_original_batch[128-bounded]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_both_entries_use_one_canonical_order_and_original_batch[128-finite]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[F-evidence-bounded]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[F-evidence-finite]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[original-clock-bounded]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[original-clock-finite]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[original-after-bounded]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[original-after-finite]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[preview-name-bounded]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[preview-name-finite]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[preview-origin_id-bounded]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[preview-origin_id-finite]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[publish-order-bounded]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[publish-order-finite]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[run-time-bounded]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[run-time-finite]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[run-before-bounded]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[run-before-finite]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[plan-clock-bounded]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[plan-clock-finite]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[L-time-bounded]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_every_actual_stage_must_match_frozen_protocol[L-time-finite]",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_empty_candidate_pages_continue_to_later_valid_members",
+    "tests/integration/persistence/test_segment_transaction_batches.py::test_fixed_batch_write_and_verification_have_bounded_residency",
+    "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[valid]",
+    "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[tail_zero]",
+    "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[non_tail_zero]",
+    "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[original_size_unknown]",
+    "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[original_completion_unknown]",
+    "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[original_incomplete]",
+    "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[original_ownership_unknown]",
+    "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[preview_zero]",
+    "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[preview_completion_unknown]",
+    "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[preview_incomplete]",
+    "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[preview_unpaired]",
+    "tests/integration/persistence/test_segment_storage.py::test_frozen_preview_candidates_and_publication_use_identical_eligibility[preview_pair_unknown]",
+    "tests/integration/persistence/test_segment_storage.py::test_pair_outside_frozen_set_is_rejected_even_when_preview_would_be_skipped[10]",
+    "tests/integration/persistence/test_segment_storage.py::test_pair_outside_frozen_set_is_rejected_even_when_preview_would_be_skipped[0]",
+    "tests/integration/persistence/test_segment_storage.py::test_candidate_cursor_can_advance_past_empty_page_and_point_reads_keep_fixed_facts",
+    "tests/integration/persistence/test_segment_storage.py::test_activation_refuses_incomplete_or_wrong_identity_scope[omit_scope]",
+    "tests/integration/persistence/test_segment_storage.py::test_activation_refuses_incomplete_or_wrong_identity_scope[wrong_identity]",
+    "tests/integration/persistence/test_segment_storage.py::test_activation_refuses_incomplete_or_wrong_identity_scope[omit_outputs]",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_page_read_rejects_corrupt_relation_without_rebuilding[missing]",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_page_read_rejects_corrupt_relation_without_rebuilding[created_event_id]",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_page_difference_indexes_reused_and_new_files_together",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_zero_difference_is_not_an_empty_or_final_device_page",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_zero_difference_preserves_raw_page_without_index[empty_device_page]",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_zero_difference_preserves_raw_page_without_index[nonempty_zero_difference]",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_accepts_only_actual_append_then_index[1]",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_accepts_only_actual_append_then_index[127]",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_accepts_only_actual_append_then_index[128]",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[append_omits_difference]",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[append_adds_out_of_page_file]",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_replaces_identity]",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_adds_extra_relation]",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_wrong_page]",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_wrong_created_event]",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_wrong_family]",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_wrong_owner]",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_bounded_entry_rejects_mutated_page_group[index_wrong_row_id]",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[append_omits_difference]",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[append_adds_out_of_page_file]",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_replaces_identity]",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_adds_extra_relation]",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_wrong_page]",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_wrong_created_event]",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_wrong_family]",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_wrong_owner]",
+    "tests/integration/persistence/test_segment_result_page_inputs.py::test_atomic_page_guard_recomputes_the_difference_and_index_rows[index_wrong_row_id]"
+  ],
+  "exit_code": 0,
+  "finished_utc": "2026-10-25T14:47:41Z"
+}

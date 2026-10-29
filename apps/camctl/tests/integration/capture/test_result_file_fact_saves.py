@@ -10,8 +10,9 @@ from camctl.contracts.values import ConsistencyError
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
-from .test_result_consumer_saves import _actual, _consume, _consumer_world, _result_port
-from .test_result_file_recovery import _fresh_runtime
+from .test_result_consumer_saves import _actual, _consume
+from .test_result_file_recovery import _fresh_runtime, _result_driver
+from ..support.result_cases import result_case, result_case_for
 
 pytestmark = pytest.mark.asyncio
 
@@ -30,81 +31,105 @@ class FileFactFault:
         return getattr(self.real, name)
 
     def execute(self, statement, params=()):
-        if statement.startswith("UPDATE device_files SET") and f"{_COLUMNS[self.stage]} = ?" in statement:
-            self.fact_transaction = True
-            if self.armed and self.mode == "projection":
-                self.armed = False
-                raise sqlite3.OperationalError("文件事实投影写入失败")
-        if self.armed and self.fact_transaction and statement == "COMMIT":
-            self.armed = False
-            if self.mode == "commit_after":
-                self.real.execute(statement, params)
-            raise sqlite3.OperationalError("文件事实提交边界错误")
-        result = self.real.execute(statement, params)
-        if statement in ("COMMIT", "ROLLBACK"):
-            self.fact_transaction = False
-        return result
+        commit = False
+
+        def authorize(operation, table, column, _database, _source):
+            nonlocal commit
+            if operation == sqlite3.SQLITE_UPDATE and table == 'device_files' and column == _COLUMNS[self.stage]:
+                self.fact_transaction = True
+                if self.armed and self.mode == 'projection':
+                    self.armed = False
+                    return sqlite3.SQLITE_DENY
+            if operation == sqlite3.SQLITE_TRANSACTION:
+                commit = table == 'COMMIT' and self.fact_transaction and self.armed
+                if commit and self.mode == 'commit_before':
+                    self.armed = False
+                    return sqlite3.SQLITE_DENY
+                if table == 'ROLLBACK':
+                    self.fact_transaction = False
+            return sqlite3.SQLITE_OK
+
+        self.real.set_authorizer(authorize)
+        try:
+            result = self.real.execute(statement, params)
+            if commit:
+                self.fact_transaction = False
+                if self.armed and self.mode == 'commit_after':
+                    self.armed = False
+                    raise sqlite3.OperationalError('文件事实提交边界错误')
+            return result
+        finally:
+            self.real.set_authorizer(None)
 
 
 class FileFactSpy(CaptureRepository):
     """真实仓储保存事实，记录所选阶段的完整公开请求和 key。"""
 
-    def __init__(self, stage):
+    def __init__(self, stage, mode=None):
         self.stage, self.requests = stage, []
+        self.mode, self.fault = mode, None
 
     def _record(self, stage, command, key):
         if self.stage == stage:
             self.requests.append((command, key))
 
+    def _connection(self, stage, owned):
+        if stage != self.stage or self.mode is None:
+            return owned
+        if self.fault is None:
+            self.fault = FileFactFault(owned.connection, self.stage, self.mode)
+        else:
+            self.fault.real = owned.connection
+        return replace(owned, connection=self.fault)
+
     def save_file_presence(self, command, key, owned):
         self._record("presence", command, key)
-        return super().save_file_presence(command, key, owned)
+        return super().save_file_presence(command, key, self._connection('presence', owned))
 
     def save_file_ownership(self, command, key, owned):
         self._record("ownership", command, key)
-        return super().save_file_ownership(command, key, owned)
+        return super().save_file_ownership(command, key, self._connection('ownership', owned))
 
     def save_file_completion(self, command, key, owned):
         self._record("completion", command, key)
-        return super().save_file_completion(command, key, owned)
+        return super().save_file_completion(command, key, self._connection('completion', owned))
 
 
 @pytest.mark.parametrize("consumer", ["photo", "record"])
 @pytest.mark.parametrize("stage", ["presence", "ownership", "completion"])
 @pytest.mark.parametrize("mode", ["projection", "commit_before", "commit_after"])
 async def test_file_fact_fault_keeps_original_stage_request_and_key(tmp_path, consumer, stage, mode):
-    owned, runtime, action_id, handler = await _consumer_world(tmp_path, consumer)
+    case = result_case_for()
+    owned, runtime, action_id, handler = await case.world(tmp_path, consumer, result_page_contract=False)
     actual = _actual(action_id, with_files=True, complete=True)
     if consumer == "photo":
         actual.observations[0].data["entries"][0]["kind"] = "photo"
-    driver = _result_port(runtime, actual)
-    spy = FileFactSpy(stage)
-    proxy = FileFactFault(owned.connection, stage, mode)
+    driver = _result_driver(actual)
+    spy = FileFactSpy(stage, mode)
     runtime.capture = spy
-    runtime.owned = replace(owned, connection=proxy)
-    original_wall = runtime.wall_us()
+    original_wall = case.clock.wall
     path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
     metadata = owned.metadata
     try:
         try:
             await _consume(runtime, consumer, action_id, handler)
-        except (ConsistencyError, AssertionError):
-            pending, = runtime.pending_start_results.values()
-            assert pending.finish.outcome.outcome is actual
-        assert not proxy.armed, "必须实际到达所选文件事实的投影或提交边界"
+        except ConsistencyError:
+            # 正式处理器可在本次停止，原工厂继续拥有完整保存申请。
+            pass
+        assert spy.fault is not None and not spy.fault.armed, "必须实际到达所选文件事实的投影或提交边界"
         command, key = spy.requests[0]
         assert command.occurred_at == original_wall
         owned.connection.close()
         owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
         assert owned.metadata == metadata
-        resumed = _fresh_runtime(owned, runtime)
+        resumed = (await _fresh_runtime(owned, runtime))
         resumed.capture = spy
-        resumed.wall_us = lambda: original_wall + 5_000_000
+        case.clock.wall = original_wall + 5_000_000
 
         await _consume(resumed, consumer, action_id, handler)
 
         driver.list_results.assert_awaited_once()
-        assert all(request == command and request_key == key for request, request_key in spy.requests)
+        assert all(request == command and request_key == key for request, request_key in spy.requests), spy.requests
         assert owned.connection.execute(
             "SELECT source_action_id,presence_state,completion_state,size_bytes FROM device_files"
             " WHERE observer_action_id=?", (action_id,)).fetchone() == (action_id, 2, 3, 41)

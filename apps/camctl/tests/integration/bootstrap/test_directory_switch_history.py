@@ -12,10 +12,10 @@ import pytest
 
 from camctl.contracts.values import new_operation_key
 from camctl.host_files.handoff import HandoffDirectories
-from camctl.persistence.initialization import InitOutcome, _canonical_binding, initialize_state
+from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.history import HistoryRepository
-from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+from camctl.persistence.runtime import DbConfig, DbOpenMode, canonical_directory_binding, open_existing
 from camctl.reporting.generation import GenerationSpec, generate_report_file
 from camctl.reporting.models import SyncMode
 from camctl.reporting.policy import ReportingRepository, start_sync
@@ -24,6 +24,7 @@ from camctl.reporting.publication import DbPublicationSession, DeliveryOutcome, 
 from ..acceptance.test_atomicity import _process
 from ..history.test_report_scope import _finish_action, _submit
 from .test_initialization import _config, _dump
+from ..support.database import business_database
 
 
 async def _completed_history(tmp_path: Path):
@@ -60,10 +61,11 @@ async def _completed_history(tmp_path: Path):
         assert action["status"] == "succeeded"
         assert action["outputs"][0]["output_id"] == "1"
         assert action["outputs"][0]["availability"] == "available"
-        publication = await deliver_report(
-            report.report_id, original,
-            HandoffDirectories(Path(cfg.paths.staging), Path(cfg.paths.ready)),
-            DbPublicationSession(owned), local_actions=(2,))
+        async with business_database(db_path) as database:
+            publication = await deliver_report(
+                report.report_id, original,
+                HandoffDirectories(Path(cfg.paths.staging), Path(cfg.paths.ready)),
+                DbPublicationSession(database), local_actions=(2,))
         assert publication.outcome is DeliveryOutcome.PUBLISHED, publication.error
         acknowledged = _process(
             {"request_id": "1", "last_report_id": str(report.report_id)}, owned.connection)
@@ -91,7 +93,7 @@ def _assert_business_unchanged(before, after, moved):
             assert after[table] == rows, table
     old_meta, new_meta = before["database_metadata"][0], after["database_metadata"][0]
     assert new_meta[:4] == old_meta[:4]
-    assert new_meta[4:7] == tuple(_canonical_binding(Path(value)) for value in (
+    assert new_meta[4:7] == tuple(canonical_directory_binding(Path(value)) for value in (
         moved.paths.staging, moved.paths.ready, moved.paths.processing))
     assert new_meta[7:] == old_meta[7:]
     assert before["reports"] and before["device_files"] and before["outputs"]

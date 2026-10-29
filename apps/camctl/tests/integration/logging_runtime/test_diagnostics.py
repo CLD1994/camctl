@@ -16,7 +16,11 @@ from camctl.logging_runtime.diagnostics import (
 from camctl.logging_runtime.lifecycle import LogRuntime, close_logging
 from camctl.logging_runtime.models import LogLevel
 from camctl.logging_runtime.service import LogChannel, LogRecord
-from camctl.session.service import _drive_flows
+from camctl.session.service import run_session
+from camctl.session.clock import register_clock_guard
+from camctl.session.work import WorkFacts
+from ..session.support import session_context
+from ..support.database import create_test_database
 
 pytestmark = pytest.mark.asyncio
 
@@ -200,14 +204,24 @@ async def test_background_admission_allows_later_flow_stop_and_same_device_round
     async def stop_flow(context):
         operations.append("required-stop")
 
-    context = SimpleNamespace(flows={"device": device_flow, "stop": stop_flow}, local_work=None)
+    register_clock_guard()
+    path = tmp_path / "session.db"
+    create_test_database(path)
+    facts = WorkFacts(unfinished_actions=0, required_settlements=0,
+        pending_report_changes=False, report_failed_no_new_changes=False,
+        residual_device_facts=False, deferred_work_cleanup=False,
+        waiting_acknowledgement=False, snapshot_backlog=False)
+    context = session_context(path,
+        clock=SimpleNamespace(utc_micros=lambda: 1_750_000_000_000_000),
+        facts_query=lambda connection: facts,
+        flows={"device": device_flow, "stop": stop_flow})
     with error_diagnostics_context(channel, fallback.append, background=True):
-        driving = asyncio.create_task(_drive_flows(context))
+        driving = asyncio.create_task(run_session(context, None))
         flushing = None
         try:
             done, _ = await asyncio.wait({driving}, timeout=1)
             assert driving in done
-            assert driving.result() is None
+            assert driving.result().succeeded
             assert operations == ["device-round-0", "device-round-1", "required-stop"]
             assert all(state.status is DiagnosticStatus.HELD for state in states)
             flushing = asyncio.create_task(flush_diagnostics())

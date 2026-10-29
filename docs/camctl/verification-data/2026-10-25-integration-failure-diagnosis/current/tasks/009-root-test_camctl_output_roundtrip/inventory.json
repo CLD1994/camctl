@@ -1,0 +1,3 @@
+[
+  "tests/integration/test_camctl_output_roundtrip.py::test_three_capture_kinds_partial_obtain"
+]

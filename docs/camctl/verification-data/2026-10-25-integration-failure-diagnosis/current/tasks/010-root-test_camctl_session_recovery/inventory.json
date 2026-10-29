@@ -1,0 +1,3 @@
+[
+  "tests/integration/test_camctl_session_recovery.py::test_concurrent_submits_and_duplicate_identity"
+]

@@ -1,0 +1,238 @@
+{
+  "synchronized_implement_camctl": "27f845274cfaa1954c4a06ce4379d3616f685a6b",
+  "shared_test_commit": "d896d4b28194258cb5da71b160d5ef22d642d48e",
+  "groups": {
+    "unit": {
+      "xml": "/tmp/camctl-quality-repair-evidence/latest-root/unit/result.xml",
+      "passed": 8775,
+      "skipped": 1,
+      "failed": 0
+    },
+    "capture": {
+      "xml": "/tmp/camctl-quality-repair-evidence/latest-root/capture/result.xml",
+      "passed": 37,
+      "skipped": 0,
+      "failed": 0
+    },
+    "persistence": {
+      "xml": "/tmp/camctl-quality-repair-evidence/latest-root/persistence/result.xml",
+      "passed": 11,
+      "skipped": 0,
+      "failed": 0
+    },
+    "outputs": {
+      "xml": "/tmp/camctl-quality-repair-evidence/latest-root/outputs/result.xml",
+      "passed": 30,
+      "skipped": 0,
+      "failed": 0
+    },
+    "bootstrap": {
+      "xml": "/tmp/camctl-quality-repair-evidence/latest-root/bootstrap/result.xml",
+      "passed": 55,
+      "skipped": 0,
+      "failed": 0
+    },
+    "action6": {
+      "xml": "/tmp/camctl-quality-repair-evidence/final-action6/after-latest-d896d4b2/result.xml",
+      "passed": 8,
+      "skipped": 0,
+      "failed": 0
+    },
+    "osmo": {
+      "xml": "/tmp/camctl-quality-repair-evidence/final-osmo/after-latest-d896d4b2.xml",
+      "passed": 8,
+      "skipped": 0,
+      "failed": 0
+    },
+    "history": {
+      "xml": "/tmp/camctl-quality-repair-evidence/final-history-after-latest/pytest-results.xml",
+      "passed": 102,
+      "skipped": 0,
+      "failed": 0
+    }
+  },
+  "selected_passed": 20,
+  "selected_failed": 0,
+  "selected_cases": [
+    {
+      "nodeid": "apps/camctl/tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window",
+      "group": "history",
+      "seconds_including_pytest_phases": 108.715,
+      "passed": true,
+      "xml": "/tmp/camctl-quality-repair-evidence/final-history-after-latest/pytest-results.xml",
+      "raw_xml_classname": "tests.integration.history.test_report_selection"
+    },
+    {
+      "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[unknown-prefix]",
+      "group": "action6",
+      "seconds_including_pytest_phases": 41.009,
+      "passed": true,
+      "xml": "/tmp/camctl-quality-repair-evidence/final-action6/after-latest-d896d4b2/result.xml",
+      "raw_xml_classname": "tmp.camctl-quality-repair-lidlmje7.action6.tests.integration.test_action6_segmented_recovery_roundtrip"
+    },
+    {
+      "nodeid": "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[overrun-indexes1-3-succeeded]",
+      "group": "osmo",
+      "seconds_including_pytest_phases": 57.68,
+      "passed": true,
+      "xml": "/tmp/camctl-quality-repair-evidence/final-osmo/after-latest-d896d4b2.xml",
+      "raw_xml_classname": "tmp.camctl-quality-repair-lidlmje7.osmo-recovery.tests.integration.test_osmo_builtin_record_segmentation_roundtrip"
+    },
+    {
+      "nodeid": "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[zero-gap-indexes4-2-failed]",
+      "group": "osmo",
+      "seconds_including_pytest_phases": 45.184,
+      "passed": true,
+      "xml": "/tmp/camctl-quality-repair-evidence/final-osmo/after-latest-d896d4b2.xml",
+      "raw_xml_classname": "tmp.camctl-quality-repair-lidlmje7.osmo-recovery.tests.integration.test_osmo_builtin_record_segmentation_roundtrip"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity",
+      "group": "history",
+      "seconds_including_pytest_phases": 172.349,
+      "passed": true,
+      "xml": "/tmp/camctl-quality-repair-evidence/final-history-after-latest/pytest-results.xml",
+      "raw_xml_classname": "tests.integration.history.test_record_segment_history"
+    },
+    {
+      "nodeid": "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[gap-indexes3-2-failed]",
+      "group": "osmo",
+      "seconds_including_pytest_phases": 47.043,
+      "passed": true,
+      "xml": "/tmp/camctl-quality-repair-evidence/final-osmo/after-latest-d896d4b2.xml",
+      "raw_xml_classname": "tmp.camctl-quality-repair-lidlmje7.osmo-recovery.tests.integration.test_osmo_builtin_record_segmentation_roundtrip"
+    },
+    {
+      "nodeid": "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[normal-indexes0-2-succeeded]",
+      "group": "osmo",
+      "seconds_including_pytest_phases": 92.677,
+      "passed": true,
+      "xml": "/tmp/camctl-quality-repair-evidence/final-osmo/after-latest-d896d4b2.xml",
+      "raw_xml_classname": "tmp.camctl-quality-repair-lidlmje7.osmo-recovery.tests.integration.test_osmo_builtin_record_segmentation_roundtrip"
+    },
+    {
+      "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-source-commit-receipt]",
+      "group": "action6",
+      "seconds_including_pytest_phases": 52.987,
+      "passed": true,
+      "xml": "/tmp/camctl-quality-repair-evidence/final-action6/after-latest-d896d4b2/result.xml",
+      "raw_xml_classname": "tmp.camctl-quality-repair-lidlmje7.action6.tests.integration.test_action6_segmented_recovery_roundtrip"
+    },
+    {
+      "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-copy-progress]",
+      "group": "action6",
+      "seconds_including_pytest_phases": 86.359,
+      "passed": true,
+      "xml": "/tmp/camctl-quality-repair-evidence/final-action6/after-latest-d896d4b2/result.xml",
+      "raw_xml_classname": "tmp.camctl-quality-repair-lidlmje7.action6.tests.integration.test_action6_segmented_recovery_roundtrip"
+    },
+    {
+      "nodeid": "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[short-set-indexes2-2-succeeded]",
+      "group": "osmo",
+      "seconds_including_pytest_phases": 45.329,
+      "passed": true,
+      "xml": "/tmp/camctl-quality-repair-evidence/final-osmo/after-latest-d896d4b2.xml",
+      "raw_xml_classname": "tmp.camctl-quality-repair-lidlmje7.osmo-recovery.tests.integration.test_osmo_builtin_record_segmentation_roundtrip"
+    },
+    {
+      "nodeid": "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[empty-indexes5-0-failed]",
+      "group": "osmo",
+      "seconds_including_pytest_phases": 42.891,
+      "passed": true,
+      "xml": "/tmp/camctl-quality-repair-evidence/final-osmo/after-latest-d896d4b2.xml",
+      "raw_xml_classname": "tmp.camctl-quality-repair-lidlmje7.osmo-recovery.tests.integration.test_osmo_builtin_record_segmentation_roundtrip"
+    },
+    {
+      "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-local-read]",
+      "group": "action6",
+      "seconds_including_pytest_phases": 47.483,
+      "passed": true,
+      "xml": "/tmp/camctl-quality-repair-evidence/final-action6/after-latest-d896d4b2/result.xml",
+      "raw_xml_classname": "tmp.camctl-quality-repair-lidlmje7.action6.tests.integration.test_action6_segmented_recovery_roundtrip"
+    },
+    {
+      "nodeid": "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[native-tail-indexes7-2-succeeded]",
+      "group": "osmo",
+      "seconds_including_pytest_phases": 27.327,
+      "passed": true,
+      "xml": "/tmp/camctl-quality-repair-evidence/final-osmo/after-latest-d896d4b2.xml",
+      "raw_xml_classname": "tmp.camctl-quality-repair-lidlmje7.osmo-recovery.tests.integration.test_osmo_builtin_record_segmentation_roundtrip"
+    },
+    {
+      "nodeid": "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[unknown-indexes6-0-failed]",
+      "group": "osmo",
+      "seconds_including_pytest_phases": 38.461,
+      "passed": true,
+      "xml": "/tmp/camctl-quality-repair-evidence/final-osmo/after-latest-d896d4b2.xml",
+      "raw_xml_classname": "tmp.camctl-quality-repair-lidlmje7.osmo-recovery.tests.integration.test_osmo_builtin_record_segmentation_roundtrip"
+    },
+    {
+      "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-inspection-saved]",
+      "group": "action6",
+      "seconds_including_pytest_phases": 50.405,
+      "passed": true,
+      "xml": "/tmp/camctl-quality-repair-evidence/final-action6/after-latest-d896d4b2/result.xml",
+      "raw_xml_classname": "tmp.camctl-quality-repair-lidlmje7.action6.tests.integration.test_action6_segmented_recovery_roundtrip"
+    },
+    {
+      "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters",
+      "group": "action6",
+      "seconds_including_pytest_phases": 22.688,
+      "passed": true,
+      "xml": "/tmp/camctl-quality-repair-evidence/final-action6/after-latest-d896d4b2/result.xml",
+      "raw_xml_classname": "tmp.camctl-quality-repair-lidlmje7.action6.tests.integration.test_action6_segmented_recovery_roundtrip"
+    },
+    {
+      "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[complete-short-sequence]",
+      "group": "action6",
+      "seconds_including_pytest_phases": 28.982,
+      "passed": true,
+      "xml": "/tmp/camctl-quality-repair-evidence/final-action6/after-latest-d896d4b2/result.xml",
+      "raw_xml_classname": "tmp.camctl-quality-repair-lidlmje7.action6.tests.integration.test_action6_segmented_recovery_roundtrip"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/outputs/test_read_discovery.py::test_candidate_capacity_tracks_batch_not_total",
+      "group": "outputs",
+      "seconds_including_pytest_phases": 8.503,
+      "passed": true,
+      "xml": "/tmp/camctl-quality-repair-evidence/latest-root/outputs/result.xml",
+      "raw_xml_classname": "tests.integration.outputs.test_read_discovery"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost",
+      "group": "bootstrap",
+      "seconds_including_pytest_phases": 4.667,
+      "passed": true,
+      "xml": "/tmp/camctl-quality-repair-evidence/latest-root/bootstrap/result.xml",
+      "raw_xml_classname": "tests.integration.bootstrap.test_read_discovery_default"
+    },
+    {
+      "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_video_modes_freeze_for_both_cameras_and_both_video_actions",
+      "group": "action6",
+      "seconds_including_pytest_phases": 9.676,
+      "passed": true,
+      "xml": "/tmp/camctl-quality-repair-evidence/final-action6/after-latest-d896d4b2/result.xml",
+      "raw_xml_classname": "tmp.camctl-quality-repair-lidlmje7.action6.tests.integration.test_action6_segmented_recovery_roundtrip"
+    }
+  ],
+  "production_identities": [
+    {
+      "commit": "d896d4b28194258cb5da71b160d5ef22d642d48e",
+      "production_trees": {
+        "apps/camctl/src": "ce354033e49d371e18b56460bbe11d504d3942b1",
+        "apps/client": "35315d19b42922973389fd7cade68f96ffb1621a",
+        "apps/host-demo": "94767ce20dd2080820b789383d1ca907391e5e62",
+        "protocol": "910ef832e99649a4cd3b910a0f74cf92cf1b533d"
+      }
+    },
+    {
+      "commit": "5012e99c57168a1dda5837941eee700104ce62af",
+      "production_trees": {
+        "apps/camctl/src": "ce354033e49d371e18b56460bbe11d504d3942b1",
+        "apps/client": "35315d19b42922973389fd7cade68f96ffb1621a",
+        "apps/host-demo": "94767ce20dd2080820b789383d1ca907391e5e62",
+        "protocol": "910ef832e99649a4cd3b910a0f74cf92cf1b533d"
+      }
+    }
+  ]
+}

@@ -25,15 +25,13 @@ from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.bootstrap.flows import cancel_flow, capture_flow
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
-from camctl.capture.handlers import CaptureRuntime
 from camctl.capture.recovery import RecoveryBoundary
 from camctl.capture.result_inputs import RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT
 from camctl.capture.results import FileKind
-from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.contracts.schemas import validate_document
 from camctl.contracts.values import new_operation_key
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
-from camctl.operations.attempts import AttemptConfig, RetryWaitGate
+from camctl.operations.attempts import AttemptConfig
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import (
@@ -56,7 +54,6 @@ from camctl.reporting.policy import (
     register_report_guards,
     register_sync_guard,
 )
-from camctl.scheduling.rules import LaunchWindow
 
 from ..capture.test_capture_contract import ResultsDouble, _entry
 from .test_recording_stop import (
@@ -78,6 +75,7 @@ from camctl.persistence.executor import DbExecutor
 from camctl.persistence.repositories.history import HistoryRepository, SqliteSnapshotStore
 from camctl.persistence.transaction import row_facts
 from .test_timelapse_finish import _TimelapseCatalog, _timelapse_plan
+from ..support.bootstrap_runtime_cases import configured_session
 
 register_operation_guards()
 register_capture_guards()
@@ -208,54 +206,8 @@ def _two_device_plan(request_id: str, scheduled_at: str) -> dict:
     }
 
 
-def _factory(driver, results, *, photo_check, extra_ms, wait_ms=2000):
-    """每设备运行时工厂：照片核实预算限 cam-1，额外等待限 cam-2。"""
-    retry_gate = RetryWaitGate()
-
-    def build(owned, device_id: str) -> CaptureRuntime:
-        overrides = {}
-        if device_id == "cam-1":
-            overrides["check_config"] = photo_check
-        with closing(owned.connection.execute(
-                "SELECT COALESCE(MAX(id), 0) FROM history_events")) as cursor:
-            horizon = int(cursor.fetchone()[0])
-        overrides["recovery_boundary"] = RecoveryBoundary.HOST_LOCAL_SETTLED
-        overrides["recovery_max_event_id"] = horizon
-        overrides["recovery_evidence_for"] = (
-            lambda binding, operation: EvidenceRegistry((
-                EvidenceContract(
-                    "adb_foreground_recovery", 1, operation, frozenset()),)))
-        return CaptureRuntime(
-            owned=owned,
-            scheduling=SchedulingRepository(),
-            operations=OperationRepository(),
-            capture=CaptureRepository(),
-            timelapse=TimelapseRepository(),
-            driver=driver,
-            results=results,
-            evidence=_EVIDENCE,
-            wall_us=lambda: int(time.time() * 1_000_000),
-            monotonic_ns=time.monotonic_ns,
-            window_of=lambda action: LaunchWindow(
-                scheduled_at=action["scheduled_at"],
-                window_end=action["scheduled_at"] + action["max_delay_ms"] * 1000),
-            wait_config=lambda params: CaptureWaitConfig(
-                target_duration_ms=wait_ms, driver_margin_ms=0,
-                extra_wait_ms=extra_ms if device_id == "cam-2" else 0),
-            retry_gate=retry_gate,
-            **overrides,
-        )
-
-    return build
 
 
-def _run_session(deps, driver, results, *, photo_check, extra_ms):
-    return asyncio.create_task(execute_command(
-        deps, None,
-        flows={"scheduling": capture_flow(
-            _factory(driver, results, photo_check=photo_check, extra_ms=extra_ms))},
-        poll_interval_s=0.1,
-    ))
 
 
 class TestTwoSessionConfigurationRecovery:
@@ -279,9 +231,8 @@ class TestTwoSessionConfigurationRecovery:
         driver = _TwoDeviceDriver()
         # 第一运行：照片预算两项、间隔拉长保证观察窗口内只有一轮；
         # cam-2 额外等待为零。
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
-        task = _run_session(
-            deps, driver, results,
+        deps, task = configured_session(
+            cfg, catalog, driver, results, _EVIDENCE,
             photo_check=AttemptConfig(2, Decimal("10"), Decimal("30")),
             extra_ms=0)
         try:
@@ -303,9 +254,8 @@ class TestTwoSessionConfigurationRecovery:
         # 修改按设备配置：照片核实预算上调且间隔缩短，cam-2 额外等待
         # 增至三秒。第二运行采用新配置完成全部责任。
         results.set_finalized = True
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
-        task = _run_session(
-            deps, driver, results,
+        deps, task = configured_session(
+            cfg, catalog, driver, results, _EVIDENCE,
             photo_check=AttemptConfig(5, Decimal("10"), Decimal("0.2")),
             extra_ms=3000)
         try:
@@ -407,49 +357,10 @@ class TestTwoSessionCancelUnderChangedStopBudget:
 
         stopper = _FailingThenConfirmingStop()
 
-        def build_factory(stop_config):
-            retry_gate = RetryWaitGate()
-
-            def build(owned, device_id: str) -> CaptureRuntime:
-                with closing(owned.connection.execute(
-                        "SELECT COALESCE(MAX(id), 0) FROM history_events")) as cursor:
-                    horizon = int(cursor.fetchone()[0])
-                return CaptureRuntime(
-                    owned=owned,
-                    scheduling=SchedulingRepository(),
-                    operations=OperationRepository(),
-                    capture=CaptureRepository(),
-                    timelapse=TimelapseRepository(),
-                    driver=driver,
-                    results=results,
-                    evidence=_EVIDENCE,
-                    stopper=stopper,
-                    stop_config=stop_config,
-                    wall_us=lambda: int(time.time() * 1_000_000),
-                    monotonic_ns=time.monotonic_ns,
-                    window_of=lambda action: LaunchWindow(
-                        scheduled_at=action["scheduled_at"],
-                        window_end=action["scheduled_at"]
-                        + action["max_delay_ms"] * 1000),
-                    wait_config=lambda params: CaptureWaitConfig(
-                        target_duration_ms=600_000, driver_margin_ms=0),
-                    retry_gate=retry_gate,
-                    recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
-                    recovery_max_event_id=horizon,
-                    recovery_evidence_for=lambda binding, operation: EvidenceRegistry((
-                        EvidenceContract(
-                            "adb_foreground_recovery", 1, operation, frozenset()),)),
-                )
-
-            return build
 
         # 第一运行：单次停止预算与长间隔；只推进到启动与等待安排。
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
-        task = asyncio.create_task(execute_command(
-            deps, None,
-            flows={"scheduling": capture_flow(build_factory(
-                AttemptConfig(1, Decimal("10"), Decimal("30"))))},
-            poll_interval_s=0.1))
+        deps, task = configured_session(cfg, catalog, driver, results, _EVIDENCE,
+            stopper=stopper, stop_config=AttemptConfig(1, Decimal("10"), Decimal("30")))
         try:
             await _await_query(
                 db,
@@ -464,16 +375,8 @@ class TestTwoSessionCancelUnderChangedStopBudget:
         # 且间隔缩短，第一次停止错误的等待不再阻塞第二次确认。
         await _submit_plan(
             tmp_path, cfg, catalog, _cancel_plan("2", 1, _future_schedule(1)))
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
-        task = asyncio.create_task(execute_command(
-            deps, None,
-            flows={
-                "scheduling": capture_flow(build_factory(
-                    AttemptConfig(3, Decimal("10"), Decimal("0.2")))),
-                "cancel": cancel_flow(
-                    ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing)),
-            },
-            poll_interval_s=0.1))
+        deps, task = configured_session(cfg, catalog, driver, results, _EVIDENCE,
+            stopper=stopper, stop_config=AttemptConfig(3, Decimal("10"), Decimal("0.2")))
         try:
             await _await_query(
                 db, "SELECT status, cancel_requested FROM actions WHERE id = 1",
@@ -544,9 +447,8 @@ class TestInterruptedSecondCallRecovery:
         results = _BlockingResults({1: (photo_file,)}, set_finalized=False)
         driver = _TwoDeviceDriver()
 
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
-        task = _run_session(
-            deps, driver, results,
+        deps, task = configured_session(
+            cfg, catalog, driver, results, _EVIDENCE,
             photo_check=AttemptConfig(2, Decimal("10"), Decimal("30")),
             extra_ms=0)
         try:
@@ -561,9 +463,8 @@ class TestInterruptedSecondCallRecovery:
 
         # 第二运行采用新配置，在第二次列举调用处中断。
         results.set_finalized = True
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
-        task = _run_session(
-            deps, driver, results,
+        deps, task = configured_session(
+            cfg, catalog, driver, results, _EVIDENCE,
             photo_check=AttemptConfig(5, Decimal("10"), Decimal("0.2")),
             extra_ms=0)
         try:
@@ -583,9 +484,8 @@ class TestInterruptedSecondCallRecovery:
 
         # 第三运行恢复：在途尝试按原责任收场，不重复既有名额；随后
         # 以恰好一次新调用完成核实与业务收场。
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
-        task = _run_session(
-            deps, driver, results,
+        deps, task = configured_session(
+            cfg, catalog, driver, results, _EVIDENCE,
             photo_check=AttemptConfig(5, Decimal("10"), Decimal("0.2")),
             extra_ms=0)
         try:
@@ -637,9 +537,8 @@ class TestConfigurationChangeHistoryRecovery:
             {1: (photo_file,), 2: (_entry("sequence-1"),)}, set_finalized=False)
         driver = _TwoDeviceDriver()
 
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
-        task = _run_session(
-            deps, driver, results,
+        deps, task = configured_session(
+            cfg, catalog, driver, results, _EVIDENCE,
             photo_check=AttemptConfig(2, Decimal("10"), Decimal("30")),
             extra_ms=0)
         try:
@@ -698,9 +597,8 @@ class TestConfigurationChangeHistoryRecovery:
         # 明确缺必需类别（已知失败）。
         results.set_finalized = True
         results.files_by_action[2] = ()
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
-        task = _run_session(
-            deps, driver, results,
+        deps, task = configured_session(
+            cfg, catalog, driver, results, _EVIDENCE,
             photo_check=AttemptConfig(5, Decimal("10"), Decimal("0.2")),
             extra_ms=3000)
         try:

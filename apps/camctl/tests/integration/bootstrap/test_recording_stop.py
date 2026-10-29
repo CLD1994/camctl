@@ -13,7 +13,6 @@ from __future__ import annotations
 from camctl.capture.result_inputs import RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT
 
 import asyncio
-import contextlib
 import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
@@ -22,44 +21,37 @@ from pathlib import Path
 
 import pytest
 
-from camctl.acceptance.input import parse_input, read_input
 from camctl.acceptance.ports import ParameterDefinition
 from camctl.acceptance.service import CommandMode
-from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.bootstrap.flows import cancel_flow, capture_flow
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
-from camctl.capture.handlers import CaptureRuntime, SessionRecordingState
-from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
 from camctl.devices.tasks import CaptureTask
 from camctl.devices.ports import DeviceCallResult
-from camctl.operations.attempts import RetryWaitGate
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.repositories.capture import (
-    CaptureRepository,
     register_capture_guards,
 )
 from camctl.persistence.repositories.cancellation import (
     register_cancellation_guards,
 )
 from camctl.persistence.repositories.operations import (
-    OperationRepository,
     register_operation_guards,
 )
-from camctl.persistence.repositories.scheduling import SchedulingRepository
 from camctl.persistence.repositories.timelapse import (
-    TimelapseRepository,
     register_timelapse_guards,
 )
 from camctl.reporting.policy import register_report_guards, register_sync_guard
 from camctl.persistence.repositories.outputs import register_outputs_guards
-from camctl.scheduling.rules import LaunchWindow
+
+from ..support.session import (capture_factory, cancel_session, await_database,
+                               session_config, submit_plan)
 
 from ..capture.test_capture_contract import (
     ResultsDouble,
     _entry,
 )
-from .test_run_dispatch import _ActivityDriver, _parsed
+from .test_run_dispatch import _ActivityDriver
 
 register_operation_guards()
 register_capture_guards()
@@ -157,18 +149,7 @@ class _StopDouble:
 
 
 def _config_for(home: Path):
-    return load_config(
-        {
-            "paths": {
-                "state_db": str(home / "state.db"),
-                "log_file": str(home / "camctl.log"),
-                "staging": str(home / "staging"),
-                "ready": str(home / "ready"),
-                "processing": str(home / "processing"),
-            }
-        },
-        ConfigDefaults(),
-    )
+    return session_config(home)
 
 
 def _future_schedule(seconds: int) -> str:
@@ -211,43 +192,13 @@ def _cancel_plan(request_id: str, target_id: int, scheduled_at: str) -> dict:
 
 
 async def _submit_plan(tmp_path: Path, cfg, catalog, body: dict) -> None:
-    deps = build_runtime(CommandMode.SUBMIT, cfg, catalog=catalog)
-    try:
-        outcome = await execute_command(deps, await _parsed(tmp_path, body))
-        assert outcome.succeeded is True, outcome.details
-    finally:
-        close_runtime(deps)
+    await submit_plan(tmp_path, cfg, catalog, body)
 
 
-def _record_factory(driver, stopper, results, clock):
-    """会话共享锚点表与重试等待门槛：推进循环每轮重建运行时，跨轮保留。"""
-    anchors: dict[int, tuple[int, int]] = {}
-    retry_gate = RetryWaitGate()
-
-    def build(owned, device_id: str) -> CaptureRuntime:
-        runtime = CaptureRuntime(
-            owned=owned,
-            scheduling=SchedulingRepository(),
-            operations=OperationRepository(),
-            capture=CaptureRepository(),
-            timelapse=TimelapseRepository(),
-            driver=driver,
-            results=results,
-            evidence=_EVIDENCE,
-            wall_us=lambda: int(time.time() * 1_000_000),
-            monotonic_ns=lambda: clock["ns"],
-            window_of=lambda action: LaunchWindow(
-                scheduled_at=action["scheduled_at"],
-                window_end=action["scheduled_at"] + action["max_delay_ms"] * 1000),
-            wait_config=lambda params: CaptureWaitConfig(
-                target_duration_ms=600_000, driver_margin_ms=0),
-            stopper=stopper,
-            retry_gate=retry_gate,
-        )
-        runtime.recording_state = SessionRecordingState(runtime, anchors)
-        return runtime
-
-    return build
+def _record_factory(cfg, driver, stopper, results, clock):
+    return capture_factory(
+        cfg, driver, results, _EVIDENCE, stopper=stopper,
+        monotonic_ns=lambda: clock["ns"])
 
 
 def _run_session(deps, cfg, driver, stopper, clock, results):
@@ -255,7 +206,7 @@ def _run_session(deps, cfg, driver, stopper, clock, results):
         deps, None,
         flows={
             "scheduling": capture_flow(
-                _record_factory(driver, stopper, results, clock)),
+                _record_factory(cfg, driver, stopper, results, clock)),
             "cancel": cancel_flow(ready=Path(cfg.paths.ready),
                                   processing=Path(cfg.paths.processing)),
         },
@@ -264,9 +215,7 @@ def _run_session(deps, cfg, driver, stopper, clock, results):
 
 
 async def _cancel(task: asyncio.Task) -> None:
-    task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await task
+    await cancel_session(task)
 
 
 def _scalar(db_path: Path, sql: str, *params):
@@ -275,18 +224,8 @@ def _scalar(db_path: Path, sql: str, *params):
 
 
 async def _await_query(
-        db_path: Path, sql: str, expected, timeout_s: float = 15.0) -> None:
-    """异步轮询查询结果；等待期间让出控制权供会话任务推进。"""
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        with sqlite3.connect(db_path) as connection:
-            row = connection.execute(sql).fetchone()
-        if row == expected:
-            return
-        await asyncio.sleep(0.05)
-    raise AssertionError(
-        f"等待 {sql} = {expected} 超时，当前: "
-        f"{_scalar(db_path, sql if '?' not in sql else sql)}")
+        db_path: Path, sql: str, expected, timeout_s: float = 15.0, *, task=None) -> None:
+    await await_database(db_path, sql, expected, timeout_s=timeout_s, task=task)
 
 
 class TestNormalStopAtTarget:
@@ -321,11 +260,9 @@ class TestNormalStopAtTarget:
                 return outcome
 
         driver, stopper = Driver(), Stop()
-        build = _record_factory(driver, stopper, ResultsDouble({}, set_finalized=False), {"ns": 0})
-        def factory(owned, device):
-            runtime = build(owned, device)
-            runtime.monotonic_ns = time.monotonic_ns
-            return runtime
+        factory = capture_factory(
+            cfg, driver, ResultsDouble({}, set_finalized=False), _EVIDENCE,
+            stopper=stopper, monotonic_ns=time.monotonic_ns)
 
         task = asyncio.create_task(execute_command(
             deps, None, flows={"scheduling": capture_flow(factory)},

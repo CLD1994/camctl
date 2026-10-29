@@ -5,6 +5,8 @@ run/submit 及工具启动均使用生产入口，不使用 Python 放行谓词�
 """
 from __future__ import annotations
 
+from camctl_memory_plugin import budgeted_host_launcher
+
 import ctypes
 import json
 import os
@@ -29,7 +31,7 @@ _ENTRY = Path(__file__).with_name("_host_recovery_entry.py")
 def snapshot(pid: int) -> dict | None:
     try:
         text = Path(f"/proc/{pid}/stat").read_text()
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
         return None
     fields = text[text.rfind(")") + 2:].split()
     return {"state": fields[0], "pgid": int(fields[2]), "start": fields[19]}
@@ -73,6 +75,7 @@ class GroupSession:
         )
         if repeat_error:
             environment["CAMCTL_TEST_REPEAT_ERROR"] = "1"
+        launcher = budgeted_host_launcher(launcher, receipt_root=root)
         self.proc = subprocess.Popen(
             [str(driver), str(launcher), str(self.deployment.ready),
              str(self.deployment.processing), str(self.log),
@@ -111,6 +114,25 @@ class GroupSession:
     def logs(self) -> str:
         return self.log.read_text() if self.log.exists() else ""
 
+    def log_entries(self, *events: str, **fields) -> list[tuple[int, dict[str, str]]]:
+        entries = []
+        for index, line in enumerate(self.logs().splitlines()):
+            tokens = line.partition(" data=")[0].split()
+            values = dict(token.split("=", 1) for token in tokens if "=" in token)
+            if all(event in tokens for event in events) and all(
+                values.get(name) == str(value) for name, value in fields.items()
+            ):
+                entries.append((index, values))
+        return entries
+
+    def spawn_log(self, call: dict, **fields) -> int:
+        spawned, = self.log_entries("spawned", command=call["command"], pid=call["pid"])
+        launched, = self.log_entries(
+            command=call["command"], call=spawned[1]["call"], attempt=spawned[1]["attempt"],
+            operation="spawn", **fields)
+        assert launched[0] < spawned[0]
+        return launched[0]
+
     def until(self, predicate, message: str):
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
@@ -132,8 +154,9 @@ class GroupSession:
         })
         if wait:
             assert self.command(f"submit {path}") == "submit 0"
-            self.until(lambda: "command=submit" in self.logs() and
-                       "result=success" in self.logs() and "needs_run=1" in self.logs(),
+            submitted = self.calls("submit")[-1]
+            self.until(lambda: self.log_entries(command="submit", pid=submitted["pid"],
+                                               result="success", needs_run=1),
                        "真实 submit 建立待启动要求")
         else:
             # 主程序的控制线程继续管理测试门闩，独立调用线程阻塞等待 submit。
@@ -142,8 +165,10 @@ class GroupSession:
 
     def exit_first(self):
         (self.root / "hold-first-exit").unlink()
-        self.until(lambda: snapshot(self.old["pid"]) and
-                   snapshot(self.old["pid"])["state"] == "Z", "旧 CLI 的退出记录被保留")
+        def exited():
+            current = snapshot(self.old["pid"])
+            return current is not None and current["state"] == "Z"
+        self.until(exited, "旧 CLI 的退出记录被保留")
 
     def assert_held(self):
         assert len(self.calls("run")) == 1
@@ -162,7 +187,10 @@ class GroupSession:
         os.waitpid(self.proc.pid, os.WUNTRACED)
         groups = {record["pgid"] for record in self.records()}
         for task in Path(f"/proc/{self.proc.pid}/task").iterdir():
-            children = (task / "children").read_text().split()
+            try:
+                children = (task / "children").read_text().split()
+            except (FileNotFoundError, ProcessLookupError):
+                continue  # 已停止主程序的其他线程仍可恰在观察时退出。
             for child in children:
                 state = snapshot(int(child))
                 if state:
@@ -180,7 +208,11 @@ class GroupSession:
         while time.monotonic() < deadline:
             owned = []
             for task in Path("/proc/self/task").iterdir():
-                for child in (task / "children").read_text().split():
+                try:
+                    children = (task / "children").read_text().split()
+                except (FileNotFoundError, ProcessLookupError):
+                    continue
+                for child in children:
                     state = snapshot(int(child))
                     if state and state["pgid"] in groups:
                         owned.append(int(child))
@@ -224,7 +256,8 @@ def test_next_run_waits_for_old_group_settlement(session_factory, exit_code):
     session.submit()
     assert session.command("block-kill") == "kill-blocked"
     session.exit_first()
-    session.until(lambda: "group_kill_sent" in session.logs(), "终止请求")
+    session.until(lambda: session.log_entries(command="run", pid=session.old["pid"],
+                                              stream="group_kill_sent"), "终止请求")
     assert not stopped(session.tool["pid"])
     session.assert_held()
     assert session.command("kill-and-hold") == "kill-enabled"
@@ -233,29 +266,29 @@ def test_next_run_waits_for_old_group_settlement(session_factory, exit_code):
     assert session.command("resume-scan") == "scan-enabled"
     session.until(lambda: len(session.calls("run")) == 2, "最终回收后启动下一 run")
     assert snapshot(session.old["pid"]) is None
-    lines = session.logs().splitlines()
-    reaped = next(i for i, line in enumerate(lines) if
-                  f"pid={session.old['pid']} stream=group_reaped" in line)
-    next_spawn = next(i for i, line in enumerate(lines) if
-                      "call=3 command=run operation=spawn" in line)
-    assert reaped < next_spawn
-    assert "call=3 command=run operation=spawn plan=(none) automatic=0 retries=0" in session.logs()
+    reaped, = session.log_entries(command="run", pid=session.old["pid"], stream="group_reaped")
+    next_spawn = session.spawn_log(session.calls("run")[-1], plan="(none)", automatic=0, retries=0)
+    assert reaped[0] < next_spawn
+    assert session.log_entries(command="run", pid=session.old["pid"], exit=exit_code)
 
 
 def test_abnormal_restart_keeps_shared_budget(session_factory):
     session = session_factory(retries=1, repeat_error=True)
     session.command("block-kill")
     session.exit_first()
-    session.until(lambda: "group_kill_sent" in session.logs(), "旧组终止请求")
+    session.until(lambda: session.log_entries(command="run", pid=session.old["pid"],
+                                              stream="group_kill_sent"), "旧组终止请求")
     session.assert_held()
     session.command("release-kill")
-    session.until(lambda: "retry_exhausted used=1" in session.logs(), "既有预算耗尽")
+    session.until(lambda: session.log_entries("retry_exhausted", command="run", used=1),
+                  "既有预算耗尽")
     assert len(session.calls("run")) == 2
-    assert "automatic=1 retries=1" in session.logs()
+    session.spawn_log(session.calls("run")[-1], automatic=1, retries=1)
     session.submit()
     session.until(lambda: len(session.calls("run")) == 3, "新提交触发一次正常启动")
-    session.until(lambda: session.logs().count("retry_exhausted used=1") == 2, "预算没有重置")
-    assert "automatic=0 retries=1" in session.logs()
+    session.until(lambda: len(session.log_entries("retry_exhausted", command="run", used=1)) == 2,
+                  "预算没有重置")
+    session.spawn_log(session.calls("run")[-1], automatic=0, retries=1)
 
 
 def test_unknown_scan_keeps_call_and_pending_request(session_factory):
@@ -263,7 +296,8 @@ def test_unknown_scan_keeps_call_and_pending_request(session_factory):
     session.submit()
     session.command("deny-scan")
     session.exit_first()
-    session.until(lambda: "stream=group_unknown" in session.logs(), "扫描权限故障诊断")
+    session.until(lambda: session.log_entries(command="run", pid=session.old["pid"],
+                                              stream="group_unknown"), "扫描权限故障诊断")
     session.assert_held()
     assert not stopped(session.tool["pid"])
     session.command("resume-scan")
@@ -276,7 +310,8 @@ def test_early_reap_never_signals_stale_group_or_starts_run(session_factory):
     session.command("pause-scan")
     session.exit_first()
     assert session.command(f"steal-exit {session.old['pid']}") == f"stolen {session.old['pid']}"
-    session.until(lambda: "stream=wait_unknown" in session.logs(), "提前回收诊断")
+    session.until(lambda: session.log_entries(command="run", pid=session.old["pid"],
+                                              stream="wait_unknown"), "提前回收诊断")
     session.command("resume-scan")
     session.submit(202, wait=False)
     session.until(lambda: len(session.calls("submit")) == 2, "原 run 身份失效时仍可并行提交")

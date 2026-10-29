@@ -1,0 +1,9 @@
+...........                                                              [100%]
+============================= slowest 15 durations =============================
+0.28s call     tests/integration/persistence/test_executor.py::TestAdmissionAndTimeout::test_admitted_job_has_no_queue_timeout
+0.05s call     tests/integration/persistence/test_executor.py::TestAdmissionAndTimeout::test_enqueue_timeout_returns_not_executed_and_never_executes
+0.03s call     tests/integration/persistence/test_executor.py::TestRealSqliteCombination::test_real_thread_and_sqlite_commit_and_read
+0.02s call     tests/integration/persistence/test_executor.py::TestPriorityAndClose::test_close_drains_active_and_withdraws_queued
+
+(11 durations < 0.005s hidden.  Use -vv to show these durations.)
+11 passed in 0.53s

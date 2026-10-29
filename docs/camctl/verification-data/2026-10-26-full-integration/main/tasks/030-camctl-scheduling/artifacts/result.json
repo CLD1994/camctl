@@ -1,0 +1,77 @@
+{
+  "id": "camctl/scheduling",
+  "scope": "camctl",
+  "path": "apps/camctl/tests/integration/scheduling",
+  "targets": [
+    "apps/camctl/tests/integration/scheduling"
+  ],
+  "estimated_seconds": 5.042757732000609,
+  "status": "failed",
+  "number": 30,
+  "worker": 3,
+  "artifacts": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/030-camctl-scheduling/artifacts",
+  "cwd": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/030-camctl-scheduling/source",
+  "started_utc": "2026-10-26T00:39:23.841334+00:00",
+  "command": [
+    "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/030-camctl-scheduling/source/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "apps/camctl/tests/integration/scheduling",
+    "-q",
+    "--durations=0",
+    "-p",
+    "integration_progress",
+    "--basetemp",
+    "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/030-camctl-scheduling/tmp/pytest",
+    "-p",
+    "camctl_memory_plugin",
+    "--camctl-memory-limit",
+    "2GiB",
+    "--camctl-memory-cgroup-root",
+    "/sys/fs/cgroup/memory/camctl-budget-1922809-b293c146ab7744439fec45b828581e67"
+  ],
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/control:/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/030-camctl-scheduling/source/apps/camctl/src",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/workers/3/python-cache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/workers/3/project-env",
+    "UV_CACHE_DIR": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/workers/3/uv-cache",
+    "UV_OFFLINE": "1",
+    "TMPDIR": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/030-camctl-scheduling/tmp"
+  },
+  "preparations": [
+    {
+      "label": "package-resources",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/030-camctl-scheduling/source/apps/camctl/scripts/sync_resources.py"
+      ],
+      "cwd": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/030-camctl-scheduling/source",
+      "started_utc": "2026-10-26T00:39:24.668030+00:00",
+      "pid": 1969279,
+      "exit_code": 0,
+      "finished_utc": "2026-10-26T00:39:24.745534+00:00",
+      "wall_seconds": 0.07750038900121581
+    }
+  ],
+  "preparation": "package-resources",
+  "preparation_pid": 1969279,
+  "pid": 1969281,
+  "execution_started_utc": "2026-10-26T00:39:24.746808+00:00",
+  "progress": {
+    "status": "finished",
+    "exit_code": 1,
+    "collected": 136,
+    "outcomes": {
+      "passed": 105,
+      "failed": 31
+    },
+    "subchecks": {},
+    "elapsed_seconds": 8.410687862007762,
+    "utc": "2026-10-26T00:39:33.503364+00:00",
+    "pid": 1969281
+  },
+  "exit_code": 1,
+  "finished_utc": "2026-10-26T00:39:33.780454+00:00",
+  "wall_seconds": 9.830631475997507
+}

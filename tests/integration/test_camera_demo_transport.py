@@ -154,7 +154,8 @@ async def test_software_result_pages_keep_posix_identity_locator_and_cursor(worl
 
 @pytest.fixture
 def real_file(world):
-    content = (b"line\r\n\x00" + "相机媒体".encode("utf-8") + b"\x1a\xff\n") * 5000
+    content = (b"CAMCTL-DIRECTORY/1\0" + world.root.as_posix().encode() + b"\0"
+               + (b"line\r\n\x00" + "相机媒体".encode("utf-8") + b"\x1a\xff\n") * 5000)
     path = world.source_path(REMOTE)
     path.parent.mkdir(parents=True)
     path.write_bytes(content)
@@ -216,6 +217,37 @@ async def test_real_directory_pages_keep_target_paths_and_forward_cursor(real_fi
     assert second.error is None, second
     assert [entry.path for entry in second.page.items] == [other]
     assert second.page.next_cursor is None
+
+
+async def test_real_directory_scan_keeps_target_paths_across_stream_chunks(real_file, world, monkeypatch):
+    filesystem, identity, _, _ = real_file
+    other = "/mnt/media_rw/emulated/DCIM/z.mp4"
+    world.source_path(other).write_bytes(b"keep")
+    original = AdbTransport.run_stream
+
+    async def fragmented(self, spec, stop, sink):
+        async def one_byte(data):
+            for value in data:
+                await sink(bytes((value,)))
+        return await original(self, spec, stop, one_byte)
+
+    monkeypatch.setattr(AdbTransport, "run_stream", fragmented)
+    (world.gates / "hold-read").touch()
+    request = DirectoryRequest(BINDING, ("/mnt/media_rw/emulated/DCIM",), None, 1, Decimal("10"))
+    scan = filesystem.directory_scan(request)
+    try:
+        first = await scan.read_directory(request, stop=NeverStop())
+        assert first.error is None, first
+        assert [entry.path for entry in first.page.items] == [identity.path]
+        assert first.page.next_cursor.after_path == identity.path
+        second = await scan.read_directory(replace(request, cursor=first.page.next_cursor), stop=NeverStop())
+        assert second.error is None, second
+        assert [entry.path for entry in second.page.items] == [other]
+        assert second.page.next_cursor is None
+        assert not (world.gates / "read-started").exists()
+    finally:
+        (world.gates / "release-read").touch()
+        scan.close()
 
 
 async def test_real_delete_removes_only_the_requested_source(real_file, world):

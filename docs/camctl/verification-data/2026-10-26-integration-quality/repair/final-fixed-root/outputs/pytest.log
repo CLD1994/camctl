@@ -1,0 +1,18 @@
+..............................                                           [100%]
+============================= slowest 15 durations =============================
+5.80s call     tests/integration/outputs/test_read_discovery.py::test_candidate_capacity_tracks_batch_not_total
+0.27s call     tests/integration/outputs/test_read_discovery.py::test_obtain_summary_folds_many_items_without_full_materialization[unresolved-wait_items-0-0]
+0.25s call     tests/integration/outputs/test_read_discovery.py::test_terminal_actions_do_not_expand_discovered_details
+0.25s call     tests/integration/outputs/test_read_discovery.py::test_obtain_summary_folds_many_items_without_full_materialization[waiting-wait_sources-0-0]
+0.25s call     tests/integration/outputs/test_read_discovery.py::test_product_predecessor_scan_retains_only_current_batch
+0.25s call     tests/integration/outputs/test_read_discovery.py::test_finishing_obtain_does_not_materialize_plan_siblings
+0.24s call     tests/integration/outputs/test_read_discovery.py::test_obtain_summary_folds_many_items_without_full_materialization[mixed-ready_to_publish-1-131]
+0.24s call     tests/integration/outputs/test_read_discovery.py::test_evicted_read_resumes_after_restart
+0.24s call     tests/integration/outputs/test_read_discovery.py::test_idle_deadline_returns_only_nearest_pending_metadata[window-1.0]
+0.23s call     tests/integration/outputs/test_read_discovery.py::test_obtain_summary_folds_many_items_without_full_materialization[empty-ready_to_publish-0-0]
+0.23s call     tests/integration/outputs/test_read_discovery.py::test_idle_deadline_returns_only_nearest_pending_metadata[future-1.0]
+0.23s call     tests/integration/outputs/test_read_discovery.py::test_idle_deadline_returns_only_nearest_pending_metadata[expired-0.0]
+0.21s call     tests/integration/outputs/test_read_discovery.py::test_obtain_summary_folds_many_items_without_full_materialization[failed-ready_to_publish-0-132]
+0.08s setup    tests/integration/outputs/test_read_discovery.py::test_later_registered_earlier_action_wins_without_full_load
+0.08s setup    tests/integration/outputs/test_read_discovery.py::test_finishing_obtain_does_not_materialize_plan_siblings
+30 passed in 11.26s

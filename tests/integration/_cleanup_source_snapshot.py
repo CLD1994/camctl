@@ -11,6 +11,7 @@ import stat
 import time
 
 import pytest
+from camctl_memory_plugin import finalize_receipts
 
 from _cleanup_roundtrip_support import (
     ARTIFACTS, World, json_write, process_identity, records, rows, sha,
@@ -90,7 +91,7 @@ def _root_users(root):
             if identity["pgid"] in groups:
                 try:
                     leader = process_identity(identity["pgid"])
-                except FileNotFoundError:
+                except (FileNotFoundError, ProcessLookupError):
                     owned = True  # 原组长已退出，原组仍有成员。
                 else:
                     owned = owned or leader["starttime"] == groups[identity["pgid"]]
@@ -141,6 +142,7 @@ class CompletedOsmoSource:
                 self.template.prepare_osmo(start_host=False)
             finally:
                 self.template.stop()
+                finalize_receipts(self.root)
             assert self.template.host is None
             patch.chdir(parent)
             assert _root_users(self.root) == []

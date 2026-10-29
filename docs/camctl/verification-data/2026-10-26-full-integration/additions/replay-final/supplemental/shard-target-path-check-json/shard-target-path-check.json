@@ -1,0 +1,8 @@
+{
+  "task": "root/test_hasselblad_photo_roundtrip/shard-1",
+  "target": "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_hasselblad_photo_roundtrip/source/tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.000667]",
+  "target_is_absolute": false,
+  "exists_relative_to_snapshot": false,
+  "actual_source_path_present": true,
+  "collection_target_as_root_absolute_exists": true
+}

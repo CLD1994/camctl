@@ -159,6 +159,63 @@ class IntegrationRunnerTest(unittest.TestCase):
             summary = json.loads((output / 'summary.json').read_text())
             self.assertEqual(sum(task['progress']['collected'] for task in summary['tasks']), 7)
 
+    def test_existing_external_budget_path_keeps_root_targets_in_each_task_source(self):
+        for shards in (1, 2):
+            with self.subTest(shards=shards), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                source = root / 'input'
+                self._fixture_repository(source, 'test_matrix.py',
+                    'import json\nfrom pathlib import Path\nimport pytest\n'
+                    '@pytest.mark.parametrize("value", ["a", "b", "new"])\n'
+                    'def test_value(value, pytestconfig):\n'
+                    '    work = Path.cwd().resolve()\n'
+                    '    assert pytestconfig.rootpath == work\n'
+                    '    assert Path(__file__).resolve().is_relative_to(work)\n'
+                    '    marker = work / "executed"\n'
+                    '    marker.mkdir(exist_ok=True)\n'
+                    '    (marker / (value + ".json")).write_text(json.dumps({\n'
+                    '        "file": str(Path(__file__).resolve()), "rootdir": str(pytestconfig.rootpath)}))\n',
+                    history=True)
+                # pytest 在插件选项解析前可把已存在的外部目录纳入 rootdir 推断。
+                # 不启动受限 camctl；真实参数仍经预算插件传入并完成配置。
+                delegated = root / 'external-budget-directory'
+                delegated.mkdir()
+                result, output = self._run_fixture(root, source, '--root-shards', str(shards),
+                    '--camctl-memory-cgroup-root', str(delegated))
+                plan = json.loads((output / 'plan.json').read_text())
+                expected = ['tests/integration/test_matrix.py::test_value[' + name + ']'
+                            for name in ('a', 'b', 'new')]
+                if shards == 2:
+                    self.assertCountEqual([node for task in plan for node in task['targets']], expected)
+                    collected = json.loads((Path(plan[0]['collection']) / 'inventory.json').read_text())
+                    self.assertCountEqual(collected, expected)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                summary = json.loads((output / 'summary.json').read_text())
+                tasks = summary['tasks']
+                self.assertEqual(len(tasks), shards)
+                self.assertEqual(len({task['cwd'] for task in tasks}), shards)
+                actual = []
+                for task in tasks:
+                    work = Path(task['cwd']).resolve()
+                    for target in task['targets']:
+                        file = Path(target.partition('::')[0])
+                        self.assertFalse(file.is_absolute())
+                        self.assertTrue((work / file).resolve().is_relative_to(work))
+                        self.assertTrue((work / file).is_file())
+                    inventory = json.loads((Path(task['artifacts']) / 'inventory.json').read_text())
+                    self.assertEqual(task['progress']['outcomes'], {'passed': len(inventory)})
+                    markers = list((work / 'executed').glob('*.json'))
+                    self.assertEqual(len(markers), len(inventory))
+                    for marker in markers:
+                        receipt = json.loads(marker.read_text())
+                        self.assertEqual(Path(receipt['rootdir']), work)
+                        self.assertEqual(Path(receipt['file']), work / 'tests/integration/test_matrix.py')
+                    actual.extend(inventory)
+                self.assertCountEqual(actual, expected)
+                self.assertEqual(len(actual), len(set(actual)))
+                self.assertFalse((source / 'executed').exists())
+                self.assertFalse(any((output / 'collection').glob('*/source/executed')))
+
     def test_failed_short_history_shards_current_nodes_but_passed_history_stays_whole(self):
         for historical_status, expected_tasks in (('failed', 2), ('passed', 1)):
             with self.subTest(historical_status=historical_status), tempfile.TemporaryDirectory() as temporary:

@@ -1,0 +1,690 @@
+[
+  {
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/osmo-builtin-package0/runtime/short-set/tools/camctl",
+      "submit",
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_2/world/client-plan-4.json",
+      "--config",
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_2/world/deployment/config.toml"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd",
+    "pid": 1703248,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd/camctl-memory-1703248-1fd77a33cffd4b91ad170f845ba19b7a",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "\u72ec\u7acb\u4ea4\u6362\u5cf0\u503c\u672a\u8ba1\u91cf\uff1b\u5408\u8ba1\u5cf0\u503c\u7531 memory.memsw.max_usage_in_bytes \u63d0\u4f9b",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 46923776,
+      "combined_peak_bytes": 46923776,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "\u72ec\u7acb\u4ea4\u6362\u5cf0\u503c\u672a\u8ba1\u91cf\uff1b\u5408\u8ba1\u5cf0\u503c\u7531 memory.memsw.max_usage_in_bytes \u63d0\u4f9b",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/osmo-builtin-package0/runtime/short-set/tools/camctl",
+      "run",
+      "--config",
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_2/world/deployment/config.toml",
+      "--host-notification-fd",
+      "7"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd",
+    "pid": 1702902,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd/camctl-memory-1702902-2e2a610b41bd46c4ac1761188f34b9af",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "\u72ec\u7acb\u4ea4\u6362\u5cf0\u503c\u672a\u8ba1\u91cf\uff1b\u5408\u8ba1\u5cf0\u503c\u7531 memory.memsw.max_usage_in_bytes \u63d0\u4f9b",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 116502528,
+      "combined_peak_bytes": 116502528,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "\u72ec\u7acb\u4ea4\u6362\u5cf0\u503c\u672a\u8ba1\u91cf\uff1b\u5408\u8ba1\u5cf0\u503c\u7531 memory.memsw.max_usage_in_bytes \u63d0\u4f9b",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/osmo-builtin-package0/runtime/short-set/tools/camctl",
+      "submit",
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_2/world/client-plan-2.json",
+      "--config",
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_2/world/deployment/config.toml"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd",
+    "pid": 1702899,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd/camctl-memory-1702899-911c492fc32d41c6b223feb114cef9f5",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "\u72ec\u7acb\u4ea4\u6362\u5cf0\u503c\u672a\u8ba1\u91cf\uff1b\u5408\u8ba1\u5cf0\u503c\u7531 memory.memsw.max_usage_in_bytes \u63d0\u4f9b",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 46850048,
+      "combined_peak_bytes": 46850048,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "\u72ec\u7acb\u4ea4\u6362\u5cf0\u503c\u672a\u8ba1\u91cf\uff1b\u5408\u8ba1\u5cf0\u503c\u7531 memory.memsw.max_usage_in_bytes \u63d0\u4f9b",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/osmo-builtin-package0/runtime/short-set/tools/camctl",
+      "submit",
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_2/world/client-plan-3.json",
+      "--config",
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_2/world/deployment/config.toml"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd",
+    "pid": 1703090,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd/camctl-memory-1703090-835349c99d0a4b76a106854b5376f4f7",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "\u72ec\u7acb\u4ea4\u6362\u5cf0\u503c\u672a\u8ba1\u91cf\uff1b\u5408\u8ba1\u5cf0\u503c\u7531 memory.memsw.max_usage_in_bytes \u63d0\u4f9b",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 46866432,
+      "combined_peak_bytes": 46866432,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "\u72ec\u7acb\u4ea4\u6362\u5cf0\u503c\u672a\u8ba1\u91cf\uff1b\u5408\u8ba1\u5cf0\u503c\u7531 memory.memsw.max_usage_in_bytes \u63d0\u4f9b",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "completed",
+    "command": [
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/osmo-builtin-package0/runtime/short-set/tools/camctl",
+      "init",
+      "--config",
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_2/world/deployment/config.toml"
+    ],
+    "requested_limit": "2GiB",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd",
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd/camctl-memory-1697845-f1a4a883d66f49feafb6144b1177c4d7",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "\u72ec\u7acb\u4ea4\u6362\u5cf0\u503c\u672a\u8ba1\u91cf\uff1b\u5408\u8ba1\u5cf0\u503c\u7531 memory.memsw.max_usage_in_bytes \u63d0\u4f9b",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "pid": 1701954,
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 41844736,
+      "combined_peak_bytes": 41844736,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "\u72ec\u7acb\u4ea4\u6362\u5cf0\u503c\u672a\u8ba1\u91cf\uff1b\u5408\u8ba1\u5cf0\u503c\u7531 memory.memsw.max_usage_in_bytes \u63d0\u4f9b",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "completed",
+    "group_removed": true,
+    "elapsed_seconds": 1.0045272980059963,
+    "returncode": 0
+  },
+  {
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/osmo-builtin-package0/runtime/short-set/tools/camctl",
+      "submit",
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_2/world/client-plan-7.json",
+      "--config",
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_2/world/deployment/config.toml"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd",
+    "pid": 1703753,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd/camctl-memory-1703753-dca1945aecca4ab59488ea6778966796",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "\u72ec\u7acb\u4ea4\u6362\u5cf0\u503c\u672a\u8ba1\u91cf\uff1b\u5408\u8ba1\u5cf0\u503c\u7531 memory.memsw.max_usage_in_bytes \u63d0\u4f9b",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 46845952,
+      "combined_peak_bytes": 46845952,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "\u72ec\u7acb\u4ea4\u6362\u5cf0\u503c\u672a\u8ba1\u91cf\uff1b\u5408\u8ba1\u5cf0\u503c\u7531 memory.memsw.max_usage_in_bytes \u63d0\u4f9b",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/osmo-builtin-package0/runtime/short-set/tools/camctl",
+      "submit",
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_2/world/client-plan-1.json",
+      "--config",
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_2/world/deployment/config.toml"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd",
+    "pid": 1702217,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd/camctl-memory-1702217-702c70e4ee8342709551c2a3dec1494b",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "\u72ec\u7acb\u4ea4\u6362\u5cf0\u503c\u672a\u8ba1\u91cf\uff1b\u5408\u8ba1\u5cf0\u503c\u7531 memory.memsw.max_usage_in_bytes \u63d0\u4f9b",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 54165504,
+      "combined_peak_bytes": 54165504,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "\u72ec\u7acb\u4ea4\u6362\u5cf0\u503c\u672a\u8ba1\u91cf\uff1b\u5408\u8ba1\u5cf0\u503c\u7531 memory.memsw.max_usage_in_bytes \u63d0\u4f9b",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/osmo-builtin-package0/runtime/short-set/tools/camctl",
+      "submit",
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_2/world/client-plan-5.json",
+      "--config",
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_2/world/deployment/config.toml"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd",
+    "pid": 1703421,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd/camctl-memory-1703421-9e2d203eb2c749c892f911b52c4c5cd9",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "\u72ec\u7acb\u4ea4\u6362\u5cf0\u503c\u672a\u8ba1\u91cf\uff1b\u5408\u8ba1\u5cf0\u503c\u7531 memory.memsw.max_usage_in_bytes \u63d0\u4f9b",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 46891008,
+      "combined_peak_bytes": 46891008,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "\u72ec\u7acb\u4ea4\u6362\u5cf0\u503c\u672a\u8ba1\u91cf\uff1b\u5408\u8ba1\u5cf0\u503c\u7531 memory.memsw.max_usage_in_bytes \u63d0\u4f9b",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "completed",
+    "command": [
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/osmo-builtin-package0/runtime/short-set/tools/camctl",
+      "describe",
+      "--config",
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_2/world/deployment/config.toml"
+    ],
+    "requested_limit": "2GiB",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd",
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd/camctl-memory-1697845-f2cb3f4316b8437785e5237a5f479001",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "\u72ec\u7acb\u4ea4\u6362\u5cf0\u503c\u672a\u8ba1\u91cf\uff1b\u5408\u8ba1\u5cf0\u503c\u7531 memory.memsw.max_usage_in_bytes \u63d0\u4f9b",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "pid": 1701996,
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 38322176,
+      "combined_peak_bytes": 38322176,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "\u72ec\u7acb\u4ea4\u6362\u5cf0\u503c\u672a\u8ba1\u91cf\uff1b\u5408\u8ba1\u5cf0\u503c\u7531 memory.memsw.max_usage_in_bytes \u63d0\u4f9b",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "completed",
+    "group_removed": true,
+    "elapsed_seconds": 2.037483127001906,
+    "returncode": 0
+  },
+  {
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/osmo-builtin-package0/runtime/short-set/tools/camctl",
+      "run",
+      "--config",
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_2/world/deployment/config.toml",
+      "--host-notification-fd",
+      "4"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd",
+    "pid": 1702216,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd/camctl-memory-1702216-68341edea2064c26b81596b159e528d3",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "\u72ec\u7acb\u4ea4\u6362\u5cf0\u503c\u672a\u8ba1\u91cf\uff1b\u5408\u8ba1\u5cf0\u503c\u7531 memory.memsw.max_usage_in_bytes \u63d0\u4f9b",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 116555776,
+      "combined_peak_bytes": 116555776,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "\u72ec\u7acb\u4ea4\u6362\u5cf0\u503c\u672a\u8ba1\u91cf\uff1b\u5408\u8ba1\u5cf0\u503c\u7531 memory.memsw.max_usage_in_bytes \u63d0\u4f9b",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/osmo-builtin-package0/runtime/short-set/tools/camctl",
+      "submit",
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_2/world/client-plan-6.json",
+      "--config",
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_2/world/deployment/config.toml"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd",
+    "pid": 1703785,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd/camctl-memory-1703785-680331f38d894c11a6c82dd130569cb3",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "\u72ec\u7acb\u4ea4\u6362\u5cf0\u503c\u672a\u8ba1\u91cf\uff1b\u5408\u8ba1\u5cf0\u503c\u7531 memory.memsw.max_usage_in_bytes \u63d0\u4f9b",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 44937216,
+      "combined_peak_bytes": 44937216,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "\u72ec\u7acb\u4ea4\u6362\u5cf0\u503c\u672a\u8ba1\u91cf\uff1b\u5408\u8ba1\u5cf0\u503c\u7531 memory.memsw.max_usage_in_bytes \u63d0\u4f9b",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  },
+  {
+    "schema": 1,
+    "budget_scope": "memory_and_swap",
+    "status": "recovered",
+    "command": [
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/osmo-builtin-package0/runtime/short-set/tools/camctl",
+      "submit",
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_2/world/client-plan-6.json",
+      "--config",
+      "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_2/world/deployment/config.toml"
+    ],
+    "requested_limit": "2147483648B",
+    "limit_bytes": 2147483648,
+    "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd",
+    "pid": 1703457,
+    "controller": "cgroup-v1",
+    "group": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd/camctl-memory-1703457-19e77292242741caaacc0b93f29dcf68",
+    "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1697836-9254004685c44f73abe58afeea7197fd",
+    "baseline": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 0,
+      "combined_peak_bytes": 0,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "\u72ec\u7acb\u4ea4\u6362\u5cf0\u503c\u672a\u8ba1\u91cf\uff1b\u5408\u8ba1\u5cf0\u503c\u7531 memory.memsw.max_usage_in_bytes \u63d0\u4f9b",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "evidence": {
+      "budget_scope": "memory_and_swap",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 46809088,
+      "combined_peak_bytes": 46809088,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "swap_peak_bytes": null,
+      "swap_peak_method": "\u72ec\u7acb\u4ea4\u6362\u5cf0\u503c\u672a\u8ba1\u91cf\uff1b\u5408\u8ba1\u5cf0\u503c\u7531 memory.memsw.max_usage_in_bytes \u63d0\u4f9b",
+      "host_swap_bytes": 4294967296,
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      }
+    },
+    "final_status": "recovered",
+    "group_removed": true
+  }
+]

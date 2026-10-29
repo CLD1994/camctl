@@ -1,0 +1,21 @@
+[
+  {
+    "nodeid": "tests/integration/test_camctl_c_module_roundtrip.py::test_capture_obtain_cleanup_roundtrip_via_c_module",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 37.54919223899924
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 14.968608934999793
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0020484999986365438
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 52.51984967399767
+  }
+]

@@ -1,0 +1,10 @@
+{"phase": "call", "nodeid": "tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window", "state": "started"}
+{"phase": "accept_actions", "count": 3, "request_id": 1, "state": "started"}
+{"phase": "accept_actions", "count": 3, "request_id": 1, "seconds": 0.31050939099804964, "state": "finished"}
+{"phase": "finish_outputs", "count": 4, "state": "started"}
+{"phase": "finish_outputs", "count": 4, "seconds": 0.39582682099717204, "state": "finished"}
+{"phase": "accept_actions", "count": 4200, "request_id": 2, "state": "started"}
+{"phase": "accept_actions", "count": 4200, "request_id": 2, "seconds": 61.707287008001, "state": "finished"}
+{"phase": "accept_actions", "count": 3, "request_id": 3, "state": "started"}
+{"phase": "accept_actions", "count": 3, "request_id": 3, "seconds": 0.024630098007037304, "state": "finished"}
+{"phase": "call", "nodeid": "tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window", "state": "finished", "seconds": 63.27237766500912, "preparation_seconds": 62.43825331800326, "checks_seconds": 0.8341243470058544, "failed": false}

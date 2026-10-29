@@ -151,36 +151,38 @@ raise SystemExit(7 if (s.st_dev, s.st_ino) == ({identity.st_dev}, {identity.st_i
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="通过 proc 核验实际报告进程 fd")
-def test_report_process_does_not_inherit_notification_writer(tmp_path):
-    from camctl.reporting.supervisor import _default_spawn
+@pytest.mark.asyncio
+async def test_report_process_does_not_inherit_notification_writer(tmp_path):
+    import multiprocessing
+    from camctl.reporting.maintenance import MaintenanceLimits
+    from camctl.reporting.supervisor import WorkerSupervisor
+    from pathlib import Path
 
     read_fd, write_fd = os.pipe()
     os.set_inheritable(write_fd, True)
     writer = open_notification_writer(write_fd)
     inode = os.fstat(write_fd).st_ino
-    process = parent = child = None
+    previous = {process.pid for process in multiprocessing.active_children()}
+    supervisor = WorkerSupervisor(limits=MaintenanceLimits(5,300,5),lock_path=str(tmp_path/'report.lock'))
+    processes = []
     try:
-        process, parent, child = _default_spawn(str(tmp_path / "report.lock"), 5)
-        # 等待真实 worker 的启动消息，验证的是存活的报告进程。
-        assert parent.poll(10)
-        parent.recv_bytes()
+        startup = await supervisor.start()
+        assert startup.ready, startup.detail
+        processes = [process for process in multiprocessing.active_children() if process.pid not in previous]
+        assert len(processes) == 1
+        process, = processes
         assert process.is_alive()
-        from pathlib import Path
         targets = []
         for fd in Path(f"/proc/{process.pid}/fd").iterdir():
             try:
                 targets.append(os.readlink(fd))
             except FileNotFoundError:
-                # worker 在读取快照期间可关闭自己的内部 fd。
                 continue
         assert f"pipe:[{inode}]" not in targets
     finally:
-        if process is not None:
-            process.terminate()
-            process.join(10)
-        if parent is not None:
-            parent.close()
-        if child is not None:
-            child.close()
+        await supervisor.stop()
+        for process in processes:
+            if process.is_alive():
+                process.terminate(); process.join(10)
         writer.close()
         os.close(read_fd)

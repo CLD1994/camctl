@@ -1,34 +1,25 @@
 """真实 OSMO 部署绑定穿过单文件媒体链及 native 公共发布。"""
 
 import json
-from dataclasses import replace
-from decimal import Decimal
-from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
 from camctl.bootstrap.config import ConfigDefaults, load_config
+from ..support.bootstrap_driver_cases import close_driver_world, stop_driver_capture, driver_media_tools
 from camctl.capture.handlers import capture_handler
-from camctl.capture.media_flow import DriverReadSessions
 from camctl.capture.segment_storage import SegmentResultRef
+from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError
-from camctl.host_files.tasks import FileTaskId, FileTaskResult
 from camctl.operations.recovery import RecoveryBoundary
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.segments import SegmentRepository
 
-from ..capture.test_recording_media_link import _RepairTools, _media
-from ..capture.test_media_flow import ReadDriverDouble, _Digest
-from ..capture.test_osv_probe_history import dual_probe
-from ..scheduling.test_start_action import owned
+from ..support.bootstrap_driver_cases import driver_owned as owned
 from .test_osmo_shared_recovery import (
     _SCHEDULED,
     _capture,
     _result_attempt,
     _reopen,
-    _save_actual_page,
-    _stop_call,
     _world,
 )
 
@@ -43,15 +34,10 @@ async def test_single_file_result_reader_uses_frozen_mode_after_deployment_chang
         osv_path = world.channel.result_path
         lrf_path = osv_path.rsplit(".", 1)[0] + ".LRF"
         world.channel.result_paths = [osv_path, lrf_path]
-        runtime = _capture(world)
-        await capture_handler(world.kind)(1, runtime)
+        await stop_driver_capture(world, monkeypatch, elapsed_us=22_000_000)
+        assert world.owned.connection.execute('SELECT COUNT(*) FROM operation_runs WHERE kind=7').fetchone() == (0,)
 
-        world.wall[0] += 22_000_000
-        world.mono[0] += 22_000_000_000
-        stopped = await _stop_call(runtime, runtime.action(1), "stop_recording")
-        assert stopped.phase == "confirmed", stopped
-
-        horizon = _reopen(world)
+        horizon = await _reopen(world)
         # 本轮重启前尚无结果列举调用；开放的是新派发，而非重放旧调用。
         world.channel.forbidden = False
         current_devices = load_config({"devices": {"cam-1": {
@@ -61,7 +47,7 @@ async def test_single_file_result_reader_uses_frozen_mode_after_deployment_chang
             "result_check": {"max_attempts": 1, "retry_interval_s": "0"},
             "copy": {"retry_interval_s": "0"},
         }}}, ConfigDefaults()).devices
-        resumed = _capture(world, devices=current_devices,
+        resumed = await _capture(world, devices=current_devices,
             recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
             recovery_max_event_id=lambda: horizon)
 
@@ -94,7 +80,7 @@ async def test_single_file_result_reader_uses_frozen_mode_after_deployment_chang
             "SELECT execution_spec_json FROM actions WHERE id=1").fetchone()[0])
         assert frozen["video_result_mode"] == "single_file"
     finally:
-        world.owned.connection.close()
+        await close_driver_world(world)
 
 
 async def test_osmo_single_file_resume_dispatches_automatic_media_repair(
@@ -109,67 +95,25 @@ async def test_osmo_single_file_resume_dispatches_automatic_media_repair(
         assert frozen["video_result_mode"] == "single_file"
         assert frozen.get("result_policy") is None
 
-        runtime, ticket = await _result_attempt(world, elapsed_us=22_000_000)
-        await _save_actual_page(world, runtime, ticket, monkeypatch, "terminal")
+        await stop_driver_capture(world, monkeypatch, elapsed_us=22_000_000)
+        await _reopen(world)
+        world.channel.forbidden = False
+        runtime, ticket = await _result_attempt(world, monkeypatch, elapsed_us=None, pages='terminal')
 
-        horizon = _reopen(world)
-        resumed = _capture(
-            world,
+        horizon = await _reopen(world)
+        tools, log = driver_media_tools(tmp_path)
+        world.channel.read_content = b'0' * 50
+        world.channel.forbidden = False
+        resumed = await _capture(world, media_enabled=True, segment_size=50, **tools,
             recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
-            recovery_max_event_id=lambda: horizon,
-        )
-        tools = _RepairTools("200")
-
-        async def probe_osv_or_mp4(input_file):
-            tools.calls.append("probe")
-            probe = dual_probe()
-            if input_file.relative_path.lower().endswith(".mp4"):
-                probe = replace(
-                    probe,
-                    duration_s=Decimal("10"),
-                    streams=tuple(
-                        replace(stream, duration_s=Decimal("10"))
-                        for stream in probe.streams
-                        if stream.attached_pic is not True
-                    ),
-                )
-            return FileTaskResult(
-                task_id=FileTaskId("probe"), ran=True, value=probe
-            )
-
-        async def repair_osv(input_file, output_file, *, trim_s, **kwargs):
-            tools.calls.append("repair")
-            return FileTaskResult(
-                task_id=FileTaskId("repair"), ran=True,
-                value=SimpleNamespace(
-                    complete=True, size_bytes=10, digest="a" * 64
-                ),
-            )
-
-        tools.probe = probe_osv_or_mp4
-        tools.repair = repair_osv
-        resumed.media = _media(
-            world.owned, tools, Path(world.cfg.paths.staging)
-        )
-        # The formal OSMO fixture reports a 50-byte source. Match the local
-        # read stream and digest to that observed source size so the real copy
-        # path can complete before probe and repair are invoked.
-        source_bytes = b"0" * 50
-        resumed.media.sessions = DriverReadSessions(
-            world.owned, ReadDriverDouble(source_bytes), ticket=None
-        )
-        resumed.media.digest = _Digest(source_bytes)
-        # This workflow's scheduled time is fixed independently of the older
-        # media-link fixture clock; use the world's current wall clock so the
-        # internal read qualification is due.
-        resumed.media.occurred_at = lambda: world.wall[0]
+            recovery_max_event_id=lambda: horizon)
 
         await capture_handler(world.kind)(1, resumed)
         # OSMO repair has a persisted prepare step before the native container
         # is processed; the next handler turn resumes that saved responsibility.
         await capture_handler(world.kind)(1, resumed)
 
-        assert tools.calls == ["probe", "repair", "probe"]
+        assert log.read_text().splitlines() == ["probe", "repair", "probe"]
         assert world.owned.connection.execute(
             "SELECT status FROM actions WHERE id=1"
         ).fetchone() == (3,)
@@ -187,7 +131,7 @@ async def test_osmo_single_file_resume_dispatches_automatic_media_repair(
             "SELECT COUNT(*) FROM segment_sets WHERE action_id=1"
         ).fetchone() == (0,)
     finally:
-        world.owned.connection.close()
+        await close_driver_world(world)
 
 
 async def test_osmo_native_segment_resume_publishes_saved_conclusion_without_device_calls(
@@ -203,7 +147,7 @@ async def test_osmo_native_segment_resume_publishes_saved_conclusion_without_dev
         assert frozen["video_result_mode"] == "segmented"
         assert frozen["result_policy"] == "osmo_empty_tail_classification_v1"
 
-        runtime = _capture(world)
+        runtime = await _capture(world)
         await capture_handler(world.kind)(1, runtime)
 
         # OSMO 原生有限任务在目标、结果余量和额外等待到期后自然完成。
@@ -221,10 +165,32 @@ async def test_osmo_native_segment_resume_publishes_saved_conclusion_without_dev
 
         prepared = SegmentRepository().read_prepared_result_ref(1, world.owned)
         assert isinstance(prepared, SegmentResultRef)
-        assert world.owned.connection.execute(
-            "SELECT COUNT(*) FROM segment_check_conclusions WHERE set_id=?",
+        conclusion = world.owned.connection.execute(
+            "SELECT * FROM segment_check_conclusions WHERE set_id=?",
             (prepared.set_id,),
-        ).fetchone() == (1,)
+        ).fetchall()
+        assert len(conclusion) == 1
+        assert world.owned.connection.execute(
+            "SELECT current_result,current_failure_json FROM segment_check_conclusions WHERE set_id=?",
+            (prepared.set_id,),
+        ).fetchone() == (int(enum_for("segment_check_conclusions.current_result").SUFFICIENT), None)
+        source = world.owned.connection.execute(
+            "SELECT run_id,current_attempt_id,current_final_page_event_id,source_txn_id,source_event_id"
+            " FROM segment_sets WHERE id=?", (prepared.set_id,),
+        ).fetchone()
+        assert all(value is not None for value in source)
+        assert world.owned.connection.execute(
+            "SELECT run_id,status,result_last_page_event_id,error_json FROM operation_attempts WHERE id=?",
+            (source[1],),
+        ).fetchone() == (source[0], int(enum_for("operation_attempts.status").SUCCEEDED), source[2], None)
+        original_page = world.owned.connection.execute(
+            "SELECT body_json FROM history_events WHERE id=?", (source[2],),
+        ).fetchone()
+        members = world.owned.connection.execute(
+            "SELECT file_id,page_event_id,identity FROM segment_members WHERE set_id=? ORDER BY id",
+            (prepared.set_id,),
+        ).fetchall()
+        assert members == [(1, source[2], world.channel.result_path)]
         assert world.owned.connection.execute(
             "SELECT published_event_id FROM segment_sets WHERE id=?",
             (prepared.set_id,),
@@ -232,8 +198,8 @@ async def test_osmo_native_segment_resume_publishes_saved_conclusion_without_dev
         calls_before_recovery = tuple(world.channel.calls)
         result_tickets_before_recovery = tuple(world.channel.result_tickets)
 
-        horizon = _reopen(world)
-        resumed = _capture(
+        horizon = await _reopen(world)
+        resumed = await _capture(
             world,
             recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
             recovery_max_event_id=lambda: horizon,
@@ -250,9 +216,20 @@ async def test_osmo_native_segment_resume_publishes_saved_conclusion_without_dev
             (prepared.set_id,),
         ).fetchone() == (1,)
         assert world.owned.connection.execute(
-            "SELECT COUNT(*) FROM segment_check_conclusions WHERE set_id=?",
+            "SELECT * FROM segment_check_conclusions WHERE set_id=?",
             (prepared.set_id,),
-        ).fetchone() == (1,)
+        ).fetchall() == conclusion
+        assert world.owned.connection.execute(
+            "SELECT run_id,current_attempt_id,current_final_page_event_id,source_txn_id,source_event_id"
+            " FROM segment_sets WHERE id=?", (prepared.set_id,),
+        ).fetchone() == source
+        assert world.owned.connection.execute(
+            "SELECT body_json FROM history_events WHERE id=?", (source[2],),
+        ).fetchone() == original_page
+        assert world.owned.connection.execute(
+            "SELECT file_id,page_event_id,identity FROM segment_members WHERE set_id=? ORDER BY id",
+            (prepared.set_id,),
+        ).fetchall() == members
         assert world.owned.connection.execute(
             "SELECT COUNT(*) FROM outputs WHERE source_action_id=1"
         ).fetchone() == (1,)
@@ -260,4 +237,4 @@ async def test_osmo_native_segment_resume_publishes_saved_conclusion_without_dev
             "SELECT COUNT(*) FROM file_copies"
         ).fetchone() == (0,)
     finally:
-        world.owned.connection.close()
+        await close_driver_world(world)

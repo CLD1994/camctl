@@ -1,0 +1,11 @@
+{
+  "action6": {
+    "raw_receipts_checked": 80,
+    "maximum_combined_peak": 154796032
+  },
+  "osmo": {
+    "raw_receipts_checked": 132,
+    "receipt_files": 8,
+    "maximum_combined_peak": 120152064
+  }
+}

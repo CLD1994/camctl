@@ -11,6 +11,7 @@ C1 的原未知删除可靠终态化后，C2 接手并只执行自己的 QUERY�
 from __future__ import annotations
 
 import json
+import sqlite3
 from dataclasses import replace
 
 import pytest
@@ -26,7 +27,7 @@ from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 
 from ..bootstrap.test_output_binding_changes import _NOW, _save_photos, environment
-from ..persistence.test_transactions import FailingConnection as _FaultConnection
+from ..support.outputs import SqliteOperationFault
 from .test_cleanup_query_save_recovery import (
     _MatrixDriver, _apply_cleanup_cancel, _member_facts, _new_runtime,
     _start_cleanup)
@@ -52,13 +53,13 @@ class _CancelQueryPort(OperationRepository):
                 or finish.ticket.target_id != str(self.item_id)):
             return super().finish_attempt(finish, key, owned)
         if self.when == "before":
-            _apply_cleanup_cancel(self.owned, self.action_id)
+            _apply_cleanup_cancel(owned, self.action_id)
         result = super().finish_attempt(finish, key, owned)
         assert result.kind is DbOutcomeKind.COMPLETED, result.error
         assert result.value.disposition is FinishDisposition.SAVED
         self.saved += 1
         if self.when == "after":
-            _apply_cleanup_cancel(self.owned, self.action_id)
+            _apply_cleanup_cancel(owned, self.action_id)
         return result
 
 
@@ -75,8 +76,8 @@ class _EntryPort(OutputsRepository):
             return super().begin_cleanup_attempt(intent, key, owned)
         if self.mode == "rolled_back":
             # 提交阶段注入连接故障：计划内全部事件随事务回滚。
-            fault = _FaultConnection(
-                owned.connection, "INSERT INTO history_events")
+            fault = SqliteOperationFault(
+                owned.connection, sqlite3.SQLITE_INSERT, "history_events")
             return super().begin_cleanup_attempt(
                 intent, key, replace(owned, connection=fault))
         result = super().begin_cleanup_attempt(intent, key, owned)
@@ -84,14 +85,14 @@ class _EntryPort(OutputsRepository):
                              getattr(result.value, "disposition", None)))
         if (result.kind is DbOutcomeKind.COMPLETED
                 and result.value.ticket is not None):
-            _apply_cleanup_cancel(self.owned, self.action_id)
+            _apply_cleanup_cancel(owned, self.action_id)
         return result
 
 
 async def _c1_unknown_delete_terminal(cfg, owned, driver, output_id: int):
     """C1 实际删除未知、查询未知后预算耗尽，可靠保存失败终态。"""
     action_id, item_id = _start_cleanup(owned, output_id, "2")
-    runtime = _new_runtime(cfg, owned, driver, query_attempts=1)
+    runtime = await _new_runtime(cfg, owned, driver, query_attempts=1)
     first = await delete_source_file(runtime, item_id)
     assert first.phase == "query_unknown", first
     exhausted = await delete_source_file(runtime, item_id)
@@ -120,10 +121,10 @@ async def test_query_only_cancel_releases_reversible_restriction(
         (c1[1],)).fetchone()
 
     action_id, item_id = _start_cleanup(owned, output_id, "3")
-    runtime = _new_runtime(cfg, owned, driver)
+    runtime = await _new_runtime(cfg, owned, driver)
     port = _CancelQueryPort(owned, item_id, action_id, when)
     runtime.operations = port
-    session = runtime.for_item(item_id)
+    session = await runtime.for_item(item_id)
     driver.matrix_enabled, driver.present = True, present
 
     step = await delete_source_file(session, item_id)
@@ -173,7 +174,7 @@ async def test_cancel_before_any_query_keeps_member_pending(environment):
     action_id, item_id = _start_cleanup(owned, output_id, "3")
     _apply_cleanup_cancel(owned, action_id)
 
-    step = await delete_source_file(_new_runtime(cfg, owned, driver), item_id)
+    step = await delete_source_file(await _new_runtime(cfg, owned, driver), item_id)
 
     assert (step.phase, step.detail) == ("canceled", None), step
     facts = _member_facts(owned, item_id)
@@ -196,7 +197,7 @@ async def test_first_entry_commits_ownership_flow_and_attempt_together(environme
     action_id, item_id = _start_cleanup(owned, output_id, "3")
     driver.matrix_enabled, driver.present = True, True
 
-    step = await delete_source_file(_new_runtime(cfg, owned, driver), item_id)
+    step = await delete_source_file(await _new_runtime(cfg, owned, driver), item_id)
 
     # 查询确认仍在后落入删除；本断言聚焦建档边界而非删除结果。
     assert step.phase in ("still_present", "delete_retry_wait", "canceled",
@@ -244,12 +245,12 @@ async def test_first_entry_rollback_leaves_no_attempt(environment):
     driver = _MatrixDriver(owned)
     await _c1_unknown_delete_terminal(cfg, owned, driver, output_id)
     action_id, item_id = _start_cleanup(owned, output_id, "3")
-    runtime = _new_runtime(cfg, owned, driver)
+    runtime = await _new_runtime(cfg, owned, driver)
     port = _EntryPort(owned, item_id, action_id, "rolled_back")
     runtime.outputs = port
     driver.matrix_enabled, driver.present = True, True
 
-    step = await delete_source_file(runtime.for_item(item_id), item_id)
+    step = await delete_source_file(await runtime.for_item(item_id), item_id)
 
     assert step.phase == "query_rejected", step
     assert owned.connection.in_transaction is False
@@ -273,11 +274,11 @@ async def test_delete_intent_cancel_before_dispatch_saves_not_dispatched(environ
         " WHERE a.device_id='cam-a'").fetchone()[0]
     driver = _MatrixDriver(owned)
     action_id, item_id = _start_cleanup(owned, output_id, "2")
-    runtime = _new_runtime(cfg, owned, driver)
+    runtime = await _new_runtime(cfg, owned, driver)
     port = _EntryPort(owned, item_id, action_id, "cancel_after_grant")
     runtime.outputs = port
 
-    step = await delete_source_file(runtime.for_item(item_id), item_id)
+    step = await delete_source_file(await runtime.for_item(item_id), item_id)
 
     assert (step.phase, step.detail) == ("canceled", None), step
     assert [entry[:2] for entry in port.entries] == [("delete", DbOutcomeKind.COMPLETED)]
@@ -311,7 +312,7 @@ async def test_query_only_absence_success_from_reversible_restriction(environmen
     action_id, item_id = _start_cleanup(owned, output_id, "3")
     driver.matrix_enabled, driver.present = True, False
 
-    step = await delete_source_file(_new_runtime(cfg, owned, driver), item_id)
+    step = await delete_source_file(await _new_runtime(cfg, owned, driver), item_id)
 
     assert (step.phase, step.detail) == ("succeeded", "ABSENCE_CONFIRMED"), step
     facts = _member_facts(owned, item_id)
@@ -354,7 +355,7 @@ async def test_cancel_after_query_return_settles_by_matrix(
     driver.matrix_enabled, driver.present = True, present
     driver.on_query_return = lambda: _apply_cleanup_cancel(owned, action_id)
 
-    step = await delete_source_file(_new_runtime(cfg, owned, driver).for_item(item_id), item_id)
+    step = await delete_source_file(await (await _new_runtime(cfg, owned, driver)).for_item(item_id), item_id)
 
     assert (step.phase, step.detail) == (phase, detail), step
     # 取消生效后不再发起任何设备调用。

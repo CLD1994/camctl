@@ -434,7 +434,7 @@ def test_verify_absent_operation_is_read_only_not_committed(
         FinishSendRequest,
         MotorFinalKind,
     )
-    from camctl.persistence.repositories.motor import _MotorCommand
+    from camctl.persistence.repositories import motor as motor_storage
     from camctl.persistence.repositories.scheduling import ObserveWindowRequest
 
     owned, repository, request, _, permit = prepared
@@ -449,7 +449,7 @@ def test_verify_absent_operation_is_read_only_not_committed(
     def forbidden_plan(*args):
         raise AssertionError("核实不得为缺失原键创建新事务")
 
-    monkeypatch.setattr(_MotorCommand, "plan", forbidden_plan)
+    monkeypatch.setattr(motor_storage, "commit_operation", forbidden_plan)
     counts = owned.connection.execute(
         "SELECT count(*) FROM history_transactions"
     ).fetchone()

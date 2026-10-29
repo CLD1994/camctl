@@ -302,10 +302,10 @@ async def test_metadata_batch_script_preserves_raw_fields_statuses_and_special_p
     raw = await AdbTransport().run(ToolSpec(
         argv, Decimal("5"), Decimal("1")), Stop())
 
-    expected = (b"CAMCTL-METADATA/1\0"
-        + paths[0].encode() + b"\0" + b"0\0" + b"4\n\0" + b"\0"
-        + paths[1].encode() + b"\0" + b"0\0" + b"0\n\0" + b"\0"
-        + paths[2].encode() + b"\0" + b"1\0" + b"\0" + b"\0"
+    expected = (b"CAMCTL-METADATA/2\0"
+        + paths[0].encode() + b"\0" + b"4\n\0" + b"\0" + b"0\0"
+        + paths[1].encode() + b"\0" + b"0\n\0" + b"\0" + b"0\0"
+        + paths[2].encode() + b"\0" + b"\0" + b"\0" + b"1\0"
         + b"END\0")
     assert raw.exit == LocalExit(exit_code=0)
     assert raw.error is None and raw.output_failure is None

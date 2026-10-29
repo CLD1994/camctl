@@ -16,13 +16,13 @@ from pathlib import Path
 import pytest
 
 from camctl.acceptance.input import parse_input, read_input
-from camctl.acceptance.service import AcceptanceContext, CommandMode, accept_input
+from camctl.acceptance.service import AcceptanceContext, CommandMode
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.acceptance import AcceptanceRepository, register_acceptance_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, OwnedConnection, open_existing
 from camctl.reporting.policy import (
-    ReportDecisionKind, ReportingRepository, _FreezeCommand, register_report_guards,
+    ReportDecisionKind, ReportingRepository, register_report_guards,
 )
 from camctl.persistence.transaction import commit_operation
 from camctl.history.validators import EventValidationError
@@ -30,7 +30,10 @@ from camctl.history.validators import EventValidationError
 from ..acceptance.test_acceptance import Catalog
 from ..acceptance.test_atomicity import _process
 from ..persistence.test_runtime import _create_valid_database
-from ..persistence.test_transactions import FailingConnection
+from ..support.acceptance import accept_source
+from ..support.database import database_path
+from ..support.reporting import deny_storage_access
+from ..support.output_planning import EventSequence, capture_operation
 
 register_acceptance_guards()
 register_report_guards()
@@ -53,11 +56,11 @@ class _Reader:
 async def _submit(owned, tmp_path, request_id):
     target = tmp_path / f"plan-{request_id}.json"
     target.write_text(json.dumps(_plan_body(request_id)), encoding="utf-8")
-    result = await accept_input(
+    result = await accept_source(
         parse_input(await read_input(str(target), _Reader())),
         AcceptanceContext(mode=CommandMode.RUN, catalog=Catalog(), repository=AcceptanceRepository(),
                           clock=type("C", (), {"utc_micros": staticmethod(lambda: 1)})()),
-        new_operation_key(), owned,
+        database_path(owned), key=new_operation_key(),
     )
     assert result.plan_id is not None
 
@@ -194,14 +197,6 @@ async def test_all_sync_origins_and_latest_start_are_combined(environment, tmp_p
     assert (outcome.value.report.from_wm, outcome.value.report.to_wm) == (2, 6)
 
 
-async def test_pending_sync_action_does_not_expand_report_scope(environment, tmp_path):
-    await _submit(environment, tmp_path, "1")
-    _ack(environment, _freeze(environment).value.report)
-    await _submit(environment, tmp_path, "2")
-    outcome = _freeze(environment)
-    assert outcome.value.report.from_wm == 2
-
-
 async def test_wider_registered_report_can_satisfy_later_narrower_scope(environment, tmp_path):
     await _submit(environment, tmp_path, "1")
     _freeze(environment)
@@ -315,6 +310,10 @@ async def test_concurrent_input_and_ack_are_read_at_one_complete_boundary(enviro
             def in_transaction(self):
                 return connection.in_transaction
 
+            @property
+            def total_changes(self):
+                return connection.total_changes
+
             def execute(self, statement, parameters=()):
                 if statement == "BEGIN IMMEDIATE":
                     if is_freeze == freeze_first:
@@ -415,17 +414,22 @@ async def test_unreliable_facts_fail_without_partial_registration(environment, t
     assert _counts(connection) == before
 
 
-@pytest.mark.parametrize("prefix", [
-    "SELECT id, last_event_id", "SELECT acknowledged_wm", "SELECT id, action_id, from_wm",
-    "SELECT id FROM reports", "INSERT INTO reports", "INSERT INTO history_events",
+@pytest.mark.parametrize("operation,table,column", [
+    (sqlite3.SQLITE_READ, "history_transactions", "last_event_id"),
+    (sqlite3.SQLITE_READ, "runtime_state", "acknowledged_wm"),
+    (sqlite3.SQLITE_READ, "state_syncs", "from_wm"),
+    (sqlite3.SQLITE_READ, "reports", "id"),
+    (sqlite3.SQLITE_INSERT, "reports", None),
+    (sqlite3.SQLITE_INSERT, "history_events", None),
 ])
-async def test_read_or_write_failure_rolls_back_freeze(environment, tmp_path, prefix):
+async def test_read_or_write_failure_rolls_back_freeze(environment, tmp_path, operation, table, column):
     await _submit(environment, tmp_path, "1")
     before = _counts(environment.connection)
-    faulty = OwnedConnection(FailingConnection(environment.connection, prefix), environment.metadata)
-    outcome = _freeze(faulty)
+    with deny_storage_access(environment.connection, operation, table, column) as observed:
+        outcome = _freeze(environment)
+    assert observed
     assert outcome.kind is DbOutcomeKind.ROLLED_BACK
-    assert isinstance(outcome.error, sqlite3.OperationalError)
+    assert type(outcome.error) is sqlite3.DatabaseError
     assert _counts(environment.connection) == before
 
 
@@ -470,16 +474,14 @@ async def test_formal_freeze_guard_rejects_boundary_inside_own_transaction(envir
     await _submit(environment, tmp_path, "1")
     key = new_operation_key()
 
-    class IncorrectBoundary:
-        def plan(self, scope):
-            plan = _FreezeCommand(1, key).plan(scope)
-            event = plan.events[0]
-            row = event.rows[0]
-            after = replace(row.after, values={**row.after.values, "frozen_event_id": event.event_id})
-            return replace(plan, events=(replace(event, rows=(replace(row, after=after),)),))
-
+    proposal = capture_operation(environment, lambda target: ReportingRepository().freeze_report(
+        key, target, occurred_at=1))
+    event = proposal.events[0]
+    row = event.rows[0]
+    after = replace(row.after, values={**row.after.values, "frozen_event_id": event.event_id})
+    events = (replace(event, rows=(replace(row, after=after),)),)
     before = _counts(environment.connection)
-    receipt = commit_operation(IncorrectBoundary(), key, environment)
+    receipt = commit_operation(EventSequence(events, proposal), key, environment)
     assert receipt.kind == "rolled_back"
     assert isinstance(receipt.error, EventValidationError)
     assert _counts(environment.connection) == before

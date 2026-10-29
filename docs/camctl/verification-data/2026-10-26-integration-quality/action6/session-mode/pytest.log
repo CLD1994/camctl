@@ -1,0 +1,23 @@
+内存预算启动收据：/tmp/camctl-quality-evidence/action6/session-mode/budget/launcher.json
+============================= test session starts ==============================
+platform linux -- Python 3.11.17, pytest-9.1.1, pluggy-1.6.0 -- /workspaces/camctl/apps/camctl/.venv311/bin/python
+cachedir: .pytest_cache
+rootdir: /
+plugins: mock-3.16.0, asyncio-1.4.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 1 item
+
+tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_video_modes_freeze_for_both_cameras_and_both_video_actions PASSED [100%]
+
+=============================== warnings summary ===============================
+../../workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/cacheprovider.py:469
+  /workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/cacheprovider.py:469: PytestCacheWarning: could not create cache path /.pytest_cache/v/cache/nodeids: [Errno 13] Permission denied: '/pytest-cache-files-a1_5qc6f'
+    config.cache.set("cache/nodeids", sorted(self.cached_nodeids))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: /tmp/camctl-quality-evidence/action6/session-mode/result.xml -
+============================= slowest 10 durations =============================
+8.51s call     tmp/camctl-quality-action6-20261026/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_video_modes_freeze_for_both_cameras_and_both_video_actions
+1.09s setup    tmp/camctl-quality-action6-20261026/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_video_modes_freeze_for_both_cameras_and_both_video_actions
+0.01s teardown tmp/camctl-quality-action6-20261026/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_video_modes_freeze_for_both_cameras_and_both_video_actions
+======================== 1 passed, 1 warning in 10.09s =========================

@@ -1,0 +1,24 @@
+{
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "tests/integration/test_memory_budget_launcher.py::test_real_cgroup_finishes_the_whole_process_tree",
+    "tests/integration/test_memory_budget_launcher.py::test_real_cgroup_detects_aggregate_child_oom_when_parent_returns_zero",
+    "-q",
+    "--tb=short",
+    "--junitxml=/tmp/camctl-memory-final-validation-20261025/budget-root-environment.xml"
+  ],
+  "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+  "environment": {
+    "PYTHONPATH": "/opt/devcontainer/.codex/worktrees/de38/camctl/apps/camctl/src:/opt/devcontainer/.codex/worktrees/de38/camctl/apps/camctl/tests:/opt/devcontainer/.codex/worktrees/de38/camctl/scripts",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-memory-final-validation-20261025/pycache",
+    "TMPDIR": "/tmp/camctl-memory-final-validation-20261025/tmp"
+  },
+  "started_utc": "2026-10-25T16:21:44.566760+00:00",
+  "finished_utc": "2026-10-25T16:21:45.073787+00:00",
+  "pid": 1423099,
+  "exit_code": 1,
+  "wall_seconds": 0.5070511119993171,
+  "source_head": "e505aa037e077c00ace07346bfb623560dc20549"
+}

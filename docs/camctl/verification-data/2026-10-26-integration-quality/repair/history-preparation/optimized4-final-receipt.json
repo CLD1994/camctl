@@ -1,0 +1,20 @@
+{
+  "label": "optimized4-final",
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "apps/camctl/tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window",
+    "-q",
+    "-s",
+    "--durations=1",
+    "-p",
+    "history_preparation_timing",
+    "--junitxml=/tmp/camctl-quality-repair-evidence/history-preparation/optimized4-final.xml"
+  ],
+  "worktree": "/tmp/camctl-quality-repair-lidlmje7/history-preparation",
+  "started_at": "2026-10-25T20:21:30.909234+00:00",
+  "exit_code": 0,
+  "wall_seconds": 76.98267768201185,
+  "ended_at": "2026-10-25T20:22:56.924345+00:00"
+}

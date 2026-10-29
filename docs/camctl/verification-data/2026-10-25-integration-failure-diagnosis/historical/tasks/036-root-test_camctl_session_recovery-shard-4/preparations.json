@@ -1,0 +1,15 @@
+[
+  {
+    "label": "package-resources",
+    "command": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "/tmp/camctl-itopt-final-20261025/tasks/036-root-test_camctl_session_recovery-shard-4/source/apps/camctl/scripts/sync_resources.py"
+    ],
+    "cwd": "/tmp/camctl-itopt-final-20261025/tasks/036-root-test_camctl_session_recovery-shard-4/source",
+    "started_utc": "2026-10-25T00:05:24.424238+00:00",
+    "pid": 481976,
+    "exit_code": 0,
+    "finished_utc": "2026-10-25T00:05:24.469154+00:00",
+    "wall_seconds": 0.04492023400234757
+  }
+]

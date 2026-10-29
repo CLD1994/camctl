@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "/tmp/camctl-quality-repair-evidence/cleanup-followup/helper-boundary/check_helper.py", line 41, in <module>
+    RETAINED = int(enum_for('intermediate_files.retention_state').RETAINED)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py", line 786, in __getattr__
+    raise AttributeError(name) from None
+AttributeError: RETAINED. Did you mean: 'REQUIRED'?

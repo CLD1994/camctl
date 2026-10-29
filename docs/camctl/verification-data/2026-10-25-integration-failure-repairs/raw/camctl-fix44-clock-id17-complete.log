@@ -1,0 +1,9 @@
+证据目录 /tmp/camctl-fix44-clock-id17-complete
+进度 root/test_hasselblad_photo_roundtrip pid=1059969 hasselblad-client-build
+启动 root/test_hasselblad_photo_roundtrip pid=1060235 cwd=/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/source
+进度 root/test_hasselblad_photo_roundtrip pid=1060235 tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]
+进度 root/test_hasselblad_photo_roundtrip pid=1060235 tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]
+进度 root/test_hasselblad_photo_roundtrip pid=1060235 tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]
+进度 root/test_hasselblad_photo_roundtrip pid=1060235 tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]
+结束 root/test_hasselblad_photo_roundtrip status=passed exit=0 seconds=84.846
+汇总 /tmp/camctl-fix44-clock-id17-complete/summary.json exit=0

@@ -1,0 +1,32 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.17, pytest-9.1.1, pluggy-1.6.0 -- /tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python
+cachedir: .pytest_cache
+rootdir: /tmp/camctl-fix44-components-20261025/apps/camctl
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, mock-3.16.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 2 items
+
+apps/camctl/tests/integration/devices/test_adb_camera_registration.py::test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-action6] FAILED [ 50%]
+apps/camctl/tests/integration/devices/test_adb_camera_registration.py::test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-osmo360-ii] FAILED [100%]
+
+=================================== FAILURES ===================================
+_ test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-action6] _
+apps/camctl/tests/integration/devices/test_adb_camera_registration.py:178: in test_real_session_open_resets_settings_but_catalog_reads_do_not
+    _initialize_recovery(SimpleNamespace(work_files=None), _owned(environment))
+apps/camctl/src/camctl/bootstrap/lifecycle.py:622: in _initialize_recovery
+    if owned.metadata.format_version >= 3:
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'NoneType' object has no attribute 'format_version'
+_ test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-osmo360-ii] _
+apps/camctl/tests/integration/devices/test_adb_camera_registration.py:178: in test_real_session_open_resets_settings_but_catalog_reads_do_not
+    _initialize_recovery(SimpleNamespace(work_files=None), _owned(environment))
+apps/camctl/src/camctl/bootstrap/lifecycle.py:622: in _initialize_recovery
+    if owned.metadata.format_version >= 3:
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'NoneType' object has no attribute 'format_version'
+- generated xml file: /tmp/camctl-fix44-components-evidence-20261025/baseline-devices/junit.xml -
+=========================== short test summary info ============================
+FAILED apps/camctl/tests/integration/devices/test_adb_camera_registration.py::test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-action6] - AttributeError: 'NoneType' object has no attribute 'format_version'
+FAILED apps/camctl/tests/integration/devices/test_adb_camera_registration.py::test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-osmo360-ii] - AttributeError: 'NoneType' object has no attribute 'format_version'
+============================== 2 failed in 0.55s ===============================

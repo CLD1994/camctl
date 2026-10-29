@@ -1,0 +1,16 @@
+{
+  "failed": 231,
+  "phase": {
+    "call": 231
+  },
+  "classification": {
+    "old_runtime_owned_argument": 20,
+    "executed_capture_fixture_missing_activity": 4,
+    "unawaited_capture_factory": 182,
+    "obsolete_eligibility_keyword": 8,
+    "obsolete_repository_constructor": 5,
+    "owned_connection_as_database": 12
+  },
+  "distinct_failed_test_functions": 79,
+  "test_functions_identical_across_three_revisions": 79
+}

@@ -1,0 +1,90 @@
+{
+  "source_head": "f143fbbecf68e9333ef6c4db36188b2c6c642630",
+  "test_sha256": "e295d5a5288f9db125ea3504b7ddc2213480255dc32783d163814d393b3be435",
+  "exitcode": 0,
+  "wall_seconds": 73.5693454650027,
+  "finished_at_utc": "2026-10-25T18:52:04.543473+00:00",
+  "pytest_phases": [
+    {
+      "nodeid": "tmp/camctl-quality-osmo-20261026/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[normal-indexes0-2-succeeded]",
+      "when": "setup",
+      "duration": 22.11516970800585,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-osmo-20261026/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[normal-indexes0-2-succeeded]",
+      "when": "call",
+      "duration": 50.17580663500121,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-osmo-20261026/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[normal-indexes0-2-succeeded]",
+      "when": "teardown",
+      "duration": 0.13156516499293502,
+      "outcome": "passed"
+    }
+  ],
+  "worlds": [
+    {
+      "nodeid": "tmp/camctl-quality-osmo-20261026/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[normal-indexes0-2-succeeded]",
+      "scenario": "normal-indexes0-2-succeeded",
+      "counts": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "status": "closed",
+      "phase_timeout_seconds": 120,
+      "startup_seconds": 3.339951306,
+      "operation_count": 16,
+      "operation_seconds": 1.5794165329999998,
+      "operations": {
+        "export": {
+          "count": 7,
+          "elapsed_seconds": 0.8502517570000001
+        },
+        "import": {
+          "count": 4,
+          "elapsed_seconds": 0.279445462
+        },
+        "import-media": {
+          "count": 5,
+          "elapsed_seconds": 0.44971931400000004
+        }
+      },
+      "all_operations_passed": true,
+      "close": {
+        "started_monotonic_ns": 102288204230560,
+        "finished_monotonic_ns": 102288278420844,
+        "elapsed_seconds": 0.074190284,
+        "outcome": "passed"
+      },
+      "cli_group_count": 13,
+      "groups_removed": true,
+      "all_combined_limits_2GiB": true,
+      "max_combined_peak_bytes": 151187456,
+      "oom_or_limit_events": [
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {},
+        {}
+      ]
+    }
+  ],
+  "world_count": 1,
+  "launcher_errors": [],
+  "delegation_removed": true,
+  "remaining_pids": [],
+  "concurrent_load": "Other quality agents may run isolated workspaces concurrently; single diagnostic sample only."
+}

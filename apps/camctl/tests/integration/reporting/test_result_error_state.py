@@ -13,7 +13,7 @@ from camctl.contracts.public_projection import PublicProjectionError
 from camctl.contracts.values import ConsistencyError
 from camctl.persistence.repositories.history import HistoryRepository
 from camctl.reporting import generation, worker
-from camctl.reporting.generation import generate_report_file
+from camctl.reporting.generation import GenerationSpec, generate_report_file
 from camctl.reporting.messages import ErrorKind, JobMessage, ResultFailureMessage, new_job_id
 from camctl.reporting.worker import run_job
 
@@ -22,10 +22,12 @@ from .test_result_error_generation import _exhausted_world, _freeze, _spec
 pytestmark = pytest.mark.asyncio
 
 
-def _incomplete_history_reader(spec, report, action_id, activity_id, expected_error):
+def _incomplete_history_reader(
+        spec, report, action_id, activity_id, expected_error, *, repository=None):
     """只改变同 H 关联行的返回值；分页选择和历史恢复均委托真实仓储。"""
-    actual = HistoryRepository(spec.db_path)
+    actual = HistoryRepository(spec.db_path) if repository is None else repository
     reader = create_autospec(HistoryRepository, instance=True, spec_set=True)
+    reader.report_read_scope.side_effect = actual.report_read_scope
     reader.status_history.side_effect = actual.status_history
     reader.frozen_registration.side_effect = actual.frozen_registration
     reader.open_report_selection.side_effect = actual.open_report_selection
@@ -57,6 +59,30 @@ def _incomplete_history_reader(spec, report, action_id, activity_id, expected_er
 
     reader.open_report_action.side_effect = open_history
     return reader, supplied
+
+
+def _incomplete_history_generator(
+        report, action_id, activity_id, expected_error, *, current_job):
+    """核对任务配置，再在 worker 的真实读取资源上改变原关联行。"""
+    supplied = []
+
+    def generate(spec, *, repository):
+        job = current_job()
+        assert isinstance(repository, HistoryRepository)
+        assert repository.path == Path(job.db_path)
+        assert spec == GenerationSpec(
+            db_path=Path(job.db_path), report_id=job.report_id,
+            from_wm=job.from_wm, to_wm=job.to_wm,
+            frozen_event_id=job.frozen_event_id, staging_path=Path(job.staging_path),
+            entity_batch_size=job.entity_batch_size, event_batch_size=job.event_batch_size)
+        reader, observed = _incomplete_history_reader(
+            spec, report, action_id, activity_id, expected_error, repository=repository)
+        try:
+            return generate_report_file(spec, repository=reader)
+        finally:
+            supplied.extend(observed)
+
+    return generate, supplied
 
 
 def _job(owned, spec):
@@ -127,10 +153,11 @@ async def test_uninterpretable_frozen_error_stops_worker_without_publish(tmp_pat
         spec = _spec(owned, report, "worker-incomplete-error.json")
         activity_id, = owned.connection.execute(
             "SELECT id FROM device_activities WHERE action_id=?", (action_id,)).fetchone()
-        reader, supplied = _incomplete_history_reader(spec, report, action_id, activity_id, error)
-        monkeypatch.setattr(worker, "HistoryRepository", lambda *args, **options: reader)
-        before = _snapshot(owned, report, runtime)
         job = _job(owned, spec)
+        generate, supplied = _incomplete_history_generator(
+            report, action_id, activity_id, error, current_job=lambda: job)
+        monkeypatch.setattr(worker, "generate_report_file", generate)
+        before = _snapshot(owned, report, runtime)
         try:
             result = run_job(job)
             assert isinstance(result, ResultFailureMessage)

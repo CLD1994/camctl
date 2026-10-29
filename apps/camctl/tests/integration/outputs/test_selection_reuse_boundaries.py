@@ -5,7 +5,6 @@ from dataclasses import replace
 from decimal import Decimal
 import json
 import sqlite3
-from unittest.mock import create_autospec
 
 import pytest
 
@@ -24,7 +23,7 @@ from .test_selection_authority import _request, _snapshot, _NOW
 from .test_selection_event_sequence import _scenarios, _Sequence
 from .test_sources import _seed_output
 from .test_read_associations import _command as _read_command
-from ..operations.test_result_reuse import _FaultConnection
+from ..support.output_storage_cases import QueryProbe, WriteFault
 
 
 def test_key_cannot_address_another_existing_selection(selection_database):
@@ -156,8 +155,13 @@ def test_rolled_back_first_fix_can_retry_original_key(selection_database):
     command = outputs.FixSelection(61, _snapshot(owned.connection), _NOW)
     key = new_operation_key()
     before = tuple(owned.connection.iterdump())
-    failed = outputs.OutputsRepository().fix_selection(command, key,
-        replace(owned, connection=_FaultConnection(owned.connection, "INSERT INTO obtain_items")))
+    failed = outputs.OutputsRepository().fix_selection(
+        command,
+        key,
+        replace(
+            owned, connection=WriteFault(owned.connection, "INSERT INTO obtain_items")
+        ),
+    )
     assert failed.kind is DbOutcomeKind.ROLLED_BACK
     assert isinstance(failed.error, sqlite3.OperationalError)
     assert tuple(owned.connection.iterdump()) == before
@@ -198,37 +202,37 @@ def test_original_not_found_does_not_require_or_adopt_later_output(selection_dat
     assert (item.requested_output_id, item.output_id, item.status, item.error_code) == (999, None, 4, 1)
 
 
-class _ReadProbe(_FaultConnection):
+class _ReadProbe(QueryProbe):
     def __init__(self, connection, prefix, fail):
-        super().__init__(connection, "unused")
-        self.prefix, self.fail = prefix, fail
-        self.cursors = []
-        self.error = sqlite3.OperationalError("原选择读取失败")
+        def selected(columns, reads, parameters):
+            if prefix == "selection":
+                return (
+                    "obtain_source_selections",
+                    "id",
+                ) in reads and "status" in columns
+            if prefix == "members":
+                return columns == {"id"} and ("obtain_items", "selection_id") in reads
+            if prefix == "item":
+                return (
+                    "requested_output_id" in columns and ("obtain_items", "id") in reads
+                )
+            return columns == {"1"} and ("outputs", "id") in reads
 
-    def execute(self, sql, parameters=()):
-        match = sql.startswith(self.prefix)
-        if match and self.fail == "execute":
-            raise self.error
-        cursor = self._connection.execute(sql, parameters)
-        if not match:
-            return cursor
-        probe = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)
-        probe.description = cursor.description
-        probe.close.side_effect = cursor.close
-        probe.fetchone.side_effect = self.error if self.fail == "fetch" else cursor.fetchone
-        self.cursors.append(probe)
-        return probe
+        super().__init__(connection, selected, failure=fail)
 
 
-@pytest.mark.parametrize("prefix", ["SELECT * FROM obtain_source_selections", "SELECT id FROM obtain_items WHERE",
-                                    "SELECT * FROM obtain_items", "SELECT 1 FROM outputs"])
+@pytest.mark.parametrize("prefix", ["selection", "members", "item", "exists"])
 @pytest.mark.parametrize("fail", [None, "execute", "fetch"])
-def test_recovery_reads_release_cursors_and_preserve_failure(selection_database, prefix, fail):
+def test_recovery_reads_release_cursors_and_preserve_failure(
+    selection_database, prefix, fail
+):
     owned = selection_database
     command, key = _save(owned)
     probe = _ReadProbe(owned.connection, prefix, fail)
     before = tuple(owned.connection.iterdump())
-    result = outputs.OutputsRepository().fix_selection(command, key, replace(owned, connection=probe))
+    result = outputs.OutputsRepository().fix_selection(
+        command, key, replace(owned, connection=probe)
+    )
     if fail:
         assert result.kind is DbOutcomeKind.ROLLED_BACK
         assert result.error is probe.error

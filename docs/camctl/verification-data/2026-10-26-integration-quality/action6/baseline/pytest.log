@@ -1,0 +1,91 @@
+内存预算启动收据：/tmp/camctl-quality-evidence/action6/baseline/budget/launcher.json
+============================= test session starts ==============================
+platform linux -- Python 3.11.17, pytest-9.1.1, pluggy-1.6.0 -- /workspaces/camctl/apps/camctl/.venv311/bin/python
+cachedir: .pytest_cache
+rootdir: /
+plugins: mock-3.16.0, asyncio-1.4.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 1 item
+
+tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters FAILED [100%]
+
+=================================== FAILURES ===================================
+_ test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters _
+
+tmp_path = PosixPath('/tmp/camctl-quality-evidence/action6/baseline/data/test_installed_action6_native_0')
+host_demo = '/tmp/camctl-host-build-bc835ec838a04337af08a8566884aaf9/host-demo'
+action6_package = _Package(python=PosixPath('/tmp/camctl-quality-evidence/action6/baseline/data/action6-builtin-package0/venv/bin/python...ery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters (setup)'})
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fb682aa5850>
+
+    late_report_receipt = _assert_ack(demo, scenario, final_report)
+    evidence = {
+        "scenario": f"ordinary-{case}-recovery",
+        "boundary": boundary,
+        "source_action_id": str(source_id),
+        "coverage": coverage,
+        "source_report_json": str(source_report_path),
+        "final_report_json": (
+            str(late_report_path) if late_id is not None else str(source_report_path)
+        ),
+        "scope_output_ids": expected_scope,
+        "prepublication_waiter_action_ids": list(map(str, waiter_ids)),
+        "bound_delivery_copies": len(bound_copies),
+        "late_obtain_action_id": None if late_id is None else str(late_id),
+        "post_h_waiter_was_in_commit_snapshot": (
+            False if post_h_waiter_id is not None else None
+        ),
+        "resume_copy": resume_evidence,
+        "delivery_evidence": delivery_evidence + post_h_evidence + late_evidence,
+        "post_h_waiter_action_id": (
+            None if post_h_waiter_id is None else str(post_h_waiter_id)
+        ),
+>       "post_h_dependency": post_h_dependency,
+        "post_h_delivery_evidence": post_h_evidence,
+        "ffprobe": probes,
+        "ack": late_report_receipt,
+    }
+
+/tmp/camctl-quality-action6-20261026/tests/integration/test_action6_segmented_recovery_roundtrip.py:1048: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+predicate = <function test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters.<locals>.<lambda> at 0x7fb682f865c0>
+timeout_s = 240, message = 'Action6 native 必需照片缺失后未按真实处理器完成前缀检查和独立取回'
+failure = None
+
+    def wait_for(predicate, timeout_s: float, message: str, *, failure=None):
+        """轮询成功条件；调用方可提供本次等待已无法成功的诊断。"""
+        deadline = time.monotonic() + timeout_s
+        next_failure_check = 0.0
+        while True:
+            value = predicate()
+            if value:
+                return value
+            now = time.monotonic()
+            # 负向事实会持续保留，限制日志和状态库诊断的读取频率。
+            if failure is not None and now >= next_failure_check:
+                if reason := failure():
+                    raise AssertionError(f"{message}: {reason}")
+                next_failure_check = now + 0.05
+>           assert time.monotonic() < deadline, f"等待超时: {message}"
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           AssertionError: 等待超时: Action6 native 必需照片缺失后未按真实处理器完成前缀检查和独立取回
+
+/tmp/camctl-quality-action6-20261026/tests/integration/_wsl_host_demo.py:98: AssertionError
+=============================== warnings summary ===============================
+../../workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/cacheprovider.py:469
+  /workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/cacheprovider.py:469: PytestCacheWarning: could not create cache path /.pytest_cache/v/cache/nodeids: [Errno 13] Permission denied: '/pytest-cache-files-py3blvv6'
+    config.cache.set("cache/nodeids", sorted(self.cached_nodeids))
+
+../../workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/cacheprovider.py:423
+  /workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/cacheprovider.py:423: PytestCacheWarning: could not create cache path /.pytest_cache/v/cache/lastfailed: [Errno 13] Permission denied: '/pytest-cache-files-tz075ul9'
+    config.cache.set("cache/lastfailed", self.lastfailed)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: /tmp/camctl-quality-evidence/action6/baseline/result.xml -
+============================= slowest 10 durations =============================
+265.40s call     tmp/camctl-quality-action6-20261026/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters
+17.97s setup    tmp/camctl-quality-action6-20261026/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters
+0.03s teardown tmp/camctl-quality-action6-20261026/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters
+=========================== short test summary info ============================
+FAILED tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters - AssertionError: 等待超时: Action6 native 必需照片缺失后未按真实处理器完成前缀检查和独立取回
+================== 1 failed, 2 warnings in 283.96s (0:04:43) ===================

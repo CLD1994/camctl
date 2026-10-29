@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import signal
 import time
 
 
@@ -93,6 +94,11 @@ def file_call(script, *, root, calls_path):
               "modeled_unlink_count": 0, "modeled_observation_count": 0}
     _append(calls_path, record)
     if fault == "before":
+        if manifest.get("hold_cancel", False):
+            def held_signal(signum, _frame):
+                _append(calls_path, {**record, "stage": "signal_held", "signal": signum})
+            for signum in (signal.SIGTERM, signal.SIGINT):
+                signal.signal(signum, held_signal)
         Path(manifest["marker"]).write_text(json.dumps({**record, **_process()}))
         while True:
             time.sleep(0.05)

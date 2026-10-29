@@ -1,0 +1,401 @@
+[
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/007-root-test_camctl_motor_recovery/source/tests/integration/test_camctl_motor_recovery.py::test_restart_never_repeats_saved_intent[before_intent-0-3]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.43522463100089226
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 15.621306339991861
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.01649387199722696
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 16.07302484298998
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/007-root-test_camctl_motor_recovery/source/tests/integration/test_camctl_motor_recovery.py::test_restart_never_repeats_saved_intent[after_intent-0-4]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.3720041860069614
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 13.419416959004593
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.03177719899395015
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 13.823198344005505
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/007-root-test_camctl_motor_recovery/source/tests/integration/test_camctl_motor_recovery.py::test_restart_never_repeats_saved_intent[before_write-0-4]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.32672158398781903
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 14.734754356002668
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.014513707006699406
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 15.075989646997186
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/007-root-test_camctl_motor_recovery/source/tests/integration/test_camctl_motor_recovery.py::test_restart_never_repeats_saved_intent[after_write-1-4]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.4232384559873026
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 15.054416432001744
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.027580894995480776
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 15.505235782984528
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/007-root-test_camctl_motor_recovery/source/tests/integration/test_camctl_motor_recovery.py::test_restart_never_repeats_saved_intent[before_result-1-4]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.5120545250101713
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 16.865065705002053
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.011624343998846598
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 17.38874457401107
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/007-root-test_camctl_motor_recovery/source/tests/integration/test_camctl_motor_recovery.py::test_restart_never_repeats_saved_intent[after_result-1-3]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.4719415330037009
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 14.378914489003364
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.010999026999343187
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 14.861855049006408
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/007-root-test_camctl_motor_recovery/source/tests/integration/test_camctl_motor_recovery.py::test_restart_never_repeats_saved_intent[intent_commit_unknown-0-4]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.3324420999997528
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 14.731811115998426
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.018954489001771435
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 15.08320770499995
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/007-root-test_camctl_motor_recovery/source/tests/integration/test_camctl_motor_recovery.py::test_restart_never_repeats_saved_intent[result_commit_unknown-1-3]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.3927957699925173
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 15.066656114999205
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.011812745011411607
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 15.471264630003134
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/007-root-test_camctl_motor_recovery/source/tests/integration/test_camctl_motor_recovery.py::test_restart_never_repeats_saved_intent[observe_commit_unknown-1-3]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.45232943700102624
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 15.685277059004875
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.01796333999664057
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 16.15556983600254
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/007-root-test_camctl_motor_recovery/source/tests/integration/test_camctl_motor_recovery.py::test_restart_never_repeats_saved_intent[intent_absent_unknown-0-3]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.39044132200069726
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 14.3553126600018
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.023460235999664292
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 14.769214218002162
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/007-root-test_camctl_motor_recovery/source/tests/integration/test_camctl_motor_recovery.py::test_restart_never_repeats_saved_intent[result_absent_unknown-1-4]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.3267423119978048
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 13.609367743993062
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.02070025099965278
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 13.95681030699052
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/007-root-test_camctl_motor_recovery/source/tests/integration/test_camctl_motor_recovery.py::test_channel_failure_is_final_and_not_retried[absent-27-not_connected]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.49828108499059454
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 7.687173411992262
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00763761400594376
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 8.1930921109888
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/007-root-test_camctl_motor_recovery/source/tests/integration/test_camctl_motor_recovery.py::test_channel_failure_is_final_and_not_retried[full-28-would_block]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.38010138599202037
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 7.983166702993913
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.009132776001933962
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 8.372400864987867
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/007-root-test_camctl_motor_recovery/source/tests/integration/test_camctl_motor_recovery.py::test_channel_failure_is_final_and_not_retried[broken-28-broken_pipe]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.40687785799673293
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 7.133934369994677
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.009445842995774001
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 7.550258070987184
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/007-root-test_camctl_motor_recovery/source/tests/integration/test_camctl_motor_recovery.py::test_missed_window_never_creates_send_intent",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.2976970790041378
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 5.603338093991624
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.005112878003274091
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 5.906148050999036
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/007-root-test_camctl_motor_recovery/source/tests/integration/test_camctl_motor_recovery.py::test_all_cancel_targets_stop_future_motor_without_intent[target0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.37748083600308746
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 7.171190467997803
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.008096383011434227
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 7.556767687012325
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/007-root-test_camctl_motor_recovery/source/tests/integration/test_camctl_motor_recovery.py::test_all_cancel_targets_stop_future_motor_without_intent[target1]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.32943949500622693
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 7.1751616850087885
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.007712820995948277
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 7.512314001010964
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/007-root-test_camctl_motor_recovery/source/tests/integration/test_camctl_motor_recovery.py::test_all_cancel_targets_stop_future_motor_without_intent[target2]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.3577998109976761
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 6.610197517002234
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.008239889997639693
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 6.97623721799755
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/007-root-test_camctl_motor_recovery/source/tests/integration/test_camctl_motor_recovery.py::test_all_cancel_targets_stop_future_motor_without_intent[target3]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.3120031750004273
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 6.434638221995556
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.009919814008753747
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 6.756561211004737
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/007-root-test_camctl_motor_recovery/source/tests/integration/test_camctl_motor_recovery.py::test_cancel_cannot_retract_unknown_intent",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.40545112399559
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 7.540014586003963
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.022954986998229288
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 7.968420696997782
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/007-root-test_camctl_motor_recovery/source/tests/integration/test_camctl_motor_recovery.py::test_admission_failure_report_preserves_original_parameters",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.2816522180073662
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 4.132168321011704
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.004733228008262813
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 4.418553767027333
+  }
+]

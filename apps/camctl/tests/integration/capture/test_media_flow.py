@@ -27,6 +27,7 @@ from camctl.host_files.models import BoundDirectories
 from camctl.host_files.tasks import FileTaskId, FileTaskResult
 from camctl.outputs.copy import SourceDigest, SourceDigestReader
 
+from ..support.capture import capture_database
 from .test_input_copy import _CONTENT, pipeline  # noqa: F401  环境夹具
 
 pytestmark = pytest.mark.asyncio
@@ -96,12 +97,13 @@ class _Digest:
         return SourceDigest(digest=self._digest, error=None)
 
 
-def _flow(pipeline, driver, tools) -> MediaFlow:
+async def _flow(pipeline, driver, tools) -> MediaFlow:
     owned, roots = pipeline[0], pipeline[1]
+    database = await capture_database(owned)
     return MediaFlow(
-        owned=owned,
+        database=database,
         roots=roots,
-        sessions=DriverReadSessions(owned, driver, ticket=None),
+        sessions=DriverReadSessions(await capture_database(owned), driver, ticket=None),
         tools=tools,
         policy=MediaPolicy(repair_margin_s=Decimal("2")),
         occurred_at=lambda: 1_750_000_100_000_000,
@@ -140,7 +142,7 @@ class TestDriverReadSessions:
             AttemptConfig(3, Decimal("10"), Decimal("0")), now, copy_round=1),
             new_operation_key(), owned)
         assert begun.kind is DbOutcomeKind.COMPLETED, begun.error
-        sessions = DriverReadSessions(owned, driver, ticket=begun.value.ticket)
+        sessions = DriverReadSessions(await capture_database(owned), driver, ticket=begun.value.ticket)
         session = await sessions.open_session(11, 4)
         assert session.position() == 4
         source, offset = driver.opens[0]
@@ -154,7 +156,7 @@ class TestDriverReadSessions:
             "UPDATE device_files SET completion_state = 1, size_bytes = NULL"
             " WHERE id = 11")
         owned.connection.commit()
-        sessions = DriverReadSessions(owned, ReadDriverDouble(_CONTENT), None)
+        sessions = DriverReadSessions(await capture_database(owned), ReadDriverDouble(_CONTENT), None)
         with pytest.raises(ConsistencyError):
             await sessions.open_session(11, 0)
 
@@ -165,7 +167,7 @@ class TestRunRecordingMedia:
         driver = ReadDriverDouble(_CONTENT)
         tools = ProbeTools(MediaProbe(duration_s=Decimal("61"), error=None))
         step = await run_recording_media(
-            _flow(pipeline, driver, tools), 1, 1, 11)
+            (await _flow(pipeline, driver, tools)), 1, 1, 11)
         assert step.phase is CheckExecutionPhase.CHECK_COMPLETED, step
         assert step.repair_decision is not None
         row = owned.connection.execute(
@@ -184,10 +186,10 @@ class TestRunRecordingMedia:
         owned = pipeline[0]
         driver = ReadDriverDouble(_CONTENT)
         tools = ProbeTools(MediaProbe(duration_s=Decimal("61"), error=None))
-        flow = _flow(pipeline, driver, tools)
+        flow = (await _flow(pipeline, driver, tools))
         await run_recording_media(flow, 1, 1, 11)
         step = await run_recording_media(
-            _flow(pipeline, ReadDriverDouble(_CONTENT), tools), 1, 1, 11)
+            (await _flow(pipeline, ReadDriverDouble(_CONTENT), tools)), 1, 1, 11)
         assert step.phase in (
             CheckExecutionPhase.ALREADY_FINISHED,
             CheckExecutionPhase.FINISHED_DECISION_SAVED), step
@@ -200,7 +202,7 @@ class TestRunRecordingMedia:
         owned = pipeline[0]
         tools = ProbeTools(MediaProbe(duration_s=Decimal("200"), error=None))
         step = await run_recording_media(
-            _flow(pipeline, ReadDriverDouble(_CONTENT), tools), 1, 1, 11)
+            (await _flow(pipeline, ReadDriverDouble(_CONTENT), tools)), 1, 1, 11)
         # 多录 200s 超过目标加余量：修复决定保存并登记输出后进入执行，
         # 工具未运行保留运行阶段，下一次推进续跑。
         from camctl.capture.media import RepairExecutionPhase
@@ -273,9 +275,9 @@ class TestCopyRetryInterval:
         tools = ProbeTools(MediaProbe(duration_s=Decimal("61"), error=None))
         clock = _Clock()
         flow = MediaFlow(
-            owned=owned,
+            database=await capture_database(owned),
             roots=roots,
-            sessions=DriverReadSessions(owned, driver, ticket=None),
+            sessions=DriverReadSessions(await capture_database(owned), driver, ticket=None),
             tools=tools,
             policy=MediaPolicy(repair_margin_s=Decimal("2")),
             occurred_at=lambda: 1_750_000_100_000_000,

@@ -1,0 +1,74 @@
+{
+  "scope": "S4/S9: ID30与ID31媒体测试、额外窗口/派发分区验证",
+  "current_commit": "5b690b859e32f6d513bf4dec72f9300b254adba7",
+  "production_changed": false,
+  "receipts": [
+    {
+      "directory": "/tmp/camctl-fix44-media-before-20261025",
+      "exit_code": 1,
+      "wall_seconds": 44.16522162599722,
+      "tasks": [
+        {
+          "id": "root/test_camctl_media_roundtrip",
+          "exit_code": 1,
+          "wall_seconds": 41.60717873800604,
+          "status": "failed"
+        }
+      ]
+    },
+    {
+      "directory": "/tmp/camctl-fix44-media-after-20261025",
+      "exit_code": 0,
+      "wall_seconds": 84.04230288900726,
+      "tasks": [
+        {
+          "id": "root/test_camctl_media_roundtrip",
+          "exit_code": 0,
+          "wall_seconds": 79.26307620899752,
+          "status": "passed"
+        }
+      ]
+    },
+    {
+      "directory": "/tmp/camctl-fix44-media-final-20261025",
+      "exit_code": 1,
+      "wall_seconds": 67.22521273700113,
+      "tasks": [
+        {
+          "id": "camctl/bootstrap",
+          "exit_code": 0,
+          "wall_seconds": 31.08211361299618,
+          "status": "passed"
+        },
+        {
+          "id": "root/test_camctl_media_roundtrip",
+          "exit_code": 0,
+          "wall_seconds": 61.807972901005996,
+          "status": "passed"
+        },
+        {
+          "id": "camctl/scheduling",
+          "exit_code": 1,
+          "wall_seconds": 8.246652357993298,
+          "status": "failed"
+        }
+      ]
+    },
+    {
+      "directory": "/tmp/camctl-fix44-window-after-20261025",
+      "exit_code": 0,
+      "wall_seconds": 9.660167592999642,
+      "tasks": [
+        {
+          "id": "camctl/scheduling",
+          "exit_code": 0,
+          "wall_seconds": 8.23485481699754,
+          "status": "passed"
+        }
+      ]
+    }
+  ],
+  "historical_id30_exact_cause_resolved": false,
+  "historical_limit": "原异常链未记录，现存资料无法唯一恢复底层异常；当前完整媒体用例及派发前窗口结束分区通过，不能倒推原异常已查明。",
+  "future_observation": "媒体启动等候在子进程提前退出时保存stdout/stderr及动作状态；启用既有dispatch异常链记录开关。"
+}

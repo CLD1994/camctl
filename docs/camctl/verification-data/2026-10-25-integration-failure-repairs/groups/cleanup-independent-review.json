@@ -1,0 +1,445 @@
+{
+  "date": "2026-10-25T08:55:37.990275+00:00",
+  "reviewer": "/root/fix44_process",
+  "verdict": "no_blocking_findings_in_scoped_final_diff",
+  "summary": "已独立检视最终源码与测试差异、真实日志及原库只读探针。S7 局部修复符合已确认的生命周期、H 绑定、逐副本消费者和每文件一次规则；本结论不替代 S7/S8 集成后的安装版联合验收。",
+  "baseline_commit": "5d20849e53fbfb045d25a2799e268827967196b2",
+  "source_root": "/tmp/camctl-fix44-cleanup-20261025",
+  "branch": "fix/fail44-cleanup-20261025",
+  "reviewed_commit": "99d8c640c66cab12a7ed9d0cf73d00fa7398f89e",
+  "s7_parent_commit": "b166f136363cf6c33391d2b139080435ea3bd730",
+  "working_tree_clean": true,
+  "reviewed_files": [
+    "apps/camctl/src/camctl/bootstrap/work_file_assembly.py",
+    "apps/camctl/src/camctl/outputs/segment_copy_reuse.py",
+    "apps/camctl/src/camctl/persistence/repositories/outputs.py",
+    "apps/camctl/src/camctl/persistence/repositories/segment_selections.py",
+    "apps/camctl/tests/integration/bootstrap/test_segment_input_cleanup.py"
+  ],
+  "source_sha256": {
+    "apps/camctl/src/camctl/bootstrap/work_file_assembly.py": "dc73e05873cc699411749124123a4a54567805c9fdb4deb5fc209e6a4394f2a1",
+    "apps/camctl/src/camctl/outputs/segment_copy_reuse.py": "62412965771d6a0f8d0128f024adc77fbb6264f62127847fcbccbd803fa54650",
+    "apps/camctl/src/camctl/persistence/repositories/outputs.py": "b4b08c1a14e55158096ffe3e4a439ca4fc875fd87280083a1ddf71bc0e1fd456",
+    "apps/camctl/src/camctl/persistence/repositories/segment_selections.py": "85d0c7e82d2984ec7a153f77e73c082d0153946830aaba781a7472ec770a5faf",
+    "apps/camctl/tests/integration/bootstrap/test_segment_input_cleanup.py": "904eb2eac5e5c3b022ceb27a0207834f0421848f26823b1903d3ff5a9170c0c3"
+  },
+  "producer_delivery_file_sha256_and_git_blob_independently_matched": true,
+  "producer_evidence_sha256": "5f23cf561c7ce35be072862a82ce409393f3d635ac6822b9ad90974ef782400a",
+  "prerequisite_commits": [
+    {
+      "local": "2a8d9ba1",
+      "root_original": "db87d1e6",
+      "purpose": "测试连接包装器透传 SQLite total_changes"
+    },
+    {
+      "local": "55f580eb",
+      "root_original": "c5043c1",
+      "purpose": "ResultsDouble 接受 reading_context"
+    },
+    {
+      "local": "b166f136",
+      "root_original": "ec25a66",
+      "purpose": "OSMO 目录与元数据测试协议前置"
+    }
+  ],
+  "scope_note": "相对基线读取了全部四个生产文件差异；S7 提交只修改四个生产文件并新增一份回归文件。三个测试前置已由 root 持有，独立评审不把它们归为 S7 生产改动。",
+  "authorities": [
+    "docs/superpowers/plans/2026-10-25-integration-failure-repairs.md:S7 状态矩阵及联合验收",
+    "docs/camctl/integration-test-failures-2026-10-25.md:ID19",
+    "docs/camctl/verification-data/2026-10-25-integration-failure-diagnosis/contracts/cleanup-audit.json",
+    "docs/superpowers/specs/2026-10-23-video-result-modes-and-segmentation-design.md:172-193",
+    "docs/architecture/file-handoff.md:169-202",
+    "docs/camctl/database/segments.md"
+  ],
+  "findings": [],
+  "resolved_findings": [
+    {
+      "id": "S7-CANCEL-REUSED-SOURCE",
+      "classification": "原有潜伏缺陷，属于 S7 已授权消费者取消分区；已修复",
+      "trigger": "H 绑定取回已建立正式交付，真实 READ 已成功且交付 PREPARED；正式 output 使用设备原片，交付 copy 实际读取合法检查中间副本；随后取消。",
+      "root_cause": "原取消 _facts 直接比较 output 设备源与 copy 当前源字段，拒绝合法本地复用源，导致最后消费者无法可靠进入取消终态并释放来源责任。",
+      "contract": "取消沿已有真实交付、原读取与 H 授权关系收场；清理后仍须支持原键和新键的终态核实，不能要求检查副本仍处于可复用保留状态。",
+      "fix_verified": "新增稳定 read_bound_check_copy_identity，核对已发布 RESULT、H 时 RUNNING/PENDING、原 selection/dependency、inspection/member/set、实际 file_copies 设备源、目标文件、完整与校验事实；取消沿该稳定证明核对本地源。普通 read_bound_check_copy 仍要求 copy_is_reusable。fallback 同时核对实际 check_copy 设备源。",
+      "regression_evidence": [
+        "/tmp/camctl-fix44-cleanup-cancel-gap.log:旧比较真实 rolled_back",
+        "/tmp/camctl-fix44-cleanup-cancel-gap-green.log:同反例 completed",
+        "test_last_bound_waiter_releases_new_source_input_in_original_run[canceled_prepared]:清理后原键及新键重入，数据库不变",
+        "test_cancel_reused_copy_rejects_damaged_original_associations[copy/inspection/source/file_owner/horizon]:全部回滚且数据库不变"
+      ],
+      "same_class_audit": "实际检视普通 FileCandidate 准备、既有准备核实、_ReadSourceFallbackCommand 和取消 _facts；普通准备保留完整来源关系、源/目标登记及动态 pin 门槛，未发现同类未闭合入口。"
+    }
+  ],
+  "invariants": [
+    {
+      "name": "本 run 及时首次发现，相关取回与来源关联闭合",
+      "result": "verified",
+      "source": "work_file_assembly.py:210-244；action 终态新增 _add_source_files，沿真实 dependency/selection/source 发布 H 重新发现源拥有文件。",
+      "dynamic": "最终新增四个终态分区均先消费来源 H，再使最后消费者结束；同一 WorkFileRuntime 完成物理删除，无额外 run；原库只读探针在 H=174 后发现 [1,2,3]。"
+    },
+    {
+      "name": "H 不从当前等待者重新计算，后到请求不延长或制造首次责任",
+      "result": "verified",
+      "source": "selection_is_bound_at_publication 恢复已发布完整事务 H 的 action/selection 状态；_add_source_files 仅接受原 H 绑定。",
+      "dynamic": "最终新测试保留后到 RUNNING 取回仍删除原检查副本；late_waiter_terminal 测试确认后到终态不能把旧源重新排入首次责任。既有 test_segment_copy_reuse 的 default/preview H 边界验收在 outputs 范围通过。"
+    },
+    {
+      "name": "逐副本核对实际消费者，无消费者、部分或未确认副本及时清理",
+      "result": "verified",
+      "source": "all_bound_waiters_terminal(copy=...) 关联本原片 output，selection_uses_output 按 FIXED 条目或不可变原请求核对；默认/预览复用同一 _scope_item 规则。",
+      "dynamic": "最终测试覆盖已完成但 preview 不选原片、真实部分读取副本、三个输入中末份 UNCONFIRMED 且无消费者；其他相关等待者尚运行时只删除无消费者副本。"
+    },
+    {
+      "name": "真实读写和工具操作收场前保护源、目标文件",
+      "result": "verified",
+      "source": "_load_work_file_facts 保留 target/source_intermediate 关联的活跃 operation_attempts 检查；WorkFileRuntime 与 clean_one_work_file 保留共享 FileTaskExecutor.unfinished_files。",
+      "dynamic": "最终 new_input_waits_for_actual_source_read 使用真实文件和共享执行器门闩，实际读取收场前文件存在且未 processed，收场后删除；outputs 关联范围的 live_media_file_task 与 canceled cleanup actual-unlink 验收通过。"
+    },
+    {
+      "name": "每稳定文件身份每 run 一次实际尝试，首次责任与历史预算分开",
+      "result": "verified",
+      "source": "新增发现只加入 _first_files；processed、pending_results、历史 CleanupScan 未重置，仍由已有 clean_one_work_file 统一防重。",
+      "dynamic": "最终新测试二次 flow 后数据库不变；查询/删除失败各只实际观察一次、删除至多一次；启动 ceiling=0 与剩余额度1始终保持。既有固定历史范围、跨轮预算和首次/历史重复身份验收通过。"
+    },
+    {
+      "name": "查询/删除失败留责；数据库错误保留原结果并进入会话错误路径",
+      "result": "verified",
+      "source": "查询/删除 OSError 原路径保存 FAILED，不改变 action 终态；_require_completed 抛 WorkFileCleanupError，WorkFileRuntime._raise_task_failure/settle 保留 StateDbFailure，新增发现未吞异常。",
+      "dynamic": "最终 query/delete 分区保留文件与 RELEASABLE/FAILED、所有 action 状态错误字段不变；outputs 范围 test_reopen_preserves_actual_cleanup_result_and_original_key 的 projection/commit_before/commit_after × 删除成功失败 × 历史首次共12分区通过，实际查询/删除不重做，复用完整原申请与 key。",
+      "limit": "未新增完整会话层数据库故障案例；会话错误转换在本次作源码复核，实际持久化失败和重开恢复由既有12分区承接。"
+    },
+    {
+      "name": "有界分页与局部关系读取，无周期全库发现扫描",
+      "result": "verified_by_source",
+      "source": "_discover 固定事件上界并每页128；新增依赖查询按具体终态 action、d.id 游标和 limits.batch_size；_add_owned_files 按源 owner/id 分页；H waiters 原有 action/selection 游标分页，单副本 output 最多取2行判歧义，选择核对单身份。",
+      "dynamic": "测试使用 batch_size=1 并有三份真实输入，原库只读探针也以 batch_size=1 完成发现；未把全库性能或大规模边界覆盖计作本次动态通过。"
+    }
+  ],
+  "independent_probe": {
+    "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src /workspaces/camctl/apps/camctl/.venv311/bin/python /tmp/camctl-fix44-cleanup-independent-probe.py > /tmp/camctl-fix44-cleanup-independent-probe.log 2>&1",
+    "exit_code": 0,
+    "result": "/tmp/camctl-fix44-cleanup-independent-probe.json",
+    "log": "/tmp/camctl-fix44-cleanup-independent-probe.log",
+    "source_commit": "99d8c640c66cab12a7ed9d0cf73d00fa7398f89e",
+    "loaded_package": "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/__init__.py",
+    "historical_result": {
+      "database": "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/test_installed_action6_ordinar1/action6-record/deployment/state.db",
+      "query_only": 1,
+      "publication_h": 174,
+      "source_input_ids": [
+        1,
+        2,
+        3
+      ],
+      "discovered_first_file_ids": [
+        1,
+        2,
+        3
+      ],
+      "processed": {},
+      "historical_ceiling": 0,
+      "historical_remaining": 1,
+      "discovery_after": 263,
+      "conditional_schedule": "本 run 在 H 时等待者尚运行，H 已消费；输入在启动历史上界0之外；保留终库提供其后真实事件。只探测发现，不执行实际检查或删除。"
+    },
+    "database_sha256_after": {
+      "historical": "925a5a2962da1f548fcb6d2b87dc57c0823b4a115efd82d3ea6ccbbaa097f994",
+      "diagnostic_current": "511d77b5029e8f7c4d8a62259e71e7a19a8a5ef28d5f6f9c9efcc3e6790992a4"
+    },
+    "database_bytes_unchanged": true,
+    "limitation": "明确条件化的发现探针；使用保留终库的真实后续事件，不还原原 run 内存，不执行实际清理。"
+  },
+  "verification_records_reviewed": [
+    {
+      "label": "red-contract",
+      "cwd": "/tmp/camctl-fix44-cleanup-20261025",
+      "command": [
+        "/tmp/camctl-fix44-cleanup-venv/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/bootstrap/test_segment_input_cleanup.py",
+        "-q"
+      ],
+      "PYTHONPATH": "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src:/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests",
+      "source_commit": "5d20849e53fbfb045d25a2799e268827967196b2",
+      "diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "started_at": "2026-10-25T08:31:19.556875+00:00",
+      "log": "/tmp/camctl-fix44-cleanup-red-contract.log",
+      "environment": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]\n3.53.1\n/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/__init__.py\n",
+      "exit_code": 1,
+      "elapsed_s": 6.126739207000355,
+      "ended_at": "2026-10-25T08:31:25.711143+00:00",
+      "log_sha256": "7f5653287b3e3668b6d69a706298709c28427944f2ca15891de43bc83c63d097",
+      "observed_log_tail": [
+        "=========================== short test summary info ============================",
+        "FAILED apps/camctl/tests/integration/bootstrap/test_segment_input_cleanup.py::test_last_bound_waiter_releases_new_source_input_in_original_run",
+        "FAILED apps/camctl/tests/integration/bootstrap/test_segment_input_cleanup.py::test_unconfirmed_copy_without_consumers_cleans_while_other_waiters_run",
+        "2 failed in 5.46s"
+      ]
+    },
+    {
+      "label": "cancel-gap",
+      "cwd": "/tmp/camctl-fix44-cleanup-20261025",
+      "command": [
+        "/tmp/camctl-fix44-cleanup-venv/bin/python",
+        "-m",
+        "pytest",
+        "/tmp/camctl-fix44-cleanup-cancel-gap.py",
+        "-q",
+        "-s"
+      ],
+      "PYTHONPATH": "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src:/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests",
+      "source_commit": "5d20849e53fbfb045d25a2799e268827967196b2",
+      "diff_sha256": "d3170102687df53de8c6b95d120ea3d46928805e9fa455f38ba5117e305252b2",
+      "started_at": "2026-10-25T08:38:33.489314+00:00",
+      "log": "/tmp/camctl-fix44-cleanup-cancel-gap.log",
+      "environment": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]\n3.53.1\n/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/__init__.py\n",
+      "exit_code": 1,
+      "elapsed_s": 2.868682867003372,
+      "ended_at": "2026-10-25T08:38:36.374132+00:00",
+      "log_sha256": "2487d899738f146f029672187ec9e49fbf6b1579d4dbd89a1190af5d6e3fb888",
+      "observed_log_tail": [
+        "../camctl-fix44-cleanup-cancel-gap.py:28: AssertionError",
+        "=========================== short test summary info ============================",
+        "FAILED ../camctl-fix44-cleanup-cancel-gap.py::test_cancel_reused_delivery_after_actual_read_settlement",
+        "1 failed in 2.45s"
+      ]
+    },
+    {
+      "label": "cancel-gap-green",
+      "cwd": "/tmp/camctl-fix44-cleanup-20261025",
+      "command": [
+        "/tmp/camctl-fix44-cleanup-venv/bin/python",
+        "-m",
+        "pytest",
+        "/tmp/camctl-fix44-cleanup-cancel-gap.py",
+        "-q",
+        "-s"
+      ],
+      "PYTHONPATH": "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src:/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests",
+      "source_commit": "5d20849e53fbfb045d25a2799e268827967196b2",
+      "diff_sha256": "0cf4ddfc41a26c7f3c954cda5393a2aea3edb12425e7c4ed24e5b52f43f1475c",
+      "started_at": "2026-10-25T08:41:31.104434+00:00",
+      "log": "/tmp/camctl-fix44-cleanup-cancel-gap-green.log",
+      "environment": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]\n3.53.1\n/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/__init__.py\n",
+      "exit_code": 0,
+      "elapsed_s": 3.277853570994921,
+      "ended_at": "2026-10-25T08:41:34.397178+00:00",
+      "log_sha256": "d76399254d690cd327def65a00b5ccf28de511a5293e8b95cd138f0aa6c35b15",
+      "observed_log_tail": [
+        "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/__init__.py",
+        "{\"facts\": [[1, 3, 1, null, null, 1, 10, 10, 3, 2]], \"members\": [1], \"outcome\": \"completed\", \"error\": \"None\"}",
+        ".",
+        "1 passed in 2.69s"
+      ]
+    },
+    {
+      "label": "unit",
+      "cwd": "/tmp/camctl-fix44-cleanup-20261025",
+      "command": [
+        "/tmp/camctl-fix44-cleanup-venv/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/unit/bootstrap/test_work_file_owner.py",
+        "apps/camctl/tests/unit/outputs/test_work_files.py",
+        "apps/camctl/tests/unit/outputs/test_segment_copy_reuse.py",
+        "apps/camctl/tests/unit/outputs/test_cleanup_session_work.py",
+        "-q"
+      ],
+      "PYTHONPATH": "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src:/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests",
+      "source_commit": "5d20849e53fbfb045d25a2799e268827967196b2",
+      "diff_sha256": "0cf4ddfc41a26c7f3c954cda5393a2aea3edb12425e7c4ed24e5b52f43f1475c",
+      "started_at": "2026-10-25T08:44:18.536078+00:00",
+      "log": "/tmp/camctl-fix44-cleanup-unit.log",
+      "environment": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]\n3.53.1\n/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/__init__.py\n",
+      "exit_code": 0,
+      "elapsed_s": 0.9687669560080394,
+      "ended_at": "2026-10-25T08:44:19.522366+00:00",
+      "log_sha256": "bc03b00955ee2608a36d272d3e8ba0133a0b360da2b55523d616e4dda997817d",
+      "observed_log_tail": [
+        "3.53.1",
+        "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/__init__.py",
+        "........................................................................ [100%]",
+        "72 passed in 0.55s"
+      ]
+    },
+    {
+      "label": "outputs-related",
+      "cwd": "/tmp/camctl-fix44-cleanup-20261025",
+      "command": [
+        "/tmp/camctl-fix44-cleanup-venv/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/outputs/test_segment_copy_reuse.py",
+        "apps/camctl/tests/integration/outputs/test_segment_copy_maintenance.py",
+        "apps/camctl/tests/integration/outputs/test_segment_default_scope.py",
+        "apps/camctl/tests/integration/outputs/test_work_files.py",
+        "apps/camctl/tests/integration/outputs/test_work_file_execution.py",
+        "apps/camctl/tests/integration/outputs/test_work_file_result_boundary.py",
+        "apps/camctl/tests/integration/outputs/test_work_file_reuse.py",
+        "apps/camctl/tests/integration/outputs/test_read_associations.py",
+        "-q"
+      ],
+      "PYTHONPATH": "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src:/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests",
+      "source_commit": "5d20849e53fbfb045d25a2799e268827967196b2",
+      "diff_sha256": "0cf4ddfc41a26c7f3c954cda5393a2aea3edb12425e7c4ed24e5b52f43f1475c",
+      "started_at": "2026-10-25T08:48:17.035971+00:00",
+      "log": "/tmp/camctl-fix44-cleanup-outputs-related.log",
+      "environment": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]\n3.53.1\n/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/__init__.py\n",
+      "exit_code": 1,
+      "elapsed_s": 101.93472352800018,
+      "ended_at": "2026-10-25T08:50:03.871278+00:00",
+      "log_sha256": "463f75f71540e03e63253d613d63cf371dd6c51a630fea01f6065b2fc455b8eb",
+      "observed_log_tail": [
+        "=========================== short test summary info ============================",
+        "FAILED apps/camctl/tests/integration/outputs/test_read_associations.py::test_delivery_creation_write_failure_preserves_original_selection[INSERT INTO deliveries]",
+        "FAILED apps/camctl/tests/integration/outputs/test_read_associations.py::test_delivery_creation_write_failure_preserves_original_selection[UPDATE obtain_items SET]",
+        "2 failed, 120 passed in 101.51s (0:01:41)"
+      ]
+    },
+    {
+      "label": "outputs-adapter-recheck",
+      "cwd": "/tmp/camctl-fix44-cleanup-20261025",
+      "command": [
+        "/tmp/camctl-fix44-cleanup-venv/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/outputs/test_read_associations.py::test_delivery_creation_write_failure_preserves_original_selection",
+        "-q"
+      ],
+      "PYTHONPATH": "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src:/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests",
+      "source_commit": "2a8d9ba1e66576712ab133f9abcb22f7946a784e",
+      "diff_sha256": "0cf4ddfc41a26c7f3c954cda5393a2aea3edb12425e7c4ed24e5b52f43f1475c",
+      "started_at": "2026-10-25T08:51:09.549599+00:00",
+      "log": "/tmp/camctl-fix44-cleanup-outputs-adapter-recheck.log",
+      "environment": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]\n3.53.1\n/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/__init__.py\n",
+      "exit_code": 0,
+      "elapsed_s": 0.9899416489934083,
+      "ended_at": "2026-10-25T08:51:10.558384+00:00",
+      "log_sha256": "33c4660df9003748c7dd41d25d01526b5a3807a944864656c4668d6ef9d43580",
+      "observed_log_tail": [
+        "3.53.1",
+        "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/__init__.py",
+        "..                                                                       [100%]",
+        "2 passed in 0.57s"
+      ]
+    },
+    {
+      "label": "bootstrap-related",
+      "cwd": "/tmp/camctl-fix44-cleanup-20261025",
+      "command": [
+        "/tmp/camctl-fix44-cleanup-venv/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/bootstrap/test_work_file_new_responsibility.py",
+        "apps/camctl/tests/integration/bootstrap/test_work_file_fixed_range.py",
+        "apps/camctl/tests/integration/bootstrap/test_work_file_runtime.py",
+        "apps/camctl/tests/integration/bootstrap/test_work_file_history.py",
+        "apps/camctl/tests/integration/bootstrap/test_cancel_work_file_first_result.py",
+        "apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py",
+        "-q"
+      ],
+      "PYTHONPATH": "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src:/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests",
+      "source_commit": "5d20849e53fbfb045d25a2799e268827967196b2",
+      "diff_sha256": "0cf4ddfc41a26c7f3c954cda5393a2aea3edb12425e7c4ed24e5b52f43f1475c",
+      "started_at": "2026-10-25T08:50:27.163104+00:00",
+      "log": "/tmp/camctl-fix44-cleanup-bootstrap-related.log",
+      "environment": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]\n3.53.1\n/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/__init__.py\n",
+      "exit_code": 1,
+      "elapsed_s": 5.045251632007421,
+      "ended_at": "2026-10-25T08:50:32.239903+00:00",
+      "log_sha256": "9ae4a1dfb4ac8fa63f68f2d6da91f9c7077d2b6a08ae3bd5fcc20b59efd03c85",
+      "observed_log_tail": [
+        "FAILED apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py::test_cancel_obtain_preserves_actual_publication_boundary[prepared]",
+        "FAILED apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py::test_cancel_obtain_preserves_actual_publication_boundary[moving]",
+        "FAILED apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py::test_cancel_obtain_preserves_actual_publication_boundary[published]",
+        "24 failed, 3 passed in 4.46s"
+      ]
+    },
+    {
+      "label": "bootstrap-adapter-recheck",
+      "cwd": "/tmp/camctl-fix44-cleanup-20261025",
+      "command": [
+        "/tmp/camctl-fix44-cleanup-venv/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/bootstrap/test_work_file_runtime.py",
+        "apps/camctl/tests/integration/bootstrap/test_work_file_history.py",
+        "apps/camctl/tests/integration/bootstrap/test_cancel_work_file_first_result.py",
+        "apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py",
+        "-q"
+      ],
+      "PYTHONPATH": "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src:/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests",
+      "source_commit": "b166f136363cf6c33391d2b139080435ea3bd730",
+      "diff_sha256": "0cf4ddfc41a26c7f3c954cda5393a2aea3edb12425e7c4ed24e5b52f43f1475c",
+      "started_at": "2026-10-25T08:52:02.807437+00:00",
+      "log": "/tmp/camctl-fix44-cleanup-bootstrap-adapter-recheck.log",
+      "source_files_sha256": {
+        "apps/camctl/src/camctl/bootstrap/work_file_assembly.py": "dc73e05873cc699411749124123a4a54567805c9fdb4deb5fc209e6a4394f2a1",
+        "apps/camctl/src/camctl/outputs/segment_copy_reuse.py": "62412965771d6a0f8d0128f024adc77fbb6264f62127847fcbccbd803fa54650",
+        "apps/camctl/src/camctl/persistence/repositories/outputs.py": "b4b08c1a14e55158096ffe3e4a439ca4fc875fd87280083a1ddf71bc0e1fd456",
+        "apps/camctl/src/camctl/persistence/repositories/segment_selections.py": "85d0c7e82d2984ec7a153f77e73c082d0153946830aaba781a7472ec770a5faf"
+      },
+      "environment": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]\n3.53.1\n/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/__init__.py\n",
+      "exit_code": 0,
+      "elapsed_s": 17.347491175009054,
+      "ended_at": "2026-10-25T08:52:20.895665+00:00",
+      "log_sha256": "f913ce02ce27f19421eadbd5790f34d8ac2f7e0e46bb95da2a5386f5d892b6c4",
+      "observed_log_tail": [
+        "3.53.1",
+        "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/__init__.py",
+        "........................                                                 [100%]",
+        "24 passed in 16.91s"
+      ]
+    },
+    {
+      "label": "final-s7",
+      "cwd": "/tmp/camctl-fix44-cleanup-20261025",
+      "command": [
+        "/tmp/camctl-fix44-cleanup-venv/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/bootstrap/test_segment_input_cleanup.py",
+        "-q"
+      ],
+      "PYTHONPATH": "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src:/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests",
+      "source_commit": "99d8c640c66cab12a7ed9d0cf73d00fa7398f89e",
+      "diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "started_at": "2026-10-25T08:52:36.554514+00:00",
+      "log": "/tmp/camctl-fix44-cleanup-final-s7.log",
+      "source_files_sha256": {
+        "apps/camctl/src/camctl/bootstrap/work_file_assembly.py": "dc73e05873cc699411749124123a4a54567805c9fdb4deb5fc209e6a4394f2a1",
+        "apps/camctl/src/camctl/outputs/segment_copy_reuse.py": "62412965771d6a0f8d0128f024adc77fbb6264f62127847fcbccbd803fa54650",
+        "apps/camctl/src/camctl/persistence/repositories/outputs.py": "b4b08c1a14e55158096ffe3e4a439ca4fc875fd87280083a1ddf71bc0e1fd456",
+        "apps/camctl/src/camctl/persistence/repositories/segment_selections.py": "85d0c7e82d2984ec7a153f77e73c082d0153946830aaba781a7472ec770a5faf",
+        "apps/camctl/tests/integration/bootstrap/test_segment_input_cleanup.py": "904eb2eac5e5c3b022ceb27a0207834f0421848f26823b1903d3ff5a9170c0c3"
+      },
+      "environment": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]\n3.53.1\n/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/__init__.py\n",
+      "exit_code": 0,
+      "elapsed_s": 21.012976949001313,
+      "ended_at": "2026-10-25T08:52:57.466420+00:00",
+      "log_sha256": "f8d8fd280a6e23798c5085bda9e828ba4a93123d785394784bf1a7fb3fc03a81",
+      "observed_log_tail": [
+        "3.53.1",
+        "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/__init__.py",
+        "................                                                         [100%]",
+        "16 passed in 20.61s"
+      ]
+    }
+  ],
+  "verification_summary": {
+    "unit": "72 passed，独立命令；四个单元文件。",
+    "new_regression": "最终提交 99d8c640 上 16 passed in 20.61s，exit 0；测试文件 SHA256 与提交一致。",
+    "outputs": "原相关范围120通过、2个旧 total_changes 测试包装器阻断；引入 root 前置后只复验这2个节点，2 passed。",
+    "bootstrap": "原相关范围3通过、24个旧 ResultsDouble reading_context 测试夹具阻断；引入 root 前置后只复验这些范围，24 passed。",
+    "counting_note": "分进程、分源码前置的定向结果，不能表述为最终提交上单次全量237例通过；所有复用结果的四个生产文件摘要与最终 S7 一致。"
+  },
+  "reviewer_actions": {
+    "modified_cleanup_tree": false,
+    "ran_pytest": false,
+    "ran_full_suite": false,
+    "spawned_agent": false,
+    "modified_original_databases": false,
+    "wrote_only_tmp_review_artifacts": true
+  },
+  "remaining_integration_gate": "S7/S8 集成后的安装版普通/残留联合链及 root 原44项回归由主代理执行；本次局部独立评审无阻塞项。"
+}

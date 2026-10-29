@@ -1,0 +1,45 @@
+{
+  "created_utc": "2026-10-26T01:26:20.807608+00:00",
+  "scope": "首轮、终态补跑、冻结独立审计、最终诊断、逐份预算收据与独立第三批窄验证",
+  "main_source_file_records": 6186,
+  "canonical_final_audit_files": 15,
+  "current_diagnosis_index_entries": 1235,
+  "resource_raw_json": {
+    "main": 357,
+    "replay": 846
+  },
+  "replay_unfinished_final_evidence_groups_preserved": 89,
+  "roles_before_archive_summary": {
+    "archive-control": 6,
+    "archive-index-history": 2,
+    "append-summary": 1,
+    "final-audit-or-narrow-evidence": 20,
+    "completed-diagnosis-addition": 70,
+    "resource-audit-original": 2,
+    "main-budget-original": 1,
+    "replay-budget-original": 1,
+    "completed-diagnosis": 1166,
+    "actual-selection-command-interruption": 6,
+    "final-narrow-combination": 3,
+    "final-narrow-combination-script": 1,
+    "main-collection-artifact": 104,
+    "main-instrumentation": 3,
+    "main-driver-log": 1,
+    "main-metadata": 3,
+    "main-tasks-artifact": 757,
+    "existing-merge-bundle": 4,
+    "replay-collection-artifact": 96,
+    "replay-instrumentation": 3,
+    "replay-driver-log": 1,
+    "replay-metadata": 3,
+    "replay-tasks-artifact": 351,
+    "per-process-budget-receipt-index": 2,
+    "per-process-budget-raw-receipt": 1203,
+    "final-archive-index": 2
+  },
+  "indices": {
+    "audits": "audits/final-index.json",
+    "diagnosis": "diagnosis/final-index.json"
+  },
+  "batch_summary": "additions/replay-final/summary.json"
+}

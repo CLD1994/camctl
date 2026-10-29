@@ -1,0 +1,85 @@
+{
+  "comparison_base": "e87f3cfac636d566cefa4c6b3b612b250ce79a9d",
+  "only_readonly_total_changes_properties_added": true,
+  "property_count": 13,
+  "added": [
+    {
+      "path": "apps/camctl/tests/integration/acceptance/test_atomicity.py",
+      "class": "LostCommitResponse",
+      "line": 130,
+      "delegates_to": "connection.total_changes"
+    },
+    {
+      "path": "apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py",
+      "class": "TrackedConnection",
+      "line": 38,
+      "delegates_to": "self.connection.total_changes"
+    },
+    {
+      "path": "apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py",
+      "class": "_FlowConnection",
+      "line": 36,
+      "delegates_to": "self._connection.total_changes"
+    },
+    {
+      "path": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py",
+      "class": "LoseCommit",
+      "line": 430,
+      "delegates_to": "db.total_changes"
+    },
+    {
+      "path": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py",
+      "class": "LoseCommit",
+      "line": 564,
+      "delegates_to": "db.total_changes"
+    },
+    {
+      "path": "apps/camctl/tests/integration/persistence/test_transactions.py",
+      "class": "FailingConnection",
+      "line": 257,
+      "delegates_to": "self._connection.total_changes"
+    },
+    {
+      "path": "apps/camctl/tests/integration/reporting/test_ack_sync.py",
+      "class": "LostCommitResponse",
+      "line": 396,
+      "delegates_to": "connection.total_changes"
+    },
+    {
+      "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+      "class": "OrderedConnection",
+      "line": 315,
+      "delegates_to": "connection.total_changes"
+    },
+    {
+      "path": "apps/camctl/tests/integration/reporting/test_management_reuse.py",
+      "class": "FailingRead",
+      "line": 160,
+      "delegates_to": "connection.total_changes"
+    },
+    {
+      "path": "apps/camctl/tests/integration/reporting/test_management_reuse.py",
+      "class": "LostReceipt",
+      "line": 185,
+      "delegates_to": "connection.total_changes"
+    },
+    {
+      "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+      "class": "LostCommitResponse",
+      "line": 401,
+      "delegates_to": "connection.total_changes"
+    },
+    {
+      "path": "apps/camctl/tests/integration/session/test_submit_boundary.py",
+      "class": "BeginObserver",
+      "line": 208,
+      "delegates_to": "self.connection.total_changes"
+    },
+    {
+      "path": "apps/camctl/tests/integration/session/test_submit_boundary.py",
+      "class": "LostCommitResponse",
+      "line": 319,
+      "delegates_to": "self.connection.total_changes"
+    }
+  ]
+}

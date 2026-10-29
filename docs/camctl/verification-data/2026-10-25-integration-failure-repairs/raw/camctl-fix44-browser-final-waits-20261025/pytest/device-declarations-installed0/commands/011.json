@@ -1,0 +1,16 @@
+{
+  "argv": [
+    "node",
+    "--import",
+    "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/tsx/dist/loader.mjs",
+    "/tmp/camctl-fix44-browser-20261025/tests/integration/device_capability_browser.ts",
+    "/tmp/camctl-fix44-browser-final-waits-20261025/pytest/test_installed_sources_control0/browser-store",
+    "/tmp/camctl-fix44-browser-final-waits-20261025/pytest/test_installed_sources_control0/current.json",
+    "/tmp/camctl-fix44-browser-final-waits-20261025/pytest/test_installed_sources_control0/changed.json",
+    "/tmp/camctl-fix44-browser-final-waits-20261025/pytest/test_installed_sources_control0/visibility.json"
+  ],
+  "cwd": "/tmp/camctl-fix44-browser-20261025/apps/client",
+  "exitcode": 0,
+  "stdout": "",
+  "stderr": ""
+}

@@ -1,0 +1,21 @@
+[
+  {
+    "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_three_capture_kinds_partial_obtain",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0017677040013950318
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 16.168177588995604
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005403920004027896
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 16.170485684997402
+  }
+]

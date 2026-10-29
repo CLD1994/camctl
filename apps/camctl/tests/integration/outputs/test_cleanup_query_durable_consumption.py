@@ -102,10 +102,10 @@ class _QueryIntentCommitFault(OutputsRepository):
     pytest.param("cancel", True, "cancel_cleanup_item", id="cancel-present"),
     pytest.param("cancel", None, "cancel_cleanup_item", id="cancel-unknown"),
 ])
-async def test_new_factory_consumes_original_saved_query_without_memory(environment, consumer, present, method):
+async def test_new_factory_consumes_original_saved_query_without_memory(environment, consumer, present, method, capture_resources):
     cfg, _, context, _ = environment
     base, driver, action_id, item_id, old_member = await _world(environment, consumer, present)
-    runtime, members, operations = _instrument(
+    runtime, members, operations = await _instrument(
         base, item_id, member_method=method, after_commit=False)
     await _first_rejected(runtime, item_id, {"result_rejected", "cancel_rejected"})
     assert members.fault is not None and members.fault.triggered
@@ -114,7 +114,8 @@ async def test_new_factory_consumes_original_saved_query_without_memory(environm
     original_query = operations.query_facts
     original_prefix = operations.query_prefix
     calls_before = (len(driver.deletes), len(driver.queries))
-    runtime.owned.connection.close()
+    await runtime.database.close()
+    environment[1].connection.close()
     fresh = context.open_connection()
     try:
         assert _member_facts(fresh, item_id)[0] == 3
@@ -122,7 +123,7 @@ async def test_new_factory_consumes_original_saved_query_without_memory(environm
         assert _query_facts(fresh, item_id) == original_query
         # 新工厂只接收本次设备配置与连接，不传原集合或旧 runtime。
         factory = _new_factory(cfg, _NoDeviceCalls(), _Clock())
-        resumed = factory(fresh)
+        resumed = await factory(await capture_resources.restart_database(fresh))
 
         step = await delete_source_file(resumed, item_id)
 
@@ -139,8 +140,6 @@ async def test_new_factory_consumes_original_saved_query_without_memory(environm
         assert _query_facts(fresh, item_id) == original_query
         _assert_history_prefix(fresh, original_prefix)
         _check_old_member(fresh, old_member)
-        assert f"exists/{item_id}" not in resumed.retry_gate.anchors
-        assert f"delete/{item_id}" not in resumed.retry_gate.anchors
         if consumer == "cancel":
             assert fresh.connection.execute(
                 "SELECT cancel_requested FROM actions WHERE id=?", (action_id,),
@@ -149,26 +148,26 @@ async def test_new_factory_consumes_original_saved_query_without_memory(environm
         fresh.connection.close()
 
 
-async def test_saved_unknown_is_consumed_once_and_wait_anchor_survives_fresh_rounds(environment):
+async def test_saved_unknown_is_consumed_once_and_wait_anchor_survives_fresh_rounds(environment, capture_resources):
     cfg, _, context, _ = environment
     base, old_driver, _, item_id, _ = await _world(environment, "after", None)
-    first_runtime = base.for_item(item_id)
+    first_runtime = await base.for_item(item_id)
     first = await delete_source_file(first_runtime, item_id)
     assert first.phase == "query_unknown", first
-    original_query = _query_facts(first_runtime.owned, item_id)
-    original_prefix = _history(first_runtime.owned)
+    original_query = _query_facts(environment[1], item_id)
+    original_prefix = _history(environment[1])
     old_calls = (len(old_driver.deletes), len(old_driver.queries))
-    first_runtime.owned.connection.close()
+    await first_runtime.database.close()
+    environment[1].connection.close()
 
     fresh = context.open_connection()
     clock = _Clock()
     driver = _OnlyNewQuery(fresh)
     factory = _new_factory(cfg, driver, clock, query_interval=Decimal(3))
     try:
-        recovered_runtime = factory(fresh)
+        recovered_runtime = await factory(await capture_resources.restart_database(fresh))
         recovered = await delete_source_file(recovered_runtime, item_id)
         assert recovered.phase == "query_retry_wait", recovered
-        first_anchor = recovered_runtime.retry_gate.anchors[f"exists/{item_id}"]
         assert _query_facts(fresh, item_id) == original_query
         assert _history(fresh) == original_prefix
         assert driver.queries == [] and driver.deletes == []
@@ -176,10 +175,9 @@ async def test_saved_unknown_is_consumed_once_and_wait_anchor_survives_fresh_rou
 
         clock.ns = 12_000_000_000
         fresh = context.open_connection()
-        waiting_runtime = factory(fresh)
+        waiting_runtime = await factory(await capture_resources.restart_database(fresh))
         waiting = await delete_source_file(waiting_runtime, item_id)
         assert waiting.phase == "query_retry_wait", waiting
-        assert waiting_runtime.retry_gate.anchors[f"exists/{item_id}"] == first_anchor
         assert _query_facts(fresh, item_id) == original_query
         assert _history(fresh) == original_prefix
         assert driver.queries == [] and driver.deletes == []
@@ -188,7 +186,7 @@ async def test_saved_unknown_is_consumed_once_and_wait_anchor_survives_fresh_rou
         clock.ns = 13_000_000_000
         driver.allow_query = True
         fresh = context.open_connection()
-        due_runtime = factory(fresh)
+        due_runtime = await factory(await capture_resources.restart_database(fresh))
         due = await delete_source_file(due_runtime, item_id)
         assert due.phase == "succeeded", due
         assert len(driver.queries) == 1 and driver.deletes == []
@@ -203,25 +201,26 @@ async def test_saved_unknown_is_consumed_once_and_wait_anchor_survives_fresh_rou
         fresh.connection.close()
 
 
-async def test_query_before_later_possible_delete_is_not_recovered_as_latest_observation(environment):
+async def test_query_before_later_possible_delete_is_not_recovered_as_latest_observation(environment, capture_resources):
     cfg, _, context, _ = environment
     base, old_driver, _, item_id, _ = await _world(environment, "after", True)
-    runtime = base.for_item(item_id)
+    runtime = await base.for_item(item_id)
     first = await delete_source_file(runtime, item_id)
     assert first.phase == "still_present", first
-    original_query = _query_facts(runtime.owned, item_id)
-    original_prefix = _history(runtime.owned)
+    original_query = _query_facts(environment[1], item_id)
+    original_prefix = _history(environment[1])
     # 同一成员在删除间隔到时后真正发出第二次 DELETE，仍返回未知。
     # 紧随其后的 QUERY 意图在真实 COMMIT 前失败，关闭连接回滚该意图。
     fault_port = _QueryIntentCommitFault()
     base.outputs = fault_port
     base.monotonic_ns = lambda: 10_000_000_000
-    again = await delete_source_file(base.for_item(item_id), item_id)
+    again = await delete_source_file(await base.for_item(item_id), item_id)
     assert again.phase == "query_rejected", again
     assert fault_port.fault is not None and fault_port.fault.triggered
     assert fault_port.result.kind is DbOutcomeKind.UNKNOWN
     assert len(old_driver.deletes) == 2 and len(old_driver.queries) == 1
-    runtime.owned.connection.close()
+    await runtime.database.close()
+    environment[1].connection.close()
 
     fresh = context.open_connection()
     try:
@@ -235,7 +234,7 @@ async def test_query_before_later_possible_delete_is_not_recovered_as_latest_obs
         assert latest_delete > old_query_intent
         driver = _OnlyNewQuery(fresh)
         driver.allow_query = True
-        resumed = _new_factory(cfg, driver, _Clock())(fresh)
+        resumed = await _new_factory(cfg, driver, _Clock())(await capture_resources.restart_database(fresh))
 
         step = await delete_source_file(resumed, item_id)
 
@@ -251,14 +250,15 @@ async def test_query_before_later_possible_delete_is_not_recovered_as_latest_obs
 
 
 @pytest.mark.parametrize("binding", ["removed", "changed", "unregistered"])
-async def test_saved_absence_finishes_before_current_binding_or_driver_resolution(environment, binding):
+async def test_saved_absence_finishes_before_current_binding_or_driver_resolution(environment, binding, capture_resources):
     cfg, _, context, _ = environment
     base, _, _, item_id, _ = await _world(environment, "after", False)
-    runtime, _, operations = _instrument(
+    runtime, _, operations = await _instrument(
         base, item_id, member_method="finish_cleanup_item", after_commit=False)
     await _first_rejected(runtime, item_id, {"result_rejected"})
     original_query = operations.query_facts
-    runtime.owned.connection.close()
+    await runtime.database.close()
+    environment[1].connection.close()
     devices = dict(cfg.devices)
     if binding == "removed":
         del devices["cam-a"]
@@ -269,7 +269,7 @@ async def test_saved_absence_finishes_before_current_binding_or_driver_resolutio
     fresh = context.open_connection()
     try:
         changed = replace(cfg, devices=devices)
-        resumed = _new_factory(changed, _NoDeviceCalls(), _Clock())(fresh)
+        resumed = await _new_factory(changed, _NoDeviceCalls(), _Clock())(await capture_resources.restart_database(fresh))
         step = await delete_source_file(resumed, item_id)
         assert step.phase == "succeeded", step
         assert _member_facts(fresh, item_id)[0] == 4

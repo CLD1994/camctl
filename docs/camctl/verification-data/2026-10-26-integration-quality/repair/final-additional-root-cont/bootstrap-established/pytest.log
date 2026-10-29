@@ -1,0 +1,18 @@
+.....................................                                    [100%]
+============================= slowest 15 durations =============================
+0.63s call     tests/integration/bootstrap/test_output_binding_changes.py::test_selected_obtain_item_binding_failure_keeps_other_device[missing]
+0.54s call     tests/integration/bootstrap/test_output_binding_changes.py::test_unfinished_cleanup_binding_failure_preserves_unknown_delete[mismatch]
+0.46s call     tests/integration/bootstrap/test_inspection_read_dispatch.py::test_inspection_missing_required_digest_saves_actual_read_then_check_failure[ordinary-missing]
+0.46s call     tests/integration/bootstrap/test_output_binding_changes.py::test_verified_copy_publishes_without_source_device[missing]
+0.43s call     tests/integration/bootstrap/test_output_binding_changes.py::test_unfinished_read_binding_failure_closes_responsibility_and_keeps_progress[missing]
+0.42s call     tests/integration/bootstrap/test_output_binding_changes.py::test_verified_copy_publishes_without_source_device[mismatch]
+0.41s call     tests/integration/bootstrap/test_output_binding_changes.py::test_unfinished_cleanup_binding_failure_preserves_unknown_delete[missing]
+0.38s call     tests/integration/bootstrap/test_output_binding_changes.py::test_unfinished_read_binding_failure_closes_responsibility_and_keeps_progress[mismatch]
+0.37s call     tests/integration/bootstrap/test_output_binding_changes.py::test_cleanup_uses_each_members_original_binding[matched]
+0.35s call     tests/integration/bootstrap/test_output_binding_changes.py::test_selected_obtain_item_binding_failure_keeps_other_device[mismatch]
+0.35s call     tests/integration/bootstrap/test_output_binding_changes.py::test_matched_single_device_cleanup_saves_reliable_absence
+0.33s call     tests/integration/bootstrap/test_output_binding_changes.py::test_cleanup_uses_each_members_original_binding[mismatch]
+0.33s call     tests/integration/bootstrap/test_output_binding_changes.py::test_cleanup_uses_each_members_original_binding[missing]
+0.31s call     tests/integration/bootstrap/test_output_binding_changes.py::test_cleanup_passes_committed_ticket_and_each_operation_timeout
+0.10s call     tests/integration/bootstrap/test_inspection_read_dispatch.py::test_inspection_binding_failure_unknown_reuses_original_requests[False-inspection]
+37 passed in 9.29s

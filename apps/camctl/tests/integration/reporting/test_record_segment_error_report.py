@@ -9,6 +9,9 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.values import new_operation_key
 from camctl.contracts.workflow_errors import validate_public_json
 from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.capture import CaptureRepository
+from camctl.persistence.repositories.scheduling import SchedulingRepository
 from camctl.persistence.repositories.history import HistoryRepository
 from camctl.reporting.generation import generate_report_file
 
@@ -41,12 +44,12 @@ async def test_expired_prepared_source_without_segment_set_reports_selection_fai
     )
     try:
         now = _NOW + 6_000_000
-        expired = runtime.scheduling.expire_action(
+        expired = SchedulingRepository().expire_action(
             ExpireActionRequest(source_id, now, now), new_operation_key(), owned,
         )
         assert expired.kind is DbOutcomeKind.COMPLETED, expired.error
-        assert runtime.action(source_id)["status"] == 5
-        assert runtime.action(source_id)["execution_started"] == 1
+        assert row_facts(owned.connection, "actions", source_id)["status"] == 5
+        assert row_facts(owned.connection, "actions", source_id)["execution_started"] == 1
         assert owned.connection.execute("SELECT COUNT(*) FROM segment_sets").fetchone() == (0,)
         action_id, selection = _obtain(owned, runtime, source_id, "preview", 2)
         fixed = fix_segment_selection(
@@ -125,7 +128,7 @@ async def test_gap_report_preserves_outputs_scope_and_bytes_after_cleanup(tmp_pa
                 ),
             ),
         ):
-            receipt = getattr(runtime.capture, method)(
+            receipt = getattr(CaptureRepository(), method)(
                 request, new_operation_key(), owned
             )
             assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error

@@ -1,0 +1,5 @@
+[
+  "tests/integration/test_camctl_output_roundtrip.py::test_auto_preview_obtains_registered_preview",
+  "tests/integration/test_camctl_output_roundtrip.py::test_plan_cancel_before_start_settles_auto_preview",
+  "tests/integration/test_camctl_output_roundtrip.py::test_three_capture_kinds_partial_obtain"
+]

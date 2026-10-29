@@ -8,7 +8,7 @@ import pytest
 
 from camctl.bootstrap.capture_assembly import DriverResultListing
 from camctl.capture.handlers import (
-    _begin_check_round, _save_winddown_progress,
+    advance_winddown,
     capture_handler,
 )
 from camctl.capture.models import ResultSetPhase, ResultSetSave
@@ -16,7 +16,11 @@ from camctl.contracts.values import new_operation_key
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.evidence import DeviceObservation
 from camctl.devices.ports import DeviceCallResult, ResultDriver
-from camctl.operations.attempts import RunOutcome
+from camctl.operations.attempts import (
+    AttemptFinish, AttemptIntent, AttemptTarget, OperationKind, RunFinish, RunOutcome,
+)
+from camctl.operations.validation import validate_outcome
+from camctl.persistence.repositories.operations import OperationRepository
 from camctl.operations.models import (
     AttemptStatus, CallInfo, CallOutcome, EffectState, ErrorValue, EvidenceValue,
     Settlement, SettlementBasis,
@@ -58,7 +62,7 @@ def _result_port(runtime, actual):
 
 async def _consume(runtime, consumer, action_id, handler):
     if consumer == "winddown":
-        await _save_winddown_progress(runtime, runtime.action(action_id))
+        await advance_winddown(action_id, runtime, {}, wait_cap_s=Decimal(0))
     else:
         await capture_handler(handler)(action_id, runtime)
 
@@ -115,8 +119,18 @@ async def test_closed_result_consumers_use_saved_input_without_device_query(tmp_
     actual = _actual(action_id, with_files=True, complete=True)
     try:
         # 模拟结果已可靠提交、文件登记和动作收尾尚未完成的中断。
-        ticket = _begin_check_round(runtime, action_id).ticket
-        runtime.finish(ticket, actual, end_run=RunOutcome.SUCCEEDED)
+        activity_id, = owned.connection.execute(
+            "SELECT id FROM device_activities WHERE action_id=?", (action_id,)).fetchone()
+        operations = OperationRepository()
+        begun = operations.begin_attempt(AttemptIntent("result", action_id,
+            OperationKind.CHECK_CAPTURE_RESULTS, AttemptTarget(activity_id=activity_id),
+            None, runtime.check_config, runtime.wall_us()), new_operation_key(), owned)
+        assert begun.kind is DbOutcomeKind.COMPLETED, begun.error
+        ticket = begun.value.ticket
+        saved = operations.finish_attempt(AttemptFinish(ticket,
+            validate_outcome(ticket, actual, _EVIDENCE), runtime.wall_us(),
+            run_finish=RunFinish(RunOutcome.SUCCEEDED)), new_operation_key(), owned)
+        assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
         if consumer == "timelapse":
             # 集合结论由已保存的独立正式事实提供；v1 观察不提供扫描结束依据。
             receipt = runtime.capture.confirm_result_set(ResultSetSave(
@@ -129,7 +143,7 @@ async def test_closed_result_consumers_use_saved_input_without_device_query(tmp_
             ), new_operation_key(), owned)
             assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
         # 新运行时没有列举缓存，也没有旧结果对象；只能消费持久化原输入。
-        resumed = _runtime(owned, driver=runtime.driver)
+        resumed = await _runtime(owned, driver=runtime.driver)
         resumed.evidence = _EVIDENCE
         resumed.check_config = runtime.check_config
         resumed.wall_us = runtime.wall_us

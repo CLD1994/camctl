@@ -10,7 +10,8 @@ import pytest
 from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.history.decoding import decode_event_row
-from camctl.history.validators import EventContext, EventValidationError, validate_event
+from camctl.history.validators import EventValidationError
+from ..support.output_planning import capture_operation, event_case, validate_static_event as validate_event
 from camctl.outputs.qualification import QualificationOutcome
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.outputs import OutputsRepository
@@ -94,27 +95,11 @@ def test_started_processing_reuses_complete_input(prepared, stage, original_key)
 
 
 @pytest.fixture
-def creation(prepared):
-    owned, _, _, first = prepared
-    with closing(owned.connection.execute(
-        "SELECT id, transaction_id, event_type, event_version, occurred_at, clock_status, change_seq, body_json"
-        " FROM history_events WHERE event_type=22"
-    )) as cursor:
-        event = decode_event_row(cursor.fetchone())
-    with closing(owned.connection.execute(
-        "SELECT first_event_id, last_event_id FROM history_transactions WHERE id=?", (event.transaction_id,)
-    )) as cursor:
-        start, end = cursor.fetchone()
-    identities = {"plans": (1,), "actions": (11,), "recording_processing": (5,), "device_files": (501,),
-                  "file_copies": (),
-                  "intermediate_files": (first.target_file_id,), "operation_runs": (first.run_id,)}
-    state = {table: {identity: row_facts(owned.connection, table, identity) for identity in ids}
-             for table, ids in identities.items()}
-    proposed = deepcopy(state)
-    proposed["file_copies"] = {first.copy_id: row_facts(owned.connection, "file_copies", first.copy_id)}
-    context = EventContext(TransactionRange(event.transaction_id, start, end),
-                           {("file_copies", first.copy_id): ("action", 11)}, state, proposed)
-    return event, context
+def creation(internal_read):
+    owned, command = internal_read
+    plan = capture_operation(owned, lambda target: OutputsRepository().grant_file(
+        command, new_operation_key(), target))
+    return event_case(plan, 22)
 
 
 @pytest.mark.parametrize("field,value", [("check_state", 2), ("check_state", 3),

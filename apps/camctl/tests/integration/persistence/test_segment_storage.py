@@ -25,7 +25,7 @@ from camctl.capture.segment_models import *
 from camctl.capture.segment_storage import SegmentSetCreate, SegmentMemberInput
 from camctl.capture.segments import advance_segment_assessment, finish_segment_assessment, iter_segment_gaps
 from camctl.capture.results import ProductRule, FileKind
-from camctl.capture.handlers import _begin_check_round
+from .result_page_fixtures import begin_result_check
 from camctl.contracts.values import new_operation_key, ConsistencyError
 from camctl.devices.segments import SegmentKey
 from camctl.persistence.models import DbOutcomeKind
@@ -56,7 +56,7 @@ async def _world(tmp_path, indexes=(1,2,4), *, sizes=None, own=True, consumer="r
     owned,runtime,action_id,_=await consumer_world(tmp_path,consumer,catalog=SegmentedCatalog(),
         record_control_elapsed_ns=60_000_000_000 if consumer=='record' else None,
         independent_activity=independent_activity,invalid_sibling=invalid_sibling)
-    ticket=_begin_check_round(runtime,action_id).ticket
+    ticket=begin_result_check(owned,runtime,action_id).ticket
     entries=[]
     for i,index in enumerate(indexes):
         name=f'/DCIM/CAM_001/CAM_20261021{90000+i if unique_names else 90000:06d}_{index:04d}_D.OSV'
@@ -85,7 +85,7 @@ async def _world(tmp_path, indexes=(1,2,4), *, sizes=None, own=True, consumer="r
         SegmentMemberRole.ORIGINAL,OwnershipState.OWNED if own else OwnershipState.UNKNOWN,
         FileCompletionState.COMPLETE if own else FileCompletionState.UNKNOWN) for entry in entries)
     repo=SegmentRepository()
-    request=SegmentSetCreate(ref,int(ticket.target_id),ticket.run_id,runtime.action(action_id)['execution_spec_json']['target_duration_ms'],runtime.wall_us())
+    request=SegmentSetCreate(ref,int(ticket.target_id),ticket.run_id,(await runtime.action(action_id))['execution_spec_json']['target_duration_ms'],runtime.wall_us())
     _ok(repo.create(request,new_operation_key(),owned))
     return owned,runtime,repo,ref,members
 
@@ -328,7 +328,7 @@ async def test_saved_default_scope_three_states_roundtrip(tmp_path,scope_state,i
 async def test_preview_pairing_requires_its_actual_original_name_stem(tmp_path):
     owned,runtime,action_id,_=await consumer_world(tmp_path,'record',catalog=SegmentedCatalog(),record_control_elapsed_ns=60_000_000_000)
     try:
-        ticket=_begin_check_round(runtime,action_id).ticket
+        ticket=begin_result_check(owned,runtime,action_id).ticket
         original='/DCIM/CAM_001/CAM_20261021090000_0002_D.OSV'
         preview='/DCIM/CAM_001/CAM_20261021090000_0001_D.LRF'
         entries=[{'identity':name,'locator':{'path':name},'complete':True,'size_bytes':10,'kind':'video','format_id':format,
@@ -358,7 +358,7 @@ async def test_native_timelapse_frozen_facts_reject_ordinary_record_assessment(t
         _ok(repo.append_members(ref,members,runtime.wall_us(),new_operation_key(),owned))
         _ok(repo.fix_members(ref,runtime.wall_us(),new_operation_key(),owned))
         target=repo.read_set(ref,owned)['target_duration_ms']
-        facts=CompletionFacts(EvidenceState.CONFIRMED,EvidenceState.CONFIRMED,EvidenceState.CONFIRMED,EvidenceState.CONFIRMED,SegmentKey(1,1),EvidenceState.CONFIRMED,EvidenceState.UNKNOWN,True,False)
+        facts=CompletionFacts(EvidenceState.UNKNOWN,EvidenceState.UNKNOWN,EvidenceState.CONFIRMED,EvidenceState.CONFIRMED,SegmentKey(1,1),EvidenceState.UNKNOWN,EvidenceState.UNKNOWN,True,False)
         state=SegmentAccumulator(ref,target,SegmentKey(1,1))
         for member in iter_segment_members(ref,owned):state=advance_segment_assessment(state,member)
         result=finish_segment_assessment(state,facts)
@@ -395,12 +395,12 @@ async def test_unpublished_assessment_is_not_an_active_set(tmp_path):
     finally:owned.connection.close()
 
 def _finish_saved_scan(owned,runtime,ref):
-    from camctl.persistence.repositories.result_pages import _at
+    from camctl.persistence.repositories.result_pages import read_page_at
     from camctl.operations.attempts import AttemptFinish
     from camctl.operations.validation import validate_outcome
     from camctl.persistence.repositories.operations import OperationRepository
     from ..capture.test_result_page_history import _REGISTRY
-    saved,_=_at(owned.connection,ref.final_page_event_id)
+    saved=read_page_at(ref.final_page_event_id,owned)
     status=owned.connection.execute('SELECT status FROM operation_attempts WHERE id=?',(ref.scan_id,)).fetchone()[0]
     if status!=1:return
     _ok(OperationRepository().finish_attempt(AttemptFinish(saved.ref.ticket,
@@ -428,95 +428,73 @@ async def _assessed_world(tmp_path,scope_state):
     return owned,runtime,repo,ref,members
 
 
-def _completion_command(ref,members,at,key,*,mode='valid',drafts=None,batch_size=128):
-    from camctl.outputs.catalog import OutputDraft,OutputKind,FileReference,OutputCatalogFacts
-    from camctl.persistence.repositories.capture import FinishCapture,FinishCaptureCommand,_CompositeScope
-    from camctl.persistence.repositories.segments import segment_event,segment_scope_publication_rows,segment_activation_rows
-    from camctl.persistence.transaction import CommandPlan
-    request=FinishCapture(ref.action_id,() if mode=='omit_outputs' else tuple(drafts) if drafts is not None else tuple(OutputDraft(OutputKind.ORIGINAL,FileReference(device_file_id=item.file_id),True) for item in members),OutputCatalogFacts(ref.action_id,True),at)
-    class Composed:
+def _completion_command(owned,ref,members,at,key,*,mode='valid',drafts=None,batch_size=128):
+    from camctl.outputs.catalog import OutputKind
+    from camctl.persistence.repositories.capture import CaptureResult
+    from camctl.persistence.repositories.capture import CaptureRepository
+    from camctl.persistence.transaction import row_change
+    from camctl.history.reads import PlanReadScope
+    from ..support.output_planning import capture_operation,EventSequence
+    from .test_segment_transaction_batches import _request_for
+    repository=SegmentRepository();row=repository.read_set(ref,owned)
+    candidates=_candidate_drafts(repository,ref,owned)
+    count=sum(item.kind is OutputKind.ORIGINAL for item in candidates)
+    request=_request_for(ref,row,at,repository.read_assessment(ref,owned),count)
+    receipts=[]
+    def save(actual):
+        receipt=CaptureRepository().finish_segment_recording(request,key,actual,batch_size=batch_size)
+        receipts.append(receipt)
+        return receipt
+    proposal=capture_operation(owned,save)
+    events=list(proposal.events)
+    from camctl.history.events import load_event_registry
+    types=load_event_registry()['events']
+    output_type=types['OUTPUT_REGISTERED']['id'];segment_type=types['SEGMENT_FACTS']['id']
+    if mode=='omit_outputs':events=[event for event in events if event.event_type!=output_type]
+    elif mode=='omit_preview':events=[event for event in events if not (event.event_type==output_type and event.reason==3)]
+    elif mode=='duplicate_preview':events.extend(event for event in tuple(events) if event.event_type==output_type and event.reason==3)
+    elif mode in ('omit_origin','wrong_origin'):
+        originals=[event.rows[0].row_id for event in events if event.event_type==output_type and event.reason==1]
+        changed=[]
+        for event in events:
+            if event.event_type==output_type and event.reason==3:
+                rows=event.rows[:1]
+                if mode=='wrong_origin':
+                    origin=event.rows[1]
+                    other=next(identity for identity in originals if identity!=origin.after.values['original_output_id'])
+                    rows+=(row_change(origin.table,origin.row_id,{**origin.after.values,'original_output_id':other}),)
+                event=replace(event,rows=rows)
+            changed.append(event)
+        events=changed
+    elif mode in ('extra_zero_preview','extra_frozen_unknown_original'):
+        requested=next(item for item in drafts if item not in candidates)
+        template=next(event for event in events if event.event_type==output_type)
+        values=dict(template.rows[0].after.values)
+        values.update(device_file_id=requested.file.device_file_id,kind=1 if requested.kind is OutputKind.ORIGINAL else 3)
+        identity=max(event.rows[0].row_id for event in events if event.event_type==output_type)+1
+        events.insert(-1,replace(template,rows=(row_change('outputs',identity,values),)))
+    elif mode=='omit_scope':events=[event for event in events if not (event.event_type==segment_type and event.reason==7)]
+    elif mode=='wrong_identity':
+        identities=[row.after.values['output_id'] for event in events if event.event_type==segment_type and event.reason==7 for row in event.rows]
+        replacements=iter(reversed(identities));changed=[]
+        for event in events:
+            if event.event_type==segment_type and event.reason==7:
+                rows=tuple(replace(row,after=replace(row.after,values={**row.after.values,'output_id':next(replacements)})) for row in event.rows)
+                bindings=tuple((row.row_id,row.after.values['output_id']) for row in rows)
+                from camctl.capture.segment_storage import document
+                event=replace(event,rows=rows,evidence={'segment_request':{'ref':document(ref),'input':[list(binding) for binding in bindings]}})
+            changed.append(event)
+        events=changed
+    elif mode=='omit_marker':events.pop()
+    plan_id=owned.connection.execute('SELECT plan_id FROM actions WHERE id=?',(ref.action_id,)).fetchone()[0]
+    sequence=EventSequence(events,proposal,plan_read_scope=PlanReadScope(plan_id,128))
+    result=receipts[0].value
+    output_ids=tuple(event.rows[0].row_id for event in proposal.events if event.event_type==output_type)
+    class Command:
         def plan(self,scope):
-            sub=_CompositeScope(scope,scope.max_event_id+1)
-            assessment=SegmentRepository().read_assessment(ref,scope)
-            actual_request=request
-            if assessment.status is not SegmentAssessmentStatus.SUCCEEDED:
-                from camctl.capture.media import RecordingFailure
-                from camctl.capture.segment_errors import segment_error_header
-                if assessment.gap_count:
-                    count=sum(draft.kind is OutputKind.ORIGINAL for draft in request.drafts)
-                    failure=RecordingFailure('capture_segment_gap',segment_error_header(assessment,count).details('capture_segment_gap'))
-                else:
-                    saved=SegmentRepository().read_set(ref,scope)
-                    failure=RecordingFailure('capture_result_unconfirmed',{'activity_id':str(saved['activity_id']),'reason':'outputs_unknown'})
-                actual_request=replace(request,failure=failure)
-            from camctl.persistence.repositories.segment_transactions import _FinishCommand
-            from camctl.capture.segment_finish import FinishSegmentRecording
-            setrow=SegmentRepository().read_set(ref,scope)
-            finite=FinishSegmentRecording(ref,setrow['activity_id'],setrow['run_id'],at,actual_request.failure)
-            original=_FinishCommand(finite,key,batch_size).plan(_CompositeScope(scope,scope.max_event_id+1))
-            header=next(iter(original.events)).evidence
-            actual_request=replace(actual_request,drafts=tuple(sorted(actual_request.drafts,key=lambda draft:0 if draft.kind is OutputKind.ORIGINAL else 1)))
-            plan=FinishCaptureCommand(actual_request,key).plan(sub)
-            plan=replace(plan,events=(replace(plan.events[0],evidence=header),*plan.events[1:]))
-            if mode in ('omit_origin','wrong_origin'):
-                changed=[]
-                originals=[identity for draft,identity in zip(actual_request.drafts,plan.result.output_ids) if draft.kind is OutputKind.ORIGINAL]
-                for event in plan.events:
-                    rows=[]
-                    for row in event.rows:
-                        if row.table=='output_origins':
-                            if mode=='omit_origin':continue
-                            from camctl.persistence.transaction import row_change
-                            wrong=next(identity for identity in originals if identity!=row.after.values['original_output_id'])
-                            row=row_change(row.table,row.row_id,{**row.after.values,'original_output_id':wrong})
-                        rows.append(row)
-                    changed.append(replace(event,rows=tuple(rows)))
-                plan=replace(plan,events=tuple(changed))
-            rows=SegmentRepository().read_scope(ref,None,128,scope,published=False).items
-            next_event=plan.events[-1].event_id+1
-            events=list(plan.events);owners=dict(plan.owners);state={table:dict(values) for table,values in plan.state_rows.items()}
-            from camctl.operations.attempts import StaleRunFinish,RunOutcome
-            from camctl.persistence.repositories.operations import _FinishStaleRunsCommand
-            run_key=scope.connection.execute('SELECT responsibility_key FROM operation_runs WHERE id=?',(setrow['run_id'],)).fetchone()[0]
-            closing=_FinishStaleRunsCommand(StaleRunFinish((run_key,),RunOutcome.SUCCEEDED,at),key).plan(_CompositeScope(scope,next_event))
-            events.extend(closing.events);next_event+=len(closing.events);owners.update(closing.owners)
-            for table,values in closing.state_rows.items():state.setdefault(table,{}).update(values)
-            state['segment_sets']={};state['segment_scope_members']={}
-            if rows and mode!='omit_scope':
-                from camctl.persistence.transaction import row_facts
-                outputs={draft.file.device_file_id:identity for draft,identity in zip(actual_request.drafts,plan.result.output_ids)}
-                expected=tuple(outputs[row_facts(scope.connection,'segment_members',row['member_id'])['file_id']] for row in rows)
-                bindings=tuple((row['id'],expected[i if mode!='wrong_identity' else len(rows)-i-1]) for i,row in enumerate(rows))
-                for offset in range(0,len(bindings),batch_size):
-                    page=bindings[offset:offset+batch_size]
-                    changes=segment_scope_publication_rows(ref,page,scope)
-                    events.append(segment_event(ref,'PUBLISH',changes,next_event,events[0].transaction_id,at,request_input=page));next_event+=1
-                for row in rows:
-                    owners['segment_scope_members',row['id']]=('action',ref.action_id)
-                    state['segment_scope_members'][row['id']]=row
-            changes=segment_activation_rows(ref,next_event,scope)
-            setrow=SegmentRepository().read_set(ref,scope);state['segment_sets'][setrow['id']]=setrow
-            owners['segment_sets',setrow['id']]=('action',ref.action_id)
-            events.append(segment_event(ref,'ACTIVATE',changes,next_event,events[0].transaction_id,at,request_input=None))
-            # 有限入口与有界完成使用同一规范阶段；所有事件按最终顺序重新编号。
-            from camctl.history.events import load_event_registry
-            registry=load_event_registry()['events']
-            def phase(event):
-                if event.event_type==registry['ACTION_FINISHED']['id']:return 0
-                if event.event_type==registry['OUTPUT_REGISTERED']['id']:return 1 if event.reason==1 else 2
-                if event.event_type==registry['SEGMENT_FACTS']['id']:return 3 if event.reason==7 else 6
-                if event.event_type==registry['OPERATION_CONFIGURED']['id']:return 4
-                return 5
-            events.sort(key=phase)
-            first=scope.max_event_id+1
-            events=[replace(event,event_id=first+index) for index,event in enumerate(events)]
-            marker=events[-1]
-            from camctl.persistence.transaction import update_change
-            events[-1]=replace(marker,rows=(update_change('segment_sets',setrow['id'],{'published_event_id':None},{'published_event_id':marker.event_id}),))
-            if mode=='omit_marker':events.pop()
-            scope.allocate(len(events))
-            return replace(plan,events=tuple(events),owners=owners,state_rows=state)
-    return Composed()
+            plan=sequence.plan(scope)
+            return replace(plan,result=CaptureResult(result.action_status,result.plan_status,output_ids))
+    return Command()
 
 
 @pytest.mark.asyncio
@@ -526,7 +504,7 @@ async def test_unique_active_set_is_composed_with_terminal_and_outputs(tmp_path,
     owned,runtime,repo,ref,members=await _assessed_world(tmp_path,scope_state)
     try:
         key=new_operation_key()
-        saved=commit_operation(_completion_command(ref,members,runtime.wall_us(),key),key,owned)
+        saved=commit_operation(_completion_command(owned,ref,members,runtime.wall_us(),key),key,owned)
         assert saved.kind=='completed',saved.error
         assert repo.read_active_set(ref.action_id,owned)==ref
         assert repo.read_set(ref,owned)['published_event_id']==owned.connection.execute('SELECT MAX(id) FROM history_events').fetchone()[0]
@@ -546,7 +524,7 @@ async def test_activation_refuses_incomplete_or_wrong_identity_scope(tmp_path,mo
     try:
         key=new_operation_key()
         before=owned.connection.execute('SELECT MAX(id),MAX(change_seq) FROM history_events').fetchone()
-        saved=commit_operation(_completion_command(ref,members,runtime.wall_us(),key,mode=mode),key,owned)
+        saved=commit_operation(_completion_command(owned,ref,members,runtime.wall_us(),key,mode=mode),key,owned)
         assert saved.kind=='rolled_back'
         assert repo.read_active_set(ref.action_id,owned) is None
         assert owned.connection.execute('SELECT COUNT(*) FROM outputs').fetchone()==(0,)
@@ -616,7 +594,7 @@ async def test_multiple_versions_never_replace_the_explicit_active_reference(tmp
         _ok(repo.save_assessment(second,facts,finish_segment_assessment(state,facts),runtime.wall_us(),new_operation_key(),owned))
         assert repo.read_active_set(ref.action_id,owned) is None
         key=new_operation_key();at=runtime.wall_us()
-        saved=commit_operation(_completion_command(ref,members,at,key),key,owned)
+        saved=commit_operation(_completion_command(owned,ref,members,at,key),key,owned)
         assert saved.kind=='completed',saved.error
         assert repo.read_active_set(ref.action_id,owned)==ref
         assert repo.read_set(second,owned)['published_event_id'] is None
@@ -642,7 +620,7 @@ async def test_unpublished_version_under_failed_source_does_not_advance_public_w
     owned,runtime,repo,ref,members=await _assessed_world(tmp_path,DefaultScopeState.EMPTY)
     try:
         key=new_operation_key()
-        saved=commit_operation(_completion_command(ref,members,runtime.wall_us(),key),key,owned)
+        saved=commit_operation(_completion_command(owned,ref,members,runtime.wall_us(),key),key,owned)
         assert saved.kind=='completed',saved.error
         setrow=repo.read_set(ref,owned)
         watermark=owned.connection.execute('SELECT MAX(change_seq) FROM history_events').fetchone()
@@ -659,7 +637,7 @@ async def test_publish_without_same_transaction_marker_rolls_back(tmp_path):
     try:
         before=_publication_snapshot(owned)
         key=new_operation_key()
-        receipt=commit_operation(_completion_command(ref,members,runtime.wall_us(),key,mode='omit_marker'),key,owned)
+        receipt=commit_operation(_completion_command(owned,ref,members,runtime.wall_us(),key,mode='omit_marker'),key,owned)
         assert receipt.kind=='rolled_back',receipt.error
         assert _publication_snapshot(owned)==before
     finally:owned.connection.close()
@@ -676,7 +654,7 @@ async def _preview_world(tmp_path, *, original_sizes=(10,0), paired_index=2, pre
     from camctl.devices.bindings import DeviceBinding
     from camctl.persistence.repositories.segments import iter_segment_members
     owned,runtime,action_id,_=await consumer_world(tmp_path,'record',catalog=SegmentedCatalog(),record_control_elapsed_ns=60_000_000_000)
-    ticket=_begin_check_round(runtime,action_id).ticket
+    ticket=begin_result_check(owned,runtime,action_id).ticket
     names=tuple(f'/DCIM/CAM_001/CAM_20261021090000_{index:04d}_D.OSV' for index in range(1,len(original_sizes)+1))
     preview=names[paired_index-1].replace('.OSV','.LRF')
     entries=[{'identity':name,'locator':{'path':name},'complete':size is not None,'size_bytes':size,'kind':'video','format_id':'osv'} for name,size in zip(names,original_sizes)]
@@ -718,10 +696,10 @@ async def _preview_world(tmp_path, *, original_sizes=(10,0), paired_index=2, pre
     attempt_id=owned.connection.execute('SELECT id FROM operation_attempts WHERE run_id=? AND attempt_no=?',(ticket.run_id,ticket.attempt_id)).fetchone()[0]
     ref=SegmentSetRef(action_id,attempt_id,last,1);repo=SegmentRepository()
     _ok(repo.create(SegmentSetCreate(ref,int(ticket.target_id),ticket.run_id,60000,runtime.wall_us()),new_operation_key(),owned))
-    from camctl.persistence.repositories.segments import _fixed_file
+    from camctl.persistence.repositories.result_file_proofs import read_fixed_file
     requests=[]
     for entry in entries:
-        name=entry['identity'];frozen=_fixed_file(owned.connection,files[name],anchors[name])
+        name=entry['identity'];frozen=read_fixed_file(owned.connection,files[name],anchors[name])
         requests.append(SegmentMemberInput(files[name],pages[name],anchors[name],SegmentMemberRole.PREVIEW if name==preview else SegmentMemberRole.ORIGINAL,OwnershipState.OWNED if frozen['source_action_id']==action_id else OwnershipState.UNKNOWN,FileCompletionState.COMPLETE if frozen['completion_state']==3 else FileCompletionState.INCOMPLETE if frozen['completion_state']==4 else FileCompletionState.UNKNOWN,names[paired_index-1] if name==preview and preview_pairing is PreviewPairingState.PAIRED else None,preview_pairing if name==preview else PreviewPairingState.NOT_APPLICABLE))
     for offset in range(0,len(requests),128):_ok(repo.append_members(ref,tuple(requests[offset:offset+128]),runtime.wall_us(),new_operation_key(),owned))
     _ok(repo.fix_members(ref,runtime.wall_us(),new_operation_key(),owned))
@@ -755,7 +733,7 @@ async def test_preview_paired_to_zero_tail_is_optional_and_does_not_block_comple
         assert assessment.empty_tail_count==1 and assessment.gap_count==0
         original=next(item for item in members if item.role is SegmentMemberRole.ORIGINAL and item.file_id==files['/DCIM/CAM_001/CAM_20261021090000_0001_D.OSV'])
         key=new_operation_key()
-        saved=commit_operation(_completion_command(ref,(original,),runtime.wall_us(),key),key,owned)
+        saved=commit_operation(_completion_command(owned,ref,(original,),runtime.wall_us(),key),key,owned)
         assert saved.kind=='completed',saved.error
         assert repo.read_active_set(ref.action_id,owned)==ref
         assert owned.connection.execute('SELECT device_file_id FROM outputs').fetchall()==[(original.file_id,)]
@@ -763,15 +741,16 @@ async def test_preview_paired_to_zero_tail_is_optional_and_does_not_block_comple
     finally:owned.connection.close()
 
 
-def _tampered_completion(ref,members,at,key,*,tamper='valid',read_scope='plan'):
-    from camctl.persistence.repositories.capture import _CompositeScope
+def _tampered_completion(owned,ref,members,at,key,*,tamper='valid',read_scope='plan',bounded_command=None,source_command=None):
+    from camctl.persistence.transaction import TransactionScope
     from camctl.persistence.transaction import update_change
     from camctl.history.reads import PlanReadScope
     from camctl.history.events import load_event_registry
+    source_command=source_command or _completion_command(owned,ref,members,at,key)
     class Tampered:
         def plan(self,scope):
-            inner=_CompositeScope(scope,scope.max_event_id+1)
-            plan=_completion_command(ref,members,at,key).plan(inner)
+            inner=TransactionScope(scope.connection,scope.max_txn_id,scope.max_event_id)
+            plan=source_command.plan(inner)
             events=list(plan.events);state={table:dict(values) for table,values in plan.state_rows.items()}
             if tamper in ('omit_marker','fake_final_marker'):
                 events.pop()
@@ -811,35 +790,63 @@ def _tampered_completion(ref,members,at,key,*,tamper='valid',read_scope='plan'):
                 fixed.append(replace(event,event_id=event_id,transaction_id=allocation.txn_id))
             if read_scope=='cross_plan':
                 plan=replace(plan,plan_read_scope=PlanReadScope(plan.plan_read_scope.plan_id+999,128))
+            if read_scope=='bounded':
+                original=TransactionScope(scope.connection,scope.max_txn_id,scope.max_event_id)
+                bounded=bounded_command.plan(original)
+                return replace(bounded,events=iter(fixed),result=plan.result)
             return replace(plan,events=tuple(fixed),state_rows=state)
     return Tampered()
 
 
+def _commit_marker_plan(owned,ref,members,at,key,read_scope,monkeypatch,*,tamper='valid'):
+    from camctl.persistence.transaction import commit_operation
+    if read_scope!='bounded':
+        return commit_operation(_tampered_completion(owned,ref,members,at,key,tamper=tamper,read_scope=read_scope),key,owned)
+    from camctl.capture.media import RecordingFailure
+    from camctl.capture.segment_errors import segment_error_header
+    from camctl.capture.segment_finish import FinishSegmentRecording
+    from camctl.persistence.repositories import segment_transactions
+    repo=SegmentRepository();row=repo.read_set(ref,owned);assessment=repo.read_assessment(ref,owned)
+    failure=None
+    if assessment.status is not SegmentAssessmentStatus.SUCCEEDED:
+        if assessment.gap_count:
+            failure=RecordingFailure('capture_segment_gap',segment_error_header(assessment,len(members)).details('capture_segment_gap'))
+        else:
+            failure=RecordingFailure('capture_result_unconfirmed',{'activity_id':str(row['activity_id']),'reason':'outputs_unknown'})
+    request=FinishSegmentRecording(ref,row['activity_id'],row['run_id'],at,failure)
+    source_command=_completion_command(owned,ref,members,at,key)
+    def commit(command,original_key,actual):
+        # 公开仓储交给事务端口的原命令保留生产context与complete。
+        altered=_tampered_completion(owned,ref,members,at,key,tamper=tamper,read_scope=read_scope,bounded_command=command,source_command=source_command)
+        return commit_operation(altered,original_key,actual)
+    with monkeypatch.context() as boundary:
+        boundary.setattr(segment_transactions,'commit_operation',commit)
+        return segment_transactions.finish_segment_recording(request,key,owned)
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize('read_scope',['plan','segment'])
+@pytest.mark.parametrize('read_scope',['plan','bounded'])
 @pytest.mark.parametrize('tamper',['omit_marker','fake_final_marker','wrong_action','wrong_version','wrong_scan','wrong_set','wrong_event_type','duplicate_marker','marker_points_to_publish','omit_terminal'])
 async def test_marker_proof_rejects_tampered_direct_transaction_and_preserves_all_state(tmp_path,read_scope,tamper,monkeypatch):
     from camctl.persistence.transaction import commit_operation
     owned,runtime,repo,ref,members=await _assessed_world(tmp_path,DefaultScopeState.NONEMPTY)
     try:
-        if read_scope=='segment':_segment_guard_scope(monkeypatch,ref)
         before=_publication_snapshot(owned);key=new_operation_key()
-        saved=commit_operation(_tampered_completion(ref,members,runtime.wall_us(),key,tamper=tamper,read_scope=read_scope),key,owned)
+        saved=_commit_marker_plan(owned,ref,members,runtime.wall_us(),key,read_scope,monkeypatch,tamper=tamper)
         assert saved.kind=='rolled_back',saved.error
         assert _publication_snapshot(owned)==before
     finally:owned.connection.close()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('read_scope',['plan','segment','cross_plan'])
+@pytest.mark.parametrize('read_scope',['plan','bounded','cross_plan'])
 @pytest.mark.parametrize('scope_state',list(DefaultScopeState))
-async def test_marker_proof_validates_same_reference_through_segments_guard_ports(tmp_path,read_scope,scope_state,monkeypatch):
+async def test_marker_proof_validates_same_reference_through_transaction_entrypoints(tmp_path,read_scope,scope_state,monkeypatch):
     from camctl.persistence.transaction import commit_operation
     owned,runtime,repo,ref,members=await _assessed_world(tmp_path,scope_state)
     try:
-        if read_scope=='segment':_segment_guard_scope(monkeypatch,ref)
         before=_publication_snapshot(owned);key=new_operation_key()
-        saved=commit_operation(_tampered_completion(ref,members,runtime.wall_us(),key,read_scope=read_scope),key,owned)
+        saved=_commit_marker_plan(owned,ref,members,runtime.wall_us(),key,read_scope,monkeypatch)
         if read_scope=='cross_plan':
             assert saved.kind=='rolled_back'
             assert _publication_snapshot(owned)==before
@@ -848,22 +855,6 @@ async def test_marker_proof_validates_same_reference_through_segments_guard_port
             assert repo.read_active_set(ref.action_id,owned)==ref
     finally:owned.connection.close()
 
-
-
-def _segment_guard_scope(monkeypatch,ref):
-    """只切换P2具名端口；原录像/计划资格继续使用其生产PlanReadScope。"""
-    from camctl.history.validators import NAMED_GUARDS
-    from camctl.history.reads import SegmentReadScope
-    from camctl.persistence.event_reads import SqlEventReads
-    original=NAMED_GUARDS['segments']
-    def segment(event,context):
-        source=context.current_reads
-        reads=SqlEventReads(source.connection,SegmentReadScope(ref),source._validated,source._planned_events)
-        SqlEventReads.bind_segment_finish_state(
-            reads, source._segment_guard_state, source._segment_guard_transaction
-        )
-        original(event,replace(context,current_reads=reads))
-    monkeypatch.setitem(NAMED_GUARDS,'segments',segment)
 
 
 def _candidate_drafts(repo,ref,owned,*,batch=2):
@@ -902,7 +893,7 @@ async def test_frozen_preview_candidates_and_publication_use_identical_eligibili
         preview=next(name for name in files if name.endswith('.LRF'))
         assert {draft.file.device_file_id for draft in drafts if draft.kind is OutputKind.PREVIEW}==({files[preview]} if case=='valid' else set())
         key=new_operation_key()
-        saved=commit_operation(_completion_command(ref,members,runtime.wall_us(),key,drafts=drafts),key,owned)
+        saved=commit_operation(_completion_command(owned,ref,members,runtime.wall_us(),key,drafts=drafts),key,owned)
         assert saved.kind=='completed',saved.error
         actual=owned.connection.execute('SELECT device_file_id,kind FROM outputs ORDER BY device_file_id').fetchall()
         expected=sorted((draft.file.device_file_id,1 if draft.kind is OutputKind.ORIGINAL else 3) for draft in drafts)
@@ -925,7 +916,7 @@ async def test_preview_candidate_pair_and_original_cross_page_and_batch_boundari
         paired=[item for item in members if item.role is SegmentMemberRole.PREVIEW][0]
         original=[item for item in members if item.file_id==files['/DCIM/CAM_001/CAM_20261021090000_0128_D.OSV']][0]
         assert paired.page_event_id!=original.page_event_id
-        key=new_operation_key();saved=commit_operation(_completion_command(ref,members,runtime.wall_us(),key,drafts=drafts),key,owned)
+        key=new_operation_key();saved=commit_operation(_completion_command(owned,ref,members,runtime.wall_us(),key,drafts=drafts),key,owned)
         assert saved.kind=='completed',saved.error
         assert owned.connection.execute('SELECT COUNT(*) FROM outputs').fetchone()==(130,)
         assert repo.read_active_set(ref.action_id,owned)==ref
@@ -951,7 +942,7 @@ async def test_preview_output_and_origin_identity_errors_roll_back_entire_comple
         elif mode=='extra_frozen_unknown_original':
             drafts+=(OutputDraft(OutputKind.ORIGINAL,FileReference(device_file_id=files['/DCIM/CAM_001/CAM_20261021090000_0002_D.OSV']),True),)
         before=_publication_snapshot(owned);key=new_operation_key()
-        saved=commit_operation(_completion_command(ref,members,runtime.wall_us(),key,drafts=drafts,mode=mode),key,owned)
+        saved=commit_operation(_completion_command(owned,ref,members,runtime.wall_us(),key,drafts=drafts,mode=mode),key,owned)
         assert saved.kind=='rolled_back',saved.error
         assert _publication_snapshot(owned)==before
     finally:owned.connection.close()
@@ -989,9 +980,11 @@ async def test_pair_outside_frozen_set_is_rejected_even_when_preview_would_be_sk
         preview=next(item for item in raw.items if item.member.role is SegmentMemberRole.PREVIEW)
         with pytest.raises(ConsistencyError):segment_output_candidate(ref,preview.member_id,owned)
         with pytest.raises(ConsistencyError):repo.read_output_candidates(ref,None,128,owned)
-        original=next(item for item in members if item.role is SegmentMemberRole.ORIGINAL)
+        from camctl.capture.segment_finish import FinishSegmentRecording
+        from camctl.persistence.repositories.segment_transactions import finish_segment_recording
+        row=repo.read_set(ref,owned)
         before=_publication_snapshot(owned);key=new_operation_key()
-        saved=commit_operation(_completion_command(ref,(original,),runtime.wall_us(),key),key,owned)
+        saved=finish_segment_recording(FinishSegmentRecording(ref,row['activity_id'],row['run_id'],runtime.wall_us()),key,owned)
         assert saved.kind=='rolled_back'
         assert _publication_snapshot(owned)==before
     finally:owned.connection.close()
@@ -1004,7 +997,7 @@ async def test_no_publish_members_can_be_invented_for_unknown_or_empty_scope(tmp
     owned,runtime,repo,ref,members=await _assessed_world(tmp_path,scope_state)
     try:
         before=_publication_snapshot(owned);key=new_operation_key()
-        saved=commit_operation(_tampered_completion(ref,members,runtime.wall_us(),key,tamper='unexpected_scope'),key,owned)
+        saved=commit_operation(_tampered_completion(owned,ref,members,runtime.wall_us(),key,tamper='unexpected_scope'),key,owned)
         assert saved.kind=='rolled_back'
         assert _publication_snapshot(owned)==before
     finally:owned.connection.close()

@@ -4,15 +4,15 @@ from datetime import datetime, timezone
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest_asyncio
 
 from camctl.acceptance.input import ParsedInput
-from camctl.acceptance.service import CommandMode
+from camctl.acceptance.service import AcceptanceContext, CommandMode, accept_input
 from camctl.bootstrap.capture_assembly import session_capture_assembly
-from camctl.bootstrap.lifecycle import build_runtime, close_runtime
 from camctl.capture.files import FileCompletionSave, FileObservationSave, FilePresenceSave, OwnershipSave
-from camctl.capture.handlers import _stop_call, capture_handler
+from camctl.capture.handlers import capture_handler
 from camctl.capture.models import ActivityConcludeSave
 from camctl.capture.processing import (
     CheckBasis, CheckDecisionChoice, CheckDecisionSave, CheckReason, SourceFileSave,
@@ -39,6 +39,8 @@ from ..bootstrap.test_media_assembly import _SessionDriver, _config
 from ..bootstrap.test_recording_stop import _RecordCatalog
 from .test_capture_contract import ResultsDouble, _entry
 from .test_input_copy import _CONTENT, _NOW
+from .result_consumer_fixtures import _prepare_through_handler
+from ..support.capture import capture_database, capture_runtime
 
 
 class _Catalog(_RecordCatalog):
@@ -72,8 +74,8 @@ async def media_pipeline(tmp_path, request):
     locator = {"path": f"/DCIM/{name}"}
     cfg = _config(tmp_path)
     assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
-    deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
     owned = open_existing(Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
+    database = await capture_database(owned)
     repository, scheduling = CaptureRepository(), SchedulingRepository()
     driver = _SessionDriver(_CONTENT)
     registry = DriverRegistry((DriverEntry("camctl-adb", driver,
@@ -82,32 +84,41 @@ async def media_pipeline(tmp_path, request):
         _EVIDENCE, DriverStatus.SOFTWARE_CONTRACT_VERIFIED),))
     instant = datetime.fromtimestamp(_NOW // 1_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     try:
-        accepted = AcceptanceRepository().process_input(ProcessInput(ParsedInput("media.json", {
+        accepted = await accept_input(ParsedInput("media.json", {
             "request_id": "1", "created_at": instant, "name": "媒体原结果",
             "actions": [{"name": "录像", "type": "camera_record", "device_id": "cam-1",
                 "scheduled_at": instant, "params": {"type": "video"},
-                "policy": {"max_delay_ms": 5000}}]}), _Catalog(), CommandMode.RUN, _NOW),
-            new_operation_key(), owned)
-        assert accepted.kind is DbOutcomeKind.COMPLETED, accepted.error
+                "policy": {"max_delay_ms": 5000}}]}),
+            AcceptanceContext(CommandMode.RUN, _Catalog(), AcceptanceRepository(),
+                clock=SimpleNamespace(utc_micros=lambda: _NOW)), new_operation_key(), database)
+        assert accepted.plan_id is not None, accepted
         observed = scheduling.observe_window(ObserveWindowRequest(1, _NOW, _NOW), new_operation_key(), owned)
         assert observed.kind is DbOutcomeKind.COMPLETED, observed.error
         started = scheduling.start_action(StartActionRequest(1, _NOW, _NOW), new_operation_key(), owned)
         assert started.kind is DbOutcomeKind.COMPLETED, started.error
-        factory = session_capture_assembly(devices=cfg.devices, drivers=registry,
-            results=ResultsDouble({}), staging=Path(cfg.paths.staging), wait_config=lambda _action: None,
-            wall_us=lambda: _NOW, monotonic_ns=lambda: 7_000_000_000)
-        runtime = factory(owned, "cam-1")
+        wall, monotonic = [_NOW], [7_000_000_000]
+        runtime = await capture_runtime(
+        database,
+        driver=driver,
+        evidence=_EVIDENCE,
+        devices=cfg.devices,
+        drivers=registry,
+        results=ResultsDouble({}),
+        staging=Path(cfg.paths.staging),
+        wait_config=lambda _action: None,
+        wall_us=lambda: wall[0],
+        monotonic_ns=lambda: monotonic[0],
+    )
         await capture_handler("camera_record")(1, runtime)
-        stopped = await _stop_call(runtime, runtime.action(1))
-        assert stopped.phase == "confirmed", stopped
+        wall[0] += 60_000_000
+        monotonic[0] += 60_000_000_000
+        await _prepare_through_handler(runtime, 1, "camera_record", "conclude")
         assert [name for name, _operation in driver.calls] == ["control", "stop"]
         attempts = owned.connection.execute(
             "SELECT r.kind,t.status,t.result_json FROM operation_attempts t"
             " JOIN operation_runs r ON r.id=t.run_id ORDER BY t.id").fetchall()
         assert len(attempts) == 2 and all(status == int(enum_for("operation_attempts.status").SUCCEEDED)
             and result is not None for _kind, status, result in attempts)
-        concluded = repository.conclude_activity(ActivityConcludeSave(1, _NOW), new_operation_key(), owned)
-        assert concluded.kind is DbOutcomeKind.COMPLETED, concluded.error
         assert owned.connection.execute("SELECT activity_state FROM device_activities WHERE action_id=1").fetchone() == (3,)
         observer_action_id = 1
         if getattr(request, "param", False) is True:
@@ -160,4 +171,3 @@ async def media_pipeline(tmp_path, request):
         yield owned, BoundDirectories(staging=Path(cfg.paths.staging)), source_id
     finally:
         owned.connection.close()
-        close_runtime(deps)

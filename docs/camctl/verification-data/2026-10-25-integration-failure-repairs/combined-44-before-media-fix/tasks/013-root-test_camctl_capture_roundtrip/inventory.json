@@ -1,0 +1,3 @@
+[
+  "tests/integration/test_camctl_capture_roundtrip.py::test_timelapse_recovers_remaining_wait"
+]

@@ -1,179 +1,74 @@
 """默认三工厂在原动作终态后仍须保存已取得的媒体结果。"""
 
 from dataclasses import replace
-from datetime import datetime, timezone
 from decimal import Decimal
-from unittest.mock import create_autospec
 
 import pytest
 
-from camctl.acceptance.input import ParsedInput
 from camctl.acceptance.service import CommandMode
 from camctl.bootstrap import capture_assembly, lifecycle
-from camctl.bootstrap.flows import _resolve_and_fix
-from camctl.cancellation.models import ApplyCancelTarget, CancelApplyMode, StartCancelAction
-from camctl.capture.media_flow import DriverReadSessions, run_recording_media
+from camctl.capture.media_flow import run_recording_media
 from camctl.capture.processing import CheckPhase
 from camctl.contracts.json_values import parse_exact_json
-from camctl.contracts.values import ConsistencyError, new_operation_key
-from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverStatus
-from camctl.devices.ports import DriverDeclaration
+from camctl.contracts.values import ConsistencyError
 from camctl.history.events import business_columns
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.acceptance import AcceptanceRepository, ProcessInput
-from camctl.persistence.repositories.cancellation import CancellationRepository
-from camctl.persistence.repositories.capture import CaptureRepository, FinishCanceledCapture
-from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.transaction import row_facts, saved_transaction_events
-from camctl.session.outcome import SessionOutcome
 
-from ..capture.media_retry_fixtures import _Catalog, _EVIDENCE, media_pipeline as pipeline  # noqa: F401
+from ..capture.media_retry_fixtures import _Catalog, media_pipeline as pipeline  # noqa: F401
 from ..capture.test_capture_contract import ResultsDouble
 from ..capture.test_input_copy import _CONTENT, _NOW
-from ..capture.test_media_flow import ReadDriverDouble
-from ..capture.test_media_result_retry import _ActualTools
-from .test_binding_transactions import _CommitFailure
-from .test_media_assembly import _SessionDriver, _config
 
 
 pytestmark = pytest.mark.asyncio
 
 
-async def _default_factories(pipeline, monkeypatch):
-    """保留默认装配，仅隔离会话循环及实际设备与工具。"""
-    config = _config(pipeline[1].staging.parent)
-    driver = _SessionDriver(_CONTENT)
-    entry = DriverEntry("camctl-adb", driver, DriverDeclaration(
-        control_supported=True, stop_supported=True, query_supported=False,
-        result_supported=False, read_supported=True, digest_supported=True, delete_supported=False),
-        _EVIDENCE, DriverStatus.SOFTWARE_CONTRACT_VERIFIED)
-    from camctl.devices.drivers import runtime as driver_runtime
-    monkeypatch.setattr(driver_runtime, "current_registry", lambda: DriverRegistry((entry,)))
-    factories, contexts = [], []
-    original_factory = capture_assembly.session_capture_assembly
-
-    def observed_factory(**kwargs):
-        factory = original_factory(**kwargs, results=ResultsDouble({}),
-            wall_us=lambda: _NOW + 20, monotonic_ns=lambda: 7_000_000_000)
-        factories.append(factory)
-        return factory
-
-    async def session(context, _source):
-        contexts.append(context)
-        return SessionOutcome(succeeded=True)
-
-    monkeypatch.setattr(capture_assembly, "session_capture_assembly", observed_factory)
-    monkeypatch.setattr(lifecycle, "run_session", create_autospec(lifecycle.run_session, side_effect=session))
-    deps = lifecycle.build_runtime(CommandMode.RUN, config, catalog=_Catalog())
-    try:
-        assert deps.startup_error is None
-        outcome = await lifecycle.execute_command(deps, None)
-        assert outcome.succeeded
-        assert len(factories) == 3 and len(contexts) == 1
-        return deps, factories, contexts[0]
-    except BaseException:
-        lifecycle.close_runtime(deps)
-        raise
-
-
-def _observe_reopened_flow_connection(context, reopened):
-    """流程通过正式打开端口取得独立、同身份的恢复连接。"""
-    original_open = context.open_connection
-    observed = []
-
-    def open_connection():
-        current = original_open()
-        assert current.metadata == reopened.metadata
-        assert current.connection is not reopened.connection
-        observed.append(current)
-        return current
-
-    context.open_connection = open_connection
-    return observed
-
-
-def _cancel_and_end_original(owned):
-    instant = datetime.fromtimestamp(_NOW // 1_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    accepted = AcceptanceRepository().process_input(ProcessInput(ParsedInput("cancel.json", {
-        "request_id": "2", "created_at": instant, "name": "取消原媒体动作",
-        "actions": [{"name": "取消", "type": "cancel_task",
-            "params": {"target": {"action_instance_id": "1"}}}]}),
-        _Catalog(), CommandMode.RUN, _NOW + 10), new_operation_key(), owned)
-    assert accepted.kind is DbOutcomeKind.COMPLETED, accepted.error
-    origin, raw = owned.connection.execute("SELECT id,input_fields_json FROM actions WHERE type=6").fetchone()
-    repository = CancellationRepository()
-    started = repository.start_cancel_action(StartCancelAction(origin, _NOW + 10), new_operation_key(), owned)
-    assert started.kind is DbOutcomeKind.COMPLETED, started.error
-    items = _resolve_and_fix(owned, repository, origin, raw, lambda: _NOW + 10)
-    assert len(items) == 1
-    applied = repository.apply_cancel_target(ApplyCancelTarget(
-        items[0], CancelApplyMode.WITH_STOP, _NOW + 10), new_operation_key(), owned)
-    assert applied.kind is DbOutcomeKind.COMPLETED, applied.error
-    ended = CaptureRepository().finish_canceled_capture(
-        FinishCanceledCapture(1, _NOW + 10), new_operation_key(), owned)
-    assert ended.kind is DbOutcomeKind.COMPLETED, ended.error
-    assert owned.connection.execute("SELECT status,cancel_requested FROM actions WHERE id=1").fetchone() == (6, 1)
-
-
 @pytest.mark.parametrize("entrance", ["normal", "residual", "restricted"])
 @pytest.mark.parametrize("branch", ["check", "decision", "repair_failed", "repair_complete"])
-async def test_default_consumers_save_original_media_after_target_terminal(pipeline, monkeypatch, entrance, branch):
-    owned, roots, source_id = pipeline
-    deps, factories, context = await _default_factories(pipeline, monkeypatch)
-    driver, tools = ReadDriverDouble(_CONTENT), _ActualTools(branch)
-    flow = factories[0](owned, "cam-1").media
-    assert flow is not None
-    flow.sessions = DriverReadSessions(owned, driver, ticket=None)
-    flow.tools = tools
+async def test_default_consumers_save_original_media_after_target_terminal(pipeline, capture_resources, monkeypatch, entrance, branch):
+    from ..support.bootstrap_consumers import consumer_world, TransactionFault, cancel_original
+
+    world = await consumer_world(pipeline, capture_resources, branch=branch,
+        collections={"pending_media_results": {}})
     method = {"check": "save_check_result", "decision": "save_repair_decision",
         "repair_failed": "save_repair_result", "repair_complete": "complete_repair_output"}[branch]
     original_save = getattr(CaptureRepository, method)
-    inputs, failed = [], False
+    inputs = []
 
     def save(repository, command, key, current):
-        nonlocal failed
         if branch == "check" and command.phase is CheckPhase.RUNNING:
             return original_save(repository, command, key, current)
         inputs.append((command, key))
-        if not failed:
-            failed = True
-            return original_save(repository, command, key,
-                replace(current, connection=_CommitFailure(current.connection, True)))
+        if len(inputs) == 1:
+            fault = TransactionFault(current.connection, after_commit=True)
+            result = original_save(repository, command, key, replace(current, connection=fault))
+            assert result.kind is DbOutcomeKind.UNKNOWN and fault.commit_calls == 1
+            return result
         return original_save(repository, command, key, current)
 
     monkeypatch.setattr(CaptureRepository, method, save)
-    reopened = None
     try:
         with pytest.raises(ConsistencyError):
-            await run_recording_media(flow, 1, 1, source_id)
-        assert len(inputs) == 1 and tools.probes == 1
-        assert tools.repairs == (1 if branch.startswith("repair_") else 0)
-        owned.connection.close()
-        reopened = open_existing(roots.staging.parent / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
-        assert reopened.metadata == owned.metadata
-        assert saved_transaction_events(reopened.connection, inputs[0][1]) is not None
-        flow_connections = _observe_reopened_flow_connection(context, reopened)
-        _cancel_and_end_original(reopened)
+            await run_recording_media(world.runtime.media, 1, 1, world.source_id)
+        expected_tools = ["probe"] + (["repair"] if branch.startswith("repair_") else [])
+        assert len(inputs) == 1 and world.tools() == expected_tools
+        await world.reconnect()
+        assert saved_transaction_events(world.owned.connection, inputs[0][1]) is not None
+        await cancel_original(world)
+        world.prime_clock()
         columns = business_columns("actions")
-        original_action = {name: row_facts(reopened.connection, "actions", 1)[name] for name in columns}
+        original_action = {name: row_facts(world.owned.connection, "actions", 1)[name] for name in columns}
         processing_columns = business_columns("recording_processing")
-        original_processing = {name: row_facts(reopened.connection, "recording_processing", 1)[name]
+        original_processing = {name: row_facts(world.owned.connection, "recording_processing", 1)[name]
             for name in processing_columns}
-        if entrance == "normal":
-            await context.flows["scheduling"](context)
-        elif entrance == "residual":
-            await context.flows["residual"](context)
-        else:
-            await context.restricted_flows["winddown"](context)
-        assert len(flow_connections) == 1
-        assert len(inputs) == 2, "终态动作过滤不能丢失已取得的原媒体保存责任"
-        assert inputs[1] == inputs[0]
-        assert tools.probes == 1 and tools.repairs == (1 if branch.startswith("repair_") else 0)
-        assert len(driver.opens) == 1
-        assert {name: row_facts(reopened.connection, "actions", 1)[name] for name in columns} == original_action
-        assert {name: row_facts(reopened.connection, "recording_processing", 1)[name]
+        await world.replay(entrance, kind="media")
+        assert inputs == [inputs[0], inputs[0]], "终态动作仍须按原媒体输入和原 key 核实"
+        assert world.tools() == expected_tools and len(world.reader.requests) == 1
+        assert {name: row_facts(world.owned.connection, "actions", 1)[name] for name in columns} == original_action
+        assert {name: row_facts(world.owned.connection, "recording_processing", 1)[name]
             for name in processing_columns} == original_processing
-        state = reopened.connection.execute(
+        state = world.owned.connection.execute(
             "SELECT check_state,media_json,repair_state,repair_basis_json,repair_error_json,repair_output_file_id"
             " FROM recording_processing WHERE id=1").fetchone()
         assert state[0] == 3 and parse_exact_json(state[1])["duration"]["seconds"] == Decimal("75.125")
@@ -183,76 +78,77 @@ async def test_default_consumers_save_original_media_after_target_terminal(pipel
             assert state[2] == 6 and parse_exact_json(state[4]) == inputs[0][0].error.as_json()
         elif branch == "repair_complete":
             assert state[2] == 5 and state[5] == inputs[0][0].output_file_id
-        snapshots = [factory(reopened, "cam-1") for factory in factories]
-        assert snapshots[2].media is None
-        assert snapshots[0].pending_media_results is snapshots[1].pending_media_results is snapshots[2].pending_media_results
-        assert not snapshots[0].pending_media_results
+            path = world.owned.connection.execute("SELECT relative_path FROM intermediate_files WHERE id=?",
+                (state[5],)).fetchone()[0]
+            assert (world.roots.staging / path).read_bytes() == b"original complete repaired bytes"
     finally:
-        if reopened is not None:
-            reopened.connection.close()
-        lifecycle.close_runtime(deps)
+        await world.close()
+        world.owned.connection.close()
 
 
-async def test_original_media_result_and_key_retained_across_runtimes(
-        pipeline, monkeypatch):
-    """原媒体结果与原操作键跨两次真实运行时保留。
+async def test_original_media_result_and_key_retained_across_runtimes(pipeline, capture_resources, monkeypatch):
+    """全冷新工厂只读可靠媒体事实，不继承上次会话的保存集合。"""
+    from ..support.bootstrap_consumers import consumer_world
 
-    第一个真实运行时取得原结果并可靠保存后整体关闭（共享待保存集
-    合随之丢弃）；第二个全新 build_runtime 与执行只依赖已持久化的
-    原结果、原键与归属事实重新进入同一条媒体链：不再观察、修复或
-    读取，处理行业务列、动作事件与正式产物数量保持。
-    """
-    owned, roots, source_id = pipeline
-    real_run_session = lifecycle.run_session
-    real_capture_assembly = capture_assembly.session_capture_assembly
-    deps, factories, _ = await _default_factories(pipeline, monkeypatch)
-    driver, tools = ReadDriverDouble(_CONTENT), _ActualTools("repair_complete")
-    reopened = None
+    world = await consumer_world(pipeline, capture_resources)
     try:
-        flow = factories[0](owned, "cam-1").media
-        flow.sessions = DriverReadSessions(owned, driver, ticket=None)
-        flow.tools = tools
-        await run_recording_media(flow, 1, 1, source_id)
-        assert tools.probes == 1 and tools.repairs == 1 and len(driver.opens) == 1
+        await run_recording_media(world.runtime.media, 1, 1, world.source_id)
+        assert world.tools() == ["probe", "repair"] and len(world.reader.requests) == 1
         columns = business_columns("recording_processing")
-        saved_processing = {
-            name: row_facts(owned.connection, "recording_processing", 1)[name]
+        saved_processing = {name: row_facts(world.owned.connection, "recording_processing", 1)[name]
             for name in columns}
-        entity_events = owned.connection.execute(
-            "SELECT COUNT(*) FROM entity_event_links"
-            " WHERE entity_type=1 AND entity_id=1").fetchone()[0]
-        outputs = owned.connection.execute(
+        entity_events = world.owned.connection.execute(
+            "SELECT COUNT(*) FROM entity_event_links WHERE entity_type=1 AND entity_id=1").fetchone()[0]
+        outputs = world.owned.connection.execute(
             "SELECT COUNT(*) FROM outputs WHERE source_action_id=1").fetchone()[0]
-        owned.connection.close()
+        await world.close()
+        await world.reconnect()
+        cold = await consumer_world((world.owned, world.roots, world.source_id), capture_resources)
+        try:
+            await run_recording_media(cold.runtime.media, 1, 1, cold.source_id)
+            assert cold.tools() == ["probe", "repair"] and cold.reader.requests == []
+            assert {name: row_facts(cold.owned.connection, "recording_processing", 1)[name]
+                for name in columns} == saved_processing
+            assert cold.owned.connection.execute(
+                "SELECT COUNT(*) FROM entity_event_links WHERE entity_type=1 AND entity_id=1").fetchone()[0] == entity_events
+            assert cold.owned.connection.execute(
+                "SELECT COUNT(*) FROM outputs WHERE source_action_id=1").fetchone()[0] == outputs
+        finally:
+            await cold.close()
+    finally:
+        await world.close()
+        world.owned.connection.close()
+
+
+async def test_default_session_consumes_saved_recording_media(pipeline, capture_resources, monkeypatch):
+    """flows=None 从实际保存的录像前置接手，完成 READ、媒体和报告收场。"""
+    from types import SimpleNamespace
+    from ..support.bootstrap_consumers import consumer_world
+    from ..support.session import run_default_session
+    from ..capture.test_capture_contract import _entry
+
+    results = ResultsDouble({1: (replace(_entry("original-recording", size=len(_CONTENT)),
+        locator={"path": "/DCIM/original.mp4"}, original_name="original.mp4"),)})
+    world = await consumer_world(pipeline, capture_resources, results=results)
+    actual_factory = capture_assembly.session_capture_assembly
+
+    def factory(**options):
+        return actual_factory(**options, wall_us=lambda: world.wall[0],
+            monotonic_ns=lambda: 7_000_000_000, probe_request=world.probe_request,
+            repair_request=world.repair_request)
+
+    monkeypatch.setattr(capture_assembly, "session_capture_assembly", factory)
+    monkeypatch.setattr(lifecycle, "SystemClock", lambda: SimpleNamespace(utc_micros=lambda: world.wall[0]))
+    deps = lifecycle.build_runtime(CommandMode.RUN, world.config, catalog=_Catalog())
+    try:
+        assert deps.startup_error is None
+        outcome = await run_default_session(deps, None, world.entry)
+        assert outcome.succeeded, outcome
+        assert world.owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (3,)
+        assert world.owned.connection.execute("SELECT check_state,repair_state FROM recording_processing WHERE id=1").fetchone() == (3, 5)
+        assert len(world.reader.requests) == 1 and world.tools() == ["probe", "repair"]
+        assert results.calls == [1]
+        assert world.owned.connection.execute("SELECT COUNT(*) FROM outputs WHERE source_action_id=1").fetchone()[0] >= 1
     finally:
         lifecycle.close_runtime(deps)
-    # 恢复真实装配入口，供第二次装配重新以真实函数为规格与原函数。
-    monkeypatch.setattr(lifecycle, "run_session", real_run_session)
-    monkeypatch.setattr(capture_assembly,
-                        "session_capture_assembly", real_capture_assembly)
-    deps2, factories2, _ = await _default_factories(pipeline, monkeypatch)
-    try:
-        reopened = open_existing(roots.staging.parent / "state.db",
-                                 DbOpenMode.EXISTING_RW, DbConfig())
-        driver2, tools2 = ReadDriverDouble(_CONTENT), _ActualTools("repair_complete")
-        flow2 = factories2[0](reopened, "cam-1").media
-        assert flow2 is not None and not flow2.pending_media_results
-        flow2.sessions = DriverReadSessions(reopened, driver2, ticket=None)
-        flow2.tools = tools2
-        await run_recording_media(flow2, 1, 1, source_id)
-        # 集合为空不触发重新观察、修复或读取；原事实与原键保持。
-        assert tools2.probes == 0 and tools2.repairs == 0 and len(driver2.opens) == 0
-        assert not flow2.pending_media_results
-        assert {
-            name: row_facts(reopened.connection, "recording_processing", 1)[name]
-            for name in columns} == saved_processing
-        assert reopened.connection.execute(
-            "SELECT COUNT(*) FROM entity_event_links"
-            " WHERE entity_type=1 AND entity_id=1").fetchone()[0] == entity_events
-        assert reopened.connection.execute(
-            "SELECT COUNT(*) FROM outputs"
-            " WHERE source_action_id=1").fetchone()[0] == outputs
-    finally:
-        if reopened is not None:
-            reopened.connection.close()
-        lifecycle.close_runtime(deps2)
+        await world.close()

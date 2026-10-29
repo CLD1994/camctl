@@ -5,51 +5,43 @@ from pathlib import Path
 
 import pytest
 
-from camctl.capture.handlers import _register_observed, capture_handler
-from camctl.capture.media import MediaPolicy
-from camctl.capture.media_flow import MediaFlow, DriverReadSessions, run_recording_media, load_processing_status
-from camctl.capture.processing import SourceFileSave
+from camctl.capture.handlers import capture_handler
+from camctl.capture.media_flow import run_recording_media, load_processing_status
 from camctl.capture.result_inputs import observed_file
 from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import new_operation_key
-from camctl.host_files.media import MediaProbe, MediaArtifact
-from camctl.host_files.models import BoundDirectories, FileObservation, FileObservationKind
-from camctl.host_files.tasks import FileTaskResult, FileTaskId
+from camctl.host_files.media import MediaProbe
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
-from .test_media_flow import ReadDriverDouble, _Digest
 from .test_recording_media_link import _environment, _runtime, _CONTENT, _NOW
 from .test_capture_contract import _entry, ResultsDouble
 from .test_osv_probe_history import dual_probe
+from ..support.capture_media_cases import (ScriptTools, save_source_entry, cold_media, media_cases, recording_media)
 
 
-class Tools:
+class Tools(ScriptTools):
     def __init__(self, probe):
-        self.actual = probe
-        self.repairs = 0
-        self.probes = 0
+        super().__init__(probe, result='failed')
 
-    async def probe(self, input):
-        self.probes += 1
-        return FileTaskResult(FileTaskId("source-probe"), ran=True, value=self.actual)
+    @property
+    def repairs(self):
+        return len(super().repairs)
 
-    async def repair(self, input, output, **kwargs):
-        self.repairs += 1
-        return FileTaskResult(FileTaskId("repair"), ran=True,
-            value=MediaArtifact("tool_failed: exit=1", FileObservation(
-                FileObservationKind.MISSING, Path("staging/derived/output.mp4"))))
+    @property
+    def probes(self):
+        return len(super().probes)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("check_required", [True, False])
 @pytest.mark.parametrize("fault", ["short_video", "short_audio", "short_audio_unknown", "missing_video", "no_video_empty", "short_container", "short_container_unknown", "unknown", "tool_failed", "valid"])
 async def test_capture_result_respects_saved_source_probe_without_fabricating_check(tmp_path, check_required, fault):
-    owned, runtime, flow, source_id, source, tools, entry = prepared_input(tmp_path, check_required, fault)
+    owned, runtime, flow, source_id, source, tools, entry = (await prepared_input(tmp_path, check_required, fault))
     try:
-        await run_recording_media(flow, 1, 41, source_id, target_extension="osv")
-        status = load_processing_status(owned, 41)
+        await run_recording_media(flow, 1, 1, source_id, target_extension="osv")
+        status = load_processing_status(owned, 1)
         assert status.source_probe == source
-        media = parse_exact_json(owned.connection.execute("SELECT media_json FROM recording_processing WHERE id=41").fetchone()[0])
+        media = parse_exact_json(owned.connection.execute("SELECT media_json FROM recording_processing WHERE id=1").fetchone()[0])
         if check_required and source.error is None and source.duration_s is not None:
             assert media["duration"] == {"status":"available","seconds":source.duration_s}
             assert not {"streams", "source_probe", "output_probe"} & media.keys()
@@ -58,10 +50,9 @@ async def test_capture_result_respects_saved_source_probe_without_fabricating_ch
                     issue["details"]["actual_duration_s"] == Decimal("55") for issue in media["issues"])
         if not check_required:
             assert status.check_state == 1
-            assert parse_exact_json(owned.connection.execute("SELECT media_json FROM recording_processing WHERE id=41").fetchone()[0]) == {}
+            assert parse_exact_json(owned.connection.execute("SELECT media_json FROM recording_processing WHERE id=1").fetchone()[0]) == {}
         elif fault in ("short_video", "short_audio"):
             assert status.check_duration_s == Decimal("75") and status.check_issues
-        runtime.media = flow
         await capture_handler("camera_record")(1, runtime)
         actual = owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone()[0]
         known_failure = fault in ("short_video", "short_audio", "short_audio_unknown", "missing_video", "no_video_empty", "short_container", "short_container_unknown")
@@ -74,23 +65,22 @@ async def test_capture_result_respects_saved_source_probe_without_fabricating_ch
         owned.connection.close()
 
 
-def prepared_input(tmp_path, check_required, fault):
+async def prepared_input(tmp_path, check_required, fault):
     basis = '{"reason":2,"target_duration_ms":60000}' if check_required else (
     '{"reason":3,"target_duration_ms":60000,"control_elapsed_ns":75000000000}')
-    owned, staging = _environment(tmp_path, check_decision=3 if check_required else 2, check_basis=basis)
+    owned, staging = await _environment(tmp_path, check_decision=3 if check_required else 2, check_basis=basis)
     entry = replace(_entry("clip", size=len(_CONTENT)), original_name="clip.OSV",
         media_type=None, format_id="osv")
     # 手工媒体前置采用完整原观察；后续真实页沿同一序列化核对来源。
     entry = observed_file(ResultsDouble.serialized_entries((entry,))[0])
-    runtime = _runtime(owned, {1: (entry,)})
-    registered = _register_observed(runtime, 1, (entry,))
-    source_id = registered[0][1]
-    saved = CaptureRepository().save_source_file(SourceFileSave(41, source_id, _NOW), new_operation_key(), owned)
-    assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+    source_id = save_source_entry(owned, entry)
     if not check_required:
-        owned.connection.execute("UPDATE recording_processing SET repair_state=3,repair_basis_json=? WHERE id=41",
-            ('{"reason":2,"target_duration_ms":60000,"threshold_s":70000,"control_elapsed_ns":75000000000}',))
-        owned.connection.commit()
+        from camctl.capture.processing import RepairBasis, RepairReason, RepairDecisionChoice, RepairDecisionSave
+        saved = CaptureRepository().save_repair_decision(RepairDecisionSave(1,
+            RepairDecisionChoice.PENDING, RepairBasis(RepairReason.THRESHOLD_REACHED,
+                60000, Decimal('70'), control_elapsed_ns=75_000_000_000), _NOW),
+            new_operation_key(), owned)
+        assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
     source = dual_probe()
     streams = list(source.streams)
     if fault == "short_video": streams[1] = replace(streams[1], duration_s=Decimal("55"))
@@ -108,10 +98,8 @@ def prepared_input(tmp_path, check_required, fault):
     if fault == "tool_failed": source = MediaProbe(None, "tool_failed: exit=1")
     if fault == "no_video_empty": source = MediaProbe(None, "no_video_stream: 容器没有视频流")
     tools = Tools(source)
-    flow = MediaFlow(owned=owned, roots=BoundDirectories(staging=staging),
-        sessions=DriverReadSessions(owned, ReadDriverDouble(_CONTENT), ticket=None), tools=tools,
-        policy=MediaPolicy(Decimal("10")), occurred_at=lambda: _NOW + 100,
-        digest_supported=True, digest=_Digest(_CONTENT))
+    flow = await recording_media(owned, tools, staging, margin=Decimal(10))
+    runtime = await _runtime(owned, {1: (entry,)}, media=flow)
     return owned, runtime, flow, source_id, source, tools, entry
 
 
@@ -119,9 +107,9 @@ def prepared_input(tmp_path, check_required, fault):
 @pytest.mark.parametrize("fault", ["short_video", "short_audio", "short_audio_unknown", "missing_video", "no_video_empty", "short_container", "short_container_unknown", "unknown", "tool_failed", "valid"])
 async def test_running_repair_restart_keeps_original_probe_and_capture_failure_boundary(tmp_path, monkeypatch, fault):
     from camctl.persistence.runtime import open_existing, DbOpenMode, DbConfig
-    owned, runtime, flow, source_id, source, tools, entry = prepared_input(tmp_path, False, fault)
+    owned, runtime, flow, source_id, source, tools, entry = (await prepared_input(tmp_path, False, fault))
     original = CaptureRepository.start_repair_output
-    class ProcessStopped(Exception):
+    class ProcessStopped(BaseException):
         pass
     def interrupted(repository, command, key, current):
         saved = original(repository, command, key, current)
@@ -129,21 +117,20 @@ async def test_running_repair_restart_keeps_original_probe_and_capture_failure_b
         raise ProcessStopped()
     monkeypatch.setattr(CaptureRepository, "start_repair_output", interrupted)
     with pytest.raises(ProcessStopped):
-        await run_recording_media(flow, 1, 41, source_id, target_extension="osv")
+        await run_recording_media(flow, 1, 1, source_id, target_extension="osv")
     monkeypatch.setattr(CaptureRepository, "start_repair_output", original)
-    assert load_processing_status(owned, 41).repair_state == 4
+    assert load_processing_status(owned, 1).repair_state == 4
     path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
     owned.connection.close()
     reopened = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
     try:
-        flow.owned = reopened
-        flow.sessions = DriverReadSessions(reopened, ReadDriverDouble(_CONTENT), ticket=None)
+        flow = await cold_media(flow, reopened)
         probes = tools.probes
-        await run_recording_media(flow, 1, 41, source_id, target_extension="osv")
+        await run_recording_media(flow, 1, 1, source_id, target_extension="osv")
         assert tools.probes == probes
-        assert load_processing_status(reopened, 41).source_probe == source
-        assert load_processing_status(reopened, 41).check_state == 1
-        runtime = _runtime(reopened, {1: (entry,)})
+        assert load_processing_status(reopened, 1).source_probe == source
+        assert load_processing_status(reopened, 1).check_state == 1
+        runtime = (await _runtime(reopened, {1: (entry,)}, media=flow))
         await capture_handler("camera_record")(1, runtime)
         known_failure = fault in ("short_video", "short_audio", "short_audio_unknown", "missing_video", "no_video_empty", "short_container", "short_container_unknown")
         assert reopened.connection.execute("SELECT status FROM actions WHERE id=1").fetchone()[0] == (4 if known_failure else 3)
@@ -160,9 +147,9 @@ async def test_success_guard_independently_rejects_saved_input_failure_and_check
     from camctl.contracts.values import ConsistencyError
     from camctl.outputs.catalog import FileReference, OutputCatalogFacts, OutputDraft, OutputKind
     from camctl.persistence.repositories.capture import FinishCapture
-    owned, runtime, flow, source_id, source, tools, entry = prepared_input(tmp_path, False, fault)
+    owned, runtime, flow, source_id, source, tools, entry = (await prepared_input(tmp_path, False, fault))
     try:
-        await run_recording_media(flow, 1, 41, source_id, target_extension="osv")
+        await run_recording_media(flow, 1, 1, source_id, target_extension="osv")
         # 完成申请本身仍请求成功，守卫须读取原输入而独立拒绝该提案。
         outcome = CaptureRepository().finish_capture(FinishCapture(1,
             (OutputDraft(OutputKind.ORIGINAL, FileReference(device_file_id=source_id), True),),

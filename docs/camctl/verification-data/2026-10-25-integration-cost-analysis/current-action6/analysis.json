@@ -1,0 +1,254 @@
+{
+  "pytest_phases": [
+    {
+      "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters",
+      "phase": "setup",
+      "outcome": "passed",
+      "duration_seconds": 16.980210933004855
+    },
+    {
+      "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters",
+      "phase": "call",
+      "outcome": "passed",
+      "duration_seconds": 42.42580375599209
+    },
+    {
+      "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters",
+      "phase": "teardown",
+      "outcome": "passed",
+      "duration_seconds": 0.0003447519993642345
+    }
+  ],
+  "helper_inclusive_totals": {
+    "action6_package._run": {
+      "count": 5,
+      "seconds": 0.792397826
+    },
+    "_run": {
+      "count": 3,
+      "seconds": 2.225942106
+    },
+    "create_segmented_media_manifest": {
+      "count": 1,
+      "seconds": 0.56110165
+    },
+    "Deployment.run_client_driver": {
+      "count": 11,
+      "seconds": 21.945056002999998
+    },
+    "Deployment.export_plan_with_client": {
+      "count": 4,
+      "seconds": 7.841084651
+    },
+    "_prepare_installed_action6": {
+      "count": 1,
+      "seconds": 5.546032978
+    },
+    "HostDemo.start": {
+      "count": 1,
+      "seconds": 0.001869758
+    },
+    "HostDemo.submit": {
+      "count": 4,
+      "seconds": 5.191089638
+    },
+    "wait_for": {
+      "count": 7,
+      "seconds": 12.432792767
+    },
+    "_start_installed_capture": {
+      "count": 1,
+      "seconds": 3.213011368
+    },
+    "_submit_obtain": {
+      "count": 2,
+      "seconds": 5.714103612000001
+    },
+    "_wait_for_waiting_obtains": {
+      "count": 1,
+      "seconds": 0.002972365
+    },
+    "_release_clock": {
+      "count": 1,
+      "seconds": 0.000546752
+    },
+    "_save_report_snapshot": {
+      "count": 1,
+      "seconds": 0.001595769
+    },
+    "HostDemo.claim": {
+      "count": 1,
+      "seconds": 0.00380441
+    },
+    "Deployment.import_reports_with_client": {
+      "count": 1,
+      "seconds": 2.048229832
+    },
+    "_assert_client_delivery_files": {
+      "count": 2,
+      "seconds": 12.060301383
+    },
+    "_cleanup_inspection_inputs": {
+      "count": 1,
+      "seconds": 0.002053132
+    },
+    "_assert_ack": {
+      "count": 1,
+      "seconds": 2.845145994
+    },
+    "HostDemo.stop": {
+      "count": 1,
+      "seconds": 0.036618844
+    }
+  },
+  "client_operations": [
+    {
+      "operation": "export",
+      "elapsed_seconds": 2.753471928
+    },
+    {
+      "operation": "export",
+      "elapsed_seconds": 1.689822931
+    },
+    {
+      "operation": "export",
+      "elapsed_seconds": 1.664717063
+    },
+    {
+      "operation": "import",
+      "elapsed_seconds": 2.048081589
+    },
+    {
+      "operation": "import-media",
+      "elapsed_seconds": 1.687936221
+    },
+    {
+      "operation": "import-media",
+      "elapsed_seconds": 1.697289932
+    },
+    {
+      "operation": "import-media",
+      "elapsed_seconds": 2.917979389
+    },
+    {
+      "operation": "import-media",
+      "elapsed_seconds": 2.608278658
+    },
+    {
+      "operation": "import-media",
+      "elapsed_seconds": 1.613153243
+    },
+    {
+      "operation": "import-media",
+      "elapsed_seconds": 1.53291322
+    },
+    {
+      "operation": "export",
+      "elapsed_seconds": 1.731411829
+    }
+  ],
+  "top_level_spans": [
+    {
+      "helper": "action6_package._run",
+      "elapsed_seconds": 0.640123655,
+      "outcome": "passed"
+    },
+    {
+      "helper": "action6_package._run",
+      "elapsed_seconds": 0.014814734,
+      "outcome": "passed"
+    },
+    {
+      "helper": "action6_package._run",
+      "elapsed_seconds": 0.008670369,
+      "outcome": "passed"
+    },
+    {
+      "helper": "action6_package._run",
+      "elapsed_seconds": 0.073253785,
+      "outcome": "passed"
+    },
+    {
+      "helper": "action6_package._run",
+      "elapsed_seconds": 0.055535283,
+      "outcome": "passed"
+    },
+    {
+      "helper": "_prepare_installed_action6",
+      "elapsed_seconds": 5.546032978,
+      "outcome": "passed"
+    },
+    {
+      "helper": "_start_installed_capture",
+      "elapsed_seconds": 3.213011368,
+      "outcome": "passed"
+    },
+    {
+      "helper": "_submit_obtain",
+      "elapsed_seconds": 2.814998672,
+      "outcome": "passed"
+    },
+    {
+      "helper": "_submit_obtain",
+      "elapsed_seconds": 2.89910494,
+      "outcome": "passed"
+    },
+    {
+      "helper": "_wait_for_waiting_obtains",
+      "elapsed_seconds": 0.002972365,
+      "outcome": "passed"
+    },
+    {
+      "helper": "_release_clock",
+      "elapsed_seconds": 0.000546752,
+      "outcome": "passed"
+    },
+    {
+      "helper": "wait_for",
+      "elapsed_seconds": 10.940512217,
+      "outcome": "passed",
+      "message": "Action6 native 必需照片缺失后未按真实处理器完成前缀检查和独立取回"
+    },
+    {
+      "helper": "_save_report_snapshot",
+      "elapsed_seconds": 0.001595769,
+      "outcome": "passed"
+    },
+    {
+      "helper": "HostDemo.claim",
+      "elapsed_seconds": 0.00380441,
+      "outcome": "passed"
+    },
+    {
+      "helper": "Deployment.import_reports_with_client",
+      "elapsed_seconds": 2.048229832,
+      "outcome": "passed"
+    },
+    {
+      "helper": "_assert_client_delivery_files",
+      "elapsed_seconds": 6.304812806,
+      "outcome": "passed"
+    },
+    {
+      "helper": "_assert_client_delivery_files",
+      "elapsed_seconds": 5.755488577,
+      "outcome": "passed"
+    },
+    {
+      "helper": "_cleanup_inspection_inputs",
+      "elapsed_seconds": 0.002053132,
+      "outcome": "passed"
+    },
+    {
+      "helper": "_assert_ack",
+      "elapsed_seconds": 2.845145994,
+      "outcome": "passed"
+    },
+    {
+      "helper": "HostDemo.stop",
+      "elapsed_seconds": 0.036618844,
+      "outcome": "passed"
+    }
+  ],
+  "nested_warning": "helper时间嵌套，仅互不相交的顶层时段可相加；等待包含真实CLI/报告生成/轮询。"
+}

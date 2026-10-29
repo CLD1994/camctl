@@ -1,0 +1,24 @@
+{
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "apps/camctl/tests/unit/capture/test_preparation.py",
+    "apps/camctl/tests/unit/capture/test_media_stopped_read_resume.py",
+    "apps/camctl/tests/unit/capture/test_media_database_ownership.py",
+    "apps/camctl/tests/unit/capture/test_saved_response_handoff.py",
+    "apps/camctl/tests/unit/capture/test_capture_database_handoff.py",
+    "apps/camctl/tests/unit/bootstrap/test_runtime_database_factory.py",
+    "-q",
+    "--junitxml=/tmp/camctl-sync8db-evidence/root-unit/final/result.xml"
+  ],
+  "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+  "git_head": "fce36ddf06c167764e556f2b104787d62fae3262",
+  "environment_override": {
+    "PYTHONPATH": "apps/camctl/src"
+  },
+  "python": "Python 3.11.17",
+  "sqlite": "3.53.1",
+  "started_at_utc": "2026-10-25T19:50:49.174268+00:00",
+  "note": "同步后6个相关单元文件的确认测次，单独记录，不与先前红绿测次相加。"
+}

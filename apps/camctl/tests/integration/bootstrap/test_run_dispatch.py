@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
@@ -19,29 +18,21 @@ from pathlib import Path
 
 import pytest
 
-from camctl.acceptance.input import parse_input, read_input
 from camctl.acceptance.ports import ParameterDefinition
 from camctl.acceptance.service import CommandMode
-from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.bootstrap.flows import capture_flow
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
-from camctl.capture.handlers import CaptureRuntime
 from camctl.capture.results import FileKind as ResultFileKind
-from camctl.capture.timelapse import CaptureWaitConfig
-from camctl.operations.attempts import RetryWaitGate
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.repositories.capture import (
-    CaptureRepository,
     register_capture_guards,
 )
 from camctl.persistence.repositories.operations import (
-    OperationRepository,
     register_operation_guards,
 )
 from camctl.persistence.repositories.scheduling import SchedulingRepository
 from camctl.persistence.repositories.timelapse import (
-    TimelapseRepository,
     register_timelapse_guards,
 )
 from camctl.devices.evidence import DeviceObservation
@@ -51,8 +42,11 @@ from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.repositories.cancellation import (
     register_cancellation_guards,
 )
-from camctl.scheduling.rules import LaunchWindow
 from camctl.session.locks import probe_admission
+
+from ..support.database import business_database
+from ..support.session import (capture_factory, capture_entry, ResultDriver,
+                               run_default_session, session_config, parsed_plan)
 
 from ..capture.test_capture_contract import (
     DriverDouble,
@@ -104,18 +98,8 @@ class _Catalog:
 
 
 def _config_for(home: Path):
-    return load_config(
-        {
-            "paths": {
-                "state_db": str(home / "state.db"),
-                "log_file": str(home / "camctl.log"),
-                "staging": str(home / "staging"),
-                "ready": str(home / "ready"),
-                "processing": str(home / "processing"),
-            }
-        },
-        ConfigDefaults(),
-    )
+    return session_config(home, devices={
+        "cam-1": {"kind": "camera", "driver": "camctl-adb"}})
 
 
 def _future_schedule(seconds: int) -> str:
@@ -143,15 +127,7 @@ def _plan_body(request_id: str, scheduled_at: str) -> dict:
 
 
 async def _parsed(tmp_path: Path, body: dict):
-    target = tmp_path / "plan.json"
-    target.write_text(json.dumps(body), encoding="utf-8")
-
-    class Reader:
-        def read(self, path: str) -> bytes:
-            with open(path, "rb") as handle:
-                return handle.read()
-
-    return parse_input(await read_input(str(target), Reader()))
+    return await parsed_plan(tmp_path, body)
 
 
 class _ActivityDriver(DriverDouble):
@@ -195,36 +171,14 @@ class _SequentialActivityDriver(DriverDouble):
         )
 
 
-def _capture_factory(driver: DriverDouble, files: dict):
-    retry_gate = RetryWaitGate()
-
-    def build(owned, device_id: str) -> CaptureRuntime:
-        return CaptureRuntime(
-            owned=owned,
-            scheduling=SchedulingRepository(),
-            operations=OperationRepository(),
-            capture=CaptureRepository(),
-            timelapse=TimelapseRepository(),
-            driver=driver,
-            results=ResultsDouble(files),
-            evidence=_EVIDENCE,
-            wall_us=lambda: int(time.time() * 1_000_000),
-            monotonic_ns=time.monotonic_ns,
-            window_of=lambda action: LaunchWindow(
-                scheduled_at=action["scheduled_at"],
-                window_end=action["scheduled_at"] + action["max_delay_ms"] * 1000),
-            wait_config=lambda params: CaptureWaitConfig(
-                target_duration_ms=600_000, driver_margin_ms=0),
-            retry_gate=retry_gate,
-        )
-
-    return build
+def _capture_factory(cfg, driver: DriverDouble, files: dict):
+    return capture_factory(cfg, driver, ResultsDouble(files), _EVIDENCE)
 
 
 def _run(deps, source, driver, files):
     return asyncio.create_task(execute_command(
         deps, source,
-        flows={"scheduling": capture_flow(_capture_factory(driver, files))},
+        flows={"scheduling": capture_flow(_capture_factory(deps.config, driver, files))},
         poll_interval_s=0.1,
     ))
 
@@ -349,22 +303,10 @@ class TestRunWindowExpiration:
     """窗口外未派发动作的过期退出：报告流程与拍摄流程共同装配。"""
 
     @staticmethod
-    def _flows(deps, driver, files):
-        from camctl.bootstrap.lifecycle import (
-            _failure_log_wiring, _report_assembly,
-        )
-
-        # 生产报告与取消流程 + 本测试的自定义拍摄工厂：生产装配的
-        # scheduling 依赖进程驱动登记（测试不登记），必须排除；日志
-        # 副本服务与生产装配同源传入。
-        failure_log, _ = _failure_log_wiring(deps)
-        report_flows, supervisor = _report_assembly(deps, failure_log)
-        flows = {
-            "scheduling": capture_flow(_capture_factory(driver, files)),
-            **{name: flow for name, flow in report_flows.items()
-               if name != "scheduling"},
-        }
-        return flows, supervisor
+    async def _run_default(deps, source, driver, files):
+        entry = capture_entry(
+            driver, _EVIDENCE, results_driver=ResultDriver(ResultsDouble(files)))
+        return await run_default_session(deps, source, entry, poll_interval_s=0.1)
 
     async def test_run_expires_missed_window_and_exits(
         self, tmp_path: Path,
@@ -377,13 +319,11 @@ class TestRunWindowExpiration:
         # 持久化观察，动作按错过窗口过期。
         source = await _parsed(tmp_path, _plan_body("9", "2026-01-15 09:00:00"))
         driver = _ActivityDriver()
-        flows, supervisor = self._flows(deps, driver, {})
         try:
             outcome = await asyncio.wait_for(
-                execute_command(deps, source, flows=flows, poll_interval_s=0.1),
+                self._run_default(deps, source, driver, {}),
                 120)
         finally:
-            await supervisor.stop()
             close_runtime(deps)
 
         assert outcome.succeeded is True, outcome.details
@@ -412,7 +352,6 @@ class TestRunWindowExpiration:
             ObserveOutcome,
             ObserveWindowRequest,
         )
-        from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
         cfg = _config_for(tmp_path)
         assert initialize_state(
@@ -427,9 +366,7 @@ class TestRunWindowExpiration:
         body["actions"][0]["policy"]["max_delay_ms"] = 1500
         source = await _parsed(tmp_path, body)
 
-        owned = open_existing(
-            Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
-        try:
+        async with business_database(Path(cfg.paths.state_db)) as database:
             accepted = await accept_input(
                 source,
                 AcceptanceContext(
@@ -440,31 +377,28 @@ class TestRunWindowExpiration:
                         "utc_micros": staticmethod(
                             lambda: int(time.time() * 1_000_000))})(),
                 ),
-                new_operation_key(), owned,
+                new_operation_key(), database,
             )
             assert accepted.plan_id is not None
             while time.time() < scheduled_second + 0.1:
                 await asyncio.sleep(0.05)
             now_us = int(time.time() * 1_000_000)
-            observation = SchedulingRepository().observe_window(
+            observation_key = new_operation_key()
+            observation = await database.write(lambda owned: SchedulingRepository().observe_window(
                 ObserveWindowRequest(
                     action_id=1, trusted_wall_now=now_us, occurred_at=now_us),
-                new_operation_key(), owned)
+                observation_key, owned), key=observation_key)
             assert observation.value.outcome is ObserveOutcome.OBSERVED
             observed_at = now_us
-        finally:
-            owned.connection.close()
 
         # 等待窗口结束后进入会话：按已持久化观察区分为窗口耗尽。
         await asyncio.sleep(max(scheduled_second + 1.6 - time.time(), 0.0))
         driver = _ActivityDriver()
-        flows, supervisor = self._flows(deps, driver, {})
         try:
             outcome = await asyncio.wait_for(
-                execute_command(deps, source, flows=flows, poll_interval_s=0.1),
+                self._run_default(deps, source, driver, {}),
                 120)
         finally:
-            await supervisor.stop()
             close_runtime(deps)
 
         assert outcome.succeeded is True, outcome.details
@@ -512,13 +446,11 @@ class TestSameDeviceProgress:
             1: (_entry("shot-1", kind=ResultFileKind.PHOTO),),
             2: (_entry("shot-2", kind=ResultFileKind.PHOTO),),
         }
-        flows, supervisor = TestRunWindowExpiration._flows(deps, driver, files)
         try:
             outcome = await asyncio.wait_for(
-                execute_command(deps, source, flows=flows, poll_interval_s=0.1),
+                TestRunWindowExpiration._run_default(deps, source, driver, files),
                 120)
         finally:
-            await supervisor.stop()
             close_runtime(deps)
 
         assert outcome.succeeded is True, outcome.details

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="2" time="0.122" timestamp="2026-10-26T00:21:44.852954+08:00" hostname="1e0518e0c6b4"><testcase classname="tests.integration.test_memory_budget_launcher" name="test_real_cgroup_finishes_the_whole_process_tree" time="0.005"><failure message="camctl_memory.BudgetEnvironmentError: cgroup v1 宿主存在交换空间，无法保证全局回收期间不换页">tests/integration/test_memory_budget_launcher.py:124: in test_real_cgroup_finishes_the_whole_process_tree
+    memory.ensure_memory_budget_available(budget)
+scripts/camctl_memory.py:261: in ensure_memory_budget_available
+    group = _new_group(config)
+            ^^^^^^^^^^^^^^^^^^
+scripts/camctl_memory.py:216: in _new_group
+    raise BudgetEnvironmentError("cgroup v1 宿主存在交换空间，无法保证全局回收期间不换页")
+E   camctl_memory.BudgetEnvironmentError: cgroup v1 宿主存在交换空间，无法保证全局回收期间不换页</failure></testcase><testcase classname="tests.integration.test_memory_budget_launcher" name="test_real_cgroup_detects_aggregate_child_oom_when_parent_returns_zero" time="0.002"><failure message="camctl_memory.BudgetEnvironmentError: cgroup v1 宿主存在交换空间，无法保证全局回收期间不换页">tests/integration/test_memory_budget_launcher.py:152: in test_real_cgroup_detects_aggregate_child_oom_when_parent_returns_zero
+    memory.ensure_memory_budget_available(budget)
+scripts/camctl_memory.py:261: in ensure_memory_budget_available
+    group = _new_group(config)
+            ^^^^^^^^^^^^^^^^^^
+scripts/camctl_memory.py:216: in _new_group
+    raise BudgetEnvironmentError("cgroup v1 宿主存在交换空间，无法保证全局回收期间不换页")
+E   camctl_memory.BudgetEnvironmentError: cgroup v1 宿主存在交换空间，无法保证全局回收期间不换页</failure></testcase></testsuite></testsuites>

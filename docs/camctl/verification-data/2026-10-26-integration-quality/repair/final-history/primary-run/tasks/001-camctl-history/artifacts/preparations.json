@@ -1,0 +1,15 @@
+[
+  {
+    "label": "package-resources",
+    "command": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "/tmp/camctl-quality-repair-evidence/final-history/primary-run/tasks/001-camctl-history/source/apps/camctl/scripts/sync_resources.py"
+    ],
+    "cwd": "/tmp/camctl-quality-repair-evidence/final-history/primary-run/tasks/001-camctl-history/source",
+    "started_utc": "2026-10-25T20:36:07.960737+00:00",
+    "pid": 1702904,
+    "exit_code": 0,
+    "finished_utc": "2026-10-25T20:36:08.115938+00:00",
+    "wall_seconds": 0.15520684501098003
+  }
+]

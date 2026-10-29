@@ -1,0 +1,234 @@
+{
+  "recorded_at_utc": "2026-10-25T09:33:41.639798+00:00",
+  "reviewer": "/root/fix44_clock",
+  "mode": "只读源码与既有导出JSON审计；未修改代码、运行测试或创建代理。",
+  "source_root": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+  "source_head": "6ed77d6230ed238a0cc40c5d02e9f8d2d48dd57f",
+  "source_files": [
+    {
+      "path": "apps/client/tests/integration/browser-camera-parameters.test.ts",
+      "sha256": "63e206044bbd2501cff10b36a43b3472a646f784e667de4415d5257c08fcd7be"
+    },
+    {
+      "path": "apps/client/tests/integration/browser-editing.test.ts",
+      "sha256": "ecc665d11b3bb60bc3cd20be1aa030c233e79706477d53a3dd1c9a4c7a69753b"
+    },
+    {
+      "path": "apps/client/tests/integration/capability-fixtures.ts",
+      "sha256": "a62ec25640bbbfe7c43b213737e56d02d7143978f4d7dd1f8f3042985b397bc6"
+    },
+    {
+      "path": "tests/integration/test_device_capability_declarations.py",
+      "sha256": "849d1c23a0a8131221d34f7aab91cd6f3e2ba28eea7ce0a7dcaa3c47e1a9a671"
+    }
+  ],
+  "cases": {
+    "camera": {
+      "path": "apps/client/tests/integration/browser-camera-parameters.test.ts",
+      "line": 334,
+      "name": "能力源字段元数据驱动表单与设备指南，查看指南不改草稿",
+      "setup": "每任务一个已直接初始化的Application、HTTP服务、context、页面和非空单动作草稿。",
+      "timeout_ms": 60000
+    },
+    "editing": {
+      "path": "apps/client/tests/integration/browser-editing.test.ts",
+      "line": 1243,
+      "name": "设备指南逐项显示能力源任务和字段说明，查看指南不改草稿",
+      "setup": "整个目录共用一次真实初始化按钮、Application、HTTP、context、页面；新建空actions草稿后重载打开指南。",
+      "timeout_ms": 20000
+    }
+  },
+  "input_equivalence": {
+    "source": "两例均调用 clientTestTasks 和 clientTestCapabilitiesText。默认共同使用两个合成任务；安装版根目标使用同一CAMCTL_TEST_CAPABILITIES_FILE绝对路径，任务不被抽样。",
+    "installed_root_target": "tests/integration/test_device_capability_declarations.py:242",
+    "installed_input": "/tmp/camctl-fix44-final-20261025/tasks/005-root-test_device_capability_declarations/tmp/pytest/test_installed_metadata_reache0/installed-capabilities.json",
+    "installed_input_sha256": "cb12c186ed9a7e56cdbfe02d4a238df1a653c2e73123d959942faf438847639e",
+    "installed_task_matrix": [
+      {
+        "device_id": "action6",
+        "action_type": "camera_record",
+        "parameter_type": "action6_record",
+        "top_fields": [
+          "duration_s",
+          "resolution",
+          "fov",
+          "stabilization",
+          "aperture",
+          "bitrate",
+          "exposure"
+        ],
+        "first_branch_form_controls": 8,
+        "guide_description_fields": [
+          "duration_s",
+          "resolution",
+          "fov",
+          "stabilization",
+          "aperture",
+          "bitrate",
+          "exposure"
+        ],
+        "description_without_title": [],
+        "task_description_nonempty": true
+      },
+      {
+        "device_id": "action6",
+        "action_type": "camera_timelapse",
+        "parameter_type": "action6_timelapse",
+        "top_fields": [
+          "interval_s",
+          "duration_s",
+          "outputs",
+          "exposure"
+        ],
+        "first_branch_form_controls": 5,
+        "guide_description_fields": [
+          "interval_s",
+          "duration_s",
+          "outputs",
+          "exposure"
+        ],
+        "description_without_title": [],
+        "task_description_nonempty": true
+      },
+      {
+        "device_id": "hb-device",
+        "action_type": "camera_take_photo",
+        "parameter_type": "hasselblad_photo",
+        "top_fields": [
+          "capture_format",
+          "exposure",
+          "white_balance",
+          "focus"
+        ],
+        "first_branch_form_controls": 8,
+        "guide_description_fields": [],
+        "description_without_title": [],
+        "task_description_nonempty": true
+      },
+      {
+        "device_id": "hb-host",
+        "action_type": "camera_take_photo",
+        "parameter_type": "hasselblad_photo",
+        "top_fields": [
+          "capture_format",
+          "exposure",
+          "white_balance",
+          "focus"
+        ],
+        "first_branch_form_controls": 8,
+        "guide_description_fields": [],
+        "description_without_title": [],
+        "task_description_nonempty": true
+      },
+      {
+        "device_id": "osmo",
+        "action_type": "camera_record",
+        "parameter_type": "osmo360ii_record",
+        "top_fields": [
+          "duration_s",
+          "bitrate",
+          "exposure"
+        ],
+        "first_branch_form_controls": 3,
+        "guide_description_fields": [
+          "duration_s",
+          "bitrate",
+          "exposure"
+        ],
+        "description_without_title": [],
+        "task_description_nonempty": true
+      },
+      {
+        "device_id": "osmo",
+        "action_type": "camera_timelapse",
+        "parameter_type": "osmo360ii_timelapse",
+        "top_fields": [
+          "interval_s",
+          "duration_s",
+          "bitrate",
+          "exposure"
+        ],
+        "first_branch_form_controls": 4,
+        "guide_description_fields": [
+          "interval_s",
+          "duration_s",
+          "bitrate",
+          "exposure"
+        ],
+        "description_without_title": [],
+        "task_description_nonempty": true
+      }
+    ],
+    "totals": {
+      "tasks": 6,
+      "duplicate_task_descriptions": 6,
+      "duplicate_top_field_descriptions": 18,
+      "camera_form_controls": 36
+    }
+  },
+  "coverage_map": [
+    {
+      "fact": "设备/任务完整身份与任务说明来自当前能力源",
+      "camera": "每任务打开全目录指南，按device_id及parameter.name定位，任务说明toHaveText。",
+      "editing": "同一指南逐任务用同一定位和toHaveText；另外检查说明trim后非空。",
+      "overlap": "同输入中的每份任务说明；安装样例共6份。",
+      "preserve": "editing的说明非空断言不能随camera分支一起消失。"
+    },
+    {
+      "fact": "顶层指南字段说明来自Schema",
+      "camera": "每个非type字段；title存在用title，否则用字段name；description是字符串时toContainText。",
+      "editing": "仅在title及description均为字符串时执行同样字段说明断言。",
+      "overlap": "带title+description的相同字段；安装样例共18份。",
+      "preserve": "如调整责任归属，接收者必须继承name回退条件；本次默认和安装输入没有description存在却title缺失的实际字段，不能声称已运行该反例。"
+    },
+    {
+      "fact": "当前参数表单元数据",
+      "camera": "所有实际顶层普通控件可见和label(title/name)，对象组描述，以及首个实际对象分支中每个成员（含判别字段）的label/可见/description；fields为空时核对固定任务提示。",
+      "editing": "未打开这些参数表单，无对应断言。",
+      "overlap": "无。",
+      "preserve": "camera完整任务矩阵与每字段首分支控件事实；不能用editing指南事实承接。安装输入覆盖36个实际控件，未覆盖不存在的全部oneOf分支。"
+    },
+    {
+      "fact": "查看页面不改草稿",
+      "camera": "每份真实非空拍摄草稿在读取表单及打开指南前后进行完整Draft深比较。",
+      "editing": "空actions草稿查看指南前后完整Draft深比较。",
+      "overlap": "共同契约是查看不改写；实际输入状态不同。",
+      "preserve": "保留全部非空独立draft与空draft两类；不能只保留空草稿便宣称全覆盖。"
+    },
+    {
+      "fact": "样例合法性",
+      "camera": "每任务由schemaSample构造必填值，再由真实app.validateContent(before.content)核对完整公共规则。",
+      "editing": "无该断言；空actions没有相机参数样例。",
+      "overlap": "无。",
+      "preserve": "真实后端校验不可用客户端DOM说明或预设手写expected替代。"
+    },
+    {
+      "fact": "初始化与资源关闭",
+      "camera": "每任务直接app.store.initialize；结束close幂等并检查browser.contexts为空。",
+      "editing": "真实网页initialize按钮；结束afterEach关闭资源。",
+      "overlap": "基础装配，不是本例要验证每任务重复初始化的状态转换。",
+      "preserve": "共享camera的同一个App/context时，每个draft独立；contexts为空检查移到共享资源最终关闭后。editing的实际网页初始化保持。"
+    }
+  ],
+  "recommendation": {
+    "preferred": "保留两个用例和全部原断言，camera在同一不可变能力目录/Application/HTTP/context中逐任务真实创建并准确打开独立draft，批量读取当前可见DOM事实。该方案减少6次独立装配为1次，并保留全部状态分区；editing继续一次指南遍历及空草稿见证。",
+    "safe_shared_inputs": [
+      "不可变能力目录正文及派生任务清单。",
+      "同一camera用例中的只读App/HTTP/context；独立draft分别保存完整before/after快照。",
+      "测试侧DOM采集与匹配辅助；预期仍直接来自原能力输入。"
+    ],
+    "conditions": [
+      "hb-host与hb-device的参数任务名称相同，打开草稿和快照键必须使用device/action/parameter或draft.id，不可仅凭任务名或旧页面指向。",
+      "批量DOM读取保留原可见性、任务/字段归属和文本匹配条件；仅有textContent不能证明隐藏内容实际可见。",
+      "逐任务保留真实schemaSample输入、表单普通/对象分支事实、完整Draft深比较和app.validateContent。",
+      "一次性采集前等待当前页面真实就绪；不能将一次DOM快照缓存在其它独立页面/草稿上当作本次见证。",
+      "源文件选择规则和安装版-t能力源入口保持，所有注入任务继续遍历。"
+    ],
+    "optional_deduplication": "6份任务说明和18份顶层字段指南预期可由共同测试侧匹配器表达；这会减少重复代码。若要进一步减少指南读取或合并用例，仍须真实覆盖空actions及每份非空draft下的指南/不改写事实，并继承title缺失时name回退，不能直接删除其中一例。"
+  },
+  "failure_partitions_not_proven_by_these_cases": [
+    "能力目录损坏、加载失败、重载保留旧目录、额外Schema组合分支、非法导出等由相邻独立用例负责；两处目标本身不能承接这些失败分区。",
+    "本次installed JSON没有fields为空任务，固定任务提示只是保留的条件断言；默认两个合成任务同样均有字段。"
+  ],
+  "verification_limit": "未执行浏览器或测量耗时；这里只证明已覆盖输入/断言与可共享边界，不据此承诺达到60秒或20秒门槛。"
+}

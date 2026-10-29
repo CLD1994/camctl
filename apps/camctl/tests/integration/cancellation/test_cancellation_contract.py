@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from ..support.database import business_database, database_path
+
 from camctl.cancellation.models import (
     CancelApplyMode,
     CancelTarget,
@@ -158,6 +160,8 @@ def pipeline(tmp_path: Path):
             " 2, 1, 0, NULL, NULL, NULL, NULL, NULL, NULL, 1, 1, 1, 1)",
             (action_id, index, f"cancel-{action_id}", _NOW,
              json.dumps({"params": {"target": params}})))
+    from ..scheduling.test_resources import _seed_activity
+    _seed_activity(connection, _C, dispatch_state=3, activity_state=3)
     connection.commit()
     yield owned
     owned.connection.close()
@@ -169,7 +173,7 @@ def _value(owned, sql: str, *params):
     return row
 
 
-def _settlement(owned):
+def _settlement(database, owned):
     from unittest.mock import create_autospec
 
     from camctl.contracts.enums import enum_for
@@ -186,10 +190,11 @@ def _settlement(owned):
         withdraw_file, spec_set=True,
         return_value=WithdrawResult(WithdrawStage.WITHDRAWN, None))
 
-    def save(delivery_id, choice):
-        result = outputs.advance_withdrawal(
-            AdvanceWithdrawal(delivery_id, choice, _TICK),
-            new_operation_key(), owned)
+    async def save(delivery_id, choice):
+        key = new_operation_key()
+        result = await database.write(
+            lambda current: outputs.advance_withdrawal(
+                AdvanceWithdrawal(delivery_id, choice, _TICK), key, current), key=key)
         assert result.kind is DbOutcomeKind.COMPLETED, result.error
 
     async def execute_withdrawal(delivery_id):
@@ -197,7 +202,7 @@ def _settlement(owned):
             owned, "SELECT file_name,withdrawal_state FROM deliveries WHERE id=?",
             delivery_id)
         if state == int(states.NOT_REQUESTED):
-            save(delivery_id, WithdrawalChoice.REQUESTED)
+            await save(delivery_id, WithdrawalChoice.REQUESTED)
             state = int(states.PENDING)
         if state == int(states.PENDING):
             actual = await remove_ready(
@@ -206,23 +211,23 @@ def _settlement(owned):
         else:
             # 后到的请求采用原可靠结果，不再次执行 ready 删除。
             assert state == int(states.WITHDRAWN), state
-        save(delivery_id, WithdrawalChoice.WITHDRAWN)
+        await save(delivery_id, WithdrawalChoice.WITHDRAWN)
         return True
 
     return TargetSettlement(
-        owned=owned, outputs=outputs,
+        database=database, outputs=outputs,
         cancellations=CancellationRepository(),
         withdrawal_positions=lambda delivery_id: "ready",
         occurred_at=lambda: _TICK,
         withdrawal_execute=execute_withdrawal)
 
 
-def _runtime(owned):
+def _runtime(database, owned):
     from camctl.cancellation.service import CancellationRuntime
 
     return CancellationRuntime(
-        owned=owned, repository=CancellationRepository(),
-        settlement=_settlement(owned), occurred_at=lambda: _TICK)
+        database=database, repository=CancellationRepository(),
+        settlement=_settlement(database, owned), occurred_at=lambda: _TICK)
 
 
 def _eligibility(owned, target_id):
@@ -268,10 +273,11 @@ async def _run_cancel(owned, cancel_action_id, target):
         FixCancelTargets(cancel_action_id, fixed, _TICK),
         new_operation_key(), owned)
     assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
-    progress = await apply_cancel(
-        ApplyCancel(origin_action_id=cancel_action_id,
-                    item_ids=saved.value.item_ids),
-        _runtime(owned))
+    async with business_database(database_path(owned)) as database:
+        progress = await apply_cancel(
+            ApplyCancel(origin_action_id=cancel_action_id,
+                        item_ids=saved.value.item_ids),
+            _runtime(database, owned))
     from camctl.cancellation.models import FinishCancelAction
     from camctl.cancellation.rules import summarize_cancel
     summary = summarize_cancel(progress)

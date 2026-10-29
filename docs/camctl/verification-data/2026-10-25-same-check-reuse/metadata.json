@@ -1,0 +1,17 @@
+{
+  "source_head": "7644b7c6be42a995f3eab629721296e01309d826",
+  "source": "/tmp/camctl-same-check-options-ykdqfnct/source",
+  "run": "/tmp/camctl-same-check-options-ykdqfnct",
+  "prior_experiment": "/tmp/camctl-batch-write-deep-hfrt1dyy",
+  "N": 200,
+  "B": 4,
+  "scope": "外部函数可行性实验；不修改源码文件，不替代正式实现验收。",
+  "python": "3.11.17",
+  "sqlite": "3.53.1",
+  "camctl_file": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/__init__.py",
+  "frozen_sha256": "c1d702a1f8bdb74a74970bdf648cdae02eefa7d221c15529cf87296079a7f9f7",
+  "baseline_logical_sha256": "d545b7b70967276e09b556a8959df2f01d7fcc6706fdce17e86348e6dcb3d30b",
+  "result_logical_sha256": "9cd0007a92fb277d1fcca5c5729319308f652a353b20598fec6a8503c5eb4b4a",
+  "reused_physical_database_path": "/tmp/camctl-batch-write-deep-hfrt1dyy/world/state.db",
+  "note": "外部函数实验；各档一次，原始档前后各一次；trace仅原始与合并档。所有主源码文件未改，原提案/守卫清空及内存上限保持。此全原片样本不验证真实预览、损坏输入或全部容量规模。"
+}

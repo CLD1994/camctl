@@ -1,0 +1,43 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_______ test_inspection_dispatch_rejects_broken_owner_relations[attempt] _______
+
+pipeline = (OwnedConnection(connection=<sqlite3.Connection object at 0x7f7b3f2ab6a0>, metadata=DatabaseMetadata(application_id='c...tion.capture.test_input_copy._Copies object at 0x7f7b3f16ed50>, <function pipeline.<locals>.context at 0x7f7b3f1567a0>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f7b3f16dd10>
+damage = 'attempt'
+
+    @pytest.mark.parametrize("damage", ["copy", "ticket", "attempt", "action", "member", "set", "source", "observer"])
+    async def test_inspection_dispatch_rejects_broken_owner_relations(pipeline, monkeypatch, damage):
+        from dataclasses import replace
+        from camctl.contracts.values import ConsistencyError
+    
+        flow, _request, driver, digest, tools, _completions, copy_id, held = (
+            await _held_local_end(pipeline, monkeypatch))
+        deps = _dependencies(flow)
+        connection = flow.owned.connection
+        if damage == "copy":
+            flow.pending_read_ends[copy_id + 100] = flow.pending_read_ends.pop(copy_id)
+        elif damage == "ticket":
+            flow.pending_read_ends[copy_id] = replace(held, ticket=replace(held.ticket, run_id=held.ticket.run_id + 100))
+        elif damage == "attempt":
+            flow.pending_read_ends[copy_id] = replace(held, ticket=replace(held.ticket, attempt_id=held.ticket.attempt_id + 100))
+        else:
+            # 故障输入只改变投影关系；拒绝路径必须只读且保留原结束事实。
+            connection.execute("PRAGMA foreign_keys=OFF")
+            statement = {
+                "action": "UPDATE operation_runs SET action_id=99 WHERE copy_id=?",
+                "member": "UPDATE segment_inspections SET member_id=99 WHERE id=1",
+                "set": "UPDATE segment_members SET set_id=99 WHERE id=1",
+                "source": "UPDATE segment_inspections SET source_device_file_id=99 WHERE id=1",
+                "observer": "UPDATE device_files SET observer_action_id=99 WHERE id=11",
+            }[damage]
+            connection.execute(statement, (copy_id,) if damage == "action" else ())
+            connection.commit()
+        before = tuple(connection.iterdump())
+>       with pytest.raises(ConsistencyError):
+E       Failed: DID NOT RAISE ConsistencyError
+
+apps/camctl/tests/integration/bootstrap/test_inspection_read_dispatch.py:240: Failed
+=========================== short test summary info ============================
+FAILED apps/camctl/tests/integration/bootstrap/test_inspection_read_dispatch.py::test_inspection_dispatch_rejects_broken_owner_relations[attempt]
+1 failed, 22 deselected in 0.97s

@@ -1,0 +1,15 @@
+[
+  {
+    "label": "package-resources",
+    "command": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/source/apps/camctl/scripts/sync_resources.py"
+    ],
+    "cwd": "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/source",
+    "started_utc": "2026-10-24T23:57:15.970172+00:00",
+    "pid": 460237,
+    "exit_code": 0,
+    "finished_utc": "2026-10-24T23:57:16.014170+00:00",
+    "wall_seconds": 0.04399257600016426
+  }
+]

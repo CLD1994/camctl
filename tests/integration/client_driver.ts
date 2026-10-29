@@ -31,7 +31,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { stat } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
@@ -100,8 +100,9 @@ function exportPlan(
   bodyPath: string,
   planPath: string,
   receiptPath: string,
+  existing?: ApplicationStore,
 ) {
-  const app = openApp(storeDir);
+  const app = existing?.app ?? openApp(storeDir);
   const draft = app.createDraft({ text: readFileSync(bodyPath, "utf-8") });
   const exported = app.exportDraft(draft.id, draft.revision, draft.content);
   const body = app.downloadRequest(exported.id);
@@ -116,15 +117,16 @@ function exportPlan(
     }),
     "utf-8",
   );
-  app.store.close();
+  if (!existing) app.store.close();
 }
 
 function importReports(
   reportsDir: string,
   storeDir: string,
   receiptPath: string,
+  existing?: ApplicationStore,
 ) {
-  const app = openApp(storeDir);
+  const app = existing?.app ?? openApp(storeDir);
   const names = readdirSync(reportsDir).filter((name) =>
     name.startsWith("status-report-"),
   );
@@ -165,16 +167,17 @@ function importReports(
     }),
     "utf-8",
   );
-  app.store.close();
+  if (!existing) app.store.close();
 }
 
 async function importMedia(
   storeDir: string,
   claimedPath: string,
   receiptPath: string,
+  existing?: ApplicationStore,
 ) {
-  const app = openApp(storeDir);
-  const files = new Files(app);
+  const app = existing?.app ?? openApp(storeDir);
+  const files = existing?.files ?? new Files(app);
   try {
     const fileName = basename(claimedPath);
     const info = await stat(claimedPath);
@@ -228,7 +231,7 @@ async function importMedia(
     );
   } finally {
     await files.idle();
-    app.store.close();
+    if (!existing) app.store.close();
   }
 }
 
@@ -550,7 +553,7 @@ async function uploadFiles(
   storeDir: string,
   manifestPath: string,
   receiptPath: string,
-  existing?: BrowserStore,
+  existing?: ApplicationStore,
 ) {
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Array<{
     path: string;
@@ -645,7 +648,8 @@ async function openBrowserStore(storeDir: string, recorder?: SessionRecorder) {
   const requireClient = createRequire(
     new URL("../../apps/client/package.json", import.meta.url),
   );
-  const { chromium, expect: check } = requireClient("@playwright/test");
+  const { chromium, expect: check } = requireClient("@playwright/test") as
+    typeof import("../../apps/client/node_modules/@playwright/test");
   const app = openApp(storeDir),
     files = new Files(app),
     requests = new RequestLifecycle();
@@ -661,8 +665,8 @@ async function openBrowserStore(storeDir: string, recorder?: SessionRecorder) {
     () => files.idle(),
     () => app.store.close(),
   );
-  let browser;
-  let browserServer;
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+  let browserServer: Awaited<ReturnType<typeof chromium.launchServer>> | undefined;
   let browserIdentity: ReturnType<SessionRecorder["browserProcess"]> | undefined;
   let completion: Promise<void> | undefined;
   const close = () => {
@@ -737,14 +741,50 @@ async function openBrowserStore(storeDir: string, recorder?: SessionRecorder) {
 
 type BrowserStore = Awaited<ReturnType<typeof openBrowserStore>>;
 
+/** 不启动HTTP或浏览器的真实Application与Files，由世界负责关闭。 */
+async function openApplicationStore(storeDir: string, recorder: SessionRecorder) {
+  const app = openApp(storeDir), files = new Files(app);
+  let completion: Promise<void> | undefined;
+  const close = () => {
+    if (!completion) completion = (async () => {
+      const errors: unknown[] = [];
+      try { await files.idle(); } catch (error) { errors.push(error); }
+      try { app.store.close(); } catch (error) { errors.push(error); }
+      if (errors.length) throw new AggregateError(errors, "客户端上下文收场失败");
+    })();
+    return completion;
+  };
+  try {
+    recorder.opened("application_starts");
+    recorder.opened("files_starts");
+    await files.recover();
+    await files.idle();
+    return { app, files, close };
+  } catch (error) {
+    try { await close(); } catch (closing) {
+      throw new AggregateError([error, closing], "客户端启动与收场均失败");
+    }
+    throw error;
+  }
+}
+
+type ApplicationStore = Awaited<ReturnType<typeof openApplicationStore>>;
+
 class WorldClient {
-  current?: BrowserStore;
+  current?: ApplicationStore | BrowserStore;
 
   constructor(readonly storeDir: string, readonly recorder: SessionRecorder) {}
 
-  async browser() {
-    if (!this.current) this.current = await openBrowserStore(this.storeDir, this.recorder);
+  async application() {
+    if (this.current && "page" in this.current) await this.close();
+    if (!this.current) this.current = await openApplicationStore(this.storeDir, this.recorder);
     return this.current;
+  }
+
+  async browser(): Promise<BrowserStore> {
+    if (this.current && !("page" in this.current)) await this.close();
+    if (!this.current) this.current = await openBrowserStore(this.storeDir, this.recorder);
+    return this.current as BrowserStore;
   }
 
   async reopen() {
@@ -1212,16 +1252,7 @@ async function worldClientSession(
           closed = true;
           break;
         }
-        if (message.operation === "browser-photo-export" && args.length === 3)
-          await browserPhotoExport(storeDir, args[0], args[1], args[2], owner);
-        else if (message.operation === "application-photo-export" && args.length === 3)
-          await applicationPhotoExport(storeDir, args[0], args[1], args[2], owner);
-        else if (message.operation === "browser-plan-export" && args.length === 3)
-          await browserPlanExport(storeDir, args[0], args[1], args[2], owner);
-        else if (message.operation === "upload-files" && args.length === 2)
-          await uploadFiles(storeDir, args[0], args[1], await owner.browser());
-        else throw new Error(`未知客户端会话操作或路径数量：${message.operation}`);
-        const receiptPath = args.at(-1)!;
+        const receiptPath = await dispatchClientCommand(message.operation, args, owner);
         const receipt = parseJson(readFileSync(receiptPath, "utf8")) as any;
         if (receipt.request_id !== undefined) record.request_id = String(receipt.request_id);
         finish("passed");
@@ -1263,56 +1294,73 @@ async function worldClientSession(
   if (primary) throw primary;
 }
 
+type ClientCommand = {
+  argumentCount: number;
+  storeIndex: number;
+  shared?: boolean;
+  implicitSessionStore?: boolean;
+  sessionOnly?: boolean;
+  run: (args: string[], owner?: WorldClient) => unknown;
+};
+
+// 独立命令与会话共用完整参数签名；既有照片会话允许省略固定store。
+const clientCommands: Record<string, ClientCommand> = {
+  initialize: { argumentCount: 2, storeIndex: 0,
+    run: ([store, receipt]) => initializeClient(store, receipt) },
+  export: { argumentCount: 4, storeIndex: 0, shared: true,
+    run: async ([store, body, plan, receipt], owner) =>
+      exportPlan(store, body, plan, receipt, owner ? await owner.application() : undefined) },
+  import: { argumentCount: 3, storeIndex: 1, shared: true,
+    run: async ([reports, store, receipt], owner) =>
+      importReports(reports, store, receipt, owner ? await owner.application() : undefined) },
+  "import-media": { argumentCount: 3, storeIndex: 0, shared: true,
+    run: async ([store, claimed, receipt], owner) =>
+      importMedia(store, claimed, receipt, owner ? await owner.application() : undefined) },
+  "browser-photo-export": { argumentCount: 4, storeIndex: 0, shared: true, implicitSessionStore: true,
+    run: ([store, input, plan, receipt], owner) => browserPhotoExport(store, input, plan, receipt, owner) },
+  "application-photo-export": { argumentCount: 4, storeIndex: 0, shared: true,
+    implicitSessionStore: true, sessionOnly: true,
+    run: ([store, input, plan, receipt], owner) => applicationPhotoExport(store, input, plan, receipt, owner!) },
+  "browser-plan-export": { argumentCount: 4, storeIndex: 0, shared: true, implicitSessionStore: true,
+    run: ([store, input, plan, receipt], owner) => browserPlanExport(store, input, plan, receipt, owner) },
+  "upload-files": { argumentCount: 3, storeIndex: 0, shared: true, implicitSessionStore: true,
+    run: async ([store, manifest, receipt], owner) =>
+      uploadFiles(store, manifest, receipt, owner ? await owner.browser() : undefined) },
+  "capability-state": { argumentCount: 2, storeIndex: 0,
+    run: ([store, receipt]) => capabilityState(store, receipt) },
+  "validate-parameters": { argumentCount: 3, storeIndex: 0,
+    run: ([store, input, receipt]) => validateParameters(store, input, receipt) },
+  estimate: { argumentCount: 3, storeIndex: 0,
+    run: ([store, action, receipt]) => estimateAction(store, action, receipt) },
+  "reload-estimate": { argumentCount: 4, storeIndex: 0,
+    run: ([store, action, replacement, receipt]) => estimateAction(store, action, receipt, replacement) },
+};
+
+async function dispatchClientCommand(operation: string, arguments_: string[], owner?: WorldClient) {
+  const definition = clientCommands[operation];
+  const invalid = (): never => {
+    if (!owner) badUsage();
+    throw new Error(`未知客户端会话操作或路径数量：${operation}`);
+  };
+  if (!definition || (definition.sessionOnly && !owner)) invalid();
+  if (owner && !definition.shared) invalid();
+  const args = [...arguments_];
+  if (owner && definition.implicitSessionStore && args.length === definition.argumentCount - 1)
+    args.splice(definition.storeIndex, 0, owner.storeDir);
+  if (args.length !== definition.argumentCount || args.some((value) => !value)) invalid();
+  if (owner && resolve(args[definition.storeIndex]) !== resolve(owner.storeDir))
+    throw new Error("客户端命令store与会话store不一致");
+  await definition.run(args, owner);
+  return args.at(-1)!;
+}
+
 async function main() {
   if (command === "session") {
     const [storeDir, host, port, sessionId, metricsPath] = rest;
-    if (!storeDir || !host || !port || !sessionId || !metricsPath) badUsage();
+    if (rest.length !== 5 || !storeDir || !host || !port || !sessionId || !metricsPath) badUsage();
     await worldClientSession(storeDir, host, port, sessionId, metricsPath);
-  } else if (command === "initialize") {
-    const [storeDir, receiptPath] = rest;
-    if (!storeDir || !receiptPath) badUsage();
-    initializeClient(storeDir, receiptPath);
-  } else if (command === "browser-photo-export" || command === "browser-plan-export") {
-    const [storeDir, inputPath, planPath, receiptPath] = rest;
-    if (!storeDir || !inputPath || !planPath || !receiptPath) badUsage();
-    if (command === "browser-photo-export")
-      await browserPhotoExport(storeDir, inputPath, planPath, receiptPath);
-    else await browserPlanExport(storeDir, inputPath, planPath, receiptPath);
-  } else if (command === "upload-files") {
-    const [storeDir, manifestPath, receiptPath] = rest;
-    if (!storeDir || !manifestPath || !receiptPath) badUsage();
-    await uploadFiles(storeDir, manifestPath, receiptPath);
-  } else if (command === "capability-state") {
-    const [storeDir, receiptPath] = rest;
-    if (!storeDir || !receiptPath) badUsage();
-    await capabilityState(storeDir, receiptPath);
-  } else if (command === "validate-parameters") {
-    const [storeDir, inputPath, receiptPath] = rest;
-    if (!storeDir || !inputPath || !receiptPath) badUsage();
-    await validateParameters(storeDir, inputPath, receiptPath);
-  } else if (command === "export") {
-    const [storeDir, bodyPath, planPath, receiptPath] = rest;
-    if (!storeDir || !bodyPath || !planPath || !receiptPath) badUsage();
-    exportPlan(storeDir, bodyPath, planPath, receiptPath);
-  } else if (command === "import") {
-    const [reportsDir, storeDir, receiptPath] = rest;
-    if (!reportsDir || !storeDir || !receiptPath) badUsage();
-    importReports(reportsDir, storeDir, receiptPath);
-  } else if (command === "import-media") {
-    const [storeDir, claimedPath, receiptPath] = rest;
-    if (!storeDir || !claimedPath || !receiptPath) badUsage();
-    await importMedia(storeDir, claimedPath, receiptPath);
-  } else if (command === "estimate") {
-    const [storeDir, actionPath, receiptPath] = rest;
-    if (!storeDir || !actionPath || !receiptPath) badUsage();
-    await estimateAction(storeDir, actionPath, receiptPath);
-  } else if (command === "reload-estimate") {
-    const [storeDir, actionPath, replacementPath, receiptPath] = rest;
-    if (!storeDir || !actionPath || !replacementPath || !receiptPath)
-      badUsage();
-    await estimateAction(storeDir, actionPath, receiptPath, replacementPath);
   } else {
-    badUsage();
+    await dispatchClientCommand(command, rest);
   }
 }
 

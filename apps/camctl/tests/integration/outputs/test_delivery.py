@@ -17,6 +17,8 @@ from dataclasses import replace
 
 import pytest
 
+from ..support.outputs import output_operation
+
 from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.history.validators import EventContext, EventValidationError, validate_event
@@ -68,9 +70,12 @@ def prepared_env(read_targets, tmp_path):
     processing.mkdir()
     roots = BoundDirectories(staging=staging)
     asyncio.run(_drive(owned, roots, qualification.copy_id, segment_size=10))
-    step = asyncio.run(complete_copy(qualification.copy_id, CompletionContext(
-        repository=OutputsRepository(), owned=owned, roots=roots,
-        occurred_at=_NOW + 5)))
+    step = asyncio.run(output_operation(
+        owned, complete_copy, qualification.copy_id, CompletionContext,
+        repository=OutputsRepository(),
+        roots=roots,
+        occurred_at=_NOW + 5,
+    ))
     assert step.phase is CompletionPhase.PREPARED
     directories = DeliveryDirectories(
         staging=staging, ready=ready, processing=processing)
@@ -79,12 +84,12 @@ def prepared_env(read_targets, tmp_path):
 
 def _publish(owned, directories, delivery_id, *, occurred_at=_NOW + 10,
              conditions=True):
-    return asyncio.run(publish_delivery(
-        delivery_id,
-        DeliveryContext(
-            repository=OutputsRepository(), owned=owned,
-            directories=directories, occurred_at=occurred_at,
-            publication_conditions_met=conditions),
+    return asyncio.run(output_operation(
+        owned, publish_delivery, delivery_id, DeliveryContext,
+        repository=OutputsRepository(),
+        directories=directories,
+        occurred_at=occurred_at,
+        publication_conditions_met=conditions,
     ))
 
 

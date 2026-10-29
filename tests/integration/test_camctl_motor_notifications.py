@@ -6,6 +6,8 @@ JSON，也不声明设备到位。真实相机协作使用既有驱动契约替�
 """
 from __future__ import annotations
 
+from camctl_memory_plugin import budgeted_host_launcher
+
 import json
 import os
 import re
@@ -100,6 +102,7 @@ class MotorHost:
         self.log = deployment.root / "motor-host.log"
         self.events: list[dict] = []
         self.buffer = b""
+        launcher = budgeted_host_launcher(launcher, receipt_root=deployment.root)
         command = [str(binary), str(launcher), str(deployment.config_path),
                    str(deployment.ready), str(deployment.processing), str(self.log),
                    str(initial)]
@@ -165,7 +168,7 @@ class MotorHost:
             for task in root.iterdir() if root.exists() else []:
                 try:
                     children = (task / "children").read_text().split()
-                except FileNotFoundError:
+                except (FileNotFoundError, ProcessLookupError):
                     continue
                 for child in children:
                     pid = int(child)

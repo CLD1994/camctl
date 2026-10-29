@@ -1,0 +1,562 @@
+{
+  "schema_version": 1,
+  "session_id": "4ebd506a-344e-4784-97fe-811c7a61f1e5",
+  "node_pid": 1730813,
+  "counts": {
+    "node_process_starts": 1,
+    "application_starts": 1,
+    "files_starts": 1,
+    "http_server_starts": 0,
+    "browser_starts": 0
+  },
+  "browser_processes": [],
+  "commands": [
+    {
+      "id": 1,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/plan-body.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-plan-1.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-receipts/001-client-export.json"
+      ],
+      "started_monotonic_ns": "109359447863246",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 0,
+        "files_starts": 0,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "request_id": "4993012266068430438",
+      "finished_monotonic_ns": "109359711417747",
+      "elapsed_seconds": 0.263554501,
+      "node_cpu_microseconds": {
+        "user": 320215,
+        "system": 0
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 2,
+      "operation": "import",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/deployment/processing",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-receipts/002-client-import.json"
+      ],
+      "started_monotonic_ns": "109369522422484",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "finished_monotonic_ns": "109369593191613",
+      "elapsed_seconds": 0.070769129,
+      "node_cpu_microseconds": {
+        "user": 90593,
+        "system": 10681
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 3,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/plan-body.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-plan-2.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-receipts/003-client-export.json"
+      ],
+      "started_monotonic_ns": "109369599773357",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "request_id": "4068066236779056155",
+      "finished_monotonic_ns": "109369822648263",
+      "elapsed_seconds": 0.222874906,
+      "node_cpu_microseconds": {
+        "user": 321248,
+        "system": 5239
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 4,
+      "operation": "import",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/deployment/processing",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-receipts/004-client-import.json"
+      ],
+      "started_monotonic_ns": "109375159740912",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "finished_monotonic_ns": "109375268484816",
+      "elapsed_seconds": 0.108743904,
+      "node_cpu_microseconds": {
+        "user": 154635,
+        "system": 8518
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 5,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/plan-body.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-plan-3.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-receipts/005-client-export.json"
+      ],
+      "started_monotonic_ns": "109375271050657",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "request_id": "4900649679495823200",
+      "finished_monotonic_ns": "109375305639803",
+      "elapsed_seconds": 0.034589146,
+      "node_cpu_microseconds": {
+        "user": 73793,
+        "system": 0
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 6,
+      "operation": "import-media",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/deployment/processing/2.OSV",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-receipts/006-media-2.json"
+      ],
+      "started_monotonic_ns": "109376852629597",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "finished_monotonic_ns": "109376934017614",
+      "elapsed_seconds": 0.081388017,
+      "node_cpu_microseconds": {
+        "user": 89021,
+        "system": 9130
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 7,
+      "operation": "import-media",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/deployment/processing/1.OSV",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-receipts/007-media-1.json"
+      ],
+      "started_monotonic_ns": "109376938036043",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "finished_monotonic_ns": "109377031222791",
+      "elapsed_seconds": 0.093186748,
+      "node_cpu_microseconds": {
+        "user": 103490,
+        "system": 20853
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 8,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/plan-body.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-plan-4.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-receipts/008-client-export.json"
+      ],
+      "started_monotonic_ns": "109377033560123",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "request_id": "480418054738482730",
+      "finished_monotonic_ns": "109377068255433",
+      "elapsed_seconds": 0.03469531,
+      "node_cpu_microseconds": {
+        "user": 24305,
+        "system": 10999
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 9,
+      "operation": "import",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/deployment/processing",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-receipts/009-client-import.json"
+      ],
+      "started_monotonic_ns": "109380735070081",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "finished_monotonic_ns": "109380815867304",
+      "elapsed_seconds": 0.080797223,
+      "node_cpu_microseconds": {
+        "user": 70810,
+        "system": 19548
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 10,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/plan-body.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-plan-5.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-receipts/010-client-export.json"
+      ],
+      "started_monotonic_ns": "109380818735740",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "request_id": "817803716092656974",
+      "finished_monotonic_ns": "109380851960595",
+      "elapsed_seconds": 0.033224855,
+      "node_cpu_microseconds": {
+        "user": 31498,
+        "system": 0
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 11,
+      "operation": "import-media",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/deployment/processing/4.LRF",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-receipts/011-media-4.json"
+      ],
+      "started_monotonic_ns": "109382367627178",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "finished_monotonic_ns": "109382447895784",
+      "elapsed_seconds": 0.080268606,
+      "node_cpu_microseconds": {
+        "user": 87441,
+        "system": 1274
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 12,
+      "operation": "import-media",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/deployment/processing/3.LRF",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-receipts/012-media-3.json"
+      ],
+      "started_monotonic_ns": "109382451780472",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "finished_monotonic_ns": "109382527586201",
+      "elapsed_seconds": 0.075805729,
+      "node_cpu_microseconds": {
+        "user": 90756,
+        "system": 1307
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 13,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/plan-body.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-plan-6.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-receipts/013-client-export.json"
+      ],
+      "started_monotonic_ns": "109382537322883",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "request_id": "3051845780704119974",
+      "finished_monotonic_ns": "109382569200050",
+      "elapsed_seconds": 0.031877167,
+      "node_cpu_microseconds": {
+        "user": 35066,
+        "system": 0
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 14,
+      "operation": "import",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/deployment/processing",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-receipts/014-client-import.json"
+      ],
+      "started_monotonic_ns": "109386208900615",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "finished_monotonic_ns": "109386356818026",
+      "elapsed_seconds": 0.147917411,
+      "node_cpu_microseconds": {
+        "user": 176719,
+        "system": 0
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 15,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/plan-body.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-plan-7.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-receipts/015-client-export.json"
+      ],
+      "started_monotonic_ns": "109386359493104",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "request_id": "2307561490030068691",
+      "finished_monotonic_ns": "109386380413029",
+      "elapsed_seconds": 0.020919925,
+      "node_cpu_microseconds": {
+        "user": 0,
+        "system": 18001
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 16,
+      "operation": "import-media",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/deployment/processing/5.OSV",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/client-receipts/016-media-5.json"
+      ],
+      "started_monotonic_ns": "109388216075336",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "finished_monotonic_ns": "109388284647262",
+      "elapsed_seconds": 0.068571926,
+      "node_cpu_microseconds": {
+        "user": 65905,
+        "system": 676
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 17,
+      "operation": "close",
+      "arguments": [],
+      "started_monotonic_ns": "109389599185329",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "finished_monotonic_ns": "109389603639837",
+      "elapsed_seconds": 0.004454508,
+      "node_cpu_microseconds": {
+        "user": 1889,
+        "system": 0
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    }
+  ],
+  "node_cpu_scope": "process.cpuUsage只包含当前Node进程，不含Chromium或其他子进程。",
+  "status": "closed",
+  "node_cpu_at_ready_microseconds": {
+    "user": 1507850,
+    "system": 114388
+  },
+  "node_cpu_total_microseconds": {
+    "user": 3375309,
+    "system": 225473
+  }
+}

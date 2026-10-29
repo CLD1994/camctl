@@ -1,0 +1,52 @@
+............F
+=================================== FAILURES ===================================
+_________________ test_newly_eligible_low_key_is_rediscovered __________________
+
+read_targets = OwnedConnection(connection=<sqlite3.Connection object at 0x7f5518c4a020>, metadata=DatabaseMetadata(application_id='ca...rsion=5, staging_path='/srv/camctl/staging', ready_path='/srv/camctl/ready', processing_path='/srv/camctl/processing'))
+
+    def test_newly_eligible_low_key_is_rediscovered(read_targets):
+        from camctl.outputs.read_discovery import ReadDiscoveryOwner
+        from .test_read_slot import _later_read_command
+    
+        owned = read_targets
+        repository = OutputsRepository(read_batch_size=1)
+        owned.connection.execute("UPDATE actions SET status=3 WHERE id=12")
+        owned.connection.commit()
+        late = repository.grant_file(_later_read_command(), new_operation_key(), owned)
+        assert late.kind is DbOutcomeKind.COMPLETED, late.error
+        owner = ReadDiscoveryOwner(1)
+        owner.begin_round(owned.connection, _NOW)
+>       assert owner.reads(owned.connection, "reads", _NOW).items[0].copy_id == late.value.copy_id
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'coroutine' object has no attribute 'items'
+
+apps/camctl/tests/integration/outputs/test_read_discovery.py:185: AttributeError
+=============================== warnings summary ===============================
+tests/integration/outputs/test_read_discovery.py::test_newly_eligible_low_key_is_rediscovered
+  /opt/devcontainer/.codex/worktrees/de38/camctl/apps/camctl/tests/integration/outputs/test_read_discovery.py:184: RuntimeWarning: coroutine 'ReadDiscoveryOwner.begin_round' was never awaited
+    owner.begin_round(owned.connection, _NOW)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============================= slowest 15 durations =============================
+0.22s call     tests/integration/outputs/test_read_discovery.py::test_product_predecessor_scan_retains_only_current_batch
+0.07s setup    tests/integration/outputs/test_read_discovery.py::test_later_registered_earlier_action_wins_without_full_load
+0.04s setup    tests/integration/outputs/test_read_discovery.py::test_product_predecessor_scan_retains_only_current_batch
+0.04s setup    tests/integration/outputs/test_read_discovery.py::test_missing_candidate_basis_is_not_filtered_away[holder_binding]
+0.04s setup    tests/integration/outputs/test_read_discovery.py::test_scope_cannot_read_another_database
+0.04s setup    tests/integration/outputs/test_read_discovery.py::test_missing_candidate_basis_is_not_filtered_away[run_owner]
+0.04s setup    tests/integration/outputs/test_read_discovery.py::test_missing_candidate_basis_is_not_filtered_away[run_copy]
+0.03s setup    tests/integration/outputs/test_read_discovery.py::test_held_retry_copy_precedes_new_candidates
+0.03s setup    tests/integration/outputs/test_read_discovery.py::test_missing_candidate_basis_is_not_filtered_away[scheduled]
+0.02s setup    tests/integration/outputs/test_read_discovery.py::test_host_missing_owner_is_not_filtered_away
+0.02s setup    tests/integration/outputs/test_read_discovery.py::test_newly_eligible_low_key_is_rediscovered
+0.02s setup    tests/integration/outputs/test_read_discovery.py::test_delivery_discovery_keeps_internal_holder_with_capture_owner[True]
+0.02s call     tests/integration/outputs/test_read_discovery.py::test_delivery_discovery_keeps_internal_holder_with_capture_owner[True]
+0.02s setup    tests/integration/outputs/test_read_discovery.py::test_internal_and_delivery_reads_share_global_order
+0.02s call     tests/integration/outputs/test_read_discovery.py::test_delivery_discovery_keeps_internal_holder_with_capture_owner[False]
+=========================== short test summary info ============================
+FAILED apps/camctl/tests/integration/outputs/test_read_discovery.py::test_newly_eligible_low_key_is_rediscovered
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+1 failed, 12 passed, 1 warning in 2.44s
+sys:1: RuntimeWarning: coroutine 'ReadDiscoveryOwner.reads' was never awaited

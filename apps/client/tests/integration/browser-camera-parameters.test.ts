@@ -9,6 +9,7 @@ import { createHttpApp } from "../../src/server/http";
 import { createStop, RequestLifecycle } from "../../src/server/lifecycle";
 import { parseJson, stringifyJson } from "../../src/shared/json";
 import { choose, readOptions } from "./select-support";
+import { checkVisibleFields, checkVisibleGuide } from "./metadata-support";
 import { titledParameter } from "../fixtures/titled-parameters";
 import {
   clientTestCapabilitiesText,
@@ -84,16 +85,19 @@ async function setup(
     () => files.idle(),
     () => app.store.close(),
   );
-  clean.push(async () => {
-    await context.close();
-    await stop();
-    rmSync(directory, { recursive: true, force: true });
-  });
+  let closing: Promise<void> | undefined;
+  const close = () =>
+    (closing ??= (async () => {
+      await context.close();
+      await stop();
+      rmSync(directory, { recursive: true, force: true });
+    })());
+  clean.push(close);
   await page.goto(
     `http://127.0.0.1:${(server.address() as { port: number }).port}`,
   );
   await page.getByTestId("draft-open-button").click();
-  return { app, page, draft, directory };
+  return { app, page, draft, directory, close };
 }
 
 it("曝光缺省时先选择模式，浏览页面不自动填写任何选项", async () => {
@@ -331,7 +335,7 @@ it.each([false, true])(
 it("能力源字段元数据驱动表单与设备指南，查看指南不改草稿", async () => {
   const tasks = clientTestTasks();
   expect(tasks.length).toBeGreaterThan(0);
-  for (const { device, action, parameter } of tasks) {
+  const inputs = tasks.map(({ device, action, parameter }) => {
     const properties = parameter.schema.properties as Record<
       string,
       Record<string, any>
@@ -339,17 +343,16 @@ it("能力源字段元数据驱动表单与设备指南，查看指南不改草�
     const fields = Object.entries(properties).filter(
       ([name]) => name !== "type",
     );
-    const required = new Set(
-      (parameter.schema.required ?? []) as string[],
-    );
+    const required = new Set((parameter.schema.required ?? []) as string[]);
     const params: Record<string, unknown> = { type: parameter.type };
-    for (const [name, schema] of fields) {
+    for (const [name, schema] of fields)
       if (required.has(name)) params[name] = schemaSample(schema, name);
-    }
-    const { app, page, draft } = await setup("10", false, {
-      capabilities: clientTestCapabilitiesText(),
+    return {
+      device,
+      parameter,
+      fields,
       draftText: JSON.stringify({
-        name: "能力元数据测试",
+        name: `${device.device_id}/${action.type}/${parameter.type}`,
         actions: [
           {
             name: parameter.name,
@@ -361,77 +364,90 @@ it("能力源字段元数据驱动表单与设备指南，查看指南不改草�
           },
         ],
       }),
-    });
+    };
+  });
+  const {
+    app,
+    page,
+    draft: first,
+    close,
+  } = await setup("10", false, {
+    capabilities: clientTestCapabilitiesText(),
+    draftText: inputs[0].draftText,
+  });
+  const saved = [];
+  for (const [index, input] of inputs.entries()) {
+    const { device, parameter, fields } = input;
+    const draft =
+      index === 0 ? first : app.createDraft({ text: input.draftText });
+    if (index !== 0) {
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await page
+        .getByTestId("draft-open-button")
+        .filter({
+          hasText: `${device.device_id}/${tasks[index].action.type}/${parameter.type}`,
+        })
+        .click();
+    }
     const before = app.draft(draft.id);
+    expect(before.content.text).toBe(input.draftText);
+    await check(page.getByLabel("计划名称")).toHaveValue(
+      `${device.device_id}/${tasks[index].action.type}/${parameter.type}`,
+    );
     if (fields.length === 0)
       await check(
         page.getByText("该任务使用固定设置，无需填写其他参数。", {
           exact: true,
         }),
       ).toBeVisible();
+    const controls: Parameters<typeof checkVisibleFields>[1] = [];
+    const objects: Parameters<typeof checkVisibleFields>[2] = [];
     for (const [name, schema] of fields) {
       const branch = objectOneOfBranch(schema);
       if (branch) {
-        const object = page
-          .locator(".object-branch-field")
-          .filter({ has: page.locator("h5").getByText(name, { exact: true }) });
         if (typeof schema.description === "string")
-          await check(
-            object.getByText(schema.description, { exact: true }),
-          ).toBeVisible();
-        // 逐个核对实际存在的字段，判别字段本身也是需要展示说明的普通事实。
+          objects.push({ name, description: schema.description });
         for (const [member, field] of Object.entries(
           branch.properties as Record<string, Record<string, unknown>>,
-        )) {
-          const control = page.getByLabel(
-            `${typeof field.title === "string" ? field.title : member} (${member})`,
-            { exact: true },
-          );
-          await check(control).toBeVisible();
-          if (typeof field.description === "string")
-            await check(
-              object.locator(".field").filter({ has: control }),
-            ).toContainText(field.description);
-        }
-      } else {
-        const control = page.getByLabel(
-          `${typeof schema.title === "string" ? schema.title : name} (${name})`,
-          { exact: true },
-        );
-        await check(control).toBeVisible();
-        if (typeof schema.description === "string")
-          await check(
-            page.locator(".field").filter({ has: control }),
-          ).toContainText(schema.description);
-      }
+        ))
+          controls.push({
+            label: `${typeof field.title === "string" ? field.title : member} (${member})`,
+            object: name,
+            ...(typeof field.description === "string"
+              ? { description: field.description }
+              : {}),
+          });
+      } else
+        controls.push({
+          label: `${typeof schema.title === "string" ? schema.title : name} (${name})`,
+          ...(typeof schema.description === "string"
+            ? { description: schema.description }
+            : {}),
+        });
     }
-    await page.getByRole("button", { name: "设备说明" }).click();
-    const guideTask = page
-      .getByTestId("device-guide")
-      .locator(".guide-device")
-      .filter({
-        has: page.getByRole("heading", { name: device.device_id, exact: true }),
-      })
-      .locator(".guide-task")
-      .filter({
-        has: page.getByRole("heading", { name: parameter.name, exact: true }),
-      });
-    await check(guideTask.locator(".guide-description")).toHaveText(
-      parameter.description,
-    );
-    for (const [name, schema] of fields) {
-      const guideField = guideTask.locator(".guide-fields > div").filter({
-        has: page.locator("dt").filter({
-          hasText: typeof schema.title === "string" ? schema.title : name,
-        }),
-      });
-      if (typeof schema.description === "string")
-        await check(guideField).toContainText(schema.description);
-    }
+    await checkVisibleFields(page, controls, objects);
+    await page.getByTestId("nav-devices").click();
+    await checkVisibleGuide(page, [
+      {
+        device: device.device_id,
+        name: parameter.name,
+        description: parameter.description,
+        fields: fields
+          .filter(([, schema]) => typeof schema.description === "string")
+          .map(([name, schema]) => ({
+            title: typeof schema.title === "string" ? schema.title : name,
+            description: schema.description as string,
+          })),
+      },
+    ]);
     expect(app.draft(draft.id)).toEqual(before);
-    // 取值仅用于建立可显示样例；真实后端仍须证明各任务参数符合完整规则。
     expect(() => app.validateContent(before.content)).not.toThrow();
+    saved.push(before);
   }
+  for (const before of saved) expect(app.draft(before.id)).toEqual(before);
+  expect(new Set(saved.map(({ id }) => id)).size).toBe(tasks.length);
+  await close();
+  expect(browser.contexts()).toHaveLength(0);
 }, 60000);
 
 function objectOneOfBranch(schema: Record<string, any>) {
@@ -604,7 +620,7 @@ it("能力源的仅模式曝光对象可切换并随动作保存必选码率", a
         },
       ],
     });
-    const { app, page, draft } = await setup("10", false, {
+    const { app, page, draft, close } = await setup("10", false, {
       capabilities: clientTestCapabilitiesText(),
       draftText,
     });
@@ -641,6 +657,8 @@ it("能力源的仅模式曝光对象可切换并随动作保存必选码率", a
     expect(() =>
       app.exportDraft(draft.id, saved.revision, saved.content),
     ).not.toThrow();
+    await close();
+    expect(browser.contexts()).toHaveLength(0);
   }
 });
 
@@ -1497,7 +1515,7 @@ it("能力源的 Action6 延时参数、预览与三种输出经真实表单和�
     }
     const field = schema.properties.outputs;
     for (const output of ["video", "video_raw", "video_jpeg"]) {
-      const { app, page, draft } = await setup("10", false, {
+      const { app, page, draft, close } = await setup("10", false, {
         capabilities: clientTestCapabilitiesText(),
         draftText: JSON.stringify({ name: "Action6延时表单", actions: [{
           name: parameter.name, type: action.type, device_id: device.device_id,
@@ -1515,6 +1533,8 @@ it("能力源的 Action6 延时参数、预览与三种输出经真实表单和�
       const saved = app.draft(draft.id);
       const request = app.exportDraft(draft.id, saved.revision, saved.content);
       expect((request.body as any).actions[0].params.outputs).toBe(output);
+      await close();
+      expect(browser.contexts()).toHaveLength(0);
     }
   }
 }, 60000);

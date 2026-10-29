@@ -42,8 +42,8 @@ def _request(owned, target):
     return SettleCanceledObtain(target, _NOW, ids)
 
 
-def _apply(owned, target):
-    _accept(owned, "3", [{"name": "取消取回", "type": "cancel_task",
+async def _apply(owned, target):
+    await _accept(owned, "3", [{"name": "取消取回", "type": "cancel_task",
         "scheduled_at": "2026-01-15 09:00:00",
         "params": {"target": {"action_instance_id": str(target)}}}])
     origin, spec = owned.connection.execute(
@@ -63,7 +63,7 @@ async def _partial(environment):
     cfg, owned, context, driver = environment
     await _save_photos(cfg, owned, context, driver)
     target = await _active_obtain(environment, "2")
-    _apply(owned, target)
+    await _apply(owned, target)
     return target
 
 
@@ -164,7 +164,7 @@ async def test_cancel_obtain_unbuilt_items_end_without_new_delivery_or_attempt(e
     from camctl.outputs import obtain_flow as obtain
     cfg, owned, context, driver = environment
     await _save_photos(cfg, owned, context, driver)
-    _accept(owned, "2", [{"name": "取回待建档", "type": "obtain_action_outputs",
+    await _accept(owned, "2", [{"name": "取回待建档", "type": "obtain_action_outputs",
         "scheduled_at": "2026-01-15 09:00:00",
         "params": {"source": {"plan_instance_id": "1", "group": "files"}}}])
     target = owned.connection.execute("SELECT MAX(id) FROM actions WHERE type=4").fetchone()[0]
@@ -174,7 +174,7 @@ async def test_cancel_obtain_unbuilt_items_end_without_new_delivery_or_attempt(e
     assert obtain._resolve_sources(runtime, obtain._action_facts(owned.connection, target), _NOW)
     obtain._fix_pending_selections(runtime, _NOW)
     assert owned.connection.execute("SELECT status,delivery_id FROM obtain_items ORDER BY id").fetchall() == [(2, None), (2, None)]
-    _apply(owned, target)
+    await _apply(owned, target)
     before_attempts = _attempts(owned)
     saved = outputs.OutputsRepository().settle_canceled_obtain(_request(owned, target), new_operation_key(), owned)
     assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
@@ -208,7 +208,7 @@ async def test_cancel_obtain_keeps_original_unfinished_read_and_all_source_prote
     ticket = obtain._begin_read_attempt(runtime, assembly, facts, _NOW)
     assert ticket is not None
     assert owned.connection.execute("SELECT COUNT(*) FROM operation_attempts WHERE status=1").fetchone() == (1,)
-    _apply(owned, target)
+    await _apply(owned, target)
     request = _request(owned, target)
     before = tuple(owned.connection.iterdump())
 
@@ -250,7 +250,7 @@ async def test_cancel_obtain_preserves_actual_publication_boundary(environment, 
             else:
                 intent = outputs.OutputsRepository().save_publication_intent(PublicationIntentRequest(identity, _NOW), new_operation_key(), owned)
                 assert intent.kind is DbOutcomeKind.COMPLETED, intent.error
-    _apply(owned, target)
+    await _apply(owned, target)
     before = tuple(owned.connection.iterdump())
     result = outputs.OutputsRepository().settle_canceled_obtain(_request(owned, target), new_operation_key(), owned)
     assert result.kind is DbOutcomeKind.COMPLETED, result.error

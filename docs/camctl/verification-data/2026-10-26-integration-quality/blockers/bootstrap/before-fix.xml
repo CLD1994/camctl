@@ -1,0 +1,234 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="33.731" timestamp="2026-10-26T03:20:14.658782+08:00" hostname="1e0518e0c6b4"><testcase classname="tests.integration.bootstrap.test_read_discovery_default" name="test_submit_during_initial_discovery_is_not_lost" time="31.048"><failure message="TimeoutError">fut = &lt;Task cancelled name='Task-41' coro=&lt;probe.&lt;locals&gt;.execute() done, defined at /tmp/camctl-failure-repair-evidence/bootstrap/diagnostics/exit_probe.py:133&gt;&gt;
+timeout = 30
+
+    async def wait_for(fut, timeout):
+        """Wait for the single Future or coroutine to complete, with timeout.
+    
+        Coroutine will be wrapped in Task.
+    
+        Returns result of the Future or coroutine.  When a timeout occurs,
+        it cancels the task and raises TimeoutError.  To avoid the task
+        cancellation, wrap it in shield().
+    
+        If the wait is cancelled, the task is also cancelled.
+    
+        This function is a coroutine.
+        """
+        loop = events.get_running_loop()
+    
+        if timeout is None:
+            return await fut
+    
+        if timeout &lt;= 0:
+            fut = ensure_future(fut, loop=loop)
+    
+            if fut.done():
+                return fut.result()
+    
+            await _cancel_and_wait(fut, loop=loop)
+            try:
+                return fut.result()
+            except exceptions.CancelledError as exc:
+                raise exceptions.TimeoutError() from exc
+    
+        waiter = loop.create_future()
+        timeout_handle = loop.call_later(timeout, _release_waiter, waiter)
+        cb = functools.partial(_release_waiter, waiter)
+    
+        fut = ensure_future(fut, loop=loop)
+        fut.add_done_callback(cb)
+    
+        try:
+            # wait until the future completes or the timeout
+            try:
+                await waiter
+            except exceptions.CancelledError:
+                if fut.done():
+                    return fut.result()
+                else:
+                    fut.remove_done_callback(cb)
+                    # We must ensure that the task is not running
+                    # after wait_for() returns.
+                    # See https://bugs.python.org/issue32751
+                    await _cancel_and_wait(fut, loop=loop)
+                    raise
+    
+            if fut.done():
+                return fut.result()
+            else:
+                fut.remove_done_callback(cb)
+                # We must ensure that the task is not running
+                # after wait_for() returns.
+                # See https://bugs.python.org/issue32751
+                await _cancel_and_wait(fut, loop=loop)
+                # In case task cancellation failed with some
+                # exception, we should re-raise it
+                # See https://bugs.python.org/issue40607
+                try:
+&gt;                   return fut.result()
+                           ^^^^^^^^^^^^
+
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/tasks.py:500: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/tmp/camctl-failure-repair-evidence/bootstrap/diagnostics/exit_probe.py:148: in execute
+    try:return await real_execute(deps,*args,**kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/bootstrap/lifecycle.py:1185: in execute_command
+    outcome = await run_session(context, source)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/session/service.py:667: in run_session
+    return await _run_session(context, source)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/session/service.py:1166: in _run_session
+    raise original.with_traceback(original.__traceback__)
+apps/camctl/src/camctl/session/service.py:1002: in _run_session
+    outcome = await drive()
+              ^^^^^^^^^^^^^
+apps/camctl/src/camctl/session/service.py:906: in drive
+    fatal = await _drive_flows(context)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/tmp/camctl-failure-repair-evidence/bootstrap/diagnostics/exit_probe.py:116: in drive
+    return await real_drive(context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/session/service.py:1333: in _drive_flows
+    await flow(context)
+apps/camctl/src/camctl/bootstrap/flows.py:225: in __call__
+    page = await self._discovery.captures(database, now)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/outputs/read_discovery.py:371: in captures
+    rows = await read_all(database, query + f" ORDER BY {order} LIMIT ?", (*parameters, self.batch_size))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/outputs/database_reads.py:16: in read_all
+    return await database.read(execute)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/business.py:136: in read
+    raise cancelled
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = &lt;camctl.persistence.business.BusinessDatabase object at 0x7f67c0e1f410&gt;
+future = &lt;Future finished result=DbOutcome(kin...ary_errors=())&gt;
+key = '58d4d794f7cbbf77e2bf637d8bffa797'
+
+    async def _wait(self, future, key):
+        try:
+&gt;           return await asyncio.shield(future), None
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           asyncio.exceptions.CancelledError
+
+apps/camctl/src/camctl/persistence/business.py:102: CancelledError
+
+The above exception was the direct cause of the following exception:
+
+environment = (ConfigSnapshot(database=DatabaseSection(queue_capacity=64, busy_timeout_ms=9000, wal_autocheckpoint_pages=1000), sess...tabase object at 0x7f67c0e8f410&gt;), &lt;integration.bootstrap.test_output_binding_changes.Driver object at 0x7f67c0da60d0&gt;)
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x7f67c1001890&gt;
+
+    @pytest.mark.asyncio
+    async def test_submit_during_initial_discovery_is_not_lost(environment, monkeypatch):
+        import asyncio
+        from dataclasses import replace
+        from camctl.acceptance.service import CommandMode
+        from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
+    
+        cfg, owned, context, driver = environment
+        await _save_photos(cfg, owned, context, driver)
+        actions = [{"name": f"取回{index}", "type": "obtain_action_outputs",
+                    "scheduled_at": "2026-01-15 09:00:00",
+                    "params": {"source": {"plan_instance_id": "1", "group": "files"}}}
+                   for index in range(3)]
+        _accept(owned, "2", actions)
+        entered = False
+        real_open = driver.open_read
+    
+        async def submit_then_read(*args, **kwargs):
+            nonlocal entered
+            if not entered:
+                entered = True
+                assert not owned.connection.in_transaction
+                _accept(owned, "3", [{**actions[0], "name": "新提交",
+                                      "scheduled_at": "2026-01-15 08:59:00"}])
+            return await real_open(*args, **kwargs)
+    
+        driver.open_read = submit_then_read
+        cfg = replace(cfg, session=replace(cfg.session, read_discovery_batch_size=1))
+        monkeypatch.setattr("camctl.devices.drivers.runtime.current_registry", lambda: _registry(driver))
+        deps = build_runtime(CommandMode.RUN, cfg, catalog=Catalog())
+        try:
+&gt;           outcome = await asyncio.wait_for(execute_command(deps, None, poll_interval_s=0.005), 30)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+apps/camctl/tests/integration/bootstrap/test_read_discovery_default.py:141: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fut = &lt;Task cancelled name='Task-41' coro=&lt;probe.&lt;locals&gt;.execute() done, defined at /tmp/camctl-failure-repair-evidence/bootstrap/diagnostics/exit_probe.py:133&gt;&gt;
+timeout = 30
+
+    async def wait_for(fut, timeout):
+        """Wait for the single Future or coroutine to complete, with timeout.
+    
+        Coroutine will be wrapped in Task.
+    
+        Returns result of the Future or coroutine.  When a timeout occurs,
+        it cancels the task and raises TimeoutError.  To avoid the task
+        cancellation, wrap it in shield().
+    
+        If the wait is cancelled, the task is also cancelled.
+    
+        This function is a coroutine.
+        """
+        loop = events.get_running_loop()
+    
+        if timeout is None:
+            return await fut
+    
+        if timeout &lt;= 0:
+            fut = ensure_future(fut, loop=loop)
+    
+            if fut.done():
+                return fut.result()
+    
+            await _cancel_and_wait(fut, loop=loop)
+            try:
+                return fut.result()
+            except exceptions.CancelledError as exc:
+                raise exceptions.TimeoutError() from exc
+    
+        waiter = loop.create_future()
+        timeout_handle = loop.call_later(timeout, _release_waiter, waiter)
+        cb = functools.partial(_release_waiter, waiter)
+    
+        fut = ensure_future(fut, loop=loop)
+        fut.add_done_callback(cb)
+    
+        try:
+            # wait until the future completes or the timeout
+            try:
+                await waiter
+            except exceptions.CancelledError:
+                if fut.done():
+                    return fut.result()
+                else:
+                    fut.remove_done_callback(cb)
+                    # We must ensure that the task is not running
+                    # after wait_for() returns.
+                    # See https://bugs.python.org/issue32751
+                    await _cancel_and_wait(fut, loop=loop)
+                    raise
+    
+            if fut.done():
+                return fut.result()
+            else:
+                fut.remove_done_callback(cb)
+                # We must ensure that the task is not running
+                # after wait_for() returns.
+                # See https://bugs.python.org/issue32751
+                await _cancel_and_wait(fut, loop=loop)
+                # In case task cancellation failed with some
+                # exception, we should re-raise it
+                # See https://bugs.python.org/issue40607
+                try:
+                    return fut.result()
+                except exceptions.CancelledError as exc:
+&gt;                   raise exceptions.TimeoutError() from exc
+E                   TimeoutError
+
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/tasks.py:502: TimeoutError</failure></testcase></testsuite></testsuites>

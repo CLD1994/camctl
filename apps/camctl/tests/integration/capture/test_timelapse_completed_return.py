@@ -17,9 +17,10 @@ from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.contracts.values import ConsistencyError
 
-from .result_consumer_fixtures import RESULT_EVIDENCE, consumer_world, returned
+from .result_consumer_fixtures import returned
+from ..support.result_cases import result_case, result_case_for
 from .test_capture_contract import _NOW
-from .test_result_device_completion import DeviceCompletionCatalog, _EVIDENCE, device_pages
+from .test_result_device_completion import DeviceCompletionCatalog, _COMPLETION, device_pages
 
 pytestmark = pytest.mark.asyncio
 
@@ -38,20 +39,15 @@ class CompletedCatalog(DeviceCompletionCatalog):
 
 
 async def world(tmp_path, *, case="video", catalog=None):
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, "timelapse",
-        catalog=CompletedCatalog() if catalog is None else catalog, start=False)
+    support = result_case_for()
+    owned, runtime, action_id, handler = await support.world(tmp_path, "timelapse",
+        catalog=CompletedCatalog() if catalog is None else catalog, start=False,
+        evidence_contracts=(_CONTROL_COMPLETION, _COMPLETION))
     driver = device_pages(runtime, completion_page=None, case=case)
-    runtime.evidence = EvidenceRegistry((
-        RESULT_EVIDENCE.contract("operation_returned", 1),
-        _CONTROL_COMPLETION,
-        *(_EVIDENCE.contract(name, version) for name, version in (
-            ("result_files_listed", 2), ("timelapse_completed", 1), ("results_returned", 1))),
-    ))
     # typed effect 是端口对原操作的可靠确认，不要求通用流程认识设备观察名。
-    runtime.driver.control.return_value = DeviceCallResult.from_outcome(replace(
+    support.driver.control.return_value = DeviceCallResult.from_outcome(replace(
         returned("operation", "timelapse_sent", 1), observations=(
             DeviceObservation(_CONTROL_COMPLETION.type, 1, {"activity_id": "1"}),)))
-    runtime.wall_us = lambda: _NOW
     return owned, runtime, action_id, handler, driver
 
 
@@ -62,7 +58,7 @@ async def test_full_call_timeout_is_shared_by_intent_and_actual_call(tmp_path):
         assert runtime.driver.control.call_args.args[0].timeout_s == Decimal("610.0001")
         assert owned.connection.execute("SELECT a.timeout_s_json FROM operation_attempts a"
             " JOIN operation_runs r ON r.id=a.run_id WHERE r.kind=1").fetchone() == ("610.0001",)
-        assert runtime.action(action_id)["execution_spec_json"]["start_call_timeout_s"] == Decimal("610.0001")
+        assert (await runtime.action(action_id))["execution_spec_json"]["start_call_timeout_s"] == Decimal("610.0001")
     finally:
         owned.connection.close()
 
@@ -82,7 +78,6 @@ async def test_completed_return_ends_activity_without_inventing_start_time(tmp_p
         assert len(ends) == 1
         assert ends[0][:2] == (start_time, start_txn)
         assert ends[0][2]["evidence"]["observation"] == {"start_result_event_id": start_event}
-        assert runtime.timelapse_deadlines == {}
         runtime.driver.control.assert_awaited_once()
         assert driver.list_results.await_count == 2
     finally:
@@ -97,14 +92,8 @@ async def test_completed_return_keeps_ended_while_file_format_is_unknown(tmp_pat
                 definition.task_factory(params), product_rules=({"kind": "video",
                     "format_id": "mp4", "min_count": 1, "exact_count": None,
                     "require_pairing": False},)))
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, "timelapse",
-        catalog=FormatCatalog(), start=False)
-    device_pages(runtime, completion_page=None, case="unknown_format")
-    runtime.evidence = EvidenceRegistry((_CONTROL_COMPLETION, RESULT_EVIDENCE.contract("operation_returned", 1),
-        _EVIDENCE.contract("result_files_listed", 2), _EVIDENCE.contract("results_returned", 1)))
-    runtime.driver.control.return_value = DeviceCallResult.from_outcome(replace(
-        returned("operation", "timelapse_sent", 1), observations=(
-            DeviceObservation(_CONTROL_COMPLETION.type, 1, {"activity_id": "1"}),)))
+    owned, runtime, action_id, handler, driver = await world(
+        tmp_path, catalog=FormatCatalog(), case="unknown_format")
     try:
         await capture_handler(handler)(action_id, runtime)
         assert owned.connection.execute("SELECT status FROM actions").fetchone() == (2,)
@@ -114,42 +103,44 @@ async def test_completed_return_keeps_ended_while_file_format_is_unknown(tmp_pat
 
 
 @pytest.mark.parametrize("committed", [False, True])
-async def test_unknown_completed_return_save_retains_original_request_and_time(tmp_path, committed):
-    class UnknownStart(CaptureRepository):
-        def __init__(self):
-            self.requests = []
-        def finish_start_result(self, finish, observation, key, owned, **kwargs):
-            self.requests.append((finish, observation, key, kwargs))
+async def test_unknown_completed_return_save_retains_original_request_and_time(tmp_path, monkeypatch, committed):
+    requests = []
+    original_save = CaptureRepository.finish_start_result
+    def uncertain(repository, finish, observation, key, owned, **kwargs):
+        requests.append((finish, observation, key, kwargs))
+        if len(requests) <= 2:
             if committed:
-                receipt = super().finish_start_result(finish, observation, key, owned, **kwargs)
+                receipt = original_save(repository, finish, observation, key, owned, **kwargs)
                 assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
             return DbOutcome(DbOutcomeKind.UNKNOWN, error=ConsistencyError("原启动结果回执未知"))
+        return original_save(repository, finish, observation, key, owned, **kwargs)
+
     owned, runtime, action_id, handler, driver = await world(tmp_path)
-    repository = UnknownStart()
-    runtime.capture = repository
+    monkeypatch.setattr(CaptureRepository, "finish_start_result", uncertain)
     try:
         with pytest.raises(ConsistencyError):
             await capture_handler(handler)(action_id, runtime)
-        assert len(repository.requests) == 2 and repository.requests[0] == repository.requests[1]
-        pending, = runtime.pending_start_results.values()
-        assert pending.observation is not None
-        assert pending.finish.occurred_at == pending.observation.occurred_at == _NOW
+        assert len(requests) == 2 and requests[0] == requests[1]
+        finish, observation, key, options = requests[0]
+        assert observation is not None
+        assert finish.occurred_at == observation.occurred_at == _NOW
         if committed:
-            for changed in (replace(pending.finish, occurred_at=_NOW + 1),
-                            replace(pending.finish, outcome=replace(pending.finish.outcome,
-                                outcome=replace(pending.finish.outcome.outcome, effect=EffectState.UNKNOWN)))):
-                rejected = CaptureRepository().finish_start_result(changed, pending.observation,
-                    pending.key, owned)
+            for changed in (replace(finish, occurred_at=_NOW + 1),
+                            replace(finish, outcome=replace(finish.outcome,
+                                outcome=replace(finish.outcome.outcome, effect=EffectState.UNKNOWN)))):
+                rejected = original_save(CaptureRepository(), changed, observation,
+                    key, owned, **options)
                 assert rejected.kind is DbOutcomeKind.ROLLED_BACK
         path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
         owned.connection.close()
         owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-        runtime.owned = owned
-        runtime.capture = CaptureRepository()
-        runtime.wall_us = lambda: _NOW + 900_000_000
+        support = result_case_for()
+        runtime = await support.reopen(owned)
+        support.clock.wall = _NOW + 900_000_000
         await capture_handler(handler)(action_id, runtime)
+        assert len(requests) == 3 and requests[2] == requests[0]
         assert owned.connection.execute("SELECT status FROM actions").fetchone() == (3,)
-        runtime.driver.control.assert_awaited_once()
+        support.driver.control.assert_awaited_once()
         assert driver.list_results.await_count == 2
     finally:
         owned.connection.close()

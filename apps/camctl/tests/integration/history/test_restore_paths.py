@@ -639,11 +639,11 @@ async def two_item_world(owned, tmp_path):
     started = SchedulingRepository().start_action(
         StartActionRequest(1, now, now), new_operation_key(), owned)
     assert started.kind is DbOutcomeKind.COMPLETED, started.error
-    runtime = _runtime(owned)
-    runtime.results = ResultsDouble({1: (
-        _entry("shot-1", kind=FileKind.PHOTO), _entry("shot-2", kind=FileKind.PHOTO),
-    )})
-    await dispatch_ready(runtime, ready_capture_actions(owned.connection, now))
+    async with _runtime(owned) as runtime:
+        runtime.results = ResultsDouble({1: (
+            _entry("shot-1", kind=FileKind.PHOTO), _entry("shot-2", kind=FileKind.PHOTO),
+        )})
+        await dispatch_ready(runtime, ready_capture_actions(owned.connection, now))
     assert row_facts(owned.connection, "actions", 1)["status"] == 3
     assert owned.connection.execute(
         "SELECT COUNT(*) FROM outputs WHERE source_action_id = 1").fetchone()[0] == 2

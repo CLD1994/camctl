@@ -1,0 +1,139 @@
+{
+  "created_utc": "2026-10-26T01:24:18.097170+00:00",
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-B",
+    "/tmp/camctl-full-272f-evidence-stage/append_evidence.py",
+    "--replay",
+    "/tmp/camctl-integration-replay-20261026-u19lkvoe",
+    "--label",
+    "replay-final",
+    "--resource-audit",
+    "main=/tmp/camctl-full-272f-audit/resource-audit.json",
+    "--resource-audit",
+    "replay=/tmp/camctl-full-272f-audit/replay/resource-audit.json",
+    "--audit",
+    "unified-audit=/tmp/camctl-full-272f-audit/unified-audit.json",
+    "--audit",
+    "combined-coverage-audit=/tmp/camctl-full-272f-audit/combined-coverage-audit.json",
+    "--audit",
+    "combined-case-histories=/tmp/camctl-full-272f-audit/combined-case-histories.json",
+    "--audit",
+    "unified-resource-audit=/tmp/camctl-full-272f-audit/unified-resource-audit.json",
+    "--audit",
+    "production-identity=/tmp/camctl-full-272f-audit/production-identity.json",
+    "--audit",
+    "capacity-execution-gap=/tmp/camctl-full-272f-audit/capacity-execution-gap.json",
+    "--audit",
+    "final-narrow-audit=/tmp/camctl-full-272f-audit/final-narrow-audit.json",
+    "--audit",
+    "coverage-audit=/tmp/camctl-full-272f-audit/coverage-audit.json",
+    "--audit",
+    "canonical-inventory=/tmp/camctl-full-272f-audit/canonical-inventory.json",
+    "--audit",
+    "canonical-cases=/tmp/camctl-full-272f-audit/canonical-cases.json",
+    "--audit",
+    "replay-coverage-audit=/tmp/camctl-full-272f-audit/replay/coverage-audit.json",
+    "--audit",
+    "replay-canonical-inventory=/tmp/camctl-full-272f-audit/replay/canonical-inventory.json",
+    "--audit",
+    "replay-canonical-cases=/tmp/camctl-full-272f-audit/replay/canonical-cases.json",
+    "--audit",
+    "final-audit-manifest-json=/tmp/camctl-full-272f-audit/final-audit-manifest.json",
+    "--audit",
+    "timing-audit-json=/tmp/camctl-full-272f-audit/timing-audit.json",
+    "--audit",
+    "shard-target-path-check-json=/tmp/camctl-full-272f-audit/shard-target-path-check.json",
+    "--audit",
+    "final_audit-py=/tmp/camctl-full-272f-audit/final_audit.py",
+    "--audit",
+    "resource_audit-py=/tmp/camctl-full-272f-audit/resource_audit.py",
+    "--audit",
+    "combined_audit-py=/tmp/camctl-full-272f-audit/combined_audit.py",
+    "--audit",
+    "finalize_audit-py=/tmp/camctl-full-272f-audit/finalize_audit.py"
+  ],
+  "exit_code": 0,
+  "append_label": "replay-final",
+  "validation": {
+    "ok": true,
+    "manifest_file_count": 3813,
+    "archived_bytes_excluding_manifest_and_receipt": 54874241,
+    "restored_bytes": 96304404,
+    "source_per_file_record_count": 6186,
+    "nested_merge_payload_files_verified": 42,
+    "resource_receipts_verified_by_run": {
+      "main": {
+        "raw_json_files": 357,
+        "unique_groups": 353,
+        "unfinished_groups_preserved": 0
+      },
+      "replay": {
+        "raw_json_files": 846,
+        "unique_groups": 782,
+        "unfinished_groups_preserved": 89
+      }
+    },
+    "all_archived_hashes_match": true,
+    "all_original_hashes_restore": true,
+    "archive_has_no_unlisted_payload_files": true,
+    "verification_requires_original_sources": false
+  },
+  "replay_included": true,
+  "original_main_files_preserved": 867,
+  "manifest": {
+    "path": "manifest.json",
+    "bytes": 2343234,
+    "sha256": "b19b12e0f6c4951c1f9c916608682f134dfaa5d85bf4ee4546a2ae864e6ea485"
+  },
+  "batch_summary": {
+    "path": "additions/replay-final/summary.json",
+    "sha256": "3e7c697290e5891bddaa0c1385806f615f0fe80b295aaf7d83a7cdcc691c5ca2"
+  },
+  "final_audit_manifest_files_verified": 15,
+  "final_diagnosis_index_entries": 1235,
+  "monitor_original_log_included": false,
+  "finished_utc": "2026-10-26T01:28:11.051025+00:00",
+  "independent_final_verification": {
+    "command": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "-B",
+      "/tmp/camctl-full-272f-evidence-stage/verify.py"
+    ],
+    "exit_code": 0,
+    "result": {
+      "ok": true,
+      "manifest_file_count": 3813,
+      "archived_bytes_excluding_manifest_and_receipt": 54874241,
+      "restored_bytes": 96304404,
+      "source_per_file_record_count": 6186,
+      "nested_merge_payload_files_verified": 42,
+      "resource_receipts_verified_by_run": {
+        "main": {
+          "raw_json_files": 357,
+          "unique_groups": 353,
+          "unfinished_groups_preserved": 0
+        },
+        "replay": {
+          "raw_json_files": 846,
+          "unique_groups": 782,
+          "unfinished_groups_preserved": 89
+        }
+      },
+      "all_archived_hashes_match": true,
+      "all_original_hashes_restore": true,
+      "archive_has_no_unlisted_payload_files": true,
+      "verification_requires_original_sources": false
+    },
+    "canonical_frozen_audit_files_verified": 15,
+    "final_diagnosis_versions_verified": 1235,
+    "source_records": {
+      "main": 6186,
+      "replay": 6186
+    },
+    "monitor_original_omitted": true
+  },
+  "archiver_modified_repository_files": false,
+  "directory_file_count": 3815,
+  "directory_bytes_excluding_verification_receipt": 57217475
+}

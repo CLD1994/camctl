@@ -1,0 +1,31 @@
+内存预算启动收据：/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/budget/launcher.json
+============================= test session starts ==============================
+platform linux -- Python 3.11.17, pytest-9.1.1, pluggy-1.6.0 -- /workspaces/camctl/apps/camctl/.venv311/bin/python
+cachedir: tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/pytest-cache
+rootdir: /
+plugins: mock-3.16.0, asyncio-1.4.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 8 items
+
+tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-copy-progress] PASSED [ 12%]
+tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-inspection-saved] PASSED [ 25%]
+tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-source-commit-receipt] PASSED [ 37%]
+tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-local-read] PASSED [ 50%]
+tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[unknown-prefix] PASSED [ 62%]
+tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[complete-short-sequence] PASSED [ 75%]
+tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters PASSED [ 87%]
+tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_video_modes_freeze_for_both_cameras_and_both_video_actions PASSED [100%]
+
+- generated xml file: /tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/result.xml -
+============================= slowest 10 durations =============================
+47.99s call     tmp/camctl-quality-repair-lidlmje7/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-copy-progress]
+35.54s call     tmp/camctl-quality-repair-lidlmje7/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-source-commit-receipt]
+31.07s call     tmp/camctl-quality-repair-lidlmje7/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-local-read]
+30.38s call     tmp/camctl-quality-repair-lidlmje7/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-inspection-saved]
+26.52s call     tmp/camctl-quality-repair-lidlmje7/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[unknown-prefix]
+21.26s call     tmp/camctl-quality-repair-lidlmje7/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[complete-short-sequence]
+18.06s setup    tmp/camctl-quality-repair-lidlmje7/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-copy-progress]
+17.50s call     tmp/camctl-quality-repair-lidlmje7/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters
+7.40s call     tmp/camctl-quality-repair-lidlmje7/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_video_modes_freeze_for_both_cameras_and_both_video_actions
+0.19s teardown tmp/camctl-quality-repair-lidlmje7/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-copy-progress]
+======================== 8 passed in 237.02s (0:03:57) =========================

@@ -66,13 +66,13 @@ def _result_run(owned):
     ).fetchone()
 
 
-def _runtime_with_media(pipeline, duration_s):
+async def _runtime_with_media(pipeline, duration_s):
     entry = original_recording_entry()
     results = ResultsDouble({1: (entry,)})
-    runtime = _runtime(pipeline[0], results=results, listing_cache={})
+    runtime = (await _runtime(pipeline[0], results=results, listing_cache={}))
     runtime.evidence = _EVIDENCE
     reader, tools = ReadDriverDouble(_CONTENT), _WaitingProbe(duration_s)
-    runtime.media = _flow(pipeline, reader, tools)
+    runtime.media = (await _flow(pipeline, reader, tools))
     return runtime, results, reader, tools
 
 
@@ -104,7 +104,7 @@ def _assert_joint_settlement(owned, run_id, action_status):
 async def test_media_completion_ends_original_results_without_new_observation(
         media_pipeline, duration_s, action_status, reopen):
     owned, roots, source_id = media_pipeline
-    runtime, results, reader, tools = _runtime_with_media(media_pipeline, duration_s)
+    runtime, results, reader, tools = (await _runtime_with_media(media_pipeline, duration_s))
 
     await capture_handler("camera_record")(1, runtime)
 
@@ -130,9 +130,9 @@ async def test_media_completion_ends_original_results_without_new_observation(
             recovered = open_existing(database_path, DbOpenMode.EXISTING_RW, DbConfig())
             assert recovered.metadata == metadata
             owned = recovered
-            runtime = _runtime(owned, results=results, listing_cache={})
+            runtime = (await _runtime(owned, results=results, listing_cache={}))
             runtime.evidence = _EVIDENCE
-            runtime.media = _flow((owned, roots, source_id), reader, tools)
+            runtime.media = (await _flow((owned, roots, source_id), reader, tools))
         runtime.wall_us = lambda: _NOW + 200_000_000
         await capture_handler("camera_record")(1, runtime)
 
@@ -178,7 +178,7 @@ class _AtSettlementBoundary(Exception):
 async def test_new_settlement_rejects_business_result_opposite_to_saved_media(
         media_pipeline, monkeypatch, duration_s):
     owned = media_pipeline[0]
-    runtime, _results, _reader, _tools = _runtime_with_media(media_pipeline, duration_s)
+    runtime, _results, _reader, _tools = (await _runtime_with_media(media_pipeline, duration_s))
     await capture_handler("camera_record")(1, runtime)
     original_save = CaptureRepository.finish_recording_results
     recorded = []
@@ -190,7 +190,7 @@ async def test_new_settlement_rejects_business_result_opposite_to_saved_media(
         changed = replace(request, capture=replace(request.capture, failure=contrary))
         result = original_save(repository, changed, key, save_owned)
         recorded.append((before, result))
-        raise _AtSettlementBoundary
+        return replace(result, handoff_error=_AtSettlementBoundary())
 
     monkeypatch.setattr(CaptureRepository, "finish_recording_results", save)
     runtime.wall_us = lambda: _NOW + 200_000_000
@@ -208,7 +208,7 @@ async def test_new_settlement_rejects_business_result_opposite_to_saved_media(
 ])
 async def test_original_settlement_key_rejects_changed_request_member(media_pipeline, monkeypatch, member):
     owned = media_pipeline[0]
-    runtime, results, reader, tools = _runtime_with_media(media_pipeline, Decimal("61"))
+    runtime, results, reader, tools = (await _runtime_with_media(media_pipeline, Decimal("61")))
     await capture_handler("camera_record")(1, runtime)
     original_save = CaptureRepository.finish_recording_results
     inputs = []
@@ -254,15 +254,16 @@ async def test_original_settlement_key_rejects_changed_request_member(media_pipe
 async def test_unknown_settlement_reuses_whole_request_and_original_decision_time(
         media_pipeline, monkeypatch, duration_s, action_status, after):
     owned, roots, source_id = media_pipeline
-    runtime, results, reader, tools = _runtime_with_media(media_pipeline, duration_s)
+    runtime, results, reader, tools = (await _runtime_with_media(media_pipeline, duration_s))
     await capture_handler("camera_record")(1, runtime)
     original_attempts = _attempts(owned)
     run_id = _result_run(owned)[0]
     original_save = CaptureRepository.finish_recording_results
-    inputs, outcomes, proxies = [], [], []
+    inputs, outcomes, proxies, connections = [], [], [], []
 
     def save(repository, request, key, save_owned):
         inputs.append((request, key))
+        connections.append(save_owned.connection)
         if len(inputs) == 1:
             proxy = _TrackedCommitFailure(save_owned.connection, after)
             proxies.append(proxy)
@@ -294,12 +295,14 @@ async def test_unknown_settlement_reuses_whole_request_and_original_decision_tim
             action_status if after else 2,)
         assert _result_run(reopened)[1:4] == ((3, 1, 0) if after else (2, 1, 1))
         assert _attempts(reopened) == original_attempts
-        resumed = replace(runtime, owned=reopened,
-            media=_flow((reopened, roots, source_id), reader, tools),
-            wall_us=lambda: _NOW + 300_000_000)
+        # UNKNOWN 回执使真实执行器关闭故障连接；原会话继续持有完整申请，
+        # 下一次公开处理器调用由执行器新开连接后重送原保存。
+        resumed = runtime
+        runtime.wall_us = lambda: _NOW + 300_000_000
         await capture_handler("camera_record")(1, resumed)
 
         assert inputs == [(original_request, original_key), (original_request, original_key)]
+        assert connections[0] is not connections[1], "UNKNOWN 必须实际更换数据库连接"
         assert outcomes[-1].kind is DbOutcomeKind.COMPLETED, outcomes[-1].error
         assert _result_run(reopened)[1:4] == (3, 1, 0)
         assert reopened.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (action_status,)
@@ -334,7 +337,7 @@ async def test_explicit_media_issue_settles_from_saved_check_without_new_queries
     零新设备查询、零新尝试，错误事实与原 T0、完整可靠文件保持。
     """
     owned, roots, source_id = media_pipeline
-    runtime, results, reader, tools = _runtime_with_media(media_pipeline, Decimal("65"))
+    runtime, results, reader, tools = (await _runtime_with_media(media_pipeline, Decimal("65")))
 
     await capture_handler("camera_record")(1, runtime)
 
@@ -365,9 +368,9 @@ async def test_explicit_media_issue_settles_from_saved_check_without_new_queries
             recovered = open_existing(database_path, DbOpenMode.EXISTING_RW, DbConfig())
             assert recovered.metadata == metadata
             owned = recovered
-            runtime = _runtime(owned, results=results, listing_cache={})
+            runtime = (await _runtime(owned, results=results, listing_cache={}))
             runtime.evidence = _EVIDENCE
-            runtime.media = _flow((owned, roots, source_id), reader, tools)
+            runtime.media = (await _flow((owned, roots, source_id), reader, tools))
         runtime.wall_us = lambda: _NOW + 200_000_000
         await capture_handler("camera_record")(1, runtime)
 
@@ -419,10 +422,10 @@ async def test_incomplete_other_file_control_partition_keeps_media_pipeline(
                     locator={"path": "/DCIM/original.mp4"}, original_name="original.mp4")
     incomplete = _entry("sidecar-log", kind=FileKind.OTHER, complete=False)
     results = ResultsDouble({1: (entry, incomplete)})
-    runtime = _runtime(owned, results=results, listing_cache={})
+    runtime = (await _runtime(owned, results=results, listing_cache={}))
     runtime.evidence = _EVIDENCE
     reader, tools = ReadDriverDouble(_CONTENT), _WaitingProbe(Decimal("61"))
-    runtime.media = _flow(media_pipeline, reader, tools)
+    runtime.media = (await _flow(media_pipeline, reader, tools))
 
     await capture_handler("camera_record")(1, runtime)
     assert _result_run(owned)[1:4] == (2, 1, 1)
@@ -472,10 +475,10 @@ async def test_incomplete_other_turning_complete_settles_from_saved_facts(
                     locator={"path": "/DCIM/original.mp4"}, original_name="original.mp4")
     incomplete = _entry("sidecar-log", kind=FileKind.OTHER, complete=False)
     results = ResultsDouble({1: (entry, incomplete)})
-    runtime = _runtime(owned, results=results, listing_cache={})
+    runtime = (await _runtime(owned, results=results, listing_cache={}))
     runtime.evidence = _EVIDENCE
     reader, tools = ReadDriverDouble(_CONTENT), _WaitingProbe(Decimal("61"))
-    runtime.media = _flow(media_pipeline, reader, tools)
+    runtime.media = (await _flow(media_pipeline, reader, tools))
 
     await capture_handler("camera_record")(1, runtime)
     runtime.wall_us = lambda: _NOW + 200_000_000

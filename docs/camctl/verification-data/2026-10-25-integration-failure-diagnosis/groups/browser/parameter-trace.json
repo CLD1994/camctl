@@ -1,0 +1,666 @@
+{
+  "date_utc": "2026-10-25",
+  "scope": "原44失败中ID42/43/44；只读诊断，无额外测试、浏览器或项目修改",
+  "fixed_source": {
+    "root": "/tmp/camctl-failure-diagnosis-20261025",
+    "head": "1973dc05c0d517a890b92e5dcfc1ee32da9266dd",
+    "status": "",
+    "snapshot_sha256": "d2efcbeee819c8242fc752a276cce2eb41d3a5ea53f17c69ffc8c7c317a84b7a"
+  },
+  "common_root_cause": "能力测试 client_build 执行 pnpm run build；日志证明该环境在运行脚本前按 pnpm-lock.yaml 重装为 Playwright 1.64.1，与文档及 package-lock.json 要求的1.63.0不同。1.64.1要求Chromium/headless1248，但全局缓存只有1243。runner同槽后续任务复用已改变依赖，参数接缝在 chromium.launch 阶段失败。",
+  "dependency_resolution": {
+    "method": "createRequire(client/package.json) -> require.resolve(@playwright/test/package.json) -> createRequire(test).resolve(playwright/package.json) -> createRequire(playwright).resolve(playwright-core/package.json); no browser launched",
+    "rows": [
+      {
+        "root": "/tmp/camctl-itopt-final-20261025/tasks/064-root-test_hasselblad_photo_parameters-shard-1/source",
+        "modules": "/tmp/camctl-itopt-final-20261025/workers/3/node_modules",
+        "chain": [
+          {
+            "path": "/tmp/camctl-itopt-final-20261025/workers/3/node_modules/.pnpm/@playwright+test@1.64.1/node_modules/@playwright/test/package.json",
+            "version": "1.64.1"
+          },
+          {
+            "path": "/tmp/camctl-itopt-final-20261025/workers/3/node_modules/.pnpm/playwright@1.64.1/node_modules/playwright/package.json",
+            "version": "1.64.1"
+          },
+          {
+            "path": "/tmp/camctl-itopt-final-20261025/workers/3/node_modules/.pnpm/playwright-core@1.64.1/node_modules/playwright-core/package.json",
+            "version": "1.64.1"
+          }
+        ],
+        "browser_json": "/tmp/camctl-itopt-final-20261025/workers/3/node_modules/.pnpm/playwright-core@1.64.1/node_modules/playwright-core/browsers.json",
+        "browsers": [
+          {
+            "name": "chromium",
+            "revision": "1248",
+            "installByDefault": true,
+            "browserVersion": "156.0.8078.4",
+            "title": "Chrome for Testing"
+          },
+          {
+            "name": "chromium-headless-shell",
+            "revision": "1248",
+            "installByDefault": true,
+            "browserVersion": "156.0.8078.4",
+            "title": "Chrome Headless Shell"
+          }
+        ]
+      },
+      {
+        "root": "/tmp/camctl-itopt-final-20261025/tasks/065-root-test_timelapse_time_parameters-shard-1/source",
+        "modules": "/tmp/camctl-itopt-final-20261025/workers/3/node_modules",
+        "chain": [
+          {
+            "path": "/tmp/camctl-itopt-final-20261025/workers/3/node_modules/.pnpm/@playwright+test@1.64.1/node_modules/@playwright/test/package.json",
+            "version": "1.64.1"
+          },
+          {
+            "path": "/tmp/camctl-itopt-final-20261025/workers/3/node_modules/.pnpm/playwright@1.64.1/node_modules/playwright/package.json",
+            "version": "1.64.1"
+          },
+          {
+            "path": "/tmp/camctl-itopt-final-20261025/workers/3/node_modules/.pnpm/playwright-core@1.64.1/node_modules/playwright-core/package.json",
+            "version": "1.64.1"
+          }
+        ],
+        "browser_json": "/tmp/camctl-itopt-final-20261025/workers/3/node_modules/.pnpm/playwright-core@1.64.1/node_modules/playwright-core/browsers.json",
+        "browsers": [
+          {
+            "name": "chromium",
+            "revision": "1248",
+            "installByDefault": true,
+            "browserVersion": "156.0.8078.4",
+            "title": "Chrome for Testing"
+          },
+          {
+            "name": "chromium-headless-shell",
+            "revision": "1248",
+            "installByDefault": true,
+            "browserVersion": "156.0.8078.4",
+            "title": "Chrome Headless Shell"
+          }
+        ]
+      },
+      {
+        "root": "/tmp/camctl-itopt-final-20261025/tasks/067-root-test_timelapse_time_parameters-shard-2/source",
+        "modules": "/tmp/camctl-itopt-final-20261025/workers/3/node_modules",
+        "chain": [
+          {
+            "path": "/tmp/camctl-itopt-final-20261025/workers/3/node_modules/.pnpm/@playwright+test@1.64.1/node_modules/@playwright/test/package.json",
+            "version": "1.64.1"
+          },
+          {
+            "path": "/tmp/camctl-itopt-final-20261025/workers/3/node_modules/.pnpm/playwright@1.64.1/node_modules/playwright/package.json",
+            "version": "1.64.1"
+          },
+          {
+            "path": "/tmp/camctl-itopt-final-20261025/workers/3/node_modules/.pnpm/playwright-core@1.64.1/node_modules/playwright-core/package.json",
+            "version": "1.64.1"
+          }
+        ],
+        "browser_json": "/tmp/camctl-itopt-final-20261025/workers/3/node_modules/.pnpm/playwright-core@1.64.1/node_modules/playwright-core/browsers.json",
+        "browsers": [
+          {
+            "name": "chromium",
+            "revision": "1248",
+            "installByDefault": true,
+            "browserVersion": "156.0.8078.4",
+            "title": "Chrome for Testing"
+          },
+          {
+            "name": "chromium-headless-shell",
+            "revision": "1248",
+            "installByDefault": true,
+            "browserVersion": "156.0.8078.4",
+            "title": "Chrome Headless Shell"
+          }
+        ]
+      },
+      {
+        "root": "/tmp/camctl-44-diagnostic-current-20261025/tasks/013-root-test_hasselblad_photo_parameters/source",
+        "modules": "/tmp/camctl-44-diagnostic-current-20261025/workers/0/node_modules",
+        "chain": [
+          {
+            "path": "/tmp/camctl-44-diagnostic-current-20261025/workers/0/node_modules/@playwright/test/package.json",
+            "version": "1.63.0"
+          },
+          {
+            "path": "/tmp/camctl-44-diagnostic-current-20261025/workers/0/node_modules/playwright/package.json",
+            "version": "1.63.0"
+          },
+          {
+            "path": "/tmp/camctl-44-diagnostic-current-20261025/workers/0/node_modules/playwright-core/package.json",
+            "version": "1.63.0"
+          }
+        ],
+        "browser_json": "/tmp/camctl-44-diagnostic-current-20261025/workers/0/node_modules/playwright-core/browsers.json",
+        "browsers": [
+          {
+            "name": "chromium",
+            "revision": "1243",
+            "installByDefault": true,
+            "browserVersion": "153.0.8010.12",
+            "title": "Chrome for Testing"
+          },
+          {
+            "name": "chromium-headless-shell",
+            "revision": "1243",
+            "installByDefault": true,
+            "browserVersion": "153.0.8010.12",
+            "title": "Chrome Headless Shell"
+          }
+        ]
+      },
+      {
+        "root": "/tmp/camctl-44-diagnostic-current-20261025/tasks/012-root-test_timelapse_time_parameters/source",
+        "modules": "/tmp/camctl-44-diagnostic-current-20261025/workers/1/node_modules",
+        "chain": [
+          {
+            "path": "/tmp/camctl-44-diagnostic-current-20261025/workers/1/node_modules/.pnpm/@playwright+test@1.64.1/node_modules/@playwright/test/package.json",
+            "version": "1.64.1"
+          },
+          {
+            "path": "/tmp/camctl-44-diagnostic-current-20261025/workers/1/node_modules/.pnpm/playwright@1.64.1/node_modules/playwright/package.json",
+            "version": "1.64.1"
+          },
+          {
+            "path": "/tmp/camctl-44-diagnostic-current-20261025/workers/1/node_modules/.pnpm/playwright-core@1.64.1/node_modules/playwright-core/package.json",
+            "version": "1.64.1"
+          }
+        ],
+        "browser_json": "/tmp/camctl-44-diagnostic-current-20261025/workers/1/node_modules/.pnpm/playwright-core@1.64.1/node_modules/playwright-core/browsers.json",
+        "browsers": [
+          {
+            "name": "chromium",
+            "revision": "1248",
+            "installByDefault": true,
+            "browserVersion": "156.0.8078.4",
+            "title": "Chrome for Testing"
+          },
+          {
+            "name": "chromium-headless-shell",
+            "revision": "1248",
+            "installByDefault": true,
+            "browserVersion": "156.0.8078.4",
+            "title": "Chrome Headless Shell"
+          }
+        ]
+      }
+    ],
+    "cache": {
+      "path": "/home/cld/.cache/ms-playwright",
+      "entries": [
+        ".links",
+        "chromium-1243",
+        "chromium_headless_shell-1243",
+        "ffmpeg-1011"
+      ],
+      "headless_1243_exists": true,
+      "headless_1248_exists": false
+    }
+  },
+  "source_comparison": [
+    {
+      "path": "apps/client/package.json",
+      "roots": [
+        "/tmp/camctl-itopt-final-20261025/tasks/064-root-test_hasselblad_photo_parameters-shard-1/source",
+        "/tmp/camctl-itopt-final-20261025/tasks/065-root-test_timelapse_time_parameters-shard-1/source",
+        "/tmp/camctl-itopt-final-20261025/tasks/067-root-test_timelapse_time_parameters-shard-2/source",
+        "/tmp/camctl-failure-diagnosis-20261025"
+      ],
+      "sha256": [
+        "fcecb76c5c330f9affb33ff9bc41bd8c957664818c6f51ee6c5b8683934dfb92",
+        "fcecb76c5c330f9affb33ff9bc41bd8c957664818c6f51ee6c5b8683934dfb92",
+        "fcecb76c5c330f9affb33ff9bc41bd8c957664818c6f51ee6c5b8683934dfb92",
+        "fcecb76c5c330f9affb33ff9bc41bd8c957664818c6f51ee6c5b8683934dfb92"
+      ],
+      "all_same": true
+    },
+    {
+      "path": "apps/client/package-lock.json",
+      "roots": [
+        "/tmp/camctl-itopt-final-20261025/tasks/064-root-test_hasselblad_photo_parameters-shard-1/source",
+        "/tmp/camctl-itopt-final-20261025/tasks/065-root-test_timelapse_time_parameters-shard-1/source",
+        "/tmp/camctl-itopt-final-20261025/tasks/067-root-test_timelapse_time_parameters-shard-2/source",
+        "/tmp/camctl-failure-diagnosis-20261025"
+      ],
+      "sha256": [
+        "4b2464a1f31bc9e3fd16870678a45a8ef89e83aa6df1f84f9f8fe6db6733c8e1",
+        "4b2464a1f31bc9e3fd16870678a45a8ef89e83aa6df1f84f9f8fe6db6733c8e1",
+        "4b2464a1f31bc9e3fd16870678a45a8ef89e83aa6df1f84f9f8fe6db6733c8e1",
+        "4b2464a1f31bc9e3fd16870678a45a8ef89e83aa6df1f84f9f8fe6db6733c8e1"
+      ],
+      "all_same": true
+    },
+    {
+      "path": "apps/client/pnpm-lock.yaml",
+      "roots": [
+        "/tmp/camctl-itopt-final-20261025/tasks/064-root-test_hasselblad_photo_parameters-shard-1/source",
+        "/tmp/camctl-itopt-final-20261025/tasks/065-root-test_timelapse_time_parameters-shard-1/source",
+        "/tmp/camctl-itopt-final-20261025/tasks/067-root-test_timelapse_time_parameters-shard-2/source",
+        "/tmp/camctl-failure-diagnosis-20261025"
+      ],
+      "sha256": [
+        "e347d46abf965af07166d4f53eb17eb7e3e8584a45466e6eee19771fed1d2eec",
+        "e347d46abf965af07166d4f53eb17eb7e3e8584a45466e6eee19771fed1d2eec",
+        "e347d46abf965af07166d4f53eb17eb7e3e8584a45466e6eee19771fed1d2eec",
+        "e347d46abf965af07166d4f53eb17eb7e3e8584a45466e6eee19771fed1d2eec"
+      ],
+      "all_same": true
+    },
+    {
+      "path": "tests/integration/client_driver.ts",
+      "roots": [
+        "/tmp/camctl-itopt-final-20261025/tasks/064-root-test_hasselblad_photo_parameters-shard-1/source",
+        "/tmp/camctl-itopt-final-20261025/tasks/065-root-test_timelapse_time_parameters-shard-1/source",
+        "/tmp/camctl-itopt-final-20261025/tasks/067-root-test_timelapse_time_parameters-shard-2/source",
+        "/tmp/camctl-failure-diagnosis-20261025"
+      ],
+      "sha256": [
+        "ea05ad64a903954b04d2a8205f45e679cb488dd3d4d7b9350c675e1950674040",
+        "ea05ad64a903954b04d2a8205f45e679cb488dd3d4d7b9350c675e1950674040",
+        "ea05ad64a903954b04d2a8205f45e679cb488dd3d4d7b9350c675e1950674040",
+        "89aafc14ad3e200f40c6eb48a11a39ab4f0472e7267ca3f3ce5f153b5abae21a"
+      ],
+      "all_same": false
+    },
+    {
+      "path": "tests/integration/test_hasselblad_photo_parameters.py",
+      "roots": [
+        "/tmp/camctl-itopt-final-20261025/tasks/064-root-test_hasselblad_photo_parameters-shard-1/source",
+        "/tmp/camctl-itopt-final-20261025/tasks/065-root-test_timelapse_time_parameters-shard-1/source",
+        "/tmp/camctl-itopt-final-20261025/tasks/067-root-test_timelapse_time_parameters-shard-2/source",
+        "/tmp/camctl-failure-diagnosis-20261025"
+      ],
+      "sha256": [
+        "89bfa1ae1b5a2638c38422717c11b8237d0d1ffa8dc01995a5d9ebb9f467dc9d",
+        "89bfa1ae1b5a2638c38422717c11b8237d0d1ffa8dc01995a5d9ebb9f467dc9d",
+        "89bfa1ae1b5a2638c38422717c11b8237d0d1ffa8dc01995a5d9ebb9f467dc9d",
+        "89bfa1ae1b5a2638c38422717c11b8237d0d1ffa8dc01995a5d9ebb9f467dc9d"
+      ],
+      "all_same": true
+    },
+    {
+      "path": "tests/integration/test_timelapse_time_parameters.py",
+      "roots": [
+        "/tmp/camctl-itopt-final-20261025/tasks/064-root-test_hasselblad_photo_parameters-shard-1/source",
+        "/tmp/camctl-itopt-final-20261025/tasks/065-root-test_timelapse_time_parameters-shard-1/source",
+        "/tmp/camctl-itopt-final-20261025/tasks/067-root-test_timelapse_time_parameters-shard-2/source",
+        "/tmp/camctl-failure-diagnosis-20261025"
+      ],
+      "sha256": [
+        "4021b4b5b57037488be46fd5acf55282362f6cf22868f9222fd6168b6e5d9da0",
+        "4021b4b5b57037488be46fd5acf55282362f6cf22868f9222fd6168b6e5d9da0",
+        "4021b4b5b57037488be46fd5acf55282362f6cf22868f9222fd6168b6e5d9da0",
+        "4021b4b5b57037488be46fd5acf55282362f6cf22868f9222fd6168b6e5d9da0"
+      ],
+      "all_same": true
+    },
+    {
+      "path": "tests/integration/camctl_fixtures.py",
+      "roots": [
+        "/tmp/camctl-itopt-final-20261025/tasks/064-root-test_hasselblad_photo_parameters-shard-1/source",
+        "/tmp/camctl-itopt-final-20261025/tasks/065-root-test_timelapse_time_parameters-shard-1/source",
+        "/tmp/camctl-itopt-final-20261025/tasks/067-root-test_timelapse_time_parameters-shard-2/source",
+        "/tmp/camctl-failure-diagnosis-20261025"
+      ],
+      "sha256": [
+        "3b08fecd6a6b20856d0f208e38bc245262439703e21cf6d06c45780619f01031",
+        "3b08fecd6a6b20856d0f208e38bc245262439703e21cf6d06c45780619f01031",
+        "3b08fecd6a6b20856d0f208e38bc245262439703e21cf6d06c45780619f01031",
+        "f010fa79de1fcf787544ef26e31b934726b53faba7df7bebe6acbee2ab796531"
+      ],
+      "all_same": false
+    },
+    {
+      "path": "apps/client/src/shared/capabilities.ts",
+      "roots": [
+        "/tmp/camctl-itopt-final-20261025/tasks/064-root-test_hasselblad_photo_parameters-shard-1/source",
+        "/tmp/camctl-itopt-final-20261025/tasks/065-root-test_timelapse_time_parameters-shard-1/source",
+        "/tmp/camctl-itopt-final-20261025/tasks/067-root-test_timelapse_time_parameters-shard-2/source",
+        "/tmp/camctl-failure-diagnosis-20261025"
+      ],
+      "sha256": [
+        "50881ac543f4c8354b9dd82fe1c6c37191ee52b343dd687a7c57fe939a37c156",
+        "50881ac543f4c8354b9dd82fe1c6c37191ee52b343dd687a7c57fe939a37c156",
+        "50881ac543f4c8354b9dd82fe1c6c37191ee52b343dd687a7c57fe939a37c156",
+        "50881ac543f4c8354b9dd82fe1c6c37191ee52b343dd687a7c57fe939a37c156"
+      ],
+      "all_same": true
+    },
+    {
+      "path": "apps/client/src/shared/json.ts",
+      "roots": [
+        "/tmp/camctl-itopt-final-20261025/tasks/064-root-test_hasselblad_photo_parameters-shard-1/source",
+        "/tmp/camctl-itopt-final-20261025/tasks/065-root-test_timelapse_time_parameters-shard-1/source",
+        "/tmp/camctl-itopt-final-20261025/tasks/067-root-test_timelapse_time_parameters-shard-2/source",
+        "/tmp/camctl-failure-diagnosis-20261025"
+      ],
+      "sha256": [
+        "31f8d5ec3919e7e1a3d8e295b2dd7a229f55580033a5a6accca6ea04806b94fc",
+        "31f8d5ec3919e7e1a3d8e295b2dd7a229f55580033a5a6accca6ea04806b94fc",
+        "31f8d5ec3919e7e1a3d8e295b2dd7a229f55580033a5a6accca6ea04806b94fc",
+        "31f8d5ec3919e7e1a3d8e295b2dd7a229f55580033a5a6accca6ea04806b94fc"
+      ],
+      "all_same": true
+    },
+    {
+      "path": "scripts/run-integration.py",
+      "roots": [
+        "/tmp/camctl-itopt-final-20261025/tasks/064-root-test_hasselblad_photo_parameters-shard-1/source",
+        "/tmp/camctl-itopt-final-20261025/tasks/065-root-test_timelapse_time_parameters-shard-1/source",
+        "/tmp/camctl-itopt-final-20261025/tasks/067-root-test_timelapse_time_parameters-shard-2/source",
+        "/tmp/camctl-failure-diagnosis-20261025"
+      ],
+      "sha256": [
+        "fd913e515fee21735c0f36f3be005c8d98f3dd45f911ea0ab419755dcc518c7d",
+        "fd913e515fee21735c0f36f3be005c8d98f3dd45f911ea0ab419755dcc518c7d",
+        "fd913e515fee21735c0f36f3be005c8d98f3dd45f911ea0ab419755dcc518c7d",
+        "fd913e515fee21735c0f36f3be005c8d98f3dd45f911ea0ab419755dcc518c7d"
+      ],
+      "all_same": true
+    }
+  ],
+  "validate_parameters_function_comparison": [
+    {
+      "path": "/tmp/camctl-itopt-final-20261025/tasks/064-root-test_hasselblad_photo_parameters-shard-1/source/tests/integration/client_driver.ts",
+      "start_line": 304,
+      "end_line_inclusive": 453,
+      "line_count": 150,
+      "sha256": "234cf365cbadedd96379e8c8b97940c3901e85e31bfe6bd7526d8d65d5dc584f"
+    },
+    {
+      "path": "/tmp/camctl-failure-diagnosis-20261025/tests/integration/client_driver.ts",
+      "start_line": 316,
+      "end_line_inclusive": 465,
+      "line_count": 150,
+      "sha256": "234cf365cbadedd96379e8c8b97940c3901e85e31bfe6bd7526d8d65d5dc584f"
+    }
+  ],
+  "dependency_rebuild_evidence": {
+    "extracted_text": "/tmp/camctl-diag-hb-timelapse-trace-evidence.txt",
+    "historical_worker": 3,
+    "historical_origin_task": 24,
+    "current_worker": 1,
+    "current_origin_task": 5,
+    "fixture_path": "/tmp/camctl-failure-diagnosis-20261025/tests/integration/test_device_capability_declarations.py",
+    "fixture_lines": "117-119",
+    "runner_reuse_lines": "331-349",
+    "runner_copy_lines": "118-121",
+    "current_initial_dependencies_command": "/tmp/camctl-44-diagnostic-command-20261025.json",
+    "extracted_historical_lines": "1-43",
+    "extracted_current_lines": "48-90"
+  },
+  "contract_basis": [
+    {
+      "path": "/tmp/camctl-failure-diagnosis-20261025/docs/architecture/camera-capabilities.md",
+      "lines": "91-123",
+      "claim": "驱动Schema同源；Python、浏览器、Node三处校验一致且不得改写输入。"
+    },
+    {
+      "path": "/tmp/camctl-failure-diagnosis-20261025/docs/superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md",
+      "lines": "55-57,91-119,323-330",
+      "claim": "Hasselblad封闭互斥对象、显式字段、精确数字及三处校验一致。"
+    },
+    {
+      "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/timelapse_parameters.py",
+      "lines": "3-47",
+      "claim": "时间域按型号派生；duration_s严格大于interval_s。"
+    },
+    {
+      "path": "/tmp/camctl-failure-diagnosis-20261025/tests/integration/README.md",
+      "lines": "57-67",
+      "claim": "Hasselblad和延时时间测试的真实消费者与前提。"
+    },
+    {
+      "path": "/tmp/camctl-failure-diagnosis-20261025/scripts/README.md",
+      "lines": "16,41",
+      "claim": "npm ci/package-lock准备依赖并匹配Chromium；同槽顺序复用依赖副本。"
+    },
+    {
+      "path": "/tmp/camctl-failure-diagnosis-20261025/docs/client/running.md",
+      "lines": "93-104",
+      "claim": "浏览器测试须安装配套Chromium。"
+    }
+  ],
+  "cases": [
+    {
+      "id": 42,
+      "nodeid": "tests/integration/test_hasselblad_photo_parameters.py::test_installed_hasselblad_parameter_validation_agrees_across_consumers",
+      "trigger": "validate-parameters 先启用能力说明并创建Vite/客户端状态，再执行默认headless Chromium启动。",
+      "root_cause": "能力测试 client_build 执行 pnpm run build；日志证明该环境在运行脚本前按 pnpm-lock.yaml 重装为 Playwright 1.64.1，与文档及 package-lock.json 要求的1.63.0不同。1.64.1要求Chromium/headless1248，但全局缓存只有1243。runner同槽后续任务复用已改变依赖，参数接缝在 chromium.launch 阶段失败。",
+      "classification": "历史环境依赖漂移；当前已通过",
+      "product_parameter_defect_confirmed": false,
+      "historical": {
+        "outcome": "failed",
+        "worker": 3,
+        "source_digest": "9c173dc0b7f843b99aa12fc17abf463b8de43911f610f2526f01e6bbe00e8818",
+        "evidence": "/tmp/camctl-itopt-final-20261025/tasks/064-root-test_hasselblad_photo_parameters-shard-1/artifacts/output.log",
+        "lines": "30-51",
+        "first_actual_error": "browserType.launch: Executable does not exist: chromium_headless_shell-1248",
+        "before_failure": "安装wheel/init/describe及参数输入已保存；尚未启动浏览器，未执行56项客户端/安装版逐项受理。",
+        "input_path": "/tmp/camctl-itopt-final-20261025/tasks/064-root-test_hasselblad_photo_parameters-shard-1/tmp/pytest/test_installed_hasselblad_para0/hasselblad-parameter-cases.json",
+        "receipt_exists": false
+      },
+      "current": {
+        "outcome": "passed",
+        "evidence": "/tmp/camctl-44-diagnostic-current-20261025/tasks/013-root-test_hasselblad_photo_parameters/artifacts/output.log",
+        "lines": "1-9",
+        "task_number": 13,
+        "worker": 0,
+        "playwright": "1.63.0",
+        "browser_revision": "1243",
+        "explanation": "该槽未执行能力client_build；Hasselblad测试自身不运行npm ci/pnpm安装，直接复用runner从指定npm依赖源复制的1.63.0依赖。完整56项消费者及安装版受理已通过。",
+        "call_seconds": 83.26
+      },
+      "parameter_handoff": {
+        "input_path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/013-root-test_hasselblad_photo_parameters/tmp/pytest/test_installed_hasselblad_para0/hasselblad-parameter-cases.json",
+        "action_type": "camera_take_photo",
+        "device_id": "hb-host",
+        "case_count": 56,
+        "valid_count": 18,
+        "invalid_count": 38,
+        "receipt_path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/013-root-test_hasselblad_photo_parameters/tmp/pytest/test_installed_hasselblad_para0/client-receipt.json",
+        "receipt_exists": true,
+        "all_consumers_match_expected_and_exact_input": true,
+        "installed_acceptance_status_error_count": [
+          [
+            1,
+            null,
+            18
+          ],
+          [
+            4,
+            1,
+            38
+          ]
+        ]
+      },
+      "contract_basis": [
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/architecture/camera-capabilities.md",
+          "lines": "91-123",
+          "claim": "驱动Schema同源；Python、浏览器、Node三处校验一致且不得改写输入。"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md",
+          "lines": "55-57,91-119,323-330",
+          "claim": "Hasselblad封闭互斥对象、显式字段、精确数字及三处校验一致。"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/timelapse_parameters.py",
+          "lines": "3-47",
+          "claim": "时间域按型号派生；duration_s严格大于interval_s。"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/tests/integration/README.md",
+          "lines": "57-67",
+          "claim": "Hasselblad和延时时间测试的真实消费者与前提。"
+        }
+      ],
+      "fix_recommendations": [
+        {
+          "problem": "两份客户端锁文件解析不同版本且构建入口混用，触发脚本前重装并改变同槽依赖。",
+          "change": "依当前文档以 package-lock.json 作为唯一客户端依赖权威；将 tests/integration/test_device_capability_declarations.py:119 构建入口统一为 npm run build，并消除对不同 pnpm 锁清单的消费。审计 tests/integration 及相关部署/runner入口的包管理命令。",
+          "scope": "测试准备、锁文件及其说明；无需修改拍摄参数生产语义。",
+          "acceptance": "从独立 npm ci 目录准备依赖；实际记录 @playwright/test→playwright→core 均1.63.0及浏览器1243；先运行能力测试再在同槽运行三个身份，依赖身份前后相同、五项相关浏览器身份通过。不得用跳过浏览器或删掉参数断言代替。"
+        }
+      ],
+      "unresolved": []
+    },
+    {
+      "id": 43,
+      "nodeid": "tests/integration/test_timelapse_time_parameters.py::test_describe_python_browser_and_node_export_agree[dji-action6]",
+      "trigger": "validate-parameters 先启用能力说明并创建Vite/客户端状态，再执行默认headless Chromium启动。",
+      "root_cause": "能力测试 client_build 执行 pnpm run build；日志证明该环境在运行脚本前按 pnpm-lock.yaml 重装为 Playwright 1.64.1，与文档及 package-lock.json 要求的1.63.0不同。1.64.1要求Chromium/headless1248，但全局缓存只有1243。runner同槽后续任务复用已改变依赖，参数接缝在 chromium.launch 阶段失败。",
+      "classification": "测试准备改变同槽依赖导致的环境失败；当前重现",
+      "product_parameter_defect_confirmed": false,
+      "historical": {
+        "outcome": "failed",
+        "worker": 3,
+        "source_digest": "9c173dc0b7f843b99aa12fc17abf463b8de43911f610f2526f01e6bbe00e8818",
+        "evidence": "/tmp/camctl-itopt-final-20261025/tasks/065-root-test_timelapse_time_parameters-shard-1/artifacts/output.log",
+        "lines": "39-73",
+        "first_actual_error": "browserType.launch: Executable does not exist: chromium_headless_shell-1248",
+        "before_failure": "候选describe/schema比对、全部Python精确校验及合法对数134或126已完成；未进入浏览器/Node导出逐项比较。",
+        "input_path": "/tmp/camctl-itopt-final-20261025/tasks/065-root-test_timelapse_time_parameters-shard-1/tmp/pytest/test_describe_python_browser_a0/parameter-cases.json",
+        "receipt_exists": false
+      },
+      "current": {
+        "outcome": "failed",
+        "evidence": "/tmp/camctl-44-diagnostic-current-20261025/tasks/012-root-test_timelapse_time_parameters/artifacts/output.log",
+        "lines": "58-73",
+        "task_number": 12,
+        "worker": 1,
+        "playwright": "1.64.1",
+        "browser_revision": "1248",
+        "explanation": "同槽较早task005的pnpm构建重装后复用依赖；启动缺1248，未生成参数比较凭据。",
+        "call_seconds": 10.65
+      },
+      "parameter_handoff": {
+        "input_path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/012-root-test_timelapse_time_parameters/tmp/pytest/test_describe_python_browser_a0/parameter-cases.json",
+        "action_type": "camera_timelapse",
+        "device_id": "camera",
+        "case_count": 182,
+        "valid_count": 144,
+        "invalid_count": 38,
+        "receipt_path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/012-root-test_timelapse_time_parameters/tmp/pytest/test_describe_python_browser_a0/parameter-receipt.json",
+        "receipt_exists": false
+      },
+      "contract_basis": [
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/architecture/camera-capabilities.md",
+          "lines": "91-123",
+          "claim": "驱动Schema同源；Python、浏览器、Node三处校验一致且不得改写输入。"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md",
+          "lines": "55-57,91-119,323-330",
+          "claim": "Hasselblad封闭互斥对象、显式字段、精确数字及三处校验一致。"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/timelapse_parameters.py",
+          "lines": "3-47",
+          "claim": "时间域按型号派生；duration_s严格大于interval_s。"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/tests/integration/README.md",
+          "lines": "57-67",
+          "claim": "Hasselblad和延时时间测试的真实消费者与前提。"
+        }
+      ],
+      "fix_recommendations": [
+        {
+          "problem": "两份客户端锁文件解析不同版本且构建入口混用，触发脚本前重装并改变同槽依赖。",
+          "change": "依当前文档以 package-lock.json 作为唯一客户端依赖权威；将 tests/integration/test_device_capability_declarations.py:119 构建入口统一为 npm run build，并消除对不同 pnpm 锁清单的消费。审计 tests/integration 及相关部署/runner入口的包管理命令。",
+          "scope": "测试准备、锁文件及其说明；无需修改拍摄参数生产语义。",
+          "acceptance": "从独立 npm ci 目录准备依赖；实际记录 @playwright/test→playwright→core 均1.63.0及浏览器1243；先运行能力测试再在同槽运行三个身份，依赖身份前后相同、五项相关浏览器身份通过。不得用跳过浏览器或删掉参数断言代替。"
+        }
+      ],
+      "unresolved": [
+        "两个延时身份在匹配依赖下的浏览器/Node导出、受理取消和报告导入仍未执行完成；环境修复后须按原覆盖重跑。"
+      ]
+    },
+    {
+      "id": 44,
+      "nodeid": "tests/integration/test_timelapse_time_parameters.py::test_describe_python_browser_and_node_export_agree[dji-osmo360-ii]",
+      "trigger": "validate-parameters 先启用能力说明并创建Vite/客户端状态，再执行默认headless Chromium启动。",
+      "root_cause": "能力测试 client_build 执行 pnpm run build；日志证明该环境在运行脚本前按 pnpm-lock.yaml 重装为 Playwright 1.64.1，与文档及 package-lock.json 要求的1.63.0不同。1.64.1要求Chromium/headless1248，但全局缓存只有1243。runner同槽后续任务复用已改变依赖，参数接缝在 chromium.launch 阶段失败。",
+      "classification": "测试准备改变同槽依赖导致的环境失败；当前重现",
+      "product_parameter_defect_confirmed": false,
+      "historical": {
+        "outcome": "failed",
+        "worker": 3,
+        "source_digest": "9c173dc0b7f843b99aa12fc17abf463b8de43911f610f2526f01e6bbe00e8818",
+        "evidence": "/tmp/camctl-itopt-final-20261025/tasks/067-root-test_timelapse_time_parameters-shard-2/artifacts/output.log",
+        "lines": "39-73",
+        "first_actual_error": "browserType.launch: Executable does not exist: chromium_headless_shell-1248",
+        "before_failure": "候选describe/schema比对、全部Python精确校验及合法对数134或126已完成；未进入浏览器/Node导出逐项比较。",
+        "input_path": "/tmp/camctl-itopt-final-20261025/tasks/067-root-test_timelapse_time_parameters-shard-2/tmp/pytest/test_describe_python_browser_a0/parameter-cases.json",
+        "receipt_exists": false
+      },
+      "current": {
+        "outcome": "failed",
+        "evidence": "/tmp/camctl-44-diagnostic-current-20261025/tasks/012-root-test_timelapse_time_parameters/artifacts/output.log",
+        "lines": "129-144",
+        "task_number": 12,
+        "worker": 1,
+        "playwright": "1.64.1",
+        "browser_revision": "1248",
+        "explanation": "同槽较早task005的pnpm构建重装后复用依赖；启动缺1248，未生成参数比较凭据。",
+        "call_seconds": 7.37
+      },
+      "parameter_handoff": {
+        "input_path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/012-root-test_timelapse_time_parameters/tmp/pytest/test_describe_python_browser_a1/parameter-cases.json",
+        "action_type": "camera_timelapse",
+        "device_id": "camera",
+        "case_count": 183,
+        "valid_count": 133,
+        "invalid_count": 50,
+        "receipt_path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/012-root-test_timelapse_time_parameters/tmp/pytest/test_describe_python_browser_a1/parameter-receipt.json",
+        "receipt_exists": false
+      },
+      "contract_basis": [
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/architecture/camera-capabilities.md",
+          "lines": "91-123",
+          "claim": "驱动Schema同源；Python、浏览器、Node三处校验一致且不得改写输入。"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md",
+          "lines": "55-57,91-119,323-330",
+          "claim": "Hasselblad封闭互斥对象、显式字段、精确数字及三处校验一致。"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/timelapse_parameters.py",
+          "lines": "3-47",
+          "claim": "时间域按型号派生；duration_s严格大于interval_s。"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/tests/integration/README.md",
+          "lines": "57-67",
+          "claim": "Hasselblad和延时时间测试的真实消费者与前提。"
+        }
+      ],
+      "fix_recommendations": [
+        {
+          "problem": "两份客户端锁文件解析不同版本且构建入口混用，触发脚本前重装并改变同槽依赖。",
+          "change": "依当前文档以 package-lock.json 作为唯一客户端依赖权威；将 tests/integration/test_device_capability_declarations.py:119 构建入口统一为 npm run build，并消除对不同 pnpm 锁清单的消费。审计 tests/integration 及相关部署/runner入口的包管理命令。",
+          "scope": "测试准备、锁文件及其说明；无需修改拍摄参数生产语义。",
+          "acceptance": "从独立 npm ci 目录准备依赖；实际记录 @playwright/test→playwright→core 均1.63.0及浏览器1243；先运行能力测试再在同槽运行三个身份，依赖身份前后相同、五项相关浏览器身份通过。不得用跳过浏览器或删掉参数断言代替。"
+        }
+      ],
+      "unresolved": [
+        "两个延时身份在匹配依赖下的浏览器/Node导出、受理取消和报告导入仍未执行完成；环境修复后须按原覆盖重跑。"
+      ]
+    }
+  ],
+  "fix_recommendations": [
+    {
+      "problem": "两份客户端锁文件解析不同版本且构建入口混用，触发脚本前重装并改变同槽依赖。",
+      "change": "依当前文档以 package-lock.json 作为唯一客户端依赖权威；将 tests/integration/test_device_capability_declarations.py:119 构建入口统一为 npm run build，并消除对不同 pnpm 锁清单的消费。审计 tests/integration 及相关部署/runner入口的包管理命令。",
+      "scope": "测试准备、锁文件及其说明；无需修改拍摄参数生产语义。",
+      "acceptance": "从独立 npm ci 目录准备依赖；实际记录 @playwright/test→playwright→core 均1.63.0及浏览器1243；先运行能力测试再在同槽运行三个身份，依赖身份前后相同、五项相关浏览器身份通过。不得用跳过浏览器或删掉参数断言代替。"
+    }
+  ]
+}

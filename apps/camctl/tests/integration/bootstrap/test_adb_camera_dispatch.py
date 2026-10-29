@@ -19,12 +19,12 @@ from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
 from camctl.operations.models import EffectState
 from camctl.operations.process import LocalExit, RawToolOutcome
-from ..capture.test_baseline_start import _prepared, _runtime
-from ..capture.test_baseline_start import _grant
+from ..capture.test_baseline_start import _prepared
+from ..support.bootstrap_driver_cases import (dispatch_capture, request_driver_cancel,
+    reopen_driver_database, interrupt_start_grant)
 from ..capture.test_baseline_history import _fix
 from ..capture.test_baseline_prepare import Directory
 from ..capture.test_capture_contract import _CONTRACTS
-from ..capture.test_cancel_late_start import _cancel
 from ..scheduling.test_start_action import _SCHEDULED, owned
 from ..scheduling.test_start_action import _accept_plan, _start
 from ..acceptance.test_acceptance import _plan_body
@@ -52,16 +52,16 @@ RETURNED = EVIDENCE.contract("operation_returned", 1)
 async def test_multistep_start_rechecks_current_business_qualification(owned, tmp_path, action_type, reason, after_setting):
     await _prepared(owned, tmp_path, action_type)
     now, calls = [_SCHEDULED], []
-    def invalidate():
+    async def invalidate():
         if reason == "canceled":
-            _cancel(owned, 1, occurred_at=int(_SCHEDULED))
+            await request_driver_cancel(owned, 1, int(_SCHEDULED), _catalog("dji-action6"))
         else:
             now[0] = _SCHEDULED + 30_000_001
     class Transport:
         async def run(self, spec, stop):
             calls.append(spec)
             if after_setting:
-                invalidate()
+                await invalidate()
             return RawToolOutcome(LocalExit(exit_code=0), b"OK", None, None, stderr=b"")
     class Parser:
         def interpret(self, raw):
@@ -72,14 +72,13 @@ async def test_multistep_start_rechecks_current_business_qualification(owned, tm
     class Driver(AdbCameraDriver):
         async def control(self, request):
             if not after_setting:
-                invalidate()
+                await invalidate()
             return await super().control(request)
     contract = CameraContract(CameraModel.ACTION6, commands={CameraCall.SETTING: command, CameraCall.START: command}, evidence=EVIDENCE)
     driver = Driver(contract, {"cam-1": {"driver": CameraModel.ACTION6, "adb": {"serial": "serial-1"}}},
                     Transport(), terminate_grace_s=Decimal("1"), monotonic_ns=lambda: 0)
-    runtime = _runtime(owned, Directory([lambda _request: DirectoryRead(None, None, Page((), None))]), driver)
-    runtime.evidence = EVIDENCE
-    runtime.wall_us = lambda: now[0]
+    runtime = await dispatch_capture(owned, Directory([lambda _request: DirectoryRead(None, None, Page((), None))]), driver,
+        evidence=EVIDENCE, wall_us=lambda: now[0])
     await capture_handler(action_type)(1, runtime)
     assert len(calls) == int(after_setting)
     saved = owned.connection.execute("SELECT result_json,effect_state,error_json FROM operation_attempts").fetchone()
@@ -118,7 +117,7 @@ async def test_restart_dispatch_uses_original_admitted_parameters(
     await _accept_plan(owned, tmp_path, body, current)
     assert owned.connection.execute("SELECT status FROM actions WHERE id=2").fetchone() == (4,)
     owned.connection.close()
-    restarted = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
+    restarted = await reopen_driver_database(tmp_path / "state.db")
     try:
         assert restarted.connection.execute(
             "SELECT device_id,driver_id,effective_params_json,execution_spec_json FROM actions WHERE id=1").fetchone() == original
@@ -137,8 +136,7 @@ async def test_restart_dispatch_uses_original_admitted_parameters(
             {"cam-1": {"driver": CameraModel.ACTION6, "adb": {"serial": "serial-original"}}},
             Transport(), terminate_grace_s=Decimal("1"), monotonic_ns=lambda: 0)
         directory = Directory([lambda _r: DirectoryRead(None, None, Page((), None))])
-        runtime = _runtime(restarted, directory, driver)
-        runtime.evidence = contract.evidence
+        runtime = await dispatch_capture(restarted, directory, driver, evidence=contract.evidence)
         await capture_handler("camera_timelapse")(1, runtime)
         assert len(requests) == 1
         assert requests[0].params == params
@@ -154,10 +152,9 @@ async def test_restart_dispatch_uses_original_admitted_parameters(
     finally:
         restarted.connection.close()
     # 已存在 START 尝试的下一次重启沿用发送及等待事实，不重发或重取基准。
-    resumed = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
+    resumed = await reopen_driver_database(tmp_path / "state.db")
     try:
-        runtime = _runtime(resumed, Directory([]), driver)
-        runtime.evidence = contract.evidence
+        runtime = await dispatch_capture(resumed, Directory([]), driver, evidence=contract.evidence)
         await capture_handler("camera_timelapse")(1, runtime)
         assert len(requests) == 1
         assert resumed.connection.execute(
@@ -212,7 +209,7 @@ async def test_restart_dispatch_keeps_first_format_after_current_domain_narrows(
     owned.connection.close()
     _narrow_authoritative_time_domain(
         monkeypatch, narrow_field, excluded, model)
-    restarted = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
+    restarted = await reopen_driver_database(tmp_path / "state.db")
     try:
         assert restarted.connection.execute(
             "SELECT device_id,driver_id,effective_params_json,execution_spec_json FROM actions WHERE id=1").fetchone() == original
@@ -242,8 +239,7 @@ async def test_restart_dispatch_keeps_first_format_after_current_domain_narrows(
             {"cam-1": {"driver": model, "adb": {"serial": "serial-original"}}},
             Transport(), terminate_grace_s=Decimal("1"), monotonic_ns=lambda: 0)
         directory = Directory([lambda _request: DirectoryRead(None, None, Page((), None))])
-        runtime = _runtime(restarted, directory, driver)
-        runtime.evidence = contract.evidence
+        runtime = await dispatch_capture(restarted, directory, driver, evidence=contract.evidence)
         await capture_handler("camera_timelapse")(1, runtime)
 
         assert len(requests) == 1
@@ -267,7 +263,7 @@ async def test_restart_dispatch_keeps_first_format_after_current_domain_narrows(
     (30, 5400, {"mode": "manual", "iso": 800}), (25, 6000, {"mode": "auto"}),
 ])
 async def test_restart_with_unresolved_start_keeps_original_attempt_without_dispatch(
-        owned, tmp_path, interval_s, duration_s, exposure):
+        owned, tmp_path, monkeypatch, interval_s, duration_s, exposure):
     body = _plan_body()
     body["actions"][0].update(type="camera_timelapse", params={
         "type": "action6_timelapse", "interval_s": interval_s, "duration_s": duration_s,
@@ -276,11 +272,18 @@ async def test_restart_with_unresolved_start_keeps_original_attempt_without_disp
     started = _start(owned, 1, now=_SCHEDULED)
     assert started.kind is DbOutcomeKind.COMPLETED
     assert _fix(owned, started.value.activity_id).kind is DbOutcomeKind.COMPLETED
-    granted = _grant(owned)
-    assert granted.kind is DbOutcomeKind.COMPLETED and granted.value.ticket is not None
+    contract = software_contract(CameraModel.ACTION6)
+    class NeverDispatch:
+        async def run(self, spec, stop):
+            pytest.fail('原意图提交后应在派发前中断')
+    first_driver = AdbCameraDriver(contract,
+        {'cam-1': {'driver': CameraModel.ACTION6, 'adb': {'serial': 'serial-original'}}},
+        NeverDispatch(), terminate_grace_s=Decimal('1'), monotonic_ns=lambda: 0)
+    first = await dispatch_capture(owned, Directory([]), first_driver, evidence=contract.evidence)
+    await interrupt_start_grant(first, 1, 'camera_timelapse', monkeypatch)
     attempt = owned.connection.execute("SELECT * FROM operation_attempts").fetchone()
     owned.connection.close()
-    reopened = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
+    reopened = await reopen_driver_database(tmp_path / "state.db")
     try:
         class Transport:
             async def run(self, spec, stop):
@@ -289,14 +292,14 @@ async def test_restart_with_unresolved_start_keeps_original_attempt_without_disp
         driver = AdbCameraDriver(contract,
             {"cam-1": {"driver": CameraModel.ACTION6, "adb": {"serial": "serial-original"}}},
             Transport(), terminate_grace_s=Decimal("1"), monotonic_ns=lambda: 0)
-        runtime = _runtime(reopened, Directory([]), driver)
-        runtime.evidence = contract.evidence
+        directory = Directory([])
+        runtime = await dispatch_capture(reopened, directory, driver, evidence=contract.evidence)
         for _ in range(2):
             await capture_handler("camera_timelapse")(1, runtime)
         assert reopened.connection.execute("SELECT * FROM operation_attempts").fetchall() == [attempt]
         assert reopened.connection.execute(
             "SELECT attempts_used FROM operation_runs WHERE responsibility_key='start/1'").fetchone() == (1,)
-        assert runtime.baseline_directory.calls == []
+        assert directory.calls == []
     finally:
         reopened.connection.close()
 
@@ -326,7 +329,7 @@ async def test_record_restart_dispatch_uses_original_parameters_after_schema_nar
     await _accept_plan(owned, tmp_path, body, _catalog(CameraModel.ACTION6))
     assert owned.connection.execute("SELECT status FROM actions WHERE id=2").fetchone() == (4,)
     owned.connection.close()
-    reopened = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
+    reopened = await reopen_driver_database(tmp_path / "state.db")
     try:
         assert _start(reopened, 1, now=_SCHEDULED).kind is DbOutcomeKind.COMPLETED
         calls, requests = [], []
@@ -341,8 +344,7 @@ async def test_record_restart_dispatch_uses_original_parameters_after_schema_nar
         driver = AdbCameraDriver(replace(contract, commands={**contract.commands, CameraCall.START: capture_request}),
             {"cam-1": {"driver": CameraModel.ACTION6, "adb": {"serial": "serial-original"}}},
             Transport(), terminate_grace_s=Decimal("1"), monotonic_ns=lambda: 0)
-        runtime = _runtime(reopened, Directory([lambda _r: DirectoryRead(None, None, Page((), None))]), driver)
-        runtime.evidence = contract.evidence
+        runtime = await dispatch_capture(reopened, Directory([lambda _r: DirectoryRead(None, None, Page((), None))]), driver, evidence=contract.evidence)
         await capture_handler("camera_record")(1, runtime)
         assert len(requests) == 1 and requests[0].params == params
         assert requests[0].binding.device_id == "cam-1" and requests[0].binding.driver_id == CameraModel.ACTION6

@@ -1,0 +1,4 @@
+[
+  "tests/integration/test_camctl_session_recovery.py::test_process_restart_resumes_interrupted_work",
+  "tests/integration/test_camctl_session_recovery.py::test_concurrent_submits_and_duplicate_identity"
+]

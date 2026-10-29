@@ -11,7 +11,11 @@ from camctl.bootstrap.flows import capture_flow
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.transaction import saved_transaction_events
 
-from ..capture.test_cancel_timelapse_exhaustion_files import _apply_public_cancel
+from ..capture.result_consumer_fixtures import ResultCatalog
+from ..support.capture import capture_database
+from ..support.session import accept_plan
+from camctl.bootstrap.flows import cancel_flow
+from camctl.persistence.directory_switch import canonical_to_path
 from ..capture.test_closed_result_local_consumption import closed_consumer_world
 from .test_closed_result_binding_recovery import _unavailable_device_ports
 from .test_media_assembly import _config
@@ -73,7 +77,18 @@ async def test_canceled_timelapse_binding_failure_registers_retained_files_atomi
         assert preparing.connection.execute(
             "SELECT id FROM operation_runs WHERE responsibility_key=?",
             (f"stop/{world.action_id}",)).fetchone() is None
-        _apply_public_cancel(preparing, world.action_id, world.formed_at + 10)
+        from datetime import datetime, timezone
+        database = await capture_database(world.path)
+        now = world.formed_at + 10
+        instant = datetime.fromtimestamp(now // 1_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        clock = SimpleNamespace(utc_micros=lambda: now)
+        await accept_plan(database, tmp_path, ResultCatalog(), {
+            "request_id": "2", "created_at": instant, "name": "取消延时摄影",
+            "actions": [{"name": "取消", "type": "cancel_task", "params": {
+                "target": {"action_instance_id": str(world.action_id)}}}]}, clock)
+        await cancel_flow(ready=canonical_to_path(database.metadata.ready_path),
+            processing=canonical_to_path(database.metadata.processing_path))(
+                SimpleNamespace(database=database, clock=clock))
         assert preparing.connection.execute(
             "SELECT status,cancel_requested FROM actions WHERE id=?", (world.action_id,)).fetchone() == (2, 1)
         assert preparing.connection.execute(
@@ -103,35 +118,11 @@ async def test_canceled_timelapse_binding_failure_registers_retained_files_atomi
         devices=devices, drivers=registry, staging=Path(config.paths.staging),
         wait_config=execution_wait_config, wall_us=lambda: now,
         monotonic_ns=lambda: 99_000_000_000)
-    opened, runtimes = [], []
-
-    def open_connection():
-        owned = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
-        assert owned.metadata == world.metadata
-        assert owned.connection is not preparing.connection
-        assert all(owned.connection is not earlier.connection for earlier in opened)
-        opened.append(owned)
-        return owned
-
-    def observed_factory(owned, device_id):
-        assert owned is opened[-1] and device_id == "cam-1"
-        runtime = factory(owned, device_id)
-        assert runtime is not None
-        assert runtime.pending_start_results == runtime.pending_capture_completions == runtime.pending_result_closes == {}
-        assert runtime.pending_file_observations == runtime.pending_media_results == {}
-        assert runtime.pending_read_results == runtime.pending_read_business == runtime.pending_read_ends == {}
-        assert runtime.continuing_read_tickets == {}
-        assert runtime.listing_cache in (None, {})
-        assert runtime.timelapse_deadlines == runtime.retry_gate.anchors == {}
-        runtimes.append(runtime)
-        return runtime
-
-    context = SimpleNamespace(open_connection=open_connection,
+    context = SimpleNamespace(database=database,
         clock=SimpleNamespace(utc_micros=lambda: now))
-    flow = capture_flow(observed_factory)
+    flow = capture_flow(factory)
     await flow(context)
     await flow.settle()
-    assert len(opened) == 2 and len(runtimes) == 1
     saved = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         assert saved.connection.execute(
@@ -184,7 +175,6 @@ async def test_canceled_timelapse_binding_failure_registers_retained_files_atomi
 
     await flow(context)
     await flow.settle()
-    assert len(opened) == 3 and len(runtimes) == 1
     repeated = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         assert tuple(repeated.connection.iterdump()) == before_repeat

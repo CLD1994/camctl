@@ -1,0 +1,21 @@
+[
+  {
+    "nodeid": "tests/integration/capture/test_action6_budget_cold_recovery.py::test_action6_cold_recovery_decodes_saved_budget_and_continues_same_copy",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0024189069954445586
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 1.9955005450028693
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0047889690031297505
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 2.0027084210014436
+  }
+]

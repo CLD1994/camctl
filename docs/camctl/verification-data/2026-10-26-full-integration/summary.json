@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "created_utc": "2026-10-26T00:58:18.285277+00:00",
+  "scope": "已结束首轮、预算原文、已完成本轮诊断与既有合并证据；不含运行中replay",
+  "main_source": {
+    "root": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+    "head": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+    "status": "",
+    "snapshot_sha256": "cf4f504b7648bb5004fd20e1d66bfb57ab6a2956a33b6203724b6f0262591950"
+  },
+  "main_status": "finished",
+  "main_exit_code": 1,
+  "artifact_groups": {
+    "collection": 13,
+    "tasks": 85
+  },
+  "payload_file_count": 2038,
+  "payload_original_bytes": 53833748,
+  "payload_archived_bytes": 18154217,
+  "payload_roles": {
+    "main-metadata": 3,
+    "main-collection-artifact": 104,
+    "main-tasks-artifact": 757,
+    "main-instrumentation": 3,
+    "main-budget-original": 1,
+    "completed-diagnosis": 1166,
+    "existing-merge-bundle": 4
+  },
+  "replay_included": false,
+  "excluded": [
+    "冻结源码副本",
+    "tmp数据库和测试世界",
+    "node_modules",
+    "cache",
+    "dist",
+    "wheel",
+    "uv依赖",
+    "存量quality-repair历史"
+  ]
+}

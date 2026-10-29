@@ -5,7 +5,7 @@ from unittest.mock import create_autospec
 import pytest
 
 from camctl.capture.baseline_models import BaselineFixSave
-from camctl.capture.handlers import capture_handler, _control_call
+from camctl.capture.handlers import capture_handler
 from camctl.contracts.values import new_operation_key
 from camctl.devices.ports import DeviceCallResult, StopDriver
 from camctl.persistence.models import DbOutcomeKind
@@ -61,13 +61,7 @@ async def test_action6_native_cancel_defaults_to_all_qualified_videos_and_photo(
         )
         assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
 
-        await _control_call(
-            runtime,
-            runtime.action(action_id),
-            "start_timelapse",
-            "timelapse_sent",
-            activity_facts={"sent_at": _NOW},
-        )
+        await capture_handler(handler)(action_id, runtime)
         wall = [_NOW + 100_000]
         runtime.wall_us = lambda: wall[0]
         runtime.monotonic_ns = lambda: 6_000_000_000
@@ -107,7 +101,7 @@ async def test_action6_native_cancel_defaults_to_all_qualified_videos_and_photo(
         driver = _result_port(runtime, read)
         await capture_handler(handler)(action_id, runtime)
 
-        assert runtime.action(action_id)["status"] == 6
+        assert (await runtime.action(action_id))["status"] == 6
         ref = SegmentRepository().read_active_set(action_id, owned)
         decision = SegmentRepository().read_decision(ref, owned)
         assert decision.status.value == "canceled"

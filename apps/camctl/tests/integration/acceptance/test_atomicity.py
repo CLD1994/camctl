@@ -14,7 +14,7 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, OwnedConnection, op
 
 from .test_acceptance import Catalog, _NOW, _accept, _plan_body, _seed_report, environment
 from ..persistence.test_runtime import _create_valid_database
-from ..persistence.test_transactions import FailingConnection
+from ..support.database import business_database, database_path
 
 
 def _process(body, connection, key=None):
@@ -26,16 +26,25 @@ def _process(body, connection, key=None):
 
 @pytest.mark.asyncio
 async def test_invalid_identity_does_not_query_existing_request(environment, tmp_path):
-    connection, _ = environment
+    from camctl.acceptance.service import accept_input
+    from .test_acceptance import _owned
+
+    connection, context = environment
     await _accept(environment, tmp_path, _plan_body())
-    statements = []
-    connection.set_trace_callback(statements.append)
-    try:
-        result = await _accept(environment, tmp_path, {"request_id": "042"})
-    finally:
-        connection.set_trace_callback(None)
+    reads = []
+
+    def authorize(operation, table, column, *_):
+        if operation == sqlite3.SQLITE_READ:
+            reads.append((table, column))
+        return sqlite3.SQLITE_OK
+
+    async with business_database(database_path(_owned(environment))) as database:
+        await database.read(lambda current: current.connection.set_authorizer(authorize))
+        result = await accept_input(ParsedInput("invalid.json", {"request_id": "042"}),
+            context, new_operation_key(), database)
+        await database.read(lambda current: current.connection.set_authorizer(None))
     assert result.plan_disposition is PlanDisposition.REJECTED
-    assert not any("FROM plans WHERE request_id" in statement for statement in statements)
+    assert ("plans", "request_id") not in reads
 
 
 @pytest.mark.asyncio
@@ -98,10 +107,17 @@ async def test_registration_members_and_ack_roll_back_together(environment, tmp_
     body["actions"].append({"name": "fetch", "type": "obtain_action_outputs",
         "scheduled_at": "2026-01-15 09:00:00",
         "params": {"source": {"action_name": "shoot"}, "purpose": "manual"}})
-    prefix = f"UPDATE {failed_table}" if failed_table == "runtime_state" else f"INSERT INTO {failed_table}"
-    result = _process(body, FailingConnection(connection, prefix))
+    def authorize(operation, table, *_):
+        return (sqlite3.SQLITE_DENY if table == failed_table and
+                operation in (sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE)
+                else sqlite3.SQLITE_OK)
+    connection.set_authorizer(authorize)
+    try:
+        result = _process(body, connection)
+    finally:
+        connection.set_authorizer(None)
     assert result.kind is DbOutcomeKind.ROLLED_BACK
-    assert isinstance(result.error, sqlite3.OperationalError)
+    assert isinstance(result.error, sqlite3.DatabaseError)
     assert {table: connection.execute(f"SELECT * FROM {table}").fetchall() for table in tables} == before
     assert connection.execute("SELECT acknowledged_wm FROM runtime_state").fetchone() == (0,)
 
@@ -109,7 +125,14 @@ async def test_registration_members_and_ack_roll_back_together(environment, tmp_
 @pytest.mark.asyncio
 async def test_ack_error_diagnostic_rolls_back_with_registration(environment, tmp_path):
     connection, _ = environment
-    result = _process(_plan_body(ack="20"), FailingConnection(connection, "INSERT INTO plan_file_diagnostics"))
+    def authorize(operation, table, *_):
+        return (sqlite3.SQLITE_DENY if operation == sqlite3.SQLITE_INSERT and
+                table == "plan_file_diagnostics" else sqlite3.SQLITE_OK)
+    connection.set_authorizer(authorize)
+    try:
+        result = _process(_plan_body(ack="20"), connection)
+    finally:
+        connection.set_authorizer(None)
     assert result.kind is DbOutcomeKind.ROLLED_BACK
     for table in ("plans", "actions", "plan_file_diagnostics", "history_transactions", "history_events"):
         assert connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone() == (0,)
@@ -125,6 +148,10 @@ async def test_unknown_commit_is_checked_by_original_key_before_retry(environmen
         @property
         def in_transaction(self):
             return connection.in_transaction
+
+        @property
+        def total_changes(self):
+            return connection.total_changes
 
         def execute(self, statement, parameters=()):
             if statement == "COMMIT":

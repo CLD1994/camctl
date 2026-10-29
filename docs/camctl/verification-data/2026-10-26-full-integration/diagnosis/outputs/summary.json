@@ -1,0 +1,83 @@
+{
+  "source_head": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+  "snapshot_sha256": "cf4f504b7648bb5004fd20e1d66bfb57ab6a2956a33b6203724b6f0262591950",
+  "artifacts": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/005-camctl-outputs/artifacts",
+  "pytest_pid": 1925683,
+  "exit_code": 1,
+  "collected": 2545,
+  "passed": 1956,
+  "failed_call": 471,
+  "errors_setup": 116,
+  "failed_identities": 587,
+  "skipped": 2,
+  "pytest_elapsed_seconds": 471.72,
+  "runner_wall_seconds": 475.8953644550056,
+  "groups": {
+    "legacy_context_owned": {
+      "title": "旧 Context/Runtime 构造仍传 owned=",
+      "count": 227,
+      "cause": "生产 Context/Runtime 已要求 BusinessDatabase 类型的 database，测试仍传 removed owned 关键字。",
+      "representative": "apps/camctl/tests/integration/outputs/test_copy_complete.py::test_matched_copy_prepares_and_releases_source"
+    },
+    "legacy_database_port": {
+      "title": "向新数据库端口传旧对象或漏 database",
+      "count": 13,
+      "cause": "SimpleNamespace 没有 database，或 OwnedConnection 被当成具有 read/write 的 BusinessDatabase 使用。",
+      "representative": "apps/camctl/tests/integration/outputs/test_outputs_contract.py::TestOutputLifecyclesAreIndependent::test_output_lifecycles_are_independent"
+    },
+    "unawaited_async_runtime": {
+      "title": "异步装配或私有申请未 await",
+      "count": 315,
+      "cause": "测试把异步装配 factory、for_item 或异步申请返回的 coroutine 当作运行对象/回执使用。",
+      "representative": "apps/camctl/tests/integration/outputs/test_cleanup_delete_save_recovery.py::test_delete_original_request_survives_save_failure[rollback-begin_cleanup_attempt]"
+    },
+    "unawaited_consumer": {
+      "title": "异步业务消费未 await，读取尚未保存的事实",
+      "count": 2,
+      "cause": "default exclusions 未等待 _fix_pending_selections；read_error_details 未等待 _finish_read_attempt，故分别得到空选择、NULL error_json。",
+      "representative": "apps/camctl/tests/integration/outputs/test_default_exclusions.py::test_obtain_runtime_consumes_saved_default_exclusions"
+    },
+    "stale_sql_fault_prefix": {
+      "title": "故障注入 SQL 前缀与实际语句不一致",
+      "count": 3,
+      "cause": "注入器使用 startswith(SELECT id, transaction_id, event_type)，实际 fact_reads.EVENT_COLUMNS 为 id,transaction_id,event_type；没有注入读错误，正常完成与断言矛盾。",
+      "representative": "apps/camctl/tests/integration/outputs/test_grant_reuse.py::test_original_group_read_error_does_not_create_new_grant[device]"
+    },
+    "legacy_read_preparation_fixture": {
+      "title": "READ 准备夹具仍沿用 OwnedConnection 与同步消费",
+      "count": 24,
+      "cause": "同一24参数夹具的 runtime 仅有 owned，DriverReadSessions/RecordingInputCopies 也直接收到 OwnedConnection；部分分支又未 await finish/acquire，broad raises 和2秒等待掩盖更早的接口错误。",
+      "representative": "apps/camctl/tests/integration/outputs/test_read_preparation_settlement.py::test_preparation_settlement_survives_real_consumer_and_result_save[not_started-device]"
+    },
+    "masked_old_database_wait": {
+      "title": "旧数据库对象使文件工作未启动",
+      "count": 2,
+      "cause": "shared_file_ownership prepare 的 CopyContext 第二位置参数是 OwnedConnection；prepare_copy 首次 database.read 即失败，文件线程尚未开始。",
+      "representative": "apps/camctl/tests/integration/outputs/test_shared_file_ownership.py::test_shared_file_operation_keeps_qualification_until_actual_end[delivery-prepare]"
+    },
+    "bounded_fetchall_observer": {
+      "title": "监测器把有界分页 fetchall 判为无界读取",
+      "count": 1,
+      "cause": "Cursor.fetchall 无条件拒绝；实际 iter_transaction_events 有固定事务、id上下界及 LIMIT batch_size<=128，首次头读 limit=1。该 fetchall 不随整个来源集合增长。",
+      "representative": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py::test_source_write_and_original_key_keep_bounded_residency"
+    }
+  },
+  "counts": {
+    "legacy_interface_first_causes": 583,
+    "private_sql_observer_first_causes": 4,
+    "confirmed_merge_production_first_causes": 0
+  },
+  "source_comparison": {
+    "failed_files": 40,
+    "whole_files_identical_across_a775_272_combined": 39,
+    "failed_test_functions_identical_across_a775_272_combined": 587,
+    "remaining_file": "test_source_resolution_batches.py differs only by removal of total_changes properties from two other fault wrappers; failed function is identical"
+  },
+  "boundary": "只读自然完成日志及源码，未修改仓库、另跑测试或实测a775/272基线。只分类首因，不证明修正入口后的业务断言通过。",
+  "files": {
+    "output.log": "195a85649756d38453935f6642fbfa5dcf8557f32888e9b0abde532c0419d1ac",
+    "events.jsonl": "f192552e46254c7ecfef74fe110ad7c2b5df0c093c74535c1307cad334ce15e4",
+    "cases.json": "61f5332ab7c605a7fad57a8c3520f9e573900cb4e37af861ee48641c327415ac",
+    "result.json": "137bdb290b4855736ebd3fd1915d9326c8b83c5a2388b7daa3a818c17004abb2"
+  }
+}

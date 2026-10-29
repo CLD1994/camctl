@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="2" time="0.556" timestamp="2026-10-25T16:26:07.996598+08:00" hostname="1e0518e0c6b4"><testcase classname="tests.integration.devices.test_adb_camera_registration" name="test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-action6]" time="0.125"><failure message="AttributeError: 'NoneType' object has no attribute 'format_version'">apps/camctl/tests/integration/devices/test_adb_camera_registration.py:178: in test_real_session_open_resets_settings_but_catalog_reads_do_not
+    _initialize_recovery(SimpleNamespace(work_files=None), _owned(environment))
+apps/camctl/src/camctl/bootstrap/lifecycle.py:622: in _initialize_recovery
+    if owned.metadata.format_version &gt;= 3:
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'NoneType' object has no attribute 'format_version'</failure></testcase><testcase classname="tests.integration.devices.test_adb_camera_registration" name="test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-osmo360-ii]" time="0.047"><failure message="AttributeError: 'NoneType' object has no attribute 'format_version'">apps/camctl/tests/integration/devices/test_adb_camera_registration.py:178: in test_real_session_open_resets_settings_but_catalog_reads_do_not
+    _initialize_recovery(SimpleNamespace(work_files=None), _owned(environment))
+apps/camctl/src/camctl/bootstrap/lifecycle.py:622: in _initialize_recovery
+    if owned.metadata.format_version &gt;= 3:
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'NoneType' object has no attribute 'format_version'</failure></testcase></testsuite></testsuites>

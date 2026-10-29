@@ -1,0 +1,5258 @@
+[
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 1071,
+    "function": "finish_segment_recording",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 0.000239315,
+    "cumulative_seconds": 28.711363646000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+    "line": 105,
+    "function": "traced",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 6.69e-05,
+    "cumulative_seconds": 28.709789145000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 682,
+    "function": "commit_operation",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 0.00018293700000000001,
+    "cumulative_seconds": 28.709654149000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 698,
+    "function": "_commit_operation",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 0.000579066,
+    "cumulative_seconds": 28.708976721000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 303,
+    "function": "_write_bounded_plan",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 0.025279749,
+    "cumulative_seconds": 26.363492661000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 146,
+    "function": "_read_member",
+    "primitive_calls": 3442,
+    "calls": 3442,
+    "self_seconds": 0.12317326,
+    "cumulative_seconds": 24.081370370000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 250,
+    "function": "read_segment_members",
+    "primitive_calls": 320,
+    "calls": 320,
+    "self_seconds": 0.044863794000000005,
+    "cumulative_seconds": 23.803619877000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 266,
+    "function": "_read_segment_members",
+    "primitive_calls": 320,
+    "calls": 320,
+    "self_seconds": 0.015886959000000003,
+    "cumulative_seconds": 23.752830819
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 281,
+    "function": "<genexpr>",
+    "primitive_calls": 3520,
+    "calls": 3520,
+    "self_seconds": 0.026377287000000003,
+    "cumulative_seconds": 23.364068847000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 46,
+    "function": "_candidates",
+    "primitive_calls": 1407,
+    "calls": 1407,
+    "self_seconds": 0.0044327130000000005,
+    "cumulative_seconds": 18.986196856000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 235,
+    "function": "read_segment_output_candidates",
+    "primitive_calls": 302,
+    "calls": 302,
+    "self_seconds": 0.004835482,
+    "cumulative_seconds": 18.974289855000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 491,
+    "function": "_at",
+    "primitive_calls": 578,
+    "calls": 578,
+    "self_seconds": 0.003644969,
+    "cumulative_seconds": 18.651518542
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 458,
+    "function": "_at_record",
+    "primitive_calls": 578,
+    "calls": 578,
+    "self_seconds": 0.0035388060000000002,
+    "cumulative_seconds": 18.647873573000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 465,
+    "function": "_load_at_record",
+    "primitive_calls": 578,
+    "calls": 578,
+    "self_seconds": 0.047296915,
+    "cumulative_seconds": 18.638916043000002
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method builtins.next>",
+    "primitive_calls": 19222,
+    "calls": 101954,
+    "self_seconds": 0.090614125,
+    "cumulative_seconds": 17.680764544000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 907,
+    "function": "_canonical_events",
+    "primitive_calls": 418,
+    "calls": 418,
+    "self_seconds": 0.014667805,
+    "cumulative_seconds": 17.513707417000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 315,
+    "function": "_verify_page_relations",
+    "primitive_calls": 113,
+    "calls": 113,
+    "self_seconds": 0.346989056,
+    "cumulative_seconds": 15.339829881000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+    "line": 165,
+    "function": "traced",
+    "primitive_calls": 23693,
+    "calls": 38801,
+    "self_seconds": 0.142281253,
+    "cumulative_seconds": 15.213347691000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/read_reuse.py",
+    "line": 73,
+    "function": "reuse_read",
+    "primitive_calls": 34558,
+    "calls": 49526,
+    "self_seconds": 0.525251978,
+    "cumulative_seconds": 14.873424062000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 1126,
+    "function": "row_facts",
+    "primitive_calls": 34342,
+    "calls": 34342,
+    "self_seconds": 0.128011706,
+    "cumulative_seconds": 10.950836819000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 231,
+    "function": "_seal_event_reads",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.004111313,
+    "cumulative_seconds": 8.805182027
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/event_reads.py",
+    "line": 358,
+    "function": "seal_segment_finish",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.0026866710000000003,
+    "cumulative_seconds": 8.800106873
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 290,
+    "function": "_timed_events",
+    "primitive_calls": 209,
+    "calls": 209,
+    "self_seconds": 0.001099774,
+    "cumulative_seconds": 8.728334276
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 1053,
+    "function": "generate",
+    "primitive_calls": 209,
+    "calls": 209,
+    "self_seconds": 0.000494161,
+    "cumulative_seconds": 8.722779032
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 641,
+    "function": "validate_event",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.004709246,
+    "cumulative_seconds": 8.267999406000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/decoding.py",
+    "line": 34,
+    "function": "decode_event_row",
+    "primitive_calls": 12875,
+    "calls": 12875,
+    "self_seconds": 0.198211996,
+    "cumulative_seconds": 6.565412084
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 758,
+    "function": "_fixed_file",
+    "primitive_calls": 3842,
+    "calls": 3842,
+    "self_seconds": 0.049515844,
+    "cumulative_seconds": 6.190575471000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 1068,
+    "function": "guard",
+    "primitive_calls": 5,
+    "calls": 5,
+    "self_seconds": 3.6257e-05,
+    "cumulative_seconds": 5.708140941
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/event_reads.py",
+    "line": 303,
+    "function": "verify_segment_event",
+    "primitive_calls": 5,
+    "calls": 5,
+    "self_seconds": 0.000304878,
+    "cumulative_seconds": 5.708104684
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 984,
+    "function": "verify_segment_event",
+    "primitive_calls": 5,
+    "calls": 5,
+    "self_seconds": 0.00047156000000000005,
+    "cumulative_seconds": 5.704084209
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 1236,
+    "function": "_verify_publication",
+    "primitive_calls": 5,
+    "calls": 5,
+    "self_seconds": 0.00016324000000000002,
+    "cumulative_seconds": 5.6817463440000004
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 771,
+    "function": "verify_publication",
+    "primitive_calls": 5,
+    "calls": 5,
+    "self_seconds": 0.005687496,
+    "cumulative_seconds": 5.6815656180000005
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 764,
+    "function": "<lambda>",
+    "primitive_calls": 3742,
+    "calls": 3742,
+    "self_seconds": 0.01231512,
+    "cumulative_seconds": 4.970940860000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 767,
+    "function": "_load_fixed_file",
+    "primitive_calls": 3742,
+    "calls": 3742,
+    "self_seconds": 0.119644464,
+    "cumulative_seconds": 4.9586257400000004
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/contracts/json_values.py",
+    "line": 79,
+    "function": "parse_exact_json",
+    "primitive_calls": 72123,
+    "calls": 72123,
+    "self_seconds": 0.15836982700000002,
+    "cumulative_seconds": 4.943115318
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/read_reuse.py",
+    "line": 123,
+    "function": "_retained_size",
+    "primitive_calls": 55876,
+    "calls": 1459304,
+    "self_seconds": 1.9902410000000001,
+    "cumulative_seconds": 4.559845493
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/copy.py",
+    "line": 128,
+    "function": "deepcopy",
+    "primitive_calls": 49526,
+    "calls": 2122609,
+    "self_seconds": 2.3164217970000003,
+    "cumulative_seconds": 4.409509777
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method builtins.sum>",
+    "primitive_calls": 55628,
+    "calls": 206885,
+    "self_seconds": 0.229331165,
+    "cumulative_seconds": 4.282450472
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 336,
+    "function": "<listcomp>",
+    "primitive_calls": 113,
+    "calls": 113,
+    "self_seconds": 0.017518315,
+    "cumulative_seconds": 4.123483484
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/copy.py",
+    "line": 227,
+    "function": "_deepcopy_dict",
+    "primitive_calls": 49326,
+    "calls": 227348,
+    "self_seconds": 0.9713803830000001,
+    "cumulative_seconds": 3.9360258000000004
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 435,
+    "function": "_verify_assessment",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 0.0006632200000000001,
+    "cumulative_seconds": 3.8881939040000004
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 362,
+    "function": "_verify_assessment",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 0.001535169,
+    "cumulative_seconds": 3.887311389
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 564,
+    "function": "validate_event_structure",
+    "primitive_calls": 25718,
+    "calls": 25718,
+    "self_seconds": 0.516677485,
+    "cumulative_seconds": 3.7746674810000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 289,
+    "function": "iter_segment_members",
+    "primitive_calls": 1206,
+    "calls": 1206,
+    "self_seconds": 0.001647325,
+    "cumulative_seconds": 3.7274492280000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/read_reuse.py",
+    "line": 131,
+    "function": "<genexpr>",
+    "primitive_calls": 490901,
+    "calls": 713510,
+    "self_seconds": 0.513412718,
+    "cumulative_seconds": 3.211186729
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/contracts/json_values.py",
+    "line": 64,
+    "function": "_check_surrogates",
+    "primitive_calls": 72123,
+    "calls": 3322859,
+    "self_seconds": 2.49032042,
+    "cumulative_seconds": 3.088077749
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 1129,
+    "function": "<lambda>",
+    "primitive_calls": 20338,
+    "calls": 20338,
+    "self_seconds": 0.050446536,
+    "cumulative_seconds": 2.878124965
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 1132,
+    "function": "_load_row_facts",
+    "primitive_calls": 20338,
+    "calls": 20338,
+    "self_seconds": 0.166059217,
+    "cumulative_seconds": 2.827678429
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 714,
+    "function": "_action_finish_guard",
+    "primitive_calls": 201,
+    "calls": 201,
+    "self_seconds": 0.000889311,
+    "cumulative_seconds": 2.472291492
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/event_reads.py",
+    "line": 334,
+    "function": "verify_segment_finish_event",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 8.711600000000001e-05,
+    "cumulative_seconds": 2.4702962580000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 616,
+    "function": "verify_finish_request_event",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 0.000617521,
+    "cumulative_seconds": 2.4693053330000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 993,
+    "function": "plan",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 0.0009988310000000002,
+    "cumulative_seconds": 2.342661676
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 219,
+    "function": "segment_output_candidate",
+    "primitive_calls": 242,
+    "calls": 242,
+    "self_seconds": 0.033039155,
+    "cumulative_seconds": 2.0640537450000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+    "line": 211,
+    "function": "execute",
+    "primitive_calls": 59718,
+    "calls": 59718,
+    "self_seconds": 0.096827457,
+    "cumulative_seconds": 1.991434834
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+    "line": 200,
+    "function": "_execute",
+    "primitive_calls": 59718,
+    "calls": 59718,
+    "self_seconds": 0.250703742,
+    "cumulative_seconds": 1.894607377
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method builtins.isinstance>",
+    "primitive_calls": 12179008,
+    "calls": 12758332,
+    "self_seconds": 1.0954285380000002,
+    "cumulative_seconds": 1.871216266
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 172,
+    "function": "_match_create_spec",
+    "primitive_calls": 59920,
+    "calls": 59920,
+    "self_seconds": 0.670206372,
+    "cumulative_seconds": 1.743745944
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/json/__init__.py",
+    "line": 299,
+    "function": "loads",
+    "primitive_calls": 72123,
+    "calls": 72123,
+    "self_seconds": 0.23462692300000001,
+    "cumulative_seconds": 1.681420044
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 76,
+    "function": "_verify_scope_members",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 0.00038127100000000003,
+    "cumulative_seconds": 1.671048313
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 79,
+    "function": "expected",
+    "primitive_calls": 45,
+    "calls": 45,
+    "self_seconds": 0.002043004,
+    "cumulative_seconds": 1.6619207070000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segments.py",
+    "line": 490,
+    "function": "iter_segment_gaps",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 0.003041962,
+    "cumulative_seconds": 1.654254018
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 1138,
+    "function": "<dictcomp>",
+    "primitive_calls": 20138,
+    "calls": 20138,
+    "self_seconds": 0.20952489300000002,
+    "cumulative_seconds": 1.5743960680000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 195,
+    "function": "_decode",
+    "primitive_calls": 578,
+    "calls": 578,
+    "self_seconds": 0.136664966,
+    "cumulative_seconds": 1.5481802560000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 1151,
+    "function": "read_transaction_range",
+    "primitive_calls": 11342,
+    "calls": 11342,
+    "self_seconds": 0.037860591,
+    "cumulative_seconds": 1.502524452
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 537,
+    "function": "_read_sql_value",
+    "primitive_calls": 395941,
+    "calls": 395941,
+    "self_seconds": 0.21985679200000002,
+    "cumulative_seconds": 1.3648816810000002
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/json/decoder.py",
+    "line": 332,
+    "function": "decode",
+    "primitive_calls": 72123,
+    "calls": 72123,
+    "self_seconds": 0.16910443700000002,
+    "cumulative_seconds": 1.198454182
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 413,
+    "function": "<listcomp>",
+    "primitive_calls": 113,
+    "calls": 113,
+    "self_seconds": 0.001181898,
+    "cumulative_seconds": 1.0861951330000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 114,
+    "function": "_source",
+    "primitive_calls": 16,
+    "calls": 16,
+    "self_seconds": 0.0006487810000000001,
+    "cumulative_seconds": 1.082771452
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/row_history.py",
+    "line": 39,
+    "function": "read_row_values_at_boundary",
+    "primitive_calls": 3742,
+    "calls": 3742,
+    "self_seconds": 0.11886062400000001,
+    "cumulative_seconds": 1.072388405
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 151,
+    "function": "_check_enum_value",
+    "primitive_calls": 796584,
+    "calls": 796584,
+    "self_seconds": 0.878523806,
+    "cumulative_seconds": 1.066547211
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/result_inputs.py",
+    "line": 57,
+    "function": "page_from_outcome",
+    "primitive_calls": 578,
+    "calls": 578,
+    "self_seconds": 0.028939965,
+    "cumulative_seconds": 1.0487834630000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 205,
+    "function": "_identity",
+    "primitive_calls": 9,
+    "calls": 9,
+    "self_seconds": 0.000502596,
+    "cumulative_seconds": 1.0240434120000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/probe.py",
+    "line": 146,
+    "function": "execute",
+    "primitive_calls": 59718,
+    "calls": 59718,
+    "self_seconds": 0.260725512,
+    "cumulative_seconds": 0.9764187990000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/read_reuse.py",
+    "line": 136,
+    "function": "<genexpr>",
+    "primitive_calls": 147814,
+    "calls": 294190,
+    "self_seconds": 0.14052034300000002,
+    "cumulative_seconds": 0.9449881050000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/result_inputs.py",
+    "line": 77,
+    "function": "<genexpr>",
+    "primitive_calls": 63026,
+    "calls": 63026,
+    "self_seconds": 0.030082047,
+    "cumulative_seconds": 0.937790325
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/dataclasses.py",
+    "line": 1258,
+    "function": "is_dataclass",
+    "primitive_calls": 1047014,
+    "calls": 1047014,
+    "self_seconds": 0.528832025,
+    "cumulative_seconds": 0.9298577020000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/result_inputs.py",
+    "line": 114,
+    "function": "observed_file",
+    "primitive_calls": 62448,
+    "calls": 62448,
+    "self_seconds": 0.310993393,
+    "cumulative_seconds": 0.9077082780000001
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/json/decoder.py",
+    "line": 343,
+    "function": "raw_decode",
+    "primitive_calls": 72123,
+    "calls": 72123,
+    "self_seconds": 0.47134963,
+    "cumulative_seconds": 0.8952105770000001
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/typing.py",
+    "line": 1327,
+    "function": "__instancecheck__",
+    "primitive_calls": 289662,
+    "calls": 289662,
+    "self_seconds": 0.28757573000000003,
+    "cumulative_seconds": 0.816769104
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'execute' of 'sqlite3.Connection' objects>",
+    "primitive_calls": 59718,
+    "calls": 59718,
+    "self_seconds": 0.68978784,
+    "cumulative_seconds": 0.68978784
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 51,
+    "function": "_one",
+    "primitive_calls": 12502,
+    "calls": 12502,
+    "self_seconds": 0.054886018,
+    "cumulative_seconds": 0.657688997
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/files.py",
+    "line": 60,
+    "function": "file_identity_key",
+    "primitive_calls": 23888,
+    "calls": 23888,
+    "self_seconds": 0.052238649000000005,
+    "cumulative_seconds": 0.6293878420000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 479,
+    "function": "encode_json_value",
+    "primitive_calls": 24298,
+    "calls": 24298,
+    "self_seconds": 0.073529499,
+    "cumulative_seconds": 0.6160511240000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+    "line": 263,
+    "function": "fetchone",
+    "primitive_calls": 57118,
+    "calls": 57118,
+    "self_seconds": 0.044600531000000006,
+    "cumulative_seconds": 0.5641849520000001
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'get' of 'dict' objects>",
+    "primitive_calls": 6050725,
+    "calls": 6050725,
+    "self_seconds": 0.557013669,
+    "cumulative_seconds": 0.557013669
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+    "line": 253,
+    "function": "_fetch",
+    "primitive_calls": 58549,
+    "calls": 58549,
+    "self_seconds": 0.13917232300000001,
+    "cumulative_seconds": 0.554897717
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/contracts/json_encoding.py",
+    "line": 6,
+    "function": "encode_exact_json",
+    "primitive_calls": 24298,
+    "calls": 24298,
+    "self_seconds": 0.025192015,
+    "cumulative_seconds": 0.542521625
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+    "line": 63,
+    "function": "sql_call",
+    "primitive_calls": 130776,
+    "calls": 130776,
+    "self_seconds": 0.395952892,
+    "cumulative_seconds": 0.540363681
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/typing.py",
+    "line": 1602,
+    "function": "__subclasscheck__",
+    "primitive_calls": 289662,
+    "calls": 289662,
+    "self_seconds": 0.194010907,
+    "cumulative_seconds": 0.529193374
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 68,
+    "function": "_set",
+    "primitive_calls": 939,
+    "calls": 939,
+    "self_seconds": 0.012390456000000001,
+    "cumulative_seconds": 0.520571719
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/contracts/json_encoding.py",
+    "line": 9,
+    "function": "dump",
+    "primitive_calls": 24298,
+    "calls": 102134,
+    "self_seconds": 0.18701146700000001,
+    "cumulative_seconds": 0.51732961
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 1158,
+    "function": "<lambda>",
+    "primitive_calls": 3858,
+    "calls": 3858,
+    "self_seconds": 0.009328164,
+    "cumulative_seconds": 0.49326277700000004
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 1162,
+    "function": "_load_transaction_range",
+    "primitive_calls": 3858,
+    "calls": 3858,
+    "self_seconds": 0.056544909000000004,
+    "cumulative_seconds": 0.483934613
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+    "line": 40,
+    "function": "_clock",
+    "primitive_calls": 343752,
+    "calls": 343752,
+    "self_seconds": 0.190880385,
+    "cumulative_seconds": 0.460423811
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/contracts/values.py",
+    "line": 54,
+    "function": "__new__",
+    "primitive_calls": 338657,
+    "calls": 338657,
+    "self_seconds": 0.328814685,
+    "cumulative_seconds": 0.44668067400000006
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/row_history.py",
+    "line": 23,
+    "function": "_one",
+    "primitive_calls": 11226,
+    "calls": 11226,
+    "self_seconds": 0.036969140000000004,
+    "cumulative_seconds": 0.43690933400000004
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/contracts/json_values.py",
+    "line": 55,
+    "function": "_object_pairs",
+    "primitive_calls": 461031,
+    "calls": 461031,
+    "self_seconds": 0.42386094700000004,
+    "cumulative_seconds": 0.42386094700000004
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'join' of 'str' objects>",
+    "primitive_calls": 25382,
+    "calls": 26886,
+    "self_seconds": 0.036808005000000005,
+    "cumulative_seconds": 0.410406095
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/contracts/json_encoding.py",
+    "line": 27,
+    "function": "<genexpr>",
+    "primitive_calls": 95998,
+    "calls": 96040,
+    "self_seconds": 0.035982005000000004,
+    "cumulative_seconds": 0.373826429
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method builtins.getattr>",
+    "primitive_calls": 591747,
+    "calls": 756632,
+    "self_seconds": 0.281012537,
+    "cumulative_seconds": 0.352410051
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method builtins.id>",
+    "primitive_calls": 4109467,
+    "calls": 4109467,
+    "self_seconds": 0.33577452300000005,
+    "cumulative_seconds": 0.33577452300000005
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method builtins.hasattr>",
+    "primitive_calls": 1067240,
+    "calls": 1067240,
+    "self_seconds": 0.323849418,
+    "cumulative_seconds": 0.323849418
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+    "line": 184,
+    "function": "__getattr__",
+    "primitive_calls": 164885,
+    "calls": 164885,
+    "self_seconds": 0.063509335,
+    "cumulative_seconds": 0.323395156
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/copy.py",
+    "line": 259,
+    "function": "_reconstruct",
+    "primitive_calls": 11342,
+    "calls": 11342,
+    "self_seconds": 0.071029175,
+    "cumulative_seconds": 0.318104947
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 1047,
+    "function": "context",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.004544642000000001,
+    "cumulative_seconds": 0.30711066800000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 860,
+    "function": "_event_state",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.016400129,
+    "cumulative_seconds": 0.297412968
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 936,
+    "function": "_member_input_from_row",
+    "primitive_calls": 3442,
+    "calls": 3442,
+    "self_seconds": 0.034145416000000005,
+    "cumulative_seconds": 0.29668071100000004
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method builtins.issubclass>",
+    "primitive_calls": 301052,
+    "calls": 301052,
+    "self_seconds": 0.162070834,
+    "cumulative_seconds": 0.291199143
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method sys.getsizeof>",
+    "primitive_calls": 1162408,
+    "calls": 1162408,
+    "self_seconds": 0.27633518900000004,
+    "cumulative_seconds": 0.27633518900000004
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 195,
+    "function": "_match_update_spec",
+    "primitive_calls": 1301,
+    "calls": 1301,
+    "self_seconds": 0.023993892000000003,
+    "cumulative_seconds": 0.260164645
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method builtins.any>",
+    "primitive_calls": 16225,
+    "calls": 16225,
+    "self_seconds": 0.064915386,
+    "cumulative_seconds": 0.250632674
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/contracts/json_values.py",
+    "line": 19,
+    "function": "json_equal",
+    "primitive_calls": 2599,
+    "calls": 2599,
+    "self_seconds": 0.024407193,
+    "cumulative_seconds": 0.24592190500000002
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/copy.py",
+    "line": 243,
+    "function": "_keep_alive",
+    "primitive_calls": 239114,
+    "calls": 239114,
+    "self_seconds": 0.19784135500000002,
+    "cumulative_seconds": 0.240341081
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/json/__init__.py",
+    "line": 183,
+    "function": "dumps",
+    "primitive_calls": 78595,
+    "calls": 78595,
+    "self_seconds": 0.130505853,
+    "cumulative_seconds": 0.238051439
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+    "line": 222,
+    "function": "__init__",
+    "primitive_calls": 59718,
+    "calls": 59718,
+    "self_seconds": 0.067701519,
+    "cumulative_seconds": 0.23696787900000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+    "line": 146,
+    "function": "transaction_detail",
+    "primitive_calls": 77602,
+    "calls": 77602,
+    "self_seconds": 0.112020324,
+    "cumulative_seconds": 0.22758987800000002
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/json/decoder.py",
+    "line": 284,
+    "function": "__init__",
+    "primitive_calls": 72123,
+    "calls": 72123,
+    "self_seconds": 0.22442752400000002,
+    "cumulative_seconds": 0.22442752400000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segment_storage.py",
+    "line": 152,
+    "function": "decode_enum",
+    "primitive_calls": 27656,
+    "calls": 27656,
+    "self_seconds": 0.024481763,
+    "cumulative_seconds": 0.21875585400000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 213,
+    "function": "<setcomp>",
+    "primitive_calls": 1301,
+    "calls": 1301,
+    "self_seconds": 0.0039708470000000004,
+    "cumulative_seconds": 0.21143086300000002
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method time.thread_time_ns>",
+    "primitive_calls": 343752,
+    "calls": 343752,
+    "self_seconds": 0.210672469,
+    "cumulative_seconds": 0.210672469
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/decoding.py",
+    "line": 19,
+    "function": "_image",
+    "primitive_calls": 73074,
+    "calls": 73074,
+    "self_seconds": 0.160352873,
+    "cumulative_seconds": 0.209835513
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/events.py",
+    "line": 94,
+    "function": "event_type_name",
+    "primitive_calls": 51436,
+    "calls": 51436,
+    "self_seconds": 0.200877713,
+    "cumulative_seconds": 0.20676323400000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 392,
+    "function": "<listcomp>",
+    "primitive_calls": 113,
+    "calls": 113,
+    "self_seconds": 0.010579613,
+    "cumulative_seconds": 0.204185575
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/read_reuse.py",
+    "line": 39,
+    "function": "typed_read_key",
+    "primitive_calls": 91368,
+    "calls": 91368,
+    "self_seconds": 0.079625876,
+    "cumulative_seconds": 0.20225437300000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/contracts/segment_values.py",
+    "line": 15,
+    "function": "decode_text_enum",
+    "primitive_calls": 27656,
+    "calls": 27656,
+    "self_seconds": 0.084245522,
+    "cumulative_seconds": 0.194274091
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/contextlib.py",
+    "line": 141,
+    "function": "__exit__",
+    "primitive_calls": 41422,
+    "calls": 41422,
+    "self_seconds": 0.045756653,
+    "cumulative_seconds": 0.192112145
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'encode' of 'str' objects>",
+    "primitive_calls": 2021506,
+    "calls": 2021506,
+    "self_seconds": 0.18485410300000002,
+    "cumulative_seconds": 0.18485410300000002
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/contextlib.py",
+    "line": 132,
+    "function": "__enter__",
+    "primitive_calls": 41422,
+    "calls": 41422,
+    "self_seconds": 0.027268473,
+    "cumulative_seconds": 0.176602707
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+    "line": 229,
+    "function": "__setattr__",
+    "primitive_calls": 179380,
+    "calls": 179380,
+    "self_seconds": 0.129743108,
+    "cumulative_seconds": 0.169438007
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'add' of 'set' objects>",
+    "primitive_calls": 1346376,
+    "calls": 1346376,
+    "self_seconds": 0.167660142,
+    "cumulative_seconds": 0.167660142
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/copy.py",
+    "line": 182,
+    "function": "_deepcopy_atomic",
+    "primitive_calls": 1883447,
+    "calls": 1883447,
+    "self_seconds": 0.159337258,
+    "cumulative_seconds": 0.159337258
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/events.py",
+    "line": 125,
+    "function": "business_columns",
+    "primitive_calls": 67404,
+    "calls": 67404,
+    "self_seconds": 0.131328728,
+    "cumulative_seconds": 0.149690434
+  },
+  {
+    "file": "<attrs generated methods jsonschema.validators.create.<locals>.Validator>",
+    "line": 26,
+    "function": "__init__",
+    "primitive_calls": 2599,
+    "calls": 2599,
+    "self_seconds": 0.0073556640000000005,
+    "cumulative_seconds": 0.14221086100000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 392,
+    "function": "<genexpr>",
+    "primitive_calls": 691612,
+    "calls": 691612,
+    "self_seconds": 0.14159655100000001,
+    "cumulative_seconds": 0.14159655100000001
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/contextlib.py",
+    "line": 359,
+    "function": "__exit__",
+    "primitive_calls": 58233,
+    "calls": 58233,
+    "self_seconds": 0.09397775700000001,
+    "cumulative_seconds": 0.13716028600000002
+  },
+  {
+    "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/jsonschema/validators.py",
+    "line": 282,
+    "function": "__attrs_post_init__",
+    "primitive_calls": 2599,
+    "calls": 2599,
+    "self_seconds": 0.015109109,
+    "cumulative_seconds": 0.134855197
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/contracts/json_values.py",
+    "line": 112,
+    "function": "is_json_integer",
+    "primitive_calls": 208438,
+    "calls": 208438,
+    "self_seconds": 0.10012090500000001,
+    "cumulative_seconds": 0.132790517
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+    "line": 276,
+    "function": "__next__",
+    "primitive_calls": 12509,
+    "calls": 12509,
+    "self_seconds": 0.021922670000000002,
+    "cumulative_seconds": 0.130208642
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/probe.py",
+    "line": 145,
+    "function": "__getattr__",
+    "primitive_calls": 164885,
+    "calls": 164885,
+    "self_seconds": 0.07139751400000001,
+    "cumulative_seconds": 0.129587443
+  },
+  {
+    "file": "<frozen abc>",
+    "line": 121,
+    "function": "__subclasscheck__",
+    "primitive_calls": 289662,
+    "calls": 289662,
+    "self_seconds": 0.077127261,
+    "cumulative_seconds": 0.129128309
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/files.py",
+    "line": 119,
+    "function": "__post_init__",
+    "primitive_calls": 11944,
+    "calls": 11944,
+    "self_seconds": 0.036130106,
+    "cumulative_seconds": 0.12216847
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segments.py",
+    "line": 173,
+    "function": "advance_segment_assessment",
+    "primitive_calls": 600,
+    "calls": 600,
+    "self_seconds": 0.006995656,
+    "cumulative_seconds": 0.122164828
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'fetchone' of 'sqlite3.Cursor' objects>",
+    "primitive_calls": 57118,
+    "calls": 57118,
+    "self_seconds": 0.12129904100000001,
+    "cumulative_seconds": 0.12129904100000001
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py",
+    "line": 688,
+    "function": "__call__",
+    "primitive_calls": 93009,
+    "calls": 93009,
+    "self_seconds": 0.071702319,
+    "cumulative_seconds": 0.120207165
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/dataclasses.py",
+    "line": 1455,
+    "function": "replace",
+    "primitive_calls": 2427,
+    "calls": 2427,
+    "self_seconds": 0.040520872,
+    "cumulative_seconds": 0.119461043
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/events.py",
+    "line": 102,
+    "function": "branch_of",
+    "primitive_calls": 25718,
+    "calls": 25718,
+    "self_seconds": 0.035879874,
+    "cumulative_seconds": 0.11828659200000001
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'items' of 'dict' objects>",
+    "primitive_calls": 1053045,
+    "calls": 1053045,
+    "self_seconds": 0.116816997,
+    "cumulative_seconds": 0.116816997
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/contextlib.py",
+    "line": 299,
+    "function": "helper",
+    "primitive_calls": 41422,
+    "calls": 41422,
+    "self_seconds": 0.037229161000000004,
+    "cumulative_seconds": 0.11282349300000001
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'match' of 're.Pattern' objects>",
+    "primitive_calls": 144824,
+    "calls": 144824,
+    "self_seconds": 0.109760487,
+    "cumulative_seconds": 0.109760487
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 5821,
+    "function": "file_discovery_row",
+    "primitive_calls": 11944,
+    "calls": 11944,
+    "self_seconds": 0.050898597000000004,
+    "cumulative_seconds": 0.10523252200000001
+  },
+  {
+    "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/referencing/_core.py",
+    "line": 586,
+    "function": "resolver_with_root",
+    "primitive_calls": 2599,
+    "calls": 2599,
+    "self_seconds": 0.009083793,
+    "cumulative_seconds": 0.102546649
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segment_storage.py",
+    "line": 280,
+    "function": "__post_init__",
+    "primitive_calls": 3442,
+    "calls": 3442,
+    "self_seconds": 0.028479057000000002,
+    "cumulative_seconds": 0.09075671
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/devices/directory.py",
+    "line": 36,
+    "function": "from_json",
+    "primitive_calls": 784,
+    "calls": 784,
+    "self_seconds": 0.00888243,
+    "cumulative_seconds": 0.08352461600000001
+  },
+  {
+    "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/referencing/_core.py",
+    "line": 514,
+    "function": "with_resource",
+    "primitive_calls": 2599,
+    "calls": 2599,
+    "self_seconds": 0.003332424,
+    "cumulative_seconds": 0.081008175
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 245,
+    "function": "verify_completion_proof",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 0.0015157600000000001,
+    "cumulative_seconds": 0.080561859
+  },
+  {
+    "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/referencing/_core.py",
+    "line": 520,
+    "function": "with_resources",
+    "primitive_calls": 2599,
+    "calls": 2599,
+    "self_seconds": 0.020077856,
+    "cumulative_seconds": 0.077675751
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/result_inputs.py",
+    "line": 161,
+    "function": "saved_outcome",
+    "primitive_calls": 581,
+    "calls": 581,
+    "self_seconds": 0.001672059,
+    "cumulative_seconds": 0.07580969
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/contextlib.py",
+    "line": 104,
+    "function": "__init__",
+    "primitive_calls": 41422,
+    "calls": 41422,
+    "self_seconds": 0.065621439,
+    "cumulative_seconds": 0.075594332
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method __new__ of type object at 0x55ae19a22610>",
+    "primitive_calls": 387683,
+    "calls": 387683,
+    "self_seconds": 0.074481477,
+    "cumulative_seconds": 0.074481477
+  },
+  {
+    "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/jsonschema/validators.py",
+    "line": 485,
+    "function": "is_valid",
+    "primitive_calls": 2599,
+    "calls": 2599,
+    "self_seconds": 0.008175621000000001,
+    "cumulative_seconds": 0.074346223
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/operations/result_format.py",
+    "line": 63,
+    "function": "read_result_document",
+    "primitive_calls": 581,
+    "calls": 581,
+    "self_seconds": 0.030370251,
+    "cumulative_seconds": 0.07413763100000001
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/json/encoder.py",
+    "line": 183,
+    "function": "encode",
+    "primitive_calls": 78595,
+    "calls": 78595,
+    "self_seconds": 0.045212575000000005,
+    "cumulative_seconds": 0.07003365
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/devices/directory.py",
+    "line": 20,
+    "function": "__post_init__",
+    "primitive_calls": 784,
+    "calls": 784,
+    "self_seconds": 0.004609764000000001,
+    "cumulative_seconds": 0.068423759
+  },
+  {
+    "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/jsonschema/validators.py",
+    "line": 349,
+    "function": "iter_errors",
+    "primitive_calls": 4816,
+    "calls": 4816,
+    "self_seconds": 0.011476465,
+    "cumulative_seconds": 0.063787905
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 154,
+    "function": "<genexpr>",
+    "primitive_calls": 6884,
+    "calls": 6884,
+    "self_seconds": 0.06241880600000001,
+    "cumulative_seconds": 0.06241880600000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/decoding.py",
+    "line": 13,
+    "function": "_json_identity",
+    "primitive_calls": 49412,
+    "calls": 49412,
+    "self_seconds": 0.032947367000000005,
+    "cumulative_seconds": 0.06110940300000001
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'startswith' of 'str' objects>",
+    "primitive_calls": 255425,
+    "calls": 255425,
+    "self_seconds": 0.05995410600000001,
+    "cumulative_seconds": 0.05995410600000001
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method time.monotonic_ns>",
+    "primitive_calls": 343752,
+    "calls": 343752,
+    "self_seconds": 0.058870957,
+    "cumulative_seconds": 0.058870957
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/row_history.py",
+    "line": 28,
+    "function": "_anchor",
+    "primitive_calls": 11226,
+    "calls": 11226,
+    "self_seconds": 0.021810731,
+    "cumulative_seconds": 0.058839724
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 1066,
+    "function": "row_change",
+    "primitive_calls": 12344,
+    "calls": 12344,
+    "self_seconds": 0.035542080000000004,
+    "cumulative_seconds": 0.058383442
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/devices/directory.py",
+    "line": 98,
+    "function": "_roots",
+    "primitive_calls": 784,
+    "calls": 784,
+    "self_seconds": 0.008140176,
+    "cumulative_seconds": 0.056152982000000004
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/copy.py",
+    "line": 201,
+    "function": "_deepcopy_list",
+    "primitive_calls": 382,
+    "calls": 424,
+    "self_seconds": 0.001393378,
+    "cumulative_seconds": 0.055678246
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method _abc._abc_subclasscheck>",
+    "primitive_calls": 289662,
+    "calls": 289662,
+    "self_seconds": 0.052001048,
+    "cumulative_seconds": 0.052001048
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segment_models.py",
+    "line": 236,
+    "function": "__post_init__",
+    "primitive_calls": 1803,
+    "calls": 1803,
+    "self_seconds": 0.033804517,
+    "cumulative_seconds": 0.050029925
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segment_models.py",
+    "line": 69,
+    "function": "__post_init__",
+    "primitive_calls": 6884,
+    "calls": 6884,
+    "self_seconds": 0.042907171,
+    "cumulative_seconds": 0.048813535000000005
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py",
+    "line": 1095,
+    "function": "__new__",
+    "primitive_calls": 93009,
+    "calls": 93009,
+    "self_seconds": 0.048504846000000004,
+    "cumulative_seconds": 0.048504846000000004
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+    "line": 226,
+    "function": "__getattr__",
+    "primitive_calls": 78371,
+    "calls": 78371,
+    "self_seconds": 0.029253570000000003,
+    "cumulative_seconds": 0.047130936000000005
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method '__reduce_ex__' of 'object' objects>",
+    "primitive_calls": 11342,
+    "calls": 11342,
+    "self_seconds": 0.045845228,
+    "cumulative_seconds": 0.045845228
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/devices/file_identity.py",
+    "line": 17,
+    "function": "__post_init__",
+    "primitive_calls": 1568,
+    "calls": 1568,
+    "self_seconds": 0.026884658000000002,
+    "cumulative_seconds": 0.045512463
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py",
+    "line": 193,
+    "function": "__get__",
+    "primitive_calls": 46270,
+    "calls": 46270,
+    "self_seconds": 0.030618117,
+    "cumulative_seconds": 0.044684854
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/read_reuse.py",
+    "line": 140,
+    "function": "<genexpr>",
+    "primitive_calls": 15432,
+    "calls": 15432,
+    "self_seconds": 0.012363548,
+    "cumulative_seconds": 0.043780307000000004
+  },
+  {
+    "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/attr/_make.py",
+    "line": 587,
+    "function": "evolve",
+    "primitive_calls": 2599,
+    "calls": 2599,
+    "self_seconds": 0.022275502000000003,
+    "cumulative_seconds": 0.041692423
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/contracts/values.py",
+    "line": 67,
+    "function": "__new__",
+    "primitive_calls": 37684,
+    "calls": 37684,
+    "self_seconds": 0.029557852000000003,
+    "cumulative_seconds": 0.041616598000000005
+  },
+  {
+    "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/jsonschema/_keywords.py",
+    "line": 85,
+    "function": "const",
+    "primitive_calls": 4816,
+    "calls": 4816,
+    "self_seconds": 0.009517087,
+    "cumulative_seconds": 0.041490871000000006
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/files.py",
+    "line": 86,
+    "function": "_mapping",
+    "primitive_calls": 11944,
+    "calls": 11944,
+    "self_seconds": 0.0050064820000000005,
+    "cumulative_seconds": 0.041140470000000005
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 263,
+    "function": "_family_fields",
+    "primitive_calls": 11944,
+    "calls": 11944,
+    "self_seconds": 0.029561299000000003,
+    "cumulative_seconds": 0.040736991
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 702,
+    "function": "_created_output",
+    "primitive_calls": 456,
+    "calls": 456,
+    "self_seconds": 0.004439773,
+    "cumulative_seconds": 0.039832447
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+    "line": 266,
+    "function": "fetchmany",
+    "primitive_calls": 1431,
+    "calls": 1431,
+    "self_seconds": 0.002349776,
+    "cumulative_seconds": 0.037663072000000006
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/json/encoder.py",
+    "line": 105,
+    "function": "__init__",
+    "primitive_calls": 78595,
+    "calls": 78595,
+    "self_seconds": 0.037511936,
+    "cumulative_seconds": 0.037511936
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 499,
+    "function": "_encode_body",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.0005935220000000001,
+    "cumulative_seconds": 0.037410366
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 311,
+    "function": "_relation_page",
+    "primitive_calls": 23,
+    "calls": 23,
+    "self_seconds": 0.0006417860000000001,
+    "cumulative_seconds": 0.036355736
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 546,
+    "function": "_write_projections",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.00261079,
+    "cumulative_seconds": 0.032836981
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method builtins.len>",
+    "primitive_calls": 233402,
+    "calls": 233402,
+    "self_seconds": 0.032475117000000005,
+    "cumulative_seconds": 0.032475117000000005
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/copy.py",
+    "line": 264,
+    "function": "<genexpr>",
+    "primitive_calls": 22684,
+    "calls": 22684,
+    "self_seconds": 0.009960466000000001,
+    "cumulative_seconds": 0.032354619
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'append' of 'list' objects>",
+    "primitive_calls": 272107,
+    "calls": 272107,
+    "self_seconds": 0.031939383,
+    "cumulative_seconds": 0.031939383
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/dataclasses.py",
+    "line": 1235,
+    "function": "fields",
+    "primitive_calls": 3881,
+    "calls": 3881,
+    "self_seconds": 0.018418599,
+    "cumulative_seconds": 0.031534943
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 65,
+    "function": "_scopes",
+    "primitive_calls": 28,
+    "calls": 28,
+    "self_seconds": 0.00012388,
+    "cumulative_seconds": 0.031054002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 336,
+    "function": "read_segment_scope",
+    "primitive_calls": 20,
+    "calls": 20,
+    "self_seconds": 0.00014564500000000002,
+    "cumulative_seconds": 0.030928496000000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/contracts/history_values.py",
+    "line": 35,
+    "function": "__post_init__",
+    "primitive_calls": 7486,
+    "calls": 7486,
+    "self_seconds": 0.025399206,
+    "cumulative_seconds": 0.030350505000000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 165,
+    "function": "_allowed_value",
+    "primitive_calls": 242,
+    "calls": 242,
+    "self_seconds": 0.000839214,
+    "cumulative_seconds": 0.028580144000000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 169,
+    "function": "<genexpr>",
+    "primitive_calls": 456,
+    "calls": 456,
+    "self_seconds": 0.00034306200000000004,
+    "cumulative_seconds": 0.027413372000000002
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method time.perf_counter>",
+    "primitive_calls": 119436,
+    "calls": 119436,
+    "self_seconds": 0.025821603000000002,
+    "cumulative_seconds": 0.025821603000000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+    "line": 123,
+    "function": "db_phase",
+    "primitive_calls": 4598,
+    "calls": 4598,
+    "self_seconds": 0.009840692,
+    "cumulative_seconds": 0.025711471000000003
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'values' of 'dict' objects>",
+    "primitive_calls": 166000,
+    "calls": 166000,
+    "self_seconds": 0.025059405,
+    "cumulative_seconds": 0.025059405
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 41,
+    "function": "_one",
+    "primitive_calls": 701,
+    "calls": 701,
+    "self_seconds": 0.002250343,
+    "cumulative_seconds": 0.024764947000000002
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py",
+    "line": 788,
+    "function": "__getitem__",
+    "primitive_calls": 28506,
+    "calls": 28506,
+    "self_seconds": 0.024620747000000002,
+    "cumulative_seconds": 0.024620747000000002
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'fetchmany' of 'sqlite3.Cursor' objects>",
+    "primitive_calls": 1431,
+    "calls": 1431,
+    "self_seconds": 0.023046635000000003,
+    "cumulative_seconds": 0.023046635000000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 820,
+    "function": "_verify_strict_member",
+    "primitive_calls": 3442,
+    "calls": 3442,
+    "self_seconds": 0.006422642,
+    "cumulative_seconds": 0.022161922
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/files.py",
+    "line": 100,
+    "function": "_timestamp",
+    "primitive_calls": 11944,
+    "calls": 11944,
+    "self_seconds": 0.007118584000000001,
+    "cumulative_seconds": 0.021104485000000003
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'get' of '_contextvars.ContextVar' objects>",
+    "primitive_calls": 131649,
+    "calls": 131649,
+    "self_seconds": 0.020439921,
+    "cumulative_seconds": 0.020439921
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 176,
+    "function": "_output_candidate",
+    "primitive_calls": 1642,
+    "calls": 1642,
+    "self_seconds": 0.005991149,
+    "cumulative_seconds": 0.020435814
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 258,
+    "function": "<genexpr>",
+    "primitive_calls": 63026,
+    "calls": 63026,
+    "self_seconds": 0.020306994000000002,
+    "cumulative_seconds": 0.020306994000000002
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'pop' of 'collections.OrderedDict' objects>",
+    "primitive_calls": 27938,
+    "calls": 27938,
+    "self_seconds": 0.02003417,
+    "cumulative_seconds": 0.02003417
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/read_reuse.py",
+    "line": 29,
+    "function": "reset",
+    "primitive_calls": 627,
+    "calls": 627,
+    "self_seconds": 0.000904142,
+    "cumulative_seconds": 0.019843733000000002
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method _json.encode_basestring>",
+    "primitive_calls": 78595,
+    "calls": 78595,
+    "self_seconds": 0.0194577,
+    "cumulative_seconds": 0.0194577
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/contracts/history_values.py",
+    "line": 62,
+    "function": "__post_init__",
+    "primitive_calls": 3860,
+    "calls": 3860,
+    "self_seconds": 0.015666058,
+    "cumulative_seconds": 0.019312145000000003
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'clear' of 'collections.OrderedDict' objects>",
+    "primitive_calls": 838,
+    "calls": 838,
+    "self_seconds": 0.019286670000000002,
+    "cumulative_seconds": 0.019286670000000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 170,
+    "function": "_bind_event_reads",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.009081764,
+    "cumulative_seconds": 0.018234667
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 3988,
+    "function": "source",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 0.00032451400000000003,
+    "cumulative_seconds": 0.018030469
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'end' of 're.Match' objects>",
+    "primitive_calls": 144246,
+    "calls": 144246,
+    "self_seconds": 0.017956997000000002,
+    "cumulative_seconds": 0.017956997000000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/row_history.py",
+    "line": 100,
+    "function": "<dictcomp>",
+    "primitive_calls": 3742,
+    "calls": 3742,
+    "self_seconds": 0.017397998,
+    "cumulative_seconds": 0.017397998
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 243,
+    "function": "<genexpr>",
+    "primitive_calls": 1702,
+    "calls": 1702,
+    "self_seconds": 0.0014277580000000001,
+    "cumulative_seconds": 0.016439930000000002
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method builtins.hash>",
+    "primitive_calls": 49526,
+    "calls": 49526,
+    "self_seconds": 0.016419486,
+    "cumulative_seconds": 0.016419486
+  },
+  {
+    "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/jsonschema/_utils.py",
+    "line": 127,
+    "function": "equal",
+    "primitive_calls": 2599,
+    "calls": 2775,
+    "self_seconds": 0.006537800000000001,
+    "cumulative_seconds": 0.016328672000000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/changes.py",
+    "line": 316,
+    "function": "derive_changes",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.006251238,
+    "cumulative_seconds": 0.016016333
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 325,
+    "function": "<genexpr>",
+    "primitive_calls": 135,
+    "calls": 135,
+    "self_seconds": 0.000125899,
+    "cumulative_seconds": 0.016004428
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/contextlib.py",
+    "line": 355,
+    "function": "__init__",
+    "primitive_calls": 58233,
+    "calls": 58233,
+    "self_seconds": 0.015990404,
+    "cumulative_seconds": 0.015990404
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 813,
+    "function": "_uses_strict_proof",
+    "primitive_calls": 3442,
+    "calls": 3442,
+    "self_seconds": 0.014427088000000001,
+    "cumulative_seconds": 0.01573928
+  },
+  {
+    "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/jsonschema/exceptions.py",
+    "line": 55,
+    "function": "__init__",
+    "primitive_calls": 2217,
+    "calls": 2217,
+    "self_seconds": 0.015645112000000003,
+    "cumulative_seconds": 0.015645112000000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/changes.py",
+    "line": 244,
+    "function": "event_report_targets",
+    "primitive_calls": 624,
+    "calls": 624,
+    "self_seconds": 0.006154963,
+    "cumulative_seconds": 0.015286564
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/copyreg.py",
+    "line": 104,
+    "function": "__newobj__",
+    "primitive_calls": 11342,
+    "calls": 11342,
+    "self_seconds": 0.010755925000000001,
+    "cumulative_seconds": 0.015056157
+  },
+  {
+    "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/referencing/_core.py",
+    "line": 165,
+    "function": "create_resource",
+    "primitive_calls": 2599,
+    "calls": 2599,
+    "self_seconds": 0.00696786,
+    "cumulative_seconds": 0.013015341000000001
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'popitem' of 'collections.OrderedDict' objects>",
+    "primitive_calls": 13954,
+    "calls": 13954,
+    "self_seconds": 0.012450500000000001,
+    "cumulative_seconds": 0.012450500000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segment_models.py",
+    "line": 101,
+    "function": "cursor",
+    "primitive_calls": 4197,
+    "calls": 4197,
+    "self_seconds": 0.003127097,
+    "cumulative_seconds": 0.012066304
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 62,
+    "function": "_ref",
+    "primitive_calls": 945,
+    "calls": 945,
+    "self_seconds": 0.004623791,
+    "cumulative_seconds": 0.011943014
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 217,
+    "function": "<setcomp>",
+    "primitive_calls": 578,
+    "calls": 578,
+    "self_seconds": 0.011528777,
+    "cumulative_seconds": 0.011528777
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py",
+    "line": 1252,
+    "function": "name",
+    "primitive_calls": 29668,
+    "calls": 29668,
+    "self_seconds": 0.010971476,
+    "cumulative_seconds": 0.010971476
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/dataclasses.py",
+    "line": 1250,
+    "function": "<genexpr>",
+    "primitive_calls": 15547,
+    "calls": 15547,
+    "self_seconds": 0.010666637000000001,
+    "cumulative_seconds": 0.010666637000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 788,
+    "function": "_output_guard",
+    "primitive_calls": 201,
+    "calls": 201,
+    "self_seconds": 0.001855155,
+    "cumulative_seconds": 0.010652173000000001
+  },
+  {
+    "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/jsonschema/exceptions.py",
+    "line": 165,
+    "function": "_set",
+    "primitive_calls": 2217,
+    "calls": 2217,
+    "self_seconds": 0.007845513,
+    "cumulative_seconds": 0.010447998
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/page_read_cache.py",
+    "line": 57,
+    "function": "_reads",
+    "primitive_calls": 1591,
+    "calls": 1591,
+    "self_seconds": 0.006380297,
+    "cumulative_seconds": 0.010414417
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 887,
+    "function": "_verify_set_identity",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 1.8313000000000002e-05,
+    "cumulative_seconds": 0.010184312000000001
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'insert' of 'rpds.HashTrieSet' objects>",
+    "primitive_calls": 2599,
+    "calls": 2599,
+    "self_seconds": 0.010162463,
+    "cumulative_seconds": 0.010162463
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/read_reuse.py",
+    "line": 66,
+    "function": "clear_read_reuse",
+    "primitive_calls": 210,
+    "calls": 210,
+    "self_seconds": 0.0004928430000000001,
+    "cumulative_seconds": 0.010010350000000001
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'close' of 'sqlite3.Cursor' objects>",
+    "primitive_calls": 58233,
+    "calls": 58233,
+    "self_seconds": 0.009930272,
+    "cumulative_seconds": 0.009930272
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/operations/result_format.py",
+    "line": 54,
+    "function": "_evidence",
+    "primitive_calls": 1162,
+    "calls": 1162,
+    "self_seconds": 0.003817977,
+    "cumulative_seconds": 0.009859868
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 597,
+    "function": "<listcomp>",
+    "primitive_calls": 200,
+    "calls": 200,
+    "self_seconds": 0.001128317,
+    "cumulative_seconds": 0.009855379000000001
+  },
+  {
+    "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/attr/_make.py",
+    "line": 1891,
+    "function": "fields",
+    "primitive_calls": 2599,
+    "calls": 2599,
+    "self_seconds": 0.005313516,
+    "cumulative_seconds": 0.00956121
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 472,
+    "function": "_check_evidence_member",
+    "primitive_calls": 2894,
+    "calls": 2894,
+    "self_seconds": 0.007815415000000001,
+    "cumulative_seconds": 0.009388365000000001
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/contextlib.py",
+    "line": 357,
+    "function": "__enter__",
+    "primitive_calls": 58233,
+    "calls": 58233,
+    "self_seconds": 0.009382375,
+    "cumulative_seconds": 0.009382375
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/devices/evidence.py",
+    "line": 103,
+    "function": "validate_observation",
+    "primitive_calls": 578,
+    "calls": 578,
+    "self_seconds": 0.005930199000000001,
+    "cumulative_seconds": 0.009322287
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 531,
+    "function": "_sql_value",
+    "primitive_calls": 2218,
+    "calls": 2218,
+    "self_seconds": 0.001134796,
+    "cumulative_seconds": 0.008756874000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 91,
+    "function": "<genexpr>",
+    "primitive_calls": 45,
+    "calls": 45,
+    "self_seconds": 5.0265e-05,
+    "cumulative_seconds": 0.008746335000000001
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'move_to_end' of 'collections.OrderedDict' objects>",
+    "primitive_calls": 22166,
+    "calls": 22166,
+    "self_seconds": 0.008652786,
+    "cumulative_seconds": 0.008652786
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segment_storage.py",
+    "line": 364,
+    "function": "__post_init__",
+    "primitive_calls": 1642,
+    "calls": 1642,
+    "self_seconds": 0.0037145600000000004,
+    "cumulative_seconds": 0.008528373
+  },
+  {
+    "file": "<attrs generated methods referencing._core.Registry>",
+    "line": 18,
+    "function": "__init__",
+    "primitive_calls": 2599,
+    "calls": 2599,
+    "self_seconds": 0.00677408,
+    "cumulative_seconds": 0.008404104
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/operations/result_format.py",
+    "line": 79,
+    "function": "<genexpr>",
+    "primitive_calls": 1162,
+    "calls": 1162,
+    "self_seconds": 0.002453193,
+    "cumulative_seconds": 0.007923149
+  },
+  {
+    "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/referencing/_core.py",
+    "line": 227,
+    "function": "id",
+    "primitive_calls": 2599,
+    "calls": 2599,
+    "self_seconds": 0.003955419,
+    "cumulative_seconds": 0.007897941
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 362,
+    "function": "<listcomp>",
+    "primitive_calls": 113,
+    "calls": 113,
+    "self_seconds": 0.007042962000000001,
+    "cumulative_seconds": 0.007042962000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/events.py",
+    "line": 133,
+    "function": "changeable_columns",
+    "primitive_calls": 1341,
+    "calls": 1341,
+    "self_seconds": 0.006835091000000001,
+    "cumulative_seconds": 0.006835091000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segments.py",
+    "line": 63,
+    "function": "_missing_interval",
+    "primitive_calls": 1194,
+    "calls": 1194,
+    "self_seconds": 0.002171043,
+    "cumulative_seconds": 0.006811504
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 6042,
+    "function": "_history_source_row",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 0.004830401000000001,
+    "cumulative_seconds": 0.006448643
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/contracts/segment_values.py",
+    "line": 35,
+    "function": "__post_init__",
+    "primitive_calls": 4996,
+    "calls": 4996,
+    "self_seconds": 0.006404964,
+    "cumulative_seconds": 0.006404964
+  },
+  {
+    "file": "<frozen posixpath>",
+    "line": 386,
+    "function": "normpath",
+    "primitive_calls": 1568,
+    "calls": 1568,
+    "self_seconds": 0.003954545,
+    "cumulative_seconds": 0.006254910000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 252,
+    "function": "_check_transitions",
+    "primitive_calls": 1301,
+    "calls": 1301,
+    "self_seconds": 0.002695093,
+    "cumulative_seconds": 0.006065541000000001
+  },
+  {
+    "file": "<attrs generated methods referencing._core.Resource>",
+    "line": 29,
+    "function": "__init__",
+    "primitive_calls": 2599,
+    "calls": 2599,
+    "self_seconds": 0.006047481,
+    "cumulative_seconds": 0.006047481
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method builtins.sorted>",
+    "primitive_calls": 1219,
+    "calls": 1219,
+    "self_seconds": 0.004194672,
+    "cumulative_seconds": 0.005888804
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+    "line": 57,
+    "function": "account",
+    "primitive_calls": 4598,
+    "calls": 4598,
+    "self_seconds": 0.005832381,
+    "cumulative_seconds": 0.005852595
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/host_photo_request.py",
+    "line": 148,
+    "function": "validate_host_photo_event_structure",
+    "primitive_calls": 25718,
+    "calls": 25718,
+    "self_seconds": 0.005836035000000001,
+    "cumulative_seconds": 0.005836035000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 339,
+    "function": "<genexpr>",
+    "primitive_calls": 12283,
+    "calls": 12283,
+    "self_seconds": 0.005756038000000001,
+    "cumulative_seconds": 0.005756038000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 353,
+    "function": "_stored_gaps",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 2.6807000000000003e-05,
+    "cumulative_seconds": 0.005715872
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 331,
+    "function": "read_segment_gaps",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 0.000109944,
+    "cumulative_seconds": 0.005689065
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/contracts/segment_values.py",
+    "line": 80,
+    "function": "__post_init__",
+    "primitive_calls": 4233,
+    "calls": 4233,
+    "self_seconds": 0.0041640060000000005,
+    "cumulative_seconds": 0.0054716980000000005
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/page_read_cache.py",
+    "line": 67,
+    "function": "page_read_scope_active",
+    "primitive_calls": 578,
+    "calls": 578,
+    "self_seconds": 0.001192654,
+    "cumulative_seconds": 0.005418724000000001
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'update' of 'dict' objects>",
+    "primitive_calls": 13061,
+    "calls": 13061,
+    "self_seconds": 0.005208758,
+    "cumulative_seconds": 0.005208758
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/changes.py",
+    "line": 181,
+    "function": "_route_candidates",
+    "primitive_calls": 1218,
+    "calls": 1218,
+    "self_seconds": 0.003693701,
+    "cumulative_seconds": 0.005088394
+  },
+  {
+    "file": "<frozen abc>",
+    "line": 117,
+    "function": "__instancecheck__",
+    "primitive_calls": 4678,
+    "calls": 4678,
+    "self_seconds": 0.0018832680000000002,
+    "cumulative_seconds": 0.005081801
+  },
+  {
+    "file": "<frozen importlib._bootstrap>",
+    "line": 1207,
+    "function": "_handle_fromlist",
+    "primitive_calls": 2599,
+    "calls": 2599,
+    "self_seconds": 0.003771786,
+    "cumulative_seconds": 0.004957628
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 858,
+    "function": "_output_file",
+    "primitive_calls": 200,
+    "calls": 200,
+    "self_seconds": 0.002667328,
+    "cumulative_seconds": 0.004923383
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'insert' of 'rpds.HashTrieMap' objects>",
+    "primitive_calls": 2599,
+    "calls": 2599,
+    "self_seconds": 0.004838048,
+    "cumulative_seconds": 0.004838048
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 1017,
+    "function": "<genexpr>",
+    "primitive_calls": 5,
+    "calls": 5,
+    "self_seconds": 1.2048e-05,
+    "cumulative_seconds": 0.004697212
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 418,
+    "function": "_report_impact_guard",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.000380608,
+    "cumulative_seconds": 0.0046634910000000005
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 668,
+    "function": "<genexpr>",
+    "primitive_calls": 5,
+    "calls": 5,
+    "self_seconds": 8.938e-06,
+    "cumulative_seconds": 0.004656929000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 446,
+    "function": "_completion_qualification",
+    "primitive_calls": 2,
+    "calls": 2,
+    "self_seconds": 5.5348000000000006e-05,
+    "cumulative_seconds": 0.004564864
+  },
+  {
+    "file": "<attrs generated methods referencing._core.Resolver>",
+    "line": 31,
+    "function": "__init__",
+    "primitive_calls": 2599,
+    "calls": 2599,
+    "self_seconds": 0.00455674,
+    "cumulative_seconds": 0.00455674
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 1076,
+    "function": "update_change",
+    "primitive_calls": 40,
+    "calls": 40,
+    "self_seconds": 0.000490165,
+    "cumulative_seconds": 0.004479539
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'rpartition' of 'str' objects>",
+    "primitive_calls": 25039,
+    "calls": 25039,
+    "self_seconds": 0.0044370320000000005,
+    "cumulative_seconds": 0.0044370320000000005
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segment_storage.py",
+    "line": 309,
+    "function": "__post_init__",
+    "primitive_calls": 304,
+    "calls": 304,
+    "self_seconds": 0.00209808,
+    "cumulative_seconds": 0.004433399
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 391,
+    "function": "_ownership_guard",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.001374042,
+    "cumulative_seconds": 0.004406539
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 920,
+    "function": "envelope",
+    "primitive_calls": 416,
+    "calls": 416,
+    "self_seconds": 0.001447804,
+    "cumulative_seconds": 0.004117386000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 6056,
+    "function": "_history_source_event",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 0.000119865,
+    "cumulative_seconds": 0.004061882
+  },
+  {
+    "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/referencing/jsonschema.py",
+    "line": 47,
+    "function": "_dollar_id",
+    "primitive_calls": 2599,
+    "calls": 2599,
+    "self_seconds": 0.0032861,
+    "cumulative_seconds": 0.003942522
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 618,
+    "function": "_derived_map",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.002482036,
+    "cumulative_seconds": 0.00393
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/page_read_cache.py",
+    "line": 89,
+    "function": "remember_page_record",
+    "primitive_calls": 113,
+    "calls": 113,
+    "self_seconds": 0.0009573540000000001,
+    "cumulative_seconds": 0.003879598
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 350,
+    "function": "<dictcomp>",
+    "primitive_calls": 113,
+    "calls": 113,
+    "self_seconds": 0.003806363,
+    "cumulative_seconds": 0.003806363
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/page_read_cache.py",
+    "line": 72,
+    "function": "cached_page_record",
+    "primitive_calls": 578,
+    "calls": 578,
+    "self_seconds": 0.0015084570000000002,
+    "cumulative_seconds": 0.0037696200000000004
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/reads.py",
+    "line": 149,
+    "function": "__post_init__",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.0010325780000000001,
+    "cumulative_seconds": 0.003688343
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/files.py",
+    "line": 95,
+    "function": "_text",
+    "primitive_calls": 23888,
+    "calls": 23888,
+    "self_seconds": 0.0036637230000000002,
+    "cumulative_seconds": 0.0036637230000000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 1091,
+    "function": "<listcomp>",
+    "primitive_calls": 40,
+    "calls": 40,
+    "self_seconds": 6.0678000000000004e-05,
+    "cumulative_seconds": 0.0036300390000000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/contracts/segment_values.py",
+    "line": 66,
+    "function": "__post_init__",
+    "primitive_calls": 990,
+    "calls": 990,
+    "self_seconds": 0.0030516600000000003,
+    "cumulative_seconds": 0.003591939
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 447,
+    "function": "<genexpr>",
+    "primitive_calls": 12057,
+    "calls": 12057,
+    "self_seconds": 0.0035582710000000004,
+    "cumulative_seconds": 0.0035582710000000004
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 443,
+    "function": "<listcomp>",
+    "primitive_calls": 113,
+    "calls": 113,
+    "self_seconds": 0.003509354,
+    "cumulative_seconds": 0.003509354
+  },
+  {
+    "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/jsonschema/validators.py",
+    "line": 293,
+    "function": "<listcomp>",
+    "primitive_calls": 2599,
+    "calls": 2599,
+    "self_seconds": 0.0034723420000000002,
+    "cumulative_seconds": 0.0034723420000000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 958,
+    "function": "_output_relationships",
+    "primitive_calls": 201,
+    "calls": 201,
+    "self_seconds": 0.001139089,
+    "cumulative_seconds": 0.0034435510000000004
+  },
+  {
+    "file": "<string>",
+    "line": 2,
+    "function": "__lt__",
+    "primitive_calls": 1809,
+    "calls": 1809,
+    "self_seconds": 0.001564302,
+    "cumulative_seconds": 0.0033394550000000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/changes.py",
+    "line": 46,
+    "function": "__post_init__",
+    "primitive_calls": 416,
+    "calls": 416,
+    "self_seconds": 0.0028151810000000004,
+    "cumulative_seconds": 0.0033049890000000004
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method _abc._abc_instancecheck>",
+    "primitive_calls": 4678,
+    "calls": 4678,
+    "self_seconds": 0.0031985330000000004,
+    "cumulative_seconds": 0.0031985330000000004
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py",
+    "line": 1257,
+    "function": "value",
+    "primitive_calls": 16602,
+    "calls": 16602,
+    "self_seconds": 0.003095261,
+    "cumulative_seconds": 0.003095261
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/contracts/segment_values.py",
+    "line": 42,
+    "function": "successor",
+    "primitive_calls": 1194,
+    "calls": 1194,
+    "self_seconds": 0.001230297,
+    "cumulative_seconds": 0.002962824
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 593,
+    "function": "_canceled_result",
+    "primitive_calls": 4,
+    "calls": 4,
+    "self_seconds": 0.00010587500000000001,
+    "cumulative_seconds": 0.0028680980000000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 394,
+    "function": "<listcomp>",
+    "primitive_calls": 113,
+    "calls": 113,
+    "self_seconds": 0.00269956,
+    "cumulative_seconds": 0.00269956
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 1102,
+    "function": "event_envelope",
+    "primitive_calls": 417,
+    "calls": 417,
+    "self_seconds": 0.001664848,
+    "cumulative_seconds": 0.002680804
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/reads.py",
+    "line": 150,
+    "function": "<dictcomp>",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.000993577,
+    "cumulative_seconds": 0.0026186670000000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/changes.py",
+    "line": 160,
+    "function": "_merged_row_values",
+    "primitive_calls": 609,
+    "calls": 609,
+    "self_seconds": 0.0018717170000000002,
+    "cumulative_seconds": 0.002601874
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 940,
+    "function": "created",
+    "primitive_calls": 28,
+    "calls": 28,
+    "self_seconds": 9.0407e-05,
+    "cumulative_seconds": 0.002579636
+  },
+  {
+    "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/attr/_compat.py",
+    "line": 95,
+    "function": "get_generic_base",
+    "primitive_calls": 2599,
+    "calls": 2599,
+    "self_seconds": 0.0025015510000000003,
+    "cumulative_seconds": 0.0025015510000000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 730,
+    "function": "_verify_group_closure",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 2.305e-05,
+    "cumulative_seconds": 0.002494244
+  },
+  {
+    "file": "<string>",
+    "line": 2,
+    "function": "__gt__",
+    "primitive_calls": 2409,
+    "calls": 2409,
+    "self_seconds": 0.002414559,
+    "cumulative_seconds": 0.002414559
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 169,
+    "function": "_eligible_original",
+    "primitive_calls": 1642,
+    "calls": 1642,
+    "self_seconds": 0.0023642000000000003,
+    "cumulative_seconds": 0.0023642000000000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/page_read_cache.py",
+    "line": 99,
+    "function": "clear_page_records",
+    "primitive_calls": 209,
+    "calls": 209,
+    "self_seconds": 0.000675792,
+    "cumulative_seconds": 0.002298912
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 4010,
+    "function": "source_from_rows",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 0.000204111,
+    "cumulative_seconds": 0.002262333
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'lower' of 'str' objects>",
+    "primitive_calls": 13106,
+    "calls": 13106,
+    "self_seconds": 0.002186725,
+    "cumulative_seconds": 0.002186725
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 396,
+    "function": "<listcomp>",
+    "primitive_calls": 113,
+    "calls": 113,
+    "self_seconds": 0.0020761810000000003,
+    "cumulative_seconds": 0.0020761810000000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 85,
+    "function": "complete_rows",
+    "primitive_calls": 200,
+    "calls": 200,
+    "self_seconds": 0.000697407,
+    "cumulative_seconds": 0.002075688
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/operations/models.py",
+    "line": 100,
+    "function": "__post_init__",
+    "primitive_calls": 578,
+    "calls": 578,
+    "self_seconds": 0.001653027,
+    "cumulative_seconds": 0.0020507480000000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 75,
+    "function": "__post_init__",
+    "primitive_calls": 416,
+    "calls": 416,
+    "self_seconds": 0.001358335,
+    "cumulative_seconds": 0.002002121
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/devices/directory.py",
+    "line": 107,
+    "function": "<genexpr>",
+    "primitive_calls": 784,
+    "calls": 784,
+    "self_seconds": 0.0019803390000000002,
+    "cumulative_seconds": 0.0019803390000000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 1055,
+    "function": "complete",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 1.4839000000000001e-05,
+    "cumulative_seconds": 0.001940663
+  },
+  {
+    "file": "<string>",
+    "line": 2,
+    "function": "__le__",
+    "primitive_calls": 1200,
+    "calls": 1200,
+    "self_seconds": 0.0009709330000000001,
+    "cumulative_seconds": 0.001884515
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method builtins.vars>",
+    "primitive_calls": 3858,
+    "calls": 3858,
+    "self_seconds": 0.00187714,
+    "cumulative_seconds": 0.00187714
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segment_storage.py",
+    "line": 223,
+    "function": "assessment_from_document",
+    "primitive_calls": 9,
+    "calls": 9,
+    "self_seconds": 0.000455387,
+    "cumulative_seconds": 0.001817405
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 398,
+    "function": "<genexpr>",
+    "primitive_calls": 113,
+    "calls": 113,
+    "self_seconds": 0.0018134800000000001,
+    "cumulative_seconds": 0.0018134800000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/contracts/pages.py",
+    "line": 32,
+    "function": "__post_init__",
+    "primitive_calls": 648,
+    "calls": 648,
+    "self_seconds": 0.0016211860000000002,
+    "cumulative_seconds": 0.0017892000000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/devices/file_identity.py",
+    "line": 22,
+    "function": "<genexpr>",
+    "primitive_calls": 6272,
+    "calls": 6272,
+    "self_seconds": 0.001780443,
+    "cumulative_seconds": 0.001780443
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 311,
+    "function": "_event_row_facts",
+    "primitive_calls": 218,
+    "calls": 218,
+    "self_seconds": 0.000493251,
+    "cumulative_seconds": 0.0017541570000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 343,
+    "function": "<genexpr>",
+    "primitive_calls": 226,
+    "calls": 226,
+    "self_seconds": 0.001712013,
+    "cumulative_seconds": 0.001712013
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'split' of 'str' objects>",
+    "primitive_calls": 1568,
+    "calls": 1568,
+    "self_seconds": 0.0017059890000000002,
+    "cumulative_seconds": 0.0017059890000000002
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/dataclasses.py",
+    "line": 1253,
+    "function": "_is_dataclass_instance",
+    "primitive_calls": 2427,
+    "calls": 2427,
+    "self_seconds": 0.0011452440000000001,
+    "cumulative_seconds": 0.001633073
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method convert>",
+    "primitive_calls": 2599,
+    "calls": 2599,
+    "self_seconds": 0.001630024,
+    "cumulative_seconds": 0.001630024
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/reads.py",
+    "line": 151,
+    "function": "<genexpr>",
+    "primitive_calls": 800,
+    "calls": 800,
+    "self_seconds": 0.000563469,
+    "cumulative_seconds": 0.00162509
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/event_reads.py",
+    "line": 387,
+    "function": "segment_created_output",
+    "primitive_calls": 14,
+    "calls": 14,
+    "self_seconds": 0.000104838,
+    "cumulative_seconds": 0.001546587
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/devices/bindings.py",
+    "line": 36,
+    "function": "__post_init__",
+    "primitive_calls": 784,
+    "calls": 784,
+    "self_seconds": 0.0014278700000000001,
+    "cumulative_seconds": 0.001524643
+  },
+  {
+    "file": "<string>",
+    "line": 2,
+    "function": "__eq__",
+    "primitive_calls": 1277,
+    "calls": 1277,
+    "self_seconds": 0.001443503,
+    "cumulative_seconds": 0.001443503
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method posix._path_normpath>",
+    "primitive_calls": 1568,
+    "calls": 1568,
+    "self_seconds": 0.0014220090000000001,
+    "cumulative_seconds": 0.0014220090000000001
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method builtins.setattr>",
+    "primitive_calls": 8868,
+    "calls": 8868,
+    "self_seconds": 0.0013817150000000002,
+    "cumulative_seconds": 0.0013817150000000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 661,
+    "function": "_write_derived_history",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.000644389,
+    "cumulative_seconds": 0.0013629620000000001
+  },
+  {
+    "file": "<frozen importlib._bootstrap>",
+    "line": 405,
+    "function": "parent",
+    "primitive_calls": 533,
+    "calls": 533,
+    "self_seconds": 0.000940549,
+    "cumulative_seconds": 0.0013541780000000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/event_reads.py",
+    "line": 65,
+    "function": "__init__",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.001289463,
+    "cumulative_seconds": 0.001326373
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/reads.py",
+    "line": 156,
+    "function": "covers",
+    "primitive_calls": 200,
+    "calls": 200,
+    "self_seconds": 0.000586107,
+    "cumulative_seconds": 0.0013194160000000001
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'keys' of 'dict' objects>",
+    "primitive_calls": 4022,
+    "calls": 4022,
+    "self_seconds": 0.001291468,
+    "cumulative_seconds": 0.001291468
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 1210,
+    "function": "_verify_final_activation",
+    "primitive_calls": 6,
+    "calls": 6,
+    "self_seconds": 0.000128205,
+    "cumulative_seconds": 0.001239669
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 525,
+    "function": "_copy_rows",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.000469565,
+    "cumulative_seconds": 0.001204208
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 1025,
+    "function": "_capture_binding",
+    "primitive_calls": 400,
+    "calls": 400,
+    "self_seconds": 0.00096228,
+    "cumulative_seconds": 0.001173723
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 735,
+    "function": "saved",
+    "primitive_calls": 2,
+    "calls": 2,
+    "self_seconds": 5.8290000000000004e-06,
+    "cumulative_seconds": 0.0011589060000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 292,
+    "function": "_row_facts",
+    "primitive_calls": 232,
+    "calls": 232,
+    "self_seconds": 0.0008078940000000001,
+    "cumulative_seconds": 0.0011482480000000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 1094,
+    "function": "register_capture_guards",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 0.0009047990000000001,
+    "cumulative_seconds": 0.001137474
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/event_reads.py",
+    "line": 509,
+    "function": "optional",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 7.087900000000001e-05,
+    "cumulative_seconds": 0.00111227
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/event_reads.py",
+    "line": 530,
+    "function": "required",
+    "primitive_calls": 2,
+    "calls": 2,
+    "self_seconds": 4.3055e-05,
+    "cumulative_seconds": 0.001068871
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segment_storage.py",
+    "line": 198,
+    "function": "facts_from_document",
+    "primitive_calls": 11,
+    "calls": 11,
+    "self_seconds": 0.00022051000000000001,
+    "cumulative_seconds": 0.0010605480000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/changes.py",
+    "line": 408,
+    "function": "<setcomp>",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.000871867,
+    "cumulative_seconds": 0.001046561
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/changes.py",
+    "line": 140,
+    "function": "_split_column",
+    "primitive_calls": 618,
+    "calls": 618,
+    "self_seconds": 0.00076574,
+    "cumulative_seconds": 0.0010351680000000002
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'setdefault' of 'dict' objects>",
+    "primitive_calls": 3625,
+    "calls": 3625,
+    "self_seconds": 0.0010228000000000001,
+    "cumulative_seconds": 0.0010228000000000001
+  },
+  {
+    "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/jsonschema/_utils.py",
+    "line": 145,
+    "function": "unbool",
+    "primitive_calls": 4436,
+    "calls": 4436,
+    "self_seconds": 0.001022595,
+    "cumulative_seconds": 0.001022595
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 513,
+    "function": "_apply_rows",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.0007285760000000001,
+    "cumulative_seconds": 0.0009515670000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/events.py",
+    "line": 139,
+    "function": "write_once_columns",
+    "primitive_calls": 1301,
+    "calls": 1301,
+    "self_seconds": 0.0009469060000000001,
+    "cumulative_seconds": 0.0009469060000000001
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'rstrip' of 'str' objects>",
+    "primitive_calls": 2599,
+    "calls": 2599,
+    "self_seconds": 0.000904961,
+    "cumulative_seconds": 0.000904961
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 943,
+    "function": "_verify_request",
+    "primitive_calls": 5,
+    "calls": 5,
+    "self_seconds": 7.937800000000001e-05,
+    "cumulative_seconds": 0.000900004
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/source_transactions.py",
+    "line": 621,
+    "function": "bind_stream",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.000531794,
+    "cumulative_seconds": 0.0008848230000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/changes.py",
+    "line": 413,
+    "function": "<genexpr>",
+    "primitive_calls": 416,
+    "calls": 416,
+    "self_seconds": 0.000576091,
+    "cumulative_seconds": 0.000877175
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 331,
+    "function": "_resolve_owner_spec",
+    "primitive_calls": 218,
+    "calls": 233,
+    "self_seconds": 0.00065399,
+    "cumulative_seconds": 0.0008747890000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/obtain_check_reads.py",
+    "line": 132,
+    "function": "bind",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.0005552160000000001,
+    "cumulative_seconds": 0.00086844
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 1018,
+    "function": "_registration_facts",
+    "primitive_calls": 800,
+    "calls": 800,
+    "self_seconds": 0.0006360480000000001,
+    "cumulative_seconds": 0.0008563780000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 629,
+    "function": "<dictcomp>",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.0008440440000000001,
+    "cumulative_seconds": 0.0008440440000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 4024,
+    "function": "<genexpr>",
+    "primitive_calls": 15,
+    "calls": 15,
+    "self_seconds": 2.5838000000000002e-05,
+    "cumulative_seconds": 0.000825396
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segment_storage.py",
+    "line": 156,
+    "function": "document",
+    "primitive_calls": 23,
+    "calls": 115,
+    "self_seconds": 0.00036492,
+    "cumulative_seconds": 0.0008232920000000001
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'appendleft' of 'collections.deque' objects>",
+    "primitive_calls": 2217,
+    "calls": 2217,
+    "self_seconds": 0.0008204540000000001,
+    "cumulative_seconds": 0.0008204540000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segment_storage.py",
+    "line": 297,
+    "function": "__post_init__",
+    "primitive_calls": 316,
+    "calls": 316,
+    "self_seconds": 0.000756315,
+    "cumulative_seconds": 0.0008127010000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 657,
+    "function": "<genexpr>",
+    "primitive_calls": 58,
+    "calls": 58,
+    "self_seconds": 2.1786e-05,
+    "cumulative_seconds": 0.0008101800000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 3176,
+    "function": "load_activity_of_action",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 0.00011005800000000001,
+    "cumulative_seconds": 0.000807566
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/operations/models.py",
+    "line": 133,
+    "function": "__post_init__",
+    "primitive_calls": 581,
+    "calls": 581,
+    "self_seconds": 0.000755619,
+    "cumulative_seconds": 0.000806686
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/reads.py",
+    "line": 45,
+    "function": "__post_init__",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.00041588000000000004,
+    "cumulative_seconds": 0.000799993
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 485,
+    "function": "_body_document",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.0007561590000000001,
+    "cumulative_seconds": 0.0007836360000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 6064,
+    "function": "_source_fact",
+    "primitive_calls": 12,
+    "calls": 12,
+    "self_seconds": 5.5853e-05,
+    "cumulative_seconds": 0.000758751
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 221,
+    "function": "<setcomp>",
+    "primitive_calls": 1301,
+    "calls": 1301,
+    "self_seconds": 0.0007412300000000001,
+    "cumulative_seconds": 0.0007412300000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/preparation.py",
+    "line": 19,
+    "function": "__init__",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.000694073,
+    "cumulative_seconds": 0.000736353
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segments.py",
+    "line": 56,
+    "function": "_member_neighbor",
+    "primitive_calls": 1194,
+    "calls": 1194,
+    "self_seconds": 0.000729721,
+    "cumulative_seconds": 0.000729721
+  },
+  {
+    "file": "<string>",
+    "line": 2,
+    "function": "__ge__",
+    "primitive_calls": 1794,
+    "calls": 1794,
+    "self_seconds": 0.0007290790000000001,
+    "cumulative_seconds": 0.0007290790000000001
+  },
+  {
+    "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/jsonschema/_utils.py",
+    "line": 106,
+    "function": "_mapping_equal",
+    "primitive_calls": 27,
+    "calls": 65,
+    "self_seconds": 0.00015844900000000001,
+    "cumulative_seconds": 0.000720073
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/admission_sources.py",
+    "line": 35,
+    "function": "bind",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.000540365,
+    "cumulative_seconds": 0.000716454
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 1199,
+    "function": "segment_activation_rows",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 2.8735000000000002e-05,
+    "cumulative_seconds": 0.000708422
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/devices/directory.py",
+    "line": 106,
+    "function": "<lambda>",
+    "primitive_calls": 784,
+    "calls": 784,
+    "self_seconds": 0.000706763,
+    "cumulative_seconds": 0.000706763
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segment_finish.py",
+    "line": 70,
+    "function": "validate_finish_header",
+    "primitive_calls": 14,
+    "calls": 14,
+    "self_seconds": 0.00031214000000000003,
+    "cumulative_seconds": 0.000702875
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 528,
+    "function": "<dictcomp>",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.0006994890000000001,
+    "cumulative_seconds": 0.0006994890000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/result_inputs.py",
+    "line": 63,
+    "function": "<listcomp>",
+    "primitive_calls": 578,
+    "calls": 578,
+    "self_seconds": 0.000690485,
+    "cumulative_seconds": 0.000690485
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method posix.fspath>",
+    "primitive_calls": 1568,
+    "calls": 1568,
+    "self_seconds": 0.000635798,
+    "cumulative_seconds": 0.000635798
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 403,
+    "function": "_header_request",
+    "primitive_calls": 8,
+    "calls": 8,
+    "self_seconds": 0.00010039100000000001,
+    "cumulative_seconds": 0.0006238550000000001
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method builtins.all>",
+    "primitive_calls": 29,
+    "calls": 89,
+    "self_seconds": 8.361100000000001e-05,
+    "cumulative_seconds": 0.000612992
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 262,
+    "function": "_unchecked_media",
+    "primitive_calls": 400,
+    "calls": 400,
+    "self_seconds": 0.0005759750000000001,
+    "cumulative_seconds": 0.0005759750000000001
+  },
+  {
+    "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/jsonschema/_utils.py",
+    "line": 112,
+    "function": "<genexpr>",
+    "primitive_calls": 60,
+    "calls": 195,
+    "self_seconds": 0.00010846,
+    "cumulative_seconds": 0.000571481
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 142,
+    "function": "_position",
+    "primitive_calls": 624,
+    "calls": 624,
+    "self_seconds": 0.000570546,
+    "cumulative_seconds": 0.000570546
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+    "line": 272,
+    "function": "__iter__",
+    "primitive_calls": 226,
+    "calls": 226,
+    "self_seconds": 0.00031162000000000003,
+    "cumulative_seconds": 0.0005633340000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 78,
+    "function": "<setcomp>",
+    "primitive_calls": 416,
+    "calls": 416,
+    "self_seconds": 0.0005500980000000001,
+    "cumulative_seconds": 0.0005500980000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segments.py",
+    "line": 588,
+    "function": "finish_segment_assessment",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 0.000192835,
+    "cumulative_seconds": 0.000537425
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 88,
+    "function": "_check_write_kind",
+    "primitive_calls": 18,
+    "calls": 18,
+    "self_seconds": 0.00027169200000000003,
+    "cumulative_seconds": 0.000537364
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_selections.py",
+    "line": 596,
+    "function": "bind",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.0005032050000000001,
+    "cumulative_seconds": 0.0005353360000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 708,
+    "function": "_guard_facts",
+    "primitive_calls": 202,
+    "calls": 202,
+    "self_seconds": 0.00045674200000000005,
+    "cumulative_seconds": 0.00053468
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+    "line": 140,
+    "function": "db_count",
+    "primitive_calls": 416,
+    "calls": 416,
+    "self_seconds": 0.000482472,
+    "cumulative_seconds": 0.000522146
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/page_read_cache.py",
+    "line": 82,
+    "function": "prepare_page_record",
+    "primitive_calls": 113,
+    "calls": 113,
+    "self_seconds": 0.00020529100000000002,
+    "cumulative_seconds": 0.0005116210000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/event_reads.py",
+    "line": 626,
+    "function": "recording_input_issues",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 1.7526e-05,
+    "cumulative_seconds": 0.0005107050000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/operations/result_format.py",
+    "line": 101,
+    "function": "<genexpr>",
+    "primitive_calls": 1156,
+    "calls": 1156,
+    "self_seconds": 0.000507892,
+    "cumulative_seconds": 0.000507892
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 100,
+    "function": "_failure",
+    "primitive_calls": 5,
+    "calls": 5,
+    "self_seconds": 0.000120428,
+    "cumulative_seconds": 0.000499031
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segments.py",
+    "line": 35,
+    "function": "default_segment_count",
+    "primitive_calls": 606,
+    "calls": 606,
+    "self_seconds": 0.000462851,
+    "cumulative_seconds": 0.000462851
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 1034,
+    "function": "_cleanup_aggregate_guard",
+    "primitive_calls": 200,
+    "calls": 200,
+    "self_seconds": 0.00040458800000000005,
+    "cumulative_seconds": 0.00045441700000000004
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/changes.py",
+    "line": 154,
+    "function": "_affects_public_columns",
+    "primitive_calls": 609,
+    "calls": 609,
+    "self_seconds": 0.000441315,
+    "cumulative_seconds": 0.000451685
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_selections.py",
+    "line": 641,
+    "function": "seal",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.00043193900000000005,
+    "cumulative_seconds": 0.00045164900000000004
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 503,
+    "function": "_scalar",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 6.2208e-05,
+    "cumulative_seconds": 0.00042141700000000005
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 281,
+    "function": "_transaction_guard",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.00041730200000000004,
+    "cumulative_seconds": 0.00041730200000000004
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 601,
+    "function": "<genexpr>",
+    "primitive_calls": 3200,
+    "calls": 3200,
+    "self_seconds": 0.00041686,
+    "cumulative_seconds": 0.00041686
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segment_storage.py",
+    "line": 170,
+    "function": "<dictcomp>",
+    "primitive_calls": 23,
+    "calls": 23,
+    "self_seconds": 9.1129e-05,
+    "cumulative_seconds": 0.000401893
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/changes.py",
+    "line": 147,
+    "function": "_table_rows",
+    "primitive_calls": 612,
+    "calls": 612,
+    "self_seconds": 0.000325937,
+    "cumulative_seconds": 0.000401659
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/changes.py",
+    "line": 331,
+    "function": "<dictcomp>",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.00039869000000000005,
+    "cumulative_seconds": 0.00039869000000000005
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/operations/models.py",
+    "line": 101,
+    "function": "<listcomp>",
+    "primitive_calls": 578,
+    "calls": 578,
+    "self_seconds": 0.000397721,
+    "cumulative_seconds": 0.000397721
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 130,
+    "function": "<setcomp>",
+    "primitive_calls": 16,
+    "calls": 16,
+    "self_seconds": 0.000225882,
+    "cumulative_seconds": 0.000385697
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segment_storage.py",
+    "line": 182,
+    "function": "cursor",
+    "primitive_calls": 36,
+    "calls": 36,
+    "self_seconds": 6.881e-05,
+    "cumulative_seconds": 0.000370921
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 637,
+    "function": "<setcomp>",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.000367705,
+    "cumulative_seconds": 0.000367705
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 1049,
+    "function": "_plan_aggregate_guard",
+    "primitive_calls": 2,
+    "calls": 2,
+    "self_seconds": 4.8154e-05,
+    "cumulative_seconds": 0.000359648
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 247,
+    "function": "<genexpr>",
+    "primitive_calls": 1116,
+    "calls": 1116,
+    "self_seconds": 0.00035457,
+    "cumulative_seconds": 0.00035457
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 716,
+    "function": "_run_finish_row",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 1.5587000000000002e-05,
+    "cumulative_seconds": 0.000352928
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segment_storage.py",
+    "line": 148,
+    "function": "encode_enum",
+    "primitive_calls": 50,
+    "calls": 50,
+    "self_seconds": 0.000196163,
+    "cumulative_seconds": 0.000352656
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/baseline_reads.py",
+    "line": 356,
+    "function": "bind_intent",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.000349888,
+    "cumulative_seconds": 0.000349888
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/source_transactions.py",
+    "line": 423,
+    "function": "required_stream",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.00032616300000000003,
+    "cumulative_seconds": 0.00032616300000000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+    "line": 175,
+    "function": "timed_connection",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 4.0178e-05,
+    "cumulative_seconds": 0.00031597900000000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 248,
+    "function": "<genexpr>",
+    "primitive_calls": 1116,
+    "calls": 1116,
+    "self_seconds": 0.00030838800000000004,
+    "cumulative_seconds": 0.00030838800000000004
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/event_reads.py",
+    "line": 341,
+    "function": "bind_segment_finish_state",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.00030543300000000003,
+    "cumulative_seconds": 0.00030543300000000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segment_storage.py",
+    "line": 178,
+    "function": "key",
+    "primitive_calls": 56,
+    "calls": 56,
+    "self_seconds": 0.00013034800000000002,
+    "cumulative_seconds": 0.00029963200000000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/event_reads.py",
+    "line": 563,
+    "function": "_iter_members",
+    "primitive_calls": 2,
+    "calls": 2,
+    "self_seconds": 7.9388e-05,
+    "cumulative_seconds": 0.000297616
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 1144,
+    "function": "next_row_id",
+    "primitive_calls": 2,
+    "calls": 2,
+    "self_seconds": 1.6388e-05,
+    "cumulative_seconds": 0.000294741
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'pop' of 'list' objects>",
+    "primitive_calls": 1394,
+    "calls": 1394,
+    "self_seconds": 0.000294228,
+    "cumulative_seconds": 0.000294228
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 393,
+    "function": "<dictcomp>",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.00029405,
+    "cumulative_seconds": 0.00029405
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/page_read_cache.py",
+    "line": 45,
+    "function": "opened_read_page_scope",
+    "primitive_calls": 640,
+    "calls": 640,
+    "self_seconds": 0.00028291000000000004,
+    "cumulative_seconds": 0.00028291000000000004
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+    "line": 181,
+    "function": "__init__",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 0.000222992,
+    "cumulative_seconds": 0.000275181
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/event_reads.py",
+    "line": 163,
+    "function": "seal_result_page_event",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.00026634,
+    "cumulative_seconds": 0.00026634
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 366,
+    "function": "<dictcomp>",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.00022028800000000002,
+    "cumulative_seconds": 0.00025838
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 797,
+    "function": "<setcomp>",
+    "primitive_calls": 201,
+    "calls": 201,
+    "self_seconds": 0.00023975100000000002,
+    "cumulative_seconds": 0.00025590000000000004
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'get' of 'mappingproxy' objects>",
+    "primitive_calls": 200,
+    "calls": 200,
+    "self_seconds": 0.00024687200000000003,
+    "cumulative_seconds": 0.00024687200000000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/source_transactions.py",
+    "line": 652,
+    "function": "seal_stream",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.000216376,
+    "cumulative_seconds": 0.000245852
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/contextlib.py",
+    "line": 502,
+    "function": "enter_context",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 3.0933000000000004e-05,
+    "cumulative_seconds": 0.000245518
+  },
+  {
+    "file": "<string>",
+    "line": 2,
+    "function": "__init__",
+    "primitive_calls": 12,
+    "calls": 12,
+    "self_seconds": 8.0438e-05,
+    "cumulative_seconds": 0.00022644
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 667,
+    "function": "<setcomp>",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.00022216300000000002,
+    "cumulative_seconds": 0.00022216300000000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segment_finish.py",
+    "line": 106,
+    "function": "result_ref_from_document",
+    "primitive_calls": 27,
+    "calls": 27,
+    "self_seconds": 7.6296e-05,
+    "cumulative_seconds": 0.00022203700000000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 1191,
+    "function": "_request_document",
+    "primitive_calls": 14,
+    "calls": 140,
+    "self_seconds": 9.3362e-05,
+    "cumulative_seconds": 0.00020986500000000002
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method builtins.__build_class__>",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 0.00019716200000000002,
+    "cumulative_seconds": 0.00020794900000000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 892,
+    "function": "<genexpr>",
+    "primitive_calls": 8,
+    "calls": 8,
+    "self_seconds": 6.798000000000001e-06,
+    "cumulative_seconds": 0.00020499500000000003
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/media_facts.py",
+    "line": 237,
+    "function": "saved_osv_input_issues",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 2.4931000000000002e-05,
+    "cumulative_seconds": 0.00020106300000000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segment_models.py",
+    "line": 342,
+    "function": "__post_init__",
+    "primitive_calls": 12,
+    "calls": 12,
+    "self_seconds": 0.000156419,
+    "cumulative_seconds": 0.00019068200000000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segment_finish.py",
+    "line": 22,
+    "function": "__post_init__",
+    "primitive_calls": 22,
+    "calls": 22,
+    "self_seconds": 8.3552e-05,
+    "cumulative_seconds": 0.00018971100000000001
+  },
+  {
+    "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/jsonschema/_utils.py",
+    "line": 118,
+    "function": "_sequence_equal",
+    "primitive_calls": 8,
+    "calls": 22,
+    "self_seconds": 4.6649e-05,
+    "cumulative_seconds": 0.000187788
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 960,
+    "function": "<dictcomp>",
+    "primitive_calls": 201,
+    "calls": 201,
+    "self_seconds": 0.00018557300000000002,
+    "cumulative_seconds": 0.00018557300000000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segments.py",
+    "line": 125,
+    "function": "_commit_pending_gaps",
+    "primitive_calls": 600,
+    "calls": 600,
+    "self_seconds": 0.00018391000000000002,
+    "cumulative_seconds": 0.00018391000000000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 1192,
+    "function": "<listcomp>",
+    "primitive_calls": 12,
+    "calls": 54,
+    "self_seconds": 0.000106416,
+    "cumulative_seconds": 0.000179117
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 864,
+    "function": "<listcomp>",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.000169292,
+    "cumulative_seconds": 0.000169292
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 414,
+    "function": "_resolve_owner",
+    "primitive_calls": 218,
+    "calls": 218,
+    "self_seconds": 0.000168245,
+    "cumulative_seconds": 0.000168245
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/admission_sources.py",
+    "line": 28,
+    "function": "required",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.00016153600000000002,
+    "cumulative_seconds": 0.00016153600000000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segments.py",
+    "line": 391,
+    "function": "_scope",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 7.1547e-05,
+    "cumulative_seconds": 0.00015546100000000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segment_models.py",
+    "line": 183,
+    "function": "__post_init__",
+    "primitive_calls": 12,
+    "calls": 12,
+    "self_seconds": 7.5516e-05,
+    "cumulative_seconds": 0.000146002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 722,
+    "function": "_verify_run_finish_event",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 5.4080000000000006e-06,
+    "cumulative_seconds": 0.000144239
+  },
+  {
+    "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/jsonschema/_utils.py",
+    "line": 124,
+    "function": "<genexpr>",
+    "primitive_calls": 26,
+    "calls": 68,
+    "self_seconds": 2.6708000000000002e-05,
+    "cumulative_seconds": 0.000143008
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/event_reads.py",
+    "line": 408,
+    "function": "validated_segment_finish",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 1.3909e-05,
+    "cumulative_seconds": 0.00014087300000000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/page_read_cache.py",
+    "line": 24,
+    "function": "page_read_scope",
+    "primitive_calls": 2,
+    "calls": 2,
+    "self_seconds": 4.7436000000000005e-05,
+    "cumulative_seconds": 0.00014075
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'pop' of 'dict' objects>",
+    "primitive_calls": 210,
+    "calls": 210,
+    "self_seconds": 0.00013948400000000002,
+    "cumulative_seconds": 0.00013948400000000002
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/event_reads.py",
+    "line": 350,
+    "function": "prepare_segment_finish",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 1.8326e-05,
+    "cumulative_seconds": 0.000133812
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 127,
+    "function": "allocate",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 0.000104232,
+    "cumulative_seconds": 0.000130617
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segment_storage.py",
+    "line": 338,
+    "function": "__post_init__",
+    "primitive_calls": 12,
+    "calls": 12,
+    "self_seconds": 7.322700000000001e-05,
+    "cumulative_seconds": 0.000129924
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 886,
+    "function": "<listcomp>",
+    "primitive_calls": 200,
+    "calls": 200,
+    "self_seconds": 0.000129527,
+    "cumulative_seconds": 0.000129527
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/operations.py",
+    "line": 1844,
+    "function": "_operation_finish_guard",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 9.262e-05,
+    "cumulative_seconds": 0.000123508
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 113,
+    "function": "association_rows",
+    "primitive_calls": 232,
+    "calls": 232,
+    "self_seconds": 0.000111668,
+    "cumulative_seconds": 0.000111668
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/operations.py",
+    "line": 1886,
+    "function": "register_operation_guards",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 9.558800000000001e-05,
+    "cumulative_seconds": 0.000110761
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/changes.py",
+    "line": 418,
+    "function": "<lambda>",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.00011019400000000001,
+    "cumulative_seconds": 0.00011019400000000001
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/changes.py",
+    "line": 424,
+    "function": "<dictcomp>",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 0.00010663,
+    "cumulative_seconds": 0.00010663
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py",
+    "line": 794,
+    "function": "__iter__",
+    "primitive_calls": 17,
+    "calls": 17,
+    "self_seconds": 0.00010034200000000001,
+    "cumulative_seconds": 0.00010034200000000001
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/contextlib.py",
+    "line": 607,
+    "function": "close",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 4.4115e-05,
+    "cumulative_seconds": 9.8097e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 1382,
+    "function": "segment_event",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 3.3261e-05,
+    "cumulative_seconds": 9.281300000000001e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/event_reads.py",
+    "line": 487,
+    "function": "_check",
+    "primitive_calls": 4,
+    "calls": 4,
+    "self_seconds": 6.7632e-05,
+    "cumulative_seconds": 9.0906e-05
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/collections/__init__.py",
+    "line": 601,
+    "function": "__missing__",
+    "primitive_calls": 380,
+    "calls": 380,
+    "self_seconds": 8.3844e-05,
+    "cumulative_seconds": 8.3844e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/read_reuse.py",
+    "line": 51,
+    "function": "read_reuse_scope",
+    "primitive_calls": 2,
+    "calls": 2,
+    "self_seconds": 2.9148000000000003e-05,
+    "cumulative_seconds": 8.3514e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segments.py",
+    "line": 132,
+    "function": "_close_prefix_at_gap",
+    "primitive_calls": 600,
+    "calls": 600,
+    "self_seconds": 8.1513e-05,
+    "cumulative_seconds": 8.1513e-05
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/contextlib.py",
+    "line": 534,
+    "function": "_push_cm_exit",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 4.3868e-05,
+    "cumulative_seconds": 8.1384e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/event_reads.py",
+    "line": 252,
+    "function": "transaction_event",
+    "primitive_calls": 7,
+    "calls": 7,
+    "self_seconds": 4.7359000000000005e-05,
+    "cumulative_seconds": 8.1245e-05
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method builtins.iter>",
+    "primitive_calls": 228,
+    "calls": 228,
+    "self_seconds": 8.0801e-05,
+    "cumulative_seconds": 8.0801e-05
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py",
+    "line": 798,
+    "function": "<genexpr>",
+    "primitive_calls": 68,
+    "calls": 68,
+    "self_seconds": 7.9603e-05,
+    "cumulative_seconds": 7.9603e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/event_reads.py",
+    "line": 248,
+    "function": "segment_activation_event",
+    "primitive_calls": 6,
+    "calls": 6,
+    "self_seconds": 1.0602000000000001e-05,
+    "cumulative_seconds": 7.690400000000001e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 265,
+    "function": "<listcomp>",
+    "primitive_calls": 19,
+    "calls": 19,
+    "self_seconds": 7.215700000000001e-05,
+    "cumulative_seconds": 7.215700000000001e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segment_models.py",
+    "line": 154,
+    "function": "__post_init__",
+    "primitive_calls": 11,
+    "calls": 11,
+    "self_seconds": 5.5036000000000006e-05,
+    "cumulative_seconds": 6.9033e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/logging_runtime/performance.py",
+    "line": 15,
+    "function": "performance_enabled",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 6.1847e-05,
+    "cumulative_seconds": 6.8096e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segment_finish.py",
+    "line": 43,
+    "function": "request_document",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 1.9125e-05,
+    "cumulative_seconds": 6.658800000000001e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segments.py",
+    "line": 363,
+    "function": "_start_gap",
+    "primitive_calls": 6,
+    "calls": 6,
+    "self_seconds": 5.575000000000001e-05,
+    "cumulative_seconds": 5.8885e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 138,
+    "function": "register_guard",
+    "primitive_calls": 25,
+    "calls": 25,
+    "self_seconds": 5.6416e-05,
+    "cumulative_seconds": 5.6416e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/devices/capture_timing.py",
+    "line": 19,
+    "function": "__post_init__",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 2.8519000000000003e-05,
+    "cumulative_seconds": 5.5803e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 3980,
+    "function": "_confirms",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 5.542e-05,
+    "cumulative_seconds": 5.542e-05
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/contextlib.py",
+    "line": 558,
+    "function": "__exit__",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 3.3273000000000005e-05,
+    "cumulative_seconds": 5.3982000000000006e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+    "line": 187,
+    "function": "__setattr__",
+    "primitive_calls": 2,
+    "calls": 2,
+    "self_seconds": 4.6984e-05,
+    "cumulative_seconds": 5.2189000000000005e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 1067,
+    "function": "register_segment_guards",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 4.8812000000000006e-05,
+    "cumulative_seconds": 5.1918e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 976,
+    "function": "<genexpr>",
+    "primitive_calls": 18,
+    "calls": 18,
+    "self_seconds": 2.0129e-05,
+    "cumulative_seconds": 5.0116000000000006e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 1677,
+    "function": "register_result_page_guard",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 3.8181e-05,
+    "cumulative_seconds": 4.2835000000000006e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/preparation.py",
+    "line": 21,
+    "function": "<genexpr>",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 4.228e-05,
+    "cumulative_seconds": 4.228e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 429,
+    "function": "_row_shape_guard",
+    "primitive_calls": 208,
+    "calls": 208,
+    "self_seconds": 3.7738000000000004e-05,
+    "cumulative_seconds": 3.7738000000000004e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/baseline.py",
+    "line": 424,
+    "function": "register_baseline_guard",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 3.2200000000000003e-05,
+    "cumulative_seconds": 3.3566000000000004e-05
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/contextlib.py",
+    "line": 472,
+    "function": "__init__",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 3.2316e-05,
+    "cumulative_seconds": 3.2316e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+    "line": 51,
+    "function": "<lambda>",
+    "primitive_calls": 9,
+    "calls": 9,
+    "self_seconds": 3.2106e-05,
+    "cumulative_seconds": 3.2106e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/operations.py",
+    "line": 134,
+    "function": "_row_after_facts",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 2.0992e-05,
+    "cumulative_seconds": 3.0552e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/devices/capture_timing.py",
+    "line": 6,
+    "function": "_bounded",
+    "primitive_calls": 15,
+    "calls": 15,
+    "self_seconds": 2.6914e-05,
+    "cumulative_seconds": 3.032e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 945,
+    "function": "values",
+    "primitive_calls": 14,
+    "calls": 14,
+    "self_seconds": 2.5722000000000002e-05,
+    "cumulative_seconds": 2.9987000000000003e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/finite_cancel.py",
+    "line": 326,
+    "function": "register_finite_cancel_guard",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 2.8275000000000003e-05,
+    "cumulative_seconds": 2.9431000000000003e-05
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/contextlib.py",
+    "line": 539,
+    "function": "_push_exit_callback",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 2.7930000000000002e-05,
+    "cumulative_seconds": 2.858e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/software_recovery.py",
+    "line": 171,
+    "function": "register_software_recovery_guard",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 2.6705000000000003e-05,
+    "cumulative_seconds": 2.7363000000000002e-05
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method '__deepcopy__' of 'decimal.Decimal' objects>",
+    "primitive_calls": 48,
+    "calls": 48,
+    "self_seconds": 2.6202e-05,
+    "cumulative_seconds": 2.6202e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/devices/capture_timing.py",
+    "line": 34,
+    "function": "recording_lower_bound_ns",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 1.3404e-05,
+    "cumulative_seconds": 2.1378e-05
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'set' of '_contextvars.ContextVar' objects>",
+    "primitive_calls": 2,
+    "calls": 2,
+    "self_seconds": 2.0826e-05,
+    "cumulative_seconds": 2.0826e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 1097,
+    "function": "<dictcomp>",
+    "primitive_calls": 40,
+    "calls": 40,
+    "self_seconds": 1.9181e-05,
+    "cumulative_seconds": 1.9181e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_file_ownership.py",
+    "line": 209,
+    "function": "register_ownership_from_result_page_guard",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 1.6404e-05,
+    "cumulative_seconds": 1.758e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/result_file_pairing.py",
+    "line": 234,
+    "function": "register_result_scan_pairing_guard",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 1.5799000000000002e-05,
+    "cumulative_seconds": 1.6469e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 944,
+    "function": "<genexpr>",
+    "primitive_calls": 10,
+    "calls": 10,
+    "self_seconds": 1.5621000000000002e-05,
+    "cumulative_seconds": 1.5621000000000002e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 1187,
+    "function": "_capacity",
+    "primitive_calls": 2,
+    "calls": 2,
+    "self_seconds": 1.5272000000000002e-05,
+    "cumulative_seconds": 1.5272000000000002e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 787,
+    "function": "<genexpr>",
+    "primitive_calls": 10,
+    "calls": 10,
+    "self_seconds": 1.4244000000000001e-05,
+    "cumulative_seconds": 1.5002000000000001e-05
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method builtins.max>",
+    "primitive_calls": 6,
+    "calls": 6,
+    "self_seconds": 1.4146000000000001e-05,
+    "cumulative_seconds": 1.4146000000000001e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/baseline_reads.py",
+    "line": 379,
+    "function": "register_baseline_read_guard",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 1.3559e-05,
+    "cumulative_seconds": 1.4132000000000001e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/changes.py",
+    "line": 168,
+    "function": "_filter_by_when",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 8.547000000000001e-06,
+    "cumulative_seconds": 1.3975000000000001e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/event_reads.py",
+    "line": 557,
+    "function": "iter_members",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 1.3154000000000001e-05,
+    "cumulative_seconds": 1.3458e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 1013,
+    "function": "<genexpr>",
+    "primitive_calls": 20,
+    "calls": 20,
+    "self_seconds": 1.2748e-05,
+    "cumulative_seconds": 1.2748e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 651,
+    "function": "<genexpr>",
+    "primitive_calls": 36,
+    "calls": 36,
+    "self_seconds": 1.1633e-05,
+    "cumulative_seconds": 1.1633e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 1220,
+    "function": "<genexpr>",
+    "primitive_calls": 12,
+    "calls": 12,
+    "self_seconds": 8.929e-06,
+    "cumulative_seconds": 1.1167e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 1098,
+    "function": "<dictcomp>",
+    "primitive_calls": 40,
+    "calls": 40,
+    "self_seconds": 1.1099e-05,
+    "cumulative_seconds": 1.1099e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 373,
+    "function": "Reader",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 1.0787e-05,
+    "cumulative_seconds": 1.0787e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_check_conclusions.py",
+    "line": 270,
+    "function": "requires_check_group",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 1.0446000000000001e-05,
+    "cumulative_seconds": 1.0446000000000001e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 587,
+    "function": "_verify_qualification_header",
+    "primitive_calls": 4,
+    "calls": 4,
+    "self_seconds": 1.0372e-05,
+    "cumulative_seconds": 1.0372e-05
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 1008,
+    "function": "<genexpr>",
+    "primitive_calls": 10,
+    "calls": 10,
+    "self_seconds": 9.809e-06,
+    "cumulative_seconds": 9.809e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segments.py",
+    "line": 385,
+    "function": "_collection_complete",
+    "primitive_calls": 6,
+    "calls": 6,
+    "self_seconds": 9.633e-06,
+    "cumulative_seconds": 9.633e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 752,
+    "function": "<setcomp>",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 3.5440000000000003e-06,
+    "cumulative_seconds": 9.353e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/probe.py",
+    "line": 144,
+    "function": "__init__",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 9.271e-06,
+    "cumulative_seconds": 9.271e-06
+  },
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/contextlib.py",
+    "line": 462,
+    "function": "_create_exit_wrapper",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 8.936e-06,
+    "cumulative_seconds": 8.936e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/operations.py",
+    "line": 128,
+    "function": "_guard_facts",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 6.8280000000000005e-06,
+    "cumulative_seconds": 8.366000000000001e-06
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'isdecimal' of 'str' objects>",
+    "primitive_calls": 9,
+    "calls": 9,
+    "self_seconds": 8.361e-06,
+    "cumulative_seconds": 8.361e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 351,
+    "function": "<genexpr>",
+    "primitive_calls": 4,
+    "calls": 4,
+    "self_seconds": 4.632e-06,
+    "cumulative_seconds": 8.077e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 676,
+    "function": "<genexpr>",
+    "primitive_calls": 24,
+    "calls": 24,
+    "self_seconds": 7.916e-06,
+    "cumulative_seconds": 7.916e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 6061,
+    "function": "<genexpr>",
+    "primitive_calls": 27,
+    "calls": 27,
+    "self_seconds": 6.521000000000001e-06,
+    "cumulative_seconds": 6.521000000000001e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 4013,
+    "function": "<listcomp>",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 6.406e-06,
+    "cumulative_seconds": 6.406e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 991,
+    "function": "__init__",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 6.251000000000001e-06,
+    "cumulative_seconds": 6.251000000000001e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 717,
+    "function": "<dictcomp>",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 5.725e-06,
+    "cumulative_seconds": 5.725e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/changes.py",
+    "line": 213,
+    "function": "<listcomp>",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 4.403e-06,
+    "cumulative_seconds": 5.611e-06
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'reset' of '_contextvars.ContextVar' objects>",
+    "primitive_calls": 2,
+    "calls": 2,
+    "self_seconds": 5.3790000000000005e-06,
+    "cumulative_seconds": 5.3790000000000005e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/page_read_cache.py",
+    "line": 106,
+    "function": "discard_page_records",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 2.2070000000000002e-06,
+    "cumulative_seconds": 4.624e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 1044,
+    "function": "proposal",
+    "primitive_calls": 7,
+    "calls": 7,
+    "self_seconds": 4.245e-06,
+    "cumulative_seconds": 4.245e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 56,
+    "function": "_batch",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 3.4830000000000004e-06,
+    "cumulative_seconds": 4.035e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 322,
+    "function": "_condition_matches",
+    "primitive_calls": 2,
+    "calls": 2,
+    "self_seconds": 3.074e-06,
+    "cumulative_seconds": 3.445e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/capture.py",
+    "line": 3996,
+    "function": "<listcomp>",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 3.3520000000000003e-06,
+    "cumulative_seconds": 3.3520000000000003e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 521,
+    "function": "_preparation_events",
+    "primitive_calls": 2,
+    "calls": 2,
+    "self_seconds": 2.8950000000000002e-06,
+    "cumulative_seconds": 3.254e-06
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method builtins.min>",
+    "primitive_calls": 4,
+    "calls": 4,
+    "self_seconds": 3.2070000000000004e-06,
+    "cumulative_seconds": 3.2070000000000004e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/segment_storage.py",
+    "line": 186,
+    "function": "gap_from_document",
+    "primitive_calls": 9,
+    "calls": 9,
+    "self_seconds": 3.103e-06,
+    "cumulative_seconds": 3.103e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/changes.py",
+    "line": 178,
+    "function": "<listcomp>",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 2.1170000000000002e-06,
+    "cumulative_seconds": 2.691e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/operations.py",
+    "line": 1870,
+    "function": "_retry_guard",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 2.385e-06,
+    "cumulative_seconds": 2.5400000000000002e-06
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<built-in method sys.exc_info>",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 2.227e-06,
+    "cumulative_seconds": 2.227e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/validators.py",
+    "line": 550,
+    "function": "<genexpr>",
+    "primitive_calls": 4,
+    "calls": 4,
+    "self_seconds": 2.035e-06,
+    "cumulative_seconds": 2.16e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/capture/media_facts.py",
+    "line": 250,
+    "function": "<genexpr>",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 1.7690000000000001e-06,
+    "cumulative_seconds": 2.108e-06
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'isascii' of 'str' objects>",
+    "primitive_calls": 9,
+    "calls": 9,
+    "self_seconds": 1.911e-06,
+    "cumulative_seconds": 1.911e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 121,
+    "function": "__init__",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 1.8310000000000001e-06,
+    "cumulative_seconds": 1.8310000000000001e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/history/changes.py",
+    "line": 204,
+    "function": "<listcomp>",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 1.737e-06,
+    "cumulative_seconds": 1.737e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_selections.py",
+    "line": 659,
+    "function": "finish",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 1.297e-06,
+    "cumulative_seconds": 1.466e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 628,
+    "function": "<genexpr>",
+    "primitive_calls": 2,
+    "calls": 2,
+    "self_seconds": 1.2670000000000001e-06,
+    "cumulative_seconds": 1.2670000000000001e-06
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/source_transactions.py",
+    "line": 666,
+    "function": "finish_stream",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 6.830000000000001e-07,
+    "cumulative_seconds": 8.18e-07
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'disable' of '_lsprof.Profiler' objects>",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 7.95e-07,
+    "cumulative_seconds": 7.95e-07
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/admission_sources.py",
+    "line": 100,
+    "function": "finish",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 6.890000000000001e-07,
+    "cumulative_seconds": 7.64e-07
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 264,
+    "function": "_baseline_read_group",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 6.720000000000001e-07,
+    "cumulative_seconds": 6.720000000000001e-07
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'append' of 'collections.deque' objects>",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 6.5e-07,
+    "cumulative_seconds": 6.5e-07
+  },
+  {
+    "file": "~",
+    "line": 0,
+    "function": "<method 'pop' of 'collections.deque' objects>",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 6.140000000000001e-07,
+    "cumulative_seconds": 6.140000000000001e-07
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 333,
+    "function": "<genexpr>",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 5.860000000000001e-07,
+    "cumulative_seconds": 5.860000000000001e-07
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/event_reads.py",
+    "line": 605,
+    "function": "<setcomp>",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 5.75e-07,
+    "cumulative_seconds": 5.75e-07
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 278,
+    "function": "_result_check_group",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 4.7200000000000004e-07,
+    "cumulative_seconds": 4.7200000000000004e-07
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/event_reads.py",
+    "line": 602,
+    "function": "<listcomp>",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 4.63e-07,
+    "cumulative_seconds": 4.63e-07
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 273,
+    "function": "_finish_baseline_read_group",
+    "primitive_calls": 2,
+    "calls": 2,
+    "self_seconds": 4.2200000000000005e-07,
+    "cumulative_seconds": 4.2200000000000005e-07
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 257,
+    "function": "_finalize_result_page_write",
+    "primitive_calls": 2,
+    "calls": 2,
+    "self_seconds": 4.1200000000000004e-07,
+    "cumulative_seconds": 4.1200000000000004e-07
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/event_reads.py",
+    "line": 568,
+    "function": "<genexpr>",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 3.3e-07,
+    "cumulative_seconds": 3.3e-07
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 286,
+    "function": "_finish_result_check_group",
+    "primitive_calls": 2,
+    "calls": 2,
+    "self_seconds": 2.8800000000000004e-07,
+    "cumulative_seconds": 2.8800000000000004e-07
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/transaction.py",
+    "line": 249,
+    "function": "_new_result_page_guard_state",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 2.46e-07,
+    "cumulative_seconds": 2.46e-07
+  },
+  {
+    "file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/persistence/event_reads.py",
+    "line": 591,
+    "function": "<genexpr>",
+    "primitive_calls": 1,
+    "calls": 1,
+    "self_seconds": 2.0500000000000002e-07,
+    "cumulative_seconds": 2.0500000000000002e-07
+  }
+]

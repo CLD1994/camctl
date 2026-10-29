@@ -98,7 +98,7 @@
 
 **输入输出：** 消费任务一实际保存的公共历史、`ReportingRepository.freeze_report` 的真实报告登记和原 `GenerationSpec`。对不合法历史实例返回既有状态前提异常，worker 的 `ResultFailureMessage.error_kind` 为 STATE；输出合法报告时 code/stage/details 完整，原未知错误不改写。
 
-- [x] `test_exhausted_results_generate_schema_valid_public_errors`：公开历史先达到有限核实失败终态，再真实冻结和生成报告。按 H 时的实际活动状态核 photo 的 `still_running` 与 timelapse 的 `end_unconfirmed`，分别核设备执行错误和动作最终错误的完整来源；调用真实公共 Schema。报告不增加公开 attempts、内部预算或额外错误成员。
+- [x] `test_exhausted_results_generate_schema_valid_public_errors` 验证 photo 的 `still_running`，`test_exhausted_result_report_rebuilds_same_frozen_history_after_reopen` 的首次生成阶段验证 timelapse 的 `end_unconfirmed`：公开历史先达到有限核实失败终态，再真实冻结和生成报告。按 H 时的实际活动状态分别核设备执行错误和动作最终错误的完整来源；调用真实公共 Schema。报告不增加公开 attempts、内部预算或额外错误成员。
 - [x] `test_exhausted_result_report_rebuilds_same_frozen_history_after_reopen`：保存首次字节和摘要，关闭重开 Owned，再发生合法后续业务变化，按同 report ID/H、水位重建；字节与摘要相同、无额外设备/RESULTS、原历史前缀保持。
 - [x] 纯单元 `test_historical_json_projection.py`：公开 `project_public` 使用内存资源和固定 H 返回形状，核非法实例抛状态前提异常并保留字段路径；资源故障原样返回规则异常，不访问文件系统。
 - [x] 真实报告组件 `test_result_error_state.py`：公共历史与冻结登记均真实，只在稳定历史读取端口返回不合法原字段。核无完整 staging/ready 发布、原 report 登记和 H 保持，真实 worker 返回 STATE；不通过 SQL 修改不可变正文制造条件。

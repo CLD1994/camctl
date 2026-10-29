@@ -1,0 +1,40 @@
+{
+  "source_before": {
+    "head": "70a77bd9593fd880d257b6dbfb80432b5fa291a6",
+    "status": "",
+    "sha256": {
+      "scripts/camctl_memory.py": "f56ddf767dc7196fed4013f898951e8f2dd6548e0e4444ab72da0e3d49f8e103",
+      "scripts/camctl_memory_plugin.py": "bf6d989aacff24035b8d0c48c592a0392ae6b8cab14c5dc10dd6420376acc175",
+      "apps/camctl/tests/integration/persistence/segment_capacity_worker.py": "97bf4069ce7d8478856c53084acd61fe07428973c6cfe92eabf58ad530e7ad15",
+      "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py": "36493b58c3586de29bf6335c9c5618bd4ac29ac7ec11be8d2f30d309a5354b30"
+    }
+  },
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "scripts/tests/test_run_integration.py",
+    "-q",
+    "--tb=short",
+    "--basetemp=/tmp/camctl-memsw-validation/integration-runner-tmp",
+    "--junitxml=/tmp/camctl-memsw-validation/integration-runner.xml"
+  ],
+  "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+  "environment": {
+    "PYTHONPATH": "/opt/devcontainer/.codex/worktrees/de38/camctl/apps/camctl/src:/opt/devcontainer/.codex/worktrees/de38/camctl/apps/camctl/tests:/opt/devcontainer/.codex/worktrees/de38/camctl/scripts",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-memsw-validation/pycache",
+    "TMPDIR": "/tmp/camctl-memsw-validation/tmp"
+  },
+  "started_utc": "2026-10-25T17:27:08.617101+00:00",
+  "finished_utc": "2026-10-25T17:27:29.603857+00:00",
+  "pid": 1478149,
+  "exit_code": 0,
+  "wall_seconds": 18.17324986300082,
+  "source_head": "70a77bd9593fd880d257b6dbfb80432b5fa291a6",
+  "source_status": "",
+  "source_files": {
+    "scripts/camctl_memory.py": "f56ddf767dc7196fed4013f898951e8f2dd6548e0e4444ab72da0e3d49f8e103",
+    "apps/camctl/tests/integration/persistence/segment_capacity_worker.py": "97bf4069ce7d8478856c53084acd61fe07428973c6cfe92eabf58ad530e7ad15",
+    "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py": "36493b58c3586de29bf6335c9c5618bd4ac29ac7ec11be8d2f30d309a5354b30"
+  }
+}

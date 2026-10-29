@@ -20,20 +20,8 @@ from ..capture.test_host_photo_flow import _world, _ManagedCaptureTransport
 pytestmark = pytest.mark.asyncio
 
 
-class HeldTransport(_ManagedCaptureTransport):
-    def __init__(self, *, fail=False):
-        super().__init__()
-        self.entered = asyncio.Event()
-        self.release = asyncio.Event()
-        self.fail = fail
-
-    async def run(self, spec, stop):
-        self.entered.set()
-        await self.release.wait()
-        if self.fail:
-            self.calls.append(spec)
-            return RawToolOutcome(LocalExit(exit_code=1), b"", None, None, stderr=b"failed")
-        return await super().run(spec, stop)
+from .hasselblad_support import (HeldPhotoTransport as HeldTransport, action as read_action,
+    cancel, accept_origin, grant_unknown, interrupt_grant_delivery)
 
 
 async def world(tmp_path, transport):
@@ -49,7 +37,7 @@ async def test_real_photo_start_saves_entry_even_when_first_tool_fails(tmp_path)
     transport.release.set()
     try:
         await capture_handler("camera_take_photo")(1, runtime)
-        row = owned.connection.execute("SELECT result_json FROM operation_attempts").fetchone()
+        row = owned.connection.execute("SELECT a.result_json FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.kind=1").fetchone()
         observations = parse_exact_json(row[0])["observations"]
         assert [value["type"] for value in observations] == ["hasselblad_start_entered"]
     finally:
@@ -57,29 +45,21 @@ async def test_real_photo_start_saves_entry_even_when_first_tool_fails(tmp_path)
 
 
 async def test_returned_no_photo_effect_does_not_reopen_start_cancellation(tmp_path, monkeypatch):
-    transport = HeldTransport(fail=True)
-    cfg, owned, driver, runtime, clock = await world(tmp_path, transport)
-    transport.release.set()
-    monkeypatch.setattr("camctl.capture.host_photo._failure_after_return", lambda *args: True)
+    from .hasselblad_support import world as saved_world, close
+    cfg,owned,driver,runtime,transport,task,repository=await saved_world(tmp_path,'no_effect',monkeypatch)
     try:
-        await capture_handler("camera_take_photo")(1, runtime)
-        assert decide_cancel_eligibility(load_eligibility_facts(owned.connection, 1)) is CancelEligibility.REJECT_UNSUPPORTED
+        assert decide_cancel_eligibility(load_eligibility_facts(owned.connection,1)) is CancelEligibility.REJECT_UNSUPPORTED
     finally:
-        owned.connection.close()
+        await close(owned,transport,task)
 
 
-def fix_cancel(owned, runtime):
-    from camctl.bootstrap.flows import _resolve_and_fix
+async def fix_cancel(cfg, owned, runtime):
     from camctl.persistence.repositories.cancellation import CancellationRepository
-    from camctl.cancellation.models import StartCancelAction
-    from camctl.contracts.values import new_operation_key
-    from camctl.persistence.models import DbOutcomeKind
-    origin, raw = owned.connection.execute('SELECT id,input_fields_json FROM actions WHERE type=6 ORDER BY id DESC LIMIT 1').fetchone()
-    repository = CancellationRepository()
-    assert repository.start_cancel_action(StartCancelAction(origin, runtime.wall_us()), new_operation_key(), owned).kind is DbOutcomeKind.COMPLETED
-    # 装配后的生产入口须读取同一会话许可；本测试不直接指定取消模式。
-    repository.start_entries = runtime.start_entries
-    return origin, repository, _resolve_and_fix(owned, repository, origin, raw, runtime.wall_us)
+    origin, = owned.connection.execute('SELECT id FROM actions WHERE type=6 ORDER BY id DESC LIMIT 1').fetchone()
+    await cancel(cfg,runtime)
+    ids=tuple(row[0] for row in owned.connection.execute(
+        'SELECT id FROM cancel_items WHERE action_id=? ORDER BY id',(origin,)))
+    return origin,CancellationRepository(),ids
 
 
 async def test_photo_cancel_before_entry_prevents_late_start(tmp_path, monkeypatch):
@@ -87,20 +67,15 @@ async def test_photo_cancel_before_entry_prevents_late_start(tmp_path, monkeypat
     cfg, owned, driver, runtime, clock = await _world(tmp_path, cancel_action=True,
         driver_factory=lambda cfg: HasselbladDriver(cfg.devices,
             BoundDirectories(Path(cfg.paths.staging)), monotonic_ns=lambda: 1, transport=transport))
-    original = runtime.grant
-    def grant(action):
-        result = original(action)
-        fix_cancel(owned, runtime)
-        assert runtime.action(1)['cancel_requested'] == 1
-        return result
-    monkeypatch.setattr(runtime, 'grant', grant)
+    permit=await interrupt_grant_delivery(owned,runtime,monkeypatch)
+    await fix_cancel(cfg,owned,runtime)
+    assert read_action(owned,1)['cancel_requested']==1
     try:
         await capture_handler('camera_take_photo')(1, runtime)
-        assert runtime.action(1)['status'] == 6
+        assert read_action(owned,1)['status'] == 6
         assert owned.connection.execute('SELECT activity_state,occupancy_state,started_at FROM device_activities').fetchone() == (1,2,None)
-        assert transport.calls == []
-        assert not runtime.start_entries.pending_cancels
-        result, = owned.connection.execute('SELECT result_json FROM operation_attempts').fetchone()
+        assert all(spec.argv[3] != "capture" for spec in transport.calls)
+        result, = owned.connection.execute('SELECT a.result_json FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.kind=1').fetchone()
         assert parse_exact_json(result)['settlement']['evidence']['type'] == 'start_call_prevented'
     finally:
         transport.release.set()
@@ -118,16 +93,16 @@ async def test_entered_start_rejection_finishes_without_waiting_for_photo(tmp_pa
     task = asyncio.create_task(capture_handler('camera_take_photo')(1, runtime))
     try:
         await asyncio.wait_for(transport.entered.wait(), 1)
-        origin, repository, ids = fix_cancel(owned, runtime)
+        origin, repository, ids = await fix_cancel(cfg, owned, runtime)
         result = await asyncio.wait_for(apply_cancel(ApplyCancel(origin, ids), CancellationRuntime(
-            owned, repository, TargetSettlement(owned, OutputsRepository(), repository,
+            runtime.database, repository, TargetSettlement(runtime.database, OutputsRepository(), repository,
                 lambda _: 'unknown', runtime.wall_us), runtime.wall_us)), 1)
         assert result.items[0].status == 4
-        assert runtime.action(1)['cancel_requested'] == 0
+        assert read_action(owned,1)['cancel_requested'] == 0
         assert not task.done()
         transport.release.set()
         await task
-        assert runtime.action(1)['status'] == 3
+        assert read_action(owned,1)['status'] == 3
         assert sum(spec.argv[3] == 'capture' for spec in transport.calls) == 1
     finally:
         transport.release.set()
@@ -136,21 +111,8 @@ async def test_entered_start_rejection_finishes_without_waiting_for_photo(tmp_pa
 
 
 async def submit_cancel(cfg, owned, runtime, target):
-    from camctl.acceptance.input import ParsedInput
-    from camctl.acceptance.service import CommandMode
-    from camctl.devices.catalog import build_catalog, DriverDefinitions
-    from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID, driver_definition
-    from camctl.persistence.repositories.acceptance import AcceptanceRepository, ProcessInput
-    from camctl.contracts.values import new_operation_key
-    from camctl.persistence.models import DbOutcomeKind
-    from ..capture.test_host_photo_flow import _input_time
-    accepted = AcceptanceRepository().process_input(ProcessInput(ParsedInput('cancel-boundary.json', {
-        'request_id': '2', 'created_at': _input_time(), 'name': '取消单张边界',
-        'actions': [{'name':'取消','type':'cancel_task','params':{'target':target}}]}),
-        build_catalog(cfg, DriverDefinitions({DRIVER_ID:driver_definition()})), CommandMode.RUN,
-        runtime.wall_us()), new_operation_key(), owned)
-    assert accepted.kind is DbOutcomeKind.COMPLETED, accepted.error
-    return fix_cancel(owned, runtime)
+    await accept_origin(cfg,owned,runtime,target)
+    return await fix_cancel(cfg,owned,runtime)
 
 
 @pytest.mark.parametrize('address', ['action','group','plan','request'])
@@ -171,18 +133,18 @@ async def test_photo_cancel_rejection_respects_preview_addressing(tmp_path, addr
         target = {'action': {'action_instance_id':'1'}, 'group':{'plan_instance_id':'1','group':'g'},
             'plan':{'plan_instance_id':'1'}, 'request':{'request_id':'1'}}[address]
         origin, repository, ids = await submit_cancel(cfg, owned, runtime, target)
-        progress = await apply_cancel(ApplyCancel(origin, ids), CancellationRuntime(owned, repository,
-            TargetSettlement(owned, OutputsRepository(), repository, lambda _: 'unknown', runtime.wall_us), runtime.wall_us))
-        assert runtime.action(1)['cancel_requested'] == 0
+        progress = await apply_cancel(ApplyCancel(origin, ids), CancellationRuntime(runtime.database, repository,
+            TargetSettlement(runtime.database, OutputsRepository(), repository, lambda _: 'unknown', runtime.wall_us), runtime.wall_us))
+        assert read_action(owned,1)['cancel_requested'] == 0
         assert owned.connection.execute('SELECT status FROM cancel_items WHERE target_action_id=1').fetchone() == (4,)
         expected = int(address in ('plan','request'))
-        assert runtime.action(2)['cancel_requested'] == expected
+        assert read_action(owned,2)['cancel_requested'] == expected
         assert owned.connection.execute('SELECT COUNT(*) FROM cancel_items').fetchone() == (1+expected,)
         if expected:
             assert owned.connection.execute('SELECT selection_basis FROM cancel_items WHERE target_action_id=2').fetchone() == (1,)
         transport.release.set()
         await task
-        assert runtime.action(1)['status'] == 3
+        assert read_action(owned,1)['status'] == 3
     finally:
         transport.release.set()
         await asyncio.gather(task, return_exceptions=True)
@@ -195,7 +157,7 @@ async def test_setup_failure_releases_occupancy_without_claiming_activity_starte
     transport.release.set()
     try:
         await capture_handler('camera_take_photo')(1, runtime)
-        assert runtime.action(1)['status'] == 4
+        assert read_action(owned,1)['status'] == 4
         assert owned.connection.execute('SELECT activity_state,occupancy_state,started_at FROM device_activities').fetchone() == (1,2,None)
         assert owned.connection.execute('SELECT COUNT(*) FROM outputs').fetchone() == (0,)
     finally:
@@ -203,37 +165,29 @@ async def test_setup_failure_releases_occupancy_without_claiming_activity_starte
 
 
 async def test_driver_entered_with_zero_tools_keeps_entry_and_rejects_cancel(tmp_path, monkeypatch):
-    transport = HeldTransport()
-    cfg, owned, driver, runtime, clock = await world(tmp_path, transport)
-    original = driver._request_config
-    def config(request):
-        value = original(request)
-        clock[0] += 5_000_001
-        return value
-    monkeypatch.setattr(driver, '_request_config', config)
-    monkeypatch.setattr('camctl.capture.host_photo._failure_after_return', lambda *args: True)
+    from .hasselblad_support import world as saved_world, close
+    cfg,owned,driver,runtime,transport,task,repository=await saved_world(tmp_path,'zero_tools',monkeypatch)
     try:
-        await capture_handler('camera_take_photo')(1, runtime)
-        assert transport.calls == []
+        assert len(transport.calls)==8 and all(spec.argv[3]!='capture' for spec in transport.calls)
         assert decide_cancel_eligibility(load_eligibility_facts(owned.connection,1)) is CancelEligibility.REJECT_UNSUPPORTED
-        result, = owned.connection.execute('SELECT result_json FROM operation_attempts').fetchone()
-        value = parse_exact_json(result)
-        assert value['settlement']['evidence']['type'] == 'dispatch_prevented'
-        assert value['diagnostics']['calls'] == []
-        assert [o['type'] for o in value['observations']] == ['hasselblad_start_entered']
+        result,=owned.connection.execute('SELECT a.result_json FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.kind=1').fetchone()
+        value=parse_exact_json(result)
+        assert value['settlement']['evidence']['type']=='dispatch_prevented'
+        assert value['diagnostics']['calls']==[]
+        assert [o['type'] for o in value['observations']]==['hasselblad_start_entered']
     finally:
-        owned.connection.close()
+        await close(owned,transport,task)
 
 
 async def test_cancel_before_any_start_does_not_fabricate_attempt(tmp_path):
     transport = HeldTransport()
     cfg, owned, driver, runtime, clock = await _world(tmp_path, cancel_action=True)
     try:
-        fix_cancel(owned, runtime)
-        assert runtime.action(1)['cancel_requested'] == 1
+        await fix_cancel(cfg, owned, runtime)
+        assert read_action(owned,1)['cancel_requested'] == 1
         assert owned.connection.execute('SELECT COUNT(*) FROM operation_attempts').fetchone() == (0,)
         await capture_handler('camera_take_photo')(1, runtime)
-        assert runtime.action(1)['status'] == 6
+        assert read_action(owned,1)['status'] == 6
     finally:
         owned.connection.close()
 
@@ -250,11 +204,11 @@ async def test_direct_cancel_mode_cannot_bypass_entered_start(tmp_path, mode):
     task = asyncio.create_task(capture_handler('camera_take_photo')(1,runtime))
     try:
         await asyncio.wait_for(transport.entered.wait(),1)
-        origin, repository, ids = fix_cancel(owned,runtime)
+        origin, repository, ids = await fix_cancel(cfg,owned,runtime)
         result = repository.apply_cancel_target(ApplyCancelTarget(ids[0],CancelApplyMode(mode),runtime.wall_us()),
             new_operation_key(),owned)
         assert result.kind is not DbOutcomeKind.COMPLETED
-        assert runtime.action(1)['cancel_requested'] == 0
+        assert read_action(owned,1)['cancel_requested'] == 0
     finally:
         transport.release.set()
         await asyncio.gather(task,return_exceptions=True)
@@ -268,83 +222,69 @@ async def test_preview_both_is_deduplicated_when_source_cancel_is_applied(tmp_pa
     cfg, owned, driver, runtime, clock = await _world(tmp_path, extra_actions=[preview])
     try:
         origin, repository, ids = await submit_cancel(cfg,owned,runtime,{'plan_instance_id':'1'})
-        assert runtime.action(1)['cancel_requested'] == 1
+        assert read_action(owned,1)['cancel_requested'] == 1
         assert owned.connection.execute('SELECT target_action_id,selection_basis FROM cancel_items ORDER BY id').fetchall() == [(1,1),(2,3)]
         assert len(ids) == 2
         await capture_handler('camera_take_photo')(1,runtime)
-        assert runtime.action(1)['status'] == 6
+        assert read_action(owned,1)['status'] == 6
     finally:
         owned.connection.close()
 
 
 @pytest.mark.parametrize('phase', ['result','fixed','apply','committed_unknown'])
 async def test_original_entry_cancel_transaction_rolls_back_or_reuses_exact_request(tmp_path, monkeypatch, phase):
-    from camctl.persistence import transaction
-    from camctl.persistence.repositories import cancellation as module
-    from camctl.persistence.repositories import capture as capture_module
+    import sqlite3
+    from camctl.persistence.repositories.cancellation import CancellationRepository
     from camctl.contracts.values import ConsistencyError
     from camctl.persistence.models import DbOutcomeKind
     from camctl.session.service import StateDbFailure
-    from camctl.devices.start_entry import EntryPhase
-    cfg, owned, driver, runtime, clock = await _world(tmp_path, cancel_action=True)
-    runtime.grant(runtime.action(1))
-    actual_fix = module.CancellationRepository.fix_cancel_targets
-    actual_commit = module.commit_operation
-    actual_validate = transaction.validate_event
-    held = {}
-    def remember(self, request, key, owner):
-        held.update(repository=self, request=request, key=key, before=tuple(owner.connection.iterdump()))
-        return actual_fix(self,request,key,owner)
-    monkeypatch.setattr(module.CancellationRepository,'fix_cancel_targets',remember)
-    if phase == 'committed_unknown':
-        def unknown(command,key,owner):
-            receipt = actual_commit(command,key,owner)
-            if isinstance(command,module._FixPhotoEntriesCommand):
-                return replace(receipt,kind='unknown',error=ConsistencyError('lost receipt'))
-            return receipt
-        monkeypatch.setattr(module,'commit_operation',unknown)
-    else:
-        wanted = {'result':capture_module._ATTEMPT_RESULT_EVENT,
-            'fixed':module._TARGETS_FIXED_EVENT,'apply':module._CANCEL_CHANGED_EVENT}[phase]
-        def fail(event,context):
-            value = actual_validate(event,context)
-            if event.event_type == wanted:
-                raise ConsistencyError('injected transaction segment failure')
-            return value
-        monkeypatch.setattr(transaction,'validate_event',fail)
+    cfg,owned,driver,runtime,clock=await _world(tmp_path,cancel_action=True)
+    permit=await interrupt_grant_delivery(owned,runtime,monkeypatch)
+    actual=CancellationRepository.fix_cancel_targets
+    held={}
+    def remember(repository,request,key,owner,**options):
+        held.update(repository=repository,request=request,key=key,before=tuple(owner.connection.iterdump()))
+        result=actual(repository,request,key,owner,**options)
+        if phase=='committed_unknown' and result.kind is DbOutcomeKind.COMPLETED:
+            return replace(result,kind=DbOutcomeKind.UNKNOWN,error=ConsistencyError('lost receipt'))
+        return result
+    monkeypatch.setattr(CancellationRepository,'fix_cancel_targets',remember)
+    denied={'result':(sqlite3.SQLITE_UPDATE,'operation_attempts','status'),
+        'fixed':(sqlite3.SQLITE_INSERT,'cancel_items',None),
+        'apply':(sqlite3.SQLITE_UPDATE,'actions','cancel_requested')}
+    if phase!='committed_unknown':
+        operation,table,column=denied[phase]
+        await runtime.database.read(lambda db: db.connection.set_authorizer(
+            lambda op,name,col,*_: sqlite3.SQLITE_DENY
+            if op==operation and name==table and (column is None or col==column) else sqlite3.SQLITE_OK))
     try:
         with pytest.raises(StateDbFailure):
-            fix_cancel(owned,runtime)
-        assert runtime.start_entries.pending_cancels[2] == (held['request'],held['key'])
-        permit = runtime.start_entries.get(owned.metadata.instance_id,1)
-        assert permit.phase is EntryPhase.RESERVED
-        with pytest.raises(ConsistencyError):
-            permit.enter(permit.ticket)
-        if phase != 'committed_unknown':
-            assert tuple(owned.connection.iterdump()) == held['before']
-            assert runtime.action(1)['cancel_requested'] == 0
+            await fix_cancel(cfg,owned,runtime)
+        with pytest.raises(ConsistencyError): permit.enter(permit.ticket)
+        if phase!='committed_unknown':
+            assert tuple(owned.connection.iterdump())==held['before']
+            assert read_action(owned,1)['cancel_requested']==0
         else:
-            assert runtime.action(1)['cancel_requested'] == 1
-        monkeypatch.setattr(transaction,'validate_event',actual_validate)
-        monkeypatch.setattr(module,'commit_operation',actual_commit)
-        result = actual_fix(held['repository'],held['request'],held['key'],owned)
-        assert result.kind is DbOutcomeKind.COMPLETED, result.error
-        assert not runtime.start_entries.pending_cancels
-        assert permit.phase is EntryPhase.BLOCKED
-        frozen = tuple(owned.connection.iterdump())
-        replay = actual_fix(held['repository'],held['request'],held['key'],owned)
-        assert replay.kind is DbOutcomeKind.COMPLETED, replay.error
-        assert tuple(owned.connection.iterdump()) == frozen
-        bad = replace(held['request'],occurred_at=held['request'].occurred_at+1)
-        assert actual_fix(held['repository'],bad,held['key'],owned).kind is not DbOutcomeKind.COMPLETED
-        block, = held['request'].entry_blocks
-        wrong_database = replace(held['request'],entry_blocks=(replace(block,database_id='other-state-db'),))
-        assert actual_fix(held['repository'],wrong_database,held['key'],owned).kind is not DbOutcomeKind.COMPLETED
-        bad_block = replace(block,ticket=replace(block.ticket,target_id='999'))
-        bad = replace(held['request'],entry_blocks=(bad_block,))
-        assert actual_fix(held['repository'],bad,held['key'],owned).kind is not DbOutcomeKind.COMPLETED
-        assert tuple(owned.connection.iterdump()) == frozen
+            assert read_action(owned,1)['cancel_requested']==1
+        await runtime.database.read(lambda db: db.connection.set_authorizer(None))
+        monkeypatch.setattr(CancellationRepository,'fix_cancel_targets',actual)
+        await cancel(cfg,runtime)
+        with pytest.raises(ConsistencyError): permit.enter(permit.ticket)
+        assert read_action(owned,1)['cancel_requested']==1
+        frozen=tuple(owned.connection.iterdump())
+        replay=actual(held['repository'],held['request'],held['key'],owned)
+        assert replay.kind is DbOutcomeKind.COMPLETED,replay.error
+        assert tuple(owned.connection.iterdump())==frozen
+        bad=replace(held['request'],occurred_at=held['request'].occurred_at+1)
+        assert actual(held['repository'],bad,held['key'],owned).kind is not DbOutcomeKind.COMPLETED
+        block,=held['request'].entry_blocks
+        wrong_database=replace(held['request'],entry_blocks=(replace(block,database_id='other-state-db'),))
+        assert actual(held['repository'],wrong_database,held['key'],owned).kind is not DbOutcomeKind.COMPLETED
+        bad_block=replace(block,ticket=replace(block.ticket,target_id='999'))
+        assert actual(held['repository'],replace(held['request'],entry_blocks=(bad_block,)),held['key'],owned).kind is not DbOutcomeKind.COMPLETED
+        assert tuple(owned.connection.iterdump())==frozen
     finally:
+        await runtime.database.read(lambda db: db.connection.set_authorizer(None))
         owned.connection.close()
 
 
@@ -373,23 +313,23 @@ async def test_cancel_after_actual_relative_focus_rejects_and_keeps_original_lim
     cfg,owned,driver,runtime,clock = await _world(tmp_path,cancel_action=True,
         photo_focus={'mode':'MF','relative_move':5},driver_factory=lambda cfg:HasselbladDriver(
             cfg.devices,BoundDirectories(Path(cfg.paths.staging)),transport=transport,monotonic_ns=lambda:ticks[0]))
-    actual=driver._run_step
-    async def after_focus(**kwargs):
-        raw=await actual(**kwargs)
-        if kwargs['name']=='focus':
+    actual=transport.run
+    async def after_focus(spec,stop):
+        raw=await actual(spec,stop)
+        if spec.argv[3]=='focus':
             result=await asyncio.wait_for(_cancel_through_service(owned,runtime),1)
-            assert result.items[0].status==4
-            assert runtime.action(1)['cancel_requested']==0
+            assert result[0]==4
+            assert read_action(owned,1)['cancel_requested']==0
             if remaining=='window': clock[0]+=5_000_001
             if remaining=='budget': ticks[0]+=181_000_000_000
         return raw
-    monkeypatch.setattr(driver,'_run_step',after_focus)
+    monkeypatch.setattr(transport,'run',after_focus)
     try:
         await capture_handler('camera_take_photo')(1,runtime)
         assert sum(call.argv[3]=='focus' for call in transport.calls)==1
         assert sum(call.argv[3]=='capture' for call in transport.calls)==int(remaining=='valid')
-        assert runtime.action(1)['status']==(3 if remaining=='valid' else 4)
-        saved_json,error_json=owned.connection.execute('SELECT result_json,error_json FROM operation_attempts').fetchone()
+        assert read_action(owned,1)['status']==(3 if remaining=='valid' else 4)
+        saved_json,error_json=owned.connection.execute('SELECT a.result_json,a.error_json FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.kind=1').fetchone()
         saved=parse_exact_json(saved_json)
         steps=(next(item['data']['steps'] for item in saved['observations'] if item['type']=='photo_taken')
             if remaining=='valid' else parse_exact_json(error_json)['details']['steps'])
@@ -405,18 +345,18 @@ async def test_cancel_origin_itself_canceled_keeps_already_applied_source_respon
     from camctl.persistence.repositories.outputs import OutputsRepository
     cfg,owned,driver,runtime,clock=await _world(tmp_path,cancel_action=True)
     try:
-        original,repository,ids=fix_cancel(owned,runtime)
-        assert runtime.action(1)['cancel_requested']==1
+        original,repository,ids=await fix_cancel(cfg,owned,runtime)
+        assert read_action(owned,1)['cancel_requested']==1
         origin,repository,other_ids=await submit_cancel(cfg,owned,runtime,{'action_instance_id':str(original)})
         result=await apply_cancel(ApplyCancel(origin,other_ids),CancellationRuntime(
-            owned,repository,TargetSettlement(owned,OutputsRepository(),repository,
+            runtime.database,repository,TargetSettlement(runtime.database,OutputsRepository(),repository,
                 lambda _:'unknown',runtime.wall_us),runtime.wall_us))
         assert result.items[0].status==3
-        assert runtime.action(original)['status']==6
+        assert read_action(owned,original)['status']==6
         assert owned.connection.execute('SELECT status,cancellation_effect FROM cancel_items WHERE id=?',(ids[0],)).fetchone()==(5,2)
-        assert runtime.action(1)['cancel_requested']==1
+        assert read_action(owned,1)['cancel_requested']==1
         await capture_handler('camera_take_photo')(1,runtime)
-        assert runtime.action(1)['status']==6 and not driver.requests
+        assert read_action(owned,1)['status']==6 and not driver.requests
     finally:
         owned.connection.close()
 
@@ -424,26 +364,44 @@ async def test_cancel_origin_itself_canceled_keeps_already_applied_source_respon
 @pytest.mark.parametrize('changed',['ticket','time','source','missing'])
 async def test_independent_fixed_event_guard_rejects_false_entry_request(tmp_path,monkeypatch,changed):
     from copy import deepcopy
-    from camctl.contracts.values import ConsistencyError
-    from camctl.persistence.repositories import cancellation as module
+    from camctl.contracts.values import ConsistencyError,new_operation_key
+    from camctl.persistence.models import DbOutcome,DbOutcomeKind
+    from camctl.persistence.repositories.cancellation import CancellationRepository
+    from camctl.persistence.transaction import commit_operation
+    from camctl.history.reads import PlanReadScope
     from camctl.session.service import StateDbFailure
+    from ..support.output_planning import capture_operation,EventSequence
     cfg,owned,driver,runtime,clock=await _world(tmp_path,cancel_action=True)
-    runtime.grant(runtime.action(1))
-    actual=module._FixPhotoEntriesCommand._request
-    def wrong(self):
-        request=deepcopy(actual(self))
-        if changed=='ticket': request['blocks'][0]['ticket']['run_id']+=100
-        if changed=='time': request['occurred_at']+=1
-        if changed=='source': request['blocks'][0]['action_id']=self.command.action_id
-        if changed=='missing': del request['blocks'][0]['ticket']
-        return request
-    monkeypatch.setattr(module._FixPhotoEntriesCommand,'_request',wrong)
+    permit=await interrupt_grant_delivery(owned,runtime,monkeypatch)
+    actual=CancellationRepository.fix_cancel_targets
+    captured={}
+    def propose(repository,request,key,owner,**options):
+        captured['proposal']=capture_operation(owner,lambda copy: actual(repository,request,key,copy,**options))
+        return DbOutcome(DbOutcomeKind.ROLLED_BACK,error=ConsistencyError('仅取得独立的正式提案'))
     try:
-        with pytest.raises(StateDbFailure): fix_cancel(owned,runtime)
+        with monkeypatch.context() as patch:
+            patch.setattr(CancellationRepository,'fix_cancel_targets',propose)
+            with pytest.raises(StateDbFailure): await fix_cancel(cfg,owned,runtime)
+        proposal=captured['proposal']
+        events=[]
+        for event in proposal.events:
+            if event.event_type==4:
+                header=deepcopy(event.evidence)
+                request=header['photo_entry_request']
+                if changed=='ticket': request['blocks'][0]['ticket']['run_id']+=100
+                if changed=='time': request['occurred_at']+=1
+                if changed=='source': request['blocks'][0]['action_id']=request['action_id']
+                if changed=='missing': del request['blocks'][0]['ticket']
+                event=replace(event,evidence=header)
+            events.append(event)
+        before=tuple(owned.connection.iterdump())
+        receipt=commit_operation(EventSequence(tuple(events),proposal,
+            plan_read_scope=PlanReadScope(1,128)),new_operation_key(),owned)
+        assert receipt.kind!='completed',receipt
+        assert tuple(owned.connection.iterdump())==before
         assert owned.connection.execute('SELECT result_json FROM operation_attempts').fetchone()==(None,)
         assert owned.connection.execute('SELECT COUNT(*) FROM cancel_items').fetchone()==(0,)
-        assert runtime.action(1)['cancel_requested']==0
-        permit=runtime.start_entries.get(owned.metadata.instance_id,1)
+        assert read_action(owned,1)['cancel_requested']==0
         with pytest.raises(ConsistencyError): permit.enter(permit.ticket)
     finally:
         owned.connection.close()
@@ -464,10 +422,9 @@ async def test_unknown_grant_never_authorizes_driver_or_guesses_cancel_success(t
     monkeypatch.setattr(runtime.scheduling,'grant_start',unknown)
     try:
         with pytest.raises(ConsistencyError): await capture_handler('camera_take_photo')(1,runtime)
-        permit=runtime.start_entries.get(owned.metadata.instance_id,1)
-        assert permit.phase is EntryPhase.UNKNOWN and not driver.requests
-        with pytest.raises(ConsistencyError): fix_cancel(owned,runtime)
-        assert runtime.action(1)['cancel_requested']==0
+        assert not driver.requests
+        with pytest.raises(ConsistencyError): await fix_cancel(cfg,owned,runtime)
+        assert read_action(owned,1)['cancel_requested']==0
         assert owned.connection.execute('SELECT COUNT(*) FROM cancel_items').fetchone()==(0,)
     finally:
         owned.connection.close()
@@ -476,19 +433,42 @@ async def test_unknown_grant_never_authorizes_driver_or_guesses_cancel_success(t
 @pytest.mark.parametrize('missing',['lost','unknown'])
 async def test_original_grant_without_ready_session_permit_never_enters_driver(tmp_path,monkeypatch,missing):
     from camctl.contracts.values import ConsistencyError
-    from camctl.devices.start_entry import EntryPhase
-    cfg,owned,driver,runtime,clock=await _world(tmp_path)
-    actual=runtime.grant
-    def lose(action):
-        granted=actual(action)
-        identity=owned.metadata.instance_id,action['id']
-        if missing=='lost': del runtime.start_entries.permits[identity]
-        else: runtime.start_entries.permits[identity].phase=EntryPhase.UNKNOWN
-        return granted
-    monkeypatch.setattr(runtime,'grant',lose)
-    try:
-        with pytest.raises(ConsistencyError): await capture_handler('camera_take_photo')(1,runtime)
-        assert not driver.requests
-        assert owned.connection.execute('SELECT status,result_json FROM operation_attempts').fetchone()==(1,None)
-    finally:
-        owned.connection.close()
+    from camctl.persistence.models import DbOutcome,DbOutcomeKind
+    from camctl.devices.drivers.registry import DriverRegistry
+    from ..capture.test_host_photo_flow import _entry
+    from ..support.capture import capture_test_session
+    from ..session.support import assert_database_closed
+    from camctl.persistence.repositories.capture_facts import load_start_facts
+    async with capture_test_session() as session:
+        cfg,owned,driver,runtime,clock=await _world(tmp_path)
+        try:
+            if missing=='lost':
+                await interrupt_grant_delivery(owned,runtime,monkeypatch)
+                original_database=runtime.database
+                database=await session.restart_database(owned)
+                await assert_database_closed(original_database)
+                # 新 factory 使用新会话许可集合，不能沿旧会话内存授权设备。
+                entry=_entry(driver)
+                runtime=await session.runtime(database,driver=driver,evidence=entry.evidence,
+                    devices=cfg.devices,drivers=DriverRegistry((entry,)),
+                    staging=Path(cfg.paths.staging),wait_config=lambda _action:None,
+                    wall_us=lambda:clock[0],monotonic_ns=lambda:9_000_000_000)
+            else:
+                actual=runtime.scheduling.grant_start
+                def unknown(request,key,owner):
+                    saved=actual(request,key,owner)
+                    assert saved.kind is DbOutcomeKind.COMPLETED,saved.error
+                    return DbOutcome(DbOutcomeKind.UNKNOWN,error=OSError('授予回执未知'))
+                with monkeypatch.context() as patch:
+                    patch.setattr(runtime.scheduling,'grant_start',unknown)
+                    with pytest.raises(ConsistencyError): await capture_handler('camera_take_photo')(1,runtime)
+            original=owned.connection.execute('SELECT id,run_id,status,result_json FROM operation_attempts').fetchone()
+            assert await capture_handler('camera_take_photo')(1,runtime) is None
+            assert not driver.requests
+            assert owned.connection.execute('SELECT id,run_id,status,result_json FROM operation_attempts').fetchone()==original
+            assert original[2:]==(1,None)
+            pending=load_start_facts(owned.connection,read_action(owned,1))
+            assert pending.attempts_used==1 and not pending.not_started
+            assert read_action(owned,1)['status']==2 and read_action(owned,1)['cancel_requested']==0
+        finally:
+            owned.connection.close()

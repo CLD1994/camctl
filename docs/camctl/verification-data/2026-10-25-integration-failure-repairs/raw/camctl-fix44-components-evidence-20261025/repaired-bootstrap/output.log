@@ -1,0 +1,16 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.17, pytest-9.1.1, pluggy-1.6.0 -- /tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python
+cachedir: .pytest_cache
+rootdir: /tmp/camctl-fix44-components-20261025/apps/camctl
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, mock-3.16.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 4 items
+
+apps/camctl/tests/integration/bootstrap/test_distribution.py::test_installed_hasselblad_photo_pair_obtain_and_source_reuse[raw] PASSED [ 25%]
+apps/camctl/tests/integration/bootstrap/test_distribution.py::test_installed_hasselblad_photo_pair_obtain_and_source_reuse[jpeg] PASSED [ 50%]
+apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py::test_installed_device_photo_reclaims_then_downloads_both_sources_twice[raw] PASSED [ 75%]
+apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py::test_installed_device_photo_reclaims_then_downloads_both_sources_twice[jpeg] PASSED [100%]
+
+- generated xml file: /tmp/camctl-fix44-components-evidence-20261025/repaired-bootstrap/junit.xml -
+======================== 4 passed in 116.09s (0:01:56) =========================

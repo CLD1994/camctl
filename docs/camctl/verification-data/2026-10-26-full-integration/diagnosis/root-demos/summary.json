@@ -1,0 +1,61 @@
+{
+  "source_head": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+  "modules": [
+    {
+      "task": "011-root-test_real_camera_demo_roundtrip",
+      "artifacts": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/011-root-test_real_camera_demo_roundtrip/artifacts",
+      "source": "cf4f504b7648bb5004fd20e1d66bfb57ab6a2956a33b6203724b6f0262591950",
+      "progress": {
+        "status": "finished",
+        "exit_code": 1,
+        "collected": 4,
+        "outcomes": {
+          "failed": 4
+        },
+        "subchecks": {},
+        "elapsed_seconds": 287.9992618219985,
+        "utc": "2026-10-26T00:37:03.106022+00:00",
+        "pid": 1949071
+      },
+      "wall_seconds": 289.7777216659888,
+      "output_log_sha256": "a573fa154e5441c1263876f2970cace7b3e260684ed7f27eaef5f814f2f34dae"
+    },
+    {
+      "task": "016-root-test_action6_builtin_demo_roundtrip",
+      "artifacts": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/016-root-test_action6_builtin_demo_roundtrip/artifacts",
+      "source": "cf4f504b7648bb5004fd20e1d66bfb57ab6a2956a33b6203724b6f0262591950",
+      "progress": {
+        "status": "finished",
+        "exit_code": 1,
+        "collected": 1,
+        "outcomes": {
+          "failed": 1
+        },
+        "subchecks": {},
+        "elapsed_seconds": 42.68172612300259,
+        "utc": "2026-10-26T00:37:30.991580+00:00",
+        "pid": 1962112
+      },
+      "wall_seconds": 43.97619232999568,
+      "output_log_sha256": "edba009de706913c686807df4eaffa7db02dce06caf499d4aa4e6b86b2183881"
+    }
+  ],
+  "real_camera": {
+    "failed_identities": 4,
+    "public_failure": "capture failed before START, reason baseline_read_failed",
+    "actual_error": "{\"code\":\"adb_directory_failed\",\"stage\":\"device_file_access\",\"details\":{\"reason\":\"call_failed\",\"transport_error\":\"output_failed\",\"output_failure\":\"stdout: stdout_sink_failed: ValueError: 目录路径不属于原固定目录\",\"local_exit_code\":null,\"local_signal\":15,\"stderr\":\"\"}}",
+    "first_cause": "WorldTransport.run_stream未将本机find路径映射回原远端路径；run已有该映射。DirectoryFrame按原目录拒绝是正确行为。",
+    "source_assessment": "camera_demo_fixtures、directory_scan、baseline扫描选择路径在a775和272已存在；未确认此次合并新增生产问题。",
+    "required_followup": "通过正式通信端口提供合法远端路径，保持目录范围、START/SENT、拍摄、取回和报告断言；等待成功时并行识别capture已终局失败。"
+  },
+  "action6": {
+    "failed_identities": 1,
+    "actual": "capture succeeded; PREPARE_CAPTURE control_returned/v2 with 15 setting calls; START control_returned/v1 recording_sent; STOP confirmed; report published before assertion",
+    "contract": "operation-fields:52及提前准备规格定义独立PREPARE_CAPTURE；action6_record_contract同时登记v1与携带calls的v2。_capture_control prepared路径只执行START，_with_attached_calls仅实际附加设置历史时升级v2。",
+    "first_cause": "测试把独立准备之前的START承载设置历史布局当作恒定契约。",
+    "required_followup": "完整核对PREPARE_CAPTURE v2设置历史和重放（光圈e3/unknown、bitrate accepted、stdout），独立核对START v1 recording_sent；保留后续真实取回/claim/ack全部断言。",
+    "source_assessment": "driver/action6_record在a775、272、组合文件相同；断言2及START.calls在两个基线均存在。",
+    "not_reached": "原测试在版本断言处停止，后续取回/claim/ack不计通过。"
+  },
+  "boundary": "只读既有真实业务日志、mode=ro SQLite和三方源码；未修改仓库或重跑测试。源码存在性不等于基线实测。"
+}

@@ -1,5 +1,7 @@
 """显式切换目录后，真实 CLI 发布与 C 模块领取采用新绑定。"""
 
+from camctl_memory_plugin import run_camctl
+
 import json
 import os
 import shlex
@@ -19,8 +21,8 @@ _ENTRY = "from camctl.cli import main; raise SystemExit(main())"
 
 
 def _cli(config, *arguments):
-    result = subprocess.run([sys.executable, "-c", _ENTRY, *arguments, "--config", str(config)],
-        capture_output=True, text=True, timeout=30)
+    result = run_camctl([sys.executable, "-c", _ENTRY, *arguments, "--config", str(config)],
+        receipt_root=config.parent, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
     return result
 
@@ -57,6 +59,19 @@ def test_new_binding_publishes_and_claims_after_explicit_init(tmp_path, host_dem
     launcher.chmod(0o755)
     deployment = SimpleNamespace(root=tmp_path, ready=old["ready"], processing=old["processing"], config_path=config)
     demo = HostDemo(deployment, host_demo, launcher=str(launcher))
+    archive = tmp_path / "old-claimed-files"
+    archive.mkdir()
+
+    def consume_claimed(path):
+        assert path.is_file()
+        content = path.read_bytes()
+        target = archive / path.name
+        if target.exists():
+            assert target.read_bytes() == content
+        else:
+            target.write_bytes(content)
+        path.unlink()
+
     try:
         demo.start()
         demo.claim()
@@ -64,9 +79,12 @@ def test_new_binding_publishes_and_claims_after_explicit_init(tmp_path, host_dem
         for name, content in originals.items():
             claimed = old["processing"] / name
             assert claimed.read_bytes() == content
-            claimed.unlink()
+            consume_claimed(claimed)
     finally:
         demo.stop()
+    for path in old["processing"].iterdir():
+        consume_claimed(path)
+    assert not tuple(old["processing"].iterdir())
 
     new = _config(config, tmp_path / "new", state_db)
     _cli(config, "init")

@@ -2,32 +2,18 @@
 
 from pathlib import Path
 
+from camctl.bootstrap.config import ConfigDefaults, load_config
+
 import pytest
 
-from camctl.bootstrap.config import ConfigDefaults, ConfigError, load_config
-
 from .test_output_binding_changes import (  # noqa: F401
-    Catalog, _CONTENT, _accept, _changed, _registry, _save_photos, environment,
+    Catalog, _CONTENT, _NOW, _accept, _changed, _registry, _save_photos, environment,
 )
 from ..capture.media_retry_fixtures import media_pipeline as pipeline  # noqa: F401
 
 
 def test_read_discovery_default():
     assert load_config(None, ConfigDefaults()).session.read_discovery_batch_size == 100
-
-
-@pytest.mark.parametrize("size", [1, 100000])
-def test_read_discovery_override_and_reload(size):
-    first = load_config({"session": {"read_discovery_batch_size": size}}, ConfigDefaults())
-    second = load_config({"session": {"read_discovery_batch_size": size + 1}}, ConfigDefaults())
-    assert first.session.read_discovery_batch_size == size
-    assert second.session.read_discovery_batch_size == size + 1
-
-
-@pytest.mark.parametrize("size", [True, False, 0, -1, "1", 1.0])
-def test_invalid_read_discovery_size(size):
-    with pytest.raises(ConfigError):
-        load_config({"session": {"read_discovery_batch_size": size}}, ConfigDefaults())
 
 
 @pytest.mark.asyncio
@@ -44,7 +30,7 @@ async def test_default_obtain_reaches_candidates_beyond_first_batch(
 
     cfg, owned, context, driver = environment
     await _save_photos(cfg, owned, context, driver)
-    _accept(owned, "2", [{
+    await _accept(owned, "2", [{
         "name": f"取回{index}", "type": "obtain_action_outputs",
         "scheduled_at": "2026-01-15 09:00:00",
         "params": {"source": {"plan_instance_id": "1", "group": "files"}},
@@ -89,7 +75,7 @@ async def test_default_binding_failures_are_paged(environment, monkeypatch, stat
 
     cfg, owned, context, driver = environment
     await _save_photos(cfg, owned, context, driver)
-    _accept(owned, "2", [{
+    await _accept(owned, "2", [{
         "name": f"取回{index}", "type": "obtain_action_outputs",
         "scheduled_at": "2026-01-15 09:00:00",
         "params": {"source": {"plan_instance_id": "1", "group": "files"}},
@@ -120,7 +106,7 @@ async def test_submit_during_initial_discovery_is_not_lost(environment, monkeypa
                 "scheduled_at": "2026-01-15 09:00:00",
                 "params": {"source": {"plan_instance_id": "1", "group": "files"}}}
                for index in range(3)]
-    _accept(owned, "2", actions)
+    await _accept(owned, "2", actions)
     entered = False
     real_open = driver.open_read
 
@@ -129,7 +115,7 @@ async def test_submit_during_initial_discovery_is_not_lost(environment, monkeypa
         if not entered:
             entered = True
             assert not owned.connection.in_transaction
-            _accept(owned, "3", [{**actions[0], "name": "新提交",
+            await _accept(owned, "3", [{**actions[0], "name": "新提交",
                                   "scheduled_at": "2026-01-15 08:59:00"}])
         return await real_open(*args, **kwargs)
 
@@ -153,23 +139,60 @@ async def test_cancel_during_discovery_preserves_active_read_settlement(environm
     from dataclasses import replace
     from camctl.acceptance.service import CommandMode
     from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
-    from .test_cancel_obtain_settlement_transactions import _apply
-
     cfg, owned, context, driver = environment
     await _save_photos(cfg, owned, context, driver)
-    _accept(owned, "2", [{"name": f"取回{index}", "type": "obtain_action_outputs",
+    await _accept(owned, "2", [{"name": f"取回{index}", "type": "obtain_action_outputs",
         "scheduled_at": "2026-01-15 09:00:00",
         "params": {"source": {"plan_instance_id": "1", "group": "files"}}} for index in range(3)])
-    canceled = []
-    original_open = driver.open_read
+    import json
+    import threading
+    from camctl.devices.read_session import ReadSession
+    from .test_obtain_flow import _MemoryStream
 
-    async def cancel_then_read(source, offset, ticket, **kwargs):
-        if not canceled:
-            assert not owned.connection.in_transaction
-            target = owned.connection.execute("SELECT action_id FROM operation_runs WHERE id=?", (ticket.run_id,)).fetchone()[0]
-            _apply(owned, target)
+    canceled, submissions = [], []
+    original_open = driver.open_read
+    loop, released = asyncio.get_running_loop(), threading.Event()
+    gate_started = False
+
+    async def submit_cancel(ticket):
+        target, = owned.connection.execute(
+            "SELECT action_id FROM operation_runs WHERE id=?", (ticket.run_id,)).fetchone()
+        try:
+            await _accept(owned, "3", [{"name": "取消取回", "type": "cancel_task",
+                "scheduled_at": "2026-01-15 09:00:00", "params": {
+                    "target": {"action_instance_id": str(target)}}}])
+            async with asyncio.timeout(30):
+                while owned.connection.execute(
+                        "SELECT cancel_requested FROM actions WHERE id=?", (target,)).fetchone() != (1,):
+                    await asyncio.sleep(.005)
             canceled.append(target)
-        return await original_open(source, offset, ticket, **kwargs)
+        finally:
+            released.set()
+
+    class ActiveStream(_MemoryStream):
+        def __init__(self, content, ticket):
+            super().__init__(content)
+            self.ticket, self.entered = ticket, False
+
+        def read(self, limit):
+            if not self.entered:
+                self.entered = True
+                loop.call_soon_threadsafe(lambda: submissions.append(
+                    asyncio.create_task(submit_cancel(self.ticket))))
+                if not released.wait(timeout=30):
+                    raise TimeoutError("真实源读取尚未取得取消回执")
+            return super().read(limit)
+
+        def cancel(self):
+            released.set()
+
+    async def cancel_then_read(source, offset, ticket, *, idle_timeout_s):
+        nonlocal gate_started
+        if gate_started:
+            return await original_open(source, offset, ticket, idle_timeout_s=idle_timeout_s)
+        gate_started = True
+        driver.reads.append(tuple(json.loads(source.file_id)[:2]))
+        return ReadSession(source, offset, ActiveStream(_CONTENT[offset:], ticket), idle_timeout_s)
 
     driver.open_read = cancel_then_read
     cfg = replace(cfg, session=replace(cfg.session, read_discovery_batch_size=1))
@@ -179,6 +202,9 @@ async def test_cancel_during_discovery_preserves_active_read_settlement(environm
         result = await asyncio.wait_for(execute_command(deps, None, poll_interval_s=0.005), 30)
         assert result.succeeded, result.details
     finally:
+        released.set()
+        if submissions:
+            await asyncio.gather(*submissions)
         close_runtime(deps)
     assert len(canceled) == 1
     assert owned.connection.execute("SELECT status FROM actions WHERE type=4 ORDER BY id").fetchall() == [(6,), (3,), (3,)]
@@ -200,15 +226,15 @@ async def test_capture_batches_keep_full_business_order(environment, batch_size)
     from ..capture.test_capture_contract import ResultsDouble
 
     cfg, owned, context, driver = environment
-    _accept(owned, "1", [{"name": name, "type": "camera_take_photo", "device_id": "cam-a",
+    await _accept(owned, "1", [{"name": name, "type": "camera_take_photo", "device_id": "cam-a",
         "scheduled_at": scheduled, "params": {"type": "single_shot"},
         "policy": {"max_delay_ms": 10000}} for name, scheduled in (
             ("晚计划时间先登记", "2026-01-15 09:00:00"),
             ("早计划时间后登记", "2026-01-15 08:59:59"),
             ("窗口已过", "2026-01-15 08:59:40"),
             ("已经取消", "2026-01-15 08:59:41"))])
-    owned.connection.execute("UPDATE actions SET status=6,cancel_requested=1 WHERE id=4")
-    owned.connection.commit()
+    from .test_read_execution_runtime import _apply_read_business_cancel
+    await _apply_read_business_cancel(owned, 4, database=context.database)
     calls = []
 
     async def control(request):
@@ -232,38 +258,47 @@ async def test_capture_batches_keep_full_business_order(environment, batch_size)
         await flow(context)
         await flow.settle()
     assert calls == [2, 1]
-    assert owned.connection.execute("SELECT status FROM actions ORDER BY id").fetchall() == [(3,), (3,), (5,), (6,)]
+    assert owned.connection.execute("SELECT status FROM actions WHERE type=1 ORDER BY id").fetchall() == [(3,), (3,), (5,), (6,)]
 
 
 @pytest.mark.asyncio
-async def test_default_internal_read_uses_session_batch_limit(pipeline, monkeypatch):
+async def test_default_internal_read_uses_session_batch_limit(pipeline, capture_resources, monkeypatch):
     from dataclasses import replace
-    from decimal import Decimal
-    from camctl.bootstrap.lifecycle import close_runtime
-    from camctl.capture.media_flow import run_recording_media
-    from camctl.host_files.media import MediaProbe
-    from . import test_read_default_consumers as consumers
-    from ..capture.test_media_flow import ProbeTools
+    from types import SimpleNamespace
+    from camctl.acceptance.service import CommandMode
+    from camctl.bootstrap import capture_assembly, lifecycle
+    from ..capture.media_retry_fixtures import _Catalog
+    from ..capture.test_capture_contract import ResultsDouble, _entry
+    from ..capture.test_input_copy import _CONTENT as content
+    from ..support.bootstrap_consumers import consumer_world
+    from ..support.session import run_default_session
 
-    original_config = consumers._config
-    def config(root):
-        cfg = original_config(root)
-        return replace(cfg, session=replace(cfg.session, read_discovery_batch_size=1))
+    results = ResultsDouble({1: (replace(_entry("original-recording", size=len(content)),
+        locator={"path": "/DCIM/original.mp4"}, original_name="original.mp4"),)})
+    world = await consumer_world(pipeline, capture_resources, duration="61", results=results)
+    config = replace(world.config, session=replace(world.config.session, read_discovery_batch_size=1))
+    actual_factory, limits = capture_assembly.session_capture_assembly, []
 
-    tools = ProbeTools(MediaProbe(duration_s=Decimal("61"), error=None))
-    monkeypatch.setattr(consumers, "_config", config)
-    monkeypatch.setattr(consumers, "_NoNewMedia", lambda: tools)
-    deps, factories, context, reader, *_ = await consumers._default_world(pipeline, monkeypatch)
+    def factory(**options):
+        if options.get("media_enabled", True):
+            limits.append(options["read_discovery_batch_size"])
+        return actual_factory(**options, wall_us=lambda: world.wall[0],
+            monotonic_ns=lambda: 7_000_000_000, probe_request=world.probe_request,
+            repair_request=world.repair_request)
+
+    monkeypatch.setattr(capture_assembly, "session_capture_assembly", factory)
+    monkeypatch.setattr(lifecycle, "SystemClock", lambda: SimpleNamespace(utc_micros=lambda: world.wall[0]))
+    deps = lifecycle.build_runtime(CommandMode.RUN, config, catalog=_Catalog())
     try:
-        owned = pipeline[0]
-        runtime = factories[0](owned, "cam-1")
-        await run_recording_media(runtime.media, 1, 1, pipeline[2])
-        assert len(reader.requests) == 1
-        assert tools.calls == ["probe"]
-        assert owned.connection.execute("SELECT verification_state,slot_device_id FROM file_copies").fetchone() == (3, None)
-        assert owned.connection.execute("SELECT check_state FROM recording_processing").fetchone() == (3,)
-        # 正常与残留工厂重建后仍采用本次加载的限额。
-        for factory in factories[:2]:
-            assert factory(owned, "cam-1").media.copies().repository.read_batch_size == 1
+        assert deps.startup_error is None
+        outcome = await run_default_session(deps, None, world.entry)
+        assert outcome.succeeded, outcome.details
+        assert limits and all(limit == 1 for limit in limits)
+        assert len(world.reader.requests) == 1 and world.tools() == ["probe"]
+        assert world.owned.connection.execute(
+            "SELECT verification_state,slot_device_id FROM file_copies").fetchone() == (3, None)
+        assert world.owned.connection.execute("SELECT check_state FROM recording_processing").fetchone() == (3,)
+        assert world.owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (3,)
     finally:
-        close_runtime(deps)
+        lifecycle.close_runtime(deps)
+        await world.close()

@@ -97,9 +97,11 @@ async def test_input_diagnostic_matches_public_schema(environment, stage, code, 
     from camctl.contracts.public_projection import ProjectionInput, project_public
     from camctl.contracts.schemas import create_validator, validation_errors
     from .test_acceptance import _owned
+    from ..support.acceptance import accept_source
+    from ..support.database import database_path
     connection, context = environment
     source = InputDiagnostic("/plans/broken.json", InputStage(stage), "完整输入不可用")
-    result = await accept_input(source, context, new_operation_key(), _owned(environment))
+    result = await accept_source(source, context, database_path(_owned(environment)))
     assert result.ack_disposition is AckDisposition.NOT_PROCESSED
     cursor = connection.execute("SELECT * FROM plan_file_diagnostics")
     row = dict(zip([d[0] for d in cursor.description], cursor.fetchone()))

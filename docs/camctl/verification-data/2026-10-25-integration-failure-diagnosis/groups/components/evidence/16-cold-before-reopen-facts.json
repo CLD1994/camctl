@@ -1,0 +1,102 @@
+[
+  {
+    "phase": "historical",
+    "database": "/tmp/camctl-itopt-final-20261025/tasks/004-camctl-capture/tmp/pytest/test_action6_cold_recovery_dec0/state.db",
+    "inspections": [
+      {
+        "id": 1,
+        "created_event_id": 29,
+        "action_id": 1,
+        "set_id": 1,
+        "member_id": 1,
+        "source_device_file_id": 1,
+        "target_json": "{\"metric\":\"duration_s\",\"value\":60}",
+        "budget_json": "{\"max_attempts\":3,\"timeout_s\":10,\"retry_interval_s\":3}",
+        "state": 1,
+        "result_json": null,
+        "result_event_id": null
+      }
+    ],
+    "copies": [
+      {
+        "id": 1,
+        "inspection_id": 1,
+        "target_file_id": 1,
+        "round": 1,
+        "source_size": 10,
+        "committed_bytes": 4
+      }
+    ],
+    "read_runs": [
+      {
+        "id": 4,
+        "copy_id": 1,
+        "status": 2,
+        "attempts_used": 1,
+        "max_attempts_used": 3,
+        "timeout_s_json": "10",
+        "retry_interval_s_json": "3",
+        "retry_wait_required": 1
+      }
+    ],
+    "read_attempts": [
+      {
+        "id": 4,
+        "run_id": 4,
+        "attempt_no": 1,
+        "copy_round": 1,
+        "status": 3
+      }
+    ]
+  },
+  {
+    "phase": "current",
+    "database": "/tmp/camctl-44-diagnostic-current-20261025/tasks/002-camctl-capture/tmp/pytest/test_action6_cold_recovery_dec0/state.db",
+    "inspections": [
+      {
+        "id": 1,
+        "created_event_id": 29,
+        "action_id": 1,
+        "set_id": 1,
+        "member_id": 1,
+        "source_device_file_id": 1,
+        "target_json": "{\"metric\":\"duration_s\",\"value\":60}",
+        "budget_json": "{\"max_attempts\":3,\"timeout_s\":10,\"retry_interval_s\":3}",
+        "state": 1,
+        "result_json": null,
+        "result_event_id": null
+      }
+    ],
+    "copies": [
+      {
+        "id": 1,
+        "inspection_id": 1,
+        "target_file_id": 1,
+        "round": 1,
+        "source_size": 10,
+        "committed_bytes": 4
+      }
+    ],
+    "read_runs": [
+      {
+        "id": 4,
+        "copy_id": 1,
+        "status": 2,
+        "attempts_used": 1,
+        "max_attempts_used": 3,
+        "timeout_s_json": "10",
+        "retry_interval_s_json": "3",
+        "retry_wait_required": 1
+      }
+    ],
+    "read_attempts": [
+      {
+        "id": 4,
+        "run_id": 4,
+        "attempt_no": 1,
+        "copy_round": 1,
+        "status": 3
+      }
+    ]
+  }
+]

@@ -1,0 +1,14 @@
+[
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/tests/integration/test_video_size_estimate.py::test_record_estimate_stays_out_of_execution_and_report",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/tests/integration/test_video_size_estimate.py::test_timelapse_estimate_uses_same_capture_duration_as_execution",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/tests/integration/test_video_size_estimate.py::test_valid_unavailable_estimate_does_not_prevent_plan_export[False-params0-not_provided]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/tests/integration/test_video_size_estimate.py::test_valid_unavailable_estimate_does_not_prevent_plan_export[True-params1-lookup_missing]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/tests/integration/test_video_size_estimate.py::test_valid_unavailable_estimate_does_not_prevent_plan_export[True-params2-value_missing]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/tests/integration/test_video_size_estimate.py::test_exact_frame_constants_survive_describe_and_http[240]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/tests/integration/test_video_size_estimate.py::test_exact_frame_constants_survive_describe_and_http[240.0]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/tests/integration/test_video_size_estimate.py::test_exact_frame_constants_survive_describe_and_http[2.4e2]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/tests/integration/test_video_size_estimate.py::test_invalid_source_fails_cli_and_client_reload_keeps_enabled_definition[{}]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/tests/integration/test_video_size_estimate.py::test_invalid_source_fails_cli_and_client_reload_keeps_enabled_definition[{\"bitrate_mbps\":0,\"duration\":{\"method\":\"direct\",\"seconds\":{\"source\":\"constant\",\"value\":1}}}]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/tests/integration/test_video_size_estimate.py::test_invalid_source_fails_cli_and_client_reload_keeps_enabled_definition[{\"bitrate_mbps\":130,\"duration\":{\"method\":\"timelapse_frames\",\"frames\":{\"source\":\"constant\",\"value\":1.00000000000000000001},\"playback_fps\":{\"source\":\"constant\",\"value\":30}}}]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/tests/integration/test_video_size_estimate.py::test_fractional_frame_parameter_is_not_rounded_by_http_or_plan_export"
+]

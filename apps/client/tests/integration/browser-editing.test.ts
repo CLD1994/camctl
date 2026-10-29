@@ -3,6 +3,7 @@ import { validateParams } from "../../src/shared/capabilities";
 import { stringifyJson, parseJson } from "../../src/shared/json";
 import { parseDraft } from "../../src/web/editing";
 import { choose, readOptions } from "./select-support";
+import { checkVisibleGuide } from "./metadata-support";
 import { beforeAll, afterAll, afterEach, it, expect } from "vitest";
 import { chromium, expect as check, type Browser } from "@playwright/test";
 import { mkdtempSync, rmSync, copyFileSync, writeFileSync } from "node:fs";
@@ -1252,35 +1253,30 @@ it("设备指南逐项显示能力源任务和字段说明，查看指南不改�
   const before = app.draft(draft.id);
 
   await page.getByRole("button", { name: "设备说明" }).click();
-  const guide = page.getByTestId("device-guide");
-  for (const { device, parameter } of tasks) {
+  const expected = tasks.map(({ device, parameter }) => {
     expect(parameter.description.trim()).not.toBe("");
-    const deviceGuide = guide.locator(".guide-device").filter({
-      has: page.getByRole("heading", { name: device.device_id, exact: true }),
-    });
-    const task = deviceGuide.locator(".guide-task").filter({
-      has: page.getByRole("heading", { name: parameter.name, exact: true }),
-    });
-    await check(task.locator(".guide-description")).toHaveText(
-      parameter.description,
-    );
     const properties = parameter.schema.properties as Record<
       string,
       Record<string, unknown>
     >;
-    for (const [name, field] of Object.entries(properties)) {
-      if (
-        name === "type" ||
-        typeof field.title !== "string" ||
-        typeof field.description !== "string"
-      )
-        continue;
-      const guideField = task
-        .locator(".guide-fields > div")
-        .filter({ has: page.locator("dt").filter({ hasText: field.title }) });
-      await check(guideField).toContainText(field.description);
-    }
-  }
+    return {
+      device: device.device_id,
+      name: parameter.name,
+      description: parameter.description,
+      fields: Object.entries(properties)
+        .filter(
+          ([name, field]) =>
+            name !== "type" &&
+            typeof field.title === "string" &&
+            typeof field.description === "string",
+        )
+        .map(([, field]) => ({
+          title: field.title as string,
+          description: field.description as string,
+        })),
+    };
+  });
+  await checkVisibleGuide(page, expected);
   expect(app.draft(draft.id)).toEqual(before);
 });
 

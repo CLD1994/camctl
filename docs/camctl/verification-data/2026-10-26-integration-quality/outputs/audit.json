@@ -1,0 +1,336 @@
+{
+  "node": "apps/camctl/tests/integration/outputs/test_read_discovery.py::test_candidate_capacity_tracks_batch_not_total",
+  "baseline_commit": "509002c25308eda98e0096068d3510485938027e",
+  "change_commit": "1fc237fbeae06af04f094467f995a48d4640d8b3",
+  "source_sha256": "50b2c36876b28e9aff004cfbd3f8676cb26133a2fcd19f4ecda5cc3ec2ef80a0",
+  "audit_basis": [
+    {
+      "path": "docs/architecture/file-copy.md",
+      "section": "读取工作的发现与唤醒",
+      "contract": "每种固定流程只保存一个继续位置，不累计历次页面；候选详情受批次限制。"
+    },
+    {
+      "path": "docs/camctl/database/consistency-verification.md",
+      "section": "验收 W-11",
+      "contract": "真实分批发现、详情淘汰、后续批次继续。"
+    },
+    {
+      "path": ".agents/rules/testing.md",
+      "section": "控制集成测试成本",
+      "contract": "测试侧优化保持声明规模、真实提交及可证伪的释放观察。"
+    }
+  ],
+  "change": "每页删除page后，只有仍存活的候选弱引用才触发gc.collect，然后执行原来的全部释放断言。正常路径不做强制GC；不可达循环仍经GC验证，owner强引用仍拒绝。",
+  "assertions_preserved": [
+    {
+      "assertion": "真实grant_file成功且copy_id非空",
+      "preservation": "120个新增消费者全部真实建档；夹具另有2个，共122次grant_file，与基线相同。"
+    },
+    {
+      "assertion": "总量与批次三分区",
+      "preservation": "(12,1)、(120,1)、(120,3)完全保留；扫描数量14、122、122。"
+    },
+    {
+      "assertion": "returned <= batch_size且owner.cursor_count <= 1",
+      "preservation": "每页原断言不变。"
+    },
+    {
+      "assertion": "逐页所有候选弱引用均为空",
+      "preservation": "每页原all断言不变，仅把无条件GC改为仍存活时GC；附具体失败消息。"
+    },
+    {
+      "assertion": "seen == total + 2",
+      "preservation": "每轮原总数断言不变。"
+    },
+    {
+      "assertion": "connection.query_plan非空且max(connection.returned)==batch_size",
+      "preservation": "原查询计划与真实读取上限断言不变；输出仍观察到索引查找及临时排序。查询计划存在断言本身不证明恒定SQL工作量。"
+    },
+    {
+      "assertion": "扫描前后iterdump相等",
+      "preservation": "每轮原数据库不变断言不变。"
+    },
+    {
+      "assertion": "扫描结束游标数",
+      "preservation": "原输出字段cursor_count_after_scan保留，三轮均为0；未将原输出误记为新增断言。"
+    }
+  ],
+  "profile_runs": {
+    "before": {
+      "command_record": "before.json",
+      "log": "before.log",
+      "xml": "before.xml",
+      "wall_seconds": 14.491463714002748,
+      "exit_code": 0,
+      "suites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "1",
+          "time": "13.089",
+          "timestamp": "2026-10-26T02:00:47.630753+08:00",
+          "hostname": "1e0518e0c6b4"
+        }
+      ],
+      "phase_durations_rounded_seconds": [
+        {
+          "seconds": 10.38,
+          "phase": "call"
+        },
+        {
+          "seconds": 0.15,
+          "phase": "setup"
+        },
+        {
+          "seconds": 0.01,
+          "phase": "teardown"
+        }
+      ]
+    },
+    "final": {
+      "command_record": "final.json",
+      "log": "final.log",
+      "xml": "final.xml",
+      "wall_seconds": 7.983546887000557,
+      "exit_code": 0,
+      "suites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "1",
+          "time": "7.418",
+          "timestamp": "2026-10-26T02:03:27.312323+08:00",
+          "hostname": "1e0518e0c6b4"
+        }
+      ],
+      "phase_durations_rounded_seconds": [
+        {
+          "seconds": 6.39,
+          "phase": "call"
+        },
+        {
+          "seconds": 0.13,
+          "phase": "setup"
+        },
+        {
+          "seconds": 0.01,
+          "phase": "teardown"
+        }
+      ]
+    }
+  },
+  "profile_stages": {
+    "before": {
+      "target_forced_gc_calls": 179,
+      "target_forced_gc_seconds": 4.829156794,
+      "target": [
+        {
+          "calls": 1,
+          "cumulative_seconds": 10.381203734000001
+        }
+      ],
+      "pagination": [
+        {
+          "calls": 179,
+          "cumulative_seconds": 0.140644191
+        }
+      ],
+      "grant_file_including_fixture": [
+        {
+          "calls": 122,
+          "cumulative_seconds": 4.852431439
+        }
+      ]
+    },
+    "final": {
+      "target_forced_gc_calls": 0,
+      "target_forced_gc_seconds": 0,
+      "target": [
+        {
+          "calls": 1,
+          "cumulative_seconds": 6.389785224000001
+        }
+      ],
+      "pagination": [
+        {
+          "calls": 179,
+          "cumulative_seconds": 0.081180178
+        }
+      ],
+      "grant_file_including_fixture": [
+        {
+          "calls": 122,
+          "cumulative_seconds": 5.601626386
+        }
+      ]
+    }
+  },
+  "counterexample": {
+    "injection": "retain_page.py临时包装真实ReadDiscoveryOwner.reads，委托原方法后以owner._quality_retained_page强持返回页；真实SQLite与原集成节点不变。",
+    "run": {
+      "command_record": "retained-page.json",
+      "log": "retained-page.log",
+      "xml": "retained-page.xml",
+      "wall_seconds": 1.692764759005513,
+      "exit_code": 1,
+      "suites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "1",
+          "skipped": "0",
+          "tests": "1",
+          "time": "1.144",
+          "timestamp": "2026-10-26T02:04:06.253254+08:00",
+          "hostname": "1e0518e0c6b4"
+        }
+      ],
+      "phase_durations_rounded_seconds": [
+        {
+          "seconds": 0.32,
+          "phase": "call"
+        },
+        {
+          "seconds": 0.1,
+          "phase": "setup"
+        }
+      ]
+    },
+    "profile": {
+      "target_forced_gc_calls": 1,
+      "target_forced_gc_seconds": 0.025497567000000002,
+      "target": [
+        {
+          "calls": 1,
+          "cumulative_seconds": 0.318734565
+        }
+      ],
+      "pagination": [
+        {
+          "calls": 1,
+          "cumulative_seconds": 0.0006705340000000001
+        }
+      ],
+      "grant_file_including_fixture": [
+        {
+          "calls": 14,
+          "cumulative_seconds": 0.237997234
+        }
+      ]
+    },
+    "expected_failure": "在第一页删除消费者page后，执行一次条件gc.collect仍保留候选，原逐页弱引用断言拒绝。"
+  },
+  "adjacent": {
+    "command_record": "adjacent.json",
+    "log": "adjacent.log",
+    "xml": "adjacent.xml",
+    "wall_seconds": 13.84791956000845,
+    "exit_code": 0,
+    "suites": [
+      {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "29",
+        "time": "13.170",
+        "timestamp": "2026-10-26T02:04:20.564664+08:00",
+        "hostname": "1e0518e0c6b4"
+      }
+    ],
+    "phase_durations_rounded_seconds": [
+      {
+        "seconds": 6.31,
+        "phase": "call"
+      },
+      {
+        "seconds": 0.05,
+        "phase": "setup"
+      },
+      {
+        "seconds": 0.01,
+        "phase": "teardown"
+      }
+    ]
+  },
+  "limits": [
+    "cProfile是诊断包装，不作为普通运行基线。",
+    "各轮不是独占硬件，其他隔离任务会影响单次耗时，不将单次比值外推为稳定提速比例。",
+    "弱引用证明原候选实例释放，不能发现候选复制为其他容器后累计；本任务不扩展到新保障边界。",
+    "这个同进程窄节点不承担整个程序固定内存预算验收。"
+  ],
+  "plain_runs": {
+    "plain-before": {
+      "command_record": "plain-before.json",
+      "log": "plain-before.log",
+      "xml": "plain-before.xml",
+      "wall_seconds": 12.01955944900692,
+      "exit_code": 0,
+      "source_commit": "509002c25308eda98e0096068d3510485938027e",
+      "suites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "1",
+          "time": "10.622",
+          "timestamp": "2026-10-26T02:06:31.204847+08:00",
+          "hostname": "1e0518e0c6b4"
+        }
+      ],
+      "phase_durations_rounded_seconds": [
+        {
+          "seconds": 8.98,
+          "phase": "call"
+        },
+        {
+          "seconds": 0.1,
+          "phase": "setup"
+        },
+        {
+          "seconds": 0.02,
+          "phase": "teardown"
+        }
+      ]
+    },
+    "plain-final": {
+      "command_record": "plain-final.json",
+      "log": "plain-final.log",
+      "xml": "plain-final.xml",
+      "wall_seconds": 6.163710592998541,
+      "exit_code": 0,
+      "source_commit": "1fc237fbeae06af04f094467f995a48d4640d8b3",
+      "suites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "1",
+          "time": "5.066",
+          "timestamp": "2026-10-26T02:06:53.232039+08:00",
+          "hostname": "1e0518e0c6b4"
+        }
+      ],
+      "phase_durations_rounded_seconds": [
+        {
+          "seconds": 3.52,
+          "phase": "call"
+        },
+        {
+          "seconds": 0.09,
+          "phase": "setup"
+        },
+        {
+          "seconds": 0.01,
+          "phase": "teardown"
+        }
+      ]
+    }
+  }
+}

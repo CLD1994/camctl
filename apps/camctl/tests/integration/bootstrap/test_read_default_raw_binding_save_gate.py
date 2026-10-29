@@ -1,115 +1,143 @@
-"""新形成的实际 READ／绑定失败申请持续失去保存依据时阻止业务推进。"""
+"""真实完整 READ 缺必要摘要时，原绑定收场保存失败仍阻止业务推进。"""
 
 from dataclasses import replace
-import sqlite3
+from pathlib import Path
+import os
+from types import SimpleNamespace
 
 import pytest
 
-from camctl.bootstrap import lifecycle
+from camctl.capture.media_flow import run_recording_media
+from camctl.contracts.enums import enum_for
+from camctl.contracts.values import ConsistencyError
+from camctl.devices.bindings import check_binding
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories import capture as capture_repository
+from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.transaction import saved_transaction_events
-from camctl.session.service import StateDbFailure
 
 from ..capture.media_retry_fixtures import media_pipeline as pipeline  # noqa: F401
+from ..capture.test_input_copy import _CONTENT
+from ..support.bootstrap_consumers import consumer_world, StorageGate, TransactionFault
 from .test_read_default_consumers import _snapshot
-from .test_read_default_raw_binding_recovery import _assert_preserved, _fresh, _prepare_raw_unknown
-from .test_read_default_save_gate import _NoBusinessClock, _ReadGateConnection
-
 
 pytestmark = pytest.mark.asyncio
 
 
-class _BindingRollbackConnection(_ReadGateConnection):
-    """完整 child 的实际检查投影失败，真实 ROLLBACK 必须恢复整个事务。"""
-
-    def execute(self, sql, parameters=()):
-        normalized = " ".join(sql.split())
-        if normalized.startswith("UPDATE recording_processing SET ") and "check_state = ?" in normalized:
-            self.projection_hits += 1
-            self.projection_error = sqlite3.OperationalError("绑定失败 child 的检查投影保存失败")
-            raise self.projection_error
-        return super().execute(sql, parameters)
-
-
 @pytest.mark.parametrize("entrance", ["normal", "residual"])
 @pytest.mark.parametrize("branch", ["finish_unknown", "child_rollback"])
-async def test_raw_binding_save_gate_preserves_original_requests(pipeline, monkeypatch, entrance, branch):
+async def test_raw_binding_save_gate_preserves_original_requests(pipeline, capture_resources, monkeypatch, entrance, branch):
+    world = await consumer_world(pipeline, capture_resources)
     stage = "finish" if branch == "finish_unknown" else "child"
-    state = await _prepare_raw_unknown(pipeline, monkeypatch, entrance, stage, stage == "finish")
+    hashes = []
+    actual_open = os.open
+
+    def local_digest_unavailable(path, flags, *args, **kwargs):
+        if isinstance(path, (str, Path)) and flags & os.O_ACCMODE == os.O_RDONLY:
+            target = Path(path)
+            if target.is_relative_to(world.roots.staging) and target.is_file():
+                hashes.append(target)
+                raise OSError("实际 READ 已结束，本地摘要文件暂不可读")
+        return actual_open(path, flags, *args, **kwargs)
+
     try:
-        pending = state.prepared[0]
-        key = pending.key if stage == "finish" else pending.business.key
-        original_holder = (state.flow.pending_read_results[(state.ticket.run_id, state.ticket.attempt_id)]
-            if stage == "finish" else state.flow.pending_read_business[(state.action_id, "capture_binding_failure")])
-        before = {table: _snapshot(state.observer, table, identity) for table, identity in (
-            ("actions", state.action_id), ("recording_processing", state.processing_id),
-            ("file_copies", state.copy_id), ("operation_runs", state.ticket.run_id))}
-        history = state.observer.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall()
-        receipts, attempts = [], []
-        if stage == "finish":
-            previous = OperationRepository.finish_attempt
+        with monkeypatch.context() as fault:
+            fault.setattr(os, "open", local_digest_unavailable)
+            with pytest.raises(ConsistencyError):
+                await run_recording_media(world.runtime.media, 1, 1, world.source_id)
+        assert len(hashes) == len(world.reader.requests) == 1
+        ticket = world.reader.requests[0][0]
+        copy_id = int(ticket.target_id)
+        assert len(world.ends) >= 1 and all(end.stopped and end.error is None and end.bytes_read == len(_CONTENT)
+                                            for end in world.ends)
+        assert hashes[0].read_bytes() == _CONTENT
+        progress = world.owned.connection.execute(
+            "SELECT committed_bytes,source_size,round,recopies_used,source_sha256,target_sha256,verification_state,slot_device_id"
+            " FROM file_copies WHERE id=?", (copy_id,)).fetchone()
+        assert progress[:2] == (len(_CONTENT), len(_CONTENT))
+        assert progress[4:6] == (None, None)
+        assert progress[6:] == (int(enum_for("file_copies.verification_state").NOT_PERFORMED), "cam-1")
+        assert world.owned.connection.execute(
+            "SELECT status,result_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
+            (ticket.run_id, ticket.attempt_id)).fetchone() == (1, None)
+        assert world.owned.connection.execute(
+            "SELECT checksum_support FROM device_files WHERE id=?", (world.source_id,)).fetchone() == (
+                int(enum_for("device_files.checksum_support").SUPPORTED),)
+        assert not any(name == "digest" for name, _ in world.driver.calls) and world.tools() == []
+        await world.reconnect()
+        world.wall[0] += 1000
+        formed_at = world.wall[0]
+        world.prime_clock()
+        finishes, children, receipts = [], [], []
+        actual_finish, actual_child = OperationRepository.finish_attempt, CaptureRepository.finish_binding_failure
 
-            def save(repository, request, operation_key, current):
-                receipt = previous(repository, request, operation_key, current)
-                receipts.append(receipt)
-                return receipt
+        def submit(actual, request, key, owned, operation, inputs):
+            inputs.append((request, key))
+            if stage == operation and len(inputs) == 1:
+                fault = TransactionFault(owned.connection, after_commit=stage == "finish")
+                result = actual(request, key, replace(owned, connection=fault))
+                assert result.kind is DbOutcomeKind.UNKNOWN and fault.commit_calls == 1
+                receipts.append(result)
+                return result
+            return actual(request, key, owned)
 
-            monkeypatch.setattr(OperationRepository, "finish_attempt", save)
-        else:
-            # child 已持有原 bound method；在该方法实际使用的事务边界观察，
-            # 保留其原 save callback、完整 request 和 key。
-            previous_commit = capture_repository.commit_operation
+        def finish(repository, request, key, owned):
+            assert request.ticket == ticket
+            return submit(lambda *args: actual_finish(repository, *args), request, key,
+                owned, "finish", finishes)
 
-            def commit(command, operation_key, current):
-                assert operation_key == key
-                receipt = previous_commit(command, operation_key, current)
-                receipts.append(receipt)
-                return receipt
+        def child(repository, request, key, owned):
+            assert saved_transaction_events(owned.connection, finishes[0][1]) is not None
+            return submit(lambda *args: actual_child(repository, *args), request, key,
+                owned, "child", children)
 
-            monkeypatch.setattr(capture_repository, "commit_operation", commit)
-        clock = _NoBusinessClock()
-        state.context.clock = clock
-
-        def open_connection():
-            current = state.original_open()
-            fault = (_ReadGateConnection(current.connection, slot_rollback=False, finish_key=key)
-                if stage == "finish" else _BindingRollbackConnection(current.connection, slot_rollback=False))
-            attempts.append(fault)
-            return replace(current, connection=fault)
-
-        state.context.open_connection = open_connection
-        # 同一原责任在两轮仍无法可靠保存；不得退役、换键或让候选进入下一阶段。
+        monkeypatch.setattr(OperationRepository, "finish_attempt", finish)
+        monkeypatch.setattr(CaptureRepository, "finish_binding_failure", child)
+        binding = lambda saved: check_binding(saved, SimpleNamespace(devices={}))
+        await world.replay(entrance, failure=True, binding=binding)
+        assert len(receipts) == 1 and len(finishes) == 1
+        assert len(children) == (1 if stage == "child" else 0)
+        assert finishes[0][0].occurred_at == formed_at
+        if children:
+            assert children[0][0].occurred_at == formed_at
+        inputs = finishes if stage == "finish" else children
+        original = inputs[0]
+        gate = StorageGate(original_key=stage == "finish", unknown=stage == "finish",
+            table="recording_processing", column="check_state")
+        gate.install(monkeypatch, original[1])
+        before = {table: _snapshot(world.owned, table, identity) for table, identity in (
+            ("actions", 1), ("recording_processing", 1), ("file_copies", copy_id),
+            ("operation_runs", ticket.run_id), ("device_files", world.source_id))}
+        history = world.owned.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall()
+        calls = tuple(world.driver.calls)
         for iteration in range(2):
-            state.time[0] += 1000
-            with pytest.raises(StateDbFailure):
-                await state.selected(state.context)
-            assert len(attempts) == len(receipts) == iteration + 1
-            fault = attempts[-1]
-            assert fault.rollback_hits == 1 and fault.candidate_queries == []
+            # 申请形成端口的时刻推进；会话接纳钟保持已检查的同会话读数。
+            world.wall[0] += 1000
+            await world.replay(entrance, failure=True, binding=binding)
+            assert len(gate.receipts) == iteration + 1
+            expected = DbOutcomeKind.UNKNOWN if stage == "finish" else DbOutcomeKind.ROLLED_BACK
+            assert gate.receipts[-1].kind is expected
+            assert gate.hits == gate.rollbacks == iteration + 1
+            assert len(inputs) == iteration + 2 and all(pair == original for pair in inputs)
+            assert (saved_transaction_events(world.owned.connection, original[1]) is not None) is (stage == "finish")
+            assert before == {table: _snapshot(world.owned, table, identity) for table, identity in (
+                ("actions", 1), ("recording_processing", 1), ("file_copies", copy_id),
+                ("operation_runs", ticket.run_id), ("device_files", world.source_id))}
+            assert world.owned.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall() == history
+            assert tuple(world.driver.calls) == calls and len(world.reader.requests) == 1 and world.tools() == []
+            assert hashes[0].read_bytes() == _CONTENT
+            assert world.owned.connection.execute("SELECT slot_device_id FROM file_copies WHERE id=?",
+                (copy_id,)).fetchone() == ("cam-1",)
             if stage == "finish":
-                assert receipts[-1].kind is DbOutcomeKind.UNKNOWN
-                assert fault.verification_hits == 1 and fault.projection_hits == 0
-                assert state.flow.pending_read_results[(state.ticket.run_id, state.ticket.attempt_id)] == original_holder
-                assert state.flow.pending_read_business == {} and state.children == []
-                assert all(pair == (pending.finish, pending.key) for pair in state.finishes)
+                assert len(children) == 0
             else:
-                assert receipts[-1].kind == DbOutcomeKind.ROLLED_BACK.value
-                assert receipts[-1].error is fault.projection_error
-                assert fault.projection_hits == 1 and fault.verification_hits == 0
-                assert state.flow.pending_read_results == {}
-                assert state.flow.pending_read_business[(state.action_id, "capture_binding_failure")] == original_holder
-                assert len(state.finishes) == 1
-                assert all(pair == (pending.business.request, pending.business.key) for pair in state.children)
-            assert state.clock_reads == [pending.finish.occurred_at] and clock.calls == 0
-            current = _fresh(state)
-            assert (saved_transaction_events(current.connection, key) is not None) is (stage == "finish")
-            assert before == {table: _snapshot(current, table, identity) for table, identity in (
-                ("actions", state.action_id), ("recording_processing", state.processing_id),
-                ("file_copies", state.copy_id), ("operation_runs", state.ticket.run_id))}
-            assert current.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall() == history
-            _assert_preserved(state, released=False)
+                assert len(finishes) == 1
+        gate.enabled = False
+        await world.replay(entrance, binding=binding)
+        assert inputs[-1] == original and len(inputs) == 4
+        assert children[-1][0].occurred_at == finishes[0][0].occurred_at == formed_at
+        assert world.owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (4,)
+        assert len(world.reader.requests) == 1 and tuple(world.driver.calls) == calls and world.tools() == []
     finally:
-        state.observer.connection.close()
-        lifecycle.close_runtime(state.deps)
+        await world.close()
+        world.owned.connection.close()

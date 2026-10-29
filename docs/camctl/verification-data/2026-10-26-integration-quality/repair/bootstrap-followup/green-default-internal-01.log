@@ -1,0 +1,20 @@
+F
+=================================== FAILURES ===================================
+_____________ test_default_internal_read_uses_session_batch_limit ______________
+apps/camctl/tests/integration/bootstrap/test_read_discovery_default.py:279: in test_default_internal_read_uses_session_batch_limit
+    database = await BusinessDatabase.open(lambda: open_existing(
+apps/camctl/src/camctl/persistence/business.py:80: in open
+    database._metadata = await database.read(lambda owned: owned.metadata,
+apps/camctl/src/camctl/persistence/business.py:131: in read
+    raise error
+apps/camctl/src/camctl/persistence/executor.py:328: in _run
+    owned = self._factory()
+            ^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/bootstrap/test_read_discovery_default.py:280: in <lambda>
+    Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig()))
+         ^^^
+E   NameError: name 'cfg' is not defined
+=========================== short test summary info ============================
+FAILED apps/camctl/tests/integration/bootstrap/test_read_discovery_default.py::test_default_internal_read_uses_session_batch_limit
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+1 failed in 1.50s

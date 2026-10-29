@@ -1,0 +1,27 @@
+{
+  "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "scripts/run-integration.py",
+    "--jobs",
+    "1",
+    "--root-shards",
+    "1",
+    "--python",
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "--node-modules",
+    "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules",
+    "--output",
+    "/tmp/camctl-fix44-browser-final-20261025",
+    "--target",
+    "tests/integration/test_device_capability_declarations.py::test_installed_metadata_reaches_parameter_form_and_device_guide",
+    "--target",
+    "tests/integration/test_device_capability_declarations.py::test_installed_sources_control_browser_cleanup_across_reload_and_restart"
+  ],
+  "source_commit": "3f126175595eb13737c1122b82efa04962b98550",
+  "source_status": "",
+  "targets": [
+    "tests/integration/test_device_capability_declarations.py::test_installed_metadata_reaches_parameter_form_and_device_guide",
+    "tests/integration/test_device_capability_declarations.py::test_installed_sources_control_browser_cleanup_across_reload_and_restart"
+  ]
+}

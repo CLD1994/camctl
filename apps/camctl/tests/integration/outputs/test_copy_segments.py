@@ -14,6 +14,10 @@ from decimal import Decimal
 
 import pytest
 
+from ..support.outputs import output_operation
+from ..support.output_planning import capture_operation, validate_static_event
+from ..support.database import business_database, database_path
+
 from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import new_operation_key
 from camctl.devices.read_session import ReadSession, SourceFile
@@ -31,10 +35,8 @@ from camctl.outputs.copy import (
 )
 from camctl.outputs.slots import SlotRequest
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from camctl.persistence.repositories import operations, outputs
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
-from camctl.persistence.transaction import TransactionScope
 
 from .test_copy_resume import (
     _command, _make_roots, _qualified, _run_action, local_read,  # noqa: F401
@@ -115,31 +117,34 @@ async def _drive(
     occurred_at: int = _NOW + 1, offset: int = 0, prepare: bool = True,
 ):
     """先按恢复规则准备目标，再用同一读取会话驱动分段。"""
-    if prepare:
-        await prepare_copy(copy_id, CopyContext(
-            repository=OutputsRepository(), owned=owned, roots=roots,
-            occurred_at=occurred_at,
-        ))
-    session = ReadSession(
-        SourceFile("501", {}, len(_CONTENT)), offset, _ByteStream(_CONTENT[offset:]),
-        Decimal("10"),
-    )
-    steps = []
-    context = SegmentContext(
-        repository=OutputsRepository(), owned=owned, roots=roots,
-        occurred_at=occurred_at, segment_size=segment_size, session=session,
-    )
-    try:
-        for index in range(max_segments if max_segments is not None else 99):
-            step = await copy_next_segment(
-                copy_id, replace(context, occurred_at=occurred_at + index))
-            steps.append(step)
-            if step.plan.outcome is SegmentOutcome.ALL_COMMITTED:
-                break
-        return steps
-    finally:
-        session.request_stop()
-        await session.wait_stopped()
+    async with business_database(database_path(owned)) as database:
+        if prepare:
+            await output_operation(
+                owned, prepare_copy, copy_id, CopyContext,
+                repository=OutputsRepository(),
+                roots=roots,
+                occurred_at=occurred_at,
+            )
+        session = ReadSession(
+            SourceFile("501", {}, len(_CONTENT)), offset, _ByteStream(_CONTENT[offset:]),
+            Decimal("10"),
+        )
+        steps = []
+        context = SegmentContext(
+            repository=OutputsRepository(), database=database, roots=roots,
+            occurred_at=occurred_at, segment_size=segment_size, session=session,
+        )
+        try:
+            for index in range(max_segments if max_segments is not None else 99):
+                step = await copy_next_segment(
+                    copy_id, replace(context, occurred_at=occurred_at + index))
+                steps.append(step)
+                if step.plan.outcome is SegmentOutcome.ALL_COMMITTED:
+                    break
+            return steps
+        finally:
+            session.request_stop()
+            await session.wait_stopped()
 
 
 def test_segments_commit_reliable_progress_until_complete(segment_env):
@@ -240,8 +245,12 @@ def test_sync_failure_keeps_progress_and_reports_stage(segment_env, monkeypatch)
     from camctl.host_files import io as host_io
 
     owned, roots, first = segment_env
-    asyncio.run(prepare_copy(first.copy_id, CopyContext(
-        repository=OutputsRepository(), owned=owned, roots=roots, occurred_at=_NOW + 1)))
+    asyncio.run(output_operation(
+        owned, prepare_copy, first.copy_id, CopyContext,
+        repository=OutputsRepository(),
+        roots=roots,
+        occurred_at=_NOW + 1,
+    ))
 
     def _refuse(fd: int) -> None:
         raise OSError("sync refused")
@@ -263,24 +272,27 @@ def test_stop_notice_halt_between_chunks(segment_env):
     owned, roots, first = segment_env
 
     async def _run():
-        await prepare_copy(first.copy_id, CopyContext(
-            repository=OutputsRepository(), owned=owned, roots=roots,
-            occurred_at=_NOW + 1,
-        ))
-        session = ReadSession(
-            SourceFile("501", {}, len(_CONTENT)), 0, _ByteStream(_CONTENT),
-            Decimal("10"))
-        stop = _threading.Event()
-        stop.set()
-        context = SegmentContext(
-            repository=OutputsRepository(), owned=owned, roots=roots,
-            occurred_at=_NOW + 1, segment_size=4, session=session, stop=stop,
-        )
-        try:
-            return await copy_next_segment(first.copy_id, context)
-        finally:
-            session.request_stop()
-            await session.wait_stopped()
+        async with business_database(database_path(owned)) as database:
+            await output_operation(
+                owned, prepare_copy, first.copy_id, CopyContext,
+                repository=OutputsRepository(),
+                roots=roots,
+                occurred_at=_NOW + 1,
+            )
+            session = ReadSession(
+                SourceFile("501", {}, len(_CONTENT)), 0, _ByteStream(_CONTENT),
+                Decimal("10"))
+            stop = _threading.Event()
+            stop.set()
+            context = SegmentContext(
+                repository=OutputsRepository(), database=database, roots=roots,
+                occurred_at=_NOW + 1, segment_size=4, session=session, stop=stop,
+            )
+            try:
+                return await copy_next_segment(first.copy_id, context)
+            finally:
+                session.request_stop()
+                await session.wait_stopped()
 
     with pytest.raises(CopySegmentError) as caught:
         asyncio.run(_run())
@@ -310,22 +322,25 @@ def test_source_early_eof_reports_read_failure(segment_env):
     """源提前结束不构成合法最后短段：按读取失败保留进度。"""
     owned, roots, first = segment_env
     async def _run():
-        await prepare_copy(first.copy_id, CopyContext(
-            repository=OutputsRepository(), owned=owned, roots=roots,
-            occurred_at=_NOW + 1,
-        ))
-        # 只提供 2 字节的流：请求更多时不再有数据，经无数据超时结束尝试。
-        session = ReadSession(
-            SourceFile("501", {}, 10), 0, _ByteStream(b"01"), Decimal("0.01"))
-        context = SegmentContext(
-            repository=OutputsRepository(), owned=owned, roots=roots,
-            occurred_at=_NOW + 1, segment_size=4, session=session,
-        )
-        try:
-            return await copy_next_segment(first.copy_id, context)
-        finally:
-            session.request_stop()
-            await session.wait_stopped()
+        async with business_database(database_path(owned)) as database:
+            await output_operation(
+                owned, prepare_copy, first.copy_id, CopyContext,
+                repository=OutputsRepository(),
+                roots=roots,
+                occurred_at=_NOW + 1,
+            )
+            # 只提供 2 字节的流：请求更多时不再有数据，经无数据超时结束尝试。
+            session = ReadSession(
+                SourceFile("501", {}, 10), 0, _ByteStream(b"01"), Decimal("0.01"))
+            context = SegmentContext(
+                repository=OutputsRepository(), database=database, roots=roots,
+                occurred_at=_NOW + 1, segment_size=4, session=session,
+            )
+            try:
+                return await copy_next_segment(first.copy_id, context)
+            finally:
+                session.request_stop()
+                await session.wait_stopped()
     with pytest.raises(CopySegmentError) as caught:
         asyncio.run(_run())
     assert caught.value.stage == "segment_transfer_failed"
@@ -388,25 +403,15 @@ def test_save_segment_rejects_stale_or_foreign_progress(segment_env):
 
 
 def _segment_proposal(owned, copy_id: int, before: int, end: int):
-    owned.connection.execute("BEGIN")
-    try:
-        plan = outputs._SegmentSaveCommand(
-            _segment_command(copy_id, before, end), new_operation_key(),
-        ).plan(TransactionScope(owned.connection, 1, 1))
-    finally:
-        owned.connection.rollback()
-    assert plan.events, "段保存提案必须产生事件"
-    return plan
+    return capture_operation(owned, lambda database: OutputsRepository().save_segment(
+        _segment_command(copy_id, before, end), new_operation_key(), database))
 
 
 def test_segment_guard_accepts_real_event(segment_env):
     owned, roots, first = segment_env
     plan = _segment_proposal(owned, first.copy_id, 0, 4)
-    context = EventContext(
-        TransactionRange(2, 2, 2), dict(plan.owners), plan.state_rows,
-        read_coverage=plan.read_coverage)
     event, = plan.events
-    assert validate_event(event, context).branch_name == "SEGMENT"
+    assert validate_static_event(event, plan).branch_name == "SEGMENT"
 
 
 def test_segment_guard_rejects_empty_or_overflowing_advance(segment_env):
@@ -418,11 +423,8 @@ def test_segment_guard_rejects_empty_or_overflowing_advance(segment_env):
         variant = replace(
             row, after=replace(row.after, values={
                 "committed_bytes": after_value}))
-        context = EventContext(
-            TransactionRange(2, 2, 2), dict(plan.owners), plan.state_rows,
-            read_coverage=plan.read_coverage)
         with pytest.raises(EventValidationError):
-            validate_event(replace(event, rows=(variant,)), context)
+            validate_static_event(replace(event, rows=(variant,)), plan)
 
 
 # ---- 主机源 ----
@@ -440,26 +442,29 @@ def test_local_source_segments_copy_bytes(local_read, tmp_path):
     from camctl.outputs.copy import LocalCopySource
 
     async def _run():
-        await prepare_copy(qualification.copy_id, CopyContext(
-            repository=OutputsRepository(), owned=owned, roots=roots,
-            occurred_at=_NOW + 1,
-        ))
-        source = LocalCopySource(source_path, 0)
-        context = SegmentContext(
-            repository=OutputsRepository(), owned=owned, roots=roots,
-            occurred_at=_NOW + 1, segment_size=1500, session=source,
-        )
-        try:
-            steps = []
-            for index in range(10):
-                step = await copy_next_segment(
-                    qualification.copy_id, replace(context, occurred_at=_NOW + 1 + index))
-                steps.append(step)
-                if step.plan.outcome is SegmentOutcome.ALL_COMMITTED:
-                    break
-            return steps
-        finally:
-            source.close()
+        async with business_database(database_path(owned)) as database:
+            await output_operation(
+                owned, prepare_copy, qualification.copy_id, CopyContext,
+                repository=OutputsRepository(),
+                roots=roots,
+                occurred_at=_NOW + 1,
+            )
+            source = LocalCopySource(source_path, 0)
+            context = SegmentContext(
+                repository=OutputsRepository(), database=database, roots=roots,
+                occurred_at=_NOW + 1, segment_size=1500, session=source,
+            )
+            try:
+                steps = []
+                for index in range(10):
+                    step = await copy_next_segment(
+                        qualification.copy_id, replace(context, occurred_at=_NOW + 1 + index))
+                    steps.append(step)
+                    if step.plan.outcome is SegmentOutcome.ALL_COMMITTED:
+                        break
+                return steps
+            finally:
+                source.close()
 
     steps = asyncio.run(_run())
     assert [(step.plan.start, step.plan.end) for step in steps if step.transfer] == [
@@ -617,13 +622,8 @@ def test_resume_read_guard_rejects_non_read_flow(segment_env):
         config=AttemptConfig(5, Decimal("30"), Decimal("2")),
         occurred_at=_NOW + 5,
     )
-    owned.connection.execute("BEGIN")
-    try:
-        plan = operations._ReadResumeCommand(
-            request, new_operation_key(),
-        ).plan(TransactionScope(owned.connection, 1, 1))
-    finally:
-        owned.connection.rollback()
+    plan = capture_operation(owned, lambda database: OperationRepository().resume_read(
+        request, new_operation_key(), database))
     resume_event, = (
         event for event in plan.events
         if validate_event_structure(event)[:2] == ("ATTEMPT_RESULT", "RESUME_READ")

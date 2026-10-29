@@ -12,6 +12,7 @@
 `docs/client`、`docs/camctl`、`docs/host-demo`|各组件的设计入口、运行与验证说明
 `docs/hardware`|设备工具资料、联调操作入口与诊断脚本；实际验收结果引用组件验证记录
 `tests/integration`|跨组件真实协作者组合测试
+`tests/unit`|仓库级测试运行器及共享测试支持工具的单元测试
 `demos`|完整业务演示的说明、生成脚本和可提交输入
 `scripts`|跨组件检查与开发脚本
 `.agents/rules`|按任务读取的共享工作规范；读取条件由根目录 `AGENTS.md` 定义

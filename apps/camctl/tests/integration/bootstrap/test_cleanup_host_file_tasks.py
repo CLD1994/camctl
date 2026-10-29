@@ -108,8 +108,8 @@ def _seed_repaired_file(cfg, owned):
     return output_id, target
 
 
-def _accept_cleanup(owned, output_id):
-    _accept(owned, "2", [{
+async def _accept_cleanup(owned, output_id):
+    await _accept(owned, "2", [{
         "name": "清理主机成品", "type": "delete_action_outputs",
         "scheduled_at": "2026-01-15 09:00:00",
         "params": {"output_ids": [str(output_id)]},
@@ -171,7 +171,7 @@ async def test_queued_host_delete_wait_cancellation_saves_not_dispatched_once(
     cfg, owned, context, driver, work_files = host_environment
     await _save_photos(cfg, owned, context, driver)
     output_id, target = _seed_repaired_file(cfg, owned)
-    _accept_cleanup(owned, output_id)
+    await _accept_cleanup(owned, output_id)
 
     loop = asyncio.get_running_loop()
     previous_pool = loop._default_executor
@@ -219,7 +219,7 @@ async def test_queued_host_delete_wait_cancellation_saves_not_dispatched_once(
         await _wait_until(lambda: 900 in work_files.executor.unfinished_files())
         item_id = owned.connection.execute("SELECT id FROM cleanup_items").fetchone()[0]
         if business_cancel:
-            _apply_cleanup_cancel(owned)
+            await _apply_cleanup_cancel(owned)
         cleanup.cancel()
         # 取消先让执行器在同一锁内撤回排队任务；blocker 放行后才会完成共享 drain。
         await _wait_until(lambda: 900 not in work_files.executor.unfinished_files())
@@ -310,7 +310,7 @@ async def test_queued_host_query_wait_cancellation_keeps_original_consumer(
     cfg, owned, context, driver, work_files = host_environment
     await _save_photos(cfg, owned, context, driver)
     output_id, target = _seed_repaired_file(cfg, owned)
-    _accept_cleanup(owned, output_id)
+    await _accept_cleanup(owned, output_id)
 
     loop = asyncio.get_running_loop()
     previous_pool = loop._default_executor
@@ -424,7 +424,7 @@ async def test_started_host_delete_cancellation_saves_observation_and_error(
     cfg, owned, context, driver, work_files = host_environment
     await _save_photos(cfg, owned, context, driver)
     output_id, target = _seed_repaired_file(cfg, owned)
-    _accept_cleanup(owned, output_id)
+    await _accept_cleanup(owned, output_id)
 
     loop = asyncio.get_running_loop()
     loop_thread = threading.get_ident()
@@ -509,7 +509,7 @@ async def test_supervisor_handoff_failure_keeps_original_handle_until_saved(
     cfg, owned, context, driver, work_files = host_environment
     await _save_photos(cfg, owned, context, driver)
     output_id, target = _seed_repaired_file(cfg, owned)
-    _accept_cleanup(owned, output_id)
+    await _accept_cleanup(owned, output_id)
 
     loop = asyncio.get_running_loop()
     entered = asyncio.Event()
@@ -596,7 +596,7 @@ async def test_finished_host_delete_cancellation_before_runner_delivery_keeps_ac
     cfg, owned, context, driver, work_files = host_environment
     await _save_photos(cfg, owned, context, driver)
     output_id, target = _seed_repaired_file(cfg, owned)
-    _accept_cleanup(owned, output_id)
+    await _accept_cleanup(owned, output_id)
 
     loop = asyncio.get_running_loop()
     loop_thread = threading.get_ident()
@@ -681,7 +681,7 @@ async def test_owner_failure_recovers_same_handle_and_saves_actual_before_error(
     cfg, owned, context, driver, work_files = host_environment
     await _save_photos(cfg, owned, context, driver)
     output_id, target = _seed_repaired_file(cfg, owned)
-    _accept_cleanup(owned, output_id)
+    await _accept_cleanup(owned, output_id)
 
     unlink_calls = []
     original_unlink = Path.unlink
@@ -739,7 +739,7 @@ async def test_canceled_owner_failure_saves_actual_and_chains_drain_error(
     cfg, owned, context, driver, work_files = host_environment
     await _save_photos(cfg, owned, context, driver)
     output_id, target = _seed_repaired_file(cfg, owned)
-    _accept_cleanup(owned, output_id)
+    await _accept_cleanup(owned, output_id)
 
     loop = asyncio.get_running_loop()
     runner_returned = asyncio.Event()
@@ -833,7 +833,7 @@ async def test_host_delete_commit_unknown_recovers_same_save_without_task_replay
     cfg, owned, context, driver, work_files = host_environment
     await _save_photos(cfg, owned, context, driver)
     output_id, target = _seed_repaired_file(cfg, owned)
-    _accept_cleanup(owned, output_id)
+    await _accept_cleanup(owned, output_id)
     pending_deletes = {}
     pending_intents = {}
     active_calls = set()
@@ -914,7 +914,7 @@ async def test_started_host_query_cancellation_keeps_query_consumer_for_reentry(
     cfg, owned, context, driver, work_files = host_environment
     await _save_photos(cfg, owned, context, driver)
     output_id, target = _seed_repaired_file(cfg, owned)
-    _accept_cleanup(owned, output_id)
+    await _accept_cleanup(owned, output_id)
 
     loop = asyncio.get_running_loop()
     loop_thread = threading.get_ident()
@@ -1043,7 +1043,7 @@ async def test_fresh_host_target_path_error_stops_before_attempt_ticket(
     cfg, owned, context, driver, work_files = host_environment
     await _save_photos(cfg, owned, context, driver)
     output_id, target = _seed_repaired_file(cfg, owned)
-    _accept_cleanup(owned, output_id)
+    await _accept_cleanup(owned, output_id)
     calls = []
 
     def invalid_target(file_ref, directories):
@@ -1071,7 +1071,7 @@ async def test_legal_ticket_target_recheck_records_real_not_dispatched(
     cfg, owned, context, driver, work_files = host_environment
     await _save_photos(cfg, owned, context, driver)
     output_id, target = _seed_repaired_file(cfg, owned)
-    _accept_cleanup(owned, output_id)
+    await _accept_cleanup(owned, output_id)
     resolve_file = host_paths.resolve_file
     calls = []
 
@@ -1111,7 +1111,7 @@ async def test_ticket_identity_error_is_not_rewritten_as_not_dispatched(
     cfg, owned, context, driver, work_files = host_environment
     await _save_photos(cfg, owned, context, driver)
     output_id, target = _seed_repaired_file(cfg, owned)
-    _accept_cleanup(owned, output_id)
+    await _accept_cleanup(owned, output_id)
     calls = []
 
     def mismatched_ticket(runtime, item_id, ticket, operation):
@@ -1142,7 +1142,7 @@ async def test_host_executor_admission_conflicts_preserve_original_owner(
     cfg, owned, context, driver, work_files = host_environment
     await _save_photos(cfg, owned, context, driver)
     output_id, target = _seed_repaired_file(cfg, owned)
-    _accept_cleanup(owned, output_id)
+    await _accept_cleanup(owned, output_id)
 
     loop = asyncio.get_running_loop()
     original_started = asyncio.Event()
@@ -1224,7 +1224,7 @@ async def test_cleanup_drain_preserves_failure_from_another_file_owner(
     cfg, owned, context, driver, work_files = host_environment
     await _save_photos(cfg, owned, context, driver)
     output_id, target = _seed_repaired_file(cfg, owned)
-    _accept_cleanup(owned, output_id)
+    await _accept_cleanup(owned, output_id)
 
     loop = asyncio.get_running_loop()
     other_started = asyncio.Event()
@@ -1302,7 +1302,7 @@ async def test_runner_failure_survives_cancellation_during_shared_drain(
     cfg, owned, context, driver, work_files = host_environment
     await _save_photos(cfg, owned, context, driver)
     output_id, target = _seed_repaired_file(cfg, owned)
-    _accept_cleanup(owned, output_id)
+    await _accept_cleanup(owned, output_id)
 
     loop = asyncio.get_running_loop()
     owner_waiting = asyncio.Event()
@@ -1394,7 +1394,7 @@ async def test_delete_supervision_diagnostic_survives_unknown_finish(
     cfg, owned, context, driver, work_files = host_environment
     await _save_photos(cfg, owned, context, driver)
     output_id, target = _seed_repaired_file(cfg, owned)
-    _accept_cleanup(owned, output_id)
+    await _accept_cleanup(owned, output_id)
     pending_deletes = {}
     original_runner = work_files.executor._runner
 
@@ -1488,7 +1488,7 @@ async def test_query_supervision_diagnostic_survives_unknown_finish(
     cfg, owned, context, driver, work_files = host_environment
     await _save_photos(cfg, owned, context, driver)
     output_id, target = _seed_repaired_file(cfg, owned)
-    _accept_cleanup(owned, output_id)
+    await _accept_cleanup(owned, output_id)
     pending_queries = {}
     original_runner = work_files.executor._runner
     original_repository_finish = OperationRepository.finish_attempt
@@ -1599,7 +1599,7 @@ async def test_late_owner_callback_does_not_retain_handle_after_fallback(
     cfg, owned, context, driver, work_files = host_environment
     await _save_photos(cfg, owned, context, driver)
     output_id, target = _seed_repaired_file(cfg, owned)
-    _accept_cleanup(owned, output_id)
+    await _accept_cleanup(owned, output_id)
 
     original_runner = work_files.executor._runner
     real_drain = work_files.executor.drain_required

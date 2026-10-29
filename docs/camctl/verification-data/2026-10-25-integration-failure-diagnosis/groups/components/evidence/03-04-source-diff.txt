@@ -1,0 +1,11 @@
+--- /tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/source/apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py
++++ /tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py
+@@ -29,7 +29,7 @@
+     config = tmp_path / "device.toml"
+     tool = tmp_path / "hb_cli"
+     log = tmp_path / "calls.jsonl"
+-    tool.write_text(_hasselblad_tool_source(log, "SERIAL-1"))
++    tool.write_text(_hasselblad_tool_source(log, "SERIAL-1", installed_python=installed.python))
+     tool.chmod(0o700)
+     config.write_text(f'''[paths]
+ state_db="{home}/state.db"

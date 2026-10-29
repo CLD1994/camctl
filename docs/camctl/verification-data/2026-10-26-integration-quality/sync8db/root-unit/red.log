@@ -1,0 +1,80 @@
+.............................................FF.......................   [100%]
+=================================== FAILURES ===================================
+_ test_default_resume_uses_original_stopped_read_after_cancel_fact_query_failed[False] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fdc7253e010>
+canceled = False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("canceled", [False, True])
+    async def test_default_resume_uses_original_stopped_read_after_cancel_fact_query_failed(monkeypatch, canceled):
+        from camctl.capture import media_flow
+    
+        database = create_autospec(BusinessDatabase, instance=True)
+        operations = create_autospec(OperationRepository, instance=True)
+        operations.finish_attempt.return_value = DbOutcome(kind=DbOutcomeKind.COMPLETED)
+        monkeypatch.setattr(media_flow, "OperationRepository", lambda: operations)
+        pending_results, continuing = {}, {}
+        runtime = SimpleNamespace(database=database, pending_read_results=pending_results,
+            continuing_read_tickets=continuing)
+        ticket = AttemptTicket(1, "read", "9", "read", 28)
+        step = InputStep(InputPhase.SEGMENT_FAILED, copy_id=9,
+            read_end=ReadEnd(stopped=True, bytes_read=10, error="stopped"), stop_requested=True)
+        evidence = EvidenceRegistry((EvidenceContract("read_returned", 1, "read", frozenset()),))
+        original = stopped_read_result(runtime, ticket, step, evidence, 123)
+        database.read.side_effect = DbReadError("cancel fact read unavailable")
+        with pytest.raises(DbReadError):
+            await save_read_result(runtime, original)
+        assert pending_results[(28, 1)] is original
+    
+        database.read.side_effect = [(int(canceled), 20), (1, None)]
+        owned = create_autospec(OwnedConnection, instance=True)
+        async def write(callback, **kwargs):
+            return callback(owned)
+        database.write.side_effect = write
+>       await resume_prepared_internal_reads(database, pending_read_results=pending_results,
+            pending_read_business={}, pending_read_ends={}, continuing_read_tickets=continuing)
+E       TypeError: resume_prepared_internal_reads() missing 1 required keyword-only argument: 'pending_segment_inspection_results'
+
+apps/camctl/tests/unit/capture/test_media_stopped_read_resume.py:47: TypeError
+_ test_default_resume_uses_original_stopped_read_after_cancel_fact_query_failed[True] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fdc7232ed90>
+canceled = True
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("canceled", [False, True])
+    async def test_default_resume_uses_original_stopped_read_after_cancel_fact_query_failed(monkeypatch, canceled):
+        from camctl.capture import media_flow
+    
+        database = create_autospec(BusinessDatabase, instance=True)
+        operations = create_autospec(OperationRepository, instance=True)
+        operations.finish_attempt.return_value = DbOutcome(kind=DbOutcomeKind.COMPLETED)
+        monkeypatch.setattr(media_flow, "OperationRepository", lambda: operations)
+        pending_results, continuing = {}, {}
+        runtime = SimpleNamespace(database=database, pending_read_results=pending_results,
+            continuing_read_tickets=continuing)
+        ticket = AttemptTicket(1, "read", "9", "read", 28)
+        step = InputStep(InputPhase.SEGMENT_FAILED, copy_id=9,
+            read_end=ReadEnd(stopped=True, bytes_read=10, error="stopped"), stop_requested=True)
+        evidence = EvidenceRegistry((EvidenceContract("read_returned", 1, "read", frozenset()),))
+        original = stopped_read_result(runtime, ticket, step, evidence, 123)
+        database.read.side_effect = DbReadError("cancel fact read unavailable")
+        with pytest.raises(DbReadError):
+            await save_read_result(runtime, original)
+        assert pending_results[(28, 1)] is original
+    
+        database.read.side_effect = [(int(canceled), 20), (1, None)]
+        owned = create_autospec(OwnedConnection, instance=True)
+        async def write(callback, **kwargs):
+            return callback(owned)
+        database.write.side_effect = write
+>       await resume_prepared_internal_reads(database, pending_read_results=pending_results,
+            pending_read_business={}, pending_read_ends={}, continuing_read_tickets=continuing)
+E       TypeError: resume_prepared_internal_reads() missing 1 required keyword-only argument: 'pending_segment_inspection_results'
+
+apps/camctl/tests/unit/capture/test_media_stopped_read_resume.py:47: TypeError
+=========================== short test summary info ============================
+FAILED apps/camctl/tests/unit/capture/test_media_stopped_read_resume.py::test_default_resume_uses_original_stopped_read_after_cancel_fact_query_failed[False]
+FAILED apps/camctl/tests/unit/capture/test_media_stopped_read_resume.py::test_default_resume_uses_original_stopped_read_after_cancel_fact_query_failed[True]
+2 failed, 68 passed in 5.47s

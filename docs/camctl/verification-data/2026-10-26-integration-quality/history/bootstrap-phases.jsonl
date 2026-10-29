@@ -1,0 +1,9 @@
+{"nodeid": "tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost", "stage": "pytest.setup", "seconds": 0.08957598300185055, "detail": []}
+{"nodeid": "tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost", "stage": "prepare.save_photos", "seconds": 0.5281353819882497, "detail": []}
+{"nodeid": "tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost", "stage": "prepare_or_inflight.accept", "seconds": 0.01449118099117186, "detail": {"request": "2"}}
+{"nodeid": "tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost", "stage": "target.build_runtime", "seconds": 0.0026025889965239912, "detail": []}
+{"nodeid": "tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost", "stage": "prepare_or_inflight.accept", "seconds": 0.009075466005015187, "detail": {"request": "3"}}
+{"nodeid": "tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost", "stage": "target.execute_command", "seconds": 2.5938667860027635, "detail": []}
+{"nodeid": "tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost", "stage": "target.close_runtime", "seconds": 4.264002200216055e-06, "detail": []}
+{"nodeid": "tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost", "stage": "pytest.call", "seconds": 3.1416131000005407, "detail": []}
+{"nodeid": "tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost", "stage": "pytest.teardown", "seconds": 0.006349151008180343, "detail": []}

@@ -31,55 +31,9 @@ from camctl.persistence.runtime import (
 )
 from camctl.persistence.runtime import canonical_directory_binding
 
-SCHEMA_RESOURCES = [
-    "sql/core.sql",
-    "sql/workflows.sql",
-    "sql/files.sql",
-    "sql/operations.sql",
-    "sql/reports.sql",
-    "sql/history.sql",
-]
-
-# 假路径绑定按主机规则规范化（Windows 形如 /c:/srv/...），使库内
-# 绑定文本与配置侧 canonical 化结果可比较，且能经 canonical_to_path
-# 还原为本机路径。
-DIRECTORIES = (
-    canonical_directory_binding(Path("/srv/camctl/staging")),
-    canonical_directory_binding(Path("/srv/camctl/ready")),
-    canonical_directory_binding(Path("/srv/camctl/processing")),
+from ..support.database import (
+    DIRECTORIES, SCHEMA_RESOURCES, create_test_database as _create_valid_database,
 )
-
-
-def _create_valid_database(
-    path: Path,
-    *,
-    format_version: int = CURRENT_FORMAT_VERSION,
-    directories: tuple[str, str, str] = DIRECTORIES,
-) -> None:
-    """按权威 SQL 构造完整有效的状态库（测试准备，不经过被测入口）。
-
-    准备连接关闭同步落盘：synchronous 是连接级属性，不进入库文件，
-    建出的库内容与生产初始化一致；测试环境的库不需要崩溃持久性，
-    避免每个测试在 FULL 同步下为 schema 脚本付出多次 fsync。
-    """
-    connection = sqlite3.connect(path)
-    try:
-        connection.execute("PRAGMA synchronous=OFF")
-        connection.execute("PRAGMA journal_mode=wal")
-        connection.execute("BEGIN IMMEDIATE")
-        for name in SCHEMA_RESOURCES:
-            connection.executescript(resource_bytes(name).decode("utf-8"))
-        connection.execute(
-            "INSERT INTO database_metadata (id, application_id, instance_id, format_version,"
-            " staging_path, ready_path, processing_path) VALUES (1, 'camctl', ?, ?, ?, ?, ?)",
-            (uuid.uuid4().hex, format_version, *directories),
-        )
-        connection.execute(
-            "INSERT INTO runtime_state (id, acknowledged_wm) VALUES (1, 0)"
-        )
-        connection.commit()
-    finally:
-        connection.close()
 
 
 def _create_legacy_v1_database(

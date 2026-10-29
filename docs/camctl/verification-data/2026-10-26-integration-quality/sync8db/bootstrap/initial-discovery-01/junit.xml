@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="34.148" timestamp="2026-10-26T03:45:00.433795+08:00" hostname="1e0518e0c6b4"><testcase classname="tests.integration.bootstrap.test_read_discovery_default" name="test_submit_during_initial_discovery_is_not_lost" time="31.244"><failure message="TimeoutError">/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/tasks.py:500: in wait_for
+    return fut.result()
+           ^^^^^^^^^^^^
+apps/camctl/src/camctl/bootstrap/lifecycle.py:1185: in execute_command
+    outcome = await run_session(context, source)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/session/service.py:667: in run_session
+    return await _run_session(context, source)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/session/service.py:1166: in _run_session
+    raise original.with_traceback(original.__traceback__)
+apps/camctl/src/camctl/session/service.py:1002: in _run_session
+    outcome = await drive()
+              ^^^^^^^^^^^^^
+apps/camctl/src/camctl/session/service.py:906: in drive
+    fatal = await _drive_flows(context)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/session/service.py:1333: in _drive_flows
+    await flow(context)
+apps/camctl/src/camctl/capture/residual.py:663: in flow
+    page = await discovery.rows(database, "residual", now,
+apps/camctl/src/camctl/outputs/read_discovery.py:335: in rows
+    rows = await read_all(database,
+apps/camctl/src/camctl/outputs/database_reads.py:16: in read_all
+    return await database.read(execute)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/business.py:136: in read
+    raise cancelled
+apps/camctl/src/camctl/persistence/business.py:102: in _wait
+    return await asyncio.shield(future), None
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+apps/camctl/tests/integration/bootstrap/test_read_discovery_default.py:141: in test_submit_during_initial_discovery_is_not_lost
+    outcome = await asyncio.wait_for(execute_command(deps, None, poll_interval_s=0.005), 30)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/tasks.py:502: in wait_for
+    raise exceptions.TimeoutError() from exc
+E   TimeoutError</failure></testcase></testsuite></testsuites>

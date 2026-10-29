@@ -1,0 +1,72 @@
+call=1 attempt=1 command=run operation=spawn plan=(none) automatic=0 retries=0
+call=2 submit accepted path=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/client-plan-1.json
+call=1 attempt=1 command=run pid=1709075 spawned execution=unknown
+call=2 attempt=2 command=submit operation=spawn plan=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/client-plan-1.json automatic=0 retries=0
+call=2 attempt=2 command=submit pid=1709076 spawned execution=unknown
+call=2 command=submit pid=1709076 stream=exit_observed data=exit record retained; group settlement pending
+call=2 command=submit pid=1709076 stream=group_reaped data=all execution stopped; child record reaped
+call=2 command=submit pid=1709076 result=success exit_kind=0 exit=0 needs_run=1 overflow=0 io_error=0
+claim operation=moved ready=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/deployment/ready processing=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/deployment/processing file=status-report-3-0797901ee134d3f6ceea20c530551f8144e3e0b6da06650d978fbca9a1faaadb.json errno=0 detail=ok
+call=3 submit accepted path=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/client-plan-2.json
+call=3 attempt=3 command=submit operation=spawn plan=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/client-plan-2.json automatic=0 retries=0
+call=3 attempt=3 command=submit pid=1709293 spawned execution=unknown
+call=1 command=run pid=1709075 stream=exit_observed data=exit record retained; group settlement pending
+call=1 command=run pid=1709075 stream=group_reaped data=all execution stopped; child record reaped
+call=1 command=run pid=1709075 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0
+call=4 attempt=4 command=run operation=spawn plan=(none) automatic=0 retries=0
+call=4 attempt=4 command=run pid=1709301 spawned execution=unknown
+call=3 command=submit pid=1709293 stream=exit_observed data=exit record retained; group settlement pending
+call=3 command=submit pid=1709293 stream=group_reaped data=all execution stopped; child record reaped
+call=3 command=submit pid=1709293 result=success exit_kind=0 exit=0 needs_run=1 overflow=0 io_error=0
+call=1 attempt=1 command=run operation=spawn plan=(none) automatic=0 retries=0
+call=2 submit accepted path=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/client-plan-2.json
+call=1 attempt=1 command=run pid=1709328 spawned execution=unknown
+call=2 attempt=2 command=submit operation=spawn plan=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/client-plan-2.json automatic=0 retries=0
+call=2 attempt=2 command=submit pid=1709329 spawned execution=unknown
+call=2 command=submit pid=1709329 stream=exit_observed data=exit record retained; group settlement pending
+call=2 command=submit pid=1709329 stream=group_reaped data=all execution stopped; child record reaped
+call=2 command=submit pid=1709329 result=success exit_kind=0 exit=0 needs_run=1 overflow=0 io_error=0
+claim operation=moved ready=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/deployment/ready processing=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/deployment/processing file=2.OSV errno=0 detail=ok
+claim operation=moved ready=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/deployment/ready processing=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/deployment/processing file=status-report-5-c6cbc0a86be9be36f7b740a81667ed661d64304aeb90484fbe94bec2918c0832.json errno=0 detail=ok
+claim operation=moved ready=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/deployment/ready processing=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/deployment/processing file=1.OSV errno=0 detail=ok
+call=3 submit accepted path=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/client-plan-3.json
+call=3 attempt=3 command=submit operation=spawn plan=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/client-plan-3.json automatic=0 retries=0
+call=3 attempt=3 command=submit pid=1709455 spawned execution=unknown
+call=3 command=submit pid=1709455 stream=exit_observed data=exit record retained; group settlement pending
+call=3 command=submit pid=1709455 stream=group_reaped data=all execution stopped; child record reaped
+call=3 command=submit pid=1709455 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0
+call=4 submit accepted path=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/client-plan-4.json
+call=4 attempt=4 command=submit operation=spawn plan=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/client-plan-4.json automatic=0 retries=0
+call=4 attempt=4 command=submit pid=1709469 spawned execution=unknown
+call=4 command=submit pid=1709469 stream=exit_observed data=exit record retained; group settlement pending
+call=4 command=submit pid=1709469 stream=group_reaped data=all execution stopped; child record reaped
+call=4 command=submit pid=1709469 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0
+claim operation=moved ready=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/deployment/ready processing=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/deployment/processing file=4.LRF errno=0 detail=ok
+claim operation=moved ready=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/deployment/ready processing=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/deployment/processing file=3.LRF errno=0 detail=ok
+claim operation=moved ready=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/deployment/ready processing=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/deployment/processing file=status-report-11-c21dec20681e2c52bd84b6521cb04783b7e0c914130e5e90b7c564fcf3bfa6e5.json errno=0 detail=ok
+call=5 submit accepted path=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/client-plan-5.json
+call=5 attempt=5 command=submit operation=spawn plan=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/client-plan-5.json automatic=0 retries=0
+call=5 attempt=5 command=submit pid=1709591 spawned execution=unknown
+call=5 command=submit pid=1709591 stream=exit_observed data=exit record retained; group settlement pending
+call=5 command=submit pid=1709591 stream=group_reaped data=all execution stopped; child record reaped
+call=5 command=submit pid=1709591 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0
+call=6 submit accepted path=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/client-plan-6.json
+call=6 attempt=6 command=submit operation=spawn plan=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/client-plan-6.json automatic=0 retries=0
+call=6 attempt=6 command=submit pid=1709612 spawned execution=unknown
+call=6 command=submit pid=1709612 stream=exit_observed data=exit record retained; group settlement pending
+call=6 command=submit pid=1709612 stream=group_reaped data=all execution stopped; child record reaped
+call=6 command=submit pid=1709612 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0
+claim operation=moved ready=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/deployment/ready processing=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/deployment/processing file=5.OSV errno=0 detail=ok
+claim operation=moved ready=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/deployment/ready processing=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/deployment/processing file=status-report-16-8f3acfc3c39ded1ca8133449bf57307bdbbb1da15647a356a7d68ee505f92948.json errno=0 detail=ok
+call=7 submit accepted path=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/client-plan-7.json
+call=7 attempt=7 command=submit operation=spawn plan=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/client-plan-7.json automatic=0 retries=0
+call=7 attempt=7 command=submit pid=1709729 spawned execution=unknown
+call=7 command=submit pid=1709729 stream=exit_observed data=exit record retained; group settlement pending
+call=7 command=submit pid=1709729 stream=group_reaped data=all execution stopped; child record reaped
+call=7 command=submit pid=1709729 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0
+call=8 submit accepted path=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/client-plan-6.json
+call=8 attempt=8 command=submit operation=spawn plan=/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_7/world/client-plan-6.json automatic=0 retries=0
+call=8 attempt=8 command=submit pid=1709750 spawned execution=unknown
+call=8 command=submit pid=1709750 stream=exit_observed data=exit record retained; group settlement pending
+call=8 command=submit pid=1709750 stream=group_reaped data=all execution stopped; child record reaped
+call=8 command=submit pid=1709750 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0

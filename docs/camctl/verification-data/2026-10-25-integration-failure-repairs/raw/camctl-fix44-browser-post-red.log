@@ -1,0 +1,38 @@
+
+ RUN  v5.0.1 /tmp/camctl-fix44-browser-20261025/apps/client
+
+ ❯ tests/unit/browser-post.test.ts (7 tests | 1 failed) 16ms
+   × 点击与请求响应各自使用五秒预算，点击等待不消耗响应预算 10ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/unit/browser-post.test.ts > 点击与请求响应各自使用五秒预算，点击等待不消耗响应预算
+AssertionError: expected { …(1) } to deeply equal { Object (value) }
+
+- Expected
++ Received
+
+  {
+-   "value": {
+-     "request": [Function request],
++   "error": Error {
++     "message": "点击完成后 5000ms 内没有取得本次 POST 响应",
+    },
+  }
+
+ ❯ tests/unit/browser-post.test.ts:35:26
+     33|   const response = { request: () => post };
+     34|   page.emit("response", response);
+     35|   expect(await observed).toEqual({ value: response });
+       |                          ^
+     36|   closed(page);
+     37| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 6 passed (7)
+   Start at  17:32:37
+   Duration  229ms (transform 73%, tests 13%, import 10%, worker 4%)
+

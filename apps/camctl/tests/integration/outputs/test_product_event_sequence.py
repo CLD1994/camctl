@@ -8,54 +8,37 @@ import pytest
 
 from camctl.contracts.values import new_operation_key
 from camctl.history import validators
+from camctl.history.validators import register_guard
 from camctl.history.events import business_columns
-from camctl.history.reads import ReadCoverage, PlanReadScope
+from camctl.history.reads import PlanReadScope, ProductReadScope
 from camctl.history.validators import EventValidationError
 from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.event_reads import SqlEventReads
 from camctl.persistence.transaction import (
-    TransactionScope, commit_operation, event_envelope, row_change, row_facts, update_change,
+    commit_operation, event_envelope, row_change, row_facts, update_change,
 )
 
-from .test_product_competition import competition_database, _static_product_facts
+from .test_product_competition import competition_database
+from ..support.output_planning import capture_operation
+from camctl.persistence.runtime import OwnedConnection
 from .test_qualification import qualification_environment, _NOW, _Seedling, _candidate, _seed_output
-from .test_selection_event_sequence import _Sequence
-from ..operations.test_result_reuse import _FaultConnection
+from ..support.output_planning import ScopedEventSequence
+from ..support.output_planning import storage_fault as _FaultConnection
+
+
+@pytest.fixture(autouse=True)
+def restore_formal_guards():
+    """观察 H1 当前事实后，由所属模块恢复正式登记，不保留测试 spy。"""
+    try:
+        yield
+    finally:
+        register_capture_guards()
+        outputs.register_outputs_guards()
 
 
 def _register_sequence_capture_guards(owned, monkeypatch):
     """组合序列分别提供媒体的原计划范围和授予的原产物范围。"""
     register_capture_guards()
-    for name in ("action_finish", "output"):
-        original = validators.NAMED_GUARDS[name]
-
-        def scoped(event, context, guard=original):
-            row = next(
-                row
-                for row in event.rows
-                if row.table in ("actions", "outputs", "intermediate_files")
-            )
-            if row.table == "actions":
-                source = row.row_id
-            elif row.table == "outputs":
-                source = (
-                    row.after.values.get("source_action_id")
-                    or context.state_rows["outputs"][row.row_id]["source_action_id"]
-                )
-            else:
-                source = context.state_rows["intermediate_files"][row.row_id][
-                    "owner_action_id"
-                ]
-            plan_id = context.state_rows["actions"][source]["plan_id"]
-            reads = SqlEventReads(
-                owned.connection,
-                PlanReadScope(plan_id, 2),
-                getattr(context.current_reads, "_validated", ()),
-            )
-            guard(event, replace(context, current_reads=reads))
-
-        monkeypatch.setitem(validators.NAMED_GUARDS, name, scoped)
 
 
 def _repair_file(connection, identity):
@@ -76,14 +59,10 @@ def _repair_file(connection, identity):
 
 
 def _grant_plan(connection, command):
-    connection.execute("BEGIN")
-    try:
-        plan = outputs._GrantFileCommand(command, new_operation_key()).plan(TransactionScope(connection, 1, 1))
-        assert len(plan.events) == 5, plan.result
-        plan = _static_product_facts(plan, connection, command.action_id, command.output_id, command.occurred_at)
-        return plan
-    finally:
-        connection.rollback()
+    plan = capture_operation(OwnedConnection(connection, None), lambda target:
+        outputs.OutputsRepository().grant_file(command, new_operation_key(), target))
+    assert len(plan.events) == 5
+    return plan
 
 
 def _scenario(owned, case):
@@ -113,13 +92,9 @@ def _scenario(owned, case):
         plan = _grant_plan(connection, command)
         # 完成守卫需要状态之外的取消与执行事实，读取实际完整行。
         plan.state_rows["actions"][12] = row_facts(connection, "actions", 12)
-        # 前序完成后会继续判断处理责任，预先可靠查询当前确实没有处理记录。
-        reads = outputs._CatalogReads(connection)
-        assert reads.processing(12) is None
-        ranges = dict(plan.read_coverage.ranges)
-        for key, values in reads.read_coverage().ranges.items():
-            ranges[key] = ranges.get(key, frozenset()) | values
-        plan = replace(plan, read_coverage=ReadCoverage(ranges))
+        # 前序完成后会继续判断处理责任，当前确实没有处理记录。
+        assert connection.execute(
+            "SELECT id FROM recording_processing WHERE action_id=12").fetchone() is None
         change = event_envelope(2, 2, 8, 1,
             (update_change("actions", 12, {"status": 2}, {"status": 3}),), _NOW)
         plan.owners["actions", 12] = ("action", 12)
@@ -156,24 +131,28 @@ def _scenario(owned, case):
         del plan.state_rows["outputs"][999]
         del plan.state_rows["output_origins"][899]
         plan.state_rows["intermediate_files"][599]["retention_state"] = 1
+        assert connection.execute(
+            "SELECT id FROM output_origins WHERE original_output_id=701").fetchone() is None
+        assert connection.execute(
+            "SELECT id FROM output_origins WHERE output_id=999").fetchone() is None
         # 登记事件时刻的处理事实：本动作修复成功且输出指向 599。
         plan.state_rows.setdefault("recording_processing", {})[1] = row_facts(
             connection, "recording_processing", 1)
-        reads = outputs._CatalogReads(connection)
-        assert reads.related(701) == ()
-        assert reads.origin(999) is None
-        ranges = dict(plan.read_coverage.ranges)
-        for key, values in reads.read_coverage().ranges.items():
-            ranges[key] = ranges.get(key, frozenset()) | values
-        plan = replace(plan, read_coverage=ReadCoverage(ranges))
     plan.state_rows["plans"] = {identity: row_facts(connection, "plans", identity) for identity in (1, 2)}
     return plan, changes
+
+
+def _sequence(events, plan):
+    def scope_for_event(event):
+        if event.event_type == 8 or (event.event_type in (20, 26) and event.reason == 2):
+            return PlanReadScope(2, 2)
+        return ProductReadScope(31, 701, _NOW, 2)
+    return ScopedEventSequence(events, plan, scope_for_event)
 
 
 @pytest.mark.parametrize("case", ["host_missing", "new_repair", "source_finished"])
 @pytest.mark.parametrize("change_first", [False, True])
 def test_grant_uses_only_preceding_business_events(competition_database, monkeypatch, case, change_first):
-    monkeypatch.setattr(validators, "NAMED_GUARDS", dict(validators.NAMED_GUARDS))
     _register_sequence_capture_guards(competition_database, monkeypatch)
     plan, changes = _scenario(competition_database, case)
     events = (*changes, *plan.events) if change_first else (*plan.events, *changes)
@@ -188,9 +167,9 @@ def test_grant_uses_only_preceding_business_events(competition_database, monkeyp
                 any(row["output_id"] == 999 for row in current.state_rows.get("output_origins", {}).values())))
         original(event, current)
 
-    monkeypatch.setitem(validators.NAMED_GUARDS, "read_permission", inspect)
+    register_guard("read_permission", inspect)
     before = tuple(competition_database.connection.iterdump())
-    receipt = commit_operation(_Sequence(events, plan), new_operation_key(), competition_database)
+    receipt = commit_operation(_sequence(events, plan), new_operation_key(), competition_database)
     assert seen == [(4 if case == "host_missing" and change_first else 1,
                      2 if case == "source_finished" and not change_first else 3,
                      case == "new_repair" and change_first, case == "new_repair" and change_first)], receipt.error
@@ -214,13 +193,12 @@ def test_grant_uses_only_preceding_business_events(competition_database, monkeyp
 def test_later_write_failure_rolls_back_business_event_and_preparation(
     competition_database, monkeypatch, case, change_first, prefix,
 ):
-    monkeypatch.setattr(validators, "NAMED_GUARDS", dict(validators.NAMED_GUARDS))
     _register_sequence_capture_guards(competition_database, monkeypatch)
     plan, changes = _scenario(competition_database, case)
     events = (*changes, *plan.events) if change_first else (*plan.events, *changes)
     before = tuple(competition_database.connection.iterdump())
     target = replace(competition_database, connection=_FaultConnection(competition_database.connection, prefix))
-    receipt = commit_operation(_Sequence(events, plan), new_operation_key(), target)
+    receipt = commit_operation(_sequence(events, plan), new_operation_key(), target)
     assert receipt.kind == "rolled_back", receipt.error
-    assert isinstance(receipt.error, sqlite3.OperationalError), receipt.error
+    assert type(receipt.error) is sqlite3.DatabaseError, receipt.error
     assert tuple(competition_database.connection.iterdump()) == before

@@ -1,0 +1,1 @@
+{"same_key_submitted_concurrently": true, "db_submission_count": 2, "actual_database_worker": false, "results": [{"kind": "str", "value": "original-response"}, {"kind": "KeyError", "value": "1"}], "remaining_pending": []}

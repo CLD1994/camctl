@@ -95,6 +95,7 @@ def pipeline(tmp_path: Path):
     from ..scheduling.test_resources import _seed_activity
 
     _seed_activity(connection, 11, dispatch_state=3)
+    _seed_activity(connection, 13, dispatch_state=3, activity_state=3)
     connection.commit()
     yield owned
     owned.connection.close()
@@ -119,11 +120,11 @@ class SettlementDouble:
             target_action_id, SettlementOutcome(complete=True))
 
 
-def _runtime(owned, settlement):
+def _runtime(database, settlement):
     from camctl.cancellation.service import CancellationRuntime
 
     return CancellationRuntime(
-        owned=owned, repository=CancellationRepository(),
+        database=database, repository=CancellationRepository(),
         settlement=settlement, occurred_at=lambda: _NOW + 10)
 
 
@@ -404,7 +405,7 @@ class TestFinishCancelAction:
 
 class TestApplyCancelService:
     @pytest.mark.asyncio
-    async def test_cancel_mark_is_not_settlement(self, pipeline):
+    async def test_cancel_mark_is_not_settlement(self, pipeline, cancellation_database):
         """集成命名用例：标记提交而停止仍在途，汇总保持 running。"""
         from camctl.cancellation.rules import summarize_cancel
         from camctl.cancellation.models import CancellationStatus
@@ -413,7 +414,7 @@ class TestApplyCancelService:
         settlement = SettlementDouble({11: SettlementOutcome(complete=False)})
         progress = await apply_cancel(
             ApplyCancel(origin_action_id=50, item_ids=(91, 92, 93)),
-            _runtime(owned, settlement))
+            _runtime(cancellation_database, settlement))
         assert summarize_cancel(progress).status \
             is CancellationStatus.RUNNING
         # 11 的停止收场已发起且只发起一次。
@@ -422,13 +423,13 @@ class TestApplyCancelService:
             owned, "SELECT status FROM cancel_items WHERE id = 91") == (2,)
 
     @pytest.mark.asyncio
-    async def test_failure_does_not_abandon_other_items(self, pipeline):
+    async def test_failure_does_not_abandon_other_items(self, pipeline, cancellation_database):
         owned = pipeline
         settlement = SettlementDouble(
             {11: SettlementOutcome(complete=True, failed=True)})
         progress = await apply_cancel(
             ApplyCancel(origin_action_id=50, item_ids=(91, 92, 93)),
-            _runtime(owned, settlement))
+            _runtime(cancellation_database, settlement))
         by_target = {item.target_action_id: item for item in progress.items}
         assert by_target[11].status == 4
         assert by_target[12].status == 3
@@ -438,7 +439,7 @@ class TestApplyCancelService:
         ) == (2,)
 
     @pytest.mark.asyncio
-    async def test_late_result_enables_restart_summary(self, pipeline):
+    async def test_late_result_enables_restart_summary(self, pipeline, cancellation_database):
         """迟到结果：生效轮次后补充结果，重启侧汇总与终态保存成立。"""
         from camctl.cancellation.rules import summarize_cancel
         from camctl.cancellation.models import CancellationStatus
@@ -447,12 +448,12 @@ class TestApplyCancelService:
         settlement = SettlementDouble({11: SettlementOutcome(complete=False)})
         await apply_cancel(
             ApplyCancel(origin_action_id=50, item_ids=(91, 92, 93)),
-            _runtime(owned, settlement))
+            _runtime(cancellation_database, settlement))
         # 重启后新服务以新键处理迟到结果并汇总。
         late = SettlementDouble({11: SettlementOutcome(complete=True)})
         progress = await apply_cancel(
             ApplyCancel(origin_action_id=50, item_ids=(91, 92, 93)),
-            _runtime(owned, late))
+            _runtime(cancellation_database, late))
         assert summarize_cancel(progress).status \
             is CancellationStatus.SUCCEEDED
         finish = CancellationRepository().finish_cancel_action(

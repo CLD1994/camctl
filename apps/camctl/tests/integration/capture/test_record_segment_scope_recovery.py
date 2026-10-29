@@ -877,7 +877,7 @@ async def test_segment_scan_resume_reuses_original_baseline_and_saved_pages(tmp_
         path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
         owned.connection.close()
         owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-        resumed = _runtime(owned, check_config=runtime.check_config)
+        resumed = (await _runtime(owned, check_config=runtime.check_config))
         resumed.wall_us = lambda: _NOW + 30_000_000
         resumed.monotonic_ns = lambda: 1_000_000_000
         resumed.recovery_boundary = RecoveryBoundary.HOST_LOCAL_SETTLED

@@ -63,6 +63,7 @@ def test_installed_action6_segmented_default_scope_obtain_and_client_ack(
             [str(camctl), command, "--config", str(deployment.config_path)],
             cwd=deployment.root,
             env=environment,
+            camctl=True,
         )
     origin_result = _run(
         [str(package.python), "-c", "import camctl; print(camctl.__file__)"],

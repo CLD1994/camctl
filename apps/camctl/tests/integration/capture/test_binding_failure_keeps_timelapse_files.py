@@ -1,8 +1,6 @@
 """取消延时摄影的必要 STOP 因绑定失败结束时仍登记可靠完整文件。"""
 
-from dataclasses import replace
 import json
-import sqlite3
 
 import pytest
 
@@ -21,25 +19,17 @@ from camctl.outputs.catalog import FileReference, OutputCatalogFacts, OutputDraf
 
 from .test_cancel_timelapse_exhaustion_files import _apply_public_cancel
 from .test_closed_result_local_consumption import (
-    _capture_facts, _rows, closed_consumer_world, fresh_closed_runtime,
+    _capture_facts, _rows, closed_consumer_world,
+)
+
+from ..support.binding_cases import (
+    BindingSaveSpy as _BindingSaveSpy, BindingTransactionFault as _BindingTransactionFault,
+    FaultingBindingSaveSpy as _FaultingBindingSaveSpy, assert_business_save,
+    binding_case, close_binding_databases, fresh_binding_runtime,
 )
 
 
 pytestmark = pytest.mark.asyncio
-
-
-class _BindingSaveSpy(CaptureRepository):
-    """记录完整实际申请，实际事务和回执仍由真实仓储产生。"""
-
-    def __init__(self):
-        self.calls = []
-        self.receipts = []
-
-    def finish_binding_failure(self, request, key, owned):
-        self.calls.append((request, key, owned))
-        receipt = super().finish_binding_failure(request, key, owned)
-        self.receipts.append(receipt)
-        return receipt
 
 
 def _assert_joint_binding_finish(owned, world, key, stop_id, output_id):
@@ -175,7 +165,7 @@ async def test_binding_failed_stop_keeps_complete_timelapse_files_atomically(
     owned = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         assert owned.metadata == world.metadata
-        runtime, methods = fresh_closed_runtime(owned, world, binding)
+        runtime, methods = (await fresh_binding_runtime(owned, world, binding))
         saves = _BindingSaveSpy()
         runtime.capture = saves
         advance = capture_handler(world.handler)
@@ -184,7 +174,8 @@ async def test_binding_failed_stop_keeps_complete_timelapse_files_atomically(
 
         (request, key, saved_owned), = saves.calls
         receipt, = saves.receipts
-        assert saved_owned is owned and receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+        assert_business_save(saved_owned, owned)
+        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
         assert request.action_id == world.action_id and request.canceled
         assert request.occurred_at == world.formed_at + 5_000_000
         assert request.responsibility_keys == ()
@@ -233,11 +224,11 @@ async def test_binding_failed_stop_keeps_complete_timelapse_files_atomically(
 
         # 目标 canceled 与发起者的处理失败分别保存，不能把目标终态当取消成功。
         cancellations = CancellationRepository()
-        settlement = TargetSettlement(owned, None, cancellations, lambda _: "unknown", runtime.wall_us)
+        settlement = TargetSettlement(runtime.database, None, cancellations, lambda _: "unknown", runtime.wall_us)
         settled = await settlement.settle(world.action_id)
         assert settled.complete and settled.failed
         progress = await apply_cancel(ApplyCancel(cancel_id, (item_id,)), CancellationRuntime(
-            owned, cancellations, settlement, runtime.wall_us))
+            runtime.database, cancellations, settlement, runtime.wall_us))
         item, = progress.items
         assert item.status == 4
         assert item.error_code == registered_error("target_cleanup_failed")["item_error_ids"]["cancel_items"]
@@ -267,6 +258,7 @@ async def test_binding_failed_stop_keeps_complete_timelapse_files_atomically(
         assert world.result_driver.list_results.await_count == world.used
     finally:
         owned.connection.close()
+        await close_binding_databases()
 
 
 @pytest.mark.parametrize("binding", ["missing", "mismatch"])
@@ -277,7 +269,7 @@ async def test_binding_file_finish_reuses_full_request_with_original_key_after_r
     owned = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
     reopened = None
     try:
-        runtime, methods = fresh_closed_runtime(owned, world, binding)
+        runtime, methods = (await fresh_binding_runtime(owned, world, binding))
         saves = _BindingSaveSpy()
         runtime.capture = saves
         await capture_handler(world.handler)(world.action_id, runtime)
@@ -289,6 +281,7 @@ async def test_binding_file_finish_reuses_full_request_with_original_key_after_r
         _assert_complete_binding_finish(owned, world, request, key)
         reliable = tuple(owned.connection.iterdump())
         binding_events = saved_transaction_events(owned.connection, key)
+        await close_binding_databases()
         owned.connection.close()
         reopened = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
 
@@ -300,7 +293,7 @@ async def test_binding_file_finish_reuses_full_request_with_original_key_after_r
         _assert_original_facts(reopened, world, methods)
         _assert_complete_binding_finish(reopened, world, request, key)
         # 重新装配新会话只是核终态重入；仓储重送不依赖设备或新时刻。
-        next_runtime, next_methods = fresh_closed_runtime(reopened, world, binding)
+        next_runtime, next_methods = (await fresh_binding_runtime(reopened, world, binding))
         await capture_handler(world.handler)(world.action_id, next_runtime)
         assert tuple(reopened.connection.iterdump()) == reliable
         for method in next_methods:
@@ -309,57 +302,7 @@ async def test_binding_file_finish_reuses_full_request_with_original_key_after_r
         owned.connection.close()
         if reopened is not None:
             reopened.connection.close()
-
-
-class _BindingTransactionFault:
-    """只在写入产物的绑定事务内注入真实投影或 COMMIT 错误。"""
-
-    def __init__(self, connection, mode):
-        self.connection, self.mode = connection, mode
-        self.armed = True
-        self.fault_transaction = False
-        self.hits = 0
-        self.commit_calls = 0
-        self.rollback_count = 0
-        self.partial_outputs = None
-        self.outputs_after_rollback = None
-        self.error = sqlite3.OperationalError("绑定终态事务保存故障")
-
-    def __getattr__(self, name):
-        return getattr(self.connection, name)
-
-    def execute(self, statement, parameters=()):
-        if self.armed and self.fault_transaction and statement == "COMMIT":
-            self.armed = False
-            self.hits += 1
-            self.commit_calls += 1
-            if self.mode == "commit_after":
-                self.connection.execute(statement, parameters)
-            raise self.error
-        result = self.connection.execute(statement, parameters)
-        if self.armed and statement.startswith("INSERT INTO outputs "):
-            self.fault_transaction = True
-            self.partial_outputs = self.connection.execute("SELECT COUNT(*) FROM outputs").fetchone()[0]
-            if self.mode == "projection":
-                self.armed = False
-                self.hits += 1
-                raise self.error
-        if self.fault_transaction and statement == "ROLLBACK":
-            self.rollback_count += 1
-            self.outputs_after_rollback = self.connection.execute("SELECT COUNT(*) FROM outputs").fetchone()[0]
-            self.fault_transaction = False
-        return result
-
-
-class _FaultingBindingSaveSpy(_BindingSaveSpy):
-    """实际保存入口取得透明连接代理，其余 handler 读取不注入故障。"""
-
-    def __init__(self, proxy):
-        super().__init__()
-        self.proxy = proxy
-
-    def finish_binding_failure(self, request, key, owned):
-        return super().finish_binding_failure(request, key, replace(owned, connection=self.proxy))
+        await close_binding_databases()
 
 
 @pytest.mark.parametrize("binding", ["missing", "mismatch"])
@@ -370,8 +313,8 @@ async def test_binding_file_transaction_fault_recovers_full_original_request_aft
     owned = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
     reopened = None
     try:
-        runtime, methods = fresh_closed_runtime(owned, world, binding)
-        fault = _BindingTransactionFault(owned.connection, mode)
+        runtime, methods = (await fresh_binding_runtime(owned, world, binding))
+        fault = _BindingTransactionFault(mode)
         saves = _FaultingBindingSaveSpy(fault)
         runtime.capture = saves
 
@@ -380,7 +323,8 @@ async def test_binding_file_transaction_fault_recovers_full_original_request_aft
 
         (request, key, fault_owned), = saves.calls
         receipt, = saves.receipts
-        assert fault_owned.connection is fault and fault.hits == 1 and not fault.armed
+        assert_business_save(fault_owned, owned)
+        assert fault_owned.fault_injected and fault.hits == 1 and not fault.armed
         assert fault.partial_outputs == 1
         assert receipt.error is fault.error
         assert receipt.kind is (DbOutcomeKind.ROLLED_BACK if mode == "projection" else DbOutcomeKind.UNKNOWN)
@@ -391,6 +335,7 @@ async def test_binding_file_transaction_fault_recovers_full_original_request_aft
             assert tuple(owned.connection.iterdump()) == world.canceled_dump
         else:
             assert fault.commit_calls == 1
+        await close_binding_databases()
         owned.connection.close()
         reopened = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
         _assert_original_facts(reopened, world, methods)
@@ -424,3 +369,4 @@ async def test_binding_file_transaction_fault_recovers_full_original_request_aft
         owned.connection.close()
         if reopened is not None:
             reopened.connection.close()
+        await close_binding_databases()

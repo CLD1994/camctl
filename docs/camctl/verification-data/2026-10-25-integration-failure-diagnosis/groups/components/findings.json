@@ -1,0 +1,483 @@
+{
+  "scope": {
+    "diagnosis_ids": [
+      1,
+      2,
+      3,
+      4,
+      16,
+      32,
+      33
+    ],
+    "historical_source": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+    "current_source": "1973dc05c0d517a890b92e5dcfc1ee32da9266dd",
+    "method": "只读源码、保留真实数据库和已有测试收据；没有修改项目文件，没有启动额外pytest。数据库探针使用Python 3.11.17及mode=ro。",
+    "summary": "7个身份归入4个直接根因组，已确认的首个错误均属于测试侧；5个在当前固定源码同点重现，2个有后续同身份通过证据。首错后的未执行路径不计为通过，也不能据此排除独立生产问题。",
+    "normalized_nodeids": "报告使用原44失败清单的apps/camctl前缀；部分原始cases.json使用tests/integration/...，通过收据提供规范身份映射。"
+  },
+  "findings": [
+    {
+      "diagnosis_id": 1,
+      "nodeid": "apps/camctl/tests/integration/bootstrap/test_distribution.py::test_installed_hasselblad_photo_pair_obtain_and_source_reuse[raw]",
+      "root_cause": "安装版用例把首次初始化后的数据库整体格式硬编码为2。冻结版本的权威登记已含V3，初始化按登记中的最大受支持格式创建V3；当前固定源码的登记已含V5，因此同一旧断言现在收到5。实际格式值与安装包枚举资源和冻结源码一致；安装资源中的枚举登记逐字节匹配对应源码。初始化与submit已成功，测试在执行run拍摄之前被旧断言中止。",
+      "classification": "测试断言与权威格式契约漂移",
+      "production_defect_confirmed": false,
+      "current_reproduction": {
+        "status": "在1973dc05复诊重现",
+        "outcome": "failed",
+        "first_failure": "assert format_version == 2；实际5",
+        "source_commit": "1973dc05c0d517a890b92e5dcfc1ee32da9266dd",
+        "artifact": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/artifacts/output.log"
+      },
+      "first_failure_and_reachability": "raw完成init、describe、样例计划生成和submit；数据库中3个动作均仍为PENDING，operation_runs数量为0。尚未执行后续拍摄、配对交付和离线重复取回，原失败不能作为这些行为的失败证明。",
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log",
+          "description": "原始完整堆栈在硬编码格式断言处失败",
+          "line": 160
+        },
+        {
+          "path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/artifacts/output.log",
+          "description": "当前源码仍在同一断言失败",
+          "line": 142
+        },
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/source/docs/camctl/database/enum-registry.json",
+          "description": "冻结源登记V1、V2、V3",
+          "line": 122
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/camctl/database/enum-registry.json",
+          "description": "当前源登记V1至V5",
+          "line": 122
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/architecture/initialization.md",
+          "description": "首次创建使用登记最大受支持格式的行为契约",
+          "line": 45
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/persistence/initialization.py",
+          "description": "实际初始化持久化CURRENT_FORMAT_VERSION",
+          "line": 138
+        },
+        {
+          "path": "/tmp/camctl-diag-components-evidence/01-02-schema-facts.json",
+          "description": "只读查询原库及当前库，列出格式、动作状态，以及安装枚举资源与源码的逐字节一致性",
+          "line": 4
+        }
+      ],
+      "repair_owner": "bootstrap安装测试的断言；无需改变初始化生产规则或现有数据库。",
+      "repair_recommendation": "让安装版测试从该已安装发行物的权威枚举资源取得当前受支持格式，并核对实际数据库与该发行物一致；格式常量只由统一登记派生。主机照片所需最低格式资格仍单独依据已确认契约核对。",
+      "acceptance": [
+        "在独立安装环境中执行该完整raw/jpeg节点，保留init、describe、submit、run、原图与预览交付及离线重复取回的原有业务断言。",
+        "确认期望格式来自被测安装包的权威登记，且当前首次初始化格式与其最大受支持成员一致；旧库不被隐式升级。",
+        "重新取得完整节点通过记录后才将后续业务验收计为已覆盖。"
+      ],
+      "uncertainties": [
+        "本次未越过首个失败断言；之后的拍摄与交付链是否还会暴露独立问题尚未核验。"
+      ]
+    },
+    {
+      "diagnosis_id": 2,
+      "nodeid": "apps/camctl/tests/integration/bootstrap/test_distribution.py::test_installed_hasselblad_photo_pair_obtain_and_source_reuse[jpeg]",
+      "root_cause": "安装版用例把首次初始化后的数据库整体格式硬编码为2。冻结版本的权威登记已含V3，初始化按登记中的最大受支持格式创建V3；当前固定源码的登记已含V5，因此同一旧断言现在收到5。实际格式值与安装包枚举资源和冻结源码一致；安装资源中的枚举登记逐字节匹配对应源码。初始化与submit已成功，测试在执行run拍摄之前被旧断言中止。",
+      "classification": "测试断言与权威格式契约漂移",
+      "production_defect_confirmed": false,
+      "current_reproduction": {
+        "status": "在1973dc05复诊重现",
+        "outcome": "failed",
+        "first_failure": "assert format_version == 2；实际5",
+        "source_commit": "1973dc05c0d517a890b92e5dcfc1ee32da9266dd",
+        "artifact": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/artifacts/output.log"
+      },
+      "first_failure_and_reachability": "jpeg完成init、describe、样例计划生成和submit；数据库中3个动作均仍为PENDING，operation_runs数量为0。尚未执行后续拍摄、配对交付和离线重复取回，原失败不能作为这些行为的失败证明。",
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log",
+          "description": "原始完整堆栈在硬编码格式断言处失败",
+          "line": 302
+        },
+        {
+          "path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/artifacts/output.log",
+          "description": "当前源码仍在同一断言失败",
+          "line": 284
+        },
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/source/docs/camctl/database/enum-registry.json",
+          "description": "冻结源登记V1、V2、V3",
+          "line": 122
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/camctl/database/enum-registry.json",
+          "description": "当前源登记V1至V5",
+          "line": 122
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/architecture/initialization.md",
+          "description": "首次创建使用登记最大受支持格式的行为契约",
+          "line": 45
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/persistence/initialization.py",
+          "description": "实际初始化持久化CURRENT_FORMAT_VERSION",
+          "line": 138
+        },
+        {
+          "path": "/tmp/camctl-diag-components-evidence/01-02-schema-facts.json",
+          "description": "只读查询原库及当前库，列出格式、动作状态，以及安装枚举资源与源码的逐字节一致性",
+          "line": 43
+        }
+      ],
+      "repair_owner": "bootstrap安装测试的断言；无需改变初始化生产规则或现有数据库。",
+      "repair_recommendation": "让安装版测试从该已安装发行物的权威枚举资源取得当前受支持格式，并核对实际数据库与该发行物一致；格式常量只由统一登记派生。主机照片所需最低格式资格仍单独依据已确认契约核对。",
+      "acceptance": [
+        "在独立安装环境中执行该完整raw/jpeg节点，保留init、describe、submit、run、原图与预览交付及离线重复取回的原有业务断言。",
+        "确认期望格式来自被测安装包的权威登记，且当前首次初始化格式与其最大受支持成员一致；旧库不被隐式升级。",
+        "重新取得完整节点通过记录后才将后续业务验收计为已覆盖。"
+      ],
+      "uncertainties": [
+        "本次未越过首个失败断言；之后的拍摄与交付链是否还会暴露独立问题尚未核验。"
+      ]
+    },
+    {
+      "diagnosis_id": 3,
+      "nodeid": "apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py::test_installed_device_photo_reclaims_then_downloads_both_sources_twice[raw]",
+      "root_cause": "安装版CLI使用清理了PYTHONPATH/PYTHONHOME的环境启动hb_cli测试替身，但替身shebang默认选择pytest所在的源码测试解释器。该解释器只提供测试依赖，没有安装camctl；替身导入camctl时即抛出ModuleNotFoundError，真实list步骤退出1，生产驱动按device_error保存失败。首次拍摄因工具启动失败而终结，并未进入原图/预览下载。",
+      "classification": "测试工具的解释器绑定错误；既有依赖被隔离执行条件暴露，已通过测试侧修复闭合",
+      "production_defect_confirmed": false,
+      "current_reproduction": {
+        "status": "本次1973dc05中央复诊未选择此已闭合身份；最新同身份补测通过",
+        "outcome": "passed_at_prior_verified_source",
+        "source_commit": "4728a4cf247dceae1fb11f5ed1a8eec7491238e0",
+        "run": "/tmp/camctl-itopt-combined-20261025",
+        "artifact": "/tmp/camctl-itopt-combined-20261025/tasks/001-camctl-bootstrap/artifacts/cases.json",
+        "current_source_static_state": "1973dc05用例已显式传入installed_python=installed.python；与原失败源的该文件差异仅此一个关键字参数。"
+      },
+      "first_failure_and_reachability": "raw的run正常完成命令协议并将动作保存为FAILED，断言观察到4而非3。数据库保存了唯一START尝试，子步骤list的stderr明确为ModuleNotFoundError，device_files与outputs为空；不是超时窗口导致未派发，也不是下载时源字节不一致。",
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log",
+          "description": "原测试断言观察到拍摄失败终态",
+          "line": 363
+        },
+        {
+          "path": "/tmp/camctl-diag-components-evidence/03-04-historical-tool-facts.json",
+          "description": "原库真实操作结果、解码stderr和生成工具shebang",
+          "line": 3
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/bootstrap/test_distribution.py",
+          "description": "安装环境移除源码导入路径",
+          "line": 74
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/bootstrap/test_distribution.py",
+          "description": "工具生成器选择shebang解释器",
+          "line": 282
+        },
+        {
+          "path": "/tmp/camctl-diag-components-evidence/03-04-source-diff.txt",
+          "description": "原失败源到固定当前源仅增加installed.python参数",
+          "line": 8
+        },
+        {
+          "path": "/workspaces/camctl/docs/camctl/verification-data/2026-10-25-integration-optimization/combined-validation.json",
+          "description": "按完整规范nodeid匹配最新同身份通过记录",
+          "line": 10
+        },
+        {
+          "path": "/tmp/camctl-itopt-combined-20261025/tasks/001-camctl-bootstrap/artifacts/output.log",
+          "description": "同身份两项实际通过，未以其他Hasselblad测试代替",
+          "line": 9
+        },
+        {
+          "path": "/tmp/camctl-diag-components-evidence/03-04-supplement-matched.json",
+          "description": "规范nodeid与原始pytest节点、源码、命令和结果对应；含窄修复收据",
+          "line": 3
+        }
+      ],
+      "repair_owner": "测试工具生成调用点；该修复已经存在于固定当前源码。",
+      "repair_recommendation": "保留两个安装链生成点显式传入的installed.python，继续使用已安装发行物提供的格式定义。审计调用同一生成器的其他安装链是否显式选择实际安装环境；普通参数拒绝测试继续使用其自身测试环境。",
+      "acceptance": [
+        "原raw/jpeg完整节点均须通过，保持两轮各自独立的原图和预览取回、源身份、大小与SHA-256、实际交付文件字节、配置变更和等长错误内容拒绝断言。",
+        "通过记录必须匹配本条完整nodeid，并保留源码、冻结摘要、解释器、命令和退出码；已核对4728a4cf联合补测的两项通过。"
+      ],
+      "uncertainties": [
+        "最新通过证据属于4728a4cf，不冒充1973dc05在本次会话重新执行的结果；本次没有额外启动pytest。",
+        "此测试使用软件工具替身，不证明真实相机或ARM设备现场行为。"
+      ]
+    },
+    {
+      "diagnosis_id": 4,
+      "nodeid": "apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py::test_installed_device_photo_reclaims_then_downloads_both_sources_twice[jpeg]",
+      "root_cause": "安装版CLI使用清理了PYTHONPATH/PYTHONHOME的环境启动hb_cli测试替身，但替身shebang默认选择pytest所在的源码测试解释器。该解释器只提供测试依赖，没有安装camctl；替身导入camctl时即抛出ModuleNotFoundError，真实list步骤退出1，生产驱动按device_error保存失败。首次拍摄因工具启动失败而终结，并未进入原图/预览下载。",
+      "classification": "测试工具的解释器绑定错误；既有依赖被隔离执行条件暴露，已通过测试侧修复闭合",
+      "production_defect_confirmed": false,
+      "current_reproduction": {
+        "status": "本次1973dc05中央复诊未选择此已闭合身份；最新同身份补测通过",
+        "outcome": "passed_at_prior_verified_source",
+        "source_commit": "4728a4cf247dceae1fb11f5ed1a8eec7491238e0",
+        "run": "/tmp/camctl-itopt-combined-20261025",
+        "artifact": "/tmp/camctl-itopt-combined-20261025/tasks/001-camctl-bootstrap/artifacts/cases.json",
+        "current_source_static_state": "1973dc05用例已显式传入installed_python=installed.python；与原失败源的该文件差异仅此一个关键字参数。"
+      },
+      "first_failure_and_reachability": "jpeg的run正常完成命令协议并将动作保存为FAILED，断言观察到4而非3。数据库保存了唯一START尝试，子步骤list的stderr明确为ModuleNotFoundError，device_files与outputs为空；不是超时窗口导致未派发，也不是下载时源字节不一致。",
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log",
+          "description": "原测试断言观察到拍摄失败终态",
+          "line": 427
+        },
+        {
+          "path": "/tmp/camctl-diag-components-evidence/03-04-historical-tool-facts.json",
+          "description": "原库真实操作结果、解码stderr和生成工具shebang",
+          "line": 84
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/bootstrap/test_distribution.py",
+          "description": "安装环境移除源码导入路径",
+          "line": 74
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/bootstrap/test_distribution.py",
+          "description": "工具生成器选择shebang解释器",
+          "line": 282
+        },
+        {
+          "path": "/tmp/camctl-diag-components-evidence/03-04-source-diff.txt",
+          "description": "原失败源到固定当前源仅增加installed.python参数",
+          "line": 8
+        },
+        {
+          "path": "/workspaces/camctl/docs/camctl/verification-data/2026-10-25-integration-optimization/combined-validation.json",
+          "description": "按完整规范nodeid匹配最新同身份通过记录",
+          "line": 11
+        },
+        {
+          "path": "/tmp/camctl-itopt-combined-20261025/tasks/001-camctl-bootstrap/artifacts/output.log",
+          "description": "同身份两项实际通过，未以其他Hasselblad测试代替",
+          "line": 9
+        },
+        {
+          "path": "/tmp/camctl-diag-components-evidence/03-04-supplement-matched.json",
+          "description": "规范nodeid与原始pytest节点、源码、命令和结果对应；含窄修复收据",
+          "line": 3
+        }
+      ],
+      "repair_owner": "测试工具生成调用点；该修复已经存在于固定当前源码。",
+      "repair_recommendation": "保留两个安装链生成点显式传入的installed.python，继续使用已安装发行物提供的格式定义。审计调用同一生成器的其他安装链是否显式选择实际安装环境；普通参数拒绝测试继续使用其自身测试环境。",
+      "acceptance": [
+        "原raw/jpeg完整节点均须通过，保持两轮各自独立的原图和预览取回、源身份、大小与SHA-256、实际交付文件字节、配置变更和等长错误内容拒绝断言。",
+        "通过记录必须匹配本条完整nodeid，并保留源码、冻结摘要、解释器、命令和退出码；已核对4728a4cf联合补测的两项通过。"
+      ],
+      "uncertainties": [
+        "最新通过证据属于4728a4cf，不冒充1973dc05在本次会话重新执行的结果；本次没有额外启动pytest。",
+        "此测试使用软件工具替身，不证明真实相机或ARM设备现场行为。"
+      ]
+    },
+    {
+      "diagnosis_id": 16,
+      "nodeid": "apps/camctl/tests/integration/capture/test_action6_budget_cold_recovery.py::test_action6_cold_recovery_decodes_saved_budget_and_continues_same_copy",
+      "root_cause": "测试子类_OffsetReadDriver.open_read先向self.offsets追加偏移，再调用父类_ReadDriver.open_read；父类也对同一个self.offsets追加相同偏移。因此一次真实open_read在观测列表中出现两个0。原库仅保存一个READ_FILE尝试，copy_id=1提交了4/10字节，读取等待重试；没有证据表明生产重复打开。",
+      "classification": "测试替身重复记录观测；冷恢复验收尚未执行",
+      "production_defect_confirmed": false,
+      "current_reproduction": {
+        "status": "在1973dc05复诊重现",
+        "outcome": "failed",
+        "first_failure": "assert first_driver.offsets == [0]；实际[0,0]",
+        "artifact": "/tmp/camctl-44-diagnostic-current-20261025/tasks/002-camctl-capture/artifacts/output.log"
+      },
+      "first_failure_and_reachability": "失败前已真实创建分段检查、开始读取并持久保存4字节，inspection仍PENDING且result未保存。断言位于第108行；关闭原SQLite连接和open_existing重开在后续第143行以后，均未执行。因此没有发生本用例声明的冷恢复，也未验证整数JSON预算解码、重试间隔、同copy/target/round从偏移4续传、检查结果保存回执未知后的再重开复用，以及不重复媒体探测。",
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/004-camctl-capture/artifacts/output.log",
+          "description": "原始失败堆栈",
+          "line": 55
+        },
+        {
+          "path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/002-camctl-capture/artifacts/output.log",
+          "description": "当前同点重现",
+          "line": 26
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/capture/test_action6_budget_cold_recovery.py",
+          "description": "子类第39行追加偏移，再调用父类",
+          "line": 33
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/capture/test_segment_inspections.py",
+          "description": "父类第96行再次追加偏移，并只创建一个stream",
+          "line": 96
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/capture/test_action6_budget_cold_recovery.py",
+          "description": "实际关闭和重开都在失败断言之后",
+          "line": 139
+        },
+        {
+          "path": "/tmp/camctl-diag-components-evidence/16-cold-before-reopen-facts.json",
+          "description": "原库与当前库只读提取：一个读尝试、copy1、4/10字节、PENDING检查、原预算",
+          "line": 3
+        }
+      ],
+      "repair_owner": "capture冷恢复测试的观测替身，生产读取及恢复逻辑尚不能由本失败定性。",
+      "repair_recommendation": "让偏移观测只有一个记录位置，复用父类已维护的offsets、streams及chunk_calls。保持原单次打开预期及后续冷恢复断言，先使本用例真正越过关闭重开边界；若后续暴露独立失败，按新的首个错误继续归因。",
+      "acceptance": [
+        "故障前一个实际ReadSession对应一个偏移0，持久库检查仍为PENDING并提交4/10字节；工具尚未探测。",
+        "实际关闭并重开数据库，清空会话内重试与待保存状态；恢复保留copy_id、target_file_id、round、冻结预算和已提交偏移。",
+        "原3秒重试间隔内不打开设备，间隔到达后从偏移4接续，完成相同copy；整数JSON预算被正确解码，检查工具只执行一次。",
+        "检查结果提交回执未知后再次实际关闭重开，复用原检查结果与文件身份，不再次读取或探测，最终动作成功。"
+      ],
+      "uncertainties": [
+        "修复观测重复后，冷恢复后续路径尚无本次实际通过记录；现有原库事实只能证明冷恢复前的部分拷贝。"
+      ]
+    },
+    {
+      "diagnosis_id": 32,
+      "nodeid": "apps/camctl/tests/integration/devices/test_adb_camera_registration.py::test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-action6]",
+      "root_cause": "测试借用acceptance环境：environment通过open_existing取得有元信息的OwnedConnection，却只yield其connection和context；_owned(environment)随后重新包装连接并明确设置metadata=None。该不完整对象传给_initialize_recovery，后者需要按真实format_version决定是否读取software_recoveries，于metadata.format_version处抛出AttributeError。None来自测试帮助函数，不来自数据库或生产打开路径。",
+      "classification": "测试夹具违反OwnedConnection非空元信息契约",
+      "production_defect_confirmed": false,
+      "current_reproduction": {
+        "status": "在1973dc05复诊重现",
+        "outcome": "failed",
+        "first_failure": "AttributeError: 'NoneType' object has no attribute 'format_version'",
+        "artifact": "/tmp/camctl-44-diagnostic-current-20261025/tasks/008-camctl-devices/artifacts/output.log"
+      },
+      "first_failure_and_reachability": "dji-action6已通过首次control、重复注册和describe不发相机命令、同会话设置只发送一次的断言。_initialize_recovery先调用begin_builtin_camera_session清空内存会话记录，再在读取metadata时异常；后续control和新会话设置次数为2的断言尚未执行，固定历史边界也未保存。",
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/044-camctl-devices/artifacts/output.log",
+          "description": "原始堆栈明确列出metadata=None",
+          "line": 61
+        },
+        {
+          "path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/008-camctl-devices/artifacts/output.log",
+          "description": "当前同点重现",
+          "line": 60
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/acceptance/test_acceptance.py",
+          "description": "真实环境丢弃已经核验的OwnedConnection外壳和元信息",
+          "line": 92
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/acceptance/test_acceptance.py",
+          "description": "None的直接来源",
+          "line": 138
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/persistence/runtime.py",
+          "description": "metadata类型为DatabaseMetadata，非可选",
+          "line": 111
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/persistence/runtime.py",
+          "description": "生产open_existing读取、核验并返回实际元信息",
+          "line": 441
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/bootstrap/lifecycle.py",
+          "description": "会话恢复的实际参数要求与格式分支",
+          "line": 622
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/architecture/camera-parameters.md",
+          "description": "新会话清空记录并在拍摄时执行设置的有效契约",
+          "line": 100
+        },
+        {
+          "path": "/tmp/camctl-diag-components-evidence/32-33-real-metadata-facts.json",
+          "description": "当前真实数据库元信息有效，格式5，software_recoveries为空",
+          "line": 3
+        }
+      ],
+      "repair_owner": "devices会话测试使用的acceptance共享环境和包装帮助函数。",
+      "repair_recommendation": "让会话初始化用例继续持有environment打开时得到的真实OwnedConnection及其元信息；若调整共享夹具，审计依赖_owned(environment)的其他测试并保持连接由原持有者关闭。生产open_existing对缺失或无效元信息继续明确拒绝，不能将None视作旧格式绕过软件恢复分支。",
+      "acceptance": [
+        "两款相机分别验证首次会话设置一次，重复注册与describe无设备I/O，同会话后续control不重复固定设置。",
+        "通过真实、已校验且包含DatabaseMetadata的OwnedConnection执行会话初始化，完成固定历史边界；新会话下一次control再发固定设置，计数为2。",
+        "真实格式3及以上保留software_recoveries查询和恢复占用语义；有效旧格式按其既定能力执行。",
+        "审计共享_owned帮助函数的已知调用边界，避免其他消费元信息的集成路径继续得到None。"
+      ],
+      "uncertainties": [
+        "本次未修改夹具，因此新会话重发设置的最后一个断言尚无当前通过记录。",
+        "堆栈能确认测试提供不合法对象；本结论不主张增加生产None兼容分支。"
+      ]
+    },
+    {
+      "diagnosis_id": 33,
+      "nodeid": "apps/camctl/tests/integration/devices/test_adb_camera_registration.py::test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-osmo360-ii]",
+      "root_cause": "测试借用acceptance环境：environment通过open_existing取得有元信息的OwnedConnection，却只yield其connection和context；_owned(environment)随后重新包装连接并明确设置metadata=None。该不完整对象传给_initialize_recovery，后者需要按真实format_version决定是否读取software_recoveries，于metadata.format_version处抛出AttributeError。None来自测试帮助函数，不来自数据库或生产打开路径。",
+      "classification": "测试夹具违反OwnedConnection非空元信息契约",
+      "production_defect_confirmed": false,
+      "current_reproduction": {
+        "status": "在1973dc05复诊重现",
+        "outcome": "failed",
+        "first_failure": "AttributeError: 'NoneType' object has no attribute 'format_version'",
+        "artifact": "/tmp/camctl-44-diagnostic-current-20261025/tasks/008-camctl-devices/artifacts/output.log"
+      },
+      "first_failure_and_reachability": "dji-osmo360-ii已通过首次control、重复注册和describe不发相机命令、同会话设置只发送一次的断言。_initialize_recovery先调用begin_builtin_camera_session清空内存会话记录，再在读取metadata时异常；后续control和新会话设置次数为2的断言尚未执行，固定历史边界也未保存。",
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/044-camctl-devices/artifacts/output.log",
+          "description": "原始堆栈明确列出metadata=None",
+          "line": 119
+        },
+        {
+          "path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/008-camctl-devices/artifacts/output.log",
+          "description": "当前同点重现",
+          "line": 120
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/acceptance/test_acceptance.py",
+          "description": "真实环境丢弃已经核验的OwnedConnection外壳和元信息",
+          "line": 92
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/acceptance/test_acceptance.py",
+          "description": "None的直接来源",
+          "line": 138
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/persistence/runtime.py",
+          "description": "metadata类型为DatabaseMetadata，非可选",
+          "line": 111
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/persistence/runtime.py",
+          "description": "生产open_existing读取、核验并返回实际元信息",
+          "line": 441
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/bootstrap/lifecycle.py",
+          "description": "会话恢复的实际参数要求与格式分支",
+          "line": 622
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/architecture/camera-parameters.md",
+          "description": "新会话清空记录并在拍摄时执行设置的有效契约",
+          "line": 100
+        },
+        {
+          "path": "/tmp/camctl-diag-components-evidence/32-33-real-metadata-facts.json",
+          "description": "当前真实数据库元信息有效，格式5，software_recoveries为空",
+          "line": 23
+        }
+      ],
+      "repair_owner": "devices会话测试使用的acceptance共享环境和包装帮助函数。",
+      "repair_recommendation": "让会话初始化用例继续持有environment打开时得到的真实OwnedConnection及其元信息；若调整共享夹具，审计依赖_owned(environment)的其他测试并保持连接由原持有者关闭。生产open_existing对缺失或无效元信息继续明确拒绝，不能将None视作旧格式绕过软件恢复分支。",
+      "acceptance": [
+        "两款相机分别验证首次会话设置一次，重复注册与describe无设备I/O，同会话后续control不重复固定设置。",
+        "通过真实、已校验且包含DatabaseMetadata的OwnedConnection执行会话初始化，完成固定历史边界；新会话下一次control再发固定设置，计数为2。",
+        "真实格式3及以上保留software_recoveries查询和恢复占用语义；有效旧格式按其既定能力执行。",
+        "审计共享_owned帮助函数的已知调用边界，避免其他消费元信息的集成路径继续得到None。"
+      ],
+      "uncertainties": [
+        "本次未修改夹具，因此新会话重发设置的最后一个断言尚无当前通过记录。",
+        "堆栈能确认测试提供不合法对象；本结论不主张增加生产None兼容分支。"
+      ]
+    }
+  ]
+}

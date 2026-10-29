@@ -3,6 +3,8 @@ import json
 from dataclasses import replace
 from decimal import Decimal
 
+
+from ..support.capture import capture_database, capture_runtime
 import pytest
 
 from camctl.capture.handlers import CaptureRuntime, _stop_call, capture_handler
@@ -16,7 +18,6 @@ from .test_call_result_save import _diagnosed_stop, ReturnedCall, _CALL_EVIDENCE
 from .test_input_copy import _CONTENT, pipeline  # noqa: F401
 from .test_media_flow import ProbeTools, ReadDriverDouble, _Digest
 from .test_capture_contract import _NOW, ResultsDouble
-from support.business_database import inline_business_database
 from camctl.capture.media import MediaPolicy
 from camctl.capture.media_flow import MediaFlow, DriverReadSessions
 from camctl.capture.timelapse import CaptureWaitConfig
@@ -30,20 +31,21 @@ from camctl.scheduling.rules import LaunchWindow
 pytestmark = pytest.mark.asyncio
 
 
-def _configured(owned, driver, *, maximum=3):
-    return CaptureRuntime(database=inline_business_database(owned),
-        scheduling=SchedulingRepository(), operations=OperationRepository(),
-        capture=CaptureRepository(), timelapse=TimelapseRepository(), driver=driver,
-        results=ResultsDouble({}), evidence=_CALL_EVIDENCE,
-        wall_us=lambda: _NOW, monotonic_ns=lambda: 7_000_000_000,
-        window_of=lambda action: LaunchWindow(action['scheduled_at'],
-            action['scheduled_at'] + action['max_delay_ms'] * 1000),
+async def _configured(owned, driver, *, maximum=3):
+    return (await capture_runtime(
+        owned,
+        driver=driver,
+        results=ResultsDouble({}),
+        evidence=_CALL_EVIDENCE,
+        wall_us=lambda: _NOW,
+        monotonic_ns=lambda: 7_000_000_000,
         wait_config=lambda _: CaptureWaitConfig(600_000, 0),
-        start_config=AttemptConfig(maximum, Decimal('0.75'), Decimal(1)))
+        start_config=AttemptConfig(maximum, Decimal('0.75'), Decimal(1)),
+    ))
 
 
-def _flow(pipeline, driver, tools):
-    database = inline_business_database(pipeline[0])
+async def _flow(pipeline, driver, tools):
+    database = await capture_database(pipeline[0])
     return MediaFlow(database=database, roots=pipeline[1],
         sessions=DriverReadSessions(database, driver, ticket=None), tools=tools,
         policy=MediaPolicy(Decimal(2)), occurred_at=lambda: 1_750_000_100_000_000,
@@ -53,8 +55,8 @@ def _flow(pipeline, driver, tools):
 async def test_start_call_failure_and_final_exhaustion_share_one_full_diagnostic(tmp_path):
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result(no_effect=True,
-            error=ErrorValue('transport_timeout', 'transport', {'timeout_s': Decimal('0.75')}))), maximum=1)
+        runtime = (await _configured(owned, StartDriver(_result(no_effect=True,
+            error=ErrorValue('transport_timeout', 'transport', {'timeout_s': Decimal('0.75')}))), maximum=1))
         records = []
         with error_diagnostics_context(None, records.append):
             async with diagnostic_scope():
@@ -72,7 +74,7 @@ async def test_start_call_failure_and_final_exhaustion_share_one_full_diagnostic
 async def test_confirmed_stop_keeps_actual_call_error_and_tool_stderr(tmp_path):
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result(confirmed=True)))
+        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
         await capture_handler('camera_record')(12, runtime)
         runtime.stop_config = AttemptConfig(1, Decimal('0.125'), Decimal(1))
         actual = _diagnosed_stop(runtime)
@@ -104,7 +106,7 @@ async def test_media_check_failure_is_logged_after_real_read_and_reliable_save(p
     records = []
     with error_diagnostics_context(None, records.append):
         async with diagnostic_scope():
-            step = await run_recording_media(_flow(pipeline, ReadDriverDouble(_CONTENT), tools), 1, 1, 11)
+            step = await run_recording_media((await _flow(pipeline, ReadDriverDouble(_CONTENT), tools)), 1, 1, 11)
             assert not records
     assert step.phase is CheckExecutionPhase.CHECK_TERMINAL
     document, = [json.loads(record) for record in records]

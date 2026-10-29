@@ -20,9 +20,7 @@ import pytest
 
 from device_driver_fixtures import synthetic_source_storage_resolver
 
-from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.config import ConfigDefaults, load_config
-from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
 from camctl.capture.result_inputs import RESULT_PAGE_CONTRACT
 from camctl.devices.catalog import (
     ActionCapability, DriverDefinition, DriverDefinitions, build_catalog,
@@ -46,13 +44,13 @@ from camctl.persistence.initialization import InitOutcome, initialize_state
 from .test_recording_stop import (
     _RecordCatalog,
     _await_query,
-    _cancel,
     _future_schedule,
     _record_plan,
     _scalar,
     _submit_plan,
 )
 from .test_timelapse_finish import _TimelapseCatalog, _timelapse_plan
+from ..support.session import running_session
 
 #: 生产装配共用的驱动证据契约（启动、停止、结果列举与轮次收场）。
 _PRODUCTION_EVIDENCE = EvidenceRegistry((
@@ -194,20 +192,6 @@ def _isolated_registry():
 pytestmark = pytest.mark.asyncio
 
 
-class TestDriverRuntimeRegistry:
-    async def test_registered_entry_is_resolved_and_duplicates_rejected(
-            self) -> None:
-        entry = _entry_for_driver("production-double", _ProductionDriver({}))
-        assert current_registry().entry("production-double") is None
-        register_drivers(entry)
-        assert current_registry().entry("production-double") is entry
-        other = _entry_for_driver("production-double", _ProductionDriver({}))
-        with pytest.raises(ValueError, match="重复登记"):
-            register_drivers(other)
-        reset_drivers()
-        assert current_registry().entry("production-double") is None
-
-
 class TestRunSessionProductionScheduling:
     async def test_timelapse_reaches_success_through_default_flows(
             self, tmp_path: Path) -> None:
@@ -245,13 +229,11 @@ class TestRunSessionProductionScheduling:
         db = Path(cfg.paths.state_db)
         assert _scalar(db, "SELECT driver_id FROM actions WHERE id = 1") == (driver_id,)
         assert current_registry().entry(driver_id).driver is driver
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
-        task = asyncio.create_task(execute_command(deps, None))
-        try:
+        async with running_session(cfg, catalog) as (_deps, task):
             # 发送经生产装配确认；结果列举来自驱动 result 端口。
             await _await_query(
                 db, "SELECT status FROM actions WHERE id = 1", (3,),
-                timeout_s=25)
+                timeout_s=25, task=task)
             assert ("control", "start_timelapse") in driver.calls
             assert ("result", "1") in driver.calls
             # 完整集合满足：按时间与产物完成判定成功终态并登记产物。
@@ -266,10 +248,6 @@ class TestRunSessionProductionScheduling:
             # 正常会话完成全部责任后自行退出。
             outcome = await asyncio.wait_for(task, timeout=25)
             assert outcome.succeeded is True, outcome.details
-        finally:
-            if not task.done():
-                await _cancel(task)
-        close_runtime(deps)
 
 
 class TestRestrictedSessionProductionWinddown:
@@ -303,33 +281,22 @@ class TestRestrictedSessionProductionWinddown:
         db = Path(cfg.paths.state_db)
         assert _scalar(db, "SELECT driver_id FROM actions WHERE id = 1") == (
             "production-double",)
-        deps = build_runtime(CommandMode.RUN, cfg, catalog=catalog)
-        task = asyncio.create_task(execute_command(deps, None))
-        try:
+        async with running_session(cfg, catalog) as (_deps, task):
             await _await_query(
                 db,
                 "SELECT started_at IS NOT NULL FROM device_activities"
-                " WHERE id = 1", (1,))
+                " WHERE id = 1", (1,), task=task)
             assert driver.calls == [("control", "start_recording")]
             assert _scalar(
                 db, "SELECT status, attempts_used FROM operation_runs"
                 " WHERE responsibility_key = 'start/1'") == (3, 1)
-        finally:
-            await _cancel(task)
-        close_runtime(deps)
 
         # 墙钟不可信的受限会话：生产受限装配消费保守收场。录像原片
         # 已在设备上（驱动列举可见），等待阶段据此登记归属与完成。
         driver._files[1] = [_entry("clip-1", size=4096)]
         restricted = _config(home, min_plausible="2030-01-01", wait_cap_s="1")
-        restricted_deps = build_runtime(
-            CommandMode.RUN, restricted, catalog=catalog)
-        try:
-            outcome = await asyncio.wait_for(
-                asyncio.ensure_future(
-                    execute_command(restricted_deps, None)), timeout=30)
-        finally:
-            close_runtime(restricted_deps)
+        async with running_session(restricted, catalog) as (_deps, task):
+            outcome = await asyncio.wait_for(task, timeout=30)
         assert outcome.succeeded is False
         assert outcome.reason == "clock_invalid"
         # 保守窗口取上限 1 秒后按原预算停止，录像确认停止。

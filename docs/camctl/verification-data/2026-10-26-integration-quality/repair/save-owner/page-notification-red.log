@@ -1,0 +1,44 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_ test_result_page_recovery_notification_error_still_applies_waiting_consumer __
+
+    async def test_result_page_recovery_notification_error_still_applies_waiting_consumer():
+        from decimal import Decimal
+        from camctl.capture.result_inputs import page_from_outcome
+        from camctl.persistence.models import _attach_db_outcome
+    
+        request = page_request()
+        pending = PendingResultScan(request.ticket, None, Decimal(10))
+        pending.saves.begin(request)
+        response = ResultPageRef(request.ticket, 1, 10,
+            page_from_outcome(request.ticket, request.outcome.outcome).next_cursor)
+        failure = RuntimeError("已提交后的通知失败")
+        _attach_db_outcome(failure, DbOutcome(DbOutcomeKind.COMPLETED, response))
+        database = _database()
+        database.read.return_value = None
+        runtime = SimpleNamespace(database=database,
+            capture=create_autospec(CaptureRepository, instance=True, spec_set=True))
+        entered, release = asyncio.Event(), asyncio.Event()
+    
+        async def write(callback, **kwargs):
+            entered.set()
+            await release.wait()
+            raise failure
+    
+        database.write.side_effect = write
+        recovery = asyncio.create_task(result_scans.resume_result_page_saves(database,
+            pending_scans={7: pending}, repository=runtime.capture))
+        await entered.wait()
+        normal = await _join(asyncio.create_task(result_scans._accept_saved_page(pending, runtime, None)))
+        release.set()
+        results = await asyncio.gather(recovery, normal, return_exceptions=True)
+    
+        assert results == [failure, failure]
+>       assert pending.page_no == 2 and pending.last_ref is response
+E       AssertionError: assert (1 == 2)
+E        +  where 1 = PendingResultScan(ticket=AttemptTicket(attempt_id=1, operation='result', target_id='71', responsibility_key='results/7...eline_exhausted=False, candidate_last_key=None, history_owner=None, history_initialized=False, verified_last_ref=None)).page_no
+
+apps/camctl/tests/unit/capture/test_capture_save_coordination.py:129: AssertionError
+=========================== short test summary info ============================
+FAILED apps/camctl/tests/unit/capture/test_capture_save_coordination.py::test_result_page_recovery_notification_error_still_applies_waiting_consumer
+1 failed in 0.96s

@@ -1,0 +1,15 @@
+[
+  {
+    "label": "package-resources",
+    "command": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/030-root-test_camctl_c_module_roundtrip-shard-3/source/apps/camctl/scripts/sync_resources.py"
+    ],
+    "cwd": "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/030-root-test_camctl_c_module_roundtrip-shard-3/source",
+    "started_utc": "2026-10-26T01:09:14.467288+00:00",
+    "pid": 2050217,
+    "exit_code": 0,
+    "finished_utc": "2026-10-26T01:09:14.509402+00:00",
+    "wall_seconds": 0.04206914399401285
+  }
+]

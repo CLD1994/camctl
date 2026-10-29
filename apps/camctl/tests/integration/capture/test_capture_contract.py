@@ -13,6 +13,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from ..support.result_cases import result_case, result_case_for
 
 from camctl.capture.handlers import CaptureRuntime, ListedResult, capture_handler
 from camctl.capture.result_inputs import RESULT_PAGE_CONTRACT, page_from_outcome
@@ -126,7 +127,7 @@ class ResultsDouble:
         self.set_finalized = set_finalized
 
     async def list_page(self, ticket, *, cursor, timeout_s, output_scope=None,
-                        completion_context=None, video_result_mode=None):
+                        completion_context=None, video_result_mode=None, reading_context=None):
         if cursor is not None:
             raise ValueError("替身单批完整集合没有后续游标")
         listed = await self.list_round(ticket, timeout_s=timeout_s)
@@ -328,35 +329,31 @@ def _seed_processing(connection, action_id: int) -> None:
     )
 
 
-def _runtime(owned, *, driver=None, files=None, wall=None,
-             recording_state=None, results=None,
-             listing_cache=None, check_config=None,
-             stop_config=None) -> CaptureRuntime:
-    from camctl.scheduling.rules import LaunchWindow
+async def _runtime(owned, *, driver=None, files=None, wall=None,
+                   recording_state=None, results=None,
+                   listing_cache=None, check_config=None, stop_config=None,
+                   evidence=None, directory=None, **options):
+    from ..support.capture import capture_runtime
 
     result_port = results if results is not None else ResultsDouble(files or {})
-
-    return CaptureRuntime(
-        owned=owned,
-        scheduling=SchedulingRepository(),
-        operations=OperationRepository(),
-        capture=CaptureRepository(),
-        timelapse=TimelapseRepository(),
+    runtime = await capture_runtime(
+        owned,
         driver=driver if driver is not None else DriverDouble(),
         results=result_port,
-        evidence=_PAGE_EVIDENCE if isinstance(result_port, ResultsDouble) else _EVIDENCE,
-        wall_us=lambda: wall if wall is not None else _NOW,
-        monotonic_ns=lambda: 5_000_000_000,
-        window_of=lambda action: LaunchWindow(
-            scheduled_at=action["scheduled_at"],
-            window_end=action["scheduled_at"] + action["max_delay_ms"] * 1000),
-        wait_config=lambda params: CaptureWaitConfig(
-            target_duration_ms=600_000, driver_margin_ms=0),
-        recording_state=recording_state,
-        listing_cache=listing_cache,
-        **({"check_config": check_config} if check_config is not None else {}),
-        **({"stop_config": stop_config} if stop_config is not None else {}),
+        evidence=evidence if evidence is not None else (
+            _PAGE_EVIDENCE if isinstance(result_port, ResultsDouble) else _EVIDENCE),
+        directory=directory,
+        wall_us=options.pop("wall_us", lambda: wall if wall is not None else _NOW),
+        monotonic_ns=options.pop("monotonic_ns", lambda: 5_000_000_000),
+        check_config=check_config,
+        stop_config=stop_config,
+        **options,
     )
+    if recording_state is not None:
+        runtime.recording_state = recording_state
+    if listing_cache is not None:
+        runtime.listing_cache = listing_cache
+    return runtime
 
 
 def _value(owned, sql: str, *params):
@@ -368,393 +365,372 @@ def _value(owned, sql: str, *params):
 pytestmark = pytest.mark.asyncio
 
 
+async def _handler_world(tmp_path, consumer):
+    from decimal import Decimal
+    from camctl.operations.attempts import AttemptConfig
+    return await result_case_for().world(tmp_path, consumer, start=False,
+        assembly_options={"check_config": AttemptConfig(3, Decimal(10), Decimal(3))})
+
+
+async def _interrupted_start_world(tmp_path, consumer, monkeypatch, *, qualified=False):
+    from camctl.capture.recovery import RecoveryBoundary
+    from camctl.persistence.models import DbOutcomeKind
+    case = result_case_for()
+    contract = EvidenceContract("adb_foreground_recovery", 1, "control", frozenset())
+    owned, runtime, aid, handler = await case.world(tmp_path, consumer, start=False,
+        assembly_options={"control_recovery": qualified},
+        evidence_contracts=(contract,) if qualified else ())
+    class StartIntentSaved(Exception):
+        pass
+    original = SchedulingRepository.grant_start
+    def after_saved(repository, request, key, current):
+        receipt = original(repository, request, key, current)
+        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+        assert receipt.value.ticket is not None
+        return replace(receipt, handoff_error=StartIntentSaved())
+    with monkeypatch.context() as patch:
+        patch.setattr(SchedulingRepository, "grant_start", after_saved)
+        with pytest.raises(StartIntentSaved):
+            await capture_handler(handler)(aid, runtime)
+    horizon, = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()
+    runtime = await case.reopen(owned, cold=True, assembly_options={
+        "recovery_boundary": RecoveryBoundary.HOST_LOCAL_SETTLED if qualified else RecoveryBoundary.UNCONFIRMED,
+        "recovery_max_event_id": lambda: horizon,
+    })
+    return owned, runtime, aid, handler
+
+
 class TestPhotoHandler:
     async def test_normal_path_registers_output_and_succeeds(self, tmp_path: Path):
-        owned = _environment(tmp_path, _PHOTO)
+        owned, runtime, aid, handler = await _handler_world(tmp_path, "photo")
+        result_case_for().results.delegate = ResultsDouble({aid: (_entry("shot-1", kind=ResultFileKind.PHOTO),)})
         try:
-            runtime = _runtime(owned, files={11: (_entry("shot-1", kind=ResultFileKind.PHOTO),)})
-            await capture_handler("camera_take_photo")(11, runtime)
-            assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (3,)
-            output = _value(
-                owned,
-                "SELECT o.kind, o.device_file_id, f.completion_state, f.size_bytes,"
-                " f.source_action_id FROM outputs o JOIN device_files f"
-                " ON f.id = o.device_file_id WHERE o.source_action_id = 11")
-            assert output == (1, 1, 3, 4096, 11)
-            # 启动调用与首轮结果核实各占一次尝试。
-            assert _value(
-                owned, "SELECT COUNT(*) FROM operation_attempts") == (2,)
-            # 成功链收场活动：调用成功返回即结束证据，占用同链释放。
-            activity = _value(
-                owned, "SELECT activity_state, occupancy_state, dispatch_state"
-                " FROM device_activities WHERE id = 11")
+            await capture_handler(handler)(aid, runtime)
+            assert _value(owned, "SELECT status FROM actions WHERE id=?", aid) == (3,)
+            output = _value(owned,
+                "SELECT o.kind,o.device_file_id,f.completion_state,f.size_bytes,f.source_action_id"
+                " FROM outputs o JOIN device_files f ON f.id=o.device_file_id WHERE o.source_action_id=?", aid)
+            assert output == (1, 1, 3, 4096, aid)
+            assert _value(owned, "SELECT COUNT(*) FROM operation_attempts") == (2,)
+            activity = _value(owned, "SELECT activity_state,occupancy_state,dispatch_state FROM device_activities WHERE action_id=?", aid)
             assert activity == (3, 2, 3)
-            # 再次推进幂等：活动已收场，不产生新的释放事件。
-            await capture_handler("camera_take_photo")(11, runtime)
-            assert _value(
-                owned, "SELECT COUNT(*) FROM history_events WHERE event_type = 13"
-                " AND json_extract(body_json, '$.reason') = 3") == (1,)
+            await capture_handler(handler)(aid, runtime)
+            assert _value(owned, "SELECT COUNT(*) FROM history_events WHERE event_type=13 AND json_extract(body_json,'$.reason')=3") == (1,)
         finally:
             owned.connection.close()
+
 
     async def test_failed_call_keeps_files_and_fails_action(self, tmp_path: Path):
-        owned = _environment(tmp_path, _PHOTO)
+        owned, runtime, aid, handler = await _handler_world(tmp_path, "photo")
+        case = result_case_for()
+        actual = case.driver.control.return_value.outcome
+        case.driver.control.return_value = DeviceCallResult.from_outcome(replace(actual,
+            status=AttemptStatus.FAILED, error=ErrorValue("device_error", "device")))
+        case.results.delegate = ResultsDouble({aid: (_entry("shot-1", kind=ResultFileKind.PHOTO),)})
         try:
-            runtime = _runtime(
-                owned, driver=DriverDouble(error={"code": "device_error"}),
-                files={11: (_entry("shot-1", kind=ResultFileKind.PHOTO),)})
-            await capture_handler("camera_take_photo")(11, runtime)
-            assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (4,)
-            row = _value(
-                owned, "SELECT error_code, error_details_json FROM actions WHERE id = 11")
+            await capture_handler(handler)(aid, runtime)
+            assert _value(owned, "SELECT status FROM actions WHERE id=?", aid) == (4,)
+            row = _value(owned, "SELECT error_code,error_details_json FROM actions WHERE id=?", aid)
             assert row[0] == 13
-            # 失败仍登记完整且归属明确的文件，不删除。
-            assert _value(
-                owned, "SELECT completion_state FROM device_files"
-                " WHERE observer_action_id = 11") == (3,)
+            assert _value(owned, "SELECT completion_state FROM device_files WHERE observer_action_id=?", aid) == (3,)
             assert _value(owned, "SELECT COUNT(*) FROM outputs") == (1,)
         finally:
             owned.connection.close()
+
 
     async def test_incomplete_listing_waits_then_recovers(self, tmp_path: Path):
-        owned = _environment(tmp_path, _PHOTO)
+        owned, runtime, aid, handler = await _handler_world(tmp_path, "photo")
+        results = ResultsDouble({}, set_finalized=False)
+        case = result_case_for()
+        case.results.delegate = results
         try:
-            runtime = _runtime(owned, files={})
-            runtime.results.set_finalized = False
-            now = [5_000_000_000]
-            runtime.monotonic_ns = lambda: now[0]
-            await capture_handler("camera_take_photo")(11, runtime)
-            assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (2,)
-            # 启动调用与首轮核实（可靠返回但产物暂不齐备）各占一次尝试。
+            await capture_handler(handler)(aid, runtime)
+            assert _value(owned, "SELECT status FROM actions WHERE id=?", aid) == (2,)
             assert _value(owned, "SELECT COUNT(*) FROM operation_attempts") == (2,)
-            # 产物暂不齐备：间隔未到不再查询，到时沿同一责任登记新轮次。
-            runtime.results.files_by_action[11] = (
-                _entry("shot-1", kind=ResultFileKind.PHOTO),)
-            await capture_handler("camera_take_photo")(11, runtime)
-            assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (2,)
+            results.files_by_action[aid] = (_entry("shot-1", kind=ResultFileKind.PHOTO),)
+            await capture_handler(handler)(aid, runtime)
+            assert _value(owned, "SELECT status FROM actions WHERE id=?", aid) == (2,)
             assert _value(owned, "SELECT COUNT(*) FROM operation_attempts") == (2,)
-            now[0] += 3_000_000_000
-            runtime.results.set_finalized = True
-            await capture_handler("camera_take_photo")(11, runtime)
-            assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (3,)
+            case.clock.monotonic += 3_000_000_000
+            results.set_finalized = True
+            await capture_handler(handler)(aid, runtime)
+            assert _value(owned, "SELECT status FROM actions WHERE id=?", aid) == (3,)
             assert _value(owned, "SELECT COUNT(*) FROM operation_attempts") == (3,)
-            # 终态后再次推进不产生新事实。
-            await capture_handler("camera_take_photo")(11, runtime)
+            await capture_handler(handler)(aid, runtime)
             assert _value(owned, "SELECT COUNT(*) FROM outputs") == (1,)
         finally:
             owned.connection.close()
 
-    async def test_invalid_observation_settles_start_and_fails_action(
-            self, tmp_path: Path):
-        owned = _environment(tmp_path, _PHOTO)
+
+    async def test_invalid_observation_settles_start_and_fails_action(self, tmp_path: Path):
+        owned, runtime, aid, handler = await _handler_world(tmp_path, "photo")
+        case = result_case_for()
+        actual = case.driver.control.return_value.outcome
+        observation, = actual.observations
+        case.driver.control.return_value = DeviceCallResult.from_outcome(replace(actual,
+            observations=(replace(observation, data={"activity_id": "99"}),)))
+        case.results.delegate = ResultsDouble({aid: (_entry("shot-1", kind=ResultFileKind.PHOTO),)})
         try:
-            # 驱动确认观察的身份与操作目标（活动 11）不符：结果不可
-            # 采纳，调用按失败收场，不遗留执行中的启动流程。
-            runtime = _runtime(
-                owned, driver=DriverDouble(identity_override="99"),
-                files={11: (_entry("shot-1", kind=ResultFileKind.PHOTO),)})
-            await capture_handler("camera_take_photo")(11, runtime)
-            start_run = _value(
-                owned, "SELECT status, error_json FROM operation_runs"
-                " WHERE responsibility_key = 'start/11'")
+            await capture_handler(handler)(aid, runtime)
+            start_run = _value(owned, "SELECT status,error_json FROM operation_runs WHERE responsibility_key=?", f"start/{aid}")
             assert start_run[0] == 4
             assert start_run[1] is not None
-            attempt = _value(
-                owned, "SELECT a.status FROM operation_attempts a"
-                " JOIN operation_runs r ON a.run_id = r.id"
-                " WHERE r.responsibility_key = 'start/11'")
+            attempt = _value(owned, "SELECT a.status FROM operation_attempts a JOIN operation_runs r ON a.run_id=r.id WHERE r.responsibility_key=?", f"start/{aid}")
             assert attempt == (3,)
-            # 坏结果按调用失败进入决策：保留完整文件并失败动作。
-            assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (4,)
+            assert _value(owned, "SELECT status FROM actions WHERE id=?", aid) == (4,)
             assert _value(owned, "SELECT COUNT(*) FROM outputs") == (1,)
         finally:
             owned.connection.close()
 
-    async def test_open_start_with_outputs_recovers_success(self, tmp_path: Path):
-        owned = _environment(tmp_path, _PHOTO)
+
+    async def test_open_start_with_outputs_recovers_success(self, tmp_path: Path, monkeypatch):
+        owned, runtime, aid, handler = await _interrupted_start_world(tmp_path, "photo", monkeypatch)
+        result_case_for().results.delegate = ResultsDouble({aid: (_entry("shot-1", kind=ResultFileKind.PHOTO),)})
         try:
-            _seed_open_start(owned.connection, 11)
-            owned.connection.commit()
-            runtime = _runtime(owned, files={11: (
-                _entry("shot-1", kind=ResultFileKind.PHOTO),)})
-            # 在途启动尝试没有可采纳的响应结果：不折叠为失败，由
-            # 产物核实证明完成。
-            await capture_handler("camera_take_photo")(11, runtime)
-            assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (3,)
+            await capture_handler(handler)(aid, runtime)
+            assert _value(owned, "SELECT status FROM actions WHERE id=?", aid) == (3,)
             assert _value(owned, "SELECT COUNT(*) FROM outputs") == (1,)
-            # 动作终态后启动流程伴随收场，会话收尾计数可归零。
-            assert _value(
-                owned, "SELECT status FROM operation_runs"
-                " WHERE responsibility_key = 'start/11'") == (3,)
+            assert _value(owned, "SELECT status FROM operation_runs WHERE responsibility_key=?", f"start/{aid}") == (3,)
         finally:
             owned.connection.close()
 
-    async def test_open_start_without_outputs_keeps_verifying(
-            self, tmp_path: Path):
-        owned = _environment(tmp_path, _PHOTO)
+
+    async def test_open_start_without_outputs_keeps_verifying(self, tmp_path: Path, monkeypatch):
+        owned, runtime, aid, handler = await _interrupted_start_world(tmp_path, "photo", monkeypatch)
+        result_case_for().results.delegate = ResultsDouble({}, set_finalized=False)
         try:
-            _seed_open_start(owned.connection, 11)
-            owned.connection.commit()
-            runtime = _runtime(owned, files={})
-            await capture_handler("camera_take_photo")(11, runtime)
-            # 结果未知且暂无产物：保持运行等待核实轮次，不折叠失败。
-            assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (2,)
-            start_run = _value(
-                owned, "SELECT status FROM operation_runs"
-                " WHERE responsibility_key = 'start/11'")
+            await capture_handler(handler)(aid, runtime)
+            assert _value(owned, "SELECT status FROM actions WHERE id=?", aid) == (2,)
+            start_run = _value(owned, "SELECT status FROM operation_runs WHERE responsibility_key=?", f"start/{aid}")
             assert start_run == (2,)
         finally:
             owned.connection.close()
 
 
+
 class TestRecordHandler:
     async def test_start_then_stopped_tail_finishes(self, tmp_path: Path):
-        owned = _environment(tmp_path, _RECORD)
+        owned, runtime, aid, handler = await _handler_world(tmp_path, "record")
+        case = result_case_for()
         try:
-            runtime = _runtime(owned, files={})
-            # 第一次推进：尚未启动，只发起启动调用。
-            await capture_handler("camera_record")(12, runtime)
-            assert _value(
-                owned, "SELECT COUNT(*) FROM operation_attempts"
-                " a JOIN operation_runs r ON a.run_id = r.id"
-                " WHERE r.responsibility_key = 'start/12'") == (1,)
-            assert _value(owned, "SELECT status FROM actions WHERE id = 12") == (2,)
-            # 停止与处理责任保存后，第二次推进经生产装载器走尾段。
-            _seed_processing(owned.connection, 12)
-            _seed_stopped_recording(owned.connection, 12)
-            owned.connection.commit()
-            runtime.results.files_by_action[12] = (_entry("clip-1"),)
-            await capture_handler("camera_record")(12, runtime)
-            assert _value(owned, "SELECT status FROM actions WHERE id = 12") == (3,)
-            output = _value(
-                owned, "SELECT kind, device_file_id FROM outputs"
-                " WHERE source_action_id = 12")
+            await capture_handler(handler)(aid, runtime)
+            assert _value(owned, "SELECT COUNT(*) FROM operation_attempts a JOIN operation_runs r ON a.run_id=r.id WHERE r.responsibility_key=?", f"start/{aid}") == (1,)
+            assert _value(owned, "SELECT status FROM actions WHERE id=?", aid) == (2,)
+            case.clock.wall = _NOW + 60_000_000
+            case.clock.monotonic = 65_000_000_000
+            case.results.delegate = ResultsDouble({aid: (_entry("clip-1"),)})
+            await capture_handler(handler)(aid, runtime)
+            assert _value(owned, "SELECT status FROM actions WHERE id=?", aid) == (3,)
+            output = _value(owned, "SELECT kind,device_file_id FROM outputs WHERE source_action_id=?", aid)
             assert output == (1, 1)
         finally:
             owned.connection.close()
 
-    async def test_invalid_stop_observation_settles_stop_attempt(
-            self, tmp_path: Path):
-        owned = _environment(tmp_path, _RECORD)
+
+    async def test_invalid_stop_observation_settles_stop_attempt(self, tmp_path: Path):
+        owned, runtime, aid, handler = await _handler_world(tmp_path, "record")
+        case = result_case_for()
         try:
-            # 真实启动后到达停止阶段：驱动停止确认观察的身份与操作
-            # 目标（活动 12）不符时，结果不可采纳，停止尝试按调用失
-            # 败收场，不遗留执行中的停止流程与在途尝试。
-            runtime = _runtime(owned, files={})
-            await capture_handler("camera_record")(12, runtime)
-            from camctl.capture.handlers import _stop_call
-            runtime.stopper = StopDouble(identity="99")
-            step = await _stop_call(runtime, runtime.action(12))
-            assert step.phase == "call_failed"
-            stop_run = _value(
-                owned, "SELECT status, error_json FROM operation_runs"
-                " WHERE responsibility_key = 'stop/12'")
+            await capture_handler(handler)(aid, runtime)
+            case.clock.wall = _NOW + 60_000_000
+            case.clock.monotonic = 65_000_000_000
+            actual = case.stopper.stop.return_value.outcome
+            observation, = actual.observations
+            case.stopper.stop.return_value = DeviceCallResult.from_outcome(replace(actual,
+                observations=(replace(observation, data={"activity_id": "99"}),)))
+            await capture_handler(handler)(aid, runtime)
+            stop_run = _value(owned, "SELECT status,error_json FROM operation_runs WHERE responsibility_key=?", f"stop/{aid}")
+            assert json.loads(stop_run[1])["code"] == "invalid_device_result"
             assert stop_run[0] == 4
             assert stop_run[1] is not None
-            attempt = _value(
-                owned, "SELECT a.status FROM operation_attempts a"
-                " JOIN operation_runs r ON a.run_id = r.id"
-                " WHERE r.responsibility_key = 'stop/12'")
+            attempt = _value(owned, "SELECT a.status FROM operation_attempts a JOIN operation_runs r ON a.run_id=r.id WHERE r.responsibility_key=?", f"stop/{aid}")
             assert attempt == (3,)
         finally:
             owned.connection.close()
 
+
     async def test_processing_pending_keeps_action_running(self, tmp_path: Path):
-        owned = _environment(tmp_path, _RECORD)
+        owned, runtime, aid, handler = await _handler_world(tmp_path, "record")
+        result_case_for().results.delegate = ResultsDouble({aid: (_entry("clip-1"),)})
         try:
-            runtime = _runtime(owned, files={12: (_entry("clip-1"),)})
-            await capture_handler("camera_record")(12, runtime)
-            # 启动调用先行保存；处理责任未建立，终态等待媒体链。
-            assert _value(owned, "SELECT status FROM actions WHERE id = 12") == (2,)
+            await capture_handler(handler)(aid, runtime)
+            assert _value(owned, "SELECT status FROM actions WHERE id=?", aid) == (2,)
             assert _value(owned, "SELECT COUNT(*) FROM outputs") == (0,)
         finally:
             owned.connection.close()
 
-    async def test_open_start_without_sent_at_fails_unconfirmed(
-            self, tmp_path: Path):
-        owned = _environment(tmp_path, _RECORD)
-        try:
-            original = _runtime(owned)
-            ticket, reason = original.grant(original.action(12))
-            assert ticket is not None, reason
-            horizon = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
-            runtime = _runtime(owned, files={})
-            from camctl.capture.recovery import RecoveryBoundary
 
-            recovery = EvidenceRegistry((EvidenceContract(
-                "adb_foreground_recovery", 1, "control", frozenset()),))
-            runtime.recovery_boundary = RecoveryBoundary.HOST_LOCAL_SETTLED
-            runtime.recovery_max_event_id = horizon
-            runtime.recovery_evidence_for = lambda binding, operation: (
-                recovery if binding.driver_id == "camctl-adb" and operation == "control" else None)
-            # 旧本地发令已由 host 可靠收场，原结果和发送时间未保存。
-            # 恢复只保存实际采用的未知依据；未装配核实时按无法确认
-            # 失败结束普通 START，不重复启动或补造发送时间。
-            await capture_handler("camera_record")(12, runtime)
-            assert _value(owned, "SELECT status FROM actions WHERE id = 12") == (4,)
-            row = _value(
-                owned, "SELECT error_code, error_details_json"
-                " FROM actions WHERE id = 12")
+    async def test_open_start_without_sent_at_fails_unconfirmed(self, tmp_path: Path, monkeypatch):
+        owned, runtime, aid, handler = await _interrupted_start_world(tmp_path, "record", monkeypatch, qualified=True)
+        try:
+            assert _value(owned, "SELECT COUNT(*) FROM operation_attempts") == (1,)
+            await capture_handler(handler)(aid, runtime)
+            assert _value(owned, "SELECT status FROM actions WHERE id=?", aid) == (4,)
+            row = _value(owned, "SELECT error_code,error_details_json FROM actions WHERE id=?", aid)
             assert row[0] == 12
             assert json.loads(row[1])["reason"] == "start_unknown"
-            # 启动流程伴随收场为无法确认；活动占用保持未知，不释放。
-            assert _value(
-                owned, "SELECT status FROM operation_runs"
-                " WHERE responsibility_key = 'start/12'") == (6,)
-            activity = _value(
-                owned, "SELECT occupancy_state FROM device_activities"
-                " WHERE id = 12")
+            assert _value(owned, "SELECT status FROM operation_runs WHERE responsibility_key=?", f"start/{aid}") == (6,)
+            activity = _value(owned, "SELECT occupancy_state FROM device_activities WHERE action_id=?", aid)
             assert activity == (1,)
-            assert runtime.driver.calls == []
+            assert result_case_for().driver.control.await_count == 0
         finally:
             owned.connection.close()
+
 
 
 class TestTimelapseHandler:
     async def test_send_wait_then_finish(self, tmp_path: Path):
-        owned = _environment(tmp_path, _TIMELAPSE)
+        owned, runtime, aid, handler = await _handler_world(tmp_path, "timelapse")
+        case = result_case_for()
+        case.results.delegate = ResultsDouble({aid: (_entry("sequence-1"),)})
         try:
-            runtime = _runtime(owned, files={13: (_entry("sequence-1"),)})
-            # 第一次推进：发送并安排等待。
-            await capture_handler("camera_timelapse")(13, runtime)
-            assert _value(
-                owned, "SELECT expected_check_at FROM device_activities WHERE id = 13"
-            ) == (_NOW + 600_000_000,)
-            assert _value(owned, "SELECT status FROM actions WHERE id = 13") == (2,)
-            # 到达预计检查时间后再次推进：核实并保存终态。
-            late = _runtime(owned, wall=_NOW + 700_000_000,
-                            files={13: (_entry("sequence-1"),)})
-            late.driver.calls = list(runtime.driver.calls)
-            await capture_handler("camera_timelapse")(13, late)
-            assert _value(owned, "SELECT status FROM actions WHERE id = 13") == (3,)
+            await capture_handler(handler)(aid, runtime)
+            assert _value(owned, "SELECT expected_check_at FROM device_activities WHERE action_id=?", aid) == (_NOW + 600_000_000,)
+            assert _value(owned, "SELECT status FROM actions WHERE id=?", aid) == (2,)
+            case.clock.wall = _NOW + 700_000_000
+            late = await case.reopen(owned, cold=True)
+            await capture_handler(handler)(aid, late)
+            assert _value(owned, "SELECT status FROM actions WHERE id=?", aid) == (3,)
             assert _value(owned, "SELECT COUNT(*) FROM outputs") == (1,)
         finally:
             owned.connection.close()
 
-    async def test_open_start_without_sent_at_fails_unconfirmed(
-            self, tmp_path: Path):
-        owned = _environment(tmp_path, _TIMELAPSE)
+
+    async def test_open_start_without_sent_at_fails_unconfirmed(self, tmp_path: Path, monkeypatch):
+        owned, runtime, aid, handler = await _interrupted_start_world(tmp_path, "timelapse", monkeypatch, qualified=True)
         try:
-            _seed_open_start(owned.connection, 13)
-            owned.connection.commit()
-            runtime = _runtime(owned, files={})
-            # 等待锚点依赖可靠发送时间：可能派发但没有发送时间的
-            # 启动无法核实原任务，按无法确认失败收场；不重复启动、
-            # 不补造时间。
-            await capture_handler("camera_timelapse")(13, runtime)
-            assert _value(owned, "SELECT status FROM actions WHERE id = 13") == (4,)
-            row = _value(
-                owned, "SELECT error_code, error_details_json"
-                " FROM actions WHERE id = 13")
+            await capture_handler(handler)(aid, runtime)
+            assert _value(owned, "SELECT status FROM actions WHERE id=?", aid) == (4,)
+            row = _value(owned, "SELECT error_code,error_details_json FROM actions WHERE id=?", aid)
             assert row[0] == 12
             assert json.loads(row[1])["reason"] == "start_unknown"
-            # 启动流程伴随收场为无法确认；活动占用保持未知，不释放。
-            assert _value(
-                owned, "SELECT status FROM operation_runs"
-                " WHERE responsibility_key = 'start/13'") == (6,)
-            activity = _value(
-                owned, "SELECT occupancy_state FROM device_activities"
-                " WHERE id = 13")
+            assert _value(owned, "SELECT status FROM operation_runs WHERE responsibility_key=?", f"start/{aid}") == (6,)
+            activity = _value(owned, "SELECT occupancy_state FROM device_activities WHERE action_id=?", aid)
             assert activity == (1,)
         finally:
             owned.connection.close()
+
 
 
 class TestDispatchLoop:
     @pytest.mark.parametrize("action_id,action_type", [(11, 1), (12, 2), (13, 3)])
     @pytest.mark.parametrize("canceled", [False, True])
-    async def test_unstarted_action_finishes_without_device_work(
-            self, tmp_path, action_id, action_type, canceled):
-        from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
-
-        owned = _environment(tmp_path, ((action_id, action_type),))
+    async def test_unstarted_action_finishes_without_device_work(self, tmp_path, action_id, action_type, canceled):
+        from .test_natural_wait_time_eligibility import _request_cancel
+        consumer, handler = {1: ("photo", "camera_take_photo"), 2: ("record", "camera_record"),
+                             3: ("timelapse", "camera_timelapse")}[action_type]
+        case = result_case_for()
+        owned, runtime, aid, _ = await case.world(tmp_path, consumer, start=False, max_delay_ms=1000)
+        files = ResultsDouble({})
+        case.results.delegate = files
         try:
             if canceled:
-                owned.connection.execute(
-                    "UPDATE actions SET cancel_requested = 1 WHERE id = ?", (action_id,))
-                owned.connection.commit()
-            driver = DriverDouble()
-            files = ResultsDouble({})
-            runtime = _runtime(owned, driver=driver, results=files, wall=_NOW + 1_000_001)
-            outcomes = await dispatch_ready(
-                runtime, ready_capture_actions(owned.connection, _NOW + 1_000_001))
-            assert len(outcomes) == 1
-            assert not isinstance(outcomes[0][1], BaseException), outcomes
-            assert _value(owned, "SELECT status, execution_started, cancel_requested"
-                          " FROM actions WHERE id = ?", action_id) == (
-                              6 if canceled else 5, 1, int(canceled))
-            assert _value(owned, "SELECT dispatch_state, activity_state, occupancy_state"
-                          " FROM device_activities WHERE action_id = ?", action_id) == (1, 1, 2)
+                await _request_cancel(runtime, aid, [case.clock.wall])
+            case.clock.wall = _NOW + 1_000_001
+            await capture_handler(handler)(aid, runtime)
+            assert _value(owned, "SELECT COUNT(*) FROM actions WHERE type=?", action_type) == (1,)
+            assert not await runtime.database.read(lambda current: current.connection.in_transaction)
+            assert _value(owned, "SELECT status,execution_started,cancel_requested FROM actions WHERE id=?", aid) == (6 if canceled else 5, 1, int(canceled))
+            assert _value(owned, "SELECT dispatch_state,activity_state,occupancy_state FROM device_activities WHERE action_id=?", aid) == (1, 1, 2)
             assert _value(owned, "SELECT COUNT(*) FROM operation_attempts") == (0,)
-            assert driver.calls == []
+            assert case.driver.control.await_count == 0
             assert files.calls == []
         finally:
             owned.connection.close()
 
-    async def test_dispatch_routes_all_capabilities_per_plan(self, tmp_path: Path):
-        owned = _environment(tmp_path, ((11, 1), (12, 2), (13, 3)))
-        # 各能力单独计划，避免同计划更早动作阻塞授予。
-        for action_id in (12, 13):
-            owned.connection.execute(
-                "UPDATE actions SET plan_id = ? WHERE id = ?",
-                (action_id - 10, action_id))
-            owned.connection.execute(
-                "INSERT INTO plans (id, request_id, name, created_at, status,"
-                " created_event_id, last_event_id, change_count)"
-                " VALUES (?, ?, 'p', ?, 1, 1, 1, 1)",
-                (action_id - 10, 9000 + action_id, _NOW))
-        owned.connection.commit()
-        from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
 
-        runtime = _runtime(owned, files={
-            11: (_entry("shot-1", kind=ResultFileKind.PHOTO),)})
-        results = await dispatch_ready(
-            runtime, ready_capture_actions(owned.connection, _NOW))
-        assert [item[0] for item in results] == [11, 12, 13]
-        assert all(item[1].phase == "dispatched" for item in results)
-        # 照片一次推进即终态；录像与延时仍按各自阶段推进。
-        assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (3,)
+    async def test_dispatch_routes_all_capabilities_per_plan(self, tmp_path: Path):
+        from datetime import datetime, timezone
+        from types import SimpleNamespace
+        from camctl.bootstrap.flows import capture_flow
+        from camctl.contracts.pages import Page
+        from camctl.devices.directory import DirectoryRead
+        from .result_consumer_fixtures import ResultCatalog, returned
+        from .test_baseline_prepare import Directory
+
+        class Catalog(ResultCatalog):
+            def device_exists(self, device_id):
+                return device_id in ("cam-1", "cam-2", "cam-3")
+            def driver_id(self, device_id):
+                return "camctl-adb" if self.device_exists(device_id) else None
+            def parameter_definition(self, device_id, action_type, parameter_type):
+                return super().parameter_definition("cam-1", action_type, parameter_type)
+        instant = datetime.fromtimestamp(_NOW // 1_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        extra = [{"name": name, "type": action_type, "device_id": device_id,
+                  "scheduled_at": instant, "params": {"type": parameter_type}, "policy": {"max_delay_ms": 5000}}
+                 for name, action_type, device_id, parameter_type in (
+                     ("录像", "camera_record", "cam-2", "video"),
+                     ("延时", "camera_timelapse", "cam-3", "timelapse"))]
+        case = result_case_for()
+        owned, runtime, aid, _ = await case.world(tmp_path, "photo", start=False, catalog=Catalog(),
+            assembly_options={
+                "devices": {name: {"driver": "camctl-adb"} for name in ("cam-1", "cam-2", "cam-3")},
+                "directory": Directory([lambda request: DirectoryRead(None, None, Page((), None)) for _ in range(3)]),
+            })
+        from camctl.acceptance.input import ParsedInput
+        from camctl.acceptance.service import AcceptanceContext, CommandMode, accept_input
+        from camctl.contracts.values import new_operation_key
+        from camctl.persistence.repositories.acceptance import AcceptanceRepository
+        for request_id, action in enumerate(extra, 2):
+            accepted = await accept_input(ParsedInput(f"capability-{request_id}.json", {
+                "request_id": str(request_id), "created_at": instant,
+                "name": action["name"], "actions": [action]}),
+                AcceptanceContext(CommandMode.RUN, Catalog(), AcceptanceRepository(),
+                    clock=SimpleNamespace(utc_micros=case.clock.wall_us)),
+                new_operation_key(), runtime.database)
+            assert accepted.plan_id is not None, accepted
+        async def control(request):
+            observation = {"take_photo": "photo_taken", "start_recording": "start_confirmed",
+                           "start_timelapse": "timelapse_sent"}[request.operation]
+            return DeviceCallResult.from_outcome(returned("operation", observation, int(request.ticket.target_id)))
+        case.driver.control.side_effect = control
+        case.results.delegate = ResultsDouble({aid: (_entry("shot-1", kind=ResultFileKind.PHOTO),)})
+        flow = capture_flow(case.factory)
+        context = SimpleNamespace(database=runtime.database, clock=SimpleNamespace(utc_micros=case.clock.wall_us))
+        try:
+            await flow(context)
+            await flow.settle()
+            flow.check_completed()
+            assert sorted((call.args[0].operation, call.args[0].binding.device_id) for call in case.driver.control.await_args_list) == [
+                ("start_recording", "cam-2"), ("start_timelapse", "cam-3"), ("take_photo", "cam-1")]
+            assert owned.connection.execute("SELECT attempts_used FROM operation_runs WHERE kind=1 ORDER BY action_id").fetchall() == [(1,), (1,), (1,)]
+            assert _value(owned, "SELECT status FROM actions WHERE id=?", aid) == (3,)
+        finally:
+            try:
+                flow.stop_new_work()
+                await flow.settle()
+                flow.check_completed()
+            finally:
+                owned.connection.close()
+
 
 
 class TestInterruptionRecovery:
     async def test_fault_at_file_registration_rolls_back_and_recovers(
-            self, tmp_path: Path):
-        from dataclasses import replace
-
+            self, tmp_path: Path, result_case, capture_resources):
+        from ..support.capture import capture_runtime
         from camctl.contracts.values import ConsistencyError
         from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
         from camctl.persistence.transaction import saved_transaction_events
+        from .test_result_consumer_saves import _actual, _assert_actual_saved
+        from .test_result_file_recovery import FileObservationSpy, _fresh_runtime, _result_driver
 
-        from ..operations.test_result_reuse import _FaultConnection
-        from .result_consumer_fixtures import consumer_world
-        from .test_result_consumer_saves import _actual, _assert_actual_saved, _result_port
-        from .test_result_file_recovery import FileObservationSpy, _fresh_runtime
-
-        owned, runtime, action_id, handler = await consumer_world(tmp_path, "photo")
+        owned, runtime, action_id, handler = await result_case.world(
+            tmp_path, "photo", result_page_contract=False)
         actual = _actual(action_id, with_files=True, complete=True)
         actual.observations[0].data["entries"][0]["kind"] = "photo"
-        results_driver = _result_port(runtime, actual)
-        spy = FileObservationSpy()
+        results_driver = _result_driver(actual)
+        spy = FileObservationSpy("projection", failures=2)
         runtime.capture = spy
-        original_wall = runtime.wall_us()
-        original_monotonic = runtime.monotonic_ns()
+        original_wall = result_case.clock.wall
+        original_monotonic = result_case.clock.monotonic
         path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
         metadata = owned.metadata
-        runtime.owned = replace(
-            owned, connection=_FaultConnection(owned.connection, "INSERT INTO device_files"))
         try:
             with pytest.raises(ConsistencyError):
                 await capture_handler(handler)(action_id, runtime)
             assert len(spy.requests) == 2 and spy.requests[1] == spy.requests[0]
-            pending, = runtime.pending_start_results.values()
-            ticket, result_key = pending.finish.ticket, pending.key
-            assert pending.finish.outcome.outcome is actual
-            assert pending.finish.occurred_at == original_wall
-            assert pending.returned_ns == original_monotonic
-            file_pending = runtime.pending_file_observations[(action_id, "original")]
-            assert file_pending.entries == pending.result_listing
             request, file_key = spy.requests[0]
-            assert file_pending.command is request and file_pending.key == file_key
             assert request.occurred_at == original_wall and request.locator == {"path": "/DCIM/original.mp4"}
             assert saved_transaction_events(owned.connection, file_key) is None
             assert _value(owned, "SELECT COUNT(*) FROM device_files") == (0,)
@@ -762,18 +738,14 @@ class TestInterruptionRecovery:
             before_attempts = owned.connection.execute(
                 "SELECT id,run_id,attempt_no FROM operation_attempts ORDER BY id").fetchall()
             assert len(before_attempts) == 2
+            original_result = before_attempts[-1]
 
             owned.connection.close()
             owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
             assert owned.metadata == metadata
-            recovery = _fresh_runtime(owned, runtime)
+            recovery = (await _fresh_runtime(owned, runtime))
             recovery.capture = spy
-            recovery.wall_us = lambda: original_wall + 5_000_000
-            assert recovery.pending_start_results is runtime.pending_start_results
-            assert recovery.pending_file_observations is runtime.pending_file_observations
-            assert recovery.retry_gate is runtime.retry_gate
-            original_held = recovery.pending_start_results[(ticket.run_id, ticket.attempt_id)]
-            assert original_held is pending and original_held.key == result_key
+            result_case.clock.wall = original_wall + 5_000_000
 
             await capture_handler(handler)(action_id, recovery)
             assert _value(owned, "SELECT status FROM actions WHERE id=?", action_id) == (2,)
@@ -785,45 +757,45 @@ class TestInterruptionRecovery:
             # 明确的完整集合，再使用原文件事实收尾。
             recovered_file = replace(_entry("original", kind=ResultFileKind.PHOTO, size=41),
                                      locator={"path": "/DCIM/original.mp4"})
-            recovery.results = ResultsDouble({action_id: (recovered_file,)})
-            recovery.evidence = _PAGE_EVIDENCE
-            recovery.monotonic_ns = lambda: original_monotonic + 5_000_000_000
+            result_case.results.delegate = ResultsDouble({action_id: (recovered_file,)})
+            result_case.clock.monotonic = original_monotonic + 5_000_000_000
+            await result_case.close()
+            database = await capture_resources.restart_database(owned)
+            recovery = await capture_runtime(database, driver=result_case.driver,
+                evidence=_PAGE_EVIDENCE, results=result_case.results,
+                wall_us=result_case.clock.wall_us, monotonic_ns=result_case.clock.monotonic_ns,
+                check_config=result_case.options['check_config'])
+            await capture_handler(handler)(action_id, recovery)
+            result_case.clock.monotonic += 3_000_000_000
             await capture_handler(handler)(action_id, recovery)
             assert _value(owned, "SELECT status FROM actions WHERE id=?", action_id) == (3,)
             attempts = owned.connection.execute(
                 "SELECT id,run_id,attempt_no FROM operation_attempts ORDER BY id").fetchall()
             assert attempts[:-1] == before_attempts
-            assert attempts[-1][1:] == (ticket.run_id, ticket.attempt_id + 1)
+            assert attempts[-1][1:] == (original_result[1], original_result[2] + 1)
             saved_file = saved_transaction_events(owned.connection, file_key)
             assert saved_file is not None and saved_file[0]["occurred_at"] == original_wall
-            saved_result = saved_transaction_events(owned.connection, result_key)
-            assert saved_result is not None and saved_result[0]["occurred_at"] == original_wall
+            assert owned.connection.execute('SELECT e.occurred_at FROM operation_attempts t'
+                ' JOIN history_events e ON e.id=t.result_event_id WHERE t.id=?',
+                (original_result[0],)).fetchone() == (original_wall,)
             _assert_actual_saved(owned, action_id, actual, attempts_used=2)
             results_driver.list_results.assert_awaited_once()
-            runtime.driver.control.assert_awaited_once()
-            assert not recovery.pending_start_results and not recovery.pending_file_observations
+            result_case.driver.control.assert_awaited_once()
             assert _value(owned, "SELECT source_action_id,presence_state,completion_state,size_bytes"
                           " FROM device_files") == (action_id, 2, 3, 41)
             assert _value(owned, "SELECT COUNT(*) FROM outputs") == (1,)
         finally:
             owned.connection.close()
 
-    async def test_history_bytes_stable_after_terminal_redispatch(
-            self, tmp_path: Path):
-        from camctl.capture.dispatch import dispatch_ready
-
-        owned = _environment(tmp_path, _PHOTO)
-        runtime = _runtime(
-            owned, files={11: (_entry("shot-1", kind=ResultFileKind.PHOTO),)})
-        await dispatch_ready(runtime, [
-            __import__("camctl.scheduling.service", fromlist=["ActionDescriptor"])
-            .ActionDescriptor(action_id=11, action_type="camera_take_photo", ready=True)])
-        assert _value(owned, "SELECT status FROM actions WHERE id = 11") == (3,)
-        before = tuple(owned.connection.execute(
-            "SELECT id, body_json FROM history_events ORDER BY id").fetchall())
-        await dispatch_ready(runtime, [
-            __import__("camctl.scheduling.service", fromlist=["ActionDescriptor"])
-            .ActionDescriptor(action_id=11, action_type="camera_take_photo", ready=True)])
-        after = tuple(owned.connection.execute(
-            "SELECT id, body_json FROM history_events ORDER BY id").fetchall())
-        assert after == before
+    async def test_history_bytes_stable_after_terminal_redispatch(self, tmp_path: Path):
+        owned, runtime, aid, handler = await _handler_world(tmp_path, "photo")
+        result_case_for().results.delegate = ResultsDouble({aid: (_entry("shot-1", kind=ResultFileKind.PHOTO),)})
+        try:
+            await capture_handler(handler)(aid, runtime)
+            assert _value(owned, "SELECT status FROM actions WHERE id=?", aid) == (3,)
+            before = tuple(owned.connection.execute("SELECT id,body_json FROM history_events ORDER BY id").fetchall())
+            await capture_handler(handler)(aid, runtime)
+            after = tuple(owned.connection.execute("SELECT id,body_json FROM history_events ORDER BY id").fetchall())
+            assert after == before
+        finally:
+            owned.connection.close()

@@ -1,0 +1,180 @@
+
+ RUN  v5.0.1 /tmp/camctl-fix44-browser-20261025/apps/client
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"task-start","device":"action6","parameter":"action6_record","contexts":0,"at":6505.077675}
+{"diagnostic":"camera","phase":"field","parameter":"action6_record","field":"duration_s","at":6512.673931}
+{"diagnostic":"camera","phase":"field","parameter":"action6_record","field":"resolution","at":6513.087164}
+{"diagnostic":"camera","phase":"field","parameter":"action6_record","field":"fov","at":6513.176833}
+{"diagnostic":"camera","phase":"field","parameter":"action6_record","field":"stabilization","at":6513.202936}
+{"diagnostic":"camera","phase":"field","parameter":"action6_record","field":"aperture","at":6513.312731}
+{"diagnostic":"camera","phase":"field","parameter":"action6_record","field":"bitrate","at":6513.367647}
+{"diagnostic":"camera","phase":"field","parameter":"action6_record","field":"exposure","at":6513.398938}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"setup-done","parameter":"action6_record","contexts":1,"at":10888.378445}
+{"diagnostic":"camera","phase":"field","parameter":"action6_record","field":"duration_s","at":10890.45714}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"action6_record","field":"resolution","at":11188.392513}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"action6_record","field":"fov","at":11200.59049}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"action6_record","field":"stabilization","at":11212.619081}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"action6_record","field":"aperture","at":11223.934077}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"action6_record","field":"bitrate","at":11239.763044}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"action6_record","field":"exposure","at":11251.992197}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"guide-start","parameter":"action6_record","at":11285.298317}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"action6_record","field":"duration_s","at":11972.394631}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"action6_record","field":"resolution","at":12492.020707}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"action6_record","field":"fov","at":12566.275855}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"action6_record","field":"stabilization","at":12634.48553}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"action6_record","field":"aperture","at":13237.832031}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"action6_record","field":"bitrate","at":13247.541314}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"action6_record","field":"exposure","at":13257.159782}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"task-done","parameter":"action6_record","contexts":1,"at":13278.440186}
+{"diagnostic":"camera","phase":"task-start","device":"action6","parameter":"action6_timelapse","contexts":1,"at":13278.532288}
+{"diagnostic":"camera","phase":"field","parameter":"action6_timelapse","field":"interval_s","at":13278.564277}
+{"diagnostic":"camera","phase":"field","parameter":"action6_timelapse","field":"duration_s","at":13278.57791}
+{"diagnostic":"camera","phase":"field","parameter":"action6_timelapse","field":"outputs","at":13278.584163}
+{"diagnostic":"camera","phase":"field","parameter":"action6_timelapse","field":"exposure","at":13278.589458}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"setup-done","parameter":"action6_timelapse","contexts":2,"at":15978.444736}
+{"diagnostic":"camera","phase":"field","parameter":"action6_timelapse","field":"interval_s","at":15979.878462}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"action6_timelapse","field":"duration_s","at":16002.47323}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"action6_timelapse","field":"outputs","at":16010.78422}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"action6_timelapse","field":"exposure","at":16019.548948}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"guide-start","parameter":"action6_timelapse","at":16060.409495}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"action6_timelapse","field":"interval_s","at":17212.744227}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"action6_timelapse","field":"duration_s","at":18377.513002}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"action6_timelapse","field":"outputs","at":18450.052314}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"action6_timelapse","field":"exposure","at":19222.087517}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"task-done","parameter":"action6_timelapse","contexts":2,"at":19301.382526}
+{"diagnostic":"camera","phase":"task-start","device":"hb-device","parameter":"hasselblad_photo","contexts":2,"at":19302.864789}
+{"diagnostic":"camera","phase":"field","parameter":"hasselblad_photo","field":"capture_format","at":19303.152469}
+{"diagnostic":"camera","phase":"field","parameter":"hasselblad_photo","field":"exposure","at":19303.256029}
+{"diagnostic":"camera","phase":"field","parameter":"hasselblad_photo","field":"white_balance","at":19303.332694}
+{"diagnostic":"camera","phase":"field","parameter":"hasselblad_photo","field":"focus","at":19303.372407}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"setup-done","parameter":"hasselblad_photo","contexts":3,"at":25053.280219}
+{"diagnostic":"camera","phase":"field","parameter":"hasselblad_photo","field":"capture_format","at":25060.551674}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"hasselblad_photo","field":"exposure","at":25130.662204}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"hasselblad_photo","field":"white_balance","at":29119.807326}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"hasselblad_photo","field":"focus","at":30366.310896}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"guide-start","parameter":"hasselblad_photo","at":32122.715121}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"hasselblad_photo","field":"capture_format","at":37953.005576}
+{"diagnostic":"camera","phase":"field","parameter":"hasselblad_photo","field":"exposure","at":37953.421941}
+{"diagnostic":"camera","phase":"field","parameter":"hasselblad_photo","field":"white_balance","at":37953.488852}
+{"diagnostic":"camera","phase":"field","parameter":"hasselblad_photo","field":"focus","at":37954.238006}
+{"diagnostic":"camera","phase":"task-done","parameter":"hasselblad_photo","contexts":3,"at":37984.94664}
+{"diagnostic":"camera","phase":"task-start","device":"hb-host","parameter":"hasselblad_photo","contexts":3,"at":37985.181095}
+{"diagnostic":"camera","phase":"field","parameter":"hasselblad_photo","field":"capture_format","at":37985.251884}
+{"diagnostic":"camera","phase":"field","parameter":"hasselblad_photo","field":"exposure","at":37985.275366}
+{"diagnostic":"camera","phase":"field","parameter":"hasselblad_photo","field":"white_balance","at":37985.321057}
+{"diagnostic":"camera","phase":"field","parameter":"hasselblad_photo","field":"focus","at":37985.333745}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"setup-done","parameter":"hasselblad_photo","contexts":4,"at":42035.495987}
+{"diagnostic":"camera","phase":"field","parameter":"hasselblad_photo","field":"capture_format","at":42059.341313}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"hasselblad_photo","field":"exposure","at":42090.176022}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"hasselblad_photo","field":"white_balance","at":44862.32384}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"field","parameter":"hasselblad_photo","field":"focus","at":44886.097032}
+
+stderr | tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+{"diagnostic":"camera","phase":"guide-start","parameter":"hasselblad_photo","at":46669.558347}
+
+ ❯ tests/integration/browser-camera-parameters.test.ts (39 tests | 1 failed | 35 skipped) 80275ms
+   × 能力源字段元数据驱动表单与设备指南，查看指南不改草稿 45552ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/integration/browser-camera-parameters.test.ts > 能力源字段元数据驱动表单与设备指南，查看指南不改草稿
+TimeoutError: locator.click: Timeout 5000ms exceeded.
+Call log:
+[2m  - waiting for getByRole('button', { name: '设备说明' })[22m
+[2m    - locator resolved to <button data-testid="nav-devices">…</button>[22m
+[2m  - attempting click action[22m
+[2m    - waiting for element to be visible, enabled and stable[22m
+[2m    - element is visible, enabled and stable[22m
+[2m    - scrolling into view if needed[22m
+[2m    - done scrolling[22m
+[2m    - performing click action[22m
+
+ ❯ tests/integration/browser-camera-parameters.test.ts:413:54
+    411|     }
+    412|     console.error(JSON.stringify({diagnostic: "camera", phase: "guide-…
+    413|     await page.getByRole("button", { name: "设备说明" }).click();
+       |                                                      ^
+    414|     const guideTask = page
+    415|       .getByTestId("device-guide")
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 4 passed | 103 skipped (108)
+   Start at  17:05:24
+   Duration  86.51s (tests 88%, import 9%, transform 3%)
+

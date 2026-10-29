@@ -215,8 +215,9 @@ async def test_write_cancel_withdraws_unstarted_job_and_attaches_not_executed(po
     future = asyncio.get_running_loop().create_future()
     executor.submit_write.return_value = future
     key = OperationKey('d'*32)
-    async def withdraw(actual_key):
+    async def withdraw(actual_key, *, expected_result):
         assert actual_key == key
+        assert expected_result is future
         future.set_result(DbOutcome(DbOutcomeKind.NOT_EXECUTED))
         return WithdrawalResult(key, WithdrawalStatus.WITHDRAWN)
     executor.withdraw.side_effect = withdraw
@@ -239,7 +240,8 @@ async def test_write_delivery_race_retains_original_future_and_typed_receipt(por
     executor.submit_write.return_value = future
     key = OperationKey('e'*32)
     delivered = asyncio.Event()
-    async def withdraw(key):
+    async def withdraw(key, *, expected_result):
+        assert expected_result is future
         delivered.set()
         raise DbExecutorError('已完成，结果等待投递')
     executor.withdraw.side_effect = withdraw

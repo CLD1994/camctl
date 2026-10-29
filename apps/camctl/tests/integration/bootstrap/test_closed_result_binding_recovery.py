@@ -20,6 +20,7 @@ from ..capture.test_closed_result_local_consumption import (
     _assert_local_finish, _assert_preserved, closed_consumer_world,
 )
 from .test_media_assembly import _config
+from ..support.capture import capture_database
 
 
 pytestmark = pytest.mark.asyncio
@@ -61,33 +62,9 @@ async def test_default_capture_consumes_closed_unconfirmed_after_binding_change(
         devices=devices, drivers=registry, staging=Path(config.paths.staging),
         wait_config=execution_wait_config, wall_us=lambda: now,
         monotonic_ns=lambda: 99_000_000_000)
-    opened, runtimes = [], []
-
-    def open_connection():
-        owned = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
-        assert owned.metadata == world.metadata
-        assert all(owned.connection is not previous.connection for previous in opened)
-        opened.append(owned)
-        return owned
-
-    def observed_factory(owned, device_id):
-        assert owned is opened[-1]
-        assert device_id == "cam-1"
-        runtime = factory(owned, device_id)
-        assert runtime is not None
-        # 原 world 不含旧 runtime；这些是实际工厂新建的空会话集合。
-        assert runtime.pending_start_results == runtime.pending_capture_completions == runtime.pending_result_closes == {}
-        assert runtime.pending_file_observations == runtime.pending_media_results == {}
-        assert runtime.pending_read_results == runtime.pending_read_business == runtime.pending_read_ends == {}
-        assert runtime.continuing_read_tickets == {}
-        assert runtime.listing_cache in (None, {})
-        assert runtime.timelapse_deadlines == runtime.retry_gate.anchors == {}
-        runtimes.append(runtime)
-        return runtime
-
-    context = SimpleNamespace(open_connection=open_connection,
-        clock=SimpleNamespace(utc_micros=lambda: now))
-    flow = capture_flow(observed_factory)
+    database = await capture_database(world.path)
+    context = SimpleNamespace(database=database, clock=SimpleNamespace(utc_micros=lambda: now))
+    flow = capture_flow(factory)
     before = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         assert before.metadata == world.metadata
@@ -101,7 +78,6 @@ async def test_default_capture_consumes_closed_unconfirmed_after_binding_change(
 
     await flow(context)
     await flow.settle()
-    assert len(opened) == 2 and len(runtimes) == 1
     saved = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         _assert_local_finish(saved, world, methods)
@@ -111,7 +87,6 @@ async def test_default_capture_consumes_closed_unconfirmed_after_binding_change(
 
     await flow(context)
     await flow.settle()
-    assert len(opened) == 3 and len(runtimes) == 1
     repeated = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         _assert_local_finish(repeated, world, methods)

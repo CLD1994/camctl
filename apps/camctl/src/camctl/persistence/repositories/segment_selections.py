@@ -358,6 +358,45 @@ def _photo_items(db, q):
         after = page[-1][0]
 
 
+def _scope_item(db, source_id, output_id, mode, saved=None):
+    family = tuple(member.entry for member in _family(db, output_id, saved))
+    original = next(entry for entry in family if entry.kind is OutputKind.ORIGINAL)
+    if original.output_id != output_id:
+        raise ConsistencyError("默认范围成员不是正式原片")
+    preview = next((entry for entry in family if entry.kind is OutputKind.PREVIEW), None)
+    repaired = next((entry for entry in family if entry.kind is OutputKind.REPAIRED), None)
+    return select_for_original(source_id, original, mode, preview=preview, repaired=repaired)
+
+
+def selection_uses_output(selection_id, output_id, owned):
+    """只读核对已固定条目或尚待固定的原选择是否会使用本原片。"""
+    db = owned.connection
+    selection = row_facts(db, "obtain_source_selections", selection_id)
+    if selection is None:
+        raise ConsistencyError(f"检查副本的取回选择缺失: {selection_id}")
+    status = enum_for("obtain_source_selections.status")
+    if selection["status"] == int(status.FIXED):
+        return _one(db, "SELECT 1 FROM obtain_items WHERE selection_id=? AND output_id=? LIMIT 1",
+                    (selection_id, output_id)) is not None
+    if selection["status"] != int(status.PENDING):
+        raise ConsistencyError("检查副本的取回选择状态无法解释")
+    dependency = row_facts(db, "action_dependencies", selection["dependency_id"])
+    if dependency is None:
+        raise ConsistencyError("检查副本的取回来源依赖缺失")
+    owner = row_facts(db, "actions", dependency["action_id"])
+    if owner is None:
+        raise ConsistencyError("检查副本的取回动作缺失")
+    mode, requested = read_selection_request(owner["execution_spec_json"], owner["input_fields_json"])
+    if mode is SelectionMode.EXPLICIT_IDS:
+        return output_id in requested
+    if _one(db,
+            "SELECT 1 FROM segment_scope_members m JOIN segment_sets s ON s.id=m.set_id"
+            " WHERE s.action_id=? AND s.published_event_id IS NOT NULL AND m.output_id=?",
+            (dependency["depends_on_action_id"], output_id)) is None:
+        return False
+    return _scope_item(db, dependency["depends_on_action_id"], output_id, mode).output_id == output_id
+
+
 def items(db, q):
     for item in _selected_items(db, q):
         if item.output_id not in q["excluded"]:
@@ -417,23 +456,7 @@ def _selected_items(db, q):
         for ordinal, output_id in page:
             if output_id is None:
                 raise ConsistencyError("已发布默认范围缺少正式原片身份")
-            family = tuple(
-                member.entry for member in _family(db, output_id, q["saved"])
-            )
-            original = next(
-                entry for entry in family if entry.kind is OutputKind.ORIGINAL
-            )
-            if original.output_id != output_id:
-                raise ConsistencyError("默认范围成员不是正式原片")
-            preview = next(
-                (entry for entry in family if entry.kind is OutputKind.PREVIEW), None
-            )
-            repaired = next(
-                (entry for entry in family if entry.kind is OutputKind.REPAIRED), None
-            )
-            yield select_for_original(
-                source_id, original, mode, preview=preview, repaired=repaired
-            )
+            yield _scope_item(db, source_id, output_id, mode, q["saved"])
         after = page[-1][0]
 
 

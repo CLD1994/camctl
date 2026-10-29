@@ -1,0 +1,29 @@
+[
+  {
+    "label": "package-resources",
+    "command": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/027-root-test_hasselblad_photo_roundtrip-shard-3/source/apps/camctl/scripts/sync_resources.py"
+    ],
+    "cwd": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/027-root-test_hasselblad_photo_roundtrip-shard-3/source",
+    "started_utc": "2026-10-26T00:39:06.065647+00:00",
+    "pid": 1968590,
+    "exit_code": 0,
+    "finished_utc": "2026-10-26T00:39:06.104876+00:00",
+    "wall_seconds": 0.039248442990356125
+  },
+  {
+    "label": "hasselblad-client-build",
+    "command": [
+      "npm",
+      "run",
+      "build"
+    ],
+    "cwd": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/027-root-test_hasselblad_photo_roundtrip-shard-3/client-candidate/apps/client",
+    "started_utc": "2026-10-26T00:39:06.949802+00:00",
+    "pid": 1968647,
+    "exit_code": 0,
+    "finished_utc": "2026-10-26T00:39:13.316711+00:00",
+    "wall_seconds": 6.366911939010606
+  }
+]

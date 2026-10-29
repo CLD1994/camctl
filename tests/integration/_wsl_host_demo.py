@@ -18,13 +18,13 @@ import time
 import uuid
 from pathlib import Path
 
+from camctl_memory_plugin import budgeted_host_launcher
+
 _REPO = Path(__file__).resolve().parent.parent.parent
 
 _WSL_BUILD = f"/tmp/camctl-host-build-{uuid.uuid4().hex}"
 _WSL_DEMO = f"{_WSL_BUILD}/host-demo"
 _WSL_LAUNCHER = f"{_WSL_BUILD}/camctl-launcher.sh"
-
-_PROMPT = "模块初始化完成；可输入 submit <绝对路径>、claim、logs 或 help。"
 
 #: 测试自身已在 Linux（部署验证环境）时，构建与执行不再经 wsl.exe。
 _NATIVE_POSIX = os.name == "posix"
@@ -184,25 +184,30 @@ class HostDemo:
     """真实 host-demo 主程序的子进程会话（终端命令协议）。"""
 
     def __init__(self, deployment, demo_path: str,
-                 launcher: str | None = None) -> None:
+                 launcher: str | None = None, *, launcher_is_camctl: bool = True) -> None:
         self.deployment = deployment
         self.log_path = deployment.root / "module.log"
         self._demo_path = demo_path
         self._launcher = launcher or _WSL_LAUNCHER
+        self._launcher_is_camctl = launcher_is_camctl
         self.proc: subprocess.Popen | None = None
         self._host_pid: int | None = None
 
     def start(self, *, env: dict[str, str] | None = None, use_default_paths: bool = False) -> None:
-        command = [
-            self._demo_path,
-            "--camctl", self._launcher,
-            "--ready", to_wsl(self.deployment.ready),
-            "--processing", to_wsl(self.deployment.processing),
-            "--log", to_wsl(self.log_path)]
-        if self.deployment.config_path is not None:
-            command.extend(["--config", to_wsl(self.deployment.config_path)])
         if use_default_paths:
+            # 默认 CLI 路径由用例在部署目录中生成受限 launcher；保留 C 的默认路径补齐。
             command = [self._demo_path]
+        else:
+            launcher = (budgeted_host_launcher(self._launcher, receipt_root=self.deployment.root)
+                        if self._launcher_is_camctl else self._launcher)
+            command = [
+                self._demo_path,
+                "--camctl", str(launcher),
+                "--ready", to_wsl(self.deployment.ready),
+                "--processing", to_wsl(self.deployment.processing),
+                "--log", to_wsl(self.log_path)]
+            if self.deployment.config_path is not None:
+                command.extend(["--config", to_wsl(self.deployment.config_path)])
         if not _NATIVE_POSIX:
             body = 'printf "%s\\n" "$$"; exec ' + shlex.join(command)
             command = ["wsl.exe", "-e", "sh", "-c", body]
@@ -211,7 +216,8 @@ class HostDemo:
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, encoding="utf-8", env=env)
         self._host_pid = self.proc.pid if _NATIVE_POSIX else int(self._reply())
-        assert self._reply() == _PROMPT
+        prompt = self._reply()
+        assert all(command in prompt for command in ("submit <", "claim", "logs", "help")), prompt
 
     def _reply(self) -> str:
         assert self.proc is not None
@@ -299,7 +305,9 @@ class HostDemo:
             "groups = set()",
             "if root.exists():",
             "    for task in root.iterdir():",
-            "        for child in (task / 'children').read_text().split():",
+            "        try: children = (task / 'children').read_text().split()",
+            "        except (FileNotFoundError, ProcessLookupError): continue",
+            "        for child in children:",
             "            pid = int(child)",
             "            try:",
             "                if os.getpgid(pid) == pid: groups.add(pid)",

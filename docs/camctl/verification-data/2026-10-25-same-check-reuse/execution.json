@@ -1,0 +1,17 @@
+{
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "/tmp/camctl-same-check-options-ykdqfnct/options_probe.py"
+  ],
+  "cwd": "/tmp/camctl-same-check-options-ykdqfnct/source",
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src:/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/tests",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-same-check-options-ykdqfnct/pycache",
+    "TMPDIR": "/tmp/camctl-same-check-options-ykdqfnct/tmp"
+  },
+  "started_utc": "2026-10-25T14:34:30.819847+00:00",
+  "pid": 1324241,
+  "exit_code": 0,
+  "wall_s": 120.93315090800752,
+  "finished_utc": "2026-10-25T14:36:40.787324+00:00"
+}

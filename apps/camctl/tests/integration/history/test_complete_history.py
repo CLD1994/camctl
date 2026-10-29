@@ -385,7 +385,7 @@ async def test_real_query_event_helper_keeps_each_purpose_with_trigger_action(op
         assert actual.rows == _expected(world, identity)
 
 
-async def test_real_internal_read_event_helper_inherits_processing_action(owned):
+async def test_real_internal_read_event_helper_inherits_processing_action(owned, capture_resources):
     """真实录像停止及完整结果固定检查责任，再授予内部 READ。"""
     from camctl.acceptance.input import ParsedInput
     from camctl.acceptance.service import CommandMode, PlanDisposition
@@ -415,14 +415,16 @@ async def test_real_internal_read_event_helper_inherits_processing_action(owned)
                                                   new_operation_key(), owned)
     assert started.kind is DbOutcomeKind.COMPLETED, started.error
     driver = DriverDouble(identity_override="1")
-    runtime = _runtime(owned, driver=driver,
-                       results=ResultsDouble({1: (_entry("video", size=10),)}), wall=NOW)
-    runtime.stopper = StopDouble("1")
-    runtime.wait_config = lambda _action: CaptureWaitConfig(target_duration_ms=6000, driver_margin_ms=0)
+    runtime = await _runtime(owned, driver=driver, stopper=StopDouble("1"),
+        results=ResultsDouble({1: (_entry("video", size=10),)}), wall=NOW,
+        wait_config=lambda _action: CaptureWaitConfig(target_duration_ms=6000, driver_margin_ms=0))
     await capture_handler("camera_record")(1, runtime)
     # 新会话没有前一会话的计时锚点，保守停止固定需要检查的原片。
-    runtime.recording_state = SessionRecordingState(runtime)
-    assert decide_recording_next(runtime.recording_state.recording_state(1),
+    database = await capture_resources.restart_database(owned)
+    runtime = await _runtime(database, driver=driver, stopper=StopDouble("1"),
+        results=ResultsDouble({1: (_entry("video", size=10),)}), wall=NOW,
+        wait_config=lambda _action: CaptureWaitConfig(target_duration_ms=6000, driver_margin_ms=0))
+    assert decide_recording_next(await runtime.recording_state.recording_state(1),
                                  RecordingFacts()).phase is RecordingPhase.RECONCILE_REQUIRED
     now_ns = [20_000_000_000]
     runtime.monotonic_ns = lambda: now_ns[0]
@@ -433,7 +435,7 @@ async def test_real_internal_read_event_helper_inherits_processing_action(owned)
     progress = await advance_winddown(1, runtime, {}, wait_cap_s=Decimal("6"), sleep=elapsed)
     assert progress.phase == "progress_saved"
     assert driver.calls == ["start_recording"]
-    assert decide_recording_next(runtime.recording_state.recording_state(1),
+    assert decide_recording_next(await runtime.recording_state.recording_state(1),
                                  RecordingFacts()).phase is RecordingPhase.CONTROL_COMPLETE
     processing = row_facts(owned.connection, "recording_processing", 1)
     assert processing["source_device_file_id"] is not None
@@ -1037,7 +1039,7 @@ async def test_concurrent_submit_and_read_queue_wait(world) -> None:
                 repository=AcceptanceRepository(),
                 clock=type("C", (), {"utc_micros": staticmethod(lambda: 1)})(),
             ),
-            new_operation_key(), owned)
+            new_operation_key(), database)
         assert accepted.plan_id is not None
 
     async def read_object() -> None:
@@ -1048,8 +1050,10 @@ async def test_concurrent_submit_and_read_queue_wait(world) -> None:
     loop = asyncio.get_running_loop()
     import time as _time
     started = _time.perf_counter()
-    await asyncio.gather(*[submit(index) for index in range(6)],
-                         *[read_object() for _ in range(4)])
+    from ..support.database import business_database, database_path
+    async with business_database(database_path(owned)) as database:
+        await asyncio.gather(*[submit(index) for index in range(6)],
+                             *[read_object() for _ in range(4)])
     elapsed = _time.perf_counter() - started
     with closing(connection.execute(
             "SELECT COUNT(*) FROM history_events")) as cursor:

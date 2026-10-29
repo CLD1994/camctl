@@ -1,0 +1,113 @@
+本文件仅从已有日志和文件读取数据；没有启动测试或浏览器。
+中央源码1973dc05c0d517a890b92e5dcfc1ee32da9266dd；历史源码48d2ee640f3c1243d0a38f1697aaa7e4a74081e1。
+
+中央任务5：root/test_device_capability_declarations worker=1 status=failed start=2026-10-25T06:08:17.172875+00:00 finish=2026-10-25T06:09:02.878741+00:00
+源码依赖链接：/tmp/camctl-44-diagnostic-current-20261025/tasks/005-root-test_device_capability_declarations/source/apps/client/node_modules -> /tmp/camctl-44-diagnostic-current-20261025/workers/1/node_modules
+中央任务7：root/test_camctl_process_recovery worker=1 status=failed start=2026-10-25T06:09:02.880515+00:00 finish=2026-10-25T06:09:34.710293+00:00
+源码依赖链接：/tmp/camctl-44-diagnostic-current-20261025/tasks/007-root-test_camctl_process_recovery/source/apps/client/node_modules -> /tmp/camctl-44-diagnostic-current-20261025/workers/1/node_modules
+中央任务12：root/test_timelapse_time_parameters worker=1 status=failed start=2026-10-25T06:09:34.714000+00:00 finish=2026-10-25T06:09:55.441405+00:00
+源码依赖链接：/tmp/camctl-44-diagnostic-current-20261025/tasks/012-root-test_timelapse_time_parameters/source/apps/client/node_modules -> /tmp/camctl-44-diagnostic-current-20261025/workers/1/node_modules
+中央任务13：root/test_hasselblad_photo_parameters worker=0 status=passed start=2026-10-25T06:09:36.600220+00:00 finish=2026-10-25T06:11:04.374955+00:00
+源码依赖链接：/tmp/camctl-44-diagnostic-current-20261025/tasks/013-root-test_hasselblad_photo_parameters/source/apps/client/node_modules -> /tmp/camctl-44-diagnostic-current-20261025/workers/0/node_modules
+
+current 构建命令原记录：/tmp/camctl-44-diagnostic-current-20261025/tasks/005-root-test_device_capability_declarations/tmp/pytest/device-declarations-installed0/commands/006.json
+argv=['pnpm', 'run', 'build'] cwd=/tmp/camctl-44-diagnostic-current-20261025/tasks/005-root-test_device_capability_declarations/source/apps/client exitcode=0
+stderr前缀（首次出现tsc后截断）：
+✓ Lockfile passes supply-chain policies (verified 9h ago)
+Lockfile is up to date, resolution step is skipped
+Packages are hard linked from the content-addressable store to the virtual store.
+  Content-addressable store is at: /opt/pnpm/store/v11
+  Virtual store is at:             node_modules/.pnpm
+Packages: +153
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Progress: resolved 153, reused 153, downloaded 0, added 153, done
+
+dependencies:
++ @base-ui/react 1.9.0
++ ajv 8.20.0
++ ajv-formats 3.0.1
++ express 5.3.0
++ jsonc-parser 3.3.1
++ react 19.3.1
++ react-dom 19.3.1
++ tsx 4.23.15
+
+devDependencies:
++ @playwright/test 1.64.1
++ @types/express 5.0.6
++ @types/node 26.6.5
++ @types/react 19.3.0
++ @types/react-dom 19.3.0
++ json-schema-to-typescript 16.0.0
++ prettier 3.9.10
++ typescript 7.0.2
++ vite 8.3.5
++ vitest 5.0.5
+
+Error: ERR_PNPM_IGNORED_BUILDS
+
+  × installing dependencies
+  ╰─▶ Ignored build scripts: esbuild@0.28.2
+  help: Run "pnpm approve-builds" to pick which dependencies should be allowed
+        to run scripts.
+
+[WARN] The install that runs before scripts failed, so your node_modules may be out of sync with your lockfile. Set "verifyDepsBeforeRun: false" to skip this install.
+$ tsc --noEmit && vite build
+
+historical 构建命令原记录：/tmp/camctl-itopt-final-20261025/tasks/024-root-test_device_capability_declarations-shard-1/tmp/pytest/device-declarations-installed0/commands/006.json
+argv=['pnpm', 'run', 'build'] cwd=/tmp/camctl-itopt-final-20261025/tasks/024-root-test_device_capability_declarations-shard-1/source/apps/client exitcode=0
+stderr前缀（首次出现tsc后截断）：
+✓ Lockfile passes supply-chain policies (verified 3h ago)
+Lockfile is up to date, resolution step is skipped
+Packages are hard linked from the content-addressable store to the virtual store.
+  Content-addressable store is at: /opt/pnpm/store/v11
+  Virtual store is at:             node_modules/.pnpm
+Packages: +153
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Progress: resolved 153, reused 153, downloaded 0, added 153, done
+
+dependencies:
++ @base-ui/react 1.9.0
++ ajv 8.20.0
++ ajv-formats 3.0.1
++ express 5.3.0
++ jsonc-parser 3.3.1
++ react 19.3.1
++ react-dom 19.3.1
++ tsx 4.23.15
+
+devDependencies:
++ @playwright/test 1.64.1
++ @types/express 5.0.6
++ @types/node 26.6.5
++ @types/react 19.3.0
++ @types/react-dom 19.3.0
++ json-schema-to-typescript 16.0.0
++ prettier 3.9.10
++ typescript 7.0.2
++ vite 8.3.5
++ vitest 5.0.5
+
+Error: ERR_PNPM_IGNORED_BUILDS
+
+  × installing dependencies
+  ╰─▶ Ignored build scripts: esbuild@0.28.2
+  help: Run "pnpm approve-builds" to pick which dependencies should be allowed
+        to run scripts.
+
+[WARN] The install that runs before scripts failed, so your node_modules may be out of sync with your lockfile. Set "verifyDepsBeforeRun: false" to skip this install.
+$ tsc --noEmit && vite build
+
+worker0 .package-lock中@playwright/test=1.63.0
+worker0 当前实际@playwright/test=1.63.0 path=/tmp/camctl-44-diagnostic-current-20261025/workers/0/node_modules/@playwright/test
+worker1 .package-lock中@playwright/test=1.63.0
+worker1 当前实际@playwright/test=1.64.1 path=/tmp/camctl-44-diagnostic-current-20261025/workers/1/node_modules/.pnpm/@playwright+test@1.64.1/node_modules/@playwright/test
+worker2 .package-lock中@playwright/test=1.63.0
+worker2 当前实际@playwright/test=1.63.0 path=/tmp/camctl-44-diagnostic-current-20261025/workers/2/node_modules/@playwright/test
+worker3 .package-lock中@playwright/test=1.63.0
+worker3 当前实际@playwright/test=1.63.0 path=/tmp/camctl-44-diagnostic-current-20261025/workers/3/node_modules/@playwright/test
+
+缓存目录：/home/cld/.cache/ms-playwright/.links, /home/cld/.cache/ms-playwright/chromium-1243, /home/cld/.cache/ms-playwright/chromium_headless_shell-1243, /home/cld/.cache/ms-playwright/ffmpeg-1011
+task013的HB测试fixture只执行uv构建、安装与init；_client_driver直接运行node，没有npm ci。
+task005 client_build在test_device_capability_declarations.py:117-119调用pnpm run build；node_modules指向worker1；日志明确显示运行脚本前自动安装并更新@playwright/test1.64.1。
+task012随后复用worker1；实际启动报缺1248。task013运行于worker0，实际@playwright/test1.63.0，且浏览器参数比较通过。

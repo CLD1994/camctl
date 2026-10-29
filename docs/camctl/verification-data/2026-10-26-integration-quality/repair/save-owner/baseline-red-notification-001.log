@@ -1,0 +1,209 @@
+FFF                                                                      [100%]
+=================================== FAILURES ===================================
+____ test_baseline_applies_completed_save_before_notification_error[chunk] _____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f7dac1c0f10>
+mocker = <pytest_mock.plugin.MockerFixture object at 0x7f7dabcafed0>
+kind = 'chunk'
+
+    @pytest.mark.parametrize("kind", ["chunk", "fix", "release"])
+    async def test_baseline_applies_completed_save_before_notification_error(monkeypatch, mocker, kind):
+        intent = _intent()
+        cursor = DirectoryCursor(intent.binding, intent.directories, 0, "/data/A/b.mp4")
+        owner = PendingBaseline(intent.activity_id, intent.binding, intent.directories,
+            chunks=1, entries=3, next_cursor=cursor)
+        if kind == "chunk":
+            entries = tuple(FileIdentity(intent.binding, path)
+                for path in ("/data/A/a.mp4", "/data/A/b.mp4"))
+            owner.saves.begin(BaselineChunkSave(intent.activity_id, 2, entries, 1000))
+            response = BaselineChunkResult(intent.activity_id, 2, 12)
+            expected_applications = [("chunks", 2), ("entries", 5), ("cursor", cursor)]
+        elif kind == "fix":
+            owner.saves.begin(BaselineFixSave(intent.activity_id, 1, 3, 1000))
+            response = BaselineRef(intent.activity_id, BaselineState.FIXED, 11, 11, 1, 3)
+            expected_applications = [("completed", True), ("closed", True)]
+        else:
+            owner.release = (ActivityReleaseSave(intent.action_id, 1000,
+                preparation_resolved=True), "3" * 32)
+            response = ActivityReleaseResult(ReleaseOutcome.RELEASED)
+            expected_applications = [("completed", True), ("closed", True)]
+        take = mocker.spy(owner.saves, "take")
+        applications = _observe_applications(monkeypatch, owner,
+            {"chunks", "entries", "cursor", "completed", "closed"})
+        failure = RuntimeError("已提交后的通知失败")
+        _attach_db_outcome(failure, DbOutcome(DbOutcomeKind.COMPLETED, response))
+        database = create_autospec(BusinessDatabase, instance=True, spec_set=True)
+        database.write.side_effect = failure
+        runtime = SimpleNamespace(pending_baselines={intent.action_id: owner},
+            capture=create_autospec(CaptureRepository, instance=True, spec_set=True), database=database)
+    
+        with pytest.raises(RuntimeError) as raised:
+            await resume_baseline_save(intent.action_id, runtime=runtime)
+    
+        assert raised.value is failure
+>       assert {
+            "writes": database.write.await_count,
+            "takes": take.call_count,
+            "applications": applications,
+            "state": (owner.chunks, owner.entries, owner.cursor, owner.completed, owner.closed),
+            "registered": runtime.pending_baselines.get(intent.action_id),
+            "pending": owner.saves.pending,
+        } == {
+            "writes": 1,
+            "takes": 0 if kind == "release" else 1,
+            "applications": expected_applications,
+            "state": (2, 5, cursor, False, False) if kind == "chunk" else (1, 3, None, True, True),
+            "registered": owner if kind == "chunk" else None,
+            "pending": None,
+        }
+E       AssertionError: assert {'writes': 1,..., False), ...} == {'writes': 1,..., False), ...}
+E         
+E         Omitting 2 identical items, use -vv to show
+E         Differing items:
+E         {'pending': PendingBaselineSave(request=BaselineChunkSave(activity_id=2, chunk_no=2, entries=(FileIdentity(binding=Dev...t=1000), key='7a158bcc854f8f936a6e5888ce798c5d', response=BaselineChunkResult(activity_id=2, chunk_no=2, event_id=12))} != {'pending': None}
+E         {'takes': 0} != {'takes': 1}
+E         {'state': (1, 3, None, False, False)} != {'state': (2, 5, DirectoryCursor(binding=DeviceBinding(device_id='cam-1', driver_id='camera-driver'), directories=('/data/A', '/data/B'), directory_index=0, after_path='/data/A/b.mp4'), F...
+E         
+E         ...Full output truncated (3 lines hidden), use '-vv' to show
+
+apps/camctl/tests/unit/capture/test_baseline_save_owner.py:153: AssertionError
+_____ test_baseline_applies_completed_save_before_notification_error[fix] ______
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f7dac396dd0>
+mocker = <pytest_mock.plugin.MockerFixture object at 0x7f7dabc87d50>
+kind = 'fix'
+
+    @pytest.mark.parametrize("kind", ["chunk", "fix", "release"])
+    async def test_baseline_applies_completed_save_before_notification_error(monkeypatch, mocker, kind):
+        intent = _intent()
+        cursor = DirectoryCursor(intent.binding, intent.directories, 0, "/data/A/b.mp4")
+        owner = PendingBaseline(intent.activity_id, intent.binding, intent.directories,
+            chunks=1, entries=3, next_cursor=cursor)
+        if kind == "chunk":
+            entries = tuple(FileIdentity(intent.binding, path)
+                for path in ("/data/A/a.mp4", "/data/A/b.mp4"))
+            owner.saves.begin(BaselineChunkSave(intent.activity_id, 2, entries, 1000))
+            response = BaselineChunkResult(intent.activity_id, 2, 12)
+            expected_applications = [("chunks", 2), ("entries", 5), ("cursor", cursor)]
+        elif kind == "fix":
+            owner.saves.begin(BaselineFixSave(intent.activity_id, 1, 3, 1000))
+            response = BaselineRef(intent.activity_id, BaselineState.FIXED, 11, 11, 1, 3)
+            expected_applications = [("completed", True), ("closed", True)]
+        else:
+            owner.release = (ActivityReleaseSave(intent.action_id, 1000,
+                preparation_resolved=True), "3" * 32)
+            response = ActivityReleaseResult(ReleaseOutcome.RELEASED)
+            expected_applications = [("completed", True), ("closed", True)]
+        take = mocker.spy(owner.saves, "take")
+        applications = _observe_applications(monkeypatch, owner,
+            {"chunks", "entries", "cursor", "completed", "closed"})
+        failure = RuntimeError("已提交后的通知失败")
+        _attach_db_outcome(failure, DbOutcome(DbOutcomeKind.COMPLETED, response))
+        database = create_autospec(BusinessDatabase, instance=True, spec_set=True)
+        database.write.side_effect = failure
+        runtime = SimpleNamespace(pending_baselines={intent.action_id: owner},
+            capture=create_autospec(CaptureRepository, instance=True, spec_set=True), database=database)
+    
+        with pytest.raises(RuntimeError) as raised:
+            await resume_baseline_save(intent.action_id, runtime=runtime)
+    
+        assert raised.value is failure
+>       assert {
+            "writes": database.write.await_count,
+            "takes": take.call_count,
+            "applications": applications,
+            "state": (owner.chunks, owner.entries, owner.cursor, owner.completed, owner.closed),
+            "registered": runtime.pending_baselines.get(intent.action_id),
+            "pending": owner.saves.pending,
+        } == {
+            "writes": 1,
+            "takes": 0 if kind == "release" else 1,
+            "applications": expected_applications,
+            "state": (2, 5, cursor, False, False) if kind == "chunk" else (1, 3, None, True, True),
+            "registered": owner if kind == "chunk" else None,
+            "pending": None,
+        }
+E       AssertionError: assert {'writes': 1,..., False), ...} == {'writes': 1,...e, True), ...}
+E         
+E         Omitting 1 identical items, use -vv to show
+E         Differing items:
+E         {'takes': 0} != {'takes': 1}
+E         {'pending': PendingBaselineSave(request=BaselineFixSave(activity_id=2, chunk_count=1, entry_count=3, occurred_at=1000)...state=<device_activities.baseline_state.FIXED: 3>, first_event_id=11, last_event_id=11, chunk_count=1, entry_count=3))} != {'pending': None}
+E         {'applications': []} != {'applications': [('completed', True), ('closed', True)]}
+E         {'state': (1, 3, None, False, False)} != {'state': (1, 3, None, True, True)}
+E         {'registered': PendingBaseline(activity_id=2, binding=DeviceBinding(dev...
+E         
+E         ...Full output truncated (2 lines hidden), use '-vv' to show
+
+apps/camctl/tests/unit/capture/test_baseline_save_owner.py:153: AssertionError
+___ test_baseline_applies_completed_save_before_notification_error[release] ____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f7dab9c0e90>
+mocker = <pytest_mock.plugin.MockerFixture object at 0x7f7dabcafb50>
+kind = 'release'
+
+    @pytest.mark.parametrize("kind", ["chunk", "fix", "release"])
+    async def test_baseline_applies_completed_save_before_notification_error(monkeypatch, mocker, kind):
+        intent = _intent()
+        cursor = DirectoryCursor(intent.binding, intent.directories, 0, "/data/A/b.mp4")
+        owner = PendingBaseline(intent.activity_id, intent.binding, intent.directories,
+            chunks=1, entries=3, next_cursor=cursor)
+        if kind == "chunk":
+            entries = tuple(FileIdentity(intent.binding, path)
+                for path in ("/data/A/a.mp4", "/data/A/b.mp4"))
+            owner.saves.begin(BaselineChunkSave(intent.activity_id, 2, entries, 1000))
+            response = BaselineChunkResult(intent.activity_id, 2, 12)
+            expected_applications = [("chunks", 2), ("entries", 5), ("cursor", cursor)]
+        elif kind == "fix":
+            owner.saves.begin(BaselineFixSave(intent.activity_id, 1, 3, 1000))
+            response = BaselineRef(intent.activity_id, BaselineState.FIXED, 11, 11, 1, 3)
+            expected_applications = [("completed", True), ("closed", True)]
+        else:
+            owner.release = (ActivityReleaseSave(intent.action_id, 1000,
+                preparation_resolved=True), "3" * 32)
+            response = ActivityReleaseResult(ReleaseOutcome.RELEASED)
+            expected_applications = [("completed", True), ("closed", True)]
+        take = mocker.spy(owner.saves, "take")
+        applications = _observe_applications(monkeypatch, owner,
+            {"chunks", "entries", "cursor", "completed", "closed"})
+        failure = RuntimeError("已提交后的通知失败")
+        _attach_db_outcome(failure, DbOutcome(DbOutcomeKind.COMPLETED, response))
+        database = create_autospec(BusinessDatabase, instance=True, spec_set=True)
+        database.write.side_effect = failure
+        runtime = SimpleNamespace(pending_baselines={intent.action_id: owner},
+            capture=create_autospec(CaptureRepository, instance=True, spec_set=True), database=database)
+    
+        with pytest.raises(RuntimeError) as raised:
+            await resume_baseline_save(intent.action_id, runtime=runtime)
+    
+        assert raised.value is failure
+>       assert {
+            "writes": database.write.await_count,
+            "takes": take.call_count,
+            "applications": applications,
+            "state": (owner.chunks, owner.entries, owner.cursor, owner.completed, owner.closed),
+            "registered": runtime.pending_baselines.get(intent.action_id),
+            "pending": owner.saves.pending,
+        } == {
+            "writes": 1,
+            "takes": 0 if kind == "release" else 1,
+            "applications": expected_applications,
+            "state": (2, 5, cursor, False, False) if kind == "chunk" else (1, 3, None, True, True),
+            "registered": owner if kind == "chunk" else None,
+            "pending": None,
+        }
+E       AssertionError: assert {'writes': 1,..., False), ...} == {'writes': 1,...e, True), ...}
+E         
+E         Omitting 3 identical items, use -vv to show
+E         Differing items:
+E         {'applications': []} != {'applications': [('completed', True), ('closed', True)]}
+E         {'state': (1, 3, None, False, False)} != {'state': (1, 3, None, True, True)}
+E         {'registered': PendingBaseline(activity_id=2, binding=DeviceBinding(device_id='cam-1', driver_id='camera-driver'), dir...33333333333333333333'), read_owner=None, read_no=0, aborted=False, directory_scan=None, completed=False, closed=False)} != {'registered': None}
+E         Use -v to get more diff
+
+apps/camctl/tests/unit/capture/test_baseline_save_owner.py:153: AssertionError
+=========================== short test summary info ============================
+FAILED apps/camctl/tests/unit/capture/test_baseline_save_owner.py::test_baseline_applies_completed_save_before_notification_error[chunk]
+FAILED apps/camctl/tests/unit/capture/test_baseline_save_owner.py::test_baseline_applies_completed_save_before_notification_error[fix]
+FAILED apps/camctl/tests/unit/capture/test_baseline_save_owner.py::test_baseline_applies_completed_save_before_notification_error[release]
+3 failed, 9 deselected in 0.37s

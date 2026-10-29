@@ -1,0 +1,13 @@
+{
+  "test_head": "0315f5aafb9c87c8d73647ef9bb7e5a19316eea2",
+  "production_commit": "3fcc19004845b5e96f2af0bce4045db959972174",
+  "test_adaptation_commit": "d5bfccf8",
+  "production_tracked_files_equal": true,
+  "diff_paths": [
+    "apps/camctl/tests/integration/capture/result_consumer_fixtures.py",
+    "apps/camctl/tests/integration/history/test_record_segment_history.py"
+  ],
+  "python": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+  "memory_budget_cli": "2GiB",
+  "resource_claim": "保留节点原有进程内容量与增长断言；不将其记作整进程预算验收"
+}

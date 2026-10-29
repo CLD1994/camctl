@@ -1,0 +1,46 @@
+{
+  "source_before": {
+    "head": "22281f1903536521ba62c9bbb1b1dcd337f402cc",
+    "status": "",
+    "sha256": {
+      "scripts/camctl_memory.py": "f56ddf767dc7196fed4013f898951e8f2dd6548e0e4444ab72da0e3d49f8e103",
+      "scripts/camctl_memory_plugin.py": "bf6d989aacff24035b8d0c48c592a0392ae6b8cab14c5dc10dd6420376acc175",
+      "scripts/run-memory-budget.py": "dd043580c0f4c177119484661a3db63e8ced746b6412d1a16288ceaead7a50d9",
+      "apps/camctl/tests/integration/persistence/segment_capacity_worker.py": "97bf4069ce7d8478856c53084acd61fe07428973c6cfe92eabf58ad530e7ad15",
+      "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py": "36493b58c3586de29bf6335c9c5618bd4ac29ac7ec11be8d2f30d309a5354b30"
+    }
+  },
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "scripts/run-memory-budget.py",
+    "--evidence-dir",
+    "/tmp/camctl-memsw-validation/capacity-delegation",
+    "--",
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py::test_fixed_batch_write_and_verification_have_bounded_residency",
+    "-q",
+    "--tb=short",
+    "--basetemp=/tmp/camctl-memsw-validation/capacity-tmp",
+    "--junitxml=/tmp/camctl-memsw-validation/capacity.xml"
+  ],
+  "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+  "environment": {
+    "PYTHONPATH": "/opt/devcontainer/.codex/worktrees/de38/camctl/apps/camctl/src:/opt/devcontainer/.codex/worktrees/de38/camctl/apps/camctl/tests:/opt/devcontainer/.codex/worktrees/de38/camctl/scripts",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-memsw-validation/pycache",
+    "TMPDIR": "/tmp/camctl-memsw-validation/tmp"
+  },
+  "started_utc": "2026-10-25T17:28:45.979766+00:00",
+  "finished_utc": "2026-10-25T17:28:46.418735+00:00",
+  "pid": 1480119,
+  "exit_code": 4,
+  "wall_seconds": 0.4389732319978066,
+  "source_head": "22281f1903536521ba62c9bbb1b1dcd337f402cc",
+  "source_status": "",
+  "source_files": {
+    "scripts/camctl_memory.py": "f56ddf767dc7196fed4013f898951e8f2dd6548e0e4444ab72da0e3d49f8e103",
+    "apps/camctl/tests/integration/persistence/segment_capacity_worker.py": "97bf4069ce7d8478856c53084acd61fe07428973c6cfe92eabf58ad530e7ad15",
+    "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py": "36493b58c3586de29bf6335c9c5618bd4ac29ac7ec11be8d2f30d309a5354b30"
+  }
+}

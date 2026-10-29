@@ -150,7 +150,7 @@ async def test_unconfirmed_stop_confirmed_by_idle_query_without_new_stop(tmp_pat
     """
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result(confirmed=True)))
+        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
         stopper = SentStop()
         await _ready(owned, runtime, stopper=stopper)
         stop_run = _run(owned, "stop/12")
@@ -205,7 +205,7 @@ async def test_reconcile_confirms_continuity_before_stop(tmp_path):
     """
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result(confirmed=True)))
+        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
         runtime.evidence = _CALL_EVIDENCE
         await capture_handler("camera_record")(12, runtime)
         runtime.stop_config = AttemptConfig(1, Decimal("0.125"), Decimal("1"))
@@ -242,7 +242,7 @@ async def test_reconcile_idle_query_concludes_activity_without_stop(tmp_path):
     """活动核实消费者：空闲观察证明活动已结束，不重新执行停止。"""
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result(confirmed=True)))
+        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
         runtime.evidence = _CALL_EVIDENCE
         await capture_handler("camera_record")(12, runtime)
         runtime.stop_config = AttemptConfig(1, Decimal("0.125"), Decimal("1"))
@@ -277,7 +277,7 @@ async def test_reconcile_failed_query_waits_without_stop(tmp_path):
     """
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result(confirmed=True)))
+        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
         runtime.evidence = _CALL_EVIDENCE
         await capture_handler("camera_record")(12, runtime)
         runtime.stop_config = AttemptConfig(1, Decimal("0.125"), Decimal("1"))
@@ -334,7 +334,7 @@ async def test_unconfirmed_stop_unreliable_query_keeps_retrying_stop(tmp_path):
     """停止核实矩阵：调用失败没有可靠观察时保存事实，停止继续。"""
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result(confirmed=True)))
+        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
         stopper = SentStop()
         await _ready(owned, runtime, stopper=stopper)
         query = FailedQuery()
@@ -359,7 +359,7 @@ async def test_stop_confirmation_confirmed_with_error_saves_observation(tmp_path
     """停止核实矩阵：仍在录确认与调用错误并存时完整保存。"""
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result(confirmed=True)))
+        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
         stopper = SentStop()
         await _ready(owned, runtime, stopper=stopper)
         query = StillRecordingWithErrorQuery(str(_activity_id(owned)))
@@ -395,7 +395,7 @@ async def test_stop_confirmation_budget_exhausted_unconfirmed_back_to_stop(tmp_p
     """停止核实矩阵：持续在录耗尽查询预算按 UNCONFIRMED，停止重试。"""
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result(confirmed=True)))
+        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
         stopper = SentStop()
         await _ready(owned, runtime, stopper=stopper)
         runtime.query_config = AttemptConfig(1, Decimal("0.5"), Decimal("1"))
@@ -429,7 +429,7 @@ async def test_canceled_capture_uses_stop_confirmation_without_new_stop(tmp_path
 
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result(confirmed=True)))
+        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
         stopper = SentStop()
         await _ready(owned, runtime, stopper=stopper)
         _cancel(owned, 12)
@@ -467,7 +467,7 @@ async def test_orphan_stop_confirmation_settled_after_stop_succeeds(tmp_path):
     """孤儿收场：停止链自行成功后停止核实按可靠依据收 SUCCEEDED。"""
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result(confirmed=True)))
+        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
         stopper = SentStop()
         await _ready(owned, runtime, stopper=stopper)
         runtime.query_config = AttemptConfig(3, Decimal("0.5"), Decimal("1"))
@@ -499,7 +499,7 @@ async def test_orphan_activity_observation_settled_after_cancel(tmp_path):
 
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result(confirmed=True)))
+        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
         runtime.evidence = _CALL_EVIDENCE
         await capture_handler("camera_record")(12, runtime)
         runtime.stop_config = AttemptConfig(1, Decimal("0.125"), Decimal("1"))
@@ -555,7 +555,7 @@ async def test_query_attempts_independent_and_same_key_across_reentry(tmp_path):
     """
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result(confirmed=True)))
+        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
         runtime.evidence = _CALL_EVIDENCE
         await capture_handler("camera_record")(12, runtime)
         runtime.stop_config = AttemptConfig(3, Decimal("0.125"), Decimal("1"))
@@ -621,7 +621,7 @@ async def test_running_query_attempt_recovered_by_new_session(tmp_path):
     """
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result(confirmed=True)))
+        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
         stopper = SentStop()
         await _ready(owned, runtime, stopper=stopper)
         assert _run(owned, "stop/12")[1:] == (2, 1)
@@ -650,7 +650,7 @@ async def test_running_query_attempt_recovered_by_new_session(tmp_path):
         from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
         from camctl.capture.recovery import RecoveryBoundary
 
-        resumed = _runtime(owned)
+        resumed = (await _runtime(owned))
         resumed.evidence = _CALL_EVIDENCE
         resumed.recovery_boundary = RecoveryBoundary.HOST_LOCAL_SETTLED
         resumed.recovery_max_event_id = horizon

@@ -1,0 +1,21 @@
+[
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_open_reader_allows_publisher_to_remove_original_path[unlink]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_open_reader_allows_publisher_to_remove_original_path[rename]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_closing_reader_keeps_unwithdrawn_report",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_open_missing_report_preserves_missing_error",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_reader_exception_closes_file_without_removing_report",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_failed_handle_handoff_releases_windows_handle",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_failed_file_object_handoff_releases_descriptor",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_observer_returns_opened_report_when_publisher_replaces_ready[unlink]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_observer_returns_opened_report_when_publisher_replaces_ready[rename]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_observer_waits_for_matching_ready_status_without_reading_staging",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_observer_preserves_invalid_json_error_and_closes_reader[invalid-json]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_observer_preserves_invalid_json_error_and_closes_reader[utf8-bom]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_observer_preserves_decode_error_and_closes_reader[invalid-utf8]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_observer_preserves_decode_error_and_closes_reader[utf16]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_observer_preserves_decode_error_and_closes_reader[utf32]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_reader_keeps_default_text_newline_semantics",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_observer_skips_existing_opening_races[FileNotFoundError]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_observer_skips_existing_opening_races[PermissionError]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_observer_preserves_other_read_errors_and_closes_reader"
+]

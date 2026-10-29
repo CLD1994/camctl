@@ -15,6 +15,7 @@ from camctl.persistence.executor import DbExecutor
 from camctl.persistence.repositories import segment_transactions as transactions
 from camctl.persistence.repositories.history import HistoryRepository, SqliteSnapshotStore
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+from ..persistence.transaction_fixtures import decorate_transaction_command
 from camctl.persistence.transaction import BoundedCommandPlan
 
 from ..persistence.test_segment_storage import _ok, _preview_world, _world
@@ -169,10 +170,9 @@ async def test_bounded_completion_keeps_original_h_after_checksum_and_cleanup(tm
         first_origin = owned.connection.execute('SELECT COALESCE(MAX(id),0)+1 FROM output_origins').fetchone()[0]
         key = new_operation_key()
         bounded = False
-        original_plan = transactions._FinishCommand.plan
         def plan(command, scope):
             nonlocal bounded
-            value = original_plan(command, scope)
+            value = command.plan(scope)
             bounded = isinstance(value, BoundedCommandPlan)
             return value
         def lost_receipt(stage, statement, params):
@@ -181,7 +181,7 @@ async def test_bounded_completion_keeps_original_h_after_checksum_and_cleanup(tm
         writer = (replace(owned, connection=ConnectionProbe(owned.connection, lost_receipt))
                   if case == 'unknown_order' else owned)
         with monkeypatch.context() as patch:
-            patch.setattr(transactions._FinishCommand, 'plan', plan)
+            decorate_transaction_command(patch, transactions, plan)
             receipt = transactions.finish_segment_recording(request, key, writer, batch_size=BATCH)
         assert bounded
         if case == 'unknown_order':

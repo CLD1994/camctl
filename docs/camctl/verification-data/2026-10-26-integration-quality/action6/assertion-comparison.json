@@ -1,0 +1,7 @@
+{
+  "baseline_assertions": 127,
+  "candidate_assertions": 127,
+  "all_assertions_unchanged_in_order": true,
+  "baseline_source": "baseline/source.py",
+  "candidate_source": "session-mode/source.py"
+}

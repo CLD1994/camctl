@@ -1,0 +1,360 @@
+{
+  "created_utc": "2026-10-27T09:52:14.865367+00:00",
+  "coordinator_head": "b253fe0ac1faf4153b3d24735bf182a6ab9e2db9",
+  "meaning": "各独立执行分支的阶段证据；生产同源，测试源及运行时点分别识别，不能合称协调分支的一次全量通过。",
+  "items": [
+    {
+      "source": "/tmp/camctl-refactor-20261026/control/.local/refactor-report.json",
+      "artifact": "control/refactor-report.json.gz",
+      "uncompressed_bytes": 460027,
+      "sha256": "422451957ddabe1afa063f3cc99c0722a8910c1d265090401861e67234a43403",
+      "compressed_sha256": "46326de9544e10d1b6012d79ea1101200b7ea5244a8454919c286c4615513c05",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/output-storage/.local/refactor-report.json",
+      "artifact": "output-storage/refactor-report.json.gz",
+      "uncompressed_bytes": 605147,
+      "sha256": "54c2b074aa7f6f66f2453e428fd62853413e801491b175c1dcc4a6eaf2038084",
+      "compressed_sha256": "be92fece0d6c867b781a1fdbda0a74791a40049087b16bfd08a8a76897f0027b",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/output-storage/.local/output-storage/outputs-public-final-252.json",
+      "artifact": "output-storage/output-storage/outputs-public-final-252.json.gz",
+      "uncompressed_bytes": 1592,
+      "sha256": "20e37161069c6587d780d7907a553c71faa129c17ecaa049cf1bca6264d6c3f4",
+      "compressed_sha256": "c0f2501885b7799fa403836f7cc2d5e9ce086c613892d520c2a664a6b2838c65",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/output-storage/.local/output-storage/outputs-public-final-252.log",
+      "artifact": "output-storage/output-storage/outputs-public-final-252.log.gz",
+      "uncompressed_bytes": 341,
+      "sha256": "2d071f4cad4361f34dda13c79ca2b1cd86098ed4003d7c8d5009642873b7a4d9",
+      "compressed_sha256": "68e89e02d76b940f36cc44f6be2474d3018938e7e52be3f54acd8536bb32f4a1",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/output-source/.local/refactor-report.json",
+      "artifact": "output-source/refactor-report.json.gz",
+      "uncompressed_bytes": 420447,
+      "sha256": "185ef153ba7db82226cd3a1bd8a0fa84841bb21ee8641513f40a306b8665d4d3",
+      "compressed_sha256": "489fd632fe3e4dcaf598566f43c2d0df1c55041a2ef5e92fcba2d1e1a6c633ff",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/output-source/.local/issue-source-capacity.json",
+      "artifact": "output-source/issue-source-capacity.json.gz",
+      "uncompressed_bytes": 19648,
+      "sha256": "6e5972dbb957a2e990ae5ad7baea5e6976b78dbfab70e045f4c14557c20271ee",
+      "compressed_sha256": "7bb4a98791dc401c8258f3be4a19184f59601a24357e950b2423f592d624ea50",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/output-source/.local/output-source-capacity-attribution/receipt.json",
+      "artifact": "output-source/output-source-capacity-attribution/receipt.json.gz",
+      "uncompressed_bytes": 1017,
+      "sha256": "795c737c47d425d8bc890daea02c3299ac0388aa3ac8d77759396afbf6692be9",
+      "compressed_sha256": "4eb38fda78b2fb86e3f4a5d04b83232eec88c75306f93c1812666f11d3248980",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/capture-results/.local/refactor-report.json",
+      "artifact": "capture-results/refactor-report.json.gz",
+      "uncompressed_bytes": 209387,
+      "sha256": "bc28e64c619f77ead5b5b6a0c50fe408af0de75b156cea711c777836ba65e35e",
+      "compressed_sha256": "774bd4447cfe36ccb864a045d7f20a9678f7ad43edf6f042e5d5090109480fc9",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/capture-results/.local/a4-complete-49bb.json",
+      "artifact": "capture-results/a4-complete-49bb.json.gz",
+      "uncompressed_bytes": 1890,
+      "sha256": "c40a4663db547cc7a3fcb3579d616e1975295f68aa698a5a7d67551f757dbc69",
+      "compressed_sha256": "f22980062bf6db2aa0ec90494a7d8323d38901d5225e29bde44d14a3c90b9ea1",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/capture-results/.local/a4-complete-49bb.log",
+      "artifact": "capture-results/a4-complete-49bb.log.gz",
+      "uncompressed_bytes": 5238,
+      "sha256": "3247fd4a2fc00476b321782b59ac667e7b79349f6efbde780eca10af86d3b3b1",
+      "compressed_sha256": "e2d4c34f2e060e31156f2f89831d3fdb7cd666e12233dec8a096b0ad5d99ee63",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/capture-results/.local/a4-defect-facts.json",
+      "artifact": "capture-results/a4-defect-facts.json.gz",
+      "uncompressed_bytes": 16972,
+      "sha256": "19b695f455da5767534ed6bfe0d92c7969c14377405fe36cb967e7c2aa8fb8cd",
+      "compressed_sha256": "0fd83cf706a08e8a85cb45165f1d329d685356c8fd943f3ff82423ac2e725ddc",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/capture-results/.local/call-public-final.json",
+      "artifact": "capture-results/call-public-final.json.gz",
+      "uncompressed_bytes": 1441,
+      "sha256": "233c8b30cf9c4395ed75df482fd62dd4aaa2b8e3aa68c563344a602e10bf2f46",
+      "compressed_sha256": "f9a70e652186d83cc53a770c88937dbee7d61b8cc339f58aadb2ec6045afb058",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/capture-results/.local/call-public-final.log",
+      "artifact": "capture-results/call-public-final.log.gz",
+      "uncompressed_bytes": 99,
+      "sha256": "20362800a300f5986b82c7788845ce8c3235c33925a0c9af2b9564d13d97fc62",
+      "compressed_sha256": "db1cc7521cb5bb85dcdcda8f5907aceb14d17a5fed55a901aaf9d93ae84f9d62",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/capture-results/.local/start-query-contract-boundary.json",
+      "artifact": "capture-results/start-query-contract-boundary.json.gz",
+      "uncompressed_bytes": 1242,
+      "sha256": "6f9dcbc77e19045cdf9b6b248fa6b32ebaf494845b818ec177dcd9f49888b713",
+      "compressed_sha256": "1f6ea55a2d673895a20eeb84e9665c146246886256da505990bb1354776a5dfb",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/bootstrap-cancel-media/.local/refactor-report.json",
+      "artifact": "bootstrap-cancel-media/refactor-report.json.gz",
+      "uncompressed_bytes": 78827,
+      "sha256": "d43641a36191d815caea73752278574fdbf6c281c4d47896467ba3788fada3a0",
+      "compressed_sha256": "34aa42c6e48c55c9fa100ea6adab24dae525bb6fcad41a81b41c740d25be785d",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/bootstrap-cancel-media/.local/production-gap.json",
+      "artifact": "bootstrap-cancel-media/production-gap.json.gz",
+      "uncompressed_bytes": 2766,
+      "sha256": "73b3f1ad6cee194e9dd47b7170a2db318071e0e9c95de10f0ff9badd7d11cb4e",
+      "compressed_sha256": "e061a56753081172fa0ccf8f5c74950041bd31926830a0b18c4d231da9ce490e",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/bootstrap-cancel-media/.local/bootstrap-cancel-media-full99.log",
+      "artifact": "bootstrap-cancel-media/bootstrap-cancel-media-full99.log.gz",
+      "uncompressed_bytes": 116931,
+      "sha256": "f1a9fdb0996cf261e6f2c0bb15f01ab0a7204a44b5467216b9a80614396812bf",
+      "compressed_sha256": "2ce974a6c4d4fe6078dc5c54fea5b7de4cfb60680b077c182511ec15d0c4d1f3",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/bootstrap-cancel-media/.local/close-refactor-report.json",
+      "artifact": "bootstrap-cancel-media/close-refactor-report.json.gz",
+      "uncompressed_bytes": 51474,
+      "sha256": "f57fae0a8defaa46ee5344d7bfdba4ac93f22dd6dc14e3ac1e099439bfc7272a",
+      "compressed_sha256": "71c3326c08a773fb4ae4600a484b7cc4d27a8b14f0e9ba91088a957b4d2dd8f7",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/bootstrap-cancel-media/.local/close-evidence/close-public-final18.json",
+      "artifact": "bootstrap-cancel-media/close-evidence/close-public-final18.json.gz",
+      "uncompressed_bytes": 1111,
+      "sha256": "ac17911ac3853a99733ca7721a32cfc7488e68a2603bb2727592b56b28d28b0d",
+      "compressed_sha256": "93c2fb4e9d6bf5f7e4133ce4402ff148136eeacac1290c18d4d2cf61b9c97bee",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/bootstrap-cancel-media/.local/close-evidence/close-public-final18.log",
+      "artifact": "bootstrap-cancel-media/close-evidence/close-public-final18.log.gz",
+      "uncompressed_bytes": 99,
+      "sha256": "5d66f3148d066037d7ad6aded42236237075d9f22d5ed327632ea0c560f713ea",
+      "compressed_sha256": "9bca407eecefb7ad8ba6be384f2aa52f0e1e39920fac5adace9c00190db889f5",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/outputs/.local/refactor-report.json",
+      "artifact": "outputs/refactor-report.json.gz",
+      "uncompressed_bytes": 1083296,
+      "sha256": "248595f2b3cc482084a6eead156d2f66e42378c39c7bb159de40ad8ff08fb9e0",
+      "compressed_sha256": "068f7247aa09056ad58ff12f781967ee32551a3dd49e681a7473a767edb0c7e8",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/outputs/.local/read-diagnostics-public-final.json",
+      "artifact": "outputs/read-diagnostics-public-final.json.gz",
+      "uncompressed_bytes": 511,
+      "sha256": "24bc56ae7bf5b87d15f3aa3bd333c581b8025c6ef03f57495eac44ad76d2b127",
+      "compressed_sha256": "c6f413d6d23757b8f34ff4232a08e316c2f6c1d0646416c1cf4045719d547530",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/outputs/.local/read-diagnostics-public-final.log",
+      "artifact": "outputs/read-diagnostics-public-final.log.gz",
+      "uncompressed_bytes": 9450,
+      "sha256": "82d4f959da218c100d5438db46a3a0c63b9f6d51ec893e2955208e0a55365997",
+      "compressed_sha256": "2c7de6ee1562d2336e4c5c842cb03c1a7ebe67300b4189a5fc71efbe9a36d094",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/outputs/.local/read-diagnostics-public-final.xml",
+      "artifact": "outputs/read-diagnostics-public-final.xml.gz",
+      "uncompressed_bytes": 21380,
+      "sha256": "e9af33e31fa9ad5e22f9ac551838138c6610aadb996d18af99b79b14993fd2ce",
+      "compressed_sha256": "76f91bbbe7acfbc702cdc4553a6577e9412b765f929d1aa98fcb8bf541a05edf",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/outputs/.local/evidence/host-normal-stop-61ca9098/facts.json",
+      "artifact": "outputs/evidence/host-normal-stop-61ca9098/facts.json.gz",
+      "uncompressed_bytes": 6013,
+      "sha256": "e077a3d44c44bb9ddb698bf9672e8a5e658e9e687d3e8d63dc0facc09e87c88a",
+      "compressed_sha256": "7021854d6e1caa137166b470df30279543469c89d45418828c12ac85a7796470",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/capture-binding/.local/binding/refactor-report.json",
+      "artifact": "capture-binding/binding/refactor-report.json.gz",
+      "uncompressed_bytes": 59583,
+      "sha256": "a7749aea6a657222a9a88cce975cc953a09936157d1b94b7af696bcd193246ac",
+      "compressed_sha256": "46537b43a1092f1cca6357850849cf190633efd079f8bbd1bf58081f8551cdff",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/capture-binding/.local/retention/refactor-report.json",
+      "artifact": "capture-binding/retention/refactor-report.json.gz",
+      "uncompressed_bytes": 82863,
+      "sha256": "8ce611c498401c5504193e7fb960e00af537523ac621e333bf3438c1736937f2",
+      "compressed_sha256": "c3df84bd8f27936bd470d874e8ffe9108cc2e61e56f3ca2449133ae0a8e670c9",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/capture-binding/.local/natural-sources/refactor-report.json",
+      "artifact": "capture-binding/natural-sources/refactor-report.json.gz",
+      "uncompressed_bytes": 81968,
+      "sha256": "1d44bd01b914d23aaa097ed959f90aef9ca5795f8c5619aea9ce70ce745fab9a",
+      "compressed_sha256": "1944be5208ecd170a8955b328fa33a82fe20a19a294a15b3ee79f9f590257460",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/capture-binding/.local/natural-sources/final-run.json",
+      "artifact": "capture-binding/natural-sources/final-run.json.gz",
+      "uncompressed_bytes": 1440,
+      "sha256": "2018fb6e1d9294787b27a401f0e310330a705a99f2a172a46dd61c9b3b989661",
+      "compressed_sha256": "2c7445752fea2005e298e2bafc0f09d0c2f84361af08a5762f406282616cf9ea",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/capture-binding/.local/natural-sources/final.log",
+      "artifact": "capture-binding/natural-sources/final.log.gz",
+      "uncompressed_bytes": 181,
+      "sha256": "01264ae4a680b21a0264640846f1acc6f827892c292390baf8f30c85e007e8df",
+      "compressed_sha256": "d153eed17d0a0db22def2c4cc71a5474542dab0db3f475162350618967f66b50",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/cross-component/.local/refactor-report.json",
+      "artifact": "cross-component/refactor-report.json.gz",
+      "uncompressed_bytes": 526315,
+      "sha256": "5c822ae25ec1b9ef59095b7102053d4b1377539aed4a6d509a86a38270b95095",
+      "compressed_sha256": "412d294e3b5e78e74cfb1be4bfa5b938995d4fa660384c3e8dddcfd7f7e0afc1",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/storage-adapters/.local/refactor-report.json",
+      "artifact": "storage-adapters/refactor-report.json.gz",
+      "uncompressed_bytes": 2432107,
+      "sha256": "44b28d6a61f43d31e2edbc1e5a6c0134c1053f1f7865ed5720b40d9552355172",
+      "compressed_sha256": "159a1b1602ab911d92a47b40182c81e3eb7ef0b6c2b053766e52e0a2660ca10b",
+      "kind": "file"
+    },
+    {
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/integration-refactor-20261026/unit-all/results.xml",
+      "artifact": "coordinator/unit-all/results.xml.gz",
+      "uncompressed_bytes": 2541750,
+      "sha256": "5e4b937133ef46b72c1a2080e36739c1f7f38b0d0671eed669c91c660c1c7b44",
+      "compressed_sha256": "153c375889652c43f077035d980bfb94ac9a40a8fe4bf7c9c1488cba3300a4d9",
+      "kind": "file"
+    },
+    {
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/integration-refactor-20261026/unit-all/pytest.log",
+      "artifact": "coordinator/unit-all/pytest.log.gz",
+      "uncompressed_bytes": 11460,
+      "sha256": "d7e1be5900c452894f2937af635fdc196069ba118feeafa169bdfecd35e3bf9b",
+      "compressed_sha256": "e8e94911ccd772cf170993c6181d68e546023ec613e803be417af5909f8e9dd2",
+      "kind": "file"
+    },
+    {
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/integration-refactor-20261026/unit-all/receipt.json",
+      "artifact": "coordinator/unit-all/receipt.json.gz",
+      "uncompressed_bytes": 738,
+      "sha256": "9a93ebf2522fc3c82491390f63268d09474e069bcefa065291b079d75527d640",
+      "compressed_sha256": "bb0c339663bd50c903ee433f103a4171d000c9e3551e953738aeaeb2a5dbd247",
+      "kind": "file"
+    },
+    {
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/integration-refactor-20261026/acceptance-diagnostics/results.xml",
+      "artifact": "coordinator/acceptance-diagnostics/results.xml.gz",
+      "uncompressed_bytes": 1352,
+      "sha256": "0f997319cb2b2561d6715b7ca7ab1263a634d142be943c5b5a279f5595b401f5",
+      "compressed_sha256": "acdb991b31151bbf580875f5da926189adba04440d37bc852fd4a8b9e11147c2",
+      "kind": "file"
+    },
+    {
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/integration-refactor-20261026/acceptance-diagnostics/receipt.json",
+      "artifact": "coordinator/acceptance-diagnostics/receipt.json.gz",
+      "uncompressed_bytes": 684,
+      "sha256": "106d31989c3c6162326bc2f7a23739df80eb9bac10e0d18e49e1efdf67439022",
+      "compressed_sha256": "de5a7c39ce6b9b09f06a1c0458e1537da44b18dce1dfa8b3b48014d95cbeb457",
+      "kind": "file"
+    },
+    {
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/integration-refactor-20261026/source-guard-registration/results.xml",
+      "artifact": "coordinator/source-guard-registration/results.xml.gz",
+      "uncompressed_bytes": 587,
+      "sha256": "ea28156e20a751a51cef1856c044e180590cbcc846a16a4d93aebc5219255e13",
+      "compressed_sha256": "f263d428b2248f5363f0cb184845dd81470ec1251bd6e3fa7316c44408b62976",
+      "kind": "file"
+    },
+    {
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/integration-refactor-20261026/source-guard-registration/pytest.log",
+      "artifact": "coordinator/source-guard-registration/pytest.log.gz",
+      "uncompressed_bytes": 114,
+      "sha256": "b97cd66792a505bf9bc3fd5036a109214824e6728d5c6291da8471ea72cf9f92",
+      "compressed_sha256": "e8786c85a77342d6fdc59956db8d489e7d1e93af10ca0d4821917c803da11a33",
+      "kind": "file"
+    },
+    {
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/integration-refactor-20261026/source-guard-registration/receipt.json",
+      "artifact": "coordinator/source-guard-registration/receipt.json.gz",
+      "uncompressed_bytes": 564,
+      "sha256": "c4588f8018552fead53197992db3c034f555c8871023c4ce1c610063d2dc579a",
+      "compressed_sha256": "578b14fb777642bb8ed15d9507d87312028ba14376e398b2ca98fdea0533db44",
+      "kind": "file"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/bootstrap-cancel-media/.local/file-result-terminal-state-final.db",
+      "artifact": "databases/00-.local.db.gz",
+      "uncompressed_bytes": 823296,
+      "sha256": "fabaa767cf0134a6541c4eecf2d8c299fe72726b5618fe47ff9fceaeed2a7ba6",
+      "compressed_sha256": "32af7682e048286af612378b2cff9c8a1d8b2a794e9aa96e2b8fa7de92dd5c31",
+      "kind": "sqlite-backup"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/outputs/.local/evidence/host-normal-stop-61ca9098/state.db",
+      "artifact": "databases/01-host-normal-stop-61ca9098.db.gz",
+      "uncompressed_bytes": 815104,
+      "sha256": "b81695c6642e7200b6b17805b85411a5c70aa856982ffc12d74ddbc479ee2fda",
+      "compressed_sha256": "a56c3a8fd986425e7a5b475d1eea8ca329ffde49518ba327b996fc0a575947ac",
+      "kind": "sqlite-backup"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/capture-results/.local/tmp/a4-complete-49bb/test_intent_saved_but_cancelle0/state.db",
+      "artifact": "databases/02-test_intent_saved_but_cancelle0.db.gz",
+      "uncompressed_bytes": 815104,
+      "sha256": "fa44de83478e097cca196b8122046f721f262a14a482d4cab256ad7fe7806d0e",
+      "compressed_sha256": "7208b00e9ad2b1b62a43bf1f6910cd7e9b003565e9a576b10381db331cdacb4b",
+      "kind": "sqlite-backup"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/capture-results/.local/tmp/a4-complete-49bb/test_same_session_cancelled_ac0/state.db",
+      "artifact": "databases/03-test_same_session_cancelled_ac0.db.gz",
+      "uncompressed_bytes": 815104,
+      "sha256": "7728641b55a16a40d21bbbafc891a4774ff00c5d632ac336ceaf84f1e177cc06",
+      "compressed_sha256": "860f44e5e9c29e410facb9f9d6344214ee4bcc0b57fc26575b16598d5a37b62e",
+      "kind": "sqlite-backup"
+    }
+  ],
+  "missing_optional_sources": []
+}

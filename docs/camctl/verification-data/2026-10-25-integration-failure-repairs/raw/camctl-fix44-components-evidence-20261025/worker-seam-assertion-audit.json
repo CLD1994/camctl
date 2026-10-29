@@ -1,0 +1,12 @@
+[
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_result_error_state.py",
+    "original_test_assertions_unchanged": true,
+    "test_count": 3
+  },
+  {
+    "path": "apps/camctl/tests/integration/bootstrap/test_result_error_flow.py",
+    "original_test_assertions_unchanged": true,
+    "test_count": 2
+  }
+]

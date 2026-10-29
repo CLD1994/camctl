@@ -1,0 +1,1826 @@
+{
+  "task": "固定批量写入成本的只读路径诊断",
+  "source_head": "98d3b28da5751e1e8c733f2712180cd5e0e119aa",
+  "production_and_test_changes_since_fc310442": [],
+  "scope": {
+    "test": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py::test_fixed_batch_write_and_verification_have_bounded_residency",
+    "diagnostic_input": {
+      "N_outputs": 200,
+      "S_default_scope": 14,
+      "B": 4,
+      "originals": 200,
+      "previews": 0,
+      "source_page_sizes": [
+        128,
+        72
+      ],
+      "saved_events": 208,
+      "row_changes": 218
+    },
+    "actions_by_this_agent": "只读源码、文档和父代理已有测量；未运行测试；未修改仓库"
+  },
+  "conclusion": "固定批量限制单次驻留和范围关联事件的行数，不限制全组总工作。200产物、14条默认范围仍产生208事件；生产规划、独立守卫、逐事件规范封口及原键核实分别重读冻结输入。当前样本成本主要在原页关系证明、解码/结构校验、冻结文件重读和缓存值复制/计量，内存跟踪进一步放大。仅现有阶段/SQL计量时写入9.292秒，其中生成/上下文/守卫共8.453秒，SQL写阶段0.052秒、COMMIT0.0048秒；SQL写入与COMMIT不是本次主要耗时。未发现本轮可直接定性的行为契约缺陷。",
+  "evidence": {
+    "parent_measurement_directory": ".",
+    "factor_results": "./factor-results.json",
+    "profile": "./write-profile.pstats",
+    "profile_functions": "./write-profile-functions.json",
+    "transaction_stages": "./write-transaction-stages.json",
+    "sql_groups": "./write-sql-groups.json",
+    "prior_current_full_test": "docs/camctl/verification-data/2026-10-25-integration-cost-analysis/current-persistence/{phases.json,totals.json,pytest.log}",
+    "stages_without_profile": "./write-stages-no-profile.json"
+  },
+  "batch_limits": [
+    {
+      "behavior": "候选读取每次最多4项，原始结果页仍可包含128项；成员分类和缺口重算固定按128项读取。",
+      "source": [
+        "segment_transactions.py:1014",
+        "segment_transactions.py:947",
+        "segments.py:292",
+        "test_segment_transaction_batches.py:512"
+      ]
+    },
+    {
+      "behavior": "默认范围14条关联按4、4、4、2分成4条PUBLISH事件；每份产物仍单独生成OUTPUT_REGISTERED。",
+      "source": [
+        "segment_transactions.py:960",
+        "segment_transactions.py:963",
+        "segment_transactions.py:973"
+      ]
+    },
+    {
+      "behavior": "回执核实首事件单独读取，其余保存事件每页4项，完整读到原组末尾；不是只核实4份产物。",
+      "source": [
+        "segment_transactions.py:1099",
+        "segment_transactions.py:1126",
+        "segment_transactions.py:1130"
+      ]
+    },
+    {
+      "behavior": "整个208事件组共享一次BEGIN IMMEDIATE和一次COMMIT，B=4不是每4条提交。",
+      "source": [
+        "transaction.py:718",
+        "transaction.py:323",
+        "transaction.py:409"
+      ]
+    },
+    {
+      "behavior": "128行SQL返回上限、128条/2MiB通用复用上限和3页原行窗口分别约束不同对象；B=4不会将这些上限改成4。",
+      "source": [
+        "transaction.py:327",
+        "read_reuse.py:18",
+        "page_read_cache.py:21"
+      ]
+    }
+  ],
+  "path": [
+    {
+      "stage": "准备世界",
+      "behavior": "先真正初始化状态库，保存结果页、每文件的归属和完成事实，再保存冻结成员、分类、缺口及默认范围。此阶段在本测试的tracemalloc窗口之前。",
+      "source": [
+        "test_segment_transaction_batches.py:478",
+        "test_segment_transaction_batches.py:58",
+        "test_segment_storage.py:54",
+        "test_segment_storage.py:68",
+        "test_segment_storage.py:79"
+      ]
+    },
+    {
+      "stage": "规划",
+      "behavior": "核真实动作/流程/集合、停止与完成证明；重算两遍成员分类；数全体候选；比默认范围实际顺序，分配整个事件范围。",
+      "source": [
+        "segment_transactions.py:993",
+        "segment_transactions.py:1012",
+        "segment_transactions.py:1020",
+        "segment_transactions.py:1028"
+      ]
+    },
+    {
+      "stage": "生成事件",
+      "behavior": "先结束动作，再按原片、预览的顺序分别遍历全体候选；逐项创建产物，按4条连接默认范围，结束RESULTS/父计划，最后发布集合。该输入虽然没有预览，PREVIEW阶段仍遍历200候选后过滤。",
+      "source": [
+        "segment_transactions.py:907",
+        "segment_transactions.py:946",
+        "segment_transactions.py:947",
+        "segment_transactions.py:975",
+        "segment_transactions.py:985"
+      ]
+    },
+    {
+      "stage": "每条事件独立检查并封口",
+      "behavior": "内核先构造本事件当前有限关联，再清除规划证明；首事件守卫重新核完整申请。全部具名守卫通过后，seal再从冻结来源生成独立预期并与实际事件逐项比较，不能让规划结果给守卫授权。",
+      "source": [
+        "transaction.py:331",
+        "transaction.py:333",
+        "transaction.py:347",
+        "transaction.py:350",
+        "segment_transactions.py:616",
+        "event_reads.py:358",
+        "event_reads.py:372",
+        "event_reads.py:377"
+      ]
+    },
+    {
+      "stage": "最终发布",
+      "behavior": "重新算分类和范围，逐候选核真实产物，再反向逐真实产物核候选，最后比默认范围实际output身份及共同收场，防止等数量替换、外来产物或漏项。",
+      "source": [
+        "segment_transactions.py:811",
+        "segment_transactions.py:821",
+        "segment_transactions.py:830",
+        "segment_transactions.py:834",
+        "segment_transactions.py:846",
+        "segment_transactions.py:857"
+      ]
+    },
+    {
+      "stage": "核实原回执",
+      "behavior": "开启新的只读事务，按原操作键找完整事务，恢复组前资格，从冻结输入重新生成预期事件，与保存事件双向比较，并核每份产物的真实身份。",
+      "source": [
+        "segment_transactions.py:1080",
+        "segment_transactions.py:1094",
+        "segment_transactions.py:1111",
+        "segment_transactions.py:1130",
+        "segment_transactions.py:1135"
+      ]
+    }
+  ],
+  "static_count_model": {
+    "conditions": "仅当前测试的普通OSMO完整扫描分支、N个合格原片、S个默认范围原片、0预览、0缺口；不含世界准备。",
+    "read_member_write_formula": "17*N + 3*S",
+    "read_member_write_expected": 3442,
+    "read_member_write_measured": 3442,
+    "read_member_write_breakdown": [
+      {
+        "stage": "plan",
+        "formula": "4*N+S",
+        "N200_S14": 814
+      },
+      {
+        "stage": "首事件独立守卫",
+        "formula": "4*N+S",
+        "N200_S14": 814
+      },
+      {
+        "stage": "生产规范事件",
+        "formula": "2*N",
+        "N200_S14": 400
+      },
+      {
+        "stage": "seal独立规范事件",
+        "formula": "2*N",
+        "N200_S14": 400
+      },
+      {
+        "stage": "最终ACTIVATE",
+        "formula": "5*N+S",
+        "N200_S14": 1014
+      }
+    ],
+    "read_member_verify_formula": "5*N+S",
+    "read_member_verify_static": 1014,
+    "why_scope_is_N_plus_S": "_verify_scope_members先按128项完整读取N成员，再对落在默认范围的S成员调用segment_output_candidate；后者再次调用_read_member。",
+    "fixed_file_write_formula": "read_member_write + 2*N",
+    "fixed_file_write_expected": 3842,
+    "fixed_file_write_measured": 3842,
+    "fixed_file_load_measured": 3742,
+    "fixed_file_reuse_hits_derived": 100,
+    "created_output_write_formula": "2*N+4*S",
+    "created_output_write_expected": 456,
+    "created_output_write_measured": 456,
+    "created_output_verify_formula": "N+S",
+    "created_output_verify_static": 214,
+    "saved_event_formula": "2 + N + ceil(S/B) + finish_run + complete_plan + len(preparation_events)",
+    "saved_events_measured": 208,
+    "actual_flags": {
+      "finish_run": true,
+      "complete_plan": true,
+      "preparation_events": 0
+    },
+    "generator_profile_caveat": "_canonical_events的418次profile调用是两条生成器每条209次恢复（208次产出及末次结束），不是完整扫描418遍；真实生产和seal各一条生成器。"
+  },
+  "measured_costs": {
+    "four_factors": [
+      {
+        "mode": "plain",
+        "sql_probe": false,
+        "tracemalloc": false,
+        "write": {
+          "wall_s": 9.565925428993069,
+          "process_cpu_s": 10.2633199,
+          "peak_bytes": null
+        },
+        "verify": {
+          "wall_s": 0.8596102619922021,
+          "process_cpu_s": 0.9200897999999995,
+          "peak_bytes": null
+        },
+        "combined_wall_s": 10.42553569098527,
+        "stats_after_write": null,
+        "stats_after_verify": null,
+        "after_logical_sha256": "9cd0007a92fb277d1fcca5c5729319308f652a353b20598fec6a8503c5eb4b4a",
+        "result": {
+          "ref": {
+            "action_id": 1,
+            "scan_id": 3,
+            "final_page_event_id": 220,
+            "version": 1
+          },
+          "action_status": 3,
+          "plan_status": 3,
+          "boundary": {
+            "txn_id": 420,
+            "last_event_id": 836
+          },
+          "output_count": 200,
+          "original_count": 200,
+          "preview_count": 0,
+          "scope_count": 14
+        }
+      },
+      {
+        "mode": "original_counter_and_tracemalloc",
+        "sql_probe": true,
+        "tracemalloc": true,
+        "write": {
+          "wall_s": 34.36561614400125,
+          "process_cpu_s": 36.8816307,
+          "peak_bytes": 2254673
+        },
+        "verify": {
+          "wall_s": 3.755344719000277,
+          "process_cpu_s": 4.0373169999999945,
+          "peak_bytes": 1927698
+        },
+        "combined_wall_s": 38.12096086300153,
+        "stats_after_write": {
+          "max_fetch": 128,
+          "fetched_rows": 84894,
+          "sql_calls": 59718,
+          "whole_group_checks": 0
+        },
+        "stats_after_verify": {
+          "max_fetch": 128,
+          "fetched_rows": 98880,
+          "sql_calls": 72227,
+          "whole_group_checks": 1
+        },
+        "after_logical_sha256": "9cd0007a92fb277d1fcca5c5729319308f652a353b20598fec6a8503c5eb4b4a",
+        "result": {
+          "ref": {
+            "action_id": 1,
+            "scan_id": 3,
+            "final_page_event_id": 220,
+            "version": 1
+          },
+          "action_status": 3,
+          "plan_status": 3,
+          "boundary": {
+            "txn_id": 420,
+            "last_event_id": 836
+          },
+          "output_count": 200,
+          "original_count": 200,
+          "preview_count": 0,
+          "scope_count": 14
+        }
+      },
+      {
+        "mode": "original_counter_only",
+        "sql_probe": true,
+        "tracemalloc": false,
+        "write": {
+          "wall_s": 8.588994638004806,
+          "process_cpu_s": 9.242953199999995,
+          "peak_bytes": null
+        },
+        "verify": {
+          "wall_s": 0.8803112769965082,
+          "process_cpu_s": 0.9402086999999995,
+          "peak_bytes": null
+        },
+        "combined_wall_s": 9.469305915001314,
+        "stats_after_write": {
+          "max_fetch": 128,
+          "fetched_rows": 84894,
+          "sql_calls": 59718,
+          "whole_group_checks": 0
+        },
+        "stats_after_verify": {
+          "max_fetch": 128,
+          "fetched_rows": 98880,
+          "sql_calls": 72227,
+          "whole_group_checks": 1
+        },
+        "after_logical_sha256": "9cd0007a92fb277d1fcca5c5729319308f652a353b20598fec6a8503c5eb4b4a",
+        "result": {
+          "ref": {
+            "action_id": 1,
+            "scan_id": 3,
+            "final_page_event_id": 220,
+            "version": 1
+          },
+          "action_status": 3,
+          "plan_status": 3,
+          "boundary": {
+            "txn_id": 420,
+            "last_event_id": 836
+          },
+          "output_count": 200,
+          "original_count": 200,
+          "preview_count": 0,
+          "scope_count": 14
+        }
+      },
+      {
+        "mode": "tracemalloc_only",
+        "sql_probe": false,
+        "tracemalloc": true,
+        "write": {
+          "wall_s": 42.27325000699784,
+          "process_cpu_s": 42.8794585,
+          "peak_bytes": 2253998
+        },
+        "verify": {
+          "wall_s": 5.4390727980062366,
+          "process_cpu_s": 5.85459560000001,
+          "peak_bytes": 1927228
+        },
+        "combined_wall_s": 47.71232280500408,
+        "stats_after_write": null,
+        "stats_after_verify": null,
+        "after_logical_sha256": "9cd0007a92fb277d1fcca5c5729319308f652a353b20598fec6a8503c5eb4b4a",
+        "result": {
+          "ref": {
+            "action_id": 1,
+            "scan_id": 3,
+            "final_page_event_id": 220,
+            "version": 1
+          },
+          "action_status": 3,
+          "plan_status": 3,
+          "boundary": {
+            "txn_id": 420,
+            "last_event_id": 836
+          },
+          "output_count": 200,
+          "original_count": 200,
+          "preview_count": 0,
+          "scope_count": 14
+        }
+      }
+    ],
+    "logical_state_sha256_all_modes": "9cd0007a92fb277d1fcca5c5729319308f652a353b20598fec6a8503c5eb4b4a",
+    "measurement_interpretation": "四因素各一次且顺序执行；计数样本略快于plain、双工具快于tracemalloc-only，故不能相减计算独立工具占比或声称稳定提速倍数。可确认开启tracemalloc明显放大该输入；四档逻辑摘要一致。",
+    "diagnostic_transaction": {
+      "stage": "db_transaction",
+      "wall_ns": 28712077290,
+      "cpu_ms": 30881.702,
+      "phases": {
+        "unclassified": {
+          "elapsed_ms": 35.366,
+          "cpu_ms": 37.507,
+          "calls": 0,
+          "sql": {
+            "elapsed_ms": 0.0,
+            "cpu_ms": 0.0
+          }
+        },
+        "begin_write": {
+          "elapsed_ms": 1.222,
+          "cpu_ms": 1.272,
+          "calls": 1,
+          "sql": {
+            "execute_calls": 1,
+            "rows_read": 0,
+            "rows_written": 0,
+            "elapsed_ms": 0.768,
+            "cpu_ms": 0.83
+          }
+        },
+        "read_state": {
+          "elapsed_ms": 13.218,
+          "cpu_ms": 14.209,
+          "calls": 210,
+          "sql": {
+            "execute_calls": 211,
+            "rows_read": 211,
+            "rows_written": 0,
+            "fetch_calls": 211,
+            "elapsed_ms": 5.724,
+            "cpu_ms": 6.158
+          }
+        },
+        "plan": {
+          "elapsed_ms": 2342.932,
+          "cpu_ms": 2533.406,
+          "calls": 1,
+          "sql": {
+            "execute_calls": 9485,
+            "rows_read": 10644,
+            "rows_written": 0,
+            "fetch_calls": 9693,
+            "elapsed_ms": 235.829,
+            "cpu_ms": 250.747
+          }
+        },
+        "final_checks": {
+          "elapsed_ms": 4.327,
+          "cpu_ms": 4.618,
+          "calls": 210,
+          "sql": {
+            "execute_calls": 5,
+            "rows_read": 5,
+            "rows_written": 0,
+            "fetch_calls": 5,
+            "elapsed_ms": 0.121,
+            "cpu_ms": 0.127
+          }
+        },
+        "sql_writes": {
+          "elapsed_ms": 112.325,
+          "cpu_ms": 120.985,
+          "calls": 417,
+          "sql": {
+            "execute_calls": 1272,
+            "rows_read": 18,
+            "rows_written": 1054,
+            "fetch_calls": 218,
+            "elapsed_ms": 45.906,
+            "cpu_ms": 49.478
+          }
+        },
+        "validation_context": {
+          "elapsed_ms": 9150.421,
+          "cpu_ms": 9864.028,
+          "calls": 417,
+          "sql": {
+            "execute_calls": 13546,
+            "rows_read": 24294,
+            "rows_written": 0,
+            "fetch_calls": 19270,
+            "elapsed_ms": 439.649,
+            "cpu_ms": 466.902
+          }
+        },
+        "event_generation": {
+          "elapsed_ms": 8725.25,
+          "cpu_ms": 9407.068,
+          "calls": 210,
+          "sql": {
+            "execute_calls": 12537,
+            "rows_read": 23917,
+            "rows_written": 0,
+            "fetch_calls": 18281,
+            "elapsed_ms": 394.559,
+            "cpu_ms": 418.58
+          }
+        },
+        "report_targets": {
+          "elapsed_ms": 13.469,
+          "cpu_ms": 14.543,
+          "calls": 208,
+          "sql": {
+            "elapsed_ms": 0.0,
+            "cpu_ms": 0.0
+          }
+        },
+        "event_validation": {
+          "elapsed_ms": 8274.074,
+          "cpu_ms": 8844.949,
+          "calls": 208,
+          "sql": {
+            "execute_calls": 22660,
+            "rows_read": 25805,
+            "rows_written": 0,
+            "fetch_calls": 23380,
+            "elapsed_ms": 845.352,
+            "cpu_ms": 891.941
+          }
+        },
+        "change_derivation": {
+          "elapsed_ms": 35.128,
+          "cpu_ms": 37.943,
+          "calls": 416,
+          "sql": {
+            "elapsed_ms": 0.0,
+            "cpu_ms": 0.0
+          }
+        },
+        "commit": {
+          "elapsed_ms": 4.344,
+          "cpu_ms": 1.175,
+          "calls": 1,
+          "sql": {
+            "execute_calls": 1,
+            "rows_read": 0,
+            "rows_written": 0,
+            "elapsed_ms": 4.287,
+            "cpu_ms": 1.116
+          }
+        }
+      },
+      "details": {
+        "history_decode": {
+          "elapsed_ms": 6623.47,
+          "cpu_ms": 7131.976,
+          "calls": 12875
+        },
+        "history_structure_validation": {
+          "elapsed_ms": 3914.712,
+          "cpu_ms": 4216.157,
+          "calls": 25718
+        },
+        "history_event_validation": {
+          "elapsed_ms": 8269.484,
+          "cpu_ms": 8840.088,
+          "calls": 208
+        }
+      },
+      "details_inclusive": true,
+      "sql": {
+        "execute_calls": 59718,
+        "rows_read": 84894,
+        "rows_written": 1054,
+        "fetch_calls": 71058,
+        "elapsed_ms": 1972.195,
+        "cpu_ms": 2085.879
+      },
+      "counts": {
+        "events": 208,
+        "row_changes": 218
+      }
+    },
+    "profile_functions": [
+      {
+        "file": "apps/camctl/src/camctl/persistence/read_reuse.py",
+        "line": 73,
+        "function": "reuse_read",
+        "primitive_calls": 34558,
+        "total_calls": 49526,
+        "own_s": 0.525251978,
+        "inclusive_s": 14.873424062000002,
+        "callers": [
+          {
+            "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+            "line": 758,
+            "function": "_fixed_file",
+            "stats": [
+              3842,
+              3842,
+              0.068798655,
+              6.141059627000001
+            ]
+          },
+          {
+            "file": "apps/camctl/src/camctl/persistence/transaction.py",
+            "line": 1126,
+            "function": "row_facts",
+            "stats": [
+              34342,
+              34342,
+              0.35812543100000005,
+              10.672283397000001
+            ]
+          },
+          {
+            "file": "apps/camctl/src/camctl/persistence/transaction.py",
+            "line": 1151,
+            "function": "read_transaction_range",
+            "stats": [
+              11342,
+              11342,
+              0.098327892,
+              1.412951204
+            ]
+          }
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/read_reuse.py",
+        "line": 123,
+        "function": "_retained_size",
+        "primitive_calls": 55876,
+        "total_calls": 1459304,
+        "own_s": 1.9902410000000001,
+        "inclusive_s": 4.559845493,
+        "callers": [
+          {
+            "file": "apps/camctl/src/camctl/persistence/read_reuse.py",
+            "line": 73,
+            "function": "reuse_read",
+            "stats": [
+              55876,
+              55876,
+              0.18063156900000002,
+              4.559845493
+            ]
+          },
+          {
+            "file": "apps/camctl/src/camctl/persistence/read_reuse.py",
+            "line": 136,
+            "function": "<genexpr>",
+            "stats": [
+              217508,
+              119556,
+              0.373728861,
+              0.8691777540000001
+            ]
+          },
+          {
+            "file": "apps/camctl/src/camctl/persistence/read_reuse.py",
+            "line": 131,
+            "function": "<genexpr>",
+            "stats": [
+              1174346,
+              934042,
+              1.4206475250000001,
+              2.8103048100000003
+            ]
+          },
+          {
+            "file": "apps/camctl/src/camctl/persistence/read_reuse.py",
+            "line": 140,
+            "function": "<genexpr>",
+            "stats": [
+              11574,
+              11574,
+              0.015233045,
+              0.029704138
+            ]
+          }
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/history/decoding.py",
+        "line": 34,
+        "function": "decode_event_row",
+        "primitive_calls": 12875,
+        "total_calls": 12875,
+        "own_s": 0.198211996,
+        "inclusive_s": 6.565412084,
+        "callers": [
+          {
+            "file": "apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+            "line": 165,
+            "function": "traced",
+            "stats": [
+              12875,
+              12875,
+              0.198211996,
+              6.565412084
+            ]
+          }
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/transaction.py",
+        "line": 1162,
+        "function": "_load_transaction_range",
+        "primitive_calls": 3858,
+        "total_calls": 3858,
+        "own_s": 0.056544909000000004,
+        "inclusive_s": 0.483934613,
+        "callers": [
+          {
+            "file": "apps/camctl/src/camctl/persistence/transaction.py",
+            "line": 1158,
+            "function": "<lambda>",
+            "stats": [
+              3858,
+              3858,
+              0.056544909000000004,
+              0.483934613
+            ]
+          }
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+        "line": 820,
+        "function": "_verify_strict_member",
+        "primitive_calls": 3442,
+        "total_calls": 3442,
+        "own_s": 0.006422642,
+        "inclusive_s": 0.022161922,
+        "callers": [
+          {
+            "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+            "line": 146,
+            "function": "_read_member",
+            "stats": [
+              3442,
+              3442,
+              0.006422642,
+              0.022161922
+            ]
+          }
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+        "line": 362,
+        "function": "_verify_assessment",
+        "primitive_calls": 3,
+        "total_calls": 3,
+        "own_s": 0.001535169,
+        "inclusive_s": 3.887311389,
+        "callers": [
+          {
+            "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+            "line": 435,
+            "function": "_verify_assessment",
+            "stats": [
+              3,
+              3,
+              0.001535169,
+              3.887311389
+            ]
+          }
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+        "line": 195,
+        "function": "_decode",
+        "primitive_calls": 578,
+        "total_calls": 578,
+        "own_s": 0.136664966,
+        "inclusive_s": 1.5481802560000002,
+        "callers": [
+          {
+            "file": "apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+            "line": 465,
+            "function": "_load_at_record",
+            "stats": [
+              578,
+              578,
+              0.136664966,
+              1.5481802560000002
+            ]
+          }
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+        "line": 176,
+        "function": "_output_candidate",
+        "primitive_calls": 1642,
+        "total_calls": 1642,
+        "own_s": 0.005991149,
+        "inclusive_s": 0.020435814,
+        "callers": [
+          {
+            "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+            "line": 219,
+            "function": "segment_output_candidate",
+            "stats": [
+              242,
+              242,
+              0.0018737,
+              0.005423642
+            ]
+          },
+          {
+            "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+            "line": 243,
+            "function": "<genexpr>",
+            "stats": [
+              1400,
+              1400,
+              0.0041174490000000005,
+              0.015012172
+            ]
+          }
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+        "line": 315,
+        "function": "_verify_page_relations",
+        "primitive_calls": 113,
+        "total_calls": 113,
+        "own_s": 0.346989056,
+        "inclusive_s": 15.339829881000002,
+        "callers": [
+          {
+            "file": "apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+            "line": 465,
+            "function": "_load_at_record",
+            "stats": [
+              113,
+              113,
+              0.346989056,
+              15.339829881000002
+            ]
+          }
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+        "line": 907,
+        "function": "_canonical_events",
+        "primitive_calls": 418,
+        "total_calls": 418,
+        "own_s": 0.014667805,
+        "inclusive_s": 17.513707417000003,
+        "callers": [
+          {
+            "file": "~",
+            "line": 0,
+            "function": "<built-in method builtins.next>",
+            "stats": [
+              209,
+              209,
+              0.007720546000000001,
+              8.79142974
+            ]
+          },
+          {
+            "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+            "line": 1053,
+            "function": "generate",
+            "stats": [
+              209,
+              209,
+              0.006947259000000001,
+              8.722277677000001
+            ]
+          }
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+        "line": 146,
+        "function": "_read_member",
+        "primitive_calls": 3442,
+        "total_calls": 3442,
+        "own_s": 0.12317326,
+        "inclusive_s": 24.081370370000002,
+        "callers": [
+          {
+            "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+            "line": 219,
+            "function": "segment_output_candidate",
+            "stats": [
+              242,
+              242,
+              0.007058587000000001,
+              1.848600247
+            ]
+          },
+          {
+            "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+            "line": 281,
+            "function": "<genexpr>",
+            "stats": [
+              3200,
+              3200,
+              0.116114673,
+              22.232770123
+            ]
+          }
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+        "line": 702,
+        "function": "_created_output",
+        "primitive_calls": 456,
+        "total_calls": 456,
+        "own_s": 0.004439773,
+        "inclusive_s": 0.039832447,
+        "callers": [
+          {
+            "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+            "line": 771,
+            "function": "verify_publication",
+            "stats": [
+              428,
+              428,
+              0.004134141,
+              0.037483957000000005
+            ]
+          },
+          {
+            "file": "apps/camctl/src/camctl/persistence/event_reads.py",
+            "line": 387,
+            "function": "segment_created_output",
+            "stats": [
+              14,
+              14,
+              0.00020871100000000001,
+              0.001441749
+            ]
+          },
+          {
+            "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+            "line": 940,
+            "function": "created",
+            "stats": [
+              14,
+              14,
+              9.6921e-05,
+              0.0009067410000000001
+            ]
+          }
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+        "line": 266,
+        "function": "_read_segment_members",
+        "primitive_calls": 320,
+        "total_calls": 320,
+        "own_s": 0.015886959000000003,
+        "inclusive_s": 23.752830819,
+        "callers": [
+          {
+            "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+            "line": 250,
+            "function": "read_segment_members",
+            "stats": [
+              320,
+              320,
+              0.015886959000000003,
+              23.752830819
+            ]
+          }
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+        "line": 767,
+        "function": "_load_fixed_file",
+        "primitive_calls": 3742,
+        "total_calls": 3742,
+        "own_s": 0.119644464,
+        "inclusive_s": 4.9586257400000004,
+        "callers": [
+          {
+            "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+            "line": 764,
+            "function": "<lambda>",
+            "stats": [
+              3742,
+              3742,
+              0.119644464,
+              4.9586257400000004
+            ]
+          }
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+        "line": 491,
+        "function": "_at",
+        "primitive_calls": 578,
+        "total_calls": 578,
+        "own_s": 0.003644969,
+        "inclusive_s": 18.651518542,
+        "callers": [
+          {
+            "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+            "line": 114,
+            "function": "_source",
+            "stats": [
+              16,
+              16,
+              0.000108194,
+              0.980734011
+            ]
+          },
+          {
+            "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+            "line": 146,
+            "function": "_read_member",
+            "stats": [
+              562,
+              562,
+              0.0035367750000000002,
+              17.670784531000002
+            ]
+          }
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+        "line": 758,
+        "function": "_fixed_file",
+        "primitive_calls": 3842,
+        "total_calls": 3842,
+        "own_s": 0.049515844,
+        "inclusive_s": 6.190575471000001,
+        "callers": [
+          {
+            "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+            "line": 907,
+            "function": "_canonical_events",
+            "stats": [
+              400,
+              400,
+              0.0022579090000000002,
+              0.40929221000000005
+            ]
+          },
+          {
+            "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+            "line": 146,
+            "function": "_read_member",
+            "stats": [
+              3442,
+              3442,
+              0.047257935,
+              5.7812832610000005
+            ]
+          }
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+        "line": 76,
+        "function": "_verify_scope_members",
+        "primitive_calls": 3,
+        "total_calls": 3,
+        "own_s": 0.00038127100000000003,
+        "inclusive_s": 1.671048313,
+        "callers": [
+          {
+            "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+            "line": 771,
+            "function": "verify_publication",
+            "stats": [
+              1,
+              1,
+              0.000176152,
+              0.7386220400000001
+            ]
+          },
+          {
+            "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+            "line": 993,
+            "function": "plan",
+            "stats": [
+              1,
+              1,
+              0.00014066100000000001,
+              0.492314466
+            ]
+          },
+          {
+            "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+            "line": 616,
+            "function": "verify_finish_request_event",
+            "stats": [
+              1,
+              1,
+              6.4458e-05,
+              0.440111807
+            ]
+          }
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+        "line": 435,
+        "function": "_verify_assessment",
+        "primitive_calls": 3,
+        "total_calls": 3,
+        "own_s": 0.0006632200000000001,
+        "inclusive_s": 3.8881939040000004,
+        "callers": [
+          {
+            "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+            "line": 771,
+            "function": "verify_publication",
+            "stats": [
+              1,
+              1,
+              0.00030412900000000004,
+              1.950209601
+            ]
+          },
+          {
+            "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+            "line": 993,
+            "function": "plan",
+            "stats": [
+              1,
+              1,
+              0.000251725,
+              1.001565445
+            ]
+          },
+          {
+            "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+            "line": 616,
+            "function": "verify_finish_request_event",
+            "stats": [
+              1,
+              1,
+              0.000107366,
+              0.936418858
+            ]
+          }
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/page_read_cache.py",
+        "line": 99,
+        "function": "clear_page_records",
+        "primitive_calls": 209,
+        "total_calls": 209,
+        "own_s": 0.000675792,
+        "inclusive_s": 0.002298912,
+        "callers": [
+          {
+            "file": "apps/camctl/src/camctl/persistence/transaction.py",
+            "line": 303,
+            "function": "_write_bounded_plan",
+            "stats": [
+              208,
+              208,
+              0.000671949,
+              0.002281481
+            ]
+          },
+          {
+            "file": "apps/camctl/src/camctl/persistence/transaction.py",
+            "line": 698,
+            "function": "_commit_operation",
+            "stats": [
+              1,
+              1,
+              3.843e-06,
+              1.7431e-05
+            ]
+          }
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/read_reuse.py",
+        "line": 66,
+        "function": "clear_read_reuse",
+        "primitive_calls": 210,
+        "total_calls": 210,
+        "own_s": 0.0004928430000000001,
+        "inclusive_s": 0.010010350000000001,
+        "callers": [
+          {
+            "file": "apps/camctl/src/camctl/persistence/page_read_cache.py",
+            "line": 24,
+            "function": "page_read_scope",
+            "stats": [
+              1,
+              1,
+              1.7152e-05,
+              4.9927000000000005e-05
+            ]
+          },
+          {
+            "file": "apps/camctl/src/camctl/persistence/transaction.py",
+            "line": 303,
+            "function": "_write_bounded_plan",
+            "stats": [
+              208,
+              208,
+              0.00047173600000000005,
+              0.009769954
+            ]
+          },
+          {
+            "file": "apps/camctl/src/camctl/persistence/transaction.py",
+            "line": 698,
+            "function": "_commit_operation",
+            "stats": [
+              1,
+              1,
+              3.955e-06,
+              0.00019046900000000002
+            ]
+          }
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/transaction.py",
+        "line": 1132,
+        "function": "_load_row_facts",
+        "primitive_calls": 20338,
+        "total_calls": 20338,
+        "own_s": 0.166059217,
+        "inclusive_s": 2.827678429,
+        "callers": [
+          {
+            "file": "apps/camctl/src/camctl/persistence/transaction.py",
+            "line": 1129,
+            "function": "<lambda>",
+            "stats": [
+              20338,
+              20338,
+              0.166059217,
+              2.827678429
+            ]
+          }
+        ]
+      }
+    ],
+    "sql_groups_top_by_count": [
+      {
+        "sql": "SELECT * FROM device_files WHERE id = ?",
+        "calls": 15289,
+        "execute_wall_s": 0.22786233515944332,
+        "phases": {
+          "validation_context": 5889,
+          "event_generation": 5873,
+          "event_validation": 2514,
+          "plan": 1013
+        }
+      },
+      {
+        "sql": "SELECT * FROM segment_members WHERE id = ?",
+        "calls": 3948,
+        "execute_wall_s": 0.0950015485577751,
+        "phases": {
+          "event_validation": 1856,
+          "plan": 814,
+          "event_generation": 644,
+          "validation_context": 634
+        }
+      },
+      {
+        "sql": "SELECT id, first_event_id, last_event_id FROM history_transactions WHERE id = ?",
+        "calls": 3858,
+        "execute_wall_s": 0.0331766453164164,
+        "phases": {
+          "event_validation": 1838,
+          "plan": 817,
+          "event_generation": 602,
+          "validation_context": 601
+        }
+      },
+      {
+        "sql": "SELECT last_event_id FROM history_transactions WHERE id = ?",
+        "calls": 3858,
+        "execute_wall_s": 0.022203591666766442,
+        "phases": {
+          "event_validation": 1838,
+          "plan": 817,
+          "event_generation": 602,
+          "validation_context": 601
+        }
+      },
+      {
+        "sql": "SELECT COUNT(*), MIN(id), MAX(id) FROM history_events WHERE transaction_id = ?",
+        "calls": 3858,
+        "execute_wall_s": 0.047787844712729566,
+        "phases": {
+          "event_validation": 1838,
+          "plan": 817,
+          "event_generation": 602,
+          "validation_context": 601
+        }
+      },
+      {
+        "sql": "SELECT e.transaction_id FROM history_events e JOIN entity_event_links l ON l.event_id=e.id WHERE e.id=? AND l.entity_type=? AND l.entity_id=?",
+        "calls": 3742,
+        "execute_wall_s": 0.07952086927252822,
+        "phases": {
+          "event_validation": 1828,
+          "plan": 814,
+          "event_generation": 550,
+          "validation_context": 550
+        }
+      },
+      {
+        "sql": "SELECT MAX(event_id) FROM entity_event_links WHERE entity_type=? AND entity_id=? AND event_id<=?",
+        "calls": 3742,
+        "execute_wall_s": 0.0420002357714111,
+        "phases": {
+          "event_validation": 1828,
+          "plan": 814,
+          "event_generation": 550,
+          "validation_context": 550
+        }
+      },
+      {
+        "sql": "SELECT t.id,t.last_event_id FROM history_events e JOIN history_transactions t ON t.id=e.transaction_id WHERE e.id=?",
+        "calls": 3742,
+        "execute_wall_s": 0.028741101443301886,
+        "phases": {
+          "event_validation": 1828,
+          "plan": 814,
+          "event_generation": 550,
+          "validation_context": 550
+        }
+      },
+      {
+        "sql": "SELECT last_event_id, change_count FROM device_files WHERE id = ?",
+        "calls": 3742,
+        "execute_wall_s": 0.045193927668151446,
+        "phases": {
+          "event_validation": 1828,
+          "plan": 814,
+          "event_generation": 550,
+          "validation_context": 550
+        }
+      },
+      {
+        "sql": "SELECT event_id, change_count FROM entity_event_links WHERE entity_type = ? AND entity_id = ? ORDER BY event_id DESC LIMIT 1",
+        "calls": 3742,
+        "execute_wall_s": 0.033868589394842274,
+        "phases": {
+          "event_validation": 1828,
+          "plan": 814,
+          "event_generation": 550,
+          "validation_context": 550
+        }
+      },
+      {
+        "sql": "SELECT event_id, change_count FROM entity_event_links WHERE entity_type = ? AND entity_id = ? AND event_id <= ? ORDER BY event_id DESC LIMIT 1",
+        "calls": 3742,
+        "execute_wall_s": 0.02782589994603768,
+        "phases": {
+          "event_validation": 1828,
+          "plan": 814,
+          "event_generation": 550,
+          "validation_context": 550
+        }
+      },
+      {
+        "sql": "SELECT id FROM segment_sets WHERE action_id=? AND version=?",
+        "calls": 939,
+        "execute_wall_s": 0.010431371279992163,
+        "phases": {
+          "event_validation": 391,
+          "event_generation": 207,
+          "validation_context": 207,
+          "plan": 133,
+          "final_checks": 1
+        }
+      },
+      {
+        "sql": "SELECT id,created_event_id FROM outputs WHERE source_action_id=? AND device_file_id=? AND kind=? ORDER BY id LIMIT 2",
+        "calls": 456,
+        "execute_wall_s": 0.005797813937533647,
+        "phases": {
+          "event_validation": 428,
+          "event_generation": 14,
+          "validation_context": 14
+        }
+      },
+      {
+        "sql": "SELECT event_type,transaction_id FROM history_events WHERE id=?",
+        "calls": 456,
+        "execute_wall_s": 0.0025968371046474203,
+        "phases": {
+          "event_validation": 428,
+          "event_generation": 14,
+          "validation_context": 14
+        }
+      },
+      {
+        "sql": "SELECT id FROM segment_members WHERE set_id=? AND (COALESCE(directory_number,0),COALESCE(segment_index,0),identity,id)>(?,?,?,?) ORDER BY COALESCE(directory_number,0),COALESCE(segment_index,0),identity,id LIMIT ?",
+        "calls": 320,
+        "execute_wall_s": 0.044202502016560175,
+        "phases": {
+          "event_generation": 100,
+          "validation_context": 100,
+          "event_validation": 64,
+          "plan": 56
+        }
+      },
+      {
+        "sql": "SELECT 1 FROM segment_members WHERE set_id=? AND (COALESCE(directory_number,0),COALESCE(segment_index,0),identity,id)>(?,?,?,?) LIMIT 1",
+        "calls": 310,
+        "execute_wall_s": 0.008245884222560562,
+        "phases": {
+          "event_generation": 100,
+          "validation_context": 100,
+          "event_validation": 57,
+          "plan": 53
+        }
+      },
+      {
+        "sql": "SELECT * FROM actions WHERE id = ?",
+        "calls": 301,
+        "execute_wall_s": 0.005927740930928849,
+        "phases": {
+          "validation_context": 238,
+          "event_generation": 52,
+          "event_validation": 9,
+          "plan": 2
+        }
+      },
+      {
+        "sql": "SELECT * FROM outputs WHERE id = ?",
+        "calls": 214,
+        "execute_wall_s": 0.0031515929149463773,
+        "phases": {
+          "validation_context": 214
+        }
+      },
+      {
+        "sql": "SELECT * FROM plans WHERE id = ?",
+        "calls": 212,
+        "execute_wall_s": 0.003435751990764402,
+        "phases": {
+          "validation_context": 208,
+          "event_validation": 2,
+          "plan": 1,
+          "final_checks": 1
+        }
+      },
+      {
+        "sql": "SELECT MAX(change_count) FROM entity_event_links WHERE entity_type=? AND entity_id=?",
+        "calls": 208,
+        "execute_wall_s": 0.002305580099346116,
+        "phases": {
+          "read_state": 208
+        }
+      },
+      {
+        "sql": "INSERT INTO history_events(id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json) VALUES(?,?,?,?,?,?,?,?)",
+        "calls": 208,
+        "execute_wall_s": 0.013391141052125022,
+        "phases": {
+          "sql_writes": 208
+        }
+      },
+      {
+        "sql": "INSERT INTO entity_event_links(entity_type,entity_id,event_id,change_count) VALUES(?,?,?,?)",
+        "calls": 208,
+        "execute_wall_s": 0.004196174137177877,
+        "phases": {
+          "sql_writes": 208
+        }
+      }
+    ],
+    "profile_caveat": "cProfile累计时间包含子调用；与事务phase独占时间不可相加。诊断样本28.712秒与plain9.566秒是不同工具档，不能直接换算生产比例。",
+    "stages_without_profile": {
+      "source_head": "98d3b28da5751e1e8c733f2712180cd5e0e119aa",
+      "N": 200,
+      "B": 4,
+      "stages": [
+        {
+          "stage": "db_transaction",
+          "wall_ns": 9291693995,
+          "cpu_ms": 9968.356,
+          "phases": {
+            "unclassified": {
+              "elapsed_ms": 11.462,
+              "cpu_ms": 12.096,
+              "calls": 0,
+              "sql": {
+                "elapsed_ms": 0.0,
+                "cpu_ms": 0.0
+              }
+            },
+            "begin_write": {
+              "elapsed_ms": 0.029,
+              "cpu_ms": 0.031,
+              "calls": 1,
+              "sql": {
+                "execute_calls": 1,
+                "rows_read": 0,
+                "rows_written": 0,
+                "elapsed_ms": 0.01,
+                "cpu_ms": 0.011
+              }
+            },
+            "read_state": {
+              "elapsed_ms": 5.303,
+              "cpu_ms": 5.684,
+              "calls": 210,
+              "sql": {
+                "execute_calls": 211,
+                "rows_read": 211,
+                "rows_written": 0,
+                "fetch_calls": 211,
+                "elapsed_ms": 2.128,
+                "cpu_ms": 2.271
+              }
+            },
+            "plan": {
+              "elapsed_ms": 741.845,
+              "cpu_ms": 794.604,
+              "calls": 1,
+              "sql": {
+                "execute_calls": 9485,
+                "rows_read": 10644,
+                "rows_written": 0,
+                "fetch_calls": 9693,
+                "elapsed_ms": 84.554,
+                "cpu_ms": 89.787
+              }
+            },
+            "final_checks": {
+              "elapsed_ms": 1.807,
+              "cpu_ms": 1.922,
+              "calls": 210,
+              "sql": {
+                "execute_calls": 5,
+                "rows_read": 5,
+                "rows_written": 0,
+                "fetch_calls": 5,
+                "elapsed_ms": 0.084,
+                "cpu_ms": 0.087
+              }
+            },
+            "sql_writes": {
+              "elapsed_ms": 51.897,
+              "cpu_ms": 55.702,
+              "calls": 417,
+              "sql": {
+                "execute_calls": 1272,
+                "rows_read": 18,
+                "rows_written": 1054,
+                "fetch_calls": 218,
+                "elapsed_ms": 25.606,
+                "cpu_ms": 27.514
+              }
+            },
+            "validation_context": {
+              "elapsed_ms": 3341.15,
+              "cpu_ms": 3586.666,
+              "calls": 417,
+              "sql": {
+                "execute_calls": 13546,
+                "rows_read": 24294,
+                "rows_written": 0,
+                "fetch_calls": 19270,
+                "elapsed_ms": 208.808,
+                "cpu_ms": 221.499
+              }
+            },
+            "event_generation": {
+              "elapsed_ms": 3090.054,
+              "cpu_ms": 3317.126,
+              "calls": 210,
+              "sql": {
+                "execute_calls": 12537,
+                "rows_read": 23917,
+                "rows_written": 0,
+                "fetch_calls": 18281,
+                "elapsed_ms": 177.717,
+                "cpu_ms": 188.795
+              }
+            },
+            "report_targets": {
+              "elapsed_ms": 7.569,
+              "cpu_ms": 8.126,
+              "calls": 208,
+              "sql": {
+                "elapsed_ms": 0.0,
+                "cpu_ms": 0.0
+              }
+            },
+            "event_validation": {
+              "elapsed_ms": 2021.598,
+              "cpu_ms": 2170.07,
+              "calls": 208,
+              "sql": {
+                "execute_calls": 22660,
+                "rows_read": 25805,
+                "rows_written": 0,
+                "fetch_calls": 23380,
+                "elapsed_ms": 188.149,
+                "cpu_ms": 199.778
+              }
+            },
+            "change_derivation": {
+              "elapsed_ms": 14.183,
+              "cpu_ms": 15.257,
+              "calls": 416,
+              "sql": {
+                "elapsed_ms": 0.0,
+                "cpu_ms": 0.0
+              }
+            },
+            "commit": {
+              "elapsed_ms": 4.795,
+              "cpu_ms": 1.073,
+              "calls": 1,
+              "sql": {
+                "execute_calls": 1,
+                "rows_read": 0,
+                "rows_written": 0,
+                "elapsed_ms": 4.767,
+                "cpu_ms": 1.044
+              }
+            }
+          },
+          "details": {
+            "history_decode": {
+              "elapsed_ms": 2393.895,
+              "cpu_ms": 2569.427,
+              "calls": 12875
+            },
+            "history_structure_validation": {
+              "elapsed_ms": 1692.539,
+              "cpu_ms": 1815.594,
+              "calls": 25718
+            },
+            "history_event_validation": {
+              "elapsed_ms": 2019.83,
+              "cpu_ms": 2168.211,
+              "calls": 208
+            }
+          },
+          "details_inclusive": true,
+          "sql": {
+            "execute_calls": 59718,
+            "rows_read": 84894,
+            "rows_written": 1054,
+            "fetch_calls": 71058,
+            "elapsed_ms": 691.824,
+            "cpu_ms": 730.787
+          },
+          "counts": {
+            "events": 208,
+            "row_changes": 218
+          }
+        }
+      ],
+      "result": {
+        "ref": {
+          "action_id": 1,
+          "scan_id": 3,
+          "final_page_event_id": 220,
+          "version": 1
+        },
+        "action_status": 3,
+        "plan_status": 3,
+        "boundary": {
+          "txn_id": 420,
+          "last_event_id": 836
+        },
+        "output_count": 200,
+        "original_count": 200,
+        "preview_count": 0,
+        "scope_count": 14
+      },
+      "after_logical_sha256": "9cd0007a92fb277d1fcca5c5729319308f652a353b20598fec6a8503c5eb4b4a",
+      "verify_wall_s_without_stage_observation": 0.8240717040025629,
+      "note": "只有现有事务阶段与SQL计量，无cProfile、无tracemalloc、无原测试MeasuredConnection。该观察本身仍有开销。"
+    }
+  },
+  "repeated_work": [
+    {
+      "id": "page_proofs",
+      "behavior": "同一128/72项原页在独立事件证明阶段被再次完整核验；缓存命中仍解码原页JSON和结构。",
+      "measured": {
+        "at_calls": 578,
+        "full_relation_proofs": 113,
+        "raw_record_hits_derived": 465,
+        "decode_event_rows": 12875,
+        "structure_checks": 25718,
+        "row_facts_calls_from_page_relations": 24001,
+        "page_relation_inclusive_s": 15.339829881
+      },
+      "mechanism": "每条事件context形成后清除两种证明；_verify_page_relations既解码原页完整事务，又读取每份文件、INDEX_FILES及持久关系。满128页的完整文件行与action/transaction等键共同使用128条缓存，会出现淘汰。",
+      "source": [
+        "transaction.py:333",
+        "result_pages.py:465",
+        "result_pages.py:315",
+        "result_pages.py:353",
+        "result_pages.py:388",
+        "read_reuse.py:113"
+      ],
+      "next_narrow_check": "按独立证明阶段及原page_event_id记录full-proof次数、page entry数和读取复用淘汰原因；不取消提案与守卫隔离。"
+    },
+    {
+      "id": "frozen_files",
+      "behavior": "反复核相同成员时，重读完整文件行、文件自身事务、最后目录及固定历史边界。",
+      "measured": {
+        "fixed_file_calls": 3842,
+        "loader_calls": 3742,
+        "reuse_hits_derived": 100,
+        "device_file_sql_calls": 15289,
+        "file_anchor_sql_calls": 3742
+      },
+      "mechanism": "同一代固定文件可复用，但每事件显式清空、写入换代以及128条缓存淘汰阻止跨事件/大遍历保留；当前不是每文件回放增长完成事务。",
+      "source": [
+        "segments.py:758",
+        "segments.py:767",
+        "segments.py:783",
+        "read_reuse.py:86",
+        "read_reuse.py:113"
+      ],
+      "next_narrow_check": "按key类别统计固定文件cache hit/miss与reset/eviction；保留同连接/同事务/独立守卫和固定历史边界。"
+    },
+    {
+      "id": "cache_object_work",
+      "behavior": "成功保存缓存要deepcopy并递归估算键和值字节，命中也deepcopy隔离可变内容。",
+      "measured": {
+        "deepcopy_top_calls_from_reuse": 49526,
+        "deepcopy_all_recursive_calls": 2122609,
+        "deepcopy_inclusive_s": 4.409509777,
+        "retained_size_recursive_calls": 1459304,
+        "retained_size_inclusive_s": 4.559845493
+      },
+      "mechanism": "缓存减少部分SQL同时增加对象复制和遍历；大量短命、低复用条目放大此成本，tracemalloc还跟踪这些分配。",
+      "source": [
+        "read_reuse.py:89",
+        "read_reuse.py:104",
+        "read_reuse.py:123"
+      ],
+      "next_narrow_check": "用现有SQL/cProfile证据先辨别哪些值复用不足；若后续获授权，独立评估保留相同容量/隔离语义的缓存表示，不能直接关闭缓存或提高容量。"
+    },
+    {
+      "id": "same_guard_member_rebuild",
+      "behavior": "比默认范围时，已经得到完整stored member后又走单成员候选端口，从头重建同一成员。",
+      "measured": {
+        "write_duplicate_member_rebuilds": 42,
+        "verify_duplicate_member_rebuilds_static": 14
+      },
+      "mechanism": "当前只额外3*S次写阶段和S次核实阶段；该例S14，不能解释全部3442次。",
+      "source": [
+        "segment_transactions.py:83",
+        "segment_transactions.py:87",
+        "segments.py:219",
+        "segments.py:230"
+      ],
+      "next_narrow_check": "如后续获授权，可核同守卫已验证stored值能否送给统一_output_candidate，仍重新核实际来源的守卫边界。"
+    },
+    {
+      "id": "two_kind_candidate_passes",
+      "behavior": "规范协议先原片后预览，两次完整候选扫描；当前0预览仍扫描第二次。",
+      "measured": {
+        "write_member_reads_for_two_canonical_paths": 800,
+        "verify_member_reads_static": 400
+      },
+      "mechanism": "这是有限驻留与固定事件顺序的当前实现，不自动等同可删验证。",
+      "source": [
+        "segment_transactions.py:946",
+        "segment_transactions.py:947",
+        "event_reads.py:372",
+        "segment_transactions.py:1130"
+      ],
+      "next_narrow_check": "未来若调整，须先设计0预览时仍能独立证明全体候选覆盖的完整分类；本轮只报告成本，不选择替代协议。"
+    }
+  ],
+  "already_implemented_not_new_savings": [
+    {
+      "behavior": "完整事务范围及行事实已有读取复用，键含实际类型和validated依据；不能再提新增通用缓存。",
+      "source": [
+        "transaction.py:1126",
+        "transaction.py:1151",
+        "read_reuse.py:39"
+      ]
+    },
+    {
+      "behavior": "固定文件已用其自身最后事件事务作为当前边界，不对每文件反复核增长完成事务；本样本整组成员COUNT写0次、核实1次。",
+      "source": [
+        "segments.py:783",
+        "segments.py:789",
+        "test_segment_transaction_batches.py:475"
+      ]
+    },
+    {
+      "behavior": "真实产物查找已有device_file_id唯一索引+LIMIT2；样本_created_output456次累计仅0.0398秒，不能当主热点。",
+      "source": [
+        "segment_transactions.py:702",
+        "test_segment_transaction_batches.py:492"
+      ]
+    },
+    {
+      "behavior": "原页已使用三份紧凑原SQL行、解码前先淘汰；命中不保留完整解码对象图是明确设计。",
+      "source": [
+        "page_read_cache.py:20",
+        "page_read_cache.py:82",
+        "result_pages.py:465",
+        "docs/camctl/persistence-runtime.md:308"
+      ]
+    },
+    {
+      "behavior": "该fixture使用空归属证据、没有pairing_fact；严格差集文件证明实际立即返回，profile3442次累计0.0222秒。",
+      "source": [
+        "test_segment_storage.py:79",
+        "segments.py:813",
+        "segments.py:820"
+      ]
+    }
+  ],
+  "required_boundaries": [
+    "全组终态、产物、origin、范围及ACTIVATE单次原子提交；失败与未知回执仍沿原操作键恢复。",
+    "提案和独立守卫分别读取实际事实；未来marker只证明结构闭合，不能授予未来业务资格。",
+    "原片/预览资格、固定file_event所在完整边界、真实来源/文件身份及双向覆盖；不能只比数量。",
+    "首遍判断、第二遍完整缺口分类及真实128原页；增长/缓存测试不降低N或生产容量。",
+    "原键核实读到原组末尾且完整比较；不能用少量抽样替代可靠提交结果核实。"
+  ],
+  "open_questions": [
+    "实际profile已证明热点位置，尚未证明某项重复检查可以在不改语义下删除。",
+    "缓存重读中各有多少由显式独立阶段reset、写入换代、条目上限淘汰引起，尚无逐原因计数，不能全归因于128条容量。",
+    "原页内部重复结构验证和每CREATE重建dict/搜索的静态工作真实存在，但当前profile未独立分离每项可节约时间。",
+    "本轮是开发容器冻结N200单次样本；未运行全量，不外推目标设备或整轮稳定提速比例。",
+    "峰值约2.2MiB是容量测试的测量结果，不能据此推断业务引用泄漏或平方复杂度。"
+  ],
+  "source_reference_roots": {
+    "production": "apps/camctl/src/camctl/persistence",
+    "repositories": "apps/camctl/src/camctl/persistence/repositories",
+    "tests": "apps/camctl/tests/integration/persistence",
+    "event_reads.py": "apps/camctl/src/camctl/persistence/event_reads.py",
+    "transaction.py": "apps/camctl/src/camctl/persistence/transaction.py",
+    "read_reuse.py": "apps/camctl/src/camctl/persistence/read_reuse.py",
+    "page_read_cache.py": "apps/camctl/src/camctl/persistence/page_read_cache.py"
+  }
+}

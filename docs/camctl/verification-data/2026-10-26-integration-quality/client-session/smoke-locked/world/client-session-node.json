@@ -1,0 +1,252 @@
+{
+  "schema_version": 1,
+  "session_id": "647dfb20-8e64-4ef2-846f-2ffae145f4d6",
+  "node_pid": 1542114,
+  "counts": {
+    "node_process_starts": 1,
+    "application_starts": 3,
+    "files_starts": 3,
+    "http_server_starts": 1,
+    "browser_starts": 1
+  },
+  "browser_processes": [
+    {
+      "pid": 1542173,
+      "pgid": 1542173,
+      "starttime": "10067617",
+      "active": false
+    }
+  ],
+  "commands": [
+    {
+      "id": 1,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/world/client-store",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/body.json",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/plan-1.json",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/export-1.json"
+      ],
+      "started_monotonic_ns": "100675390754437",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 0,
+        "files_starts": 0,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "request_id": "9030891225354104788",
+      "finished_monotonic_ns": "100675605808728",
+      "elapsed_seconds": 0.215054291,
+      "node_cpu_microseconds": {
+        "user": 249158,
+        "system": 11609
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 2,
+      "operation": "import",
+      "arguments": [
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/reports",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/world/client-store",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/import-1.json"
+      ],
+      "started_monotonic_ns": "100675607146915",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "finished_monotonic_ns": "100675641871751",
+      "elapsed_seconds": 0.034724836,
+      "node_cpu_microseconds": {
+        "user": 52136,
+        "system": 841
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 3,
+      "operation": "import-media",
+      "arguments": [
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/world/client-store",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/1.mp4",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/media-1.json"
+      ],
+      "started_monotonic_ns": "100675642890804",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "finished_monotonic_ns": "100675695106388",
+      "elapsed_seconds": 0.052215584,
+      "node_cpu_microseconds": {
+        "user": 61453,
+        "system": 622
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 4,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/world/client-store",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/body.json",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/plan-2.json",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/export-2.json"
+      ],
+      "started_monotonic_ns": "100675696069545",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "request_id": "4837313118653417808",
+      "finished_monotonic_ns": "100675709354452",
+      "elapsed_seconds": 0.013284907,
+      "node_cpu_microseconds": {
+        "user": 10784,
+        "system": 0
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 5,
+      "operation": "browser-plan-export",
+      "arguments": [
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/body.json",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/browser-plan.json",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/browser-export.json"
+      ],
+      "started_monotonic_ns": "100675714529907",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "request_id": "3012773978225066846",
+      "finished_monotonic_ns": "100678472205516",
+      "elapsed_seconds": 2.757675609,
+      "node_cpu_microseconds": {
+        "user": 1144917,
+        "system": 96888
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 2,
+        "files_starts": 2,
+        "http_server_starts": 1,
+        "browser_starts": 1
+      }
+    },
+    {
+      "id": 6,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/world/client-store",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/body.json",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/plan-3.json",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/export-3.json"
+      ],
+      "started_monotonic_ns": "100678474478590",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 2,
+        "files_starts": 2,
+        "http_server_starts": 1,
+        "browser_starts": 1
+      },
+      "request_id": "8145447787998450136",
+      "finished_monotonic_ns": "100678580852251",
+      "elapsed_seconds": 0.106373661,
+      "node_cpu_microseconds": {
+        "user": 60245,
+        "system": 12578
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 3,
+        "files_starts": 3,
+        "http_server_starts": 1,
+        "browser_starts": 1
+      }
+    },
+    {
+      "id": 7,
+      "operation": "close",
+      "arguments": [],
+      "started_monotonic_ns": "100678584141875",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 3,
+        "files_starts": 3,
+        "http_server_starts": 1,
+        "browser_starts": 1
+      },
+      "finished_monotonic_ns": "100678587060953",
+      "elapsed_seconds": 0.002919078,
+      "node_cpu_microseconds": {
+        "user": 1163,
+        "system": 113
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 3,
+        "files_starts": 3,
+        "http_server_starts": 1,
+        "browser_starts": 1
+      }
+    }
+  ],
+  "node_cpu_scope": "process.cpuUsage只包含当前Node进程，不含Chromium或其他子进程。",
+  "status": "closed",
+  "node_cpu_at_ready_microseconds": {
+    "user": 1701327,
+    "system": 197573
+  },
+  "node_cpu_total_microseconds": {
+    "user": 3308736,
+    "system": 320914
+  }
+}

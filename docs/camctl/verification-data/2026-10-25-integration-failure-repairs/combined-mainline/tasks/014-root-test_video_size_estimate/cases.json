@@ -1,0 +1,21 @@
+[
+  {
+    "nodeid": "tests/integration/test_video_size_estimate.py::test_record_estimate_stays_out_of_execution_and_report",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0025865520001389086
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 24.633151153000654
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008356180042028427
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 24.636573323004995
+  }
+]

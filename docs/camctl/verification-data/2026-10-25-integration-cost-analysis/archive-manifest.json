@@ -1,0 +1,29 @@
+{
+  "analysis_source_head": "fc3104424fd8ce64152cbdd6f1b4899d38e011e1",
+  "purpose": "已有集成计时重算及三个当前源码样本；不代表完整回归。",
+  "files": {
+    "component-analysis.json": "f10133e5eb34753aa0e1050afac9400b5840b2ddec9803df72c836d296993f85",
+    "cross-component-analysis.json": "70194e3bf5191394c027b62878d129f91538a110ff004ea4906876b985a7d97f",
+    "current-action6/analysis.json": "19c28161d2f030c1627aebe7efbb046f3e34f37db5ac81f866f97c5aac4193a0",
+    "current-action6/control/action6_timing_plugin.py": "e926137e7beeded67aaa22e85a22f50456b402931a47d39207e1f9de223767f1",
+    "current-action6/helper-events.jsonl": "f51bd97536dae1a0f32a83b97f8cf9be38d6b68922bc27a98393a77311c7256e",
+    "current-action6/measurement.json": "ffccdbc36889665d4f617eab1ad776f6802c376a8bf287fc8ace8846f6e69b4e",
+    "current-action6/output.log": "a0ea857b04ad6aafece7b90929ffcb30ff095512cce061b6050dab3b0976aca3",
+    "current-action6/pytest-phases.json": "0ce31e0e76a977d2df69b0bc604a387a4d45e3c6be662db839980eaf81e2e986",
+    "current-action6/source-verification.json": "e145bc51c4ed11982d393ff5782cb027126b7d64c27b58abbc310fb42814c2ae",
+    "current-outputs/command.json": "5621b5be8d97e21385c1713f3dc7b8258a9c3d05dc343ad6c4a1c20ae5a6e0ae",
+    "current-outputs/pytest.log": "45978212ebba557176c7b9a0d1d1aeccdf0bb53646f82d6dd210a0a5ad7b79dd",
+    "current-outputs/source-identity.json": "27ebf83ca2895b3ef02d45e41ff46cdbf2cd95d08f2dae15ee1e3ee7d0bfb562",
+    "current-outputs/stage-result.json": "339cb222477ef633db2cc653b925d7d8008f7f3f04539109bf296dcf7a89a575",
+    "current-outputs/timing_probe.py": "1acfe4926f6aa024a15e29f398cf17753ec2b0bb9af83f77b8a341a5d4b09d29",
+    "current-persistence/execution.json": "6560837861a38b4f60b149e677bff6b82135e2e32c3d217c65025d9635f574f8",
+    "current-persistence/metadata.json": "3c1c1619cc6f30314663079b94c625f5ba334811bd660ec5ba47c6132112fa6a",
+    "current-persistence/phases.json": "b1e37792695dafc7ce66a4657b71e38d4f129f706d9345687f125c91d73f03ed",
+    "current-persistence/pytest.log": "bae05727712a24723d292fe5d5f4d965c8931502195ce3dc9b92cefb01e86798",
+    "current-persistence/timing_persistence.py": "c3dd3a48a3da0e96bd297f97b0e1501637dc23f4cd37b1ae7aa6d8d4be7b9926",
+    "current-persistence/totals.json": "15314e67f6c100396cecfe2364a2634f621623f948baf3cc82355cbf25d342b4",
+    "historical-summary.json": "7fcd15d72720b0ade22acd48efef682b324b3ab38eb4355aac1fb1a4177c5661",
+    "recompute.py": "711b7459948e66c1f882a8416e8b51675c02795b841eec3b2adb29707763b565",
+    "source-footprint.json": "da2dd350d5328626d1ce2a9c3f96514bc5939ffdcde14923fe964a2d1533788f"
+  }
+}

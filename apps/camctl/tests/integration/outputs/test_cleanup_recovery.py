@@ -19,16 +19,13 @@ from camctl.contracts.values import new_operation_key
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import DeviceCallResult
-from camctl.operations.attempts import AttemptConfig
 from camctl.outputs.cleanup_flow import (
-    CleanupRuntime,
     FixCleanupTargets,
     delete_source_file,
 )
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.operations import (
-    OperationRepository,
     register_operation_guards,
 )
 from camctl.persistence.repositories.outputs import (
@@ -38,7 +35,14 @@ from camctl.persistence.repositories.outputs import (
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..persistence.test_runtime import _create_valid_database
+from ..support.capture import capture_database
+from ..support.outputs import cleanup_runtime
 
+from camctl.persistence.repositories.acceptance import register_acceptance_guards
+from camctl.persistence.repositories.cancellation import register_cancellation_guards
+
+register_acceptance_guards()
+register_cancellation_guards()
 register_operation_guards()
 register_outputs_guards()
 register_capture_guards()
@@ -104,11 +108,13 @@ class GatedDriver:
 
     def __init__(self, *, release: asyncio.Event) -> None:
         self.release = release
+        self.entered = asyncio.Event()
         self.delete_calls = 0
         self.query_calls = 0
 
     async def delete(self, request) -> DeviceCallResult:
         self.delete_calls += 1
+        self.entered.set()
         await self.release.wait()
         # 返回无观察成功：删除效果未知。
         return DeviceCallResult(observations=(), error=None)
@@ -185,22 +191,13 @@ def pipeline(tmp_path: Path):
     owned.connection.close()
 
 
-def _runtime(owned, driver, *, delete_attempts=1, query_attempts=1,
-             tick=_NOW + 10) -> CleanupRuntime:
-    return CleanupRuntime(
-        owned=owned,
-        outputs=OutputsRepository(),
-        operations=OperationRepository(),
-        driver=driver,
-        evidence=_EVIDENCE,
-        binding_of=lambda item_id: _BINDING,
+async def _runtime(owned, driver, *, delete_attempts=1, query_attempts=1,
+                   tick=_NOW + 10, item_id=91):
+    database = await capture_database(owned)
+    return await cleanup_runtime(
+        database, driver, _EVIDENCE, item_id=item_id,
+        delete_attempts=delete_attempts, query_attempts=query_attempts,
         occurred_at=lambda: tick,
-        delete_config=AttemptConfig(
-            max_attempts=delete_attempts, timeout_s=Decimal("10"),
-            retry_interval_s=Decimal("1")),
-        query_config=AttemptConfig(
-            max_attempts=query_attempts, timeout_s=Decimal("10"),
-            retry_interval_s=Decimal("1")),
     )
 
 
@@ -238,10 +235,10 @@ class TestTakeoverPreservesOldFailure:
         # A：删除效果未知且查询预算耗尽——最终失败并保留限制。
         driver = DriverDouble(absent=False, query_error={"code": "device_error", "stage": "query"})
         first = await delete_source_file(
-            _runtime(owned, driver, delete_attempts=2, query_attempts=1), 91)
+            await _runtime(owned, driver, delete_attempts=2, query_attempts=1), 91)
         assert first.phase == "query_unknown", first
         second = await delete_source_file(
-            _runtime(owned, driver, delete_attempts=2, query_attempts=1), 91)
+            await _runtime(owned, driver, delete_attempts=2, query_attempts=1), 91)
         assert second.phase == "failed", second
         assert second.detail == "file_query_attempts_exhausted", second
         row = _value(
@@ -260,7 +257,7 @@ class TestTakeoverPreservesOldFailure:
         b_item = _fix_b(owned).item_ids[0]
         driver_b = DriverDouble(absent=False, present=False, item=str(b_item))
         # 接手前置：A 留下效果未知的删除，B 先用自己的查询预算核实。
-        taken = await delete_source_file(_runtime(owned, driver_b), b_item)
+        taken = await delete_source_file(await _runtime(owned, driver_b, item_id=b_item), b_item)
         assert taken.phase == "succeeded", taken
         assert taken.detail == "ABSENCE_CONFIRMED", taken
         assert driver_b.delete_calls == 0
@@ -285,7 +282,7 @@ class TestCleanupCancel:
             "UPDATE actions SET cancel_requested = 1 WHERE id = 30")
         owned.connection.commit()
         driver = DriverDouble(absent=True)
-        step = await delete_source_file(_runtime(owned, driver), 91)
+        step = await delete_source_file(await _runtime(owned, driver), 91)
         assert step.phase == "canceled", step
         assert driver.delete_calls == 0
         assert _value(
@@ -302,7 +299,7 @@ class TestCleanupCancel:
             "UPDATE actions SET cancel_requested = 1 WHERE id = 30")
         owned.connection.commit()
         driver = DriverDouble(absent=True)
-        step = await delete_source_file(_runtime(owned, driver), 91)
+        step = await delete_source_file(await _runtime(owned, driver), 91)
         assert step.phase == "canceled", step
         assert driver.delete_calls == 0
         assert _value(
@@ -316,12 +313,12 @@ class TestCleanupCancel:
     async def test_cancel_with_unknown_delete_keeps_restriction(self, pipeline):
         owned = pipeline
         driver = DriverDouble(absent=False, query_error={"code": "device_error", "stage": "query"})
-        first = await delete_source_file(_runtime(owned, driver), 91)
+        first = await delete_source_file(await _runtime(owned, driver), 91)
         assert first.phase == "query_unknown", first
         owned.connection.execute(
             "UPDATE actions SET cancel_requested = 1 WHERE id = 30")
         owned.connection.commit()
-        settled = await delete_source_file(_runtime(owned, driver), 91)
+        settled = await delete_source_file(await _runtime(owned, driver), 91)
         assert settled.phase == "canceled", settled
         assert settled.detail == "delete_unconfirmed", settled
         row = _value(
@@ -340,13 +337,13 @@ class TestCleanupCancel:
         owned = pipeline
         driver = DriverDouble(absent=False, present=True)
         first = await delete_source_file(
-            _runtime(owned, driver, delete_attempts=2), 91)
+            await _runtime(owned, driver, delete_attempts=2), 91)
         assert first.phase == "still_present", first
         owned.connection.execute(
             "UPDATE actions SET cancel_requested = 1 WHERE id = 30")
         owned.connection.commit()
         settled = await delete_source_file(
-            _runtime(owned, driver, delete_attempts=2), 91)
+            await _runtime(owned, driver, delete_attempts=2), 91)
         assert settled.phase == "canceled", settled
         assert settled.detail == "file_delete_failed", settled
         assert _value(
@@ -358,13 +355,14 @@ class TestCleanupCancel:
         release = asyncio.Event()
         driver = GatedDriver(release=release)
         task = asyncio.ensure_future(
-            delete_source_file(_runtime(owned, driver), 91))
+            delete_source_file(await _runtime(owned, driver), 91))
         # 等待流程推进到删除调用挂起后，取消才到达。
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
+        await driver.entered.wait()
         from .test_cleanup_query_save_recovery import _apply_cleanup_cancel
-        _apply_cleanup_cancel(owned,30)
-        release.set()
+        try:
+            _apply_cleanup_cancel(owned, 30)
+        finally:
+            release.set()
         step = await task
         assert step.phase == "canceled", step
         assert step.detail == "delete_unconfirmed", step

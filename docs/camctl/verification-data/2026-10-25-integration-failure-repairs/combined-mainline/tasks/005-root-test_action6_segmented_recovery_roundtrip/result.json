@@ -1,0 +1,73 @@
+{
+  "id": "root/test_action6_segmented_recovery_roundtrip",
+  "scope": "root",
+  "path": "tests/integration/test_action6_segmented_recovery_roundtrip.py",
+  "targets": [
+    "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[unknown-prefix]",
+    "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters"
+  ],
+  "estimated_seconds": 107.43371068299894,
+  "historical_failure_observed": true,
+  "status": "passed",
+  "number": 5,
+  "worker": 2,
+  "artifacts": "/tmp/camctl-fix44-verified-20261025/tasks/005-root-test_action6_segmented_recovery_roundtrip/artifacts",
+  "cwd": "/tmp/camctl-fix44-verified-20261025/tasks/005-root-test_action6_segmented_recovery_roundtrip/source",
+  "started_utc": "2026-10-25T09:17:38.475195+00:00",
+  "command": [
+    "/tmp/camctl-fix44-verified-20261025/tasks/005-root-test_action6_segmented_recovery_roundtrip/source/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[unknown-prefix]",
+    "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters",
+    "-q",
+    "--durations=0",
+    "-p",
+    "integration_progress",
+    "--basetemp",
+    "/tmp/camctl-fix44-verified-20261025/tasks/005-root-test_action6_segmented_recovery_roundtrip/tmp/pytest"
+  ],
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-fix44-verified-20261025/control:/tmp/camctl-fix44-verified-20261025/tasks/005-root-test_action6_segmented_recovery_roundtrip/source/apps/camctl/src",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-verified-20261025/workers/2/python-cache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-verified-20261025/workers/2/project-env",
+    "UV_CACHE_DIR": "/tmp/camctl-fix44-verified-20261025/workers/2/uv-cache",
+    "UV_OFFLINE": "1",
+    "TMPDIR": "/tmp/camctl-fix44-verified-20261025/tasks/005-root-test_action6_segmented_recovery_roundtrip/tmp"
+  },
+  "preparations": [
+    {
+      "label": "package-resources",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-fix44-verified-20261025/tasks/005-root-test_action6_segmented_recovery_roundtrip/source/apps/camctl/scripts/sync_resources.py"
+      ],
+      "cwd": "/tmp/camctl-fix44-verified-20261025/tasks/005-root-test_action6_segmented_recovery_roundtrip/source",
+      "started_utc": "2026-10-25T09:17:45.523016+00:00",
+      "pid": 1121951,
+      "exit_code": 0,
+      "finished_utc": "2026-10-25T09:17:45.687351+00:00",
+      "wall_seconds": 0.16433990899531636
+    }
+  ],
+  "preparation": "package-resources",
+  "preparation_pid": 1121951,
+  "pid": 1121966,
+  "execution_started_utc": "2026-10-25T09:17:45.700719+00:00",
+  "progress": {
+    "status": "finished",
+    "exit_code": 0,
+    "collected": 2,
+    "outcomes": {
+      "passed": 2
+    },
+    "subchecks": {},
+    "elapsed_seconds": 397.5844486319984,
+    "utc": "2026-10-25T09:24:45.697648+00:00",
+    "pid": 1121966
+  },
+  "exit_code": 0,
+  "finished_utc": "2026-10-25T09:24:46.007895+00:00",
+  "wall_seconds": 405.6204555449949
+}

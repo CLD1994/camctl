@@ -94,12 +94,13 @@ class PendingBaseline:
         self.closed = True
 
 
-def close_baseline(action_id, *, runtime):
+def close_baseline(action_id, *, runtime, expected=None):
     """可靠收场后删除拥有者；关闭失败仍保留其清理责任。"""
     pending = runtime.pending_baselines.get(action_id)
-    if pending is not None:
+    if pending is not None and (expected is None or pending is expected):
         pending.close()
-        del runtime.pending_baselines[action_id]
+        if runtime.pending_baselines.get(action_id) is pending:
+            del runtime.pending_baselines[action_id]
 
 
 async def recover_terminal_baselines(*, runtime, limit=None):
@@ -173,7 +174,7 @@ async def _resume_baseline_save(action_id, *, runtime):
     if pending is None:
         return None
     if pending.completed:
-        close_baseline(action_id, runtime=runtime)
+        close_baseline(action_id, runtime=runtime, expected=pending)
         return BaselinePreparation(PreparationPhase.READY)
     if pending.in_call:
         # 原 await 拥有者尚未交付调用结果；其他流程只观察，不接管或报保存失败。
@@ -181,17 +182,38 @@ async def _resume_baseline_save(action_id, *, runtime):
     if pending.read_owner is not None:
         from camctl.capture.segment_baseline import consume_read
 
-        if not (await consume_read(pending, runtime)):
-            if pending.read_owner.saves.pending is None:
+        read_owner = pending.read_owner
+
+        async def consume_original_read():
+            if (runtime.pending_baselines.get(action_id) is not pending
+                    or pending.read_owner is not read_owner):
+                return True
+            if not await consume_read(pending, runtime):
+                raise _PendingReadConsumption()
+            return True
+
+        read_owner.consumption.retry_failed()
+        try:
+            await read_owner.consumption.run(consume_original_read)
+        except _PendingReadConsumption:
+            if read_owner.saves.pending is None:
                 return BaselinePreparation(PreparationPhase.WAITING, wakeup_required=False)
             return BaselinePreparation(
-                PreparationPhase.PENDING, database_error=pending.read_owner.diagnostic
+                PreparationPhase.PENDING, database_error=read_owner.diagnostic
             )
+        if runtime.pending_baselines.get(action_id) is not pending:
+            return None
     held = pending.saves.pending
     if pending.release is None and held is None:
         return None
 
     async def save_and_apply():
+        if runtime.pending_baselines.get(action_id) is not pending:
+            return None
+        if pending.release is None:
+            current = pending.saves.pending
+            if current is None or current.save is not held.save:
+                return None
         notification_error = None
         if pending.release is not None:
             from camctl.persistence.repositories.capture import ReleaseOutcome
@@ -214,7 +236,7 @@ async def _resume_baseline_save(action_id, *, runtime):
                 raise ConsistencyError(f"原准备收场释放条件未成立: {receipt.value.reason}")
             pending.completed = True
             pending.wakeup_pending = True
-            close_baseline(action_id, runtime=runtime)
+            close_baseline(action_id, runtime=runtime, expected=pending)
             if notification_error is not None:
                 raise notification_error
             return BaselinePreparation(PreparationPhase.READY, wakeup_required=False)
@@ -231,11 +253,11 @@ async def _resume_baseline_save(action_id, *, runtime):
             if not isinstance(failure, Exception):
                 raise failure
             raise _PendingSave(failure)
-        pending.saves.take()
+        pending.saves.take(expected=held)
         pending.wakeup_pending = True
         if isinstance(original, BaselineFixSave):
             pending.completed = True
-            close_baseline(action_id, runtime=runtime)
+            close_baseline(action_id, runtime=runtime, expected=pending)
             if notification_error is not None:
                 raise notification_error
             return BaselinePreparation(PreparationPhase.READY, wakeup_required=False)
@@ -256,6 +278,10 @@ async def _resume_baseline_save(action_id, *, runtime):
 class _PendingSave(Exception):
     def __init__(self, error):
         self.error = error
+
+
+class _PendingReadConsumption(Exception):
+    pass
 
 
 async def release_preparation(action_id, *, runtime):

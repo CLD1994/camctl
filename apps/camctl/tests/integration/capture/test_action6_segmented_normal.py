@@ -17,7 +17,7 @@ from camctl.operations.models import ErrorValue
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.segments import SegmentRepository
 
-from .result_consumer_fixtures import consumer_world, returned
+from .result_consumer_fixtures import consumer_world, returned, _prepare_through_handler
 from .test_capture_contract import _NOW
 from .test_native_segment_completion import NativeSegmentCatalog
 from .test_record_file_completion_wait import (
@@ -117,9 +117,16 @@ def _entry(relative, *, size=32):
     }
 
 
-async def _stopped_action6_record(tmp_path):
+async def _stopped_action6_record(tmp_path, *, runtime_options=None):
+    wall, mono = [_NOW], [5_000_000_000]
+    stopper = create_autospec(StopDriver, instance=True)
+    stopper.stop.side_effect = lambda request: DeviceCallResult.from_outcome(
+        returned("stop", "stop_confirmed", request.ticket.target_id))
+    options = {} if runtime_options is None else dict(runtime_options)
+    options.update(stopper=stopper, wall_us=lambda: wall[0], monotonic_ns=lambda: mono[0])
     owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, "record", catalog=Action6RecordCatalog(), start=False
+        tmp_path, "record", catalog=Action6RecordCatalog(), start=False,
+        runtime_options=options,
     )
     (activity,) = owned.connection.execute(
         "SELECT id FROM device_activities WHERE action_id=?", (action_id,)
@@ -129,17 +136,11 @@ async def _stopped_action6_record(tmp_path):
     )
     assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
     await capture_handler(handler)(action_id, runtime)
-    runtime.wall_us = lambda: _NOW + 12_000_000
-    runtime.monotonic_ns = lambda: 17_000_000_000
-    stopper = create_autospec(StopDriver, instance=True)
-    stopper.stop.return_value = DeviceCallResult.from_outcome(
-        returned("stop", "stop_confirmed", activity)
-    )
-    runtime.stopper = stopper
-    stopped = await _stop_call(runtime, runtime.action(action_id), "stop_recording")
-    assert stopped.phase == "confirmed"
-    runtime.wall_us = lambda: _NOW + 17_000_000
-    runtime.monotonic_ns = lambda: 22_000_000_000
+    wall[0], mono[0] = _NOW + 12_000_000, 17_000_000_000
+    await _prepare_through_handler(runtime, action_id, handler, "conclude")
+    assert owned.connection.execute(
+        "SELECT activity_state FROM device_activities WHERE id=?", (activity,)).fetchone() == (3,)
+    wall[0], mono[0] = _NOW + 17_000_000, 22_000_000_000
     return owned, runtime, action_id, handler, stopper
 
 
@@ -156,7 +157,7 @@ async def test_action6_partial_result_exhaustion_finishes_without_another_device
     try:
         context = _stop_context(owned, action_id)
         entry = _entry("DJI_001/DJI_20261022100000_0007_D.MP4")
-        action = runtime.action(action_id)
+        action = (await runtime.action(action_id))
         cursor = DirectoryCursor(
             DeviceBinding(action["device_id"], action["driver_id"]),
             tuple(action["execution_spec_json"]["output_scope"]["directories"]),
@@ -175,7 +176,7 @@ async def test_action6_partial_result_exhaustion_finishes_without_another_device
             await capture_handler(handler)(action_id, runtime)
 
         assert driver.list_results.await_count == 3
-        assert runtime.action(action_id)["status"] == int(enum_for("actions.status").FAILED)
+        assert (await runtime.action(action_id))["status"] == int(enum_for("actions.status").FAILED)
         run_status = enum_for("operation_runs.status")
         expected_run = run_status.FAILED if explicit_error else run_status.UNCONFIRMED
         assert owned.connection.execute(
@@ -220,7 +221,7 @@ async def test_action6_ordinary_normal_publishes_all_mp4_lrf_and_photo_without_m
         driver = _result_port(runtime, read)
         await capture_handler(handler)(action_id, runtime)
 
-        assert runtime.action(action_id)["status"] == 3
+        assert (await runtime.action(action_id))["status"] == 3
         assert owned.connection.execute(
             "SELECT kind,COUNT(*) FROM outputs GROUP BY kind ORDER BY kind"
         ).fetchall() == [(1, 4), (3, 2)]
@@ -286,7 +287,7 @@ async def test_action6_native_normal_publishes_all_video_and_required_photo_sepa
         mono[0] += 1_200_000_000
         await capture_handler(handler)(action_id, runtime)
 
-        assert runtime.action(action_id)["status"] == 3
+        assert (await runtime.action(action_id))["status"] == 3
         assert owned.connection.execute(
             "SELECT completion_basis,occupancy_state,result_set_state FROM device_activities"
             " WHERE action_id=?",

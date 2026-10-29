@@ -1,0 +1,131 @@
+{
+  "label": "replay-final",
+  "created_utc": "2026-10-26T01:24:17.565766+00:00",
+  "replay_source": "/tmp/camctl-integration-replay-20261026-u19lkvoe",
+  "replay_status": "finished",
+  "replay_exit_code": 1,
+  "artifact_groups": {
+    "collection": 12,
+    "tasks": 39
+  },
+  "raw_resource_receipts": {
+    "main": {
+      "raw_json_count": 357,
+      "unique_groups": 353,
+      "unfinished_groups": 0
+    },
+    "replay": {
+      "raw_json_count": 846,
+      "unique_groups": 782,
+      "unfinished_groups": 89
+    }
+  },
+  "missing_task_artifacts_as_observed": [],
+  "added_files_before_batch_summary": 1765,
+  "unchanged_files_skipped": 1165,
+  "versioned_changes": [
+    {
+      "original_archive_path": "diagnosis/bootstrap/confirmed-production-closing.json",
+      "previous_original_sha256": "30bd8a5e9fcce0656e96c8fd31bd9da4343cebde8658f8d804b9be3aa7812921",
+      "new_original_sha256": "0b03c339f1637a6db367306d1905e1845e627db7db2dffabfeb773c39e5a0b22"
+    }
+  ],
+  "source_recheck_file_count": 2926,
+  "reused_prior_versions": [],
+  "supplemental_sources": [
+    {
+      "name": "unified-audit",
+      "source": "/tmp/camctl-full-272f-audit/unified-audit.json"
+    },
+    {
+      "name": "combined-coverage-audit",
+      "source": "/tmp/camctl-full-272f-audit/combined-coverage-audit.json"
+    },
+    {
+      "name": "combined-case-histories",
+      "source": "/tmp/camctl-full-272f-audit/combined-case-histories.json"
+    },
+    {
+      "name": "unified-resource-audit",
+      "source": "/tmp/camctl-full-272f-audit/unified-resource-audit.json"
+    },
+    {
+      "name": "production-identity",
+      "source": "/tmp/camctl-full-272f-audit/production-identity.json"
+    },
+    {
+      "name": "capacity-execution-gap",
+      "source": "/tmp/camctl-full-272f-audit/capacity-execution-gap.json"
+    },
+    {
+      "name": "final-narrow-audit",
+      "source": "/tmp/camctl-full-272f-audit/final-narrow-audit.json"
+    },
+    {
+      "name": "coverage-audit",
+      "source": "/tmp/camctl-full-272f-audit/coverage-audit.json"
+    },
+    {
+      "name": "canonical-inventory",
+      "source": "/tmp/camctl-full-272f-audit/canonical-inventory.json"
+    },
+    {
+      "name": "canonical-cases",
+      "source": "/tmp/camctl-full-272f-audit/canonical-cases.json"
+    },
+    {
+      "name": "replay-coverage-audit",
+      "source": "/tmp/camctl-full-272f-audit/replay/coverage-audit.json"
+    },
+    {
+      "name": "replay-canonical-inventory",
+      "source": "/tmp/camctl-full-272f-audit/replay/canonical-inventory.json"
+    },
+    {
+      "name": "replay-canonical-cases",
+      "source": "/tmp/camctl-full-272f-audit/replay/canonical-cases.json"
+    },
+    {
+      "name": "final-audit-manifest-json",
+      "source": "/tmp/camctl-full-272f-audit/final-audit-manifest.json"
+    },
+    {
+      "name": "timing-audit-json",
+      "source": "/tmp/camctl-full-272f-audit/timing-audit.json"
+    },
+    {
+      "name": "shard-target-path-check-json",
+      "source": "/tmp/camctl-full-272f-audit/shard-target-path-check.json"
+    },
+    {
+      "name": "final_audit-py",
+      "source": "/tmp/camctl-full-272f-audit/final_audit.py"
+    },
+    {
+      "name": "resource_audit-py",
+      "source": "/tmp/camctl-full-272f-audit/resource_audit.py"
+    },
+    {
+      "name": "combined_audit-py",
+      "source": "/tmp/camctl-full-272f-audit/combined_audit.py"
+    },
+    {
+      "name": "finalize_audit-py",
+      "source": "/tmp/camctl-full-272f-audit/finalize_audit.py"
+    }
+  ],
+  "original_main_files_preserved": 867,
+  "initial_archive_validation": {
+    "ok": true,
+    "manifest_file_count": 2044,
+    "archived_bytes_excluding_manifest_and_receipt": 18189533,
+    "restored_bytes": 53869064,
+    "source_per_file_record_count": 6186,
+    "nested_merge_payload_files_verified": 42,
+    "resource_receipts_verified_by_run": {},
+    "all_archived_hashes_match": true,
+    "all_original_hashes_restore": true,
+    "archive_has_no_unlisted_payload_files": true,
+    "verification_requires_original_sources": false
+  }
+}

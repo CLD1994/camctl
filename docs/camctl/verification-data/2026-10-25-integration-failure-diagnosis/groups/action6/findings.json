@@ -1,0 +1,2947 @@
+{
+  "date": "2026-10-25",
+  "scope": "仅诊断原44项失败中的19和20；没有启动pytest、修改源码/测试/配置、追加run或改动原world。标准库SQLite mode=ro + query_only只读提取。",
+  "source_identity": {
+    "pre_optimization": "ea52a0d0",
+    "historical": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+    "current": "1973dc05c0d517a890b92e5dcfc1ee32da9266dd",
+    "central_run": "/tmp/camctl-44-diagnostic-current-20261025",
+    "comparisons": [
+      {
+        "path": "apps/camctl/src/camctl/bootstrap/work_file_assembly.py",
+        "sha256": {
+          "ea52a0d0": "bc701935fb9ba2370f8f32fd5c4a8b53978a5838a88770146d1148715eda0c34",
+          "48d2ee64": "bc701935fb9ba2370f8f32fd5c4a8b53978a5838a88770146d1148715eda0c34",
+          "1973dc05": "bc701935fb9ba2370f8f32fd5c4a8b53978a5838a88770146d1148715eda0c34",
+          "current_diagnostic_source": "bc701935fb9ba2370f8f32fd5c4a8b53978a5838a88770146d1148715eda0c34"
+        },
+        "all_equal": true
+      },
+      {
+        "path": "apps/camctl/src/camctl/capture/media_flow.py",
+        "sha256": {
+          "ea52a0d0": "22fa44e45cb65b94a28848c83268b0731fd4686ae0a8a31172d9fdb7937c2441",
+          "48d2ee64": "22fa44e45cb65b94a28848c83268b0731fd4686ae0a8a31172d9fdb7937c2441",
+          "1973dc05": "22fa44e45cb65b94a28848c83268b0731fd4686ae0a8a31172d9fdb7937c2441",
+          "current_diagnostic_source": "22fa44e45cb65b94a28848c83268b0731fd4686ae0a8a31172d9fdb7937c2441"
+        },
+        "all_equal": true
+      },
+      {
+        "path": "apps/camctl/src/camctl/capture/segment_inspections.py",
+        "sha256": {
+          "ea52a0d0": "7423ce94a99f8e1ea22cc42f30d8bcb3f396920fe61e19effb94b2f504e99cae",
+          "48d2ee64": "7423ce94a99f8e1ea22cc42f30d8bcb3f396920fe61e19effb94b2f504e99cae",
+          "1973dc05": "7423ce94a99f8e1ea22cc42f30d8bcb3f396920fe61e19effb94b2f504e99cae",
+          "current_diagnostic_source": "7423ce94a99f8e1ea22cc42f30d8bcb3f396920fe61e19effb94b2f504e99cae"
+        },
+        "all_equal": true
+      },
+      {
+        "path": "apps/camctl/src/camctl/outputs/work_files.py",
+        "sha256": {
+          "ea52a0d0": "d5d1d41e7098fd7cae0ccdea2d8cfb99baaf452fe10444b87c445b991773bca1",
+          "48d2ee64": "d5d1d41e7098fd7cae0ccdea2d8cfb99baaf452fe10444b87c445b991773bca1",
+          "1973dc05": "d5d1d41e7098fd7cae0ccdea2d8cfb99baaf452fe10444b87c445b991773bca1",
+          "current_diagnostic_source": "d5d1d41e7098fd7cae0ccdea2d8cfb99baaf452fe10444b87c445b991773bca1"
+        },
+        "all_equal": true
+      }
+    ]
+  },
+  "cases": [
+    {
+      "diagnosis_id": 19,
+      "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[unknown-prefix]",
+      "classification": "原有生产缺陷；当前保留",
+      "root_cause": "来源提交时，检查输入因H绑定等待者尚未终态而未进入首次清理集合；等待者终态只发现等待者自身归属文件，未沿依赖重新发现来源检查输入的新清理资格。",
+      "current_reproduced": false,
+      "current_result": "passed；清理依赖host在run1之后额外启动run5，不构成缺陷已修复。",
+      "snapshots": {
+        "historical": {
+          "world": "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/test_installed_action6_ordinar1/action6-record",
+          "database": "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/test_installed_action6_ordinar1/action6-record/deployment/state.db",
+          "queries": {
+            "actions": "SELECT id,name,type,status,error_code,error_details_json,created_event_id,last_event_id FROM actions ORDER BY id",
+            "copies": "SELECT id,delivery_id,processing_id,inspection_id,source_device_file_id,source_intermediate_file_id,target_file_id,source_size,source_sha256,committed_bytes,slot_device_id,verification_state,target_sha256 FROM file_copies ORDER BY id",
+            "inspection_files": "SELECT * FROM intermediate_files WHERE owner_action_id IS NOT NULL ORDER BY id",
+            "inspections": "SELECT * FROM segment_inspections ORDER BY id",
+            "sets": "SELECT id,action_id,state,published_event_id,assessment_json FROM segment_sets ORDER BY id",
+            "read_attempts": "SELECT c.id copy_id,c.inspection_id,r.id run_id,r.status run_status,t.id attempt_id,t.status attempt_status,t.result_event_id,e.occurred_at result_at,t.result_json FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id JOIN operation_attempts t ON t.run_id=r.id LEFT JOIN history_events e ON e.id=t.result_event_id ORDER BY c.id,t.id",
+            "runtime": "SELECT * FROM runtime_state",
+            "wrong_join": "SELECT c.id,c.processing_id,c.inspection_id,p.id AS joined_processing_id FROM file_copies c LEFT JOIN recording_processing p ON p.id=c.processing_id WHERE c.inspection_id IS NOT NULL ORDER BY c.id"
+          },
+          "rows": {
+            "actions": [
+              {
+                "id": 1,
+                "name": "capture",
+                "type": 2,
+                "status": 3,
+                "error_code": null,
+                "error_details_json": null,
+                "created_event_id": 2,
+                "last_event_id": 174
+              },
+              {
+                "id": 2,
+                "name": "pre-default-a",
+                "type": 4,
+                "status": 3,
+                "error_code": null,
+                "error_details_json": null,
+                "created_event_id": 27,
+                "last_event_id": 250
+              },
+              {
+                "id": 3,
+                "name": "pre-default-b",
+                "type": 4,
+                "status": 3,
+                "error_code": null,
+                "error_details_json": null,
+                "created_event_id": 41,
+                "last_event_id": 258
+              }
+            ],
+            "copies": [
+              {
+                "id": 1,
+                "delivery_id": null,
+                "processing_id": null,
+                "inspection_id": 1,
+                "source_device_file_id": 2,
+                "source_intermediate_file_id": null,
+                "target_file_id": 1,
+                "source_size": 1571886,
+                "source_sha256": "88ea9af8f3eab27a6dc181ec7cb35a7afddb8e636f1aa2ff7f45eb5931587cdf",
+                "committed_bytes": 1571886,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "88ea9af8f3eab27a6dc181ec7cb35a7afddb8e636f1aa2ff7f45eb5931587cdf"
+              },
+              {
+                "id": 2,
+                "delivery_id": null,
+                "processing_id": null,
+                "inspection_id": 2,
+                "source_device_file_id": 4,
+                "source_intermediate_file_id": null,
+                "target_file_id": 2,
+                "source_size": 2361415,
+                "source_sha256": "af3bf41d35100c7bcc0d3012090379d28b06be9b29e753420c3c892c7ffebb89",
+                "committed_bytes": 2361415,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "af3bf41d35100c7bcc0d3012090379d28b06be9b29e753420c3c892c7ffebb89"
+              },
+              {
+                "id": 3,
+                "delivery_id": null,
+                "processing_id": null,
+                "inspection_id": 3,
+                "source_device_file_id": 6,
+                "source_intermediate_file_id": null,
+                "target_file_id": 3,
+                "source_size": 1918377,
+                "source_sha256": "ab6689f30aaabdc66fd399c5e799688f24a5ca80c4aed4ad36caa1325173ea6a",
+                "committed_bytes": 1918377,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "ab6689f30aaabdc66fd399c5e799688f24a5ca80c4aed4ad36caa1325173ea6a"
+              },
+              {
+                "id": 4,
+                "delivery_id": 1,
+                "processing_id": null,
+                "inspection_id": null,
+                "source_device_file_id": null,
+                "source_intermediate_file_id": 1,
+                "target_file_id": 4,
+                "source_size": 1571886,
+                "source_sha256": "88ea9af8f3eab27a6dc181ec7cb35a7afddb8e636f1aa2ff7f45eb5931587cdf",
+                "committed_bytes": 1571886,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "88ea9af8f3eab27a6dc181ec7cb35a7afddb8e636f1aa2ff7f45eb5931587cdf"
+              },
+              {
+                "id": 5,
+                "delivery_id": 2,
+                "processing_id": null,
+                "inspection_id": null,
+                "source_device_file_id": null,
+                "source_intermediate_file_id": 2,
+                "target_file_id": 5,
+                "source_size": 2361415,
+                "source_sha256": "af3bf41d35100c7bcc0d3012090379d28b06be9b29e753420c3c892c7ffebb89",
+                "committed_bytes": 2361415,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "af3bf41d35100c7bcc0d3012090379d28b06be9b29e753420c3c892c7ffebb89"
+              },
+              {
+                "id": 6,
+                "delivery_id": 3,
+                "processing_id": null,
+                "inspection_id": null,
+                "source_device_file_id": null,
+                "source_intermediate_file_id": 1,
+                "target_file_id": 6,
+                "source_size": 1571886,
+                "source_sha256": "88ea9af8f3eab27a6dc181ec7cb35a7afddb8e636f1aa2ff7f45eb5931587cdf",
+                "committed_bytes": 1571886,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "88ea9af8f3eab27a6dc181ec7cb35a7afddb8e636f1aa2ff7f45eb5931587cdf"
+              },
+              {
+                "id": 7,
+                "delivery_id": 4,
+                "processing_id": null,
+                "inspection_id": null,
+                "source_device_file_id": null,
+                "source_intermediate_file_id": 2,
+                "target_file_id": 7,
+                "source_size": 2361415,
+                "source_sha256": "af3bf41d35100c7bcc0d3012090379d28b06be9b29e753420c3c892c7ffebb89",
+                "committed_bytes": 2361415,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "af3bf41d35100c7bcc0d3012090379d28b06be9b29e753420c3c892c7ffebb89"
+              }
+            ],
+            "inspection_files": [
+              {
+                "id": 1,
+                "owner_action_id": 1,
+                "owner_delivery_id": null,
+                "purpose": 2,
+                "relative_path": "recording-inputs/1.mp4",
+                "retention_state": 1,
+                "cleanup_state": 1,
+                "size_bytes": 1571886,
+                "sha256": "88ea9af8f3eab27a6dc181ec7cb35a7afddb8e636f1aa2ff7f45eb5931587cdf",
+                "last_error_json": null,
+                "created_event_id": 110,
+                "last_event_id": 119,
+                "change_count": 2
+              },
+              {
+                "id": 2,
+                "owner_action_id": 1,
+                "owner_delivery_id": null,
+                "purpose": 2,
+                "relative_path": "recording-inputs/2.mp4",
+                "retention_state": 1,
+                "cleanup_state": 1,
+                "size_bytes": 2361415,
+                "sha256": "af3bf41d35100c7bcc0d3012090379d28b06be9b29e753420c3c892c7ffebb89",
+                "last_error_json": null,
+                "created_event_id": 129,
+                "last_event_id": 138,
+                "change_count": 2
+              },
+              {
+                "id": 3,
+                "owner_action_id": 1,
+                "owner_delivery_id": null,
+                "purpose": 2,
+                "relative_path": "recording-inputs/3.mp4",
+                "retention_state": 1,
+                "cleanup_state": 1,
+                "size_bytes": 1918377,
+                "sha256": "ab6689f30aaabdc66fd399c5e799688f24a5ca80c4aed4ad36caa1325173ea6a",
+                "last_error_json": null,
+                "created_event_id": 145,
+                "last_event_id": 154,
+                "change_count": 2
+              }
+            ],
+            "inspections": [
+              {
+                "id": 1,
+                "created_event_id": 108,
+                "action_id": 1,
+                "set_id": 1,
+                "member_id": 2,
+                "source_device_file_id": 2,
+                "target_json": "{\"metric\":\"duration_s\",\"value\":60}",
+                "budget_json": "{\"max_attempts\":3,\"timeout_s\":10,\"retry_interval_s\":3}",
+                "state": 2,
+                "result_json": "{\"metric\":{\"metric\":\"duration_s\",\"value\":18.000000,\"reason\":null},\"probe\":{\"duration_s\":18.000000,\"error\":null,\"format_name\":\"mov,mp4,m4a,3gp,3g2,mj2\",\"streams\":[{\"index\":0,\"codec_type\":\"video\",\"codec_name\":\"h264\",\"width\":480,\"height\":360,\"duration_s\":18.000000,\"attached_pic\":false,\"frame_count\":null,\"fps\":10}]},\"tool\":{\"ran\":true,\"error\":null},\"failure\":null}",
+                "result_event_id": 126
+              },
+              {
+                "id": 2,
+                "created_event_id": 127,
+                "action_id": 1,
+                "set_id": 1,
+                "member_id": 4,
+                "source_device_file_id": 4,
+                "target_json": "{\"metric\":\"duration_s\",\"value\":60}",
+                "budget_json": "{\"max_attempts\":3,\"timeout_s\":10,\"retry_interval_s\":3}",
+                "state": 2,
+                "result_json": "{\"metric\":{\"metric\":\"duration_s\",\"value\":27.000000,\"reason\":null},\"probe\":{\"duration_s\":27.000000,\"error\":null,\"format_name\":\"mov,mp4,m4a,3gp,3g2,mj2\",\"streams\":[{\"index\":0,\"codec_type\":\"video\",\"codec_name\":\"h264\",\"width\":480,\"height\":360,\"duration_s\":27.000000,\"attached_pic\":false,\"frame_count\":null,\"fps\":10}]},\"tool\":{\"ran\":true,\"error\":null},\"failure\":null}",
+                "result_event_id": 142
+              },
+              {
+                "id": 3,
+                "created_event_id": 143,
+                "action_id": 1,
+                "set_id": 1,
+                "member_id": 6,
+                "source_device_file_id": 6,
+                "target_json": "{\"metric\":\"duration_s\",\"value\":60}",
+                "budget_json": "{\"max_attempts\":3,\"timeout_s\":10,\"retry_interval_s\":3}",
+                "state": 4,
+                "result_json": "{\"metric\":{\"metric\":\"duration_s\",\"value\":null,\"reason\":\"probe_error\"},\"probe\":{\"duration_s\":null,\"error\":\"tool_failed: exit=86\",\"format_name\":null,\"streams\":[]},\"tool\":{\"ran\":true,\"error\":null},\"failure\":null}",
+                "result_event_id": 158
+              }
+            ],
+            "sets": [
+              {
+                "id": 1,
+                "action_id": 1,
+                "state": 3,
+                "published_event_id": 174,
+                "assessment_json": "{\"decision_type\":\"video_coverage_v1\",\"set_ref\":{\"action_id\":1,\"scan_id\":3,\"final_page_event_id\":72,\"version\":1},\"status\":\"succeeded\",\"metric\":\"duration_s\",\"target\":60,\"confirmed\":45.000000,\"coverage_status\":\"unconfirmed\",\"checked_count\":2,\"default_scope\":{\"state\":3,\"set_ref\":{\"action_id\":1,\"scan_id\":3,\"final_page_event_id\":72,\"version\":1},\"first_cursor\":{\"key\":{\"directory_number\":1,\"index\":998},\"member_identity\":\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120000_0998_D.MP4\"},\"last_cursor\":{\"key\":{\"directory_number\":1,\"index\":999},\"member_identity\":\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120100_0999_D.MP4\"},\"member_count\":2},\"failure_code\":null,\"reason\":\"probe_error\"}"
+              }
+            ],
+            "read_attempts": [
+              {
+                "copy_id": 1,
+                "inspection_id": 1,
+                "run_id": 4,
+                "run_status": 3,
+                "attempt_id": 4,
+                "attempt_status": 2,
+                "result_event_id": 120,
+                "result_at": 1792886412095477,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 2,
+                "inspection_id": 2,
+                "run_id": 5,
+                "run_status": 3,
+                "attempt_id": 5,
+                "attempt_status": 2,
+                "result_event_id": 139,
+                "result_at": 1792886412593853,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 3,
+                "inspection_id": 3,
+                "run_id": 6,
+                "run_status": 3,
+                "attempt_id": 6,
+                "attempt_status": 2,
+                "result_event_id": 155,
+                "result_at": 1792886413069567,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 4,
+                "inspection_id": null,
+                "run_id": 7,
+                "run_status": 3,
+                "attempt_id": 7,
+                "attempt_status": 2,
+                "result_event_id": 210,
+                "result_at": 1792886421136677,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 5,
+                "inspection_id": null,
+                "run_id": 8,
+                "run_status": 3,
+                "attempt_id": 8,
+                "attempt_status": 2,
+                "result_event_id": 220,
+                "result_at": 1792886421201142,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 6,
+                "inspection_id": null,
+                "run_id": 9,
+                "run_status": 3,
+                "attempt_id": 9,
+                "attempt_status": 2,
+                "result_event_id": 229,
+                "result_at": 1792886421250816,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 7,
+                "inspection_id": null,
+                "run_id": 10,
+                "run_status": 3,
+                "attempt_id": 10,
+                "attempt_status": 2,
+                "result_event_id": 239,
+                "result_at": 1792886421295224,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              }
+            ],
+            "runtime": [
+              {
+                "id": 1,
+                "acknowledged_wm": 0,
+                "acknowledged_report_id": null,
+                "trusted_time_lower_bound": 1792886326000000,
+                "trusted_time_event_id": 1,
+                "cleanup_cursor_file_id": null
+              }
+            ],
+            "wrong_join": [
+              {
+                "id": 1,
+                "processing_id": null,
+                "inspection_id": 1,
+                "joined_processing_id": null
+              },
+              {
+                "id": 2,
+                "processing_id": null,
+                "inspection_id": 2,
+                "joined_processing_id": null
+              },
+              {
+                "id": 3,
+                "processing_id": null,
+                "inspection_id": 3,
+                "joined_processing_id": null
+              }
+            ]
+          },
+          "lifecycle_events": [
+            {
+              "event_id": 110,
+              "transaction_id": 87,
+              "occurred_at": 1792886411726234,
+              "row": {
+                "table": "intermediate_files",
+                "id": 1,
+                "before": {
+                  "exists": false,
+                  "values": {}
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "owner_action_id": 1,
+                    "owner_delivery_id": null,
+                    "purpose": 2,
+                    "relative_path": "recording-inputs/1.mp4",
+                    "retention_state": 1,
+                    "cleanup_state": 1,
+                    "size_bytes": null,
+                    "sha256": null,
+                    "last_error_json": null
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 129,
+              "transaction_id": 103,
+              "occurred_at": 1792886412254362,
+              "row": {
+                "table": "intermediate_files",
+                "id": 2,
+                "before": {
+                  "exists": false,
+                  "values": {}
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "owner_action_id": 1,
+                    "owner_delivery_id": null,
+                    "purpose": 2,
+                    "relative_path": "recording-inputs/2.mp4",
+                    "retention_state": 1,
+                    "cleanup_state": 1,
+                    "size_bytes": null,
+                    "sha256": null,
+                    "last_error_json": null
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 145,
+              "transaction_id": 116,
+              "occurred_at": 1792886412703187,
+              "row": {
+                "table": "intermediate_files",
+                "id": 3,
+                "before": {
+                  "exists": false,
+                  "values": {}
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "owner_action_id": 1,
+                    "owner_delivery_id": null,
+                    "purpose": 2,
+                    "relative_path": "recording-inputs/3.mp4",
+                    "retention_state": 1,
+                    "cleanup_state": 1,
+                    "size_bytes": null,
+                    "sha256": null,
+                    "last_error_json": null
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 163,
+              "transaction_id": 130,
+              "occurred_at": 1792886415663008,
+              "row": {
+                "table": "actions",
+                "id": 1,
+                "before": {
+                  "exists": true,
+                  "values": {
+                    "status": 2
+                  }
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "status": 3
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 250,
+              "transaction_id": 174,
+              "occurred_at": 1792886421639786,
+              "row": {
+                "table": "actions",
+                "id": 2,
+                "before": {
+                  "exists": true,
+                  "values": {
+                    "status": 2
+                  }
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "status": 3
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 258,
+              "transaction_id": 179,
+              "occurred_at": 1792886421639786,
+              "row": {
+                "table": "actions",
+                "id": 3,
+                "before": {
+                  "exists": true,
+                  "values": {
+                    "status": 2
+                  }
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "status": 3
+                  }
+                }
+              }
+            }
+          ],
+          "host_lines": [
+            {
+              "line": 1,
+              "text": "call=1 attempt=1 command=run operation=spawn plan=(none) automatic=0 retries=0"
+            },
+            {
+              "line": 3,
+              "text": "call=1 attempt=1 command=run pid=465064 spawned execution=unknown"
+            },
+            {
+              "line": 8,
+              "text": "call=2 command=submit pid=465065 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+            },
+            {
+              "line": 14,
+              "text": "call=3 command=submit pid=465402 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+            },
+            {
+              "line": 20,
+              "text": "call=4 command=submit pid=465598 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+            },
+            {
+              "line": 26,
+              "text": "call=1 command=run pid=465064 stream=exit_observed data=exit record retained; group settlement pending"
+            },
+            {
+              "line": 27,
+              "text": "call=1 command=run pid=465064 stream=group_reaped data=all execution stopped; child record reaped"
+            },
+            {
+              "line": 28,
+              "text": "call=1 command=run pid=465064 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+            }
+          ],
+          "run_clock_intervals": [
+            {
+              "pid": 465064,
+              "first_utc_us": 1792886326000000,
+              "last_utc_us": 1792886422844449
+            }
+          ],
+          "inspection_file_exists": [
+            {
+              "file_id": 1,
+              "relative_path": "recording-inputs/1.mp4",
+              "exists": true
+            },
+            {
+              "file_id": 2,
+              "relative_path": "recording-inputs/2.mp4",
+              "exists": true
+            },
+            {
+              "file_id": 3,
+              "relative_path": "recording-inputs/3.mp4",
+              "exists": true
+            }
+          ]
+        },
+        "current": {
+          "world": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_ordinar0/action6-record",
+          "database": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_ordinar0/action6-record/deployment/state.db",
+          "queries": {
+            "actions": "SELECT id,name,type,status,error_code,error_details_json,created_event_id,last_event_id FROM actions ORDER BY id",
+            "copies": "SELECT id,delivery_id,processing_id,inspection_id,source_device_file_id,source_intermediate_file_id,target_file_id,source_size,source_sha256,committed_bytes,slot_device_id,verification_state,target_sha256 FROM file_copies ORDER BY id",
+            "inspection_files": "SELECT * FROM intermediate_files WHERE owner_action_id IS NOT NULL ORDER BY id",
+            "inspections": "SELECT * FROM segment_inspections ORDER BY id",
+            "sets": "SELECT id,action_id,state,published_event_id,assessment_json FROM segment_sets ORDER BY id",
+            "read_attempts": "SELECT c.id copy_id,c.inspection_id,r.id run_id,r.status run_status,t.id attempt_id,t.status attempt_status,t.result_event_id,e.occurred_at result_at,t.result_json FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id JOIN operation_attempts t ON t.run_id=r.id LEFT JOIN history_events e ON e.id=t.result_event_id ORDER BY c.id,t.id",
+            "runtime": "SELECT * FROM runtime_state",
+            "wrong_join": "SELECT c.id,c.processing_id,c.inspection_id,p.id AS joined_processing_id FROM file_copies c LEFT JOIN recording_processing p ON p.id=c.processing_id WHERE c.inspection_id IS NOT NULL ORDER BY c.id"
+          },
+          "rows": {
+            "actions": [
+              {
+                "id": 1,
+                "name": "capture",
+                "type": 2,
+                "status": 3,
+                "error_code": null,
+                "error_details_json": null,
+                "created_event_id": 1,
+                "last_event_id": 175
+              },
+              {
+                "id": 2,
+                "name": "pre-default-a",
+                "type": 4,
+                "status": 3,
+                "error_code": null,
+                "error_details_json": null,
+                "created_event_id": 26,
+                "last_event_id": 246
+              },
+              {
+                "id": 3,
+                "name": "pre-default-b",
+                "type": 4,
+                "status": 3,
+                "error_code": null,
+                "error_details_json": null,
+                "created_event_id": 40,
+                "last_event_id": 254
+              },
+              {
+                "id": 4,
+                "name": "late-explicit",
+                "type": 4,
+                "status": 3,
+                "error_code": null,
+                "error_details_json": null,
+                "created_event_id": 276,
+                "last_event_id": 309
+              },
+              {
+                "id": 5,
+                "name": "ack",
+                "type": 7,
+                "status": 1,
+                "error_code": null,
+                "error_details_json": null,
+                "created_event_id": 318,
+                "last_event_id": 318
+              }
+            ],
+            "copies": [
+              {
+                "id": 1,
+                "delivery_id": null,
+                "processing_id": null,
+                "inspection_id": 1,
+                "source_device_file_id": 2,
+                "source_intermediate_file_id": null,
+                "target_file_id": 1,
+                "source_size": 1571886,
+                "source_sha256": "88ea9af8f3eab27a6dc181ec7cb35a7afddb8e636f1aa2ff7f45eb5931587cdf",
+                "committed_bytes": 1571886,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "88ea9af8f3eab27a6dc181ec7cb35a7afddb8e636f1aa2ff7f45eb5931587cdf"
+              },
+              {
+                "id": 2,
+                "delivery_id": null,
+                "processing_id": null,
+                "inspection_id": 2,
+                "source_device_file_id": 4,
+                "source_intermediate_file_id": null,
+                "target_file_id": 2,
+                "source_size": 2361415,
+                "source_sha256": "af3bf41d35100c7bcc0d3012090379d28b06be9b29e753420c3c892c7ffebb89",
+                "committed_bytes": 2361415,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "af3bf41d35100c7bcc0d3012090379d28b06be9b29e753420c3c892c7ffebb89"
+              },
+              {
+                "id": 3,
+                "delivery_id": null,
+                "processing_id": null,
+                "inspection_id": 3,
+                "source_device_file_id": 6,
+                "source_intermediate_file_id": null,
+                "target_file_id": 3,
+                "source_size": 1918377,
+                "source_sha256": "ab6689f30aaabdc66fd399c5e799688f24a5ca80c4aed4ad36caa1325173ea6a",
+                "committed_bytes": 1918377,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "ab6689f30aaabdc66fd399c5e799688f24a5ca80c4aed4ad36caa1325173ea6a"
+              },
+              {
+                "id": 4,
+                "delivery_id": 1,
+                "processing_id": null,
+                "inspection_id": null,
+                "source_device_file_id": null,
+                "source_intermediate_file_id": 1,
+                "target_file_id": 4,
+                "source_size": 1571886,
+                "source_sha256": "88ea9af8f3eab27a6dc181ec7cb35a7afddb8e636f1aa2ff7f45eb5931587cdf",
+                "committed_bytes": 1571886,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "88ea9af8f3eab27a6dc181ec7cb35a7afddb8e636f1aa2ff7f45eb5931587cdf"
+              },
+              {
+                "id": 5,
+                "delivery_id": 2,
+                "processing_id": null,
+                "inspection_id": null,
+                "source_device_file_id": null,
+                "source_intermediate_file_id": 2,
+                "target_file_id": 5,
+                "source_size": 2361415,
+                "source_sha256": "af3bf41d35100c7bcc0d3012090379d28b06be9b29e753420c3c892c7ffebb89",
+                "committed_bytes": 2361415,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "af3bf41d35100c7bcc0d3012090379d28b06be9b29e753420c3c892c7ffebb89"
+              },
+              {
+                "id": 6,
+                "delivery_id": 3,
+                "processing_id": null,
+                "inspection_id": null,
+                "source_device_file_id": null,
+                "source_intermediate_file_id": 1,
+                "target_file_id": 6,
+                "source_size": 1571886,
+                "source_sha256": "88ea9af8f3eab27a6dc181ec7cb35a7afddb8e636f1aa2ff7f45eb5931587cdf",
+                "committed_bytes": 1571886,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "88ea9af8f3eab27a6dc181ec7cb35a7afddb8e636f1aa2ff7f45eb5931587cdf"
+              },
+              {
+                "id": 7,
+                "delivery_id": 4,
+                "processing_id": null,
+                "inspection_id": null,
+                "source_device_file_id": null,
+                "source_intermediate_file_id": 2,
+                "target_file_id": 7,
+                "source_size": 2361415,
+                "source_sha256": "af3bf41d35100c7bcc0d3012090379d28b06be9b29e753420c3c892c7ffebb89",
+                "committed_bytes": 2361415,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "af3bf41d35100c7bcc0d3012090379d28b06be9b29e753420c3c892c7ffebb89"
+              },
+              {
+                "id": 8,
+                "delivery_id": 5,
+                "processing_id": null,
+                "inspection_id": null,
+                "source_device_file_id": 8,
+                "source_intermediate_file_id": null,
+                "target_file_id": 8,
+                "source_size": 3505257,
+                "source_sha256": "a15dd0c78f1aa7a88610a1f1186fd23984d8f34f1f6926db34e783a673e2303d",
+                "committed_bytes": 3505257,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "a15dd0c78f1aa7a88610a1f1186fd23984d8f34f1f6926db34e783a673e2303d"
+              }
+            ],
+            "inspection_files": [
+              {
+                "id": 1,
+                "owner_action_id": 1,
+                "owner_delivery_id": null,
+                "purpose": 2,
+                "relative_path": "recording-inputs/1.mp4",
+                "retention_state": 2,
+                "cleanup_state": 4,
+                "size_bytes": 1571886,
+                "sha256": "88ea9af8f3eab27a6dc181ec7cb35a7afddb8e636f1aa2ff7f45eb5931587cdf",
+                "last_error_json": null,
+                "created_event_id": 109,
+                "last_event_id": 266,
+                "change_count": 5
+              },
+              {
+                "id": 2,
+                "owner_action_id": 1,
+                "owner_delivery_id": null,
+                "purpose": 2,
+                "relative_path": "recording-inputs/2.mp4",
+                "retention_state": 2,
+                "cleanup_state": 4,
+                "size_bytes": 2361415,
+                "sha256": "af3bf41d35100c7bcc0d3012090379d28b06be9b29e753420c3c892c7ffebb89",
+                "last_error_json": null,
+                "created_event_id": 128,
+                "last_event_id": 270,
+                "change_count": 5
+              },
+              {
+                "id": 3,
+                "owner_action_id": 1,
+                "owner_delivery_id": null,
+                "purpose": 2,
+                "relative_path": "recording-inputs/3.mp4",
+                "retention_state": 2,
+                "cleanup_state": 4,
+                "size_bytes": 1918377,
+                "sha256": "ab6689f30aaabdc66fd399c5e799688f24a5ca80c4aed4ad36caa1325173ea6a",
+                "last_error_json": null,
+                "created_event_id": 145,
+                "last_event_id": 274,
+                "change_count": 5
+              }
+            ],
+            "inspections": [
+              {
+                "id": 1,
+                "created_event_id": 107,
+                "action_id": 1,
+                "set_id": 1,
+                "member_id": 2,
+                "source_device_file_id": 2,
+                "target_json": "{\"metric\":\"duration_s\",\"value\":60}",
+                "budget_json": "{\"max_attempts\":3,\"timeout_s\":10,\"retry_interval_s\":3}",
+                "state": 2,
+                "result_json": "{\"metric\":{\"metric\":\"duration_s\",\"value\":18.000000,\"reason\":null},\"probe\":{\"duration_s\":18.000000,\"error\":null,\"format_name\":\"mov,mp4,m4a,3gp,3g2,mj2\",\"streams\":[{\"index\":0,\"codec_type\":\"video\",\"codec_name\":\"h264\",\"width\":480,\"height\":360,\"duration_s\":18.000000,\"attached_pic\":false,\"frame_count\":null,\"fps\":10}]},\"tool\":{\"ran\":true,\"error\":null},\"failure\":null}",
+                "result_event_id": 125
+              },
+              {
+                "id": 2,
+                "created_event_id": 126,
+                "action_id": 1,
+                "set_id": 1,
+                "member_id": 4,
+                "source_device_file_id": 4,
+                "target_json": "{\"metric\":\"duration_s\",\"value\":60}",
+                "budget_json": "{\"max_attempts\":3,\"timeout_s\":10,\"retry_interval_s\":3}",
+                "state": 2,
+                "result_json": "{\"metric\":{\"metric\":\"duration_s\",\"value\":27.000000,\"reason\":null},\"probe\":{\"duration_s\":27.000000,\"error\":null,\"format_name\":\"mov,mp4,m4a,3gp,3g2,mj2\",\"streams\":[{\"index\":0,\"codec_type\":\"video\",\"codec_name\":\"h264\",\"width\":480,\"height\":360,\"duration_s\":27.000000,\"attached_pic\":false,\"frame_count\":null,\"fps\":10}]},\"tool\":{\"ran\":true,\"error\":null},\"failure\":null}",
+                "result_event_id": 142
+              },
+              {
+                "id": 3,
+                "created_event_id": 143,
+                "action_id": 1,
+                "set_id": 1,
+                "member_id": 6,
+                "source_device_file_id": 6,
+                "target_json": "{\"metric\":\"duration_s\",\"value\":60}",
+                "budget_json": "{\"max_attempts\":3,\"timeout_s\":10,\"retry_interval_s\":3}",
+                "state": 4,
+                "result_json": "{\"metric\":{\"metric\":\"duration_s\",\"value\":null,\"reason\":\"probe_error\"},\"probe\":{\"duration_s\":null,\"error\":\"tool_failed: exit=86\",\"format_name\":null,\"streams\":[]},\"tool\":{\"ran\":true,\"error\":null},\"failure\":null}",
+                "result_event_id": 159
+              }
+            ],
+            "sets": [
+              {
+                "id": 1,
+                "action_id": 1,
+                "state": 3,
+                "published_event_id": 175,
+                "assessment_json": "{\"decision_type\":\"video_coverage_v1\",\"set_ref\":{\"action_id\":1,\"scan_id\":4,\"final_page_event_id\":71,\"version\":1},\"status\":\"succeeded\",\"metric\":\"duration_s\",\"target\":60,\"confirmed\":45.000000,\"coverage_status\":\"unconfirmed\",\"checked_count\":2,\"default_scope\":{\"state\":3,\"set_ref\":{\"action_id\":1,\"scan_id\":4,\"final_page_event_id\":71,\"version\":1},\"first_cursor\":{\"key\":{\"directory_number\":1,\"index\":998},\"member_identity\":\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120000_0998_D.MP4\"},\"last_cursor\":{\"key\":{\"directory_number\":1,\"index\":999},\"member_identity\":\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120100_0999_D.MP4\"},\"member_count\":2},\"failure_code\":null,\"reason\":\"probe_error\"}"
+              }
+            ],
+            "read_attempts": [
+              {
+                "copy_id": 1,
+                "inspection_id": 1,
+                "run_id": 5,
+                "run_status": 3,
+                "attempt_id": 5,
+                "attempt_status": 2,
+                "result_event_id": 119,
+                "result_at": 1792908622774357,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 2,
+                "inspection_id": 2,
+                "run_id": 6,
+                "run_status": 3,
+                "attempt_id": 6,
+                "attempt_status": 2,
+                "result_event_id": 138,
+                "result_at": 1792908623324467,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 3,
+                "inspection_id": 3,
+                "run_id": 7,
+                "run_status": 3,
+                "attempt_id": 7,
+                "attempt_status": 2,
+                "result_event_id": 154,
+                "result_at": 1792908623954659,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 4,
+                "inspection_id": null,
+                "run_id": 8,
+                "run_status": 3,
+                "attempt_id": 8,
+                "attempt_status": 2,
+                "result_event_id": 208,
+                "result_at": 1792908627775562,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 5,
+                "inspection_id": null,
+                "run_id": 9,
+                "run_status": 3,
+                "attempt_id": 9,
+                "attempt_status": 2,
+                "result_event_id": 218,
+                "result_at": 1792908627847809,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 6,
+                "inspection_id": null,
+                "run_id": 10,
+                "run_status": 3,
+                "attempt_id": 10,
+                "attempt_status": 2,
+                "result_event_id": 227,
+                "result_at": 1792908627904927,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 7,
+                "inspection_id": null,
+                "run_id": 11,
+                "run_status": 3,
+                "attempt_id": 11,
+                "attempt_status": 2,
+                "result_event_id": 237,
+                "result_at": 1792908627966892,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 8,
+                "inspection_id": null,
+                "run_id": 12,
+                "run_status": 3,
+                "attempt_id": 12,
+                "attempt_status": 2,
+                "result_event_id": 303,
+                "result_at": 1792908647710761,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              }
+            ],
+            "runtime": [
+              {
+                "id": 1,
+                "acknowledged_wm": 75,
+                "acknowledged_report_id": 13,
+                "trusted_time_lower_bound": 1792908647138475,
+                "trusted_time_event_id": 279,
+                "cleanup_cursor_file_id": 3
+              }
+            ],
+            "wrong_join": [
+              {
+                "id": 1,
+                "processing_id": null,
+                "inspection_id": 1,
+                "joined_processing_id": null
+              },
+              {
+                "id": 2,
+                "processing_id": null,
+                "inspection_id": 2,
+                "joined_processing_id": null
+              },
+              {
+                "id": 3,
+                "processing_id": null,
+                "inspection_id": 3,
+                "joined_processing_id": null
+              }
+            ]
+          },
+          "lifecycle_events": [
+            {
+              "event_id": 109,
+              "transaction_id": 86,
+              "occurred_at": 1792908622218451,
+              "row": {
+                "table": "intermediate_files",
+                "id": 1,
+                "before": {
+                  "exists": false,
+                  "values": {}
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "owner_action_id": 1,
+                    "owner_delivery_id": null,
+                    "purpose": 2,
+                    "relative_path": "recording-inputs/1.mp4",
+                    "retention_state": 1,
+                    "cleanup_state": 1,
+                    "size_bytes": null,
+                    "sha256": null,
+                    "last_error_json": null
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 128,
+              "transaction_id": 102,
+              "occurred_at": 1792908622918344,
+              "row": {
+                "table": "intermediate_files",
+                "id": 2,
+                "before": {
+                  "exists": false,
+                  "values": {}
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "owner_action_id": 1,
+                    "owner_delivery_id": null,
+                    "purpose": 2,
+                    "relative_path": "recording-inputs/2.mp4",
+                    "retention_state": 1,
+                    "cleanup_state": 1,
+                    "size_bytes": null,
+                    "sha256": null,
+                    "last_error_json": null
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 145,
+              "transaction_id": 116,
+              "occurred_at": 1792908623488259,
+              "row": {
+                "table": "intermediate_files",
+                "id": 3,
+                "before": {
+                  "exists": false,
+                  "values": {}
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "owner_action_id": 1,
+                    "owner_delivery_id": null,
+                    "purpose": 2,
+                    "relative_path": "recording-inputs/3.mp4",
+                    "retention_state": 1,
+                    "cleanup_state": 1,
+                    "size_bytes": null,
+                    "sha256": null,
+                    "last_error_json": null
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 164,
+              "transaction_id": 131,
+              "occurred_at": 1792908625372814,
+              "row": {
+                "table": "actions",
+                "id": 1,
+                "before": {
+                  "exists": true,
+                  "values": {
+                    "status": 2
+                  }
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "status": 3
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 246,
+              "transaction_id": 170,
+              "occurred_at": 1792908628177776,
+              "row": {
+                "table": "actions",
+                "id": 2,
+                "before": {
+                  "exists": true,
+                  "values": {
+                    "status": 2
+                  }
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "status": 3
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 254,
+              "transaction_id": 175,
+              "occurred_at": 1792908628177776,
+              "row": {
+                "table": "actions",
+                "id": 3,
+                "before": {
+                  "exists": true,
+                  "values": {
+                    "status": 2
+                  }
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "status": 3
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 264,
+              "transaction_id": 184,
+              "occurred_at": 1792908632695363,
+              "row": {
+                "table": "intermediate_files",
+                "id": 1,
+                "before": {
+                  "exists": true,
+                  "values": {
+                    "retention_state": 1,
+                    "cleanup_state": 1
+                  }
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "retention_state": 2,
+                    "cleanup_state": 2
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 265,
+              "transaction_id": 185,
+              "occurred_at": 1792908632695363,
+              "row": {
+                "table": "intermediate_files",
+                "id": 1,
+                "before": {
+                  "exists": true,
+                  "values": {
+                    "cleanup_state": 2
+                  }
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "cleanup_state": 3
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 266,
+              "transaction_id": 186,
+              "occurred_at": 1792908632695363,
+              "row": {
+                "table": "intermediate_files",
+                "id": 1,
+                "before": {
+                  "exists": true,
+                  "values": {
+                    "cleanup_state": 3
+                  }
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "cleanup_state": 4
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 268,
+              "transaction_id": 187,
+              "occurred_at": 1792908632695363,
+              "row": {
+                "table": "intermediate_files",
+                "id": 2,
+                "before": {
+                  "exists": true,
+                  "values": {
+                    "retention_state": 1,
+                    "cleanup_state": 1
+                  }
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "retention_state": 2,
+                    "cleanup_state": 2
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 269,
+              "transaction_id": 188,
+              "occurred_at": 1792908632695363,
+              "row": {
+                "table": "intermediate_files",
+                "id": 2,
+                "before": {
+                  "exists": true,
+                  "values": {
+                    "cleanup_state": 2
+                  }
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "cleanup_state": 3
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 270,
+              "transaction_id": 189,
+              "occurred_at": 1792908632695363,
+              "row": {
+                "table": "intermediate_files",
+                "id": 2,
+                "before": {
+                  "exists": true,
+                  "values": {
+                    "cleanup_state": 3
+                  }
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "cleanup_state": 4
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 272,
+              "transaction_id": 190,
+              "occurred_at": 1792908632695363,
+              "row": {
+                "table": "intermediate_files",
+                "id": 3,
+                "before": {
+                  "exists": true,
+                  "values": {
+                    "retention_state": 1,
+                    "cleanup_state": 1
+                  }
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "retention_state": 2,
+                    "cleanup_state": 2
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 273,
+              "transaction_id": 191,
+              "occurred_at": 1792908632695363,
+              "row": {
+                "table": "intermediate_files",
+                "id": 3,
+                "before": {
+                  "exists": true,
+                  "values": {
+                    "cleanup_state": 2
+                  }
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "cleanup_state": 3
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 274,
+              "transaction_id": 192,
+              "occurred_at": 1792908632695363,
+              "row": {
+                "table": "intermediate_files",
+                "id": 3,
+                "before": {
+                  "exists": true,
+                  "values": {
+                    "cleanup_state": 3
+                  }
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "cleanup_state": 4
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 309,
+              "transaction_id": 213,
+              "occurred_at": 1792908647868956,
+              "row": {
+                "table": "actions",
+                "id": 4,
+                "before": {
+                  "exists": true,
+                  "values": {
+                    "status": 2
+                  }
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "status": 3
+                  }
+                }
+              }
+            }
+          ],
+          "host_lines": [
+            {
+              "line": 1,
+              "text": "call=1 attempt=1 command=run operation=spawn plan=(none) automatic=0 retries=0"
+            },
+            {
+              "line": 3,
+              "text": "call=1 attempt=1 command=run pid=937299 spawned execution=unknown"
+            },
+            {
+              "line": 8,
+              "text": "call=2 command=submit pid=937300 result=success exit_kind=0 exit=0 needs_run=1 overflow=0 io_error=0"
+            },
+            {
+              "line": 14,
+              "text": "call=3 command=submit pid=937727 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+            },
+            {
+              "line": 20,
+              "text": "call=4 command=submit pid=938000 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+            },
+            {
+              "line": 26,
+              "text": "call=1 command=run pid=937299 stream=exit_observed data=exit record retained; group settlement pending"
+            },
+            {
+              "line": 27,
+              "text": "call=1 command=run pid=937299 stream=group_reaped data=all execution stopped; child record reaped"
+            },
+            {
+              "line": 28,
+              "text": "call=1 command=run pid=937299 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+            },
+            {
+              "line": 29,
+              "text": "call=5 attempt=5 command=run operation=spawn plan=(none) automatic=0 retries=0"
+            },
+            {
+              "line": 30,
+              "text": "call=5 attempt=5 command=run pid=939091 spawned execution=unknown"
+            },
+            {
+              "line": 31,
+              "text": "call=5 command=run pid=939091 stream=exit_observed data=exit record retained; group settlement pending"
+            },
+            {
+              "line": 32,
+              "text": "call=5 command=run pid=939091 stream=group_reaped data=all execution stopped; child record reaped"
+            },
+            {
+              "line": 33,
+              "text": "call=5 command=run pid=939091 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+            },
+            {
+              "line": 39,
+              "text": "call=6 command=submit pid=939671 result=success exit_kind=0 exit=0 needs_run=1 overflow=0 io_error=0"
+            },
+            {
+              "line": 40,
+              "text": "call=7 attempt=7 command=run operation=spawn plan=(none) automatic=0 retries=0"
+            },
+            {
+              "line": 41,
+              "text": "call=7 attempt=7 command=run pid=939701 spawned execution=unknown"
+            },
+            {
+              "line": 44,
+              "text": "call=7 command=run pid=939701 stream=exit_observed data=exit record retained; group settlement pending"
+            },
+            {
+              "line": 45,
+              "text": "call=7 command=run pid=939701 stream=group_reaped data=all execution stopped; child record reaped"
+            },
+            {
+              "line": 46,
+              "text": "call=7 command=run pid=939701 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+            },
+            {
+              "line": 52,
+              "text": "call=8 command=submit pid=940002 result=success exit_kind=0 exit=0 needs_run=1 overflow=0 io_error=0"
+            },
+            {
+              "line": 53,
+              "text": "call=9 attempt=9 command=run operation=spawn plan=(none) automatic=0 retries=0"
+            },
+            {
+              "line": 54,
+              "text": "call=9 attempt=9 command=run pid=940058 spawned execution=unknown"
+            }
+          ],
+          "run_clock_intervals": [
+            {
+              "pid": 937299,
+              "first_utc_us": 1792908536000000,
+              "last_utc_us": 1792908630423835
+            },
+            {
+              "pid": 939091,
+              "first_utc_us": 1792908632564352,
+              "last_utc_us": 1792908633253444
+            },
+            {
+              "pid": 939701,
+              "first_utc_us": 1792908647138475,
+              "last_utc_us": 1792908650555463
+            },
+            {
+              "pid": 940058,
+              "first_utc_us": null,
+              "last_utc_us": null
+            }
+          ],
+          "inspection_file_exists": [
+            {
+              "file_id": 1,
+              "relative_path": "recording-inputs/1.mp4",
+              "exists": false
+            },
+            {
+              "file_id": 2,
+              "relative_path": "recording-inputs/2.mp4",
+              "exists": false
+            },
+            {
+              "file_id": 3,
+              "relative_path": "recording-inputs/3.mp4",
+              "exists": false
+            }
+          ]
+        }
+      },
+      "first_unexpected_failure": {
+        "path": "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/artifacts/output.log",
+        "lines": [
+          413,
+          442
+        ],
+        "description": "首次不满足断言为_cleanup_inspection_inputs等待180秒超时；第3份ffprobe返回86是测试明确注入的未知指标，不是意外首错。"
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/bootstrap/work_file_assembly.py",
+          "lines": [
+            184,
+            235
+          ]
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/persistence/repositories/outputs.py",
+          "lines": [
+            5097,
+            5148
+          ]
+        },
+        {
+          "path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_ordinar0/action6-record/module.log",
+          "lines": [
+            8,
+            33
+          ]
+        }
+      ],
+      "completed": "历史来源成功；coverage unconfirmed且已确认45秒，固定前两段；4MP4与4LRF保留；两个绑定取回成功，各2份独立delivery；字节/摘要及客户端媒体导入已通过。",
+      "not_executed": "历史清理后方的late-explicit范围外原片取回、对应设备读取和客户端导入、最终累计ACK、最终场景凭据未执行。当前通过轮这些后续断言已完成。",
+      "repair_recommendation": "在既有维护发现边界，绑定取回终态时按现存action_dependencies、obtain_source_selections及来源published_event_id重建的H集合，重新发现来源检查输入首次清理资格；或者保留尚未获得首次处理资格的必要责任。遵守一次run每文件最多一次实际检查清理、固定历史上界及额度，不增加独立清理会话或主动补run。",
+      "falsifiable_acceptance": [
+        "用确定同步点让维护器消费来源终态，两个H绑定等待者保持RUNNING；不能释放或删除输入。",
+        "同一真实run中依次结束两个绑定等待者；最后一个结束前继续保留，结束且源/目标文件操作实际收场后及时释放三份输入并保存COMPLETED，文件实际消失。",
+        "不启动额外run、不扩大历史扫描/预算；每份输入只有一次首次检查清理尝试。",
+        "覆盖绑定等待者失败/取消、后到非H取回、仍在读检查输入、部分/未知指标输入、清理失败留责与后续正常run继续；既有来源/范围/交付终态保持。",
+        "逐副本核对实际用途：第三份未知指标输入不在默认范围且不可复用，原检查责任结束、来源可靠提交、操作收场后即可按无绑定用途分区清理。"
+      ],
+      "unresolved": [
+        "历史没有保存_discovery_after/_first_files，故不能直接证明维护器消费来源终态的精确时刻；静态发现链与DB时序共同支持根因，确定性交错反例仍需在修复授权后执行。",
+        "当前单次通过只证明第二次正常run可清理残留，不能证明同次run新资格发现已闭合。"
+      ],
+      "per_copy_scope_qualification": "第三份inspection为UNCONFIRMED，默认范围只含前两段，且copy_is_reusable只接受COMPLETED；没有绑定取回实际使用第三份输入。当前_load_work_file_facts对所有inspection副本统一套用all_bound_waiters_terminal，未区分无后续用途的副本；其原检查责任结束、来源提交和操作收场后应按无绑定用途分区清理。"
+    },
+    {
+      "diagnosis_id": 20,
+      "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters",
+      "classification": "原有生产缺陷；当前保留",
+      "root_cause": "合法分段inspection READ持有完整ReadEnd时，普通/残留恢复入口仍用INNER JOIN recording_processing解析责任；inspection副本processing_id为NULL，查询返回空而抛出一致性错误，尚未分类实际动作状态及绑定是否失效。",
+      "current_reproduced": true,
+      "current_result": "failed；与历史相同state_db_error，随后host run5完成来源结果和等待取回，但检查副本仍未释放。",
+      "snapshots": {
+        "historical": {
+          "world": "/tmp/camctl-itopt-final-20261025/tasks/019-root-test_action6_segmented_recovery_roundtrip-shard-3/tmp/pytest/test_installed_action6_native_0/action6-native",
+          "database": "/tmp/camctl-itopt-final-20261025/tasks/019-root-test_action6_segmented_recovery_roundtrip-shard-3/tmp/pytest/test_installed_action6_native_0/action6-native/deployment/state.db",
+          "queries": {
+            "actions": "SELECT id,name,type,status,error_code,error_details_json,created_event_id,last_event_id FROM actions ORDER BY id",
+            "copies": "SELECT id,delivery_id,processing_id,inspection_id,source_device_file_id,source_intermediate_file_id,target_file_id,source_size,source_sha256,committed_bytes,slot_device_id,verification_state,target_sha256 FROM file_copies ORDER BY id",
+            "inspection_files": "SELECT * FROM intermediate_files WHERE owner_action_id IS NOT NULL ORDER BY id",
+            "inspections": "SELECT * FROM segment_inspections ORDER BY id",
+            "sets": "SELECT id,action_id,state,published_event_id,assessment_json FROM segment_sets ORDER BY id",
+            "read_attempts": "SELECT c.id copy_id,c.inspection_id,r.id run_id,r.status run_status,t.id attempt_id,t.status attempt_status,t.result_event_id,e.occurred_at result_at,t.result_json FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id JOIN operation_attempts t ON t.run_id=r.id LEFT JOIN history_events e ON e.id=t.result_event_id ORDER BY c.id,t.id",
+            "runtime": "SELECT * FROM runtime_state",
+            "wrong_join": "SELECT c.id,c.processing_id,c.inspection_id,p.id AS joined_processing_id FROM file_copies c LEFT JOIN recording_processing p ON p.id=c.processing_id WHERE c.inspection_id IS NOT NULL ORDER BY c.id"
+          },
+          "rows": {
+            "actions": [
+              {
+                "id": 1,
+                "name": "capture",
+                "type": 3,
+                "status": 4,
+                "error_code": 13,
+                "error_details_json": "{\"activity_id\":\"1\",\"reason\":\"invalid_outputs\"}",
+                "created_event_id": 1,
+                "last_event_id": 171
+              },
+              {
+                "id": 2,
+                "name": "native-prefix-a",
+                "type": 4,
+                "status": 3,
+                "error_code": null,
+                "error_details_json": null,
+                "created_event_id": 28,
+                "last_event_id": 271
+              },
+              {
+                "id": 3,
+                "name": "native-prefix-b",
+                "type": 4,
+                "status": 3,
+                "error_code": null,
+                "error_details_json": null,
+                "created_event_id": 42,
+                "last_event_id": 282
+              }
+            ],
+            "copies": [
+              {
+                "id": 1,
+                "delivery_id": null,
+                "processing_id": null,
+                "inspection_id": 1,
+                "source_device_file_id": 2,
+                "source_intermediate_file_id": null,
+                "target_file_id": 1,
+                "source_size": 79552,
+                "source_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392",
+                "committed_bytes": 79552,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392"
+              },
+              {
+                "id": 2,
+                "delivery_id": null,
+                "processing_id": null,
+                "inspection_id": 2,
+                "source_device_file_id": 4,
+                "source_intermediate_file_id": null,
+                "target_file_id": 2,
+                "source_size": 79552,
+                "source_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392",
+                "committed_bytes": 79552,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392"
+              },
+              {
+                "id": 3,
+                "delivery_id": null,
+                "processing_id": null,
+                "inspection_id": 3,
+                "source_device_file_id": 6,
+                "source_intermediate_file_id": null,
+                "target_file_id": 3,
+                "source_size": 61038,
+                "source_sha256": "34bac877a5d5d6b50644f3a0cfe6f635e2006cd5d0110701a6a4980f6071a015",
+                "committed_bytes": 61038,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "34bac877a5d5d6b50644f3a0cfe6f635e2006cd5d0110701a6a4980f6071a015"
+              },
+              {
+                "id": 4,
+                "delivery_id": 1,
+                "processing_id": null,
+                "inspection_id": null,
+                "source_device_file_id": null,
+                "source_intermediate_file_id": 1,
+                "target_file_id": 4,
+                "source_size": 79552,
+                "source_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392",
+                "committed_bytes": 79552,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392"
+              },
+              {
+                "id": 5,
+                "delivery_id": 2,
+                "processing_id": null,
+                "inspection_id": null,
+                "source_device_file_id": null,
+                "source_intermediate_file_id": 2,
+                "target_file_id": 5,
+                "source_size": 79552,
+                "source_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392",
+                "committed_bytes": 79552,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392"
+              },
+              {
+                "id": 6,
+                "delivery_id": 3,
+                "processing_id": null,
+                "inspection_id": null,
+                "source_device_file_id": null,
+                "source_intermediate_file_id": 3,
+                "target_file_id": 6,
+                "source_size": 61038,
+                "source_sha256": "34bac877a5d5d6b50644f3a0cfe6f635e2006cd5d0110701a6a4980f6071a015",
+                "committed_bytes": 61038,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "34bac877a5d5d6b50644f3a0cfe6f635e2006cd5d0110701a6a4980f6071a015"
+              },
+              {
+                "id": 7,
+                "delivery_id": 4,
+                "processing_id": null,
+                "inspection_id": null,
+                "source_device_file_id": null,
+                "source_intermediate_file_id": 1,
+                "target_file_id": 7,
+                "source_size": 79552,
+                "source_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392",
+                "committed_bytes": 79552,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392"
+              },
+              {
+                "id": 8,
+                "delivery_id": 5,
+                "processing_id": null,
+                "inspection_id": null,
+                "source_device_file_id": null,
+                "source_intermediate_file_id": 2,
+                "target_file_id": 8,
+                "source_size": 79552,
+                "source_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392",
+                "committed_bytes": 79552,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392"
+              },
+              {
+                "id": 9,
+                "delivery_id": 6,
+                "processing_id": null,
+                "inspection_id": null,
+                "source_device_file_id": null,
+                "source_intermediate_file_id": 3,
+                "target_file_id": 9,
+                "source_size": 61038,
+                "source_sha256": "34bac877a5d5d6b50644f3a0cfe6f635e2006cd5d0110701a6a4980f6071a015",
+                "committed_bytes": 61038,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "34bac877a5d5d6b50644f3a0cfe6f635e2006cd5d0110701a6a4980f6071a015"
+              }
+            ],
+            "inspection_files": [
+              {
+                "id": 1,
+                "owner_action_id": 1,
+                "owner_delivery_id": null,
+                "purpose": 2,
+                "relative_path": "recording-inputs/1.mp4",
+                "retention_state": 1,
+                "cleanup_state": 1,
+                "size_bytes": 79552,
+                "sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392",
+                "last_error_json": null,
+                "created_event_id": 103,
+                "last_event_id": 111,
+                "change_count": 2
+              },
+              {
+                "id": 2,
+                "owner_action_id": 1,
+                "owner_delivery_id": null,
+                "purpose": 2,
+                "relative_path": "recording-inputs/2.mp4",
+                "retention_state": 1,
+                "cleanup_state": 1,
+                "size_bytes": 79552,
+                "sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392",
+                "last_error_json": null,
+                "created_event_id": 121,
+                "last_event_id": 129,
+                "change_count": 2
+              },
+              {
+                "id": 3,
+                "owner_action_id": 1,
+                "owner_delivery_id": null,
+                "purpose": 2,
+                "relative_path": "recording-inputs/3.mp4",
+                "retention_state": 1,
+                "cleanup_state": 1,
+                "size_bytes": 61038,
+                "sha256": "34bac877a5d5d6b50644f3a0cfe6f635e2006cd5d0110701a6a4980f6071a015",
+                "last_error_json": null,
+                "created_event_id": 136,
+                "last_event_id": 146,
+                "change_count": 2
+              }
+            ],
+            "inspections": [
+              {
+                "id": 1,
+                "created_event_id": 101,
+                "action_id": 1,
+                "set_id": 1,
+                "member_id": 2,
+                "source_device_file_id": 2,
+                "target_json": "{\"metric\":\"frames\",\"value\":151}",
+                "budget_json": "{\"max_attempts\":3,\"timeout_s\":10,\"retry_interval_s\":3}",
+                "state": 2,
+                "result_json": "{\"metric\":{\"metric\":\"frames\",\"value\":60,\"reason\":null},\"probe\":{\"duration_s\":2.000000,\"error\":null,\"format_name\":\"mov,mp4,m4a,3gp,3g2,mj2\",\"streams\":[{\"index\":0,\"codec_type\":\"video\",\"codec_name\":\"h264\",\"width\":160,\"height\":120,\"duration_s\":2.000000,\"attached_pic\":false,\"frame_count\":60,\"fps\":30}]},\"tool\":{\"ran\":true,\"error\":null},\"failure\":null}",
+                "result_event_id": 118
+              },
+              {
+                "id": 2,
+                "created_event_id": 119,
+                "action_id": 1,
+                "set_id": 1,
+                "member_id": 4,
+                "source_device_file_id": 4,
+                "target_json": "{\"metric\":\"frames\",\"value\":151}",
+                "budget_json": "{\"max_attempts\":3,\"timeout_s\":10,\"retry_interval_s\":3}",
+                "state": 2,
+                "result_json": "{\"metric\":{\"metric\":\"frames\",\"value\":60,\"reason\":null},\"probe\":{\"duration_s\":2.000000,\"error\":null,\"format_name\":\"mov,mp4,m4a,3gp,3g2,mj2\",\"streams\":[{\"index\":0,\"codec_type\":\"video\",\"codec_name\":\"h264\",\"width\":160,\"height\":120,\"duration_s\":2.000000,\"attached_pic\":false,\"frame_count\":60,\"fps\":30}]},\"tool\":{\"ran\":true,\"error\":null},\"failure\":null}",
+                "result_event_id": 133
+              },
+              {
+                "id": 3,
+                "created_event_id": 134,
+                "action_id": 1,
+                "set_id": 1,
+                "member_id": 6,
+                "source_device_file_id": 6,
+                "target_json": "{\"metric\":\"frames\",\"value\":151}",
+                "budget_json": "{\"max_attempts\":3,\"timeout_s\":10,\"retry_interval_s\":3}",
+                "state": 2,
+                "result_json": "{\"metric\":{\"metric\":\"frames\",\"value\":45,\"reason\":null},\"probe\":{\"duration_s\":1.500000,\"error\":null,\"format_name\":\"mov,mp4,m4a,3gp,3g2,mj2\",\"streams\":[{\"index\":0,\"codec_type\":\"video\",\"codec_name\":\"h264\",\"width\":160,\"height\":120,\"duration_s\":1.500000,\"attached_pic\":false,\"frame_count\":45,\"fps\":30}]},\"tool\":{\"ran\":true,\"error\":null},\"failure\":null}",
+                "result_event_id": 155
+              }
+            ],
+            "sets": [
+              {
+                "id": 1,
+                "action_id": 1,
+                "state": 3,
+                "published_event_id": 171,
+                "assessment_json": "{\"decision_type\":\"video_coverage_v1\",\"set_ref\":{\"action_id\":1,\"scan_id\":2,\"final_page_event_id\":66,\"version\":1},\"status\":\"failed\",\"metric\":\"frames\",\"target\":151,\"confirmed\":165,\"coverage_status\":\"reached\",\"checked_count\":3,\"default_scope\":{\"state\":3,\"set_ref\":{\"action_id\":1,\"scan_id\":2,\"final_page_event_id\":66,\"version\":1},\"first_cursor\":{\"key\":{\"directory_number\":1,\"index\":998},\"member_identity\":\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120000_0998_D.MP4\"},\"last_cursor\":{\"key\":{\"directory_number\":2,\"index\":1},\"member_identity\":\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120200_0001_D.MP4\"},\"member_count\":3},\"failure_code\":\"capture_failed\",\"reason\":\"invalid_outputs\"}"
+              }
+            ],
+            "read_attempts": [
+              {
+                "copy_id": 1,
+                "inspection_id": 1,
+                "run_id": 3,
+                "run_status": 3,
+                "attempt_id": 3,
+                "attempt_status": 2,
+                "result_event_id": 112,
+                "result_at": 1792886690528163,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 2,
+                "inspection_id": 2,
+                "run_id": 4,
+                "run_status": 3,
+                "attempt_id": 4,
+                "attempt_status": 2,
+                "result_event_id": 130,
+                "result_at": 1792886691374990,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 3,
+                "inspection_id": 3,
+                "run_id": 5,
+                "run_status": 3,
+                "attempt_id": 5,
+                "attempt_status": 2,
+                "result_event_id": 147,
+                "result_at": 1792886691895967,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 4,
+                "inspection_id": null,
+                "run_id": 6,
+                "run_status": 3,
+                "attempt_id": 6,
+                "attempt_status": 2,
+                "result_event_id": 216,
+                "result_at": 1792886705154434,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 5,
+                "inspection_id": null,
+                "run_id": 7,
+                "run_status": 3,
+                "attempt_id": 7,
+                "attempt_status": 2,
+                "result_event_id": 224,
+                "result_at": 1792886705184150,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 6,
+                "inspection_id": null,
+                "run_id": 8,
+                "run_status": 3,
+                "attempt_id": 8,
+                "attempt_status": 2,
+                "result_event_id": 232,
+                "result_at": 1792886705210288,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 7,
+                "inspection_id": null,
+                "run_id": 9,
+                "run_status": 3,
+                "attempt_id": 9,
+                "attempt_status": 2,
+                "result_event_id": 240,
+                "result_at": 1792886705238947,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 8,
+                "inspection_id": null,
+                "run_id": 10,
+                "run_status": 3,
+                "attempt_id": 10,
+                "attempt_status": 2,
+                "result_event_id": 248,
+                "result_at": 1792886705267163,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 9,
+                "inspection_id": null,
+                "run_id": 11,
+                "run_status": 3,
+                "attempt_id": 11,
+                "attempt_status": 2,
+                "result_event_id": 256,
+                "result_at": 1792886705299061,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              }
+            ],
+            "runtime": [
+              {
+                "id": 1,
+                "acknowledged_wm": 0,
+                "acknowledged_report_id": null,
+                "trusted_time_lower_bound": 1792886693269014,
+                "trusted_time_event_id": 150,
+                "cleanup_cursor_file_id": null
+              }
+            ],
+            "wrong_join": [
+              {
+                "id": 1,
+                "processing_id": null,
+                "inspection_id": 1,
+                "joined_processing_id": null
+              },
+              {
+                "id": 2,
+                "processing_id": null,
+                "inspection_id": 2,
+                "joined_processing_id": null
+              },
+              {
+                "id": 3,
+                "processing_id": null,
+                "inspection_id": 3,
+                "joined_processing_id": null
+              }
+            ]
+          },
+          "lifecycle_events": [
+            {
+              "event_id": 103,
+              "transaction_id": 82,
+              "occurred_at": 1792886690148010,
+              "row": {
+                "table": "intermediate_files",
+                "id": 1,
+                "before": {
+                  "exists": false,
+                  "values": {}
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "owner_action_id": 1,
+                    "owner_delivery_id": null,
+                    "purpose": 2,
+                    "relative_path": "recording-inputs/1.mp4",
+                    "retention_state": 1,
+                    "cleanup_state": 1,
+                    "size_bytes": null,
+                    "sha256": null,
+                    "last_error_json": null
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 121,
+              "transaction_id": 97,
+              "occurred_at": 1792886690746260,
+              "row": {
+                "table": "intermediate_files",
+                "id": 2,
+                "before": {
+                  "exists": false,
+                  "values": {}
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "owner_action_id": 1,
+                    "owner_delivery_id": null,
+                    "purpose": 2,
+                    "relative_path": "recording-inputs/2.mp4",
+                    "retention_state": 1,
+                    "cleanup_state": 1,
+                    "size_bytes": null,
+                    "sha256": null,
+                    "last_error_json": null
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 136,
+              "transaction_id": 109,
+              "occurred_at": 1792886691551955,
+              "row": {
+                "table": "intermediate_files",
+                "id": 3,
+                "before": {
+                  "exists": false,
+                  "values": {}
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "owner_action_id": 1,
+                    "owner_delivery_id": null,
+                    "purpose": 2,
+                    "relative_path": "recording-inputs/3.mp4",
+                    "retention_state": 1,
+                    "cleanup_state": 1,
+                    "size_bytes": null,
+                    "sha256": null,
+                    "last_error_json": null
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 160,
+              "transaction_id": 129,
+              "occurred_at": 1792886698568990,
+              "row": {
+                "table": "actions",
+                "id": 1,
+                "before": {
+                  "exists": true,
+                  "values": {
+                    "status": 2,
+                    "error_code": null,
+                    "error_details_json": null
+                  }
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "status": 4,
+                    "error_code": 13,
+                    "error_details_json": {
+                      "activity_id": "1",
+                      "reason": "invalid_outputs"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 271,
+              "transaction_id": 182,
+              "occurred_at": 1792886706119713,
+              "row": {
+                "table": "actions",
+                "id": 2,
+                "before": {
+                  "exists": true,
+                  "values": {
+                    "status": 2
+                  }
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "status": 3
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 282,
+              "transaction_id": 189,
+              "occurred_at": 1792886706119713,
+              "row": {
+                "table": "actions",
+                "id": 3,
+                "before": {
+                  "exists": true,
+                  "values": {
+                    "status": 2
+                  }
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "status": 3
+                  }
+                }
+              }
+            }
+          ],
+          "host_lines": [
+            {
+              "line": 1,
+              "text": "call=1 attempt=1 command=run operation=spawn plan=(none) automatic=0 retries=0"
+            },
+            {
+              "line": 3,
+              "text": "call=1 attempt=1 command=run pid=466076 spawned execution=unknown"
+            },
+            {
+              "line": 8,
+              "text": "call=2 command=submit pid=466077 result=success exit_kind=0 exit=0 needs_run=1 overflow=0 io_error=0"
+            },
+            {
+              "line": 14,
+              "text": "call=3 command=submit pid=466414 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+            },
+            {
+              "line": 20,
+              "text": "call=4 command=submit pid=466495 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+            },
+            {
+              "line": 21,
+              "text": "call=1 command=run pid=466076 stream=exit_observed data=exit record retained; group settlement pending"
+            },
+            {
+              "line": 22,
+              "text": "call=1 command=run pid=466076 stream=group_reaped data=all execution stopped; child record reaped"
+            },
+            {
+              "line": 23,
+              "text": "call=1 command=run pid=466076 result=error exit_kind=0 exit=1 needs_run=0 overflow=0 io_error=0"
+            },
+            {
+              "line": 24,
+              "text": "call=1 stdout={\"kind\" : \"error\", \"body\" : {\"reason\" : \"state_db_error\", \"details\" : {\"error\" : \"原文件事实未可靠保存: 原内部读取结束缺少处理、源观察者与动作归属\"}}}"
+            },
+            {
+              "line": 27,
+              "text": "call=5 attempt=5 command=run operation=spawn plan=(none) automatic=0 retries=0"
+            },
+            {
+              "line": 28,
+              "text": "call=5 attempt=5 command=run pid=467025 spawned execution=unknown"
+            },
+            {
+              "line": 36,
+              "text": "call=5 command=run pid=467025 stream=exit_observed data=exit record retained; group settlement pending"
+            },
+            {
+              "line": 37,
+              "text": "call=5 command=run pid=467025 stream=group_reaped data=all execution stopped; child record reaped"
+            },
+            {
+              "line": 38,
+              "text": "call=5 command=run pid=467025 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+            }
+          ],
+          "run_clock_intervals": [
+            {
+              "pid": 466076,
+              "first_utc_us": 1792886354000000,
+              "last_utc_us": 1792886691895967
+            },
+            {
+              "pid": 467025,
+              "first_utc_us": 1792886693269014,
+              "last_utc_us": 1792886707301095
+            }
+          ],
+          "inspection_file_exists": [
+            {
+              "file_id": 1,
+              "relative_path": "recording-inputs/1.mp4",
+              "exists": true
+            },
+            {
+              "file_id": 2,
+              "relative_path": "recording-inputs/2.mp4",
+              "exists": true
+            },
+            {
+              "file_id": 3,
+              "relative_path": "recording-inputs/3.mp4",
+              "exists": true
+            }
+          ]
+        },
+        "current": {
+          "world": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_native_0/action6-native",
+          "database": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_native_0/action6-native/deployment/state.db",
+          "queries": {
+            "actions": "SELECT id,name,type,status,error_code,error_details_json,created_event_id,last_event_id FROM actions ORDER BY id",
+            "copies": "SELECT id,delivery_id,processing_id,inspection_id,source_device_file_id,source_intermediate_file_id,target_file_id,source_size,source_sha256,committed_bytes,slot_device_id,verification_state,target_sha256 FROM file_copies ORDER BY id",
+            "inspection_files": "SELECT * FROM intermediate_files WHERE owner_action_id IS NOT NULL ORDER BY id",
+            "inspections": "SELECT * FROM segment_inspections ORDER BY id",
+            "sets": "SELECT id,action_id,state,published_event_id,assessment_json FROM segment_sets ORDER BY id",
+            "read_attempts": "SELECT c.id copy_id,c.inspection_id,r.id run_id,r.status run_status,t.id attempt_id,t.status attempt_status,t.result_event_id,e.occurred_at result_at,t.result_json FROM file_copies c JOIN operation_runs r ON r.copy_id=c.id JOIN operation_attempts t ON t.run_id=r.id LEFT JOIN history_events e ON e.id=t.result_event_id ORDER BY c.id,t.id",
+            "runtime": "SELECT * FROM runtime_state",
+            "wrong_join": "SELECT c.id,c.processing_id,c.inspection_id,p.id AS joined_processing_id FROM file_copies c LEFT JOIN recording_processing p ON p.id=c.processing_id WHERE c.inspection_id IS NOT NULL ORDER BY c.id"
+          },
+          "rows": {
+            "actions": [
+              {
+                "id": 1,
+                "name": "capture",
+                "type": 3,
+                "status": 4,
+                "error_code": 13,
+                "error_details_json": "{\"activity_id\":\"1\",\"reason\":\"invalid_outputs\"}",
+                "created_event_id": 1,
+                "last_event_id": 167
+              },
+              {
+                "id": 2,
+                "name": "native-prefix-a",
+                "type": 4,
+                "status": 3,
+                "error_code": null,
+                "error_details_json": null,
+                "created_event_id": 27,
+                "last_event_id": 263
+              },
+              {
+                "id": 3,
+                "name": "native-prefix-b",
+                "type": 4,
+                "status": 3,
+                "error_code": null,
+                "error_details_json": null,
+                "created_event_id": 41,
+                "last_event_id": 274
+              }
+            ],
+            "copies": [
+              {
+                "id": 1,
+                "delivery_id": null,
+                "processing_id": null,
+                "inspection_id": 1,
+                "source_device_file_id": 2,
+                "source_intermediate_file_id": null,
+                "target_file_id": 1,
+                "source_size": 79552,
+                "source_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392",
+                "committed_bytes": 79552,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392"
+              },
+              {
+                "id": 2,
+                "delivery_id": null,
+                "processing_id": null,
+                "inspection_id": 2,
+                "source_device_file_id": 4,
+                "source_intermediate_file_id": null,
+                "target_file_id": 2,
+                "source_size": 79552,
+                "source_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392",
+                "committed_bytes": 79552,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392"
+              },
+              {
+                "id": 3,
+                "delivery_id": null,
+                "processing_id": null,
+                "inspection_id": 3,
+                "source_device_file_id": 6,
+                "source_intermediate_file_id": null,
+                "target_file_id": 3,
+                "source_size": 61038,
+                "source_sha256": "34bac877a5d5d6b50644f3a0cfe6f635e2006cd5d0110701a6a4980f6071a015",
+                "committed_bytes": 61038,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "34bac877a5d5d6b50644f3a0cfe6f635e2006cd5d0110701a6a4980f6071a015"
+              },
+              {
+                "id": 4,
+                "delivery_id": 1,
+                "processing_id": null,
+                "inspection_id": null,
+                "source_device_file_id": null,
+                "source_intermediate_file_id": 1,
+                "target_file_id": 4,
+                "source_size": 79552,
+                "source_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392",
+                "committed_bytes": 79552,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392"
+              },
+              {
+                "id": 5,
+                "delivery_id": 2,
+                "processing_id": null,
+                "inspection_id": null,
+                "source_device_file_id": null,
+                "source_intermediate_file_id": 2,
+                "target_file_id": 5,
+                "source_size": 79552,
+                "source_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392",
+                "committed_bytes": 79552,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392"
+              },
+              {
+                "id": 6,
+                "delivery_id": 3,
+                "processing_id": null,
+                "inspection_id": null,
+                "source_device_file_id": null,
+                "source_intermediate_file_id": 3,
+                "target_file_id": 6,
+                "source_size": 61038,
+                "source_sha256": "34bac877a5d5d6b50644f3a0cfe6f635e2006cd5d0110701a6a4980f6071a015",
+                "committed_bytes": 61038,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "34bac877a5d5d6b50644f3a0cfe6f635e2006cd5d0110701a6a4980f6071a015"
+              },
+              {
+                "id": 7,
+                "delivery_id": 4,
+                "processing_id": null,
+                "inspection_id": null,
+                "source_device_file_id": null,
+                "source_intermediate_file_id": 1,
+                "target_file_id": 7,
+                "source_size": 79552,
+                "source_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392",
+                "committed_bytes": 79552,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392"
+              },
+              {
+                "id": 8,
+                "delivery_id": 5,
+                "processing_id": null,
+                "inspection_id": null,
+                "source_device_file_id": null,
+                "source_intermediate_file_id": 2,
+                "target_file_id": 8,
+                "source_size": 79552,
+                "source_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392",
+                "committed_bytes": 79552,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392"
+              },
+              {
+                "id": 9,
+                "delivery_id": 6,
+                "processing_id": null,
+                "inspection_id": null,
+                "source_device_file_id": null,
+                "source_intermediate_file_id": 3,
+                "target_file_id": 9,
+                "source_size": 61038,
+                "source_sha256": "34bac877a5d5d6b50644f3a0cfe6f635e2006cd5d0110701a6a4980f6071a015",
+                "committed_bytes": 61038,
+                "slot_device_id": null,
+                "verification_state": 3,
+                "target_sha256": "34bac877a5d5d6b50644f3a0cfe6f635e2006cd5d0110701a6a4980f6071a015"
+              }
+            ],
+            "inspection_files": [
+              {
+                "id": 1,
+                "owner_action_id": 1,
+                "owner_delivery_id": null,
+                "purpose": 2,
+                "relative_path": "recording-inputs/1.mp4",
+                "retention_state": 1,
+                "cleanup_state": 1,
+                "size_bytes": 79552,
+                "sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392",
+                "last_error_json": null,
+                "created_event_id": 102,
+                "last_event_id": 110,
+                "change_count": 2
+              },
+              {
+                "id": 2,
+                "owner_action_id": 1,
+                "owner_delivery_id": null,
+                "purpose": 2,
+                "relative_path": "recording-inputs/2.mp4",
+                "retention_state": 1,
+                "cleanup_state": 1,
+                "size_bytes": 79552,
+                "sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392",
+                "last_error_json": null,
+                "created_event_id": 120,
+                "last_event_id": 128,
+                "change_count": 2
+              },
+              {
+                "id": 3,
+                "owner_action_id": 1,
+                "owner_delivery_id": null,
+                "purpose": 2,
+                "relative_path": "recording-inputs/3.mp4",
+                "retention_state": 1,
+                "cleanup_state": 1,
+                "size_bytes": 61038,
+                "sha256": "34bac877a5d5d6b50644f3a0cfe6f635e2006cd5d0110701a6a4980f6071a015",
+                "last_error_json": null,
+                "created_event_id": 135,
+                "last_event_id": 146,
+                "change_count": 2
+              }
+            ],
+            "inspections": [
+              {
+                "id": 1,
+                "created_event_id": 100,
+                "action_id": 1,
+                "set_id": 1,
+                "member_id": 2,
+                "source_device_file_id": 2,
+                "target_json": "{\"metric\":\"frames\",\"value\":151}",
+                "budget_json": "{\"max_attempts\":3,\"timeout_s\":10,\"retry_interval_s\":3}",
+                "state": 2,
+                "result_json": "{\"metric\":{\"metric\":\"frames\",\"value\":60,\"reason\":null},\"probe\":{\"duration_s\":2.000000,\"error\":null,\"format_name\":\"mov,mp4,m4a,3gp,3g2,mj2\",\"streams\":[{\"index\":0,\"codec_type\":\"video\",\"codec_name\":\"h264\",\"width\":160,\"height\":120,\"duration_s\":2.000000,\"attached_pic\":false,\"frame_count\":60,\"fps\":30}]},\"tool\":{\"ran\":true,\"error\":null},\"failure\":null}",
+                "result_event_id": 117
+              },
+              {
+                "id": 2,
+                "created_event_id": 118,
+                "action_id": 1,
+                "set_id": 1,
+                "member_id": 4,
+                "source_device_file_id": 4,
+                "target_json": "{\"metric\":\"frames\",\"value\":151}",
+                "budget_json": "{\"max_attempts\":3,\"timeout_s\":10,\"retry_interval_s\":3}",
+                "state": 2,
+                "result_json": "{\"metric\":{\"metric\":\"frames\",\"value\":60,\"reason\":null},\"probe\":{\"duration_s\":2.000000,\"error\":null,\"format_name\":\"mov,mp4,m4a,3gp,3g2,mj2\",\"streams\":[{\"index\":0,\"codec_type\":\"video\",\"codec_name\":\"h264\",\"width\":160,\"height\":120,\"duration_s\":2.000000,\"attached_pic\":false,\"frame_count\":60,\"fps\":30}]},\"tool\":{\"ran\":true,\"error\":null},\"failure\":null}",
+                "result_event_id": 132
+              },
+              {
+                "id": 3,
+                "created_event_id": 133,
+                "action_id": 1,
+                "set_id": 1,
+                "member_id": 6,
+                "source_device_file_id": 6,
+                "target_json": "{\"metric\":\"frames\",\"value\":151}",
+                "budget_json": "{\"max_attempts\":3,\"timeout_s\":10,\"retry_interval_s\":3}",
+                "state": 2,
+                "result_json": "{\"metric\":{\"metric\":\"frames\",\"value\":45,\"reason\":null},\"probe\":{\"duration_s\":1.500000,\"error\":null,\"format_name\":\"mov,mp4,m4a,3gp,3g2,mj2\",\"streams\":[{\"index\":0,\"codec_type\":\"video\",\"codec_name\":\"h264\",\"width\":160,\"height\":120,\"duration_s\":1.500000,\"attached_pic\":false,\"frame_count\":45,\"fps\":30}]},\"tool\":{\"ran\":true,\"error\":null},\"failure\":null}",
+                "result_event_id": 151
+              }
+            ],
+            "sets": [
+              {
+                "id": 1,
+                "action_id": 1,
+                "state": 3,
+                "published_event_id": 167,
+                "assessment_json": "{\"decision_type\":\"video_coverage_v1\",\"set_ref\":{\"action_id\":1,\"scan_id\":3,\"final_page_event_id\":65,\"version\":1},\"status\":\"failed\",\"metric\":\"frames\",\"target\":151,\"confirmed\":165,\"coverage_status\":\"reached\",\"checked_count\":3,\"default_scope\":{\"state\":3,\"set_ref\":{\"action_id\":1,\"scan_id\":3,\"final_page_event_id\":65,\"version\":1},\"first_cursor\":{\"key\":{\"directory_number\":1,\"index\":998},\"member_identity\":\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120000_0998_D.MP4\"},\"last_cursor\":{\"key\":{\"directory_number\":2,\"index\":1},\"member_identity\":\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120200_0001_D.MP4\"},\"member_count\":3},\"failure_code\":\"capture_failed\",\"reason\":\"invalid_outputs\"}"
+              }
+            ],
+            "read_attempts": [
+              {
+                "copy_id": 1,
+                "inspection_id": 1,
+                "run_id": 4,
+                "run_status": 3,
+                "attempt_id": 4,
+                "attempt_status": 2,
+                "result_event_id": 111,
+                "result_at": 1792908940436176,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 2,
+                "inspection_id": 2,
+                "run_id": 5,
+                "run_status": 3,
+                "attempt_id": 5,
+                "attempt_status": 2,
+                "result_event_id": 129,
+                "result_at": 1792908940836449,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 3,
+                "inspection_id": 3,
+                "run_id": 6,
+                "run_status": 3,
+                "attempt_id": 6,
+                "attempt_status": 2,
+                "result_event_id": 147,
+                "result_at": 1792908941221929,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 4,
+                "inspection_id": null,
+                "run_id": 7,
+                "run_status": 3,
+                "attempt_id": 7,
+                "attempt_status": 2,
+                "result_event_id": 211,
+                "result_at": 1792908946584926,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 5,
+                "inspection_id": null,
+                "run_id": 8,
+                "run_status": 3,
+                "attempt_id": 8,
+                "attempt_status": 2,
+                "result_event_id": 219,
+                "result_at": 1792908946611256,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 6,
+                "inspection_id": null,
+                "run_id": 9,
+                "run_status": 3,
+                "attempt_id": 9,
+                "attempt_status": 2,
+                "result_event_id": 227,
+                "result_at": 1792908946639021,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 7,
+                "inspection_id": null,
+                "run_id": 10,
+                "run_status": 3,
+                "attempt_id": 10,
+                "attempt_status": 2,
+                "result_event_id": 235,
+                "result_at": 1792908946664184,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 8,
+                "inspection_id": null,
+                "run_id": 11,
+                "run_status": 3,
+                "attempt_id": 11,
+                "attempt_status": 2,
+                "result_event_id": 243,
+                "result_at": 1792908946692641,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              },
+              {
+                "copy_id": 9,
+                "inspection_id": null,
+                "run_id": 12,
+                "run_status": 3,
+                "attempt_id": 12,
+                "attempt_status": 2,
+                "result_event_id": 251,
+                "result_at": 1792908946720804,
+                "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}"
+              }
+            ],
+            "runtime": [
+              {
+                "id": 1,
+                "acknowledged_wm": 0,
+                "acknowledged_report_id": null,
+                "trusted_time_lower_bound": 1792908942595275,
+                "trusted_time_event_id": 150,
+                "cleanup_cursor_file_id": null
+              }
+            ],
+            "wrong_join": [
+              {
+                "id": 1,
+                "processing_id": null,
+                "inspection_id": 1,
+                "joined_processing_id": null
+              },
+              {
+                "id": 2,
+                "processing_id": null,
+                "inspection_id": 2,
+                "joined_processing_id": null
+              },
+              {
+                "id": 3,
+                "processing_id": null,
+                "inspection_id": 3,
+                "joined_processing_id": null
+              }
+            ]
+          },
+          "lifecycle_events": [
+            {
+              "event_id": 102,
+              "transaction_id": 81,
+              "occurred_at": 1792908940073255,
+              "row": {
+                "table": "intermediate_files",
+                "id": 1,
+                "before": {
+                  "exists": false,
+                  "values": {}
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "owner_action_id": 1,
+                    "owner_delivery_id": null,
+                    "purpose": 2,
+                    "relative_path": "recording-inputs/1.mp4",
+                    "retention_state": 1,
+                    "cleanup_state": 1,
+                    "size_bytes": null,
+                    "sha256": null,
+                    "last_error_json": null
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 120,
+              "transaction_id": 96,
+              "occurred_at": 1792908940538775,
+              "row": {
+                "table": "intermediate_files",
+                "id": 2,
+                "before": {
+                  "exists": false,
+                  "values": {}
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "owner_action_id": 1,
+                    "owner_delivery_id": null,
+                    "purpose": 2,
+                    "relative_path": "recording-inputs/2.mp4",
+                    "retention_state": 1,
+                    "cleanup_state": 1,
+                    "size_bytes": null,
+                    "sha256": null,
+                    "last_error_json": null
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 135,
+              "transaction_id": 108,
+              "occurred_at": 1792908940945210,
+              "row": {
+                "table": "intermediate_files",
+                "id": 3,
+                "before": {
+                  "exists": false,
+                  "values": {}
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "owner_action_id": 1,
+                    "owner_delivery_id": null,
+                    "purpose": 2,
+                    "relative_path": "recording-inputs/3.mp4",
+                    "retention_state": 1,
+                    "cleanup_state": 1,
+                    "size_bytes": null,
+                    "sha256": null,
+                    "last_error_json": null
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 156,
+              "transaction_id": 125,
+              "occurred_at": 1792908944375743,
+              "row": {
+                "table": "actions",
+                "id": 1,
+                "before": {
+                  "exists": true,
+                  "values": {
+                    "status": 2,
+                    "error_code": null,
+                    "error_details_json": null
+                  }
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "status": 4,
+                    "error_code": 13,
+                    "error_details_json": {
+                      "activity_id": "1",
+                      "reason": "invalid_outputs"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 263,
+              "transaction_id": 174,
+              "occurred_at": 1792908946993045,
+              "row": {
+                "table": "actions",
+                "id": 2,
+                "before": {
+                  "exists": true,
+                  "values": {
+                    "status": 2
+                  }
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "status": 3
+                  }
+                }
+              }
+            },
+            {
+              "event_id": 274,
+              "transaction_id": 181,
+              "occurred_at": 1792908946993045,
+              "row": {
+                "table": "actions",
+                "id": 3,
+                "before": {
+                  "exists": true,
+                  "values": {
+                    "status": 2
+                  }
+                },
+                "after": {
+                  "exists": true,
+                  "values": {
+                    "status": 3
+                  }
+                }
+              }
+            }
+          ],
+          "host_lines": [
+            {
+              "line": 1,
+              "text": "call=1 attempt=1 command=run operation=spawn plan=(none) automatic=0 retries=0"
+            },
+            {
+              "line": 3,
+              "text": "call=1 attempt=1 command=run pid=940340 spawned execution=unknown"
+            },
+            {
+              "line": 8,
+              "text": "call=2 command=submit pid=940341 result=success exit_kind=0 exit=0 needs_run=1 overflow=0 io_error=0"
+            },
+            {
+              "line": 14,
+              "text": "call=3 command=submit pid=940657 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+            },
+            {
+              "line": 20,
+              "text": "call=4 command=submit pid=940697 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+            },
+            {
+              "line": 21,
+              "text": "call=1 command=run pid=940340 stream=exit_observed data=exit record retained; group settlement pending"
+            },
+            {
+              "line": 22,
+              "text": "call=1 command=run pid=940340 stream=group_reaped data=all execution stopped; child record reaped"
+            },
+            {
+              "line": 23,
+              "text": "call=1 command=run pid=940340 result=error exit_kind=0 exit=1 needs_run=0 overflow=0 io_error=0"
+            },
+            {
+              "line": 24,
+              "text": "call=1 stdout={\"kind\" : \"error\", \"body\" : {\"reason\" : \"state_db_error\", \"details\" : {\"error\" : \"原文件事实未可靠保存: 原内部读取结束缺少处理、源观察者与动作归属\"}}}"
+            },
+            {
+              "line": 27,
+              "text": "call=5 attempt=5 command=run operation=spawn plan=(none) automatic=0 retries=0"
+            },
+            {
+              "line": 28,
+              "text": "call=5 attempt=5 command=run pid=940981 spawned execution=unknown"
+            },
+            {
+              "line": 36,
+              "text": "call=5 command=run pid=940981 stream=exit_observed data=exit record retained; group settlement pending"
+            },
+            {
+              "line": 37,
+              "text": "call=5 command=run pid=940981 stream=group_reaped data=all execution stopped; child record reaped"
+            },
+            {
+              "line": 38,
+              "text": "call=5 command=run pid=940981 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+            }
+          ],
+          "run_clock_intervals": [
+            {
+              "pid": 940340,
+              "first_utc_us": 1792908606000000,
+              "last_utc_us": 1792908941221929
+            },
+            {
+              "pid": 940981,
+              "first_utc_us": 1792908942595275,
+              "last_utc_us": 1792908948602489
+            }
+          ],
+          "inspection_file_exists": [
+            {
+              "file_id": 1,
+              "relative_path": "recording-inputs/1.mp4",
+              "exists": true
+            },
+            {
+              "file_id": 2,
+              "relative_path": "recording-inputs/2.mp4",
+              "exists": true
+            },
+            {
+              "file_id": 3,
+              "relative_path": "recording-inputs/3.mp4",
+              "exists": true
+            }
+          ]
+        }
+      },
+      "first_unexpected_failure": {
+        "path": "/tmp/camctl-itopt-final-20261025/tasks/019-root-test_action6_segmented_recovery_roundtrip-shard-3/tmp/pytest/test_installed_action6_native_0/action6-native/module.log",
+        "lines": [
+          21,
+          24
+        ],
+        "description": "host run1退出1，stdout reason=state_db_error，details.error=原文件事实未可靠保存: 原内部读取结束缺少处理、源观察者与动作归属；不是缺JPEG这个预期业务失败。"
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/capture/media_flow.py",
+          "lines": [
+            702,
+            744
+          ]
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/capture/segment_inspections.py",
+          "lines": [
+            390,
+            415
+          ]
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/bootstrap/lifecycle.py",
+          "lines": [
+            181,
+            193
+          ]
+        },
+        {
+          "path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_native_0/action6-native/module.log",
+          "lines": [
+            21,
+            38
+          ]
+        }
+      ],
+      "completed": "最终数据库来源FAILED(capture_failed/invalid_outputs，必需JPEG缺失)符合预期；coverage reached 151目标/165帧累计，默认前3段；4MP4与4LRF保留；两个绑定取回成功，共6份独立delivery，字节/摘要与客户端媒体导入已通过。中央当前run1结束前第三份READ已保存read_returned并释放相机读取机会；run5继续第三份媒体检查和来源发布。",
+      "not_executed": "原会话在正常READ事实分类处被错误中断；本例最终清理断言因失败观察立即终止，后续累计ACK与最终场景凭据未执行。另一次host run虽完成来源/交付，三份输入仍REQUIRED/NOT_NEEDED。",
+      "repair_recommendation": "按file_copies的delivery/processing/inspection唯一责任分类复用原事实入口；为inspection READ沿原copy/ticket、segment_inspections.action_id/member/source_device_file_id与源观察者核对真实归属，再执行适用的已有状态/取消/绑定分类。完整读取只续接原本地核验与保存，不重开设备读取、不重置预算、不重算来源结果。保留对缺失或交叉归属、错误ticket及错误观察者的拒绝。清理新资格还须闭合ID19的独立接缝。",
+      "falsifiable_acceptance": [
+        "在实际clean完整ReadEnd已持有、_finish_internal_read尚未保存前确定暂停合法inspection副本，调用普通/残留事实恢复；不能因processing_id为空报错，也不能新开READ或媒体处理。",
+        "原READ按同一ticket/key保存，保存未知沿原请求核实；媒体检查、来源共同提交及等待取回继续，缺JPEG仍为capture_failed/invalid_outputs，覆盖仍151/165前3段。",
+        "同时验证processing合法原责任保持、inspection合法责任接受；错误copy/inspection/action/source/member/observer/ticket关系仍按一致性错误拒绝。",
+        "保留取消、来源已终态、绑定正常/失效、摘要尚未取得/终局失败、准备未实际收场及提交未知各自语义；正常与残留入口均覆盖。",
+        "叠加ID19确定性门闩后，最后绑定取回和真实文件操作结束时，同一run清理三份输入；真实C host不再保存意外state_db_error，实际客户端ACK完成。"
+      ],
+      "unresolved": [
+        "历史和当前错误未记录触发时pending_read_ends的copy_id或调用栈，不能从最终DB可靠指认1/2/3中哪份HeldReadEnd触发错误；当前第三份READ靠近run1末尾只提供候选时序，不是确证。",
+        "共享入口与合法inspection责任缺失已明确；修复后的精确辅助函数/模块划分属于实现选择，无需新增业务或持久化机制。"
+      ]
+    }
+  ],
+  "repair_execution_order": [
+    "现有规格已定义两项目标语义，先分别增加可证伪且确定交错的窄失败测试。",
+    "先闭合inspection READ责任分类并审计正常/残留恢复、读取成功/失败、取消及未知回执相同入口。",
+    "独立闭合H绑定取回终态到来源检查副本首次清理资格的发现，并审计显式/自动取回入口及多来源依赖。",
+    "针对两个原nodeid和新的确定性反例验证，再核对原处理/预算/范围/交付/实际操作收场与同次run一次清理规则；不得把额外run掩盖当作通过证据。"
+  ]
+}

@@ -32,6 +32,7 @@ class BackgroundFlow:
         self._flow = flow
         self._task: asyncio.Task | None = None
         self._stopping = False
+        self._completion_handoff = False
         self._last_context = None
 
     @property
@@ -80,6 +81,8 @@ class BackgroundFlow:
             return _FlowResult(error)
 
     async def __call__(self, context):
+        if self._take_completion_handoff():
+            return
         if self._task is not None:
             if self._task.done():
                 self._consume()
@@ -95,6 +98,13 @@ class BackgroundFlow:
     def check_completed(self):
         if self._task is not None and self._task.done():
             self._consume()
+            # 外部检查已交付本轮结果，下一次推进先把机会交回会话，
+            # 让工作事实及关闭接纳检查观察实际责任。
+            self._completion_handoff = True
+
+    def _take_completion_handoff(self):
+        completed, self._completion_handoff = self._completion_handoff, False
+        return completed
 
     def required_settlements(self):
         # 已形成的失败也须交付，不能先被会话解释为空闲。
@@ -184,6 +194,8 @@ class ReportBackgroundFlow(BackgroundFlow):
             raise self._fatal_error
 
     async def __call__(self, context):
+        if self._take_completion_handoff():
+            return
         if self._task is None and not self._stopping:
             probe = getattr(self._maintenance_flow, "should_advance", None)
             if probe is not None:
@@ -195,6 +207,8 @@ class ReportBackgroundFlow(BackgroundFlow):
                     self._probe_error = error
         await super().__call__(context)
         self.check_completed()
+        # 本次调用已经交还推进机会，无须延后下一次报告检查。
+        self._take_completion_handoff()
 
 
 class CombinedLocalWork:

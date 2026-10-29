@@ -1,0 +1,53 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.17, pytest-9.1.1, pluggy-1.6.0 -- /workspaces/camctl/apps/camctl/.venv311/bin/python3.11
+cachedir: .pytest_cache
+rootdir: /tmp/camctl-quality-history-20261026/apps/camctl
+configfile: pyproject.toml
+plugins: mock-3.16.0, asyncio-1.4.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 1 item
+
+apps/camctl/tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost FAILED
+
+=================================== FAILURES ===================================
+_______________ test_submit_during_initial_discovery_is_not_lost _______________
+
+environment = (ConfigSnapshot(database=DatabaseSection(queue_capacity=64, busy_timeout_ms=9000, wal_autocheckpoint_pages=1000), sess...ls>.<lambda> at 0x7f31b0c3ec00>)), <integration.bootstrap.test_output_binding_changes.Driver object at 0x7f31b0ae1710>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f31b0a19ed0>
+
+    @pytest.mark.asyncio
+    async def test_submit_during_initial_discovery_is_not_lost(environment, monkeypatch):
+        import asyncio
+        from dataclasses import replace
+        from camctl.acceptance.service import CommandMode
+        from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
+    
+        cfg, owned, context, driver = environment
+>       await _save_photos(cfg, owned, context, driver)
+
+apps/camctl/tests/integration/bootstrap/test_read_discovery_default.py:118: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py:189: in _save_photos
+    await capture(context)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <camctl.bootstrap.flows.CaptureFlow object at 0x7f31b08baf90>
+context = namespace(open_connection=<function environment.<locals>.<lambda> at 0x7f31b0c3eb60>, clock=namespace(utc_micros=<function environment.<locals>.<lambda> at 0x7f31b0c3ec00>))
+
+    async def __call__(self, context):
+        self.check_completed()
+        if self._stopping:
+            return
+>       database = context.database
+                   ^^^^^^^^^^^^^^^^
+E       AttributeError: 'types.SimpleNamespace' object has no attribute 'database'
+
+apps/camctl/src/camctl/bootstrap/flows.py:212: AttributeError
+- generated xml file: /tmp/camctl-quality-evidence/history/latest83-bootstrap.xml -
+============================= slowest 10 durations =============================
+0.33s call     tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost
+0.18s setup    tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost
+0.01s teardown tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost
+=========================== short test summary info ============================
+FAILED apps/camctl/tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost - AttributeError: 'types.SimpleNamespace' object has no attribute 'database'
+============================== 1 failed in 2.85s ===============================

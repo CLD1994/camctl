@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="1.307" timestamp="2026-10-26T02:58:56.812141+08:00" hostname="1e0518e0c6b4"><testcase classname="tests.integration.bootstrap.test_inspection_read_dispatch" name="test_clean_inspection_end_remains_with_owner_during_digest[ordinary]" time="0.038"><failure message="TypeError: MediaFlow.__init__() got an unexpected keyword argument 'owned'">pipeline = (OwnedConnection(connection=&lt;sqlite3.Connection object at 0x7fcb4f667010&gt;, metadata=DatabaseMetadata(application_id='c...tion.capture.test_input_copy._Copies object at 0x7fcb4ee05b50&gt;, &lt;function pipeline.&lt;locals&gt;.context at 0x7fcb4f563f60&gt;)
+entry = 'ordinary'
+
+    @pytest.mark.parametrize("entry", ["ordinary", "residual"])
+    async def test_clean_inspection_end_remains_with_owner_during_digest(pipeline, entry):
+        owned, roots = pipeline[:2]
+        _fixed_member(owned)
+        digest = _DigestGate()
+&gt;       flow, request, driver, tools = _inspection_runtime(owned, roots, digest)
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+apps/camctl/tests/integration/bootstrap/test_inspection_read_dispatch.py:72: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+owned = OwnedConnection(connection=&lt;sqlite3.Connection object at 0x7fcb4f667010&gt;, metadata=DatabaseMetadata(application_id='ca...rsion=5, staging_path='/srv/camctl/staging', ready_path='/srv/camctl/ready', processing_path='/srv/camctl/processing'))
+roots = BoundDirectories(staging=PosixPath('/tmp/pytest-of-cld/pytest-99/test_clean_inspection_end_rema0/staging'))
+digest = &lt;integration.bootstrap.test_inspection_read_dispatch._DigestGate object at 0x7fcb4edf4d50&gt;
+driver = None, overrides = {}
+
+    def _inspection_runtime(owned, roots, digest, *, driver=None, **overrides):
+        tools = _SegmentTools()
+        read_driver = driver or _ReadDriver(_CONTENT)
+        values = dict(
+            owned=owned,
+            roots=roots,
+            sessions=DriverReadSessions(owned, read_driver, ticket=None),
+            tools=tools,
+            policy=MediaPolicy(repair_margin_s=Decimal("2")),
+            occurred_at=lambda: _NOW + 10,
+            digest_supported=True,
+            digest=digest,
+            segment_size=4,
+            max_read_attempts=3,
+            retry_interval_s=Decimal("0"),
+            read_idle_timeout_s=Decimal("10"),
+        )
+        values.update(overrides)
+&gt;       flow = MediaFlow(**values)
+               ^^^^^^^^^^^^^^^^^^^
+E       TypeError: MediaFlow.__init__() got an unexpected keyword argument 'owned'
+
+apps/camctl/tests/integration/capture/test_segment_inspections.py:180: TypeError</failure></testcase></testsuite></testsuites>

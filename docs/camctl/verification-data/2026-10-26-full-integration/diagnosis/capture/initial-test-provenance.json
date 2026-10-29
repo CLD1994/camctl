@@ -1,0 +1,706 @@
+[
+  {
+    "path": "apps/camctl/tests/integration/capture/test_action6_budget_cold_recovery.py",
+    "tested_sha256": "b5681806d5ca7c59f0ceca3746bc2023d174e0c37d0d47fe0da94f886bc7ca81",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "b5681806d5ca7c59f0ceca3746bc2023d174e0c37d0d47fe0da94f886bc7ca81"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": false,
+        "sha256": "89d838fcdd7a29e17ad4096fdea243de9df1647b39911f2a7582ad2e5bd2e40a"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_action6_control_elapsed.py",
+    "tested_sha256": "add863fff20368e14f932f5d0717a7407acf68a76fbc65f6a2ab7587bd583fbc",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "add863fff20368e14f932f5d0717a7407acf68a76fbc65f6a2ab7587bd583fbc"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "add863fff20368e14f932f5d0717a7407acf68a76fbc65f6a2ab7587bd583fbc"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_action6_duplicate_segment_keys.py",
+    "tested_sha256": "690d35f318b5f5487de356616952eb696a4e78aefd12115272cc2be8a8b4d5ac",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "690d35f318b5f5487de356616952eb696a4e78aefd12115272cc2be8a8b4d5ac"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "690d35f318b5f5487de356616952eb696a4e78aefd12115272cc2be8a8b4d5ac"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_action6_known_failure_precedence.py",
+    "tested_sha256": "cb0fb71d9c24ee5321cbbbc9f5e3648bbf3f013de9c0e3b03a3218bc6965be70",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "cb0fb71d9c24ee5321cbbbc9f5e3648bbf3f013de9c0e3b03a3218bc6965be70"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "cb0fb71d9c24ee5321cbbbc9f5e3648bbf3f013de9c0e3b03a3218bc6965be70"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_action6_lifecycle_recovery.py",
+    "tested_sha256": "26fef8aabdbe526835d037267099eec1581ca69df80ac3a284edef6846231fa8",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "26fef8aabdbe526835d037267099eec1581ca69df80ac3a284edef6846231fa8"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "26fef8aabdbe526835d037267099eec1581ca69df80ac3a284edef6846231fa8"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_action6_native_cancel_scope.py",
+    "tested_sha256": "3e0c4ab497b12537a75157f5e9125b848e7a358447cf20e250afdfd734711b4e",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "3e0c4ab497b12537a75157f5e9125b848e7a358447cf20e250afdfd734711b4e"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "3e0c4ab497b12537a75157f5e9125b848e7a358447cf20e250afdfd734711b4e"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_action6_segmented_normal.py",
+    "tested_sha256": "a327b14213e3d11d1725fbaef6b5d51c1cdb72db443e99372bbb507d4fc3e988",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "a327b14213e3d11d1725fbaef6b5d51c1cdb72db443e99372bbb507d4fc3e988"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "a327b14213e3d11d1725fbaef6b5d51c1cdb72db443e99372bbb507d4fc3e988"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_action6_segmented_recovery.py",
+    "tested_sha256": "1745a93bea5fb833ca2615b669c6a17e6b0c9b16c2c4e00bae39432b61e27126",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "1745a93bea5fb833ca2615b669c6a17e6b0c9b16c2c4e00bae39432b61e27126"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "1745a93bea5fb833ca2615b669c6a17e6b0c9b16c2c4e00bae39432b61e27126"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_baseline_history.py",
+    "tested_sha256": "ed520090a418677ff6f23abf7999dbda1b3f7037d5fca325da3a74f6e57258e1",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "ed520090a418677ff6f23abf7999dbda1b3f7037d5fca325da3a74f6e57258e1"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "ed520090a418677ff6f23abf7999dbda1b3f7037d5fca325da3a74f6e57258e1"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_baseline_start.py",
+    "tested_sha256": "5ffc2ad48d447545778eb5f4a3f5b56c74f82f6df1bfc47698e7928b9597c61f",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "5ffc2ad48d447545778eb5f4a3f5b56c74f82f6df1bfc47698e7928b9597c61f"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "5ffc2ad48d447545778eb5f4a3f5b56c74f82f6df1bfc47698e7928b9597c61f"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_binding_failure_file_input_recovery.py",
+    "tested_sha256": "f37cedc381c30a14d2e1750b01a4a61177b4d7c218637602c5a38bf1b556a756",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "f37cedc381c30a14d2e1750b01a4a61177b4d7c218637602c5a38bf1b556a756"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "f37cedc381c30a14d2e1750b01a4a61177b4d7c218637602c5a38bf1b556a756"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_binding_failure_keeps_timelapse_files.py",
+    "tested_sha256": "f33b51e5eb9a5b3cb35911e1f64aef2a7ff249810458b82e9a4528e09e0ec8a8",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "f33b51e5eb9a5b3cb35911e1f64aef2a7ff249810458b82e9a4528e09e0ec8a8"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "f33b51e5eb9a5b3cb35911e1f64aef2a7ff249810458b82e9a4528e09e0ec8a8"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_binding_failure_retained_file_transactions.py",
+    "tested_sha256": "ffe25903a792ed7c9bb081ca4e9e2f4fa5c01da273cda71ec6dbf793d0ec4af3",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "ffe25903a792ed7c9bb081ca4e9e2f4fa5c01da273cda71ec6dbf793d0ec4af3"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "ffe25903a792ed7c9bb081ca4e9e2f4fa5c01da273cda71ec6dbf793d0ec4af3"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_call_result_save.py",
+    "tested_sha256": "f7505da551b0e4df1bed9510e91ed0b0f2f475ab1772f937f67df86e602f71e6",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "f7505da551b0e4df1bed9510e91ed0b0f2f475ab1772f937f67df86e602f71e6"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "f7505da551b0e4df1bed9510e91ed0b0f2f475ab1772f937f67df86e602f71e6"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_cancel_late_start.py",
+    "tested_sha256": "aefe779720fd51f213baaeb62cb1bc3d6d3a6d5f3763cf9a69d98776251315b9",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "aefe779720fd51f213baaeb62cb1bc3d6d3a6d5f3763cf9a69d98776251315b9"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "aefe779720fd51f213baaeb62cb1bc3d6d3a6d5f3763cf9a69d98776251315b9"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_cancel_timelapse_exhaustion_files.py",
+    "tested_sha256": "a0100ea708811724bf821ae859d6862996e340437927e18210bc4e0ef44122ab",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "a0100ea708811724bf821ae859d6862996e340437927e18210bc4e0ef44122ab"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "a0100ea708811724bf821ae859d6862996e340437927e18210bc4e0ef44122ab"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_capture_completion_save_recovery.py",
+    "tested_sha256": "0a21e762b5bbbf99c61c9b17ceaebc7d9a0d235722cffa25b5e3f018de1bcc2c",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "0a21e762b5bbbf99c61c9b17ceaebc7d9a0d235722cffa25b5e3f018de1bcc2c"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "0a21e762b5bbbf99c61c9b17ceaebc7d9a0d235722cffa25b5e3f018de1bcc2c"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_capture_contract.py",
+    "tested_sha256": "15d93550a4f0e4d430bc77f04e29a19a14501bde3569141f2ed5492f3dd714cd",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "15d93550a4f0e4d430bc77f04e29a19a14501bde3569141f2ed5492f3dd714cd"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": false,
+        "sha256": "5893bf702bbb36242861ad2ae53708d372f396299714b4930c0b6e0ffd4ecd44"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_capture_failure_activity_identity.py",
+    "tested_sha256": "d7c2ab641f98f9e50b5d22f61f0fa0c97984336cdf4b6a2b3dc19c4f1a529446",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "d7c2ab641f98f9e50b5d22f61f0fa0c97984336cdf4b6a2b3dc19c4f1a529446"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "d7c2ab641f98f9e50b5d22f61f0fa0c97984336cdf4b6a2b3dc19c4f1a529446"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_check_current_budget.py",
+    "tested_sha256": "b0bf4b70de656b1adbc57b2dc2d58961d5d03861633e7d28f18025123fae1769",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "b0bf4b70de656b1adbc57b2dc2d58961d5d03861633e7d28f18025123fae1769"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "b0bf4b70de656b1adbc57b2dc2d58961d5d03861633e7d28f18025123fae1769"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_closed_result_local_boundaries.py",
+    "tested_sha256": "b3e20ff47b0f436f82876b14bd0468351cdd8a11ca5865124a178e2bd32e3941",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "b3e20ff47b0f436f82876b14bd0468351cdd8a11ca5865124a178e2bd32e3941"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "b3e20ff47b0f436f82876b14bd0468351cdd8a11ca5865124a178e2bd32e3941"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_closed_result_local_consumption.py",
+    "tested_sha256": "67feed76ddbcd5f1f31820975ec75219e1a406bd0a2fd5728acec0ee22c4b280",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "67feed76ddbcd5f1f31820975ec75219e1a406bd0a2fd5728acec0ee22c4b280"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "67feed76ddbcd5f1f31820975ec75219e1a406bd0a2fd5728acec0ee22c4b280"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_device_photo_flow.py",
+    "tested_sha256": "9083545e832033afd693b00e42aa336331abdab0ecee7beb9b536410d4a861cb",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "9083545e832033afd693b00e42aa336331abdab0ecee7beb9b536410d4a861cb"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "9083545e832033afd693b00e42aa336331abdab0ecee7beb9b536410d4a861cb"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_direct_result_terminal_views.py",
+    "tested_sha256": "4aa44dd348f1886d26834febaafe39c93dfa2fbdd61269699288cd978d5c36d5",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "4aa44dd348f1886d26834febaafe39c93dfa2fbdd61269699288cd978d5c36d5"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "4aa44dd348f1886d26834febaafe39c93dfa2fbdd61269699288cd978d5c36d5"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_discard.py",
+    "tested_sha256": "7b6f19abcfb1aa18565deb64d0608aa8d3df11e055edfe6c28e16c0852fcf271",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "7b6f19abcfb1aa18565deb64d0608aa8d3df11e055edfe6c28e16c0852fcf271"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "7b6f19abcfb1aa18565deb64d0608aa8d3df11e055edfe6c28e16c0852fcf271"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_emergency_error_details.py",
+    "tested_sha256": "1411214877c3c69572305a95914f6781056bf365f8c5e2f6aa85da30f09752cb",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "1411214877c3c69572305a95914f6781056bf365f8c5e2f6aa85da30f09752cb"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "1411214877c3c69572305a95914f6781056bf365f8c5e2f6aa85da30f09752cb"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_finite_cancel.py",
+    "tested_sha256": "b72d270e1c928f0f6883ed3b0d026cf3acf846061fb4a8e80ea8aa1519d17b35",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "b72d270e1c928f0f6883ed3b0d026cf3acf846061fb4a8e80ea8aa1519d17b35"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": false,
+        "sha256": "663bf60cde49ff9498fd4a64dbd79246de316bed8a5e3d14f45da7fe33dfeb1f"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_finite_cancel_review.py",
+    "tested_sha256": "546c541cd51f7c1b56b33a952082358ff94d3a06a31da6e079da1b56dfc49838",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "546c541cd51f7c1b56b33a952082358ff94d3a06a31da6e079da1b56dfc49838"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "546c541cd51f7c1b56b33a952082358ff94d3a06a31da6e079da1b56dfc49838"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_hasselblad_start_recovery.py",
+    "tested_sha256": "9ccaf797260181267611ef21ba7ae97b3eb635c410cd6fdf09c085c9f011f348",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "9ccaf797260181267611ef21ba7ae97b3eb635c410cd6fdf09c085c9f011f348"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "9ccaf797260181267611ef21ba7ae97b3eb635c410cd6fdf09c085c9f011f348"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_host_photo_complete_history_recovery.py",
+    "tested_sha256": "69f81f20951c3857d7a11439caec79bf49052ce61c937f05d7516caa93c17e62",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "69f81f20951c3857d7a11439caec79bf49052ce61c937f05d7516caa93c17e62"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "69f81f20951c3857d7a11439caec79bf49052ce61c937f05d7516caa93c17e62"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_host_photo_finish_pair_boundary.py",
+    "tested_sha256": "f2337700bcfe84cc2309b34d18f0e2551a11243f82052c1be45859b0f49f25e3",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "f2337700bcfe84cc2309b34d18f0e2551a11243f82052c1be45859b0f49f25e3"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "f2337700bcfe84cc2309b34d18f0e2551a11243f82052c1be45859b0f49f25e3"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_host_photo_flow.py",
+    "tested_sha256": "2ca6d1c84f493fb788b2eea9b233265e10aab49e1f96b3aa356e2cdd8e85b930",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "2ca6d1c84f493fb788b2eea9b233265e10aab49e1f96b3aa356e2cdd8e85b930"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "2ca6d1c84f493fb788b2eea9b233265e10aab49e1f96b3aa356e2cdd8e85b930"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_host_photo_storage.py",
+    "tested_sha256": "9bf56834b39b2710f066e470dc33859c380d37cb65a6721eb9054b3da612d84b",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "9bf56834b39b2710f066e470dc33859c380d37cb65a6721eb9054b3da612d84b"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "9bf56834b39b2710f066e470dc33859c380d37cb65a6721eb9054b3da612d84b"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_input_copy.py",
+    "tested_sha256": "059f2ca84041451347f8c80194863bae14cf8e0be4c35c3302b0b29e4d94b37f",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "059f2ca84041451347f8c80194863bae14cf8e0be4c35c3302b0b29e4d94b37f"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "059f2ca84041451347f8c80194863bae14cf8e0be4c35c3302b0b29e4d94b37f"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_legacy_capture_without_results.py",
+    "tested_sha256": "d63d1c854d13d12f8c35a74a2526cb261249c9e367f43189cd05ce5e208a9c60",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "d63d1c854d13d12f8c35a74a2526cb261249c9e367f43189cd05ce5e208a9c60"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "d63d1c854d13d12f8c35a74a2526cb261249c9e367f43189cd05ce5e208a9c60"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_legacy_completion_metadata.py",
+    "tested_sha256": "ed97a1d64d2ed5ecac9324f2746dcc36d2778a733a7b54adaaa1d8c6d20d10d0",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "ed97a1d64d2ed5ecac9324f2746dcc36d2778a733a7b54adaaa1d8c6d20d10d0"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "ed97a1d64d2ed5ecac9324f2746dcc36d2778a733a7b54adaaa1d8c6d20d10d0"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_listing_rounds.py",
+    "tested_sha256": "4da472d218f98624943af225408362422574eee069dc8449048594fa8d883c2b",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "4da472d218f98624943af225408362422574eee069dc8449048594fa8d883c2b"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "4da472d218f98624943af225408362422574eee069dc8449048594fa8d883c2b"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_media_execution.py",
+    "tested_sha256": "c01617202ff1623a7abc947735e65952bbfc1a96395a0c34d20106dacd58fa37",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "c01617202ff1623a7abc947735e65952bbfc1a96395a0c34d20106dacd58fa37"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "c01617202ff1623a7abc947735e65952bbfc1a96395a0c34d20106dacd58fa37"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_media_flow.py",
+    "tested_sha256": "52643aba81ad8c13fa9461e53b3c57ee29fff935d2623acab1858ed81121f00e",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "52643aba81ad8c13fa9461e53b3c57ee29fff935d2623acab1858ed81121f00e"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "52643aba81ad8c13fa9461e53b3c57ee29fff935d2623acab1858ed81121f00e"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_media_result_owner.py",
+    "tested_sha256": "4f99c72ef00029044e1b305cd826cc56ff7d3e92b602fd3efb026dd0a76e032a",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "4f99c72ef00029044e1b305cd826cc56ff7d3e92b602fd3efb026dd0a76e032a"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "4f99c72ef00029044e1b305cd826cc56ff7d3e92b602fd3efb026dd0a76e032a"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_media_result_retry.py",
+    "tested_sha256": "47f85ace6c56a9b8bf6ef3f271445af8cb2c13fa34ca130db2f3960f322bb7be",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "47f85ace6c56a9b8bf6ef3f271445af8cb2c13fa34ca130db2f3960f322bb7be"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "47f85ace6c56a9b8bf6ef3f271445af8cb2c13fa34ca130db2f3960f322bb7be"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_native_completion_context.py",
+    "tested_sha256": "315b6695573cfb742aa6df3c121b9b4376c43d2ef74f00e918f8a0dae017cace",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "315b6695573cfb742aa6df3c121b9b4376c43d2ef74f00e918f8a0dae017cace"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "315b6695573cfb742aa6df3c121b9b4376c43d2ef74f00e918f8a0dae017cace"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_native_segment_completion.py",
+    "tested_sha256": "38cb7c3b6d60f7284e1206d7275cd01701903b88b6b11b675f8d57be603ce076",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "38cb7c3b6d60f7284e1206d7275cd01701903b88b6b11b675f8d57be603ce076"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "38cb7c3b6d60f7284e1206d7275cd01701903b88b6b11b675f8d57be603ce076"
+      }
+    }
+  },
+  {
+    "path": "apps/camctl/tests/integration/capture/test_natural_wait_retention.py",
+    "tested_sha256": "5d78ec50fb6b19d6fc6f459b00dcd9ce3ac7e704e45ca194ccd284daaffaa0cf",
+    "sides": {
+      "a7755d81": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "5d78ec50fb6b19d6fc6f459b00dcd9ce3ac7e704e45ca194ccd284daaffaa0cf"
+      },
+      "272fda66": {
+        "exists": true,
+        "equals_tested_file": true,
+        "sha256": "5d78ec50fb6b19d6fc6f459b00dcd9ce3ac7e704e45ca194ccd284daaffaa0cf"
+      }
+    }
+  }
+]

@@ -57,8 +57,6 @@ class BaselineSaveOwner:
         async def save_and_apply():
             _delivery_error = None
             if pending.response is not None:
-                if _delivery_error is not None:
-                    raise _delivery_error
                 return DbOutcome(DbOutcomeKind.COMPLETED, value=pending.response)
             if isinstance(pending.request,BaselineReadIntent):
                 method=repository.save_baseline_read_intent
@@ -82,7 +80,7 @@ class BaselineSaveOwner:
                 response = receipt.value
                 if isinstance(pending.request,(BaselineReadIntent,BaselineReadReturn,BaselineReadUnconfirmedSave)):
                     self._check_call_response(pending.request,response)
-                    self.pending=replace(pending,response=response)
+                    self._remember_response(pending,response)
                     if _delivery_error is not None:
                         raise _delivery_error
                     return receipt
@@ -100,7 +98,7 @@ class BaselineSaveOwner:
                         or (response.chunk_count, response.entry_count) !=
                         (pending.request.chunk_count, pending.request.entry_count)):
                     raise ConsistencyError("基准保存回执没有可靠固定原计数")
-                self.pending = replace(pending, response=response)
+                self._remember_response(pending,response)
             if _delivery_error is not None:
                 raise _delivery_error
             if receipt.kind is not DbOutcomeKind.COMPLETED:
@@ -117,6 +115,10 @@ class BaselineSaveOwner:
             self.pending.save.retry_failed()
         return await self.save(repository, database)
 
+    def _remember_response(self, pending, response):
+        if self.pending is not None and self.pending.save is pending.save:
+            self.pending = replace(pending, response=response)
+
     @staticmethod
     def _check_call_response(request,response):
         if not isinstance(response,BaselineReadCallView):
@@ -132,9 +134,11 @@ class BaselineSaveOwner:
                 or response.next_cursor != (None if request.returned.page is None else request.returned.page.next_cursor)):
             raise ConsistencyError('基准实际返回回执不属于原申请')
 
-    def take(self) -> BaselineChunkResult | BaselineRef | BaselineReadCallView:
+    def take(self, *, expected=None) -> BaselineChunkResult | BaselineRef | BaselineReadCallView:
         if self.pending is None or self.pending.response is None:
             raise ConsistencyError("基准原申请尚未可靠完成，不能推进下一步")
+        if expected is not None and self.pending.save is not expected.save:
+            raise ConsistencyError("不能消费后续基准保存申请的回执")
         response = self.pending.response
         self.pending = None
         return response

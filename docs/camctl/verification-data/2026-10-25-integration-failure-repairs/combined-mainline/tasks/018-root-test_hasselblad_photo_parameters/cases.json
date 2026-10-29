@@ -1,0 +1,21 @@
+[
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_parameters.py::test_installed_hasselblad_parameter_validation_agrees_across_consumers",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 1.6432793000130914
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 110.03967137800646
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0015639460034435615
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 111.684514624023
+  }
+]

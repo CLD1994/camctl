@@ -1,9 +1,11 @@
-"""Action6 ordinary/native lifecycle exceptions use the segmented publisher."""
+"""Action6 普通录像与原生延时的异常流程通过分段发布器保存结果。"""
 
 from decimal import Decimal
 from unittest.mock import create_autospec
 
 import pytest
+
+from ..support.capture import capture_database
 
 from camctl.capture.baseline_models import BaselineFixSave
 from camctl.capture.handlers import capture_handler
@@ -43,7 +45,7 @@ async def test_action6_ordinary_cancel_publishes_canceled_segment_result_without
 
         await capture_handler(handler)(action_id, runtime)
 
-        assert runtime.action(action_id)["status"] == 6
+        assert (await runtime.action(action_id))["status"] == 6
         assert owned.connection.execute(
             "SELECT publication_kind,state,published_event_id IS NOT NULL"
             " FROM segment_sets WHERE action_id=?",
@@ -75,7 +77,7 @@ async def test_action6_baseline_failure_publishes_no_results_source(tmp_path):
         ])
         await capture_handler(handler)(action_id, runtime)
 
-        assert runtime.action(action_id)["status"] == 4
+        assert (await runtime.action(action_id))["status"] == 4
         assert owned.connection.execute(
             "SELECT source_kind,member_count,published_event_id IS NOT NULL"
             " FROM segment_sets WHERE action_id=?",
@@ -112,7 +114,7 @@ async def test_action6_start_no_effect_failure_publishes_no_results_source(
     try:
         await capture_handler(handler)(action_id, runtime)
 
-        assert runtime.action(action_id)["status"] == 4
+        assert (await runtime.action(action_id))["status"] == 4
         assert owned.connection.execute(
             "SELECT source_kind,member_count,published_event_id IS NOT NULL"
             " FROM segment_sets WHERE action_id=?",
@@ -148,7 +150,7 @@ async def test_action6_stop_budget_exhaustion_publishes_unconfirmed_without_rele
         )
         assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
         await capture_handler(handler)(action_id, runtime)
-        action = runtime.action(action_id)
+        action = (await runtime.action(action_id))
         assert action["execution_started"] == 1
         assert action["execution_spec_json"]["result_policy"] == (
             "action6_video_segments_v1"
@@ -161,7 +163,7 @@ async def test_action6_stop_budget_exhaustion_publishes_unconfirmed_without_rele
         await capture_handler(handler)(action_id, runtime)
         await capture_handler(handler)(action_id, runtime)
 
-        assert runtime.action(action_id)["status"] == 4
+        assert (await runtime.action(action_id))["status"] == 4
         assert owned.connection.execute(
             "SELECT activity_state,occupancy_state FROM device_activities WHERE id=?",
             (activity_id,),
@@ -186,7 +188,6 @@ async def test_action6_stop_budget_exhaustion_publishes_unconfirmed_without_rele
 
 async def test_action6_binding_failure_uses_external_segment_terminal(tmp_path):
     from types import SimpleNamespace
-    from camctl.capture.handlers import _handle_binding_failure
 
     owned, runtime, action_id, _handler, _tools = await _overrun_recording(
         tmp_path, (Decimal("18"), Decimal("27"), Decimal("22"))
@@ -195,9 +196,9 @@ async def test_action6_binding_failure_uses_external_segment_terminal(tmp_path):
         runtime.binding_check = lambda binding: check_binding(
             binding, SimpleNamespace(devices={})
         )
-        assert _handle_binding_failure(runtime, runtime.action(action_id))
+        await capture_handler("camera_record")(action_id, runtime)
 
-        assert runtime.action(action_id)["status"] == 4
+        assert (await runtime.action(action_id))["status"] == 4
         assert owned.connection.execute(
             "SELECT published_event_id IS NOT NULL FROM segment_sets"
         ).fetchone() == (1,)
@@ -227,21 +228,14 @@ async def test_action6_native_required_photo_failure_reaches_recovery_through_re
         assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
 
         from camctl.capture.timelapse import CaptureWaitConfig
-        from camctl.capture.handlers import _control_call
         from .test_record_file_completion_wait import _result_port
         from .test_result_page_history import _actual
 
-        await _control_call(
-            runtime,
-            runtime.action(action_id),
-            "start_timelapse",
-            "timelapse_sent",
-            activity_facts={"sent_at": _NOW},
-        )
-        tools = _attach_media(
+        await capture_handler(handler)(action_id, runtime)
+        tools = (await _attach_media(
             runtime, owned, tmp_path,
             (60, 60, 31, 20),
-        )
+        ))
         wall, mono = [_NOW], [5_000_000_000]
         runtime.wall_us = lambda: wall[0]
         runtime.monotonic_ns = lambda: mono[0]
@@ -268,7 +262,7 @@ async def test_action6_native_required_photo_failure_reaches_recovery_through_re
         assert decision.coverage_status.value == "reached"
         assert decision.confirmed == 151
         assert decision.checked_count == 3
-        assert runtime.action(action_id)["status"] == 4
+        assert (await runtime.action(action_id))["status"] == 4
         event_count = owned.connection.execute(
             "SELECT COUNT(*) FROM history_events"
         ).fetchone()
@@ -295,7 +289,7 @@ async def test_action6_pending_inspection_waits_for_full_session_then_cancels_wi
     )
     try:
         runtime.media.sessions = DriverReadSessions(
-            owned, _ReadDriver(_CONTENT, fail_after=4), ticket=None,
+            await capture_database(owned), _ReadDriver(_CONTENT, fail_after=4), ticket=None,
         )
         runtime.media.segment_size = 4
         await _publish_ordinary_result(runtime, owned, action_id, handler, _entries(3))
@@ -333,7 +327,7 @@ async def test_action6_pending_inspection_waits_for_full_session_then_cancels_wi
         assert facts.inspection.state == int(
             enum_for("segment_inspections.state").UNCONFIRMED
         )
-        assert runtime.action(action_id)["status"] == 6
+        assert (await runtime.action(action_id))["status"] == 6
         assert owned.connection.execute(
             "SELECT COUNT(*) FROM outputs WHERE source_action_id=?", (action_id,)
         ).fetchone() == (0,)
@@ -368,16 +362,9 @@ async def test_action6_native_cancel_retains_qualified_videos_and_required_photo
             BaselineFixSave(activity_id, 0, 0, _NOW), new_operation_key(), owned
         )
         assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
-        from camctl.capture.handlers import _control_call
         from .test_record_file_completion_wait import _completed_result, _result_port
 
-        await _control_call(
-            runtime,
-            runtime.action(action_id),
-            "start_timelapse",
-            "timelapse_sent",
-            activity_facts={"sent_at": _NOW},
-        )
+        await capture_handler(handler)(action_id, runtime)
         wall = [_NOW + 100_000]
         runtime.wall_us = lambda: wall[0]
         runtime.monotonic_ns = lambda: 6_000_000_000
@@ -408,7 +395,7 @@ async def test_action6_native_cancel_retains_qualified_videos_and_required_photo
         driver = _result_port(runtime, read)
         await capture_handler(handler)(action_id, runtime)
 
-        assert runtime.action(action_id)["status"] == 6
+        assert (await runtime.action(action_id))["status"] == 6
         ref = SegmentRepository().read_active_set(action_id, owned)
         assert ref is not None
         decision = SegmentRepository().read_decision(ref, owned)

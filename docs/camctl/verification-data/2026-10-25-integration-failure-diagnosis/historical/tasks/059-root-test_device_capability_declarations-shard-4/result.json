@@ -1,0 +1,79 @@
+{
+  "id": "root/test_device_capability_declarations/shard-4",
+  "scope": "root",
+  "path": "tests/integration/test_device_capability_declarations.py",
+  "targets": [
+    "tests/integration/test_device_capability_declarations.py::test_installed_declarations_match_checkout_and_protocol_resources",
+    "tests/integration/test_device_capability_declarations.py::test_installed_sources_control_browser_cleanup_across_reload_and_restart"
+  ],
+  "estimated_seconds": 6.333871170994826,
+  "historical_failure_observed": true,
+  "parent_id": "root/test_device_capability_declarations",
+  "shard": 4,
+  "shards": 4,
+  "collection": "/tmp/camctl-itopt-final-20261025/collection/root-test_device_capability_declarations/artifacts",
+  "collected_nodes": 6,
+  "status": "failed",
+  "number": 59,
+  "worker": 3,
+  "artifacts": "/tmp/camctl-itopt-final-20261025/tasks/059-root-test_device_capability_declarations-shard-4/artifacts",
+  "cwd": "/tmp/camctl-itopt-final-20261025/tasks/059-root-test_device_capability_declarations-shard-4/source",
+  "started_utc": "2026-10-25T00:10:10.693823+00:00",
+  "command": [
+    "/tmp/camctl-itopt-final-20261025/tasks/059-root-test_device_capability_declarations-shard-4/source/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "tests/integration/test_device_capability_declarations.py::test_installed_declarations_match_checkout_and_protocol_resources",
+    "tests/integration/test_device_capability_declarations.py::test_installed_sources_control_browser_cleanup_across_reload_and_restart",
+    "-q",
+    "--durations=0",
+    "-p",
+    "integration_progress",
+    "--basetemp",
+    "/tmp/camctl-itopt-final-20261025/tasks/059-root-test_device_capability_declarations-shard-4/tmp/pytest"
+  ],
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-itopt-final-20261025/control:/tmp/camctl-itopt-final-20261025/tasks/059-root-test_device_capability_declarations-shard-4/source/apps/camctl/src",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-itopt-final-20261025/workers/3/python-cache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-itopt-final-20261025/workers/3/project-env",
+    "UV_CACHE_DIR": "/tmp/camctl-itopt-final-20261025/workers/3/uv-cache",
+    "UV_OFFLINE": "1",
+    "TMPDIR": "/tmp/camctl-itopt-final-20261025/tasks/059-root-test_device_capability_declarations-shard-4/tmp"
+  },
+  "preparations": [
+    {
+      "label": "package-resources",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-itopt-final-20261025/tasks/059-root-test_device_capability_declarations-shard-4/source/apps/camctl/scripts/sync_resources.py"
+      ],
+      "cwd": "/tmp/camctl-itopt-final-20261025/tasks/059-root-test_device_capability_declarations-shard-4/source",
+      "started_utc": "2026-10-25T00:10:10.930811+00:00",
+      "pid": 495756,
+      "exit_code": 0,
+      "finished_utc": "2026-10-25T00:10:10.968373+00:00",
+      "wall_seconds": 0.0375570929973037
+    }
+  ],
+  "preparation": "package-resources",
+  "preparation_pid": 495756,
+  "pid": 495758,
+  "execution_started_utc": "2026-10-25T00:10:10.969280+00:00",
+  "progress": {
+    "status": "finished",
+    "exit_code": 1,
+    "collected": 2,
+    "outcomes": {
+      "passed": 1,
+      "failed": 1
+    },
+    "subchecks": {},
+    "elapsed_seconds": 13.643745296998532,
+    "utc": "2026-10-25T00:10:24.936015+00:00",
+    "pid": 495758
+  },
+  "exit_code": 1,
+  "finished_utc": "2026-10-25T00:10:25.034081+00:00",
+  "wall_seconds": 14.190618387998256
+}

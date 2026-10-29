@@ -1,0 +1,7 @@
+.                                                                        [100%]
+============================== slowest durations ===============================
+83.26s call     tests/integration/test_hasselblad_photo_parameters.py::test_installed_hasselblad_parameter_validation_agrees_across_consumers
+1.55s setup    tests/integration/test_hasselblad_photo_parameters.py::test_installed_hasselblad_parameter_validation_agrees_across_consumers
+
+(1 durations < 0.005s hidden.  Use -vv to show these durations.)
+1 passed in 84.86s (0:01:24)

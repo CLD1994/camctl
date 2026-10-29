@@ -1,0 +1,13 @@
+{
+  "status": "finished",
+  "exit_code": 1,
+  "collected": 936,
+  "outcomes": {
+    "failed": 685,
+    "passed": 251
+  },
+  "subchecks": {},
+  "elapsed_seconds": 232.44809041899862,
+  "utc": "2026-10-26T00:53:14.123123+00:00",
+  "pid": 1988271
+}

@@ -16,6 +16,9 @@ from decimal import Decimal
 
 import pytest
 
+from ..support.outputs import output_operation
+from ..support.output_planning import capture_operation
+
 from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import new_operation_key
 from camctl.history.validators import EventContext, EventValidationError, validate_event
@@ -29,11 +32,9 @@ from camctl.outputs.copy import (
 )
 from camctl.outputs.slots import SlotRequest
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from camctl.persistence.repositories import outputs
 from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
-from camctl.persistence.transaction import TransactionScope
 
 from .test_copy_resume import _command, _make_roots, _qualified, _seed_failed_attempts
 from .test_copy_segments import _CONTENT, _drive, _target_path
@@ -60,11 +61,14 @@ class _FixedDigest:
 
 
 def _complete(owned, roots, copy_id, *, digest=None, max_recopies=1):
-    context = CompletionContext(
-        repository=OutputsRepository(), owned=owned, roots=roots,
-        occurred_at=_NOW + 5, digest=digest, max_recopies=max_recopies,
-    )
-    return asyncio.run(complete_copy(copy_id, context))
+    return asyncio.run(output_operation(
+        owned, complete_copy, copy_id, CompletionContext,
+        repository=OutputsRepository(),
+        roots=roots,
+        occurred_at=_NOW + 5,
+        digest=digest,
+        max_recopies=max_recopies,
+    ))
 
 
 def _row(owned, sql: str, *params):
@@ -312,8 +316,12 @@ def test_recopy_round_restarts_target_and_completes(complete_env):
     first = _complete(owned, roots, qualification.copy_id)
     assert first.phase is CompletionPhase.RECOPY_REGISTERED
     # 截断/重建并保存重置完成，再按更正后的源摘要从头拷贝一轮。
-    asyncio.run(prepare_copy(qualification.copy_id, CopyContext(
-        repository=OutputsRepository(), owned=owned, roots=roots, occurred_at=_NOW + 6)))
+    asyncio.run(output_operation(
+        owned, prepare_copy, qualification.copy_id, CopyContext,
+        repository=OutputsRepository(),
+        roots=roots,
+        occurred_at=_NOW + 6,
+    ))
     owned.connection.execute(
         "UPDATE file_copies SET source_sha256=? WHERE id=?",
         (_CONTENT_DIGEST, qualification.copy_id))
@@ -505,14 +513,9 @@ def test_save_prepared_key_recovers_first_response(complete_env):
 # ---- 正式守卫 ----
 
 
-def _proposal(owned, command):
-    owned.connection.execute("BEGIN")
-    try:
-        plan = command.plan(TransactionScope(owned.connection, 1, 1))
-    finally:
-        owned.connection.rollback()
-    assert plan.events, "提案必须产生事件"
-    return plan
+def _proposal(owned, operation, request):
+    return capture_operation(owned, lambda database: operation(
+        request, new_operation_key(), database))
 
 
 def _validate(plan, events=None, state_rows=None):
@@ -544,25 +547,25 @@ def _validate(plan, events=None, state_rows=None):
 
 def test_guard_accepts_real_verification_and_recopy_events(complete_env):
     owned, roots, qualification = complete_env
-    verify = _proposal(owned, outputs._IntegritySaveCommand(VerificationSave(
+    verify = _proposal(owned, OutputsRepository().save_verification, VerificationSave(
         copy_id=qualification.copy_id, state=3, source_sha256=_CONTENT_DIGEST,
         target_sha256=_CONTENT_DIGEST, error_json=None, occurred_at=_NOW + 5,
-    ), new_operation_key()))
+    ))
     _validate(verify)
     _seed_wrong_source_digest(owned, qualification.copy_id)
-    recopy = _proposal(owned, outputs._RecopyCommand(RecopyRegistration(
+    recopy = _proposal(owned, OutputsRepository().register_recopy, RecopyRegistration(
         copy_id=qualification.copy_id, source_sha256=_WRONG_DIGEST,
         target_sha256=_CONTENT_DIGEST, max_recopies=1, occurred_at=_NOW + 5,
-    ), new_operation_key()))
+    ))
     _validate(recopy)
 
 
 def test_guard_rejects_matched_with_unequal_digests(complete_env):
     owned, roots, qualification = complete_env
-    plan = _proposal(owned, outputs._IntegritySaveCommand(VerificationSave(
+    plan = _proposal(owned, OutputsRepository().save_verification, VerificationSave(
         copy_id=qualification.copy_id, state=3, source_sha256=_CONTENT_DIGEST,
         target_sha256=_CONTENT_DIGEST, error_json=None, occurred_at=_NOW + 5,
-    ), new_operation_key()))
+    ))
     event = plan.events[0]
     row = event.rows[0]
     variant = replace(
@@ -579,10 +582,10 @@ def test_guard_rejects_recopy_without_full_progress(complete_env):
         "UPDATE file_copies SET verification_state=4, target_sha256=? WHERE id=?",
         (_CONTENT_DIGEST, qualification.copy_id))
     owned.connection.commit()
-    plan = _proposal(owned, outputs._RecopyCommand(RecopyRegistration(
+    plan = _proposal(owned, OutputsRepository().register_recopy, RecopyRegistration(
         copy_id=qualification.copy_id, source_sha256=_WRONG_DIGEST,
         target_sha256=_CONTENT_DIGEST, max_recopies=1, occurred_at=_NOW + 5,
-    ), new_operation_key()))
+    ))
     event = next(e for e in plan.events if e.event_type == 22 and e.reason == 4)
     row = event.rows[0]
     variant = replace(
@@ -601,10 +604,10 @@ def test_guard_rejects_release_without_prepared_copy(complete_env):
             copy_id=qualification.copy_id, state=3, source_sha256=_CONTENT_DIGEST,
             target_sha256=_CONTENT_DIGEST, error_json=None, occurred_at=_NOW + 5),
         new_operation_key(), owned)
-    plan = _proposal(owned, outputs._PreparedSaveCommand(PreparedRequest(
+    plan = _proposal(owned, OutputsRepository().save_prepared, PreparedRequest(
         copy_id=qualification.copy_id, target_sha256=_CONTENT_DIGEST,
         size_bytes=10, occurred_at=_NOW + 6,
-    ), new_operation_key()))
+    ))
     release = next(e for e in plan.events if e.event_type == 21)
     tampered = {
         table: {row_id: dict(rows) for row_id, rows in rows.items()}

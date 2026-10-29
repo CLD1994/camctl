@@ -1,0 +1,91 @@
+--- apps/camctl/src/camctl/persistence/repositories/result_pages.py（原函数）
++++ apps/camctl/src/camctl/persistence/repositories/result_pages.py（实验函数）
+@@ -35,12 +35,15 @@
+     create_reason = _FILE_EVENT["branches"]["CREATE"]["reason"]
+     page_entries = {entry.identity: entry for entry in saved.page.entries}
+     file_ids = tuple(saved.file_ids)
++    file_id_by_identity = dict(file_ids)
++    created_event_by_file = {}
+     expected_created = []
+     for identity, file_id in file_ids:
+         facts = row_facts(connection, "device_files", file_id)
+         if facts is None or facts["identity_key"] != file_identity_key(
+                 action["device_id"], action["driver_id"], identity):
+             raise ConsistencyError("原页文件ID与完整身份登记不符")
++        created_event_by_file[file_id] = facts["created_event_id"]
+         if transaction.first_event_id <= facts["created_event_id"] <= transaction.last_event_id:
+             expected_created.append((identity, file_id, facts["created_event_id"]))
+         elif facts["created_event_id"] >= transaction.first_event_id:
+@@ -49,7 +52,6 @@
+                             for identity, file_id, created_id in expected_created]
+     actual_created = []
+     for create in create_events:
+-        validate_event_structure(create)
+         if ((create.event_type, create.reason) != (create_type, create_reason)
+                 or create.occurred_at != event.occurred_at or len(create.rows) != 1):
+             raise ConsistencyError("结果页APPEND前包含非单行首次发现事件")
+@@ -61,7 +63,7 @@
+         except (KeyError, TypeError, ValueError) as error:
+             raise ConsistencyError("原首次发现身份不可解释") from error
+         identity = identity_key[2] if isinstance(identity_key, list) and len(identity_key) == 3 else None
+-        file_id = dict(file_ids).get(identity)
++        file_id = file_id_by_identity.get(identity)
+         entry = page_entries.get(identity)
+         if file_id is None or entry is None or row.row_id != file_id:
+             raise ConsistencyError("原首次发现不是APPEND的实际差集身份")
+@@ -71,12 +73,10 @@
+             file_identity_key(action["device_id"], action["driver_id"], identity))
+         if dict(row.after.values) != dict(expected_row.after.values):
+             raise ConsistencyError("原首次发现没有精确保存该页的原文件事实")
+-        if facts := row_facts(connection, "device_files", file_id):
+-            if facts["created_event_id"] != create.event_id:
+-                raise ConsistencyError("原首次发现的持久文件创建事件身份不同")
++        if created_event_by_file[file_id] != create.event_id:
++            raise ConsistencyError("原首次发现的持久文件创建事件身份不同")
+         actual_created.append((identity, file_id, create.event_id))
+-    expected_create_order = [item for item in file_ids if any(
+-        identity == item[0] and file_id == item[1] for identity, file_id, _ in expected_created_ids)]
++    expected_create_order = [(identity, file_id) for identity, file_id, _ in expected_created_ids]
+     if actual_created != [(identity, file_id, created_id) for identity, file_id, created_id in expected_created_ids]:
+         raise ConsistencyError("结果页CREATE前缀没有精确覆盖本页首次发现")
+     if [(identity, file_id) for identity, file_id, _ in actual_created] != expected_create_order:
+@@ -117,7 +117,6 @@
+             or index.occurred_at != event.occurred_at
+             or index.evidence != {"result_page_index": {"page_event_id": append_id}}):
+         raise ConsistencyError("原页INDEX_FILES身份、证据、时刻或事务位置不符")
+-    validate_event_structure(index)
+     expected_rows = []
+     for pair in file_ids:
+         identity, file_id = pair
+--- apps/camctl/src/camctl/persistence/repositories/segment_transactions.py（原函数）
++++ apps/camctl/src/camctl/persistence/repositories/segment_transactions.py（实验函数）
+@@ -3,13 +3,14 @@
+     selected=assessment.default_scope
+     def expected():
+         if selected.state is not DefaultScopeState.NONEMPTY:return
++        setrow=storage._set(reader.connection,request.ref,fixed=True)
+         cursor=None
+         while True:
+             page=storage.read_segment_members(request.ref,cursor,128,reader)
+             for stored in page.items:
+                 member=stored.member
+                 if member.cursor is None or not selected.first_cursor<=member.cursor<=selected.last_cursor:continue
+-                candidate=storage.segment_output_candidate(request.ref,stored.member_id,reader)
++                candidate=storage._output_candidate(reader.connection,setrow,stored)
+                 if candidate is not None and candidate.kind is OutputKind.ORIGINAL:yield candidate.member_id
+             if page.next_cursor is None:return
+             cursor=page.next_cursor
+--- apps/camctl/src/camctl/persistence/repositories/segment_transactions.py（原函数）
++++ apps/camctl/src/camctl/persistence/repositories/segment_transactions.py（实验函数）
+@@ -37,8 +37,11 @@
+         return _created_output(db,transaction,request.ref.action_id,file_id,kind)
+     output_id=header['first_output_id'];origin_id=header['first_origin_id']
+     originals=previews=0
++    preview_seen=False
+     for wanted in (OutputKind.ORIGINAL,OutputKind.PREVIEW):
++        if wanted is OutputKind.PREVIEW and not preview_seen:continue
+         for candidate in _candidates(request,reader,header['batch_size']):
++            if candidate.kind is OutputKind.PREVIEW:preview_seen=True
+             if candidate.kind is not wanted:continue
+             member=row_facts(db,'segment_members',candidate.member_id)
+             file=storage._fixed_file(db,candidate.file_id,member['file_event_id'])

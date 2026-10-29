@@ -1,0 +1,217 @@
+{
+  "source_commit": "509002c25308eda98e0096068d3510485938027e",
+  "python": "3.11.17",
+  "node": "24.22.1",
+  "selected_tests": 8,
+  "baseline": {
+    "outcome": "failed",
+    "pytest_exit_code": 1,
+    "pytest_seconds": 283.96,
+    "setup_seconds": 17.97,
+    "call_seconds": 265.4,
+    "teardown_seconds": 0.03,
+    "client_starts": 3,
+    "client_seconds": 8.50872035897919,
+    "client_operations": [
+      {
+        "operation": "export",
+        "world": "/tmp/camctl-quality-evidence/action6/baseline/data/test_installed_action6_native_0/action6-native",
+        "output": "/tmp/camctl-quality-evidence/action6/baseline/data/test_installed_action6_native_0/action6-native/client-export.json",
+        "outcome": "passed",
+        "elapsed_seconds": 4.524798469996313
+      },
+      {
+        "operation": "export",
+        "world": "/tmp/camctl-quality-evidence/action6/baseline/data/test_installed_action6_native_0/action6-native",
+        "output": "/tmp/camctl-quality-evidence/action6/baseline/data/test_installed_action6_native_0/action6-native/client-export.json",
+        "outcome": "passed",
+        "elapsed_seconds": 2.1603796549898107
+      },
+      {
+        "operation": "export",
+        "world": "/tmp/camctl-quality-evidence/action6/baseline/data/test_installed_action6_native_0/action6-native",
+        "output": "/tmp/camctl-quality-evidence/action6/baseline/data/test_installed_action6_native_0/action6-native/client-export.json",
+        "outcome": "passed",
+        "elapsed_seconds": 1.8235422339930665
+      }
+    ],
+    "reason": "state_db_error: 拍摄流程状态库前提失效: 分段保存尚未可靠完成: 分段保存只接受固定大小模型",
+    "successful_cost_comparison_available": false
+  },
+  "narrow_verification": {
+    "nodeids": [
+      "test_wait_observes_current_run_result_while_host_stays_alive[error]",
+      "test_wait_limits_incompatible_terminal_to_requested_actions (all six)"
+    ],
+    "passed": 7,
+    "seconds": 14.46,
+    "exit_code": 0
+  },
+  "scope": {
+    "production_modified": false,
+    "configuration_modified": false,
+    "dependency_modified": false,
+    "removed_nodes": 0,
+    "reduced_scale": false,
+    "relaxed_assertions": false
+  },
+  "after_failure_diagnostic": {
+    "outcome": "failed_with_current_run_diagnostic",
+    "pytest_exit_code": 1,
+    "pytest_seconds": 29.1,
+    "setup_seconds": 13.19,
+    "call_seconds": 15.42,
+    "teardown_seconds": 0.02,
+    "client_starts": 3,
+    "client_seconds": 5.2582108240021626,
+    "client_operations": [
+      {
+        "operation": "export",
+        "world": "/tmp/camctl-quality-evidence/action6/after-failure/data/test_installed_action6_native_0/action6-native",
+        "output": "/tmp/camctl-quality-evidence/action6/after-failure/data/test_installed_action6_native_0/action6-native/client-export.json",
+        "outcome": "passed",
+        "elapsed_seconds": 1.5303614669974195
+      },
+      {
+        "operation": "export",
+        "world": "/tmp/camctl-quality-evidence/action6/after-failure/data/test_installed_action6_native_0/action6-native",
+        "output": "/tmp/camctl-quality-evidence/action6/after-failure/data/test_installed_action6_native_0/action6-native/client-export.json",
+        "outcome": "passed",
+        "elapsed_seconds": 1.958071539993398
+      },
+      {
+        "operation": "export",
+        "world": "/tmp/camctl-quality-evidence/action6/after-failure/data/test_installed_action6_native_0/action6-native",
+        "output": "/tmp/camctl-quality-evidence/action6/after-failure/data/test_installed_action6_native_0/action6-native/client-export.json",
+        "outcome": "passed",
+        "elapsed_seconds": 1.7697778170113452
+      }
+    ],
+    "unchanged_success_budget_seconds": 240,
+    "budget_launcher_exit_code": 1,
+    "successful_cost_comparison_available": false,
+    "interpretation": "同一既有生产state_db_error得到提前失败诊断；不是业务成功或成功路径提速。单次采样且同期有其他独立任务，墙钟差不作为稳定比例。"
+  },
+  "session_verification": {
+    "helper_original_commit": "aff87d6b979b5970aa49d6e5e0f96697bedb2733",
+    "helper_local_commit": "ce808f27",
+    "node_counts": {
+      "node_process_starts": 1,
+      "application_starts": 1,
+      "files_starts": 1,
+      "http_server_starts": 0,
+      "browser_starts": 0
+    },
+    "node_status": "closed",
+    "python_startup": {
+      "started_monotonic_ns": 100883300802170,
+      "finished_monotonic_ns": 100884376566778,
+      "elapsed_seconds": 1.075764608,
+      "outcome": "passed"
+    },
+    "python_close": {
+      "started_monotonic_ns": 100892387587706,
+      "finished_monotonic_ns": 100892428349841,
+      "elapsed_seconds": 0.040762135,
+      "outcome": "passed"
+    },
+    "phase_timeout_seconds": 120,
+    "commands": [
+      {
+        "id": 1,
+        "operation": "export",
+        "elapsed_seconds": 0.21084854,
+        "outcome": "passed",
+        "contexts_after": {
+          "node_process_starts": 1,
+          "application_starts": 1,
+          "files_starts": 1,
+          "http_server_starts": 0,
+          "browser_starts": 0
+        }
+      },
+      {
+        "id": 2,
+        "operation": "export",
+        "elapsed_seconds": 0.202483049,
+        "outcome": "passed",
+        "contexts_after": {
+          "node_process_starts": 1,
+          "application_starts": 1,
+          "files_starts": 1,
+          "http_server_starts": 0,
+          "browser_starts": 0
+        }
+      },
+      {
+        "id": 3,
+        "operation": "export",
+        "elapsed_seconds": 0.006921285,
+        "outcome": "passed",
+        "contexts_after": {
+          "node_process_starts": 1,
+          "application_starts": 1,
+          "files_starts": 1,
+          "http_server_starts": 0,
+          "browser_starts": 0
+        }
+      },
+      {
+        "id": 4,
+        "operation": "close",
+        "elapsed_seconds": 0.003586962,
+        "outcome": "passed",
+        "contexts_after": {
+          "node_process_starts": 1,
+          "application_starts": 1,
+          "files_starts": 1,
+          "http_server_starts": 0,
+          "browser_starts": 0
+        }
+      }
+    ],
+    "unique_receipts": [
+      {
+        "id": 1,
+        "path": "/tmp/camctl-quality-evidence/action6/session-native/data/test_installed_action6_native_0/action6-native/client-export-session-1.json",
+        "exists": true
+      },
+      {
+        "id": 2,
+        "path": "/tmp/camctl-quality-evidence/action6/session-native/data/test_installed_action6_native_0/action6-native/client-export-session-2.json",
+        "exists": true
+      },
+      {
+        "id": 3,
+        "path": "/tmp/camctl-quality-evidence/action6/session-native/data/test_installed_action6_native_0/action6-native/client-export-session-3.json",
+        "exists": true
+      }
+    ],
+    "business_outcome": "原生产state_db_error；未执行到媒体、报告导入或ACK，不能记业务通过。",
+    "mode_freeze": {
+      "exit_code": 0,
+      "passed": 1,
+      "pytest_seconds": 10.09,
+      "setup_seconds": 1.09,
+      "call_seconds": 8.51,
+      "teardown_seconds": 0.01
+    },
+    "native_prepath": {
+      "exit_code": 1,
+      "pytest_seconds": 22.64,
+      "setup_seconds": 10.37,
+      "call_seconds": 11.67,
+      "teardown_seconds": 0.06
+    },
+    "full_module_executed": false,
+    "collected_nodes": 8,
+    "assertions": {
+      "baseline_assertions": 127,
+      "candidate_assertions": 127,
+      "all_assertions_unchanged_in_order": true,
+      "baseline_source": "baseline/source.py",
+      "candidate_source": "session-mode/source.py"
+    },
+    "session_commit": "5b0d15a1"
+  }
+}

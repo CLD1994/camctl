@@ -1,0 +1,12 @@
+{
+  "summary.json": "1a3fafb3c7cd75e7a53c851e641f514a69a21d45cc78d59fd97356adae99461f",
+  "diagnose.py": "b4ceaae58399cfa974c5c27e7c63a9746106d20ecd389caff031a63983686613",
+  "failures.tsv": "52356f7d11492b6fa3621931a49b818d65b63876a5627c3a3d3a2917f42717dd",
+  "initial-test-provenance.json": "9fc5470b01078cf38fe58e09c14509bf9bb5ffa08cb7943d7a1fe102d2a81e82",
+  "interface-provenance.json": "3520b2351b021669202e5de1bb1bae88727fa0063b4d228715c6a6926aa32d46",
+  "diagnostic-receipt.json": "0554e63adac8b459a76a559361c23956fbb3c7da5919aab8aa50bf77c5b8ab73",
+  "diagnosis.md": "ac40c9cc887b4a184be2494b2a7a0fa5bddf2118ce3872d57d76da3b333a81b9",
+  "initial-status.json": "b0763b0b04f149b0af0ea454f7409fa1992c8e1d56fa61f1145612fd7a12187d",
+  "diagnostic.log": "7f9a25b6d856bfea8c363c1d50d10aeb4652e538f5a37a8fb306cb896846f52a",
+  "failures.json": "d0800ff125fe0c8ad3e65005e60a1b9bf2d8cd977c89d2ed213ce940d71ac98e"
+}

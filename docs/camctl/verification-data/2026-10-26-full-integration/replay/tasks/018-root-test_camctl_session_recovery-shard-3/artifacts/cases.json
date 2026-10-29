@@ -1,0 +1,40 @@
+[
+  {
+    "nodeid": "tests/integration/test_camctl_session_recovery.py::test_future_action_waits_and_past_window_expires",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009625020029488951
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 23.76445947100001
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0648480189993279
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 23.830269992002286
+  },
+  {
+    "nodeid": "tests/integration/test_camctl_session_recovery.py::test_report_failure_preserves_device_work_and_redelivers",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013334300019778311
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 21.158546204998856
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.011479477005195804
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 21.17135911200603
+  }
+]

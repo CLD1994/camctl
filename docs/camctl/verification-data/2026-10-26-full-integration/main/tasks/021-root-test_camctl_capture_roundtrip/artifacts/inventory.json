@@ -1,0 +1,4 @@
+[
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/021-root-test_camctl_capture_roundtrip/source/tests/integration/test_camctl_capture_roundtrip.py::test_photo_keeps_completed_outputs",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/021-root-test_camctl_capture_roundtrip/source/tests/integration/test_camctl_capture_roundtrip.py::test_timelapse_recovers_remaining_wait"
+]

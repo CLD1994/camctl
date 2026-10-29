@@ -1,46 +1,112 @@
-"""普通／残留入口先保存真实完整 READ，再按必要摘要的绑定错误收场。"""
+"""普通与残留入口先保存真实完整READ，再按必要摘要的绑定错误收场。"""
 
-from dataclasses import replace
 import json
+import os
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from camctl.bootstrap import capture_assembly, lifecycle
 from camctl.capture.media_flow import run_recording_media
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError
-from camctl.devices import bindings
-from camctl.devices.drivers.registry import DriverRegistry
-from camctl.persistence.repositories.acceptance import register_acceptance_guards
-from camctl.persistence.repositories.capture import CaptureRepository, register_capture_guards
-from camctl.persistence.repositories.operations import OperationRepository, register_operation_guards
-from camctl.persistence.repositories.outputs import register_outputs_guards
-from camctl.persistence.repositories.scheduling import register_window_guard
-from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+from camctl.devices.bindings import check_binding
+from camctl.persistence.repositories.capture import CaptureRepository
+from camctl.persistence.repositories.operations import OperationRepository
 
 from ..capture.media_retry_fixtures import media_pipeline as pipeline  # noqa: F401
 from ..capture.test_input_copy import _CONTENT
-from .test_read_default_consumers import (
-    _BeforeBusinessCandidates, _CandidateClock, _default_world, _snapshot,
-)
-from .test_read_held_end_required_digest import _held_without_digest, _hold_before_digest
-
+from ..support.bootstrap_consumers import consumer_world
+from .test_read_default_consumers import _snapshot
+from .test_read_held_end_required_digest import _held_without_digest
 
 pytestmark = pytest.mark.asyncio
-register_acceptance_guards()
-register_window_guard()
-register_operation_guards()
-register_capture_guards()
-register_outputs_guards()
+
+
+def _binding_port(change):
+    devices = {} if change == "missing" else {"cam-1": {
+        "kind": "camera", "driver": "camctl-adb" if change == "matched" else "alternate-camera"}}
+    return lambda saved: check_binding(saved, SimpleNamespace(devices=devices))
+
+
+async def _raw_world(pipeline, capture_resources, monkeypatch):
+    """真实源已交付完整End，实际主机摘要打开失败，尚未形成Finish。"""
+    world = await consumer_world(pipeline, capture_resources)
+    hashes = []
+    original_open = os.open
+
+    def unavailable(path, flags, *args, **kwargs):
+        if isinstance(path, (str, Path)) and flags & os.O_ACCMODE == os.O_RDONLY:
+            target = Path(path)
+            if target.is_relative_to(world.roots.staging) and target.is_file():
+                hashes.append(target)
+                raise OSError("READ已实际结束，主机摘要文件暂不可读")
+        return original_open(path, flags, *args, **kwargs)
+
+    try:
+        ended_at = world.wall[0]
+        with monkeypatch.context() as fault:
+            fault.setattr(os, "open", unavailable)
+            with pytest.raises(ConsistencyError):
+                await run_recording_media(world.runtime.media, 1, 1, world.source_id)
+        ticket, progress = _held_without_digest(world.owned, world.runtime, world.reader)
+        assert len(hashes) == len(world.reader.requests) == 1
+        assert world.ends and all(end.stopped and end.error is None and end.bytes_read == len(_CONTENT)
+                                  for end in world.ends)
+        assert hashes[0].read_bytes() == _CONTENT
+        assert world.driver.calls == [] and world.tools() == []
+        action_id, processing_id = world.owned.connection.execute(
+            "SELECT action_id,id FROM recording_processing WHERE source_device_file_id=?",
+            (world.source_id,)).fetchone()
+        assert world.owned.connection.execute(
+            "SELECT COUNT(*) FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
+            " WHERE r.action_id=? AND r.id!=? AND (t.status=1 OR t.result_json IS NULL)",
+            (action_id, ticket.run_id)).fetchone() == (0,)
+        copy_id = int(ticket.target_id)
+        target_id, = world.owned.connection.execute(
+            "SELECT target_file_id FROM file_copies WHERE id=?", (copy_id,)).fetchone()
+        raw = SimpleNamespace(world=world, ticket=ticket, progress=progress, copy_id=copy_id,
+            action_id=action_id, processing_id=processing_id, ended_at=ended_at, hashes=hashes,
+            run=_snapshot(world.owned, "operation_runs", ticket.run_id),
+            source=_snapshot(world.owned, "device_files", world.source_id), target_id=target_id,
+            target=_snapshot(world.owned, "intermediate_files", target_id),
+            history=world.owned.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall(),
+            other_attempts=world.owned.connection.execute(
+                "SELECT * FROM operation_attempts WHERE run_id!=? ORDER BY id", (ticket.run_id,)).fetchall())
+        await world.reconnect()
+        world.wall[0] += 1000
+        world.prime_clock()
+        return raw
+    except BaseException:
+        await world.close()
+        world.owned.connection.close()
+        raise
+
+
+def _assert_raw_preserved(raw, *, released):
+    world, owned = raw.world, raw.world.owned
+    progress = owned.connection.execute(
+        "SELECT committed_bytes,source_size,round,recopies_used,source_sha256,target_sha256,verification_state,slot_device_id"
+        " FROM file_copies WHERE id=?", (raw.copy_id,)).fetchone()
+    assert progress[:-1] == raw.progress[:-1]
+    assert progress[-1] == (None if released else raw.progress[-1])
+    run = _snapshot(owned, "operation_runs", raw.ticket.run_id)
+    assert {**run, "status": raw.run["status"], "error_json": raw.run["error_json"]} == raw.run
+    assert _snapshot(owned, "device_files", world.source_id) == raw.source
+    assert _snapshot(owned, "intermediate_files", raw.target_id) == raw.target
+    assert raw.hashes[0].read_bytes() == _CONTENT
+    assert owned.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall()[:len(raw.history)] == raw.history
+    assert owned.connection.execute(
+        "SELECT * FROM operation_attempts WHERE run_id!=? ORDER BY id", (raw.ticket.run_id,)).fetchall() == raw.other_attempts
+    assert len(world.reader.requests) == len(raw.hashes) == 1
+    assert world.driver.calls == [] and world.tools() == []
 
 
 @pytest.mark.parametrize("pipeline", [True], indirect=True)
 @pytest.mark.parametrize("entrance", ["normal", "residual"])
 @pytest.mark.parametrize("change", ["missing", "mismatch"])
 async def test_default_entry_preserves_distinct_source_observer_and_owner(
-    pipeline, monkeypatch, entrance, change,
-):
+        pipeline, capture_resources, monkeypatch, entrance, change):
     owned, _roots, source_id = pipeline
     row = owned.connection.execute(
         "SELECT f.observer_action_id,f.source_action_id,p.action_id,"
@@ -50,299 +116,93 @@ async def test_default_entry_preserves_distinct_source_observer_and_owner(
         " WHERE f.id=?", (source_id,)).fetchone()
     assert row is not None and row[0] != row[1] and row[1] == row[2]
     assert row[3:5] == row[5:7]
-    await test_default_entry_saves_clean_read_with_missing_required_sha_before_candidates(
-        pipeline, monkeypatch, entrance, change)
-
-
-class _ResidualReadBoundary:
-    """真实 SQLite 透传；旧调用恢复查询前核实原 READ 已可靠保存。"""
-
-    def __init__(self, connection, check):
-        self.connection, self.check = connection, check
-        self.hits = 0
-
-    def execute(self, sql, parameters=()):
-        if " ".join(sql.split()).startswith("SELECT t.id, t.attempt_no, r.id, r.kind"):
-            self.hits += 1
-            self.check()
-            raise _BeforeBusinessCandidates
-        return self.connection.execute(sql, parameters)
-
-    def __getattr__(self, name):
-        return getattr(self.connection, name)
-
-
-def _register_alternate_driver(monkeypatch):
-    # 替代驱动有合法登记；配置与原 READ 参数保持固定，不重建第二套工厂。
-    actual_factory = capture_assembly.session_capture_assembly
-
-    def factory(**kwargs):
-        original = kwargs["drivers"].entry("camctl-adb")
-        return actual_factory(**{**kwargs, "drivers": DriverRegistry((
-            original, replace(original, driver_id="alternate-camera")))})
-
-    monkeypatch.setattr(capture_assembly, "session_capture_assembly", factory)
-
-
-def _current_binding_fact(monkeypatch, change):
-    """控制稳定绑定协作者的可用性；真正 check_binding 产生分类和详情。"""
-    actual_check = bindings.check_binding
-    driver_id = "camctl-adb" if change == "matched" else "alternate-camera"
-    fault_config = SimpleNamespace(devices={} if change == "missing" else {
-        "cam-1": {"kind": "camera", "driver": driver_id}})
-    checks = []
-
-    def check(saved, current):
-        if saved.device_id != "cam-1":
-            return actual_check(saved, current)
-        result = actual_check(saved, fault_config)
-        checks.append(result)
-        return result
-
-    monkeypatch.setattr(bindings, "check_binding", check)
-    monkeypatch.setattr(capture_assembly, "check_binding", check)
-    return checks
+    await _assert_default_binding(pipeline, capture_resources, monkeypatch, entrance, change)
 
 
 @pytest.mark.parametrize("entrance", ["normal", "residual"])
 @pytest.mark.parametrize("change", ["missing", "mismatch"])
 async def test_default_entry_saves_clean_read_with_missing_required_sha_before_candidates(
-    pipeline, monkeypatch, entrance, change,
-):
-    owned, roots, source_id = pipeline
-    _register_alternate_driver(monkeypatch)
-    world = await _default_world(pipeline, monkeypatch)
-    deps, factories, context, reader, driver, ends, wall, factory_calls = world
-    reopened = None
+        pipeline, capture_resources, monkeypatch, entrance, change):
+    await _assert_default_binding(pipeline, capture_resources, monkeypatch, entrance, change)
+
+
+async def _assert_default_binding(pipeline, capture_resources, monkeypatch, entrance, change):
+    raw = await _raw_world(pipeline, capture_resources, monkeypatch)
+    world, ticket = raw.world, raw.ticket
+    saves = []
+    actual_finish, actual_binding = OperationRepository.finish_attempt, CaptureRepository.finish_binding_failure
+
+    def finish(repository, request, key, current):
+        if request.ticket.operation == "read":
+            saves.append(("finish", request, key))
+        return actual_finish(repository, request, key, current)
+
+    def binding(repository, request, key, current):
+        saves.append(("binding", request, key))
+        return actual_binding(repository, request, key, current)
+
+    monkeypatch.setattr(OperationRepository, "finish_attempt", finish)
+    monkeypatch.setattr(CaptureRepository, "finish_binding_failure", binding)
     try:
-        # 原完整 End 由普通默认 factory 的真实任务取得，没有复制任何 READ 集合。
-        action_id, processing_id = owned.connection.execute(
-            "SELECT action_id,id FROM recording_processing WHERE source_device_file_id=?",
-            (source_id,)).fetchone()
-        runtime = factories[0](owned, "cam-1")
-        flow = runtime.media
-        assert flow is not None
-        completions = _hold_before_digest(monkeypatch)
-        with pytest.raises(ConsistencyError):
-            await run_recording_media(flow, action_id, processing_id, source_id)
-        ticket, before_progress = _held_without_digest(owned, flow, reader)
-        copy_id = int(ticket.target_id)
-        held = flow.pending_read_ends[copy_id]
-        assert held.evidence is flow.evidence and held.resume is not None
-        assert ends and all(end.stopped is True and end.error is None
-                           and end.bytes_read == len(_CONTENT) for end in ends)
-        assert held.end in ends and held.occurred_at == wall[0]
-        assert flow.pending_read_results == flow.pending_read_business == {}
-        assert len(completions) == 1 and driver.calls == []
-        before_run = _snapshot(owned, "operation_runs", ticket.run_id)
-        assert before_run["status"] == int(enum_for("operation_runs.status").ACTIVE)
-        assert runtime.action(action_id)["status"] == int(enum_for("actions.status").RUNNING)
-        assert runtime.action(action_id)["cancel_requested"] == 0
-        # 除本次原 READ 外的全部实际调用都已可靠结束，不能用业务失败代替调用收场。
-        assert owned.connection.execute(
-            "SELECT COUNT(*) FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
-            " WHERE r.action_id=? AND r.id<>? AND (t.status=1 OR t.result_json IS NULL)",
-            (action_id, ticket.run_id)).fetchone() == (0,)
-        before_source = _snapshot(owned, "device_files", source_id)
-        target_id, = owned.connection.execute(
-            "SELECT target_file_id FROM file_copies WHERE id=?", (copy_id,)).fetchone()
-        before_target = _snapshot(owned, "intermediate_files", target_id)
-        target_path = roots.staging / before_target["relative_path"]
-        assert target_path.read_bytes() == _CONTENT
-        history = owned.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall()
-        original_attempts = owned.connection.execute(
-            "SELECT * FROM operation_attempts WHERE run_id<>? ORDER BY id", (ticket.run_id,)).fetchall()
-
-        owned.connection.close()
-        reopened = open_existing(roots.staging.parent / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
-        assert reopened.metadata == owned.metadata
-        # 新连接没有重建实际结果；原会话持有物和字节事实分别核实。
-        assert reopened.connection.execute(
-            "SELECT status,result_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
-            (ticket.run_id, ticket.attempt_id)).fetchone() == (1, None)
-        assert flow.pending_read_ends[copy_id] == held
-        wall[0] += 1000
-        binding_checks = _current_binding_fact(monkeypatch, change)
-        saves = []
-        actual_finish, actual_binding = OperationRepository.finish_attempt, CaptureRepository.finish_binding_failure
-
-        def finish(repository, request, key, current):
-            if request.ticket.operation == "read":
-                saves.append(("finish", request, key))
-            return actual_finish(repository, request, key, current)
-
-        def binding(repository, request, key, current):
-            saves.append(("binding", request, key))
-            return actual_binding(repository, request, key, current)
-
-        monkeypatch.setattr(OperationRepository, "finish_attempt", finish)
-        monkeypatch.setattr(CaptureRepository, "finish_binding_failure", binding)
-        expected_details = {"device_id": "cam-1", "expected_driver_id": "camctl-adb", "reason": change}
+        await world.replay(entrance, binding=_binding_port(change))
+        owned = world.owned
+        row = owned.connection.execute(
+            "SELECT status,error_json,result_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
+            (ticket.run_id, ticket.attempt_id)).fetchone()
+        assert row[:2] == (int(enum_for("operation_attempts.status").SUCCEEDED), None)
+        assert json.loads(row[2])["settlement"] == {
+            "basis": "observed", "evidence": {"type": "read_returned", "version": 1, "data": {}}}
+        details = {"device_id": "cam-1", "expected_driver_id": "camctl-adb", "reason": change}
         if change == "mismatch":
-            expected_details["actual_driver_id"] = "alternate-camera"
-
-        def saved_before_candidates():
-            status, error, result = reopened.connection.execute(
-                "SELECT status,error_json,result_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
-                (ticket.run_id, ticket.attempt_id)).fetchone()
-            assert status == int(enum_for("operation_attempts.status").SUCCEEDED), \
-                "候选筛选前必须先保存原实际 clean READ，不能留待录像 handler"
-            assert error is None
-            assert json.loads(result)["settlement"] == {
-                "basis": "observed", "evidence": {"type": "read_returned", "version": 1, "data": {}}}
-            run = _snapshot(reopened, "operation_runs", ticket.run_id)
-            assert run["status"] == int(enum_for("operation_runs.status").FAILED)
-            assert run["error_json"] == {
-                "code": "device_binding_unavailable", "stage": "execution", "details": expected_details}
-            assert {**run, "status": before_run["status"], "error_json": before_run["error_json"]} == before_run
-            state = reopened.connection.execute(
-                "SELECT committed_bytes,source_size,round,recopies_used,source_sha256,target_sha256,verification_state,slot_device_id"
-                " FROM file_copies WHERE id=?", (copy_id,)).fetchone()
-            assert state[:-1] == before_progress[:-1] and state[-1] is None
-            check, media, repair = reopened.connection.execute(
-                "SELECT check_state,media_json,repair_state FROM recording_processing WHERE id=?", (processing_id,)).fetchone()
-            assert check == int(enum_for("recording_processing.check_state").FAILED)
-            assert json.loads(media)["error"] == {
-                "code": "device_binding_unavailable", "stage": "execution", "details": expected_details}
-            assert repair == int(enum_for("recording_processing.repair_state").NOT_NEEDED)
-            action_status, error_code, error_details = reopened.connection.execute(
-                "SELECT status,error_code,error_details_json FROM actions WHERE id=?", (action_id,)).fetchone()
-            assert (action_status, error_code) == (int(enum_for("actions.status").FAILED), 17)
-            assert json.loads(error_details) == expected_details
-            assert [stage for stage, _request, _key in saves] == ["finish", "binding"]
-            assert saves[0][1].ticket == ticket and saves[0][1].occurred_at > held.occurred_at
-            assert saves[1][1].action_id == action_id and saves[0][2] != saves[1][2]
-            for _stage, _request, key in saves:
-                assert reopened.connection.execute(
-                    "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?", (str(key),)).fetchone() == (1,)
-
-        original_open, opened = context.open_connection, []
-
-        def open_connection():
-            current = original_open()
-            assert current.metadata == reopened.metadata and current.connection is not reopened.connection
-            opened.append(current)
-            return replace(current, connection=_ResidualReadBoundary(current.connection, saved_before_candidates)) \
-                if entrance == "residual" else current
-
-        context.open_connection = open_connection
-        if entrance == "normal":
-            context.clock = _CandidateClock(saved_before_candidates)
-        selected = context.flows["scheduling"] if entrance == "normal" else context.flows["residual"]
-        with pytest.raises(_BeforeBusinessCandidates):
-            await selected(context)
-        saved_before_candidates()
-        assert len(opened) == 1 and len(factory_calls) == 1 and binding_checks
-        assert flow.pending_read_ends == flow.pending_read_results == flow.pending_read_business == {}
-        assert len(reader.requests) == len(completions) == 1 and driver.calls == []
-        assert _snapshot(reopened, "device_files", source_id) == before_source
-        assert _snapshot(reopened, "intermediate_files", target_id) == before_target
-        assert target_path.read_bytes() == _CONTENT
-        assert reopened.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall()[:len(history)] == history
-        assert reopened.connection.execute(
-            "SELECT * FROM operation_attempts WHERE run_id<>? ORDER BY id", (ticket.run_id,)).fetchall() == original_attempts
+            details["actual_driver_id"] = "alternate-camera"
+        expected = {"code": "device_binding_unavailable", "stage": "execution", "details": details}
+        run = _snapshot(owned, "operation_runs", ticket.run_id)
+        assert run["status"] == int(enum_for("operation_runs.status").FAILED) and run["error_json"] == expected
+        check, media, repair = owned.connection.execute(
+            "SELECT check_state,media_json,repair_state FROM recording_processing WHERE id=?", (raw.processing_id,)).fetchone()
+        assert check == int(enum_for("recording_processing.check_state").FAILED)
+        assert json.loads(media)["error"] == expected
+        assert repair == int(enum_for("recording_processing.repair_state").NOT_NEEDED)
+        status, code, error = owned.connection.execute(
+            "SELECT status,error_code,error_details_json FROM actions WHERE id=?", (raw.action_id,)).fetchone()
+        assert (status, code) == (int(enum_for("actions.status").FAILED), 17)
+        assert json.loads(error) == details
+        assert [stage for stage, _request, _key in saves] == ["finish", "binding"]
+        assert saves[0][1].ticket == ticket and saves[0][1].occurred_at > raw.ended_at
+        assert saves[1][1].action_id == raw.action_id and saves[0][2] != saves[1][2]
+        for _stage, _request, key in saves:
+            assert owned.connection.execute(
+                "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?", (str(key),)).fetchone() == (1,)
+        _assert_raw_preserved(raw, released=True)
     finally:
-        if reopened is not None:
-            reopened.connection.close()
-        lifecycle.close_runtime(deps)
+        await world.close()
+        world.owned.connection.close()
 
 
 @pytest.mark.parametrize("entrance", ["normal", "residual"])
-async def test_matched_binding_excludes_failure_path_and_keeps_read_open(
-        pipeline, monkeypatch, entrance):
-    """原绑定与本次配置匹配时排除绑定失败路径：不写 bindingFAILED。
+async def test_matched_binding_excludes_failure_path_and_keeps_read_open(pipeline, capture_resources, monkeypatch, entrance):
+    raw = await _raw_world(pipeline, capture_resources, monkeypatch)
+    world, ticket = raw.world, raw.ticket
+    calls = []
+    actual = CaptureRepository.finish_binding_failure
 
-    与 missing／mismatch 同一前提（digest 前持有原 End、重开后经
-    入口恢复），绑定核对返回 MATCHED：本次分类不产生绑定失败申
-    请、不把 run 或动作收场为绑定失败，原 READ 按正常链保存，原
-    holder 释放后由候选链继续。
-    """
-    owned, roots, source_id = pipeline
-    _register_alternate_driver(monkeypatch)
-    world = await _default_world(pipeline, monkeypatch)
-    deps, factories, context, reader, driver, ends, wall, factory_calls = world
-    reopened = None
+    def observe(repository, request, key, current):
+        calls.append((request, key))
+        return actual(repository, request, key, current)
+
+    monkeypatch.setattr(CaptureRepository, "finish_binding_failure", observe)
     try:
-        action_id, processing_id = owned.connection.execute(
-            "SELECT action_id,id FROM recording_processing WHERE source_device_file_id=?",
-            (source_id,)).fetchone()
-        runtime = factories[0](owned, "cam-1")
-        flow = runtime.media
-        completions = _hold_before_digest(monkeypatch)
-        with pytest.raises(ConsistencyError):
-            await run_recording_media(flow, action_id, processing_id, source_id)
-        ticket, before_progress = _held_without_digest(owned, flow, reader)
-        copy_id = int(ticket.target_id)
-        held = flow.pending_read_ends[copy_id]
-        history = owned.connection.execute(
-            "SELECT * FROM history_events ORDER BY id").fetchall()
-        original_attempts = owned.connection.execute(
-            "SELECT * FROM operation_attempts WHERE run_id<>? ORDER BY id",
-            (ticket.run_id,)).fetchall()
-
-        owned.connection.close()
-        reopened = open_existing(roots.staging.parent / "state.db",
-                                 DbOpenMode.EXISTING_RW, DbConfig())
-        wall[0] += 1000
-        # 绑定核对保持原配置：本次分类为 MATCHED。
-        binding_checks = _current_binding_fact(monkeypatch, "matched")
-        binding_calls = []
-        actual_binding = CaptureRepository.finish_binding_failure
-
-        def binding(repository, request, key, current):
-            binding_calls.append(request)
-            return actual_binding(repository, request, key, current)
-
-        monkeypatch.setattr(CaptureRepository, "finish_binding_failure", binding)
-
-        def matched_excludes_failure():
-            # 匹配排除绑定失败路径：不保存收场、不写 bindingFAILED，
-            # 原 READ 尝试保持执行中，原 holder 不被消费。
-            status, error = reopened.connection.execute(
-                "SELECT status,error_json FROM operation_attempts"
-                " WHERE run_id=? AND attempt_no=?",
-                (ticket.run_id, ticket.attempt_id)).fetchone()
-            assert status == int(enum_for("operation_attempts.status").RUNNING)
-            assert error is None
-            run = _snapshot(reopened, "operation_runs", ticket.run_id)
-            assert run["status"] == int(enum_for("operation_runs.status").ACTIVE)
-            assert run["error_json"] is None
-            assert flow.pending_read_ends.get(copy_id) == held
-            action_status, error_code = reopened.connection.execute(
-                "SELECT status,error_code FROM actions WHERE id=?",
-                (action_id,)).fetchone()
-            assert action_status == int(enum_for("actions.status").RUNNING)
-            assert error_code is None
-            assert binding_calls == []
-            assert all(check.status is bindings.BindingStatus.MATCHED
-                       for check in binding_checks)
-
-        original_open = context.open_connection
-
-        def open_connection():
-            current = original_open()
-            return replace(current, connection=_ResidualReadBoundary(
-                current.connection, matched_excludes_failure)) \
-                if entrance == "residual" else current
-
-        context.open_connection = open_connection
-        if entrance == "normal":
-            context.clock = _CandidateClock(matched_excludes_failure)
-        selected = context.flows["scheduling"] if entrance == "normal" \
-            else context.flows["residual"]
-        with pytest.raises(_BeforeBusinessCandidates):
-            await selected(context)
-        matched_excludes_failure()
-        # 原会话持有物保持：未保存收场、未调用本地续接、原 holder 在。
-        assert list(flow.pending_read_ends) == [copy_id]
-        assert flow.pending_read_results == flow.pending_read_business == {}
-        assert len(completions) == 1
-        assert reopened.connection.execute(
-            "SELECT * FROM history_events ORDER BY id").fetchall()[:len(history)] == history
-        assert reopened.connection.execute(
-            "SELECT * FROM operation_attempts WHERE run_id<>? ORDER BY id",
-            (ticket.run_id,)).fetchall() == original_attempts
+        for _ in range(2):
+            await world.replay(entrance, binding=_binding_port("matched"))
+            assert world.owned.connection.execute(
+                "SELECT status,error_json,result_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
+                (ticket.run_id, ticket.attempt_id)).fetchone() == (1, None, None)
+            assert world.owned.connection.execute(
+                "SELECT status,error_json FROM operation_runs WHERE id=?", (ticket.run_id,)).fetchone() == (2, None)
+            assert world.owned.connection.execute(
+                "SELECT status,error_code FROM actions WHERE id=?", (raw.action_id,)).fetchone() == (2, None)
+            assert calls == []
+            _assert_raw_preserved(raw, released=False)
     finally:
-        if reopened is not None:
-            reopened.connection.close()
-        lifecycle.close_runtime(deps)
+        await world.close()
+        world.owned.connection.close()

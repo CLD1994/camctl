@@ -1,0 +1,136 @@
+{
+  "base": "2f3f97b1d8b890d402f439137266559cb0fbbb83",
+  "implementation_head": "c4e2f55b7e7bbe0cdd99e25e778d673d044c6fe1",
+  "validation_note": "Each command receipt records its own actual source_head. Final controller and entrypoint revision was checked by infrastructure-final; other behavior paths were unchanged by that revision.",
+  "files": [
+    {
+      "path": ".agents/rules/testing.md",
+      "sha256": "5c815843bfe184070840cf3a3e5a05c8278848df87020540444bf2cbe4593650"
+    },
+    {
+      "path": "AGENTS.md",
+      "sha256": "71d55e417d57e14d78725d64f55aefdffae06b3f9b6423c1e4d792ca056d406f"
+    },
+    {
+      "path": "apps/camctl/tests/AGENTS.md",
+      "sha256": "2a6dafed253ed1fcaa93c9345031a64333c52e02d4bf1c106de09baf47fea8e9"
+    },
+    {
+      "path": "apps/camctl/tests/integration/persistence/segment_capacity_case.py",
+      "sha256": "fe1e639a672db80ca810de276c980defd5346ec1acc05797769f326541984621"
+    },
+    {
+      "path": "apps/camctl/tests/integration/persistence/segment_capacity_worker.py",
+      "sha256": "338702bd689efcdfd0bef376b62aec5a8435ef3383f474d82f9cd2c6d75e6c9b"
+    },
+    {
+      "path": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py",
+      "sha256": "e05b97d527794017690ca45bbd9823d583bc154e5dd6ff8f4bc835d1d79a249b"
+    },
+    {
+      "path": "conftest.py",
+      "sha256": "5e29e30aefdd6dcafa5fd8903c84b7ac0996fe9cdec59f258f6eae17e894c42f"
+    },
+    {
+      "path": "scripts/README.md",
+      "sha256": "a98272913b64615949b9179a6a55b58b956562bfc00279f3e3e5d8bac006c6cc"
+    },
+    {
+      "path": "scripts/camctl_memory.py",
+      "sha256": "30fcecbc5cf2e28f90428decb9d0f3bb794629572109ec660438abbe41abea4d"
+    },
+    {
+      "path": "scripts/camctl_memory_plugin.py",
+      "sha256": "bf6d989aacff24035b8d0c48c592a0392ae6b8cab14c5dc10dd6420376acc175"
+    },
+    {
+      "path": "scripts/run-integration.py",
+      "sha256": "57712bd02aabe4dec2d0f84b8b9e818a31a915406e8787c3a1d6dd59bd91ddd4"
+    },
+    {
+      "path": "tests/integration/README.md",
+      "sha256": "c8a600fec5f19ff0790010f61383dbf12a1c0c26696019b9d19fd56dde648d17"
+    },
+    {
+      "path": "tests/integration/_cleanup_roundtrip_support.py",
+      "sha256": "54c08f5ab7c69b2e339ec06fd729b5091d92b08d3c744b16e959a578d00a2e34"
+    },
+    {
+      "path": "tests/integration/_wsl_host_demo.py",
+      "sha256": "f406e7382722d48b582079c55edc11daa0838a5aabe2dffe788ac0a0c6399aec"
+    },
+    {
+      "path": "tests/integration/camctl_fixtures.py",
+      "sha256": "1b2cf7f4e6c0dce8baec37d7373c272b190690afe6ecc323583acd368ac5c5d9"
+    },
+    {
+      "path": "tests/integration/test_action6_builtin_demo_roundtrip.py",
+      "sha256": "0339d62ead1bffa13d378304b1ec595b42ecc11cc55388596a3e6c2352493314"
+    },
+    {
+      "path": "tests/integration/test_action6_builtin_segmented_roundtrip.py",
+      "sha256": "67709d5d23671407c2395ff62835131d8a3d3e567c0c314ee58985eccf1406e5"
+    },
+    {
+      "path": "tests/integration/test_action6_builtin_timelapse_roundtrip.py",
+      "sha256": "673431cd6462c20f8590d83b4ab25f41cf121f57cf901c66e5bacdaf08588fc9"
+    },
+    {
+      "path": "tests/integration/test_action6_segmented_recovery_roundtrip.py",
+      "sha256": "5781356d0da0a73e46216638a870187aa5e40d4bbf9b3cdb1fdcf4e23d9a7452"
+    },
+    {
+      "path": "tests/integration/test_camctl_directory_switch.py",
+      "sha256": "a1719d490004b450a84e704825f5c94e2fef3c5555296210874d7ed4eda04f7c"
+    },
+    {
+      "path": "tests/integration/test_camctl_host_deployment.py",
+      "sha256": "aa7b5a0089c97d35e78a4c67d238dfedee2d1547f01dfdd803d93c3cfa543d9b"
+    },
+    {
+      "path": "tests/integration/test_camctl_motor_notifications.py",
+      "sha256": "8572cbaee7d8c15bddf8576c52f0dfbabfaeceb0c3eef6b9e35684443f4ce44a"
+    },
+    {
+      "path": "tests/integration/test_camctl_motor_recovery.py",
+      "sha256": "9bc1072f695eb82ecb2b8be6c6fa4683855ce95425d39b570d0ce86bc44c7ea0"
+    },
+    {
+      "path": "tests/integration/test_camctl_process_recovery.py",
+      "sha256": "94167d1a8d32f3cd5d493f4066a8bab459e30f79bbc632756e1e738d2a706a86"
+    },
+    {
+      "path": "tests/integration/test_device_capability_declarations.py",
+      "sha256": "31ccfb3286c90936fa45bbc09db9b95d352e4d567cc310d13f60c3362bc7fccf"
+    },
+    {
+      "path": "tests/integration/test_hasselblad_photo_parameters.py",
+      "sha256": "06acef7a2a713b0251901a3054ce5d8c5bcf2be6d506bc3b12e7248101c394c6"
+    },
+    {
+      "path": "tests/integration/test_host_wait_failures.py",
+      "sha256": "09dc82dd96543420a1dbe56bf501a2913a824f86336e1acd84d13765024054f0"
+    },
+    {
+      "path": "tests/integration/test_memory_budget_launcher.py",
+      "sha256": "f34e1d1385a0d5fe9b5547d8a12f526a3acf071dafbb8e8a2ed7677fdd2c5e0a"
+    },
+    {
+      "path": "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py",
+      "sha256": "88f45215f5269c2110e79e6093aee3529cdf6b766bb3fa9b5de63c8040d9c650"
+    },
+    {
+      "path": "tests/integration/test_osmo_builtin_timelapse_roundtrip.py",
+      "sha256": "1aaf492745f56eb7fe2fcf4ba3fbce4e8da73b9159e1f92e29611fa052ed1e51"
+    },
+    {
+      "path": "tests/unit/test_camctl_memory.py",
+      "sha256": "a1d481ecb7b3de2cca91ac59f394157ea57ba77845eaec9ff199e0ca4e2f0cad"
+    },
+    {
+      "path": "tests/unit/test_memory_budget_entrypoints.py",
+      "sha256": "aa6c7c41a5324eb2948219c7cb42a96d45568e800b6934aee7ef693e88c37087"
+    }
+  ],
+  "production_changes": []
+}

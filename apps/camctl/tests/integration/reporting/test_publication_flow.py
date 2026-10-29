@@ -64,6 +64,7 @@ from camctl.reporting.publication import (
 
 from ..persistence.test_runtime import _create_valid_database
 from .test_freeze import _submit
+from ..support.database import business_database, database_path
 
 register_report_guards()
 register_sync_guard()
@@ -189,11 +190,13 @@ def _new_events(owned, after: int):
 
 def _deliver(pipeline, report_id: int, **kwargs):
     owned, directories, _ = pipeline
-    session = DbPublicationSession(_owned(owned))
-    return asyncio.run(deliver_report(
-        report_id, _PAYLOAD,
-        HandoffDirectories(directories.staging, directories.ready),
-        session, **kwargs))
+    async def scenario():
+        async with business_database(database_path(owned)) as database:
+            return await deliver_report(
+                report_id, _PAYLOAD,
+                HandoffDirectories(directories.staging, directories.ready),
+                DbPublicationSession(database), **kwargs)
+    return asyncio.run(scenario())
 
 
 def _covering(report: FrozenReport) -> AckReport:

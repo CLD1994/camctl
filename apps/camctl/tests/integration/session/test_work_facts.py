@@ -15,6 +15,9 @@ from pathlib import Path
 
 import pytest
 
+from ..support.acceptance import accept_source
+from ..support.database import database_path
+
 from camctl.acceptance.input import parse_input, read_input
 from camctl.acceptance.service import AcceptanceContext, CommandMode, accept_input
 from camctl.bootstrap.application import query_work_facts
@@ -81,14 +84,14 @@ def _submit(owned, tmp_path: Path, request_id: str) -> int:
     target.write_text(json.dumps(_plan_body(request_id)), encoding="utf-8")
 
     async def scenario() -> int:
-        result = await accept_input(
+        result = await accept_source(
             parse_input(await read_input(str(target), _Reader())),
             AcceptanceContext(
                 mode=CommandMode.RUN, catalog=Catalog(),
                 repository=AcceptanceRepository(),
                 clock=type("C", (), {"utc_micros": staticmethod(lambda: _NOW)})(),
             ),
-            new_operation_key(), owned,
+            database_path(owned),
         )
         assert result.plan_id is not None
         return result.plan_id
@@ -153,14 +156,14 @@ class TestReportDimensions:
         }), encoding="utf-8")
 
         async def scenario():
-            await accept_input(
+            await accept_source(
                 parse_input(await read_input(str(target), _Reader())),
                 AcceptanceContext(
                     mode=CommandMode.RUN, catalog=Catalog(),
                     repository=AcceptanceRepository(),
                     clock=type("C", (), {"utc_micros": staticmethod(lambda: _NOW)})(),
                 ),
-                new_operation_key(), owned)
+                database_path(owned))
 
         asyncio.run(scenario())
         facts = query_work_facts(owned.connection)
@@ -348,7 +351,7 @@ class TestPendingDeadline:
                 {"utc_micros": staticmethod(lambda: at)})()})()
 
     @staticmethod
-    def _submit_capture(owned, tmp_path: Path, request_id: str) -> None:
+    async def _submit_capture(owned, tmp_path: Path, request_id: str) -> None:
         body = {
             "request_id": request_id,
             "created_at": "2026-01-15 08:00:00",
@@ -365,7 +368,7 @@ class TestPendingDeadline:
         target.write_text(json.dumps(body), encoding="utf-8")
 
         async def scenario() -> None:
-            await accept_input(
+            await accept_source(
                 parse_input(await read_input(str(target), _Reader())),
                 AcceptanceContext(
                     mode=CommandMode.RUN, catalog=Catalog(),
@@ -373,34 +376,59 @@ class TestPendingDeadline:
                     clock=type(
                         "C", (), {"utc_micros": staticmethod(lambda: _NOW)})(),
                 ),
-                new_operation_key(), owned,
+                database_path(owned),
             )
 
-        asyncio.run(scenario())
+        await scenario()
 
-    def test_capture_deadline_wakes_at_schedule_then_window_end(
-        self, owned, tmp_path,
-    ):
+    @staticmethod
+    async def _session_wait(owned, at):
+        from camctl.persistence.repositories.session import SessionRepository
+        from camctl.session.clock import ClockCheckInput
+        from camctl.session.locks import acquire_admission, acquire_session, lock_file_paths
+        from camctl.session.service import SessionContext, SessionPaths, run_session
+        from .support import open_session_database
+        from .test_session import FixedClock, _facts
+
+        path = database_path(owned)
+        session_path, admission_path = lock_file_paths(path)
+        waits = []
+
+        class Wake:
+            def snapshot(self):
+                return len(waits)
+
+            async def wait_changed(self, observed, deadline):
+                waits.append(deadline - asyncio.get_running_loop().time())
+
+        context = SessionContext(
+            mode=CommandMode.RUN, catalog=Catalog(), clock=FixedClock(at),
+            open_database=lambda: open_session_database(path),
+            acceptance_repository=AcceptanceRepository(), session_repository=SessionRepository(),
+            paths=SessionPaths(session_path, admission_path),
+            clock_policy=lambda connection: ClockCheckInput(None, 0, 0, 1),
+            acquire_session=lambda: acquire_session(session_path),
+            acquire_admission=lambda: acquire_admission(admission_path),
+            facts_query=lambda connection: _facts(unfinished_actions=int(not waits)),
+            wake=Wake(), poll_interval_s=30.0,
+        )
+        result = await run_session(context, None)
+        assert result.succeeded, result
+        assert len(waits) == 1
+        return waits[0]
+
+    @pytest.mark.asyncio
+    async def test_capture_deadline_wakes_at_schedule_then_window_end(self, owned, tmp_path):
         from camctl.contracts.values import to_utc_micros
-        from camctl.session.service import _pending_deadline_seconds
 
-        self._submit_capture(owned, tmp_path, "50")
+        await self._submit_capture(owned, tmp_path, "50")
         scheduled = to_utc_micros("2026-01-15 09:00:00")
         window_end = scheduled + 1_000 * 1000
-        # 计划时间之前：等待到计划时间。
-        assert _pending_deadline_seconds(
-            self._context(scheduled - 5_000_000), owned) == 5.0
-        # 窗口之内：等待到窗口结束（过期判定时刻），不再按已过的
-        # 计划时间立即唤醒。
-        assert _pending_deadline_seconds(
-            self._context(scheduled), owned) == 1.0
-        assert _pending_deadline_seconds(
-            self._context(window_end - 500_000), owned) == 0.5
-        # 窗口结束之后：立即唤醒去过期。
-        assert _pending_deadline_seconds(
-            self._context(window_end + 1), owned) == 0.0
+        for now, expected in ((scheduled - 5_000_000, 5.0), (scheduled, 1.0),
+                              (window_end - 500_000, 0.5), (window_end + 1, 0.01)):
+            observed = await self._session_wait(owned, now)
+            assert observed == pytest.approx(expected, abs=0.01), (now, observed)
 
-    def test_no_pending_actions_has_no_deadline(self, owned):
-        from camctl.session.service import _pending_deadline_seconds
-
-        assert _pending_deadline_seconds(self._context(_NOW), owned) is None
+    @pytest.mark.asyncio
+    async def test_no_pending_actions_has_no_deadline(self, owned):
+        assert await self._session_wait(owned, _NOW) == pytest.approx(30.0, abs=0.01)

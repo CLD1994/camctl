@@ -1,0 +1,40 @@
+[
+  {
+    "nodeid": "tests/integration/test_device_capability_declarations.py::test_installed_source_change_keeps_accepted_execution_definition",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.9428258429979905
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 6.959232286011684
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.013349323999136686
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 7.915407453008811
+  },
+  {
+    "nodeid": "tests/integration/test_device_capability_declarations.py::test_installed_sources_control_browser_cleanup_across_reload_and_restart",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 12.760002648006775
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.5261852530093165
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.008957978992839344
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 13.295145880008931
+  }
+]

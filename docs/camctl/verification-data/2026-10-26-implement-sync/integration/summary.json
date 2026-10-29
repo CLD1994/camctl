@@ -1,0 +1,282 @@
+{
+  "started_utc": "2026-10-26T03:03:07.265352+00:00",
+  "source": {
+    "root": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+    "head": "c55f94d468b79fd62a45ae499a7c9624ed223928",
+    "status": "M  .agents/rules/implementation.md\nM  .agents/rules/testing.md\nM  AGENTS.md\nM  apps/camctl/src/camctl/acceptance/input.py\nM  apps/camctl/src/camctl/acceptance/service.py\nM  apps/camctl/src/camctl/bootstrap/background_flow.py\nM  apps/camctl/src/camctl/bootstrap/capture_assembly.py\nM  apps/camctl/src/camctl/bootstrap/cleanup_assembly.py\nM  apps/camctl/src/camctl/bootstrap/flows.py\nM  apps/camctl/src/camctl/bootstrap/lifecycle.py\nM  apps/camctl/src/camctl/bootstrap/obtain_assembly.py\nM  apps/camctl/src/camctl/cancellation/models.py\nM  apps/camctl/src/camctl/cancellation/service.py\nM  apps/camctl/src/camctl/cancellation/settlement.py\nM  apps/camctl/src/camctl/capture/action6_recovery.py\nM  apps/camctl/src/camctl/capture/baseline.py\nM  apps/camctl/src/camctl/capture/baseline_reads.py\nA  apps/camctl/src/camctl/capture/diagnostics.py\nM  apps/camctl/src/camctl/capture/dispatch.py\nM  apps/camctl/src/camctl/capture/handlers.py\nM  apps/camctl/src/camctl/capture/host_photo.py\nM  apps/camctl/src/camctl/capture/media.py\nM  apps/camctl/src/camctl/capture/media_facts.py\nM  apps/camctl/src/camctl/capture/media_flow.py\nM  apps/camctl/src/camctl/capture/preparation.py\nM  apps/camctl/src/camctl/capture/processing.py\nM  apps/camctl/src/camctl/capture/residual.py\nM  apps/camctl/src/camctl/capture/result_scans.py\nM  apps/camctl/src/camctl/capture/segment_baseline.py\nM  apps/camctl/src/camctl/capture/segment_completion.py\nM  apps/camctl/src/camctl/capture/segment_inspections.py\nM  apps/camctl/src/camctl/capture/software_recovery.py\nM  apps/camctl/src/camctl/cli.py\nM  apps/camctl/src/camctl/devices/drivers/adb_cameras/action6_record.py\nM  apps/camctl/src/camctl/devices/drivers/adb_cameras/commands.py\nM  apps/camctl/src/camctl/devices/drivers/adb_cameras/driver.py\nM  apps/camctl/src/camctl/devices/drivers/adb_cameras/filesystem.py\nM  apps/camctl/src/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py\nM  apps/camctl/src/camctl/devices/ports.py\nM  apps/camctl/src/camctl/history/snapshots.py\nM  apps/camctl/src/camctl/host_files/handoff.py\nM  apps/camctl/src/camctl/host_files/media.py\nM  apps/camctl/src/camctl/logging_runtime/admission.py\nA  apps/camctl/src/camctl/logging_runtime/diagnostics.py\nM  apps/camctl/src/camctl/logging_runtime/lifecycle.py\nM  apps/camctl/src/camctl/logging_runtime/service.py\nA  apps/camctl/src/camctl/logging_runtime/standard_logging.py\nM  apps/camctl/src/camctl/motor/notification.py\nM  apps/camctl/src/camctl/motor/service.py\nA  apps/camctl/src/camctl/operations/diagnostic_controls.py\nM  apps/camctl/src/camctl/operations/error_diagnostics.py\nM  apps/camctl/src/camctl/outputs/cleanup_flow.py\nM  apps/camctl/src/camctl/outputs/cleanup_ownership.py\nM  apps/camctl/src/camctl/outputs/copy.py\nA  apps/camctl/src/camctl/outputs/diagnostics.py\nM  apps/camctl/src/camctl/outputs/handoff.py\nM  apps/camctl/src/camctl/outputs/obtain_flow.py\nM  apps/camctl/src/camctl/outputs/qualification.py\nM  apps/camctl/src/camctl/outputs/read_attempts.py\nM  apps/camctl/src/camctl/outputs/segment_query.py\nM  apps/camctl/src/camctl/outputs/sources.py\nM  apps/camctl/src/camctl/outputs/work_files.py\nM  apps/camctl/src/camctl/persistence/models.py\nM  apps/camctl/src/camctl/persistence/repositories/acceptance.py\nM  apps/camctl/src/camctl/persistence/repositories/outputs.py\nM  apps/camctl/src/camctl/persistence/repositories/segment_selections.py\nM  apps/camctl/src/camctl/persistence/snapshot_runtime.py\nM  apps/camctl/src/camctl/reporting/maintenance.py\nM  apps/camctl/src/camctl/reporting/messages.py\nM  apps/camctl/src/camctl/reporting/publication.py\nM  apps/camctl/src/camctl/reporting/supervisor.py\nM  apps/camctl/src/camctl/reporting/worker.py\nM  apps/camctl/src/camctl/session/locks.py\nM  apps/camctl/src/camctl/session/service.py\nM  apps/camctl/src/camctl/session/supervision.py\nM  apps/camctl/tests/AGENTS.md\nA  apps/camctl/tests/integration/acceptance/test_error_diagnostics.py\nA  apps/camctl/tests/integration/bootstrap/test_cleanup_error_facts.py\nA  apps/camctl/tests/integration/bootstrap/test_cleanup_supervision_error_graph.py\nA  apps/camctl/tests/integration/bootstrap/test_cli_error_diagnostics.py\nA  apps/camctl/tests/integration/bootstrap/test_foreground_error_scopes.py\nA  apps/camctl/tests/integration/bootstrap/test_global_error_logging.py\nA  apps/camctl/tests/integration/bootstrap/test_idle_session_exit.py\nA  apps/camctl/tests/integration/bootstrap/test_report_diagnostic_ownership.py\nA  apps/camctl/tests/integration/cancellation/test_error_diagnostics.py\nA  apps/camctl/tests/integration/capture/test_global_error_diagnostics.py\nA  apps/camctl/tests/integration/capture/test_media_tool_diagnostics.py\nA  apps/camctl/tests/integration/capture/test_result_error_diagnostics.py\nA  apps/camctl/tests/integration/host_files/test_handoff_error_facts.py\nA  apps/camctl/tests/integration/host_files/test_media_tool_diagnostics.py\nR  apps/camctl/tests/unit/logging_runtime/test_lifecycle.py -> apps/camctl/tests/integration/logging_runtime/test_channel_lifecycle.py\nA  apps/camctl/tests/integration/logging_runtime/test_diagnostic_reservations.py\nA  apps/camctl/tests/integration/logging_runtime/test_diagnostics.py\nA  apps/camctl/tests/integration/logging_runtime/test_error_delivery.py\nM  apps/camctl/tests/integration/logging_runtime/test_handler.py\nR  apps/camctl/tests/unit/logging_runtime/test_pending_log.py -> apps/camctl/tests/integration/logging_runtime/test_pending_log.py\nM  apps/camctl/tests/integration/logging_runtime/test_queue.py\nA  apps/camctl/tests/integration/motor/test_error_diagnostics.py\nA  apps/camctl/tests/integration/motor/test_notification_error_facts.py\nA  apps/camctl/tests/integration/motor/test_unknown_save_diagnostics.py\nA  apps/camctl/tests/integration/outputs/test_database_failure_causes.py\nA  apps/camctl/tests/integration/outputs/test_delete_rejected_error_graph.py\nA  apps/camctl/tests/integration/outputs/test_digest_diagnostics.py\nA  apps/camctl/tests/integration/outputs/test_error_diagnostics.py\nA  apps/camctl/tests/integration/outputs/test_obtain_diagnostics.py\nA  apps/camctl/tests/integration/outputs/test_read_diagnostics.py\nA  apps/camctl/tests/integration/outputs/test_result_error_diagnostics.py\nA  apps/camctl/tests/integration/outputs/test_selection_diagnostic_receipt.py\nA  apps/camctl/tests/integration/persistence/test_db_failure_diagnostics.py\nA  apps/camctl/tests/integration/persistence/test_snapshot_error_diagnostics.py\nA  apps/camctl/tests/integration/reporting/test_error_diagnostics.py\nA  apps/camctl/tests/integration/reporting/test_error_observers.py\nA  apps/camctl/tests/integration/reporting/test_worker_diagnostics.py\nA  apps/camctl/tests/integration/session/test_idle_background_exit.py\nM  apps/camctl/tests/unit/bootstrap/test_baseline_scan_shutdown.py\nA  apps/camctl/tests/unit/bootstrap/test_business_error_scopes.py\nM  apps/camctl/tests/unit/bootstrap/test_result_scan_shutdown.py\nM  apps/camctl/tests/unit/bootstrap/test_session_terminal_diagnostics.py\nM  apps/camctl/tests/unit/capture/test_media_facts.py\nM  apps/camctl/tests/unit/devices/test_action6_session_settings.py\nA  apps/camctl/tests/unit/devices/test_camera_power_session_settings.py\nM  apps/camctl/tests/unit/devices/test_osmo360ii_capture.py\nM  apps/camctl/tests/unit/logging_runtime/test_admission.py\nA  apps/camctl/tests/unit/logging_runtime/test_diagnostic_reservations.py\nA  apps/camctl/tests/unit/logging_runtime/test_diagnostics.py\nA  apps/camctl/tests/unit/logging_runtime/test_standard_logging.py\nA  apps/camctl/tests/unit/operations/test_lock_error_facts_diagnostics.py\nM  apps/camctl/tests/unit/reporting/test_publication_flow.py\nM  apps/host-demo/CMakeLists.txt\nM  apps/host-demo/README.md\nM  apps/host-demo/include/camctl_host.h\nM  apps/host-demo/src/demo.c\nA  apps/host-demo/src/demo_stop.c\nA  apps/host-demo/src/demo_stop.h\nM  apps/host-demo/src/diagnostic.c\nM  apps/host-demo/src/diagnostic.h\nM  apps/host-demo/src/host.c\nM  apps/host-demo/src/logger.c\nM  apps/host-demo/src/logger.h\nM  apps/host-demo/src/process.c\nM  apps/host-demo/src/process.h\nM  apps/host-demo/tests/integration/test_delivery.py\nA  apps/host-demo/tests/unit/test_demo_stop.c\nM  apps/host-demo/tests/unit/test_process_unit.c\nM  apps/host-demo/tests/unit/test_spawn.c\nA  apps/host-demo/tests/unit/test_stop.c\nA  apps/host-demo/tests/unit/test_writer_stop.c\nM  docs/architecture/camera-parameters.md\nM  docs/architecture/logging.md\nM  docs/camctl/README.md\nM  docs/camctl/file-runtime.md\nM  docs/camctl/implementation.md\nM  docs/camctl/logging-runtime.md\nM  docs/camctl/verification.md\nM  docs/hardware/camera-control-handoff.md\nM  docs/host-demo/README.md\nM  docs/host-demo/design.md\nM  docs/host-demo/implementation.md\nM  docs/host-demo/verification.md\nM  docs/superpowers/plans/2026-09-30-camctl-implementation-roadmap.md\nA  docs/superpowers/plans/2026-10-26-camera-idle-settings.md\nA  docs/superpowers/plans/2026-10-26-global-error-diagnostics.md\nA  docs/superpowers/plans/2026-10-26-host-stop.md\nA  docs/superpowers/plans/2026-10-26-idle-session-exit.md",
+    "snapshot_sha256": "21ff40a5aab5b3596d80aec05a327dafbd502589f0c6a903076ebcb1ae2166cb"
+  },
+  "versions": {
+    "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+    "version": [
+      3,
+      11
+    ],
+    "sqlite": "3.53.1",
+    "pytest": "9.1.1",
+    "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+    "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+    "node": "v24.22.1",
+    "git": "git version 2.43.0"
+  },
+  "runner_pid": 2162968,
+  "jobs": 3,
+  "scope": "camctl",
+  "selection": [
+    "apps/camctl/tests/integration/bootstrap/test_inspection_read_dispatch.py",
+    "apps/camctl/tests/integration/bootstrap/test_idle_session_exit.py",
+    "apps/camctl/tests/integration/bootstrap/test_cleanup_background_owner.py",
+    "apps/camctl/tests/integration/bootstrap/test_global_error_logging.py",
+    "apps/camctl/tests/integration/bootstrap/test_cli_error_diagnostics.py",
+    "apps/camctl/tests/integration/bootstrap/test_report_diagnostic_ownership.py",
+    "apps/camctl/tests/integration/capture/test_result_error_diagnostics.py",
+    "apps/camctl/tests/integration/capture/test_global_error_diagnostics.py",
+    "apps/camctl/tests/integration/capture/test_media_tool_diagnostics.py",
+    "apps/camctl/tests/integration/session/test_idle_background_exit.py"
+  ],
+  "status": "finished",
+  "tasks": [
+    {
+      "id": "camctl/bootstrap",
+      "scope": "camctl",
+      "path": "apps/camctl/tests/integration/bootstrap",
+      "targets": [
+        "apps/camctl/tests/integration/bootstrap/test_inspection_read_dispatch.py",
+        "apps/camctl/tests/integration/bootstrap/test_idle_session_exit.py",
+        "apps/camctl/tests/integration/bootstrap/test_cleanup_background_owner.py",
+        "apps/camctl/tests/integration/bootstrap/test_global_error_logging.py",
+        "apps/camctl/tests/integration/bootstrap/test_cli_error_diagnostics.py",
+        "apps/camctl/tests/integration/bootstrap/test_report_diagnostic_ownership.py"
+      ],
+      "estimated_seconds": 733.239981505747,
+      "status": "failed",
+      "number": 1,
+      "worker": 0,
+      "artifacts": "/tmp/camctl-sync277-integration-20261026/tasks/001-camctl-bootstrap/artifacts",
+      "cwd": "/tmp/camctl-sync277-integration-20261026/tasks/001-camctl-bootstrap/source",
+      "started_utc": "2026-10-26T03:03:17.444843+00:00",
+      "command": [
+        "/tmp/camctl-sync277-integration-20261026/tasks/001-camctl-bootstrap/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/bootstrap/test_inspection_read_dispatch.py",
+        "apps/camctl/tests/integration/bootstrap/test_idle_session_exit.py",
+        "apps/camctl/tests/integration/bootstrap/test_cleanup_background_owner.py",
+        "apps/camctl/tests/integration/bootstrap/test_global_error_logging.py",
+        "apps/camctl/tests/integration/bootstrap/test_cli_error_diagnostics.py",
+        "apps/camctl/tests/integration/bootstrap/test_report_diagnostic_ownership.py",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-sync277-integration-20261026/tasks/001-camctl-bootstrap/tmp/pytest",
+        "-p",
+        "camctl_memory_plugin",
+        "--camctl-memory-limit",
+        "2GiB"
+      ],
+      "environment": {
+        "PYTHONPATH": "/tmp/camctl-sync277-integration-20261026/control:/tmp/camctl-sync277-integration-20261026/tasks/001-camctl-bootstrap/source/apps/camctl/src",
+        "PYTHONPYCACHEPREFIX": "/tmp/camctl-sync277-integration-20261026/workers/0/python-cache",
+        "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-sync277-integration-20261026/workers/0/project-env",
+        "UV_CACHE_DIR": "/tmp/camctl-sync277-integration-20261026/workers/0/uv-cache",
+        "UV_OFFLINE": "1",
+        "TMPDIR": "/tmp/camctl-sync277-integration-20261026/tasks/001-camctl-bootstrap/tmp"
+      },
+      "preparations": [
+        {
+          "label": "package-resources",
+          "command": [
+            "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "/tmp/camctl-sync277-integration-20261026/tasks/001-camctl-bootstrap/source/apps/camctl/scripts/sync_resources.py"
+          ],
+          "cwd": "/tmp/camctl-sync277-integration-20261026/tasks/001-camctl-bootstrap/source",
+          "started_utc": "2026-10-26T03:03:40.586901+00:00",
+          "pid": 2163456,
+          "exit_code": 0,
+          "finished_utc": "2026-10-26T03:03:40.749042+00:00",
+          "wall_seconds": 0.16212939500110224
+        }
+      ],
+      "preparation": "package-resources",
+      "preparation_pid": 2163456,
+      "pid": 2163474,
+      "execution_started_utc": "2026-10-26T03:03:40.750039+00:00",
+      "progress": {
+        "status": "finished",
+        "exit_code": 1,
+        "collected": 51,
+        "outcomes": {
+          "passed": 40,
+          "failed": 11
+        },
+        "subchecks": {},
+        "elapsed_seconds": 21.121653967988095,
+        "utc": "2026-10-26T03:04:04.378971+00:00",
+        "pid": 2163474
+      },
+      "exit_code": 1,
+      "finished_utc": "2026-10-26T03:04:04.726041+00:00",
+      "wall_seconds": 46.354361130986945
+    },
+    {
+      "id": "camctl/capture",
+      "scope": "camctl",
+      "path": "apps/camctl/tests/integration/capture",
+      "targets": [
+        "apps/camctl/tests/integration/capture/test_result_error_diagnostics.py",
+        "apps/camctl/tests/integration/capture/test_global_error_diagnostics.py",
+        "apps/camctl/tests/integration/capture/test_media_tool_diagnostics.py"
+      ],
+      "estimated_seconds": 642.2213893147964,
+      "status": "passed",
+      "number": 2,
+      "worker": 1,
+      "artifacts": "/tmp/camctl-sync277-integration-20261026/tasks/002-camctl-capture/artifacts",
+      "cwd": "/tmp/camctl-sync277-integration-20261026/tasks/002-camctl-capture/source",
+      "started_utc": "2026-10-26T03:03:17.446703+00:00",
+      "command": [
+        "/tmp/camctl-sync277-integration-20261026/tasks/002-camctl-capture/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/capture/test_result_error_diagnostics.py",
+        "apps/camctl/tests/integration/capture/test_global_error_diagnostics.py",
+        "apps/camctl/tests/integration/capture/test_media_tool_diagnostics.py",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-sync277-integration-20261026/tasks/002-camctl-capture/tmp/pytest",
+        "-p",
+        "camctl_memory_plugin",
+        "--camctl-memory-limit",
+        "2GiB"
+      ],
+      "environment": {
+        "PYTHONPATH": "/tmp/camctl-sync277-integration-20261026/control:/tmp/camctl-sync277-integration-20261026/tasks/002-camctl-capture/source/apps/camctl/src",
+        "PYTHONPYCACHEPREFIX": "/tmp/camctl-sync277-integration-20261026/workers/1/python-cache",
+        "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-sync277-integration-20261026/workers/1/project-env",
+        "UV_CACHE_DIR": "/tmp/camctl-sync277-integration-20261026/workers/1/uv-cache",
+        "UV_OFFLINE": "1",
+        "TMPDIR": "/tmp/camctl-sync277-integration-20261026/tasks/002-camctl-capture/tmp"
+      },
+      "preparations": [
+        {
+          "label": "package-resources",
+          "command": [
+            "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "/tmp/camctl-sync277-integration-20261026/tasks/002-camctl-capture/source/apps/camctl/scripts/sync_resources.py"
+          ],
+          "cwd": "/tmp/camctl-sync277-integration-20261026/tasks/002-camctl-capture/source",
+          "started_utc": "2026-10-26T03:03:40.650138+00:00",
+          "pid": 2163470,
+          "exit_code": 0,
+          "finished_utc": "2026-10-26T03:03:40.762956+00:00",
+          "wall_seconds": 0.11281595099717379
+        }
+      ],
+      "preparation": "package-resources",
+      "preparation_pid": 2163470,
+      "pid": 2163476,
+      "execution_started_utc": "2026-10-26T03:03:40.764191+00:00",
+      "progress": {
+        "status": "finished",
+        "exit_code": 0,
+        "collected": 62,
+        "outcomes": {
+          "passed": 62
+        },
+        "subchecks": {},
+        "elapsed_seconds": 6.27819830700173,
+        "utc": "2026-10-26T03:03:49.488172+00:00",
+        "pid": 2163476
+      },
+      "exit_code": 0,
+      "finished_utc": "2026-10-26T03:03:49.753960+00:00",
+      "wall_seconds": 31.38042630099517
+    },
+    {
+      "id": "camctl/session",
+      "scope": "camctl",
+      "path": "apps/camctl/tests/integration/session",
+      "targets": [
+        "apps/camctl/tests/integration/session/test_idle_background_exit.py"
+      ],
+      "estimated_seconds": 8.320586458990874,
+      "status": "passed",
+      "number": 3,
+      "worker": 2,
+      "artifacts": "/tmp/camctl-sync277-integration-20261026/tasks/003-camctl-session/artifacts",
+      "cwd": "/tmp/camctl-sync277-integration-20261026/tasks/003-camctl-session/source",
+      "started_utc": "2026-10-26T03:03:17.447940+00:00",
+      "command": [
+        "/tmp/camctl-sync277-integration-20261026/tasks/003-camctl-session/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/session/test_idle_background_exit.py",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-sync277-integration-20261026/tasks/003-camctl-session/tmp/pytest",
+        "-p",
+        "camctl_memory_plugin",
+        "--camctl-memory-limit",
+        "2GiB"
+      ],
+      "environment": {
+        "PYTHONPATH": "/tmp/camctl-sync277-integration-20261026/control:/tmp/camctl-sync277-integration-20261026/tasks/003-camctl-session/source/apps/camctl/src",
+        "PYTHONPYCACHEPREFIX": "/tmp/camctl-sync277-integration-20261026/workers/2/python-cache",
+        "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-sync277-integration-20261026/workers/2/project-env",
+        "UV_CACHE_DIR": "/tmp/camctl-sync277-integration-20261026/workers/2/uv-cache",
+        "UV_OFFLINE": "1",
+        "TMPDIR": "/tmp/camctl-sync277-integration-20261026/tasks/003-camctl-session/tmp"
+      },
+      "preparations": [
+        {
+          "label": "package-resources",
+          "command": [
+            "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "/tmp/camctl-sync277-integration-20261026/tasks/003-camctl-session/source/apps/camctl/scripts/sync_resources.py"
+          ],
+          "cwd": "/tmp/camctl-sync277-integration-20261026/tasks/003-camctl-session/source",
+          "started_utc": "2026-10-26T03:03:40.591050+00:00",
+          "pid": 2163459,
+          "exit_code": 0,
+          "finished_utc": "2026-10-26T03:03:40.731330+00:00",
+          "wall_seconds": 0.14027450598950963
+        }
+      ],
+      "preparation": "package-resources",
+      "preparation_pid": 2163459,
+      "pid": 2163472,
+      "execution_started_utc": "2026-10-26T03:03:40.732260+00:00",
+      "progress": {
+        "status": "finished",
+        "exit_code": 0,
+        "collected": 7,
+        "outcomes": {
+          "passed": 7
+        },
+        "subchecks": {},
+        "elapsed_seconds": 0.9705114399985177,
+        "utc": "2026-10-26T03:03:43.683461+00:00",
+        "pid": 2163472
+      },
+      "exit_code": 0,
+      "finished_utc": "2026-10-26T03:03:44.541015+00:00",
+      "wall_seconds": 26.16623142399476
+    }
+  ],
+  "updated_utc": "2026-10-26T03:04:04.732539+00:00",
+  "wall_seconds": 55.69591936800862,
+  "exit_code": 1,
+  "finished_utc": "2026-10-26T03:04:04.731991+00:00"
+}

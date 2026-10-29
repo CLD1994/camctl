@@ -1,0 +1,2935 @@
+{
+  "label": "finished",
+  "elapsed": 13.380202241998632,
+  "state_db": "/tmp/pytest-of-cld/pytest-133/test_cancel_during_discovery_p0/state.db",
+  "flows": [
+    {
+      "type": "ReportBackgroundFlow",
+      "id": 140445507629200,
+      "stopping": true,
+      "handoff": true,
+      "required": 0,
+      "task": null
+    },
+    {
+      "type": "CaptureFlow",
+      "id": 140445507318224,
+      "stopping": true,
+      "handoff": null,
+      "required": 0,
+      "task": null
+    },
+    {
+      "type": "BackgroundFlow",
+      "id": 140445516738512,
+      "stopping": true,
+      "handoff": false,
+      "required": 0,
+      "task": null
+    }
+  ],
+  "tasks": [
+    {
+      "id": 140445516209536,
+      "name": "Task-42",
+      "done": false,
+      "cancelled": false,
+      "coro": "<coroutine object pytest_runtest_call.<locals>.execute at 0x7fbc052e0150>",
+      "stack": [
+        {
+          "file": "<frozen runpy>",
+          "line": 198,
+          "function": "_run_module_as_main"
+        },
+        {
+          "file": "<frozen runpy>",
+          "line": 88,
+          "function": "_run_code"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest/__main__.py",
+          "line": 9,
+          "function": "<module>"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/config/__init__.py",
+          "line": 253,
+          "function": "_console_main"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/config/__init__.py",
+          "line": 229,
+          "function": "_main"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_hooks.py",
+          "line": 512,
+          "function": "__call__"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_manager.py",
+          "line": 120,
+          "function": "_hookexec"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_callers.py",
+          "line": 121,
+          "function": "_multicall"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/main.py",
+          "line": 377,
+          "function": "pytest_cmdline_main"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/main.py",
+          "line": 330,
+          "function": "wrap_session"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/main.py",
+          "line": 384,
+          "function": "_main"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_hooks.py",
+          "line": 512,
+          "function": "__call__"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_manager.py",
+          "line": 120,
+          "function": "_hookexec"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_callers.py",
+          "line": 121,
+          "function": "_multicall"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/main.py",
+          "line": 408,
+          "function": "pytest_runtestloop"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_hooks.py",
+          "line": 512,
+          "function": "__call__"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_manager.py",
+          "line": 120,
+          "function": "_hookexec"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_callers.py",
+          "line": 121,
+          "function": "_multicall"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/runner.py",
+          "line": 118,
+          "function": "pytest_runtest_protocol"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/runner.py",
+          "line": 139,
+          "function": "runtestprotocol"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/runner.py",
+          "line": 249,
+          "function": "call_and_report"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/runner.py",
+          "line": 361,
+          "function": "from_call"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/runner.py",
+          "line": 250,
+          "function": "<lambda>"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_hooks.py",
+          "line": 512,
+          "function": "__call__"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_manager.py",
+          "line": 120,
+          "function": "_hookexec"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_callers.py",
+          "line": 121,
+          "function": "_multicall"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/runner.py",
+          "line": 184,
+          "function": "pytest_runtest_call"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest_asyncio/plugin.py",
+          "line": 569,
+          "function": "runtest"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/python.py",
+          "line": 1707,
+          "function": "runtest"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_hooks.py",
+          "line": 512,
+          "function": "__call__"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_manager.py",
+          "line": 120,
+          "function": "_hookexec"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_callers.py",
+          "line": 121,
+          "function": "_multicall"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/python.py",
+          "line": 167,
+          "function": "pytest_pyfunc_call"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest_asyncio/plugin.py",
+          "line": 905,
+          "function": "inner"
+        },
+        {
+          "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/runners.py",
+          "line": 118,
+          "function": "run"
+        },
+        {
+          "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/base_events.py",
+          "line": 641,
+          "function": "run_until_complete"
+        },
+        {
+          "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/base_events.py",
+          "line": 608,
+          "function": "run_forever"
+        },
+        {
+          "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/base_events.py",
+          "line": 1936,
+          "function": "_run_once"
+        },
+        {
+          "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/events.py",
+          "line": 84,
+          "function": "_run"
+        },
+        {
+          "file": "/tmp/camctl-quality-repair-evidence/bootstrap-followup/observe_bootstrap.py",
+          "line": 72,
+          "function": "execute"
+        }
+      ]
+    },
+    {
+      "id": 140445536843520,
+      "name": "Task-2",
+      "done": false,
+      "cancelled": false,
+      "coro": "<coroutine object test_cancel_during_discovery_preserves_active_read_settlement at 0x560a6b956450>",
+      "stack": [
+        {
+          "file": "/tmp/camctl-quality-repair-lidlmje7/bootstrap-followup/apps/camctl/tests/integration/bootstrap/test_read_discovery_default.py",
+          "line": 179,
+          "function": "test_cancel_during_discovery_preserves_active_read_settlement"
+        }
+      ]
+    }
+  ],
+  "actual_session_facts": [
+    {
+      "elapsed": 12.287744239001768,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.294107751993579,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.296357952989638,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.30514941799629,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.30926238000393,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.314767343996209,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.316225713002495,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.321001956996042,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.32456861899118,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.329523683001753,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.331153753999388,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.336054729996249,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.347585821000393,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.353727961992263,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.355923668990727,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.363376048000646,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.367136611996102,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.37336666599731,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.375372865993995,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.381093439995311,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.384252834002837,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.390234552003676,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.391626005002763,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.398343594992184,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.402201655990211,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.410140431995387,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.411751045001438,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.417270138001186,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.420355595997535,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.425180202990305,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.426782982991426,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.432595217003836,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.436335525999311,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.441461675989558,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.442963527995744,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.448750078998273,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.462207884993404,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.468067237001378,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.469793522992404,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.474541610994493,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.479096459996072,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.48522762900393,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.486680670001078,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.492110256003798,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.495978790990193,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.502023109002039,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.504172303990345,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.512063770991517,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.515267472990672,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.520145980000962,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.521556103994953,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.526601096993545,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.529339051994612,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.534077267991961,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.535360806999961,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.540422411999316,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.543932788990787,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.54941029100155,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.55089857299754,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.555963145001442,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.568927747997805,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.574746168989805,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.576272348989733,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.581535317003727,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.584949212992797,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.590241887999582,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.591736425994895,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.596971541992389,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.60047009200207,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.606498000997817,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.608563196001342,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.614066538997577,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.617316267002025,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.623058395998669,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.624638013992808,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.629689574998338,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.660006346995942,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.681853996997233,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.691098406998208,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.697218735003844,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.717704574999516,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.723196071994607,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.732017365997308,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.738155286002439,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.755606168997474,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.761865337990457,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.769357584998943,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.775051488002646,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.791970332997153,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.79758155500167,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.805659296995145,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.813145050997264,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.829986835000454,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.835963464996894,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.845162714002072,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.851523121003993,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.869192332989769,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.876069888996426,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 3,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.913802501003374,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 4,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.946059353998862,
+      "facts": {
+        "unfinished_actions": 1,
+        "required_settlements": 2,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.967781514991657,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.968498930989881,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 0,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.97348645699094,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.98676667700056,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 0,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 12.99848840800405,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 3,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 13.00504161400022,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 13.023648589994991,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 3,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 13.029519775998779,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 13.046921818997362,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 3,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 13.054670515994076,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 13.071560673997737,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 3,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 13.078740069991909,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 13.09707229200285,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 3,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 13.103727326000808,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 13.122745877000852,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 3,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 13.130855547991814,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 13.149315649003256,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 3,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 13.155629746994236,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 13.173059000997455,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 3,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 13.179273046989692,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 13.197454294990166,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 3,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 13.20329003999359,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 13.221338510993519,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 3,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 13.22867014700023,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 13.24663789299666,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 3,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 13.25341080299404,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": true,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 13.274819133992423,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 13.275962820000132,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 0,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    }
+  ],
+  "persisted_work_facts": {
+    "unfinished_actions": 0,
+    "required_settlements": 0,
+    "pending_report_changes": false,
+    "report_failed_no_new_changes": false,
+    "residual_device_facts": false,
+    "deferred_work_cleanup": false,
+    "waiting_acknowledgement": true,
+    "snapshot_backlog": false
+  },
+  "rows": {
+    "actions": [
+      [
+        1,
+        1,
+        0,
+        "cam-a",
+        1,
+        "cam-a",
+        1768467600000000,
+        "files",
+        "{\"params\":{\"type\":\"single_shot\"},\"policy\":{\"max_delay_ms\":1000}}",
+        "{\"type\":\"single_shot\"}",
+        "camctl-adb",
+        1000,
+        "{}",
+        3,
+        1,
+        0,
+        null,
+        null,
+        1768467600000000,
+        null,
+        null,
+        null,
+        null,
+        1,
+        41,
+        16
+      ],
+      [
+        2,
+        1,
+        1,
+        "cam-b",
+        1,
+        "cam-b",
+        1768467600000000,
+        "files",
+        "{\"params\":{\"type\":\"single_shot\"},\"policy\":{\"max_delay_ms\":1000}}",
+        "{\"type\":\"single_shot\"}",
+        "camctl-adb",
+        1000,
+        "{}",
+        3,
+        1,
+        0,
+        null,
+        null,
+        1768467600000000,
+        null,
+        null,
+        null,
+        null,
+        2,
+        43,
+        16
+      ],
+      [
+        3,
+        2,
+        0,
+        "取回0",
+        4,
+        null,
+        1768467600000000,
+        null,
+        "{\"params\":{\"source\":{\"plan_instance_id\":\"1\",\"group\":\"files\"}}}",
+        null,
+        null,
+        null,
+        "{\"selection_mode\":1}",
+        6,
+        1,
+        1,
+        null,
+        null,
+        null,
+        null,
+        2,
+        1,
+        null,
+        46,
+        78,
+        10
+      ],
+      [
+        4,
+        2,
+        1,
+        "取回1",
+        4,
+        null,
+        1768467600000000,
+        null,
+        "{\"params\":{\"source\":{\"plan_instance_id\":\"1\",\"group\":\"files\"}}}",
+        null,
+        null,
+        null,
+        "{\"selection_mode\":1}",
+        4,
+        1,
+        0,
+        21,
+        "{}",
+        null,
+        null,
+        2,
+        1,
+        null,
+        47,
+        162,
+        12
+      ],
+      [
+        5,
+        2,
+        2,
+        "取回2",
+        4,
+        null,
+        1768467600000000,
+        null,
+        "{\"params\":{\"source\":{\"plan_instance_id\":\"1\",\"group\":\"files\"}}}",
+        null,
+        null,
+        null,
+        "{\"selection_mode\":1}",
+        4,
+        1,
+        0,
+        21,
+        "{}",
+        null,
+        null,
+        2,
+        1,
+        null,
+        48,
+        202,
+        12
+      ],
+      [
+        6,
+        3,
+        0,
+        "取消取回",
+        6,
+        null,
+        1768467600000000,
+        null,
+        "{\"params\":{\"target\":{\"action_instance_id\":\"3\"}}}",
+        null,
+        null,
+        null,
+        "{}",
+        3,
+        1,
+        0,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        2,
+        66,
+        83,
+        6
+      ]
+    ],
+    "operation_runs": [
+      [
+        1,
+        1,
+        null,
+        1,
+        null,
+        "start/1",
+        1,
+        null,
+        null,
+        null,
+        null,
+        3,
+        1,
+        1,
+        "30",
+        null,
+        0,
+        null
+      ],
+      [
+        2,
+        2,
+        null,
+        1,
+        null,
+        "start/2",
+        2,
+        null,
+        null,
+        null,
+        null,
+        3,
+        1,
+        1,
+        "30",
+        null,
+        0,
+        null
+      ],
+      [
+        3,
+        1,
+        null,
+        7,
+        null,
+        "results/1",
+        1,
+        null,
+        null,
+        null,
+        null,
+        3,
+        1,
+        3,
+        "10",
+        "3",
+        0,
+        null
+      ],
+      [
+        4,
+        2,
+        null,
+        7,
+        null,
+        "results/2",
+        2,
+        null,
+        null,
+        null,
+        null,
+        3,
+        1,
+        3,
+        "10",
+        "3",
+        0,
+        null
+      ],
+      [
+        5,
+        3,
+        1,
+        3,
+        null,
+        "read/1",
+        null,
+        1,
+        null,
+        null,
+        null,
+        5,
+        1,
+        3,
+        "10",
+        "3",
+        0,
+        null
+      ],
+      [
+        6,
+        4,
+        2,
+        3,
+        null,
+        "read/2",
+        null,
+        2,
+        null,
+        null,
+        null,
+        4,
+        3,
+        3,
+        "10",
+        "3",
+        0,
+        "{\"code\":\"read_attempts_exhausted\",\"stage\":\"source_read\",\"details\":{}}"
+      ],
+      [
+        7,
+        4,
+        3,
+        3,
+        null,
+        "read/3",
+        null,
+        3,
+        null,
+        null,
+        null,
+        4,
+        3,
+        3,
+        "10",
+        "3",
+        0,
+        "{\"code\":\"read_attempts_exhausted\",\"stage\":\"source_read\",\"details\":{}}"
+      ],
+      [
+        8,
+        5,
+        4,
+        3,
+        null,
+        "read/4",
+        null,
+        4,
+        null,
+        null,
+        null,
+        4,
+        3,
+        3,
+        "10",
+        "3",
+        0,
+        "{\"code\":\"read_attempts_exhausted\",\"stage\":\"source_read\",\"details\":{}}"
+      ],
+      [
+        9,
+        5,
+        5,
+        3,
+        null,
+        "read/5",
+        null,
+        5,
+        null,
+        null,
+        null,
+        4,
+        3,
+        3,
+        "10",
+        "3",
+        0,
+        "{\"code\":\"read_attempts_exhausted\",\"stage\":\"source_read\",\"details\":{}}"
+      ]
+    ],
+    "operation_attempts": [
+      [
+        1,
+        1,
+        1,
+        null,
+        2,
+        11,
+        13,
+        null,
+        null,
+        1,
+        "30",
+        null,
+        3,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"operation_returned\",\"version\":1,\"data\":{}}},\"observations\":[{\"type\":\"photo_taken\",\"version\":1,\"data\":{\"activity_id\":\"1\"}}]}",
+        null
+      ],
+      [
+        2,
+        2,
+        1,
+        null,
+        2,
+        12,
+        16,
+        null,
+        null,
+        1,
+        "30",
+        null,
+        3,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"operation_returned\",\"version\":1,\"data\":{}}},\"observations\":[{\"type\":\"photo_taken\",\"version\":1,\"data\":{\"activity_id\":\"2\"}}]}",
+        null
+      ],
+      [
+        3,
+        3,
+        1,
+        null,
+        2,
+        19,
+        33,
+        22,
+        22,
+        3,
+        "10",
+        "3",
+        3,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"results_returned\",\"version\":1,\"data\":{}}},\"observations\":[{\"type\":\"result_files_listed\",\"version\":2,\"data\":{\"activity_id\":\"1\",\"entries\":[{\"identity\":\"photo-1\",\"locator\":{\"path\":\"/DCIM/1\"},\"complete\":true,\"size_bytes\":19,\"kind\":\"photo\",\"original_name\":\"photo-1.jpg\",\"media_type\":\"image/jpeg\",\"paired_identity\":null}],\"cursor\":null,\"next_cursor\":null,\"set_finalized\":true,\"completion_evidence\":null}}]}",
+        null
+      ],
+      [
+        4,
+        4,
+        1,
+        null,
+        2,
+        20,
+        35,
+        25,
+        25,
+        3,
+        "10",
+        "3",
+        3,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"results_returned\",\"version\":1,\"data\":{}}},\"observations\":[{\"type\":\"result_files_listed\",\"version\":2,\"data\":{\"activity_id\":\"2\",\"entries\":[{\"identity\":\"photo-2\",\"locator\":{\"path\":\"/DCIM/2\"},\"complete\":true,\"size_bytes\":19,\"kind\":\"photo\",\"original_name\":\"photo-2.jpg\",\"media_type\":\"image/jpeg\",\"paired_identity\":null}],\"cursor\":null,\"next_cursor\":null,\"set_finalized\":true,\"completion_evidence\":null}}]}",
+        null
+      ],
+      [
+        5,
+        5,
+        1,
+        1,
+        3,
+        64,
+        70,
+        null,
+        null,
+        3,
+        "10",
+        "3",
+        1,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        "{\"code\":\"device_error\",\"stage\":\"read\",\"details\":{\"reason\":\"object of type 'coroutine' has no len()\"}}"
+      ],
+      [
+        6,
+        6,
+        1,
+        1,
+        3,
+        96,
+        97,
+        null,
+        null,
+        3,
+        "10",
+        "3",
+        1,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        "{\"code\":\"device_error\",\"stage\":\"read\",\"details\":{\"reason\":\"object of type 'coroutine' has no len()\"}}"
+      ],
+      [
+        7,
+        7,
+        1,
+        1,
+        3,
+        122,
+        124,
+        null,
+        null,
+        3,
+        "10",
+        "3",
+        1,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        "{\"code\":\"device_error\",\"stage\":\"read\",\"details\":{\"reason\":\"object of type 'coroutine' has no len()\"}}"
+      ],
+      [
+        8,
+        6,
+        2,
+        1,
+        3,
+        133,
+        134,
+        null,
+        null,
+        3,
+        "10",
+        "3",
+        1,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        "{\"code\":\"device_error\",\"stage\":\"read\",\"details\":{\"reason\":\"object of type 'coroutine' has no len()\"}}"
+      ],
+      [
+        9,
+        7,
+        2,
+        1,
+        3,
+        136,
+        137,
+        null,
+        null,
+        3,
+        "10",
+        "3",
+        1,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        "{\"code\":\"device_error\",\"stage\":\"read\",\"details\":{\"reason\":\"object of type 'coroutine' has no len()\"}}"
+      ],
+      [
+        10,
+        6,
+        3,
+        1,
+        3,
+        139,
+        140,
+        null,
+        null,
+        3,
+        "10",
+        "3",
+        1,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        "{\"code\":\"device_error\",\"stage\":\"read\",\"details\":{\"reason\":\"object of type 'coroutine' has no len()\"}}"
+      ],
+      [
+        11,
+        8,
+        1,
+        1,
+        3,
+        150,
+        151,
+        null,
+        null,
+        3,
+        "10",
+        "3",
+        1,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        "{\"code\":\"device_error\",\"stage\":\"read\",\"details\":{\"reason\":\"object of type 'coroutine' has no len()\"}}"
+      ],
+      [
+        12,
+        7,
+        3,
+        1,
+        3,
+        153,
+        154,
+        null,
+        null,
+        3,
+        "10",
+        "3",
+        1,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        "{\"code\":\"device_error\",\"stage\":\"read\",\"details\":{\"reason\":\"object of type 'coroutine' has no len()\"}}"
+      ],
+      [
+        13,
+        9,
+        1,
+        1,
+        3,
+        167,
+        168,
+        null,
+        null,
+        3,
+        "10",
+        "3",
+        1,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        "{\"code\":\"device_error\",\"stage\":\"read\",\"details\":{\"reason\":\"object of type 'coroutine' has no len()\"}}"
+      ],
+      [
+        14,
+        8,
+        2,
+        1,
+        3,
+        174,
+        175,
+        null,
+        null,
+        3,
+        "10",
+        "3",
+        1,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        "{\"code\":\"device_error\",\"stage\":\"read\",\"details\":{\"reason\":\"object of type 'coroutine' has no len()\"}}"
+      ],
+      [
+        15,
+        9,
+        2,
+        1,
+        3,
+        177,
+        178,
+        null,
+        null,
+        3,
+        "10",
+        "3",
+        1,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        "{\"code\":\"device_error\",\"stage\":\"read\",\"details\":{\"reason\":\"object of type 'coroutine' has no len()\"}}"
+      ],
+      [
+        16,
+        8,
+        3,
+        1,
+        3,
+        180,
+        181,
+        null,
+        null,
+        3,
+        "10",
+        "3",
+        1,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        "{\"code\":\"device_error\",\"stage\":\"read\",\"details\":{\"reason\":\"object of type 'coroutine' has no len()\"}}"
+      ],
+      [
+        17,
+        9,
+        3,
+        1,
+        3,
+        190,
+        191,
+        null,
+        null,
+        3,
+        "10",
+        "3",
+        1,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        "{\"code\":\"device_error\",\"stage\":\"read\",\"details\":{\"reason\":\"object of type 'coroutine' has no len()\"}}"
+      ]
+    ],
+    "file_copies": [
+      [
+        1,
+        1,
+        null,
+        null,
+        1,
+        null,
+        1,
+        1,
+        0,
+        0,
+        19,
+        null,
+        0,
+        1,
+        null,
+        1,
+        null,
+        null
+      ],
+      [
+        2,
+        2,
+        null,
+        null,
+        1,
+        null,
+        2,
+        1,
+        0,
+        0,
+        19,
+        null,
+        0,
+        1,
+        null,
+        1,
+        null,
+        null
+      ],
+      [
+        3,
+        3,
+        null,
+        null,
+        2,
+        null,
+        3,
+        1,
+        0,
+        0,
+        19,
+        null,
+        0,
+        1,
+        null,
+        1,
+        null,
+        null
+      ],
+      [
+        4,
+        4,
+        null,
+        null,
+        1,
+        null,
+        4,
+        1,
+        0,
+        0,
+        19,
+        null,
+        0,
+        1,
+        null,
+        1,
+        null,
+        null
+      ],
+      [
+        5,
+        5,
+        null,
+        null,
+        2,
+        null,
+        5,
+        1,
+        0,
+        0,
+        19,
+        null,
+        0,
+        1,
+        null,
+        1,
+        null,
+        null
+      ]
+    ],
+    "deliveries": [
+      [
+        1,
+        3,
+        1,
+        "1.jpg",
+        "photo-1-双设备-cam-a.jpg",
+        7,
+        null,
+        null,
+        1,
+        null,
+        null,
+        59,
+        77,
+        10
+      ],
+      [
+        2,
+        4,
+        1,
+        "2.jpg",
+        "photo-1-双设备-cam-a.jpg",
+        6,
+        null,
+        null,
+        1,
+        null,
+        "{\"code\":\"read_attempts_exhausted\",\"stage\":\"source_read\",\"details\":{\"max_read_attempts\":3,\"attempts_used\":3}}",
+        91,
+        144,
+        15
+      ],
+      [
+        3,
+        4,
+        2,
+        "3.jpg",
+        "photo-2-双设备-cam-b.jpg",
+        6,
+        null,
+        null,
+        1,
+        null,
+        "{\"code\":\"read_attempts_exhausted\",\"stage\":\"source_read\",\"details\":{\"max_read_attempts\":3,\"attempts_used\":3}}",
+        105,
+        158,
+        15
+      ],
+      [
+        4,
+        5,
+        1,
+        "4.jpg",
+        "photo-1-双设备-cam-a.jpg",
+        6,
+        null,
+        null,
+        1,
+        null,
+        "{\"code\":\"read_attempts_exhausted\",\"stage\":\"source_read\",\"details\":{\"max_read_attempts\":3,\"attempts_used\":3}}",
+        111,
+        185,
+        15
+      ],
+      [
+        5,
+        5,
+        2,
+        "5.jpg",
+        "photo-2-双设备-cam-b.jpg",
+        6,
+        null,
+        null,
+        1,
+        null,
+        "{\"code\":\"read_attempts_exhausted\",\"stage\":\"source_read\",\"details\":{\"max_read_attempts\":3,\"attempts_used\":3}}",
+        117,
+        195,
+        15
+      ]
+    ],
+    "obtain_items": [
+      [
+        1,
+        1,
+        null,
+        1,
+        1,
+        null,
+        null,
+        null,
+        null,
+        3,
+        0,
+        1,
+        null,
+        null
+      ],
+      [
+        2,
+        3,
+        null,
+        1,
+        1,
+        null,
+        null,
+        null,
+        null,
+        3,
+        0,
+        2,
+        null,
+        null
+      ],
+      [
+        3,
+        4,
+        null,
+        2,
+        1,
+        null,
+        null,
+        null,
+        null,
+        3,
+        0,
+        3,
+        null,
+        null
+      ],
+      [
+        4,
+        5,
+        null,
+        1,
+        1,
+        null,
+        null,
+        null,
+        null,
+        3,
+        0,
+        4,
+        null,
+        null
+      ],
+      [
+        5,
+        6,
+        null,
+        2,
+        1,
+        null,
+        null,
+        null,
+        null,
+        3,
+        0,
+        5,
+        null,
+        null
+      ]
+    ],
+    "reports": [
+      [
+        1,
+        50,
+        0,
+        23,
+        1,
+        4,
+        2089,
+        "17a42d3fa8dc39bda52fb43b251895d8b774283e31a046326e84cffc50c935fc",
+        1,
+        128,
+        null,
+        51,
+        128
+      ],
+      [
+        2,
+        128,
+        0,
+        56,
+        1,
+        4,
+        3453,
+        "5887a0a47bef4f875b955e863aced9de965f4f5a8b3285b61c01176fc6434ea5",
+        1,
+        132,
+        null,
+        129,
+        132
+      ],
+      [
+        3,
+        147,
+        0,
+        57,
+        1,
+        4,
+        3753,
+        "07d7bc39f0a69f3f52466bf6045486708e7139b3e1964b463a9399649f90c9fd",
+        1,
+        166,
+        null,
+        148,
+        166
+      ],
+      [
+        4,
+        169,
+        0,
+        59,
+        1,
+        4,
+        4125,
+        "9e037b546ede28c172e9c7d8c44f66d8e7b64ef7fae58f15980a0e6381701b4f",
+        1,
+        173,
+        null,
+        170,
+        173
+      ],
+      [
+        5,
+        188,
+        0,
+        60,
+        1,
+        4,
+        4425,
+        "d39e35a8533722a88fc01c3308306ae4ca8511eb7983ee406ace217ec61f932d",
+        1,
+        201,
+        null,
+        189,
+        201
+      ],
+      [
+        6,
+        203,
+        0,
+        63,
+        1,
+        4,
+        4799,
+        "3d32caaafd78602806066667faa69d37f48cf8eaa97056285dede0bcf3a33815",
+        1,
+        207,
+        null,
+        204,
+        207
+      ]
+    ]
+  }
+}

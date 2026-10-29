@@ -1,0 +1,234 @@
+{
+  "schema_version": 1,
+  "verification": "C host Debug 全量 CTest 单元入口",
+  "started_utc": "2026-10-26T03:01:00.575740+00:00",
+  "repository": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+  "evidence_directory": "/tmp/camctl-host-merge-unit-20261026-9y_bnocl",
+  "build_directory": "/tmp/camctl-host-merge-unit-20261026-9y_bnocl/build",
+  "scope": {
+    "ctest_regex": "^unit_",
+    "integration_tests_executed": false,
+    "real_camera_used": false,
+    "deployment_modified": false,
+    "build_parallel_jobs": 2
+  },
+  "source": {
+    "state": "合并进行中的工作区",
+    "head": {
+      "exit_code": 0,
+      "stdout": "c55f94d468b79fd62a45ae499a7c9624ed223928",
+      "stderr": ""
+    },
+    "head_parent": {
+      "exit_code": 0,
+      "stdout": "4e42c81c965ecb6e901abf5f477b09cb163dc29e",
+      "stderr": ""
+    },
+    "merge_head": {
+      "exit_code": 0,
+      "stdout": "27713c14dbdf6dda445e3dd123745ba11d66a9cc",
+      "stderr": ""
+    },
+    "merge_base": {
+      "exit_code": 0,
+      "stdout": "272fda66a0e4e58f2917677e808939a2cb174983",
+      "stderr": ""
+    },
+    "manifest_before": "/tmp/camctl-host-merge-unit-20261026-9y_bnocl/source-sha256-before.json",
+    "manifest_after": "/tmp/camctl-host-merge-unit-20261026-9y_bnocl/source-sha256-after.json",
+    "host_and_shared_fixture_unchanged_during_verification": true,
+    "changed_inputs": []
+  },
+  "environment": {
+    "platform": "Linux-5.15.167.4-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "libc": [
+      "glibc",
+      "2.39"
+    ],
+    "os_release": "PRETTY_NAME=\"Ubuntu 24.04.5 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION=\"24.04.5 LTS (Noble Numbat)\"\nVERSION_CODENAME=noble\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=noble\nLOGO=ubuntu-logo\n",
+    "python_executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "python": {
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "--version"
+      ],
+      "exit_code": 0,
+      "stdout": "Python 3.11.17",
+      "stderr": ""
+    },
+    "cmake": {
+      "command": [
+        "cmake",
+        "--version"
+      ],
+      "exit_code": 0,
+      "stdout": "cmake version 3.28.3\n\nCMake suite maintained and supported by Kitware (kitware.com/cmake).",
+      "stderr": ""
+    },
+    "ctest": {
+      "command": [
+        "ctest",
+        "--version"
+      ],
+      "exit_code": 0,
+      "stdout": "ctest version 3.28.3\n\nCMake suite maintained and supported by Kitware (kitware.com/cmake).",
+      "stderr": ""
+    },
+    "compiler": {
+      "command": [
+        "cc",
+        "--version"
+      ],
+      "exit_code": 0,
+      "stdout": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+      "stderr": ""
+    },
+    "relevant_variables": {
+      "DEVCONTAINER": "true"
+    }
+  },
+  "stages": [
+    {
+      "name": "configure",
+      "command": [
+        "cmake",
+        "-S",
+        "/opt/devcontainer/.codex/worktrees/de38/camctl/apps/host-demo",
+        "-B",
+        "/tmp/camctl-host-merge-unit-20261026-9y_bnocl/build",
+        "-DCMAKE_BUILD_TYPE=Debug",
+        "-DHOST_BUILD_TESTS=ON",
+        "-DHOST_TEST_PYTHON=/workspaces/camctl/apps/camctl/.venv311/bin/python"
+      ],
+      "shell_command": "cmake -S /opt/devcontainer/.codex/worktrees/de38/camctl/apps/host-demo -B /tmp/camctl-host-merge-unit-20261026-9y_bnocl/build -DCMAKE_BUILD_TYPE=Debug -DHOST_BUILD_TESTS=ON -DHOST_TEST_PYTHON=/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+      "log": "/tmp/camctl-host-merge-unit-20261026-9y_bnocl/logs/configure.log",
+      "started_utc": "2026-10-26T03:01:00.668988+00:00",
+      "finished_utc": "2026-10-26T03:01:01.192085+00:00",
+      "elapsed_seconds": 0.523096713994164,
+      "exit_code": 0
+    },
+    {
+      "name": "build",
+      "command": [
+        "cmake",
+        "--build",
+        "/tmp/camctl-host-merge-unit-20261026-9y_bnocl/build",
+        "--",
+        "-j2"
+      ],
+      "shell_command": "cmake --build /tmp/camctl-host-merge-unit-20261026-9y_bnocl/build -- -j2",
+      "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+      "log": "/tmp/camctl-host-merge-unit-20261026-9y_bnocl/logs/build.log",
+      "started_utc": "2026-10-26T03:01:01.192433+00:00",
+      "finished_utc": "2026-10-26T03:01:06.790856+00:00",
+      "elapsed_seconds": 5.598434735002229,
+      "exit_code": 0
+    },
+    {
+      "name": "ctest-discovery",
+      "command": [
+        "ctest",
+        "--test-dir",
+        "/tmp/camctl-host-merge-unit-20261026-9y_bnocl/build",
+        "-R",
+        "^unit_",
+        "--show-only=json-v1"
+      ],
+      "shell_command": "ctest --test-dir /tmp/camctl-host-merge-unit-20261026-9y_bnocl/build -R '^unit_' --show-only=json-v1",
+      "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+      "log": "/tmp/camctl-host-merge-unit-20261026-9y_bnocl/logs/ctest-discovery.log",
+      "started_utc": "2026-10-26T03:01:06.791336+00:00",
+      "finished_utc": "2026-10-26T03:01:06.808731+00:00",
+      "elapsed_seconds": 0.017400420998455957,
+      "exit_code": 0
+    },
+    {
+      "name": "ctest-unit",
+      "command": [
+        "ctest",
+        "--test-dir",
+        "/tmp/camctl-host-merge-unit-20261026-9y_bnocl/build",
+        "-R",
+        "^unit_",
+        "-V",
+        "--output-on-failure"
+      ],
+      "shell_command": "ctest --test-dir /tmp/camctl-host-merge-unit-20261026-9y_bnocl/build -R '^unit_' -V --output-on-failure",
+      "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+      "log": "/tmp/camctl-host-merge-unit-20261026-9y_bnocl/logs/ctest-unit.log",
+      "started_utc": "2026-10-26T03:01:06.810215+00:00",
+      "finished_utc": "2026-10-26T03:01:06.847631+00:00",
+      "elapsed_seconds": 0.03742289199726656,
+      "exit_code": 0,
+      "results": {
+        "total_ctest_entries": 16,
+        "failed_ctest_entries": 0,
+        "passed_ctest_entries": 16,
+        "passed_cmocka_cases": 162,
+        "cmocka_entry_counts": [
+          7,
+          1,
+          2,
+          21,
+          10,
+          4,
+          1,
+          15,
+          4,
+          10,
+          28,
+          8,
+          17,
+          18,
+          5,
+          11
+        ],
+        "raw_log_encoding": "保留原始字节；计数解析以 UTF-8 replacement 解码",
+        "total_cmocka_cases": 162,
+        "failed_cmocka_cases": 0,
+        "per_ctest_entry": {
+          "unit_notification": 7,
+          "unit_callback_queue": 1,
+          "unit_callbacks": 2,
+          "unit_result": 21,
+          "unit_scheduler": 10,
+          "unit_log_queue": 4,
+          "unit_diagnostic": 1,
+          "unit_claim": 15,
+          "unit_input": 4,
+          "unit_home_paths": 10,
+          "unit_process_unit": 28,
+          "unit_spawn": 8,
+          "unit_process_group": 17,
+          "unit_stop": 18,
+          "unit_writer_stop": 5,
+          "unit_demo_stop": 11
+        },
+        "ctest_reported_real_seconds": 0.03
+      }
+    }
+  ],
+  "test_inventory": [
+    "unit_notification",
+    "unit_callback_queue",
+    "unit_callbacks",
+    "unit_result",
+    "unit_scheduler",
+    "unit_log_queue",
+    "unit_diagnostic",
+    "unit_claim",
+    "unit_input",
+    "unit_home_paths",
+    "unit_process_unit",
+    "unit_spawn",
+    "unit_process_group",
+    "unit_stop",
+    "unit_writer_stop",
+    "unit_demo_stop"
+  ],
+  "finished_utc": "2026-10-26T03:01:06.849402+00:00",
+  "elapsed_seconds": 6.180463080003392,
+  "status": "passed"
+}

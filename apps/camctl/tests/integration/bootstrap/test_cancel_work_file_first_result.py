@@ -23,7 +23,7 @@ pytestmark = pytest.mark.asyncio
 
 async def _active_obtain(environment, request_id):
     cfg, owned, context, _driver = environment
-    _accept(owned, request_id, [{"name": "取回待取消", "type": "obtain_action_outputs",
+    await _accept(owned, request_id, [{"name": "取回待取消", "type": "obtain_action_outputs",
         "scheduled_at": "2026-01-15 09:00:00",
         "params": {"source": {"plan_instance_id": "1", "group": "files"}}}])
     target = owned.connection.execute("SELECT MAX(id) FROM actions WHERE type=4").fetchone()[0]
@@ -51,7 +51,7 @@ async def test_cancel_origin_adopts_only_its_first_work_file_result(environment,
     runtime = WorkFileRuntime(staging=Path(cfg.paths.staging), limits=WorkFileLimits(32, 1))
     runtime.initialize(owned)
     target = await _active_obtain(environment, "2")
-    _accept(owned, "3", [{"name": "取消取回", "type": "cancel_task",
+    await _accept(owned, "3", [{"name": "取消取回", "type": "cancel_task",
         "scheduled_at": "2026-01-15 09:00:00",
         "params": {"target": {"action_instance_id": str(target)}}}])
     origin = owned.connection.execute("SELECT id FROM actions WHERE type=6").fetchone()[0]
@@ -91,7 +91,7 @@ async def test_cancel_first_cleanup_does_not_consume_unrelated_old_history(envir
     runtime = WorkFileRuntime(staging=Path(cfg.paths.staging), limits=WorkFileLimits(32, 1))
     runtime.initialize(owned)
     target = await _active_obtain(environment, "4")
-    _accept(owned, "5", [{"name": "取消新取回", "type": "cancel_task",
+    await _accept(owned, "5", [{"name": "取消新取回", "type": "cancel_task",
         "scheduled_at": "2026-01-15 09:00:00",
         "params": {"target": {"action_instance_id": str(target)}}}])
 
@@ -116,7 +116,7 @@ async def test_cancel_waits_shared_actual_file_owner_before_any_terminal(environ
     file_id = owned.connection.execute(
         "SELECT f.id FROM intermediate_files f JOIN deliveries d ON d.id=f.owner_delivery_id"
         " WHERE d.action_id=? ORDER BY f.id LIMIT 1", (target,)).fetchone()[0]
-    _accept(owned, "3", [{"name": "取消在用取回", "type": "cancel_task",
+    await _accept(owned, "3", [{"name": "取消在用取回", "type": "cancel_task",
         "scheduled_at": "2026-01-15 09:00:00",
         "params": {"target": {"action_instance_id": str(target)}}}])
     entered, release = asyncio.Event(), asyncio.Event()
@@ -157,7 +157,7 @@ async def test_cancel_of_terminal_obtain_keeps_its_old_history_out_of_first_clea
     old = tuple(owned.connection.execute("SELECT * FROM intermediate_files ORDER BY id"))
     runtime = WorkFileRuntime(staging=Path(cfg.paths.staging), limits=WorkFileLimits(32, 1))
     runtime.initialize(owned)
-    _accept(owned, "3", [{"name": "取消旧终态取回", "type": "cancel_task",
+    await _accept(owned, "3", [{"name": "取消旧终态取回", "type": "cancel_task",
         "scheduled_at": "2026-01-15 09:00:00",
         "params": {"target": {"action_instance_id": str(target)}}}])
 

@@ -1,0 +1,34 @@
+{
+  "commit": "d896d4b28194258cb5da71b160d5ef22d642d48e",
+  "collected": 8,
+  "passed": 8,
+  "failed": 0,
+  "remaining": 0,
+  "launcher_wall_seconds": 397.34485664000385,
+  "cli_groups": 132,
+  "peak_combined_bytes": 123322368,
+  "all_groups_removed": true,
+  "all_limits_2GiB": true,
+  "resource_events": [],
+  "all_client_sessions_closed": true,
+  "all_client_operations_passed": true,
+  "remaining_pids": [],
+  "launcher_errors": [],
+  "delegation_removed": true,
+  "native_gate_forwarded_bytes": [
+    65536,
+    0
+  ],
+  "archived_worlds": 8,
+  "compressed_logs": 24,
+  "archived_source_bytes": 51092632,
+  "archived_saved_bytes": 23890426,
+  "pytest_seconds": 396.75,
+  "all_setup_call_teardown_passed": true,
+  "max_client_startup_seconds": 3.445149264,
+  "client_phase_timeout_seconds": [
+    120
+  ],
+  "postflight_git_status": "",
+  "postflight_remaining_processes": []
+}

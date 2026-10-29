@@ -250,8 +250,8 @@ def test_cleanup_saved_result_and_terminal_companions(phase, tmp_path, cleanup_o
 
 def test_cleanup_cancel_inflight_delete_recover(tmp_path, cleanup_osmo_source, monkeypatch):
     with cleanup_osmo_source.consumer(tmp_path, monkeypatch) as world:
-        world.write_config(max_d=2, max_q=1, timeout="30")
-        request = world.begin_cleanup(fault="before")
+        world.write_config(max_d=2, max_q=1, timeout="30", terminate_grace="30")
+        request = world.begin_cleanup(fault="before", hold_cancel=True)
         marker = world.wait_marker("entered")
         item = world.cleanup_item(request)
         original, = world.attempts(item["id"])
@@ -259,8 +259,13 @@ def test_cleanup_cancel_inflight_delete_recover(tmp_path, cleanup_osmo_source, m
         plan, cancel = world.export("cancel-cleanup", [world.action("cancel-cleanup", "cancel_task",
                                    {"target": {"request_id": request}})])
         world.host.submit(plan)
-        wait(lambda: rows(world.db, "SELECT a.cancel_requested FROM actions a JOIN plans p ON p.id=a.plan_id WHERE p.request_id=?",
-                          (request,)) == [{"cancel_requested": 1}], "真实业务取消尚未保存")
+        def cancel_and_signal():
+            if rows(world.db, "SELECT a.cancel_requested FROM actions a JOIN plans p ON p.id=a.plan_id WHERE p.request_id=?",
+                    (request,)) != [{"cancel_requested": 1}]:
+                return None
+            return [record for record in records(world.calls_path)
+                    if record.get("stage") == "signal_held" and record["pid"] == marker["pid"]]
+        held_signals = wait(cancel_and_signal, "真实取消及原DELETE进程的停止信号尚未形成")
         inflight, = world.attempts(item["id"])
         assert inflight == original
         assert inflight["status"] == int(enum_for("operation_attempts.status").RUNNING)
@@ -269,11 +274,12 @@ def test_cleanup_cancel_inflight_delete_recover(tmp_path, cleanup_osmo_source, m
         process = process_identity(marker["pid"])
         assert process["starttime"] == marker["starttime"]
         assert process["pgid"] == marker["pgid"] and process["state"] not in ("Z", "X")
+        assert marker["modeled_unlink_count"] == 0 and world.path("osv").is_file()
         json_write(world.root / "cancel-inflight-window.json", {
             "cancel_request": cancel["request_id"], "target_request": request,
             "target_actions": rows(world.db, "SELECT a.* FROM actions a JOIN plans p ON p.id=a.plan_id WHERE p.request_id=?", (request,)),
             "attempt": inflight, "gate": marker, "process": process,
-            "calls": world.calls(),
+            "calls": world.calls(), "held_signals": held_signals,
         })
         final = world.recover(request, "CANCELED", max_d=2, max_q=1)
         _assert_original_attempt(world, {"request": request, "attempt": original}, intent)

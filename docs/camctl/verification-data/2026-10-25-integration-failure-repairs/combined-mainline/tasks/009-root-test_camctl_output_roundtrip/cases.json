@@ -1,0 +1,97 @@
+[
+  {
+    "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_cross_plan_reference_and_multi_request",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.004413251008372754
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 91.88708784800838
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0016562999953748658
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 91.89315739901213
+  },
+  {
+    "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_recording_delivery_survives_late_cancel",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.013286208995850757
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 48.61898453699541
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008845420088618994
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 48.633155288000125
+  },
+  {
+    "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_repeated_obtain_of_same_output_yields_independent_deliveries",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002548162010498345
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 14.70544710199465
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012019229907309636
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 14.70919718699588
+  },
+  {
+    "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_auto_preview_obtains_registered_preview",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0019296490063425153
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 17.155876061995514
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007239769911393523
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 17.158529687992996
+  },
+  {
+    "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_three_capture_kinds_partial_obtain",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0016003110067686066
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 19.242269451991888
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0019597899954533204
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 19.24582955299411
+  }
+]

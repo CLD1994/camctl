@@ -535,7 +535,7 @@ def test_plan_cancel_before_start_settles_auto_preview(
 def test_three_capture_kinds_partial_obtain(tmp_path: Path) -> None:
     """三种拍摄与部分取回组合：照片、录像与延时同计划顺序执行，
     照片与延时产物被取回交付，录像产物保持登记不建交付。"""
-    deployment = Deployment(tmp_path)
+    deployment = Deployment(tmp_path, controlled_clock=True)
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
@@ -550,7 +550,7 @@ def test_three_capture_kinds_partial_obtain(tmp_path: Path) -> None:
                       "combo-seq": _COMBO_SEQ_CONTENT})
     deployment.install_client_capabilities(spec)
 
-    shoot_at = future_schedule(1)
+    shoot_at = deployment.schedule(1)
     body = {
         "request_id": "0",
         "created_at": "2026-01-15 08:00:00",
@@ -607,8 +607,29 @@ def test_three_capture_kinds_partial_obtain(tmp_path: Path) -> None:
     assert submitted.exit_code == 0, submitted.stderr
 
     # 一个 run 会话顺序完成三种拍摄与两次取回（一次一份拷贝）。
-    run = deployment.camctl(
+    deployment.freeze_at(shoot_at)
+    deadline = time.monotonic() + 180
+    process = deployment.start_camctl(
         "run", "--config", str(deployment.config_path), driver=spec)
+    try:
+        _await_row(
+            deployment.state_db,
+            "SELECT r.id FROM operation_runs r JOIN actions a ON a.id=r.action_id"
+            " WHERE a.name='拍录' AND r.responsibility_key='start/' || a.id"
+            " AND r.status IN (3,4)", process=process)
+        # 真实录像 START 后推进其一秒目标，随后在原窗口内启动延时。
+        deployment.freeze_at(deployment.schedule(1))
+        _await_row(
+            deployment.state_db,
+            "SELECT r.id FROM operation_runs r JOIN actions a ON a.id=r.action_id"
+            " WHERE a.name='延时' AND r.responsibility_key='start/' || a.id"
+            " AND r.status IN (3,4)", process=process)
+        deployment.resume_clock()
+        stdout, stderr = process.communicate(timeout=max(0, deadline - time.monotonic()))
+        run = CliResult(process.returncode, stdout, stderr)
+    finally:
+        if process.poll() is None:
+            terminate_process_tree(process)
     assert run.exit_code == 0, run.stderr
 
     state_db = deployment.state_db

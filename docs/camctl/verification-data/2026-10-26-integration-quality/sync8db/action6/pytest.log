@@ -1,0 +1,96 @@
+内存预算启动收据：/tmp/camctl-sync8db-evidence/action6/native/budget/launcher.json
+============================= test session starts ==============================
+platform linux -- Python 3.11.17, pytest-9.1.1, pluggy-1.6.0 -- /workspaces/camctl/apps/camctl/.venv311/bin/python
+cachedir: .pytest_cache
+rootdir: /
+plugins: mock-3.16.0, asyncio-1.4.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 1 item
+
+tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters FAILED [100%]
+
+=================================== FAILURES ===================================
+_ test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters _
+
+tmp_path = PosixPath('/tmp/camctl-sync8db-evidence/action6/native/data/test_installed_action6_native_0')
+host_demo = '/tmp/camctl-host-build-20392d229b084f55a3d8798ba1c754e1/host-demo'
+action6_package = _Package(python=PosixPath('/tmp/camctl-sync8db-evidence/action6/native/data/action6-builtin-package0/venv/bin/python')...ery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters (setup)'})
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f207f940ad0>
+client_deployment = <function client_deployment.<locals>.create at 0x7f207fd92980>
+
+    @pytest.mark.skipif(os.name != "posix", reason="安装版 POSIX C host 恢复链")
+    def test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters(
+            tmp_path, host_demo, action6_package, monkeypatch, client_deployment,
+    ):
+        package = action6_package
+        scenario = _prepare_installed_action6(
+            tmp_path, package, client_deployment, native=True, include_jpeg=False,
+        )
+        deployment = scenario["deployment"]
+        demo, source_id = _start_installed_capture(host_demo, package, scenario, monkeypatch)
+        waiter_names = ("native-prefix-a", "native-prefix-b")
+        waiter_ids = [
+            _submit_obtain(
+                demo, deployment, action_name=name, source_id=source_id,
+                selection={"filter": "default"},
+            )
+            for name in waiter_names
+        ]
+        _wait_for_waiting_obtains(deployment, source_id, waiter_names)
+        failure = demo.watch_failures()
+        try:
+            _release_clock(scenario, 330)
+>           report = wait_for(
+                lambda: _report_with_statuses(
+                    deployment.ready,
+                    {"capture": "failed", waiter_names[0]: "succeeded", waiter_names[1]: "succeeded"},
+                ),
+                240,
+                "Action6 native 必需照片缺失后未按真实处理器完成前缀检查和独立取回",
+                failure=failure,
+            )
+
+/tmp/camctl-sync8db-tests-ojv22ku3/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py:1096: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+predicate = <function test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters.<locals>.<lambda> at 0x7f207fda9f80>
+timeout_s = 240, message = 'Action6 native 必需照片缺失后未按真实处理器完成前缀检查和独立取回'
+failure = <function HostDemo.watch_failures.<locals>.<lambda> at 0x7f207fda9300>
+
+    def wait_for(predicate, timeout_s: float, message: str, *, failure=None):
+        """轮询成功条件；调用方可提供本次等待已无法成功的诊断。"""
+        deadline = time.monotonic() + timeout_s
+        next_failure_check = 0.0
+        while True:
+            value = predicate()
+            if value:
+                return value
+            now = time.monotonic()
+            # 负向事实会持续保留，限制日志和状态库诊断的读取频率。
+            if failure is not None and now >= next_failure_check:
+                if reason := failure():
+                    raise AssertionError(f"{message}: {reason}")
+                next_failure_check = now + 0.05
+>           assert time.monotonic() < deadline, f"等待超时: {message}"
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           AssertionError: 等待超时: Action6 native 必需照片缺失后未按真实处理器完成前缀检查和独立取回
+
+/tmp/camctl-sync8db-tests-ojv22ku3/action6/tests/integration/_wsl_host_demo.py:98: AssertionError
+=============================== warnings summary ===============================
+../../../workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/cacheprovider.py:469
+  /workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/cacheprovider.py:469: PytestCacheWarning: could not create cache path /.pytest_cache/v/cache/nodeids: [Errno 13] Permission denied: '/pytest-cache-files-wv2eg6i1'
+    config.cache.set("cache/nodeids", sorted(self.cached_nodeids))
+
+../../../workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/cacheprovider.py:423
+  /workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/cacheprovider.py:423: PytestCacheWarning: could not create cache path /.pytest_cache/v/cache/lastfailed: [Errno 13] Permission denied: '/pytest-cache-files-w83kabbb'
+    config.cache.set("cache/lastfailed", self.lastfailed)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+-- generated xml file: /tmp/camctl-sync8db-evidence/action6/native/result.xml --
+============================= slowest 10 durations =============================
+253.58s call     tmp/camctl-sync8db-tests-ojv22ku3/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters
+15.44s setup    tmp/camctl-sync8db-tests-ojv22ku3/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters
+0.06s teardown tmp/camctl-sync8db-tests-ojv22ku3/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters
+=========================== short test summary info ============================
+FAILED tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters - AssertionError: 等待超时: Action6 native 必需照片缺失后未按真实处理器完成前缀检查和独立取回
+================== 1 failed, 2 warnings in 270.06s (0:04:30) ===================

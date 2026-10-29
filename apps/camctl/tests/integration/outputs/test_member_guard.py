@@ -8,7 +8,8 @@ import pytest
 
 from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import new_operation_key
-from camctl.history.validators import EventContext, EventValidationError, validate_event
+from camctl.history.validators import EventValidationError
+from ..support.output_planning import capture_operation, proposal_state, validate_static_event as validate_event
 from camctl.history.reads import ReadCoverage
 from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.transaction import (
@@ -17,15 +18,14 @@ from camctl.persistence.transaction import (
 
 from .test_read_associations import read_targets
 from .test_qualification import _NOW
-from ..operations.test_result_reuse import _FaultConnection
+from ..support.output_planning import storage_fault as _FaultConnection
 
 
 @pytest.fixture
 def member_context(read_targets):
     _complete_source(read_targets.connection)
     register_outputs_guards()
-    return EventContext(TransactionRange(2, 2, 2),
-                        {("obtain_items", 101): ("action", 31)}, _state(read_targets.connection))
+    return proposal_state(read_targets, owners={("obtain_items", 101): ("action", 31)})
 
 
 def _complete_source(connection):
@@ -202,7 +202,7 @@ def test_member_event_and_projection_commit_or_rollback_together(read_targets, r
     receipt = commit_operation(_AdvanceMember(reason), key, target)
     if write_failure:
         assert receipt.kind == "rolled_back", receipt.error
-        assert isinstance(receipt.error, sqlite3.OperationalError)
+        assert type(receipt.error) is sqlite3.DatabaseError
         assert tuple(owned.connection.iterdump()) == before
     else:
         assert receipt.kind == "completed", receipt.error

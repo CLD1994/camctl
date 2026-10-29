@@ -1,0 +1,97 @@
+{
+  "stages": {
+    "db_transaction": 16858,
+    "camera_setting": 8,
+    "adb_directory": 2,
+    "baseline_preparation": 2,
+    "camera_start_command": 1,
+    "prior_result_history": 1,
+    "result_candidates": 1,
+    "adb_metadata": 1,
+    "result_page_save": 1,
+    "segment_save": 9
+  },
+  "duplicate_transaction_keys": [
+    {
+      "operation_key": "cca9a84b303d05d4f17e70d6913efefd",
+      "count": 2,
+      "commands": [
+        "_FileCompleteCommand",
+        "_FileCompleteCommand"
+      ],
+      "outcomes": [
+        "completed",
+        "completed"
+      ],
+      "events": [
+        1,
+        null
+      ]
+    }
+  ],
+  "segment_saves": [
+    {
+      "stage": "segment_save",
+      "elapsed_ms": 5.133,
+      "action_id": 1,
+      "method": "save_file_presence",
+      "resumed": false
+    },
+    {
+      "stage": "segment_save",
+      "elapsed_ms": 21.676,
+      "action_id": 1,
+      "method": "save_ownership_from_result_page",
+      "resumed": false
+    },
+    {
+      "stage": "segment_save",
+      "elapsed_ms": 26.066,
+      "action_id": 1,
+      "method": "save_file_completion",
+      "resumed": false
+    },
+    {
+      "stage": "segment_save",
+      "elapsed_ms": 6.907,
+      "action_id": 1,
+      "method": "save_file_presence",
+      "resumed": false
+    },
+    {
+      "stage": "segment_save",
+      "elapsed_ms": 20.754,
+      "action_id": 1,
+      "method": "save_ownership_from_result_page",
+      "resumed": false
+    },
+    {
+      "stage": "segment_save",
+      "elapsed_ms": 31.122,
+      "action_id": 1,
+      "method": "save_file_completion",
+      "resumed": false
+    },
+    {
+      "stage": "segment_save",
+      "elapsed_ms": 7.083,
+      "action_id": 1,
+      "method": "save_file_presence",
+      "resumed": false
+    },
+    {
+      "stage": "segment_save",
+      "elapsed_ms": 46.431,
+      "action_id": 1,
+      "method": "save_ownership_from_result_page",
+      "resumed": false
+    },
+    {
+      "stage": "segment_save",
+      "elapsed_ms": 64.1,
+      "action_id": 1,
+      "method": "save_file_completion",
+      "resumed": true
+    }
+  ]
+}

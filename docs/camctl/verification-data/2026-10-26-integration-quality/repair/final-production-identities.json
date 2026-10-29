@@ -1,0 +1,41 @@
+{
+  "description": "最终各验证工作区与集成分支的生产目录对象完全相同；后续差异仅是测试与验证说明。",
+  "commits": [
+    {
+      "commit": "b4cdff6b0a1c3aaa3547785c7fa5519b823c0adc",
+      "trees": {
+        "apps/camctl/src": "42c4d8b74e174178e8c0ad3352fcdaee443e9d01",
+        "apps/client": "9fef1a2b73e8358c027738d0e020bd968e28cb8b",
+        "apps/host-demo": "94767ce20dd2080820b789383d1ca907391e5e62",
+        "protocol": "4ed9fc8da56ec251e43297ef3b5e2e24e046cbdb"
+      }
+    },
+    {
+      "commit": "f9ba88c8608e51ced26feb8bc0490b505c837688",
+      "trees": {
+        "apps/camctl/src": "42c4d8b74e174178e8c0ad3352fcdaee443e9d01",
+        "apps/client": "9fef1a2b73e8358c027738d0e020bd968e28cb8b",
+        "apps/host-demo": "94767ce20dd2080820b789383d1ca907391e5e62",
+        "protocol": "4ed9fc8da56ec251e43297ef3b5e2e24e046cbdb"
+      }
+    },
+    {
+      "commit": "e0e8ff4e3919dc570882d68cd2454285e017f57c",
+      "trees": {
+        "apps/camctl/src": "42c4d8b74e174178e8c0ad3352fcdaee443e9d01",
+        "apps/client": "9fef1a2b73e8358c027738d0e020bd968e28cb8b",
+        "apps/host-demo": "94767ce20dd2080820b789383d1ca907391e5e62",
+        "protocol": "4ed9fc8da56ec251e43297ef3b5e2e24e046cbdb"
+      }
+    },
+    {
+      "commit": "66aee56d1f34e36f910db124d3fceaf5d5bc1dca",
+      "trees": {
+        "apps/camctl/src": "42c4d8b74e174178e8c0ad3352fcdaee443e9d01",
+        "apps/client": "9fef1a2b73e8358c027738d0e020bd968e28cb8b",
+        "apps/host-demo": "94767ce20dd2080820b789383d1ca907391e5e62",
+        "protocol": "4ed9fc8da56ec251e43297ef3b5e2e24e046cbdb"
+      }
+    }
+  ]
+}

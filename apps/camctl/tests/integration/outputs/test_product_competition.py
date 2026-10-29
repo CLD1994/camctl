@@ -4,23 +4,28 @@ from copy import deepcopy
 from dataclasses import replace
 import json
 import sqlite3
-from unittest.mock import create_autospec
 
 import pytest
 
-from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import new_operation_key
 from camctl.history.reads import ReadCoverage
-from camctl.history.validators import EventContext, EventValidationError, validate_event
-from camctl.outputs.competition import has_product_predecessor
+from camctl.history.validators import EventValidationError
+from ..support.output_planning import validate_static_event as validate_event
+from ..support.output_storage_cases import (
+    product_proposal,
+    observed_rows,
+    observe_product_competition,
+    QueryProbe,
+)
+from ..support.outputs import observed_query
+from ..support.output_planning import capture_operation, EventSequence
 from camctl.persistence.repositories import outputs
-from camctl.persistence.transaction import TransactionScope, commit_operation
+from camctl.persistence.transaction import commit_operation
 
 from .test_qualification import (
     qualification_environment, _NOW, _Seedling, _candidate, _seed_action,
     _seed_device_file, _seed_output, _seed_plan, _seed_selection_and_item,
 )
-from ..operations.test_result_reuse import _FaultConnection
 
 
 @pytest.fixture
@@ -49,7 +54,9 @@ def competition_database(qualification_environment):
 
 
 @pytest.mark.parametrize("reference", ["instance", "name", "group", "plan", "fixed"])
-def test_source_resolution_retains_metadata_without_request_bodies(competition_database, reference):
+def test_source_resolution_retains_metadata_without_request_bodies(
+    competition_database, reference
+):
     """来源引用的完整性不应以加载终态动作正文为代价。"""
     connection = competition_database.connection
     source = {
@@ -61,65 +68,77 @@ def test_source_resolution_retains_metadata_without_request_bodies(competition_d
     }[reference]
     if reference == "name":
         connection.execute("UPDATE actions SET plan_id=2 WHERE id=91")
-    connection.execute("UPDATE actions SET input_fields_json=? WHERE id=91",
-        (json.dumps({"params": {"source": source, "filter": "preview"}}),))
+    connection.execute(
+        "UPDATE actions SET input_fields_json=? WHERE id=91",
+        (json.dumps({"params": {"source": source, "filter": "preview"}}),),
+    )
     if reference == "fixed":
-        connection.execute("UPDATE actions SET source_resolution_state=2, resolved_source_plan_id=2 WHERE id=91")
+        connection.execute(
+            "UPDATE actions SET source_resolution_state=2, resolved_source_plan_id=2 WHERE id=91"
+        )
         connection.execute("INSERT INTO action_dependencies VALUES (191,91,11)")
-        connection.execute("INSERT INTO obtain_source_selections (id,dependency_id,status) VALUES (191,191,1)")
+        connection.execute(
+            "INSERT INTO obtain_source_selections (id,dependency_id,status) VALUES (191,191,1)"
+        )
     connection.commit()
-    connection.execute("BEGIN")
-    try:
-        reads = outputs._ProductReads(connection, {})
-        # 申请者与待判断候选允许加载正文；后续来源解析不得读取任何动作正文。
-        reads.required("actions", 31)
-        reads.required("actions", 91)
+    queries = []
 
-        def metadata_only(operation, table, column, database, trigger):
-            if operation == sqlite3.SQLITE_READ and table == "actions" and column.endswith("_json"):
-                return sqlite3.SQLITE_DENY
-            return sqlite3.SQLITE_OK
+    class MetadataProbe:
+        def __init__(self, connection):
+            self.connection = connection
 
-        connection.set_authorizer(metadata_only)
-        assert has_product_predecessor(reads, 31, 701, _NOW) is False
-        source_row = reads.state_rows["actions"][11]
-        assert source_row["status"] == 3
-        assert not {"input_fields_json", "effective_params_json", "execution_spec_json"} & source_row.keys()
-        context = EventContext(TransactionRange(2, 2, 2), {}, reads.state_rows,
-                               read_coverage=reads.read_coverage())
-        if reference in ("name", "group", "plan"):
-            assert set(context.complete_rows("actions", "plan_id", 2)) == (
-                {11, 12, 91} if reference == "name" else {11, 12})
-            assert "input_fields_json" not in reads.state_rows["actions"][12]
-        assert has_product_predecessor(outputs._CurrentProductReads(context), 31, 701, _NOW) is False
-    finally:
-        connection.set_authorizer(None)
-        connection.rollback()
+        def __getattr__(self, name):
+            return getattr(self.connection, name)
+
+        def execute(self, sql, parameters=()):
+            cursor, columns, reads = observed_query(self.connection, sql, parameters)
+            json_fields = {
+                column
+                for table, column in reads
+                if table == "actions" and column.endswith("_json")
+            }
+            if json_fields and tuple(parameters) != (91,):
+                cursor.close()
+                raise AssertionError("来源元数据查询读取了动作正文")
+            queries.append((columns, reads, parameters))
+            return cursor
+
+    before = tuple(connection.iterdump())
+    from camctl.outputs.sources import SourceSpec, resolve_source
+
+    lookup = outputs.SqliteSourceLookup(MetadataProbe(connection), 91)
+    if reference == "fixed":
+        sources = tuple(
+            row[0]
+            for row in connection.execute(
+                "SELECT depends_on_action_id FROM action_dependencies WHERE action_id=91 ORDER BY id"
+            )
+        )
+        assert sources == (11,)
+        assert lookup.action_by_id(sources[0]).plan_id == 2
+    else:
+        spec = SourceSpec(
+            **{
+                name: int(value) if name.endswith("_id") else value
+                for name, value in source.items()
+            }
+        )
+        resolution = resolve_source(spec, lookup)
+        assert resolution.member_action_ids == (
+            (11, 12) if reference == "plan" else (11,)
+        )
+    assert tuple(connection.iterdump()) == before
+    assert queries
+    event, proposal = _proposal(competition_database)
+    if reference in ("name", "group", "plan"):
+        assert set(observed_rows(proposal, "actions", "plan_id", 2)) == (
+            {11, 12, 91} if reference == "name" else {11, 12}
+        )
+    assert validate_event(event, proposal).branch_name == "GRANT"
 
 
 def _proposal(owned):
-    connection = owned.connection
-    connection.execute("BEGIN")
-    try:
-        plan = outputs._GrantFileCommand(_candidate(_Seedling(31, 101, 701, 501)),
-            new_operation_key()).plan(TransactionScope(connection, 1, 1))
-        plan = _static_product_facts(plan, connection, 31, 701, _NOW)
-    finally:
-        connection.rollback()
-    state = deepcopy(plan.state_rows)
-    for event in plan.events[:-1]:
-        for row in event.rows:
-            assert not row.before.exists and row.after.exists
-            state.setdefault(row.table, {})[row.row_id] = dict(row.after.values)
-    return replace(plan.events[-1], change_seq=1), EventContext(TransactionRange(2, 2, 6), plan.owners, state,
-                                         read_coverage=plan.read_coverage)
-
-
-def _static_product_facts(plan, connection, action_id, output_id, occurred_at):
-    """静态事件验证显式取得完整边界；生产路径使用原事务内的读取端口。"""
-    reads = outputs._ProductReads(connection, plan.state_rows)
-    has_product_predecessor(reads, action_id, output_id, occurred_at)
-    return replace(plan, read_coverage=reads.read_coverage())
+    return product_proposal(owned, _candidate(_Seedling(31, 101, 701, 501)))
 
 
 def test_formal_grant_accepts_complete_candidate_facts(competition_database):
@@ -170,34 +189,74 @@ def test_future_candidate_fields_cannot_fill_missing_current_facts(competition_d
 
 def test_source_metadata_can_be_upgraded_to_full_candidate(competition_database):
     connection = competition_database.connection
-    connection.execute("UPDATE actions SET input_fields_json=?, execution_spec_json=? WHERE id=91",
-        (json.dumps({"params": {"source": {"plan_instance_id": "2"}}}),
-         json.dumps({"selection_mode": 1})))
+    connection.execute(
+        "UPDATE actions SET input_fields_json=?, execution_spec_json=? WHERE id=91",
+        (
+            json.dumps({"params": {"source": {"plan_instance_id": "2"}}}),
+            json.dumps({"selection_mode": 1}),
+        ),
+    )
     connection.commit()
-    connection.execute("BEGIN")
-    try:
-        reads = outputs._ProductReads(connection, {})
-        assert "input_fields_json" not in reads.plan_actions(1)[91]
-        # 先被来源查找读取的动作，随后仍能按其真实请求参与候选判断。
-        assert has_product_predecessor(reads, 31, 701, _NOW) is True
-        assert reads.state_rows["actions"][91]["execution_spec_json"] == {"selection_mode": 1}
-    finally:
-        connection.rollback()
+    from camctl.persistence.event_reads import SqlEventReads
+    from camctl.history.reads import ProductReadScope
+
+    observed = []
+
+    class MetadataFirst:
+        def __init__(self, connection):
+            self.connection = connection
+            self.read = False
+
+        def __getattr__(self, name):
+            return getattr(self.connection, name)
+
+        def execute(self, sql, parameters=()):
+            before = self.connection.in_transaction
+            cursor = self.connection.execute(sql, parameters)
+            if not before and self.connection.in_transaction and not self.read:
+                self.read = True
+                view = SqlEventReads(
+                    self.connection, ProductReadScope(31, 701, _NOW, 128)
+                )
+                rows = {
+                    identity: row
+                    for batch in view.iter_members(
+                        "actions", "plan_id", 1, columns=view.SOURCE_COLUMNS
+                    )
+                    for identity, row in batch
+                }
+                observed.append(rows[91])
+            return cursor
+
+    assert (
+        observe_product_competition(
+            competition_database, occurred_at=_NOW, observer=MetadataFirst
+        )
+        is True
+    )
+    assert observed and "input_fields_json" not in observed[0]
 
 
-@pytest.mark.parametrize("source,table,column,identity", [
-    ({"plan_instance_id": "3"}, "actions", "plan_id", 3),
-    ({"plan_instance_id": "4"}, "plans", "id", 4),
-    ({"action_instance_id": "99"}, "actions", "id", 99),
-])
-def test_absent_or_empty_source_has_reliable_coverage(competition_database, source, table, column, identity):
+@pytest.mark.parametrize(
+    "source,table,column,identity",
+    [
+        ({"plan_instance_id": "3"}, "actions", "plan_id", 3),
+        ({"plan_instance_id": "4"}, "plans", "id", 4),
+        ({"action_instance_id": "99"}, "actions", "id", 99),
+    ],
+)
+def test_absent_or_empty_source_has_reliable_coverage(
+    competition_database, source, table, column, identity
+):
     connection = competition_database.connection
     _seed_plan(connection, 3)
-    connection.execute("UPDATE actions SET input_fields_json=? WHERE id=91",
-        (json.dumps({"params": {"source": source, "filter": "preview"}}),))
+    connection.execute(
+        "UPDATE actions SET input_fields_json=? WHERE id=91",
+        (json.dumps({"params": {"source": source, "filter": "preview"}}),),
+    )
     connection.commit()
     event, context = _proposal(competition_database)
-    assert context.complete_rows(table, column, identity) == {}
+    assert observed_rows(context, table, column, identity) == {}
     assert validate_event(event, context).branch_name == "GRANT"
     ranges = dict(context.read_coverage.ranges)
     ranges[table, column] = ranges[table, column] - {identity}
@@ -205,59 +264,34 @@ def test_absent_or_empty_source_has_reliable_coverage(competition_database, sour
         validate_event(event, replace(context, read_coverage=ReadCoverage(ranges)))
 
 
-class _WithoutCandidateCoverage:
-    def __init__(self, key):
-        self.key = key
-
-    def plan(self, scope):
-        plan = outputs._GrantFileCommand(_candidate(_Seedling(31, 101, 701, 501)), self.key).plan(scope)
-        # 两条可靠路径都没有提供：没有事务端口，也没有静态完整范围。
-        return replace(plan, product_read_scope=None)
-
-
 def test_incomplete_candidate_reads_roll_back_entire_grant(competition_database):
     owned = competition_database
+    proposal = capture_operation(
+        owned,
+        lambda actual: outputs.OutputsRepository().grant_file(
+            _candidate(_Seedling(31, 101, 701, 501)), new_operation_key(), actual
+        ),
+    )
+    proposal = replace(proposal, product_read_scope=None, read_coverage=ReadCoverage())
     before = tuple(owned.connection.iterdump())
-    key = new_operation_key()
-    receipt = commit_operation(_WithoutCandidateCoverage(key), key, owned)
-    assert receipt.kind == "rolled_back"
-    assert isinstance(receipt.error, EventValidationError), receipt.error
+    result = commit_operation(
+        EventSequence(proposal.events, proposal), new_operation_key(), owned
+    )
+    assert result.kind == "rolled_back"
+    assert isinstance(result.error, EventValidationError), result.error
     assert tuple(owned.connection.iterdump()) == before
-    assert owned.connection.in_transaction is False
+    assert not owned.connection.in_transaction
 
 
-class _BatchReads(_FaultConnection):
-    """仅包装候选元数据游标，保留真实 SQLite 的执行、结果及关闭行为。"""
-
+class _BatchReads(QueryProbe):
     def __init__(self, connection, scope, fail_at=None):
-        super().__init__(connection, "unused failure prefix")
-        self.scope, self.fail_at = scope, fail_at
-        self.cursors = []
-        self.sizes = []
-        self.batches = 0
+        def selected(columns, reads, parameters):
+            return (
+                columns == {"id"}
+                and ("actions", "status" if scope == "active" else "plan_id") in reads
+            )
 
-    def execute(self, sql, parameters=()):
-        selected = sql.startswith("SELECT id FROM actions WHERE (") and (
-            "status=?" in sql if self.scope == "active" else "plan_id=?" in sql)
-        if selected and self.fail_at == "execute":
-            raise sqlite3.OperationalError("candidate query interrupted")
-        real = super().execute(sql, parameters)
-        if not selected:
-            return real
-        cursor = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)
-        self.cursors.append(cursor)
-        def fetchmany(size):
-            self.batches += 1
-            self.sizes.append(size)
-            if self.fail_at == self.batches:
-                raise sqlite3.OperationalError("candidate batch interrupted")
-            return real.fetchmany(size)
-
-        cursor.fetchmany.side_effect = fetchmany
-        cursor.fetchone.side_effect = real.fetchone
-        cursor.fetchall.side_effect = AssertionError("候选元数据必须分批读取")
-        cursor.close.side_effect = real.close
-        return cursor
+        super().__init__(connection, selected, failure=fail_at)
 
 
 def _seed_many_actions(connection, scope):

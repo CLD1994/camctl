@@ -13,7 +13,7 @@ from camctl.outputs.sources import select_for_original
 from camctl.persistence.repositories import outputs
 
 from .test_qualification import _seed_environment, _seed_plan, _seed_action, _seed_device_file, _seed_output
-from ..operations.test_result_reuse import _FaultConnection
+from ..support.outputs import observed_query, SqliteOperationFault
 
 
 @pytest.fixture
@@ -161,36 +161,41 @@ def test_family_lookup_preserves_later_file_existence_states(family_database, ta
     assert tuple(connection.iterdump()) == before
 
 
-class FamilyConnection(_FaultConnection):
+class FamilyConnection:
     def __init__(self, connection, fail=None):
-        super().__init__(connection, "unused")
+        self._connection = connection
         self.fail = fail
         self.cursors = []
         self.related_counts = []
 
     def execute(self, sql, parameters=()):
-        cursor = self._connection.execute(sql, parameters)
-        stage = ("origin" if sql.startswith("SELECT original_output_id, id, output_id FROM output_origins") else
-                 "related" if sql.startswith("SELECT output_id, id, original_output_id FROM output_origins") else None)
-        if stage is None:
+        cursor, columns, reads = observed_query(self._connection, sql, parameters)
+        if columns != {"id", "output_id", "original_output_id"} or not any(
+                table == "output_origins" for table, _column in reads):
             return cursor
         probe = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)
+        probe.description = cursor.description
         probe.close.side_effect = cursor.close
 
-        def fetch():
-            if self.fail == stage:
+        def one():
+            if self.fail == "origin":
                 raise sqlite3.OperationalError("read failed")
-            rows = cursor.fetchall() if stage == "related" else cursor.fetchone()
-            if stage == "related":
-                self.related_counts.append(len(rows))
+            return cursor.fetchone()
+
+        def many():
+            if self.fail == "related":
+                raise sqlite3.OperationalError("read failed")
+            rows = cursor.fetchall()
+            self.related_counts.append(len(rows))
             return rows
 
-        if stage == "related":
-            probe.fetchall.side_effect = fetch
-        else:
-            probe.fetchone.side_effect = fetch
+        probe.fetchone.side_effect = one
+        probe.fetchall.side_effect = many
         self.cursors.append(probe)
         return probe
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
 
 
 @pytest.mark.parametrize("state", ["success", "absent", "origin", "related", "decode"])
@@ -232,6 +237,8 @@ def test_family_lookup_bounds_duplicate_detection(family_database):
 
 
 def test_family_query_execution_failure_never_means_no_derivative(family_database):
-    failing = _FaultConnection(family_database.connection, "SELECT output_id, id, original_output_id FROM output_origins")
-    with pytest.raises(sqlite3.OperationalError):
+    failing = SqliteOperationFault(
+        family_database.connection, sqlite3.SQLITE_READ, "output_origins")
+    with pytest.raises(sqlite3.DatabaseError):
         outputs.load_output_family(failing, 701)
+    assert failing.triggered

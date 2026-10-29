@@ -1,8 +1,8 @@
 """RESULTS 页事实沿一次原尝试逐页可靠保存；当前状态与历史一致。"""
 from dataclasses import replace
-from decimal import Decimal
 import json
 from pathlib import Path
+
 
 import pytest
 
@@ -15,16 +15,18 @@ from camctl.operations.models import CallOutcome, CallInfo, EffectState, Evidenc
 from camctl.operations.validation import validate_outcome
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
-from camctl.capture.handlers import _begin_check_round
+from camctl.capture.handlers import capture_handler
+from ..support.result_cases import begin_result_attempt, ResultPageFault
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from .result_consumer_fixtures import consumer_world, RESULT_EVIDENCE
-from .test_baseline_start import _prepared, _grant, owned
+from .test_baseline_start import _prepared, owned, _SCHEDULED
 from .test_baseline_history import _append, _fix, _entries
-from .test_capture_contract import _runtime
-from camctl.operations.attempts import AttemptFinish, RunFinish, RunOutcome
+from .test_capture_contract import _runtime, DriverDouble
+from camctl.operations.attempts import (
+    AttemptFinish, AttemptIntent, AttemptTarget, OperationKind,
+)
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from .test_result_file_recovery import FileWriteFault
 from camctl.persistence.repositories.history import HistoryRepository, SqliteSnapshotStore
 from camctl.persistence.executor import DbExecutor
 from camctl.history.snapshots import SnapshotRef, prepare_snapshot
@@ -66,7 +68,7 @@ async def test_two_pages_use_one_attempt_and_keep_both_actual_calls(tmp_path):
     owned, runtime, action_id, _ = await consumer_world(tmp_path, "record")
     repository = CaptureRepository()
     try:
-        ticket = _begin_check_round(runtime, action_id).ticket
+        ticket = begin_result_attempt(owned, action_id, runtime.check_config, runtime.wall_us())
         first = _request(runtime, ticket, _actual(ticket, entries=[_entry("a")], next_cursor=_CURSOR))
         saved = repository.save_result_page(first, new_operation_key(), owned)
         assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
@@ -89,7 +91,7 @@ async def test_two_pages_use_one_attempt_and_keep_both_actual_calls(tmp_path):
 async def test_original_page_key_recovers_exact_input_and_rejects_changed_error(tmp_path):
     owned, runtime, action_id, _ = await consumer_world(tmp_path, "record")
     try:
-        ticket = _begin_check_round(runtime, action_id).ticket
+        ticket = begin_result_attempt(owned, action_id, runtime.check_config, runtime.wall_us())
         actual = _actual(ticket, error=ErrorValue("directory_read_failed", "device", {"received_bytes": 9}))
         request = _request(runtime, ticket, actual)
         key = new_operation_key()
@@ -111,7 +113,7 @@ async def test_original_page_key_recovers_exact_input_and_rejects_changed_error(
 async def test_page_sequence_rejects_gap_or_unrelated_cursor_or_after_end(tmp_path, case):
     owned, runtime, action_id, _ = await consumer_world(tmp_path, "record")
     try:
-        ticket = _begin_check_round(runtime, action_id).ticket
+        ticket = begin_result_attempt(owned, action_id, runtime.check_config, runtime.wall_us())
         first = _request(runtime, ticket, _actual(ticket, next_cursor=None if case == "after_end" else _CURSOR))
         receipt = runtime.capture.save_result_page(first, new_operation_key(), owned)
         assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
@@ -130,17 +132,18 @@ async def _baseline_world(owned, tmp_path, names):
         assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
     fixed = _fix(owned, activity_id, chunks=(len(names) + 127) // 128, entries=len(names))
     assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
-    grant = _grant(owned)
-    assert grant.kind is DbOutcomeKind.COMPLETED, grant.error
-    ticket = grant.value.ticket
-    actual = CallOutcome(effect=EffectState.CONFIRMED,
-        settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("operation_returned", 1, {})),
-        observations=(DeviceObservation("start_confirmed", 1, {"activity_id": ticket.target_id}),))
-    saved = OperationRepository().finish_attempt(AttemptFinish(ticket, validate_outcome(ticket, actual, RESULT_EVIDENCE),
-        1_750_000_000_000_000, run_finish=RunFinish(RunOutcome.SUCCEEDED)), new_operation_key(), owned)
-    assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
-    runtime = _runtime(owned)
-    return runtime, _begin_check_round(runtime, 1).ticket, fixed.value
+    runtime = await _runtime(owned, driver=DriverDouble(identity_override=str(activity_id)),
+        driver_id="dji-action6", wall=_SCHEDULED)
+    await capture_handler("camera_record")(1, runtime)
+    assert owned.connection.execute(
+        "SELECT status FROM operation_runs WHERE responsibility_key='start/1'").fetchone() == (3,)
+    begun = OperationRepository().begin_attempt(AttemptIntent(
+        operation="result", action_id=1, kind=OperationKind.CHECK_CAPTURE_RESULTS,
+        target=AttemptTarget(activity_id=activity_id), query_purpose=None,
+        config=runtime.check_config, occurred_at=runtime.wall_us()), new_operation_key(), owned)
+    assert begun.kind is DbOutcomeKind.COMPLETED, begun.error
+    assert begun.value.ticket is not None
+    return runtime, begun.value.ticket, fixed.value
 
 
 def _path_entry(path):
@@ -242,40 +245,52 @@ async def test_new_file_in_previously_empty_declared_directory_is_in_difference(
 
 @pytest.mark.parametrize("mode", ["projection", "commit_before", "commit_after"])
 async def test_page_and_first_discovery_fault_reuses_original_key_after_reopen(tmp_path, mode):
+    from camctl.persistence.business import BusinessDatabase
+
     owned, runtime, action_id, _ = await consumer_world(tmp_path, "record")
     path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
-    metadata = owned.metadata
+    ticket = begin_result_attempt(owned, action_id, runtime.check_config, runtime.wall_us())
+    request = _request(runtime, ticket, _actual(ticket, entries=[_entry("a")], next_cursor=_CURSOR))
+    faults = []
+
+    def open_fault_connection():
+        opened = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
+        fault = ResultPageFault(opened.connection, mode)
+        faults.append(fault)
+        return replace(opened, connection=fault)
+
+    database = await BusinessDatabase.open(open_fault_connection)
+    metadata = database.metadata
     try:
-        ticket = _begin_check_round(runtime, action_id).ticket
-        request = _request(runtime, ticket, _actual(ticket, entries=[_entry("a")], next_cursor=_CURSOR))
         owner = result_pages.ResultPageSaveOwner()
         original = owner.begin(request)
-        fault = FileWriteFault(owned.connection, mode)
-        receipt = owner.save(runtime.capture, replace(owned, connection=fault))
+        receipt = await owner.save(runtime.capture, database)
         assert receipt.kind is not DbOutcomeKind.COMPLETED
-        assert not fault.armed and owner.pending == original
+        assert not faults[0].armed and owner.pending == original
         with pytest.raises(ConsistencyError):
             owner.take()
-        owned.connection.close()
-        owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-        assert owned.metadata == metadata
+        await database.close()
+        database = await BusinessDatabase.open(lambda: open_existing(path, DbOpenMode.EXISTING_RW, DbConfig()))
+        assert database.metadata == metadata
         # 核实原页只访问状态库，拥有者仍保留实际调用与原时刻。
-        receipt = owner.save(runtime.capture, owned)
+        receipt = await owner.resume_save(runtime.capture, database)
         assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
         ref = owner.take()
-        assert owned.connection.execute("SELECT COUNT(*) FROM device_files").fetchone() == (1,)
-        pages = runtime.capture.read_result_pages(ticket, None, 1, owned)
+        assert await database.read(lambda owned: owned.connection.execute("SELECT COUNT(*) FROM device_files").fetchone()) == (1,)
+        pages = await database.read(lambda owned: runtime.capture.read_result_pages(ticket, None, 1, owned))
         assert pages.items[0].ref == ref and pages.items[0].occurred_at == request.occurred_at
         assert pages.items[0].page.outcome == request.outcome.outcome
-        assert owned.connection.execute("SELECT attempts_used FROM operation_runs WHERE id=?", (ticket.run_id,)).fetchone() == (1,)
+        assert await database.read(lambda owned: owned.connection.execute(
+            "SELECT attempts_used FROM operation_runs WHERE id=?", (ticket.run_id,)).fetchone()) == (1,)
     finally:
+        await database.close()
         owned.connection.close()
 
 
 async def test_original_first_page_key_remains_exact_after_later_pages(tmp_path):
     owned, runtime, action_id, _ = await consumer_world(tmp_path, "record")
     try:
-        ticket = _begin_check_round(runtime, action_id).ticket
+        ticket = begin_result_attempt(owned, action_id, runtime.check_config, runtime.wall_us())
         first = _request(runtime, ticket, _actual(ticket, entries=[_entry("a")], next_cursor=_CURSOR))
         key = new_operation_key()
         receipt = runtime.capture.save_result_page(first, key, owned)
@@ -312,7 +327,7 @@ async def test_original_first_page_key_remains_exact_after_later_pages(tmp_path)
 async def test_new_result_attempt_keeps_previous_interrupted_scan_separate(tmp_path):
     owned, runtime, action_id, _ = await consumer_world(tmp_path, "record")
     try:
-        first_ticket = _begin_check_round(runtime, action_id).ticket
+        first_ticket = begin_result_attempt(owned, action_id, runtime.check_config, runtime.wall_us())
         first_actual = _actual(first_ticket, entries=[_entry("a")], next_cursor=_CURSOR)
         first = _request(runtime, first_ticket, first_actual)
         receipt = runtime.capture.save_result_page(first, new_operation_key(), owned)
@@ -321,7 +336,7 @@ async def test_new_result_attempt_keeps_previous_interrupted_scan_separate(tmp_p
         finish = OperationRepository().finish_attempt(AttemptFinish(first_ticket, first.outcome,
             first.occurred_at, retry_wait=True), new_operation_key(), owned)
         assert finish.kind is DbOutcomeKind.COMPLETED, finish.error
-        second_ticket = _begin_check_round(runtime, action_id).ticket
+        second_ticket = begin_result_attempt(owned, action_id, runtime.check_config, runtime.wall_us())
         assert second_ticket.attempt_id == first_ticket.attempt_id + 1
         second = _request(runtime, second_ticket, _actual(second_ticket, entries=[_entry("b")], finalized=True))
         receipt = runtime.capture.save_result_page(second, new_operation_key(), owned)
@@ -343,7 +358,7 @@ async def test_page_range_forward_reverse_and_snapshot_restore_same_state(tmp_pa
     path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
     history = HistoryRepository(path)
     try:
-        ticket = _begin_check_round(runtime, action_id).ticket
+        ticket = begin_result_attempt(owned, action_id, runtime.check_config, runtime.wall_us())
         first = _request(runtime, ticket, _actual(ticket, entries=[_entry("a")], next_cursor=_CURSOR))
         receipt = runtime.capture.save_result_page(first, new_operation_key(), owned)
         assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
@@ -462,7 +477,7 @@ async def test_page_created_files_and_catalog_restore_from_three_paths(tmp_path)
             EntityImage(entity_type, entity_id, False, {}, 0, 0), INITIAL_BOUNDARY)
 
     try:
-        ticket = _begin_check_round(runtime, action_id).ticket
+        ticket = begin_result_attempt(owned, action_id, runtime.check_config, runtime.wall_us())
         first = _request(runtime, ticket, _actual(ticket, entries=[_entry("a")], next_cursor=_CURSOR))
         saved = repository.save_result_page(first, new_operation_key(), owned)
         assert saved.kind is DbOutcomeKind.COMPLETED, saved.error

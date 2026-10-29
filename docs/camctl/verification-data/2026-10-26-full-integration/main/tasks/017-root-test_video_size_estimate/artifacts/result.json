@@ -1,0 +1,77 @@
+{
+  "id": "root/test_video_size_estimate",
+  "scope": "root",
+  "path": "tests/integration/test_video_size_estimate.py",
+  "targets": [
+    "tests/integration/test_video_size_estimate.py"
+  ],
+  "estimated_seconds": 45.076320487001794,
+  "historical_failure_observed": false,
+  "status": "passed",
+  "number": 17,
+  "worker": 3,
+  "artifacts": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/artifacts",
+  "cwd": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source",
+  "started_utc": "2026-10-26T00:37:03.293065+00:00",
+  "command": [
+    "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "tests/integration/test_video_size_estimate.py",
+    "-q",
+    "--durations=0",
+    "-p",
+    "integration_progress",
+    "--basetemp",
+    "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/tmp/pytest",
+    "-p",
+    "camctl_memory_plugin",
+    "--camctl-memory-limit",
+    "2GiB",
+    "--camctl-memory-cgroup-root",
+    "/sys/fs/cgroup/memory/camctl-budget-1922809-b293c146ab7744439fec45b828581e67"
+  ],
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/control:/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/apps/camctl/src",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/workers/3/python-cache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/workers/3/project-env",
+    "UV_CACHE_DIR": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/workers/3/uv-cache",
+    "UV_OFFLINE": "1",
+    "TMPDIR": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/tmp"
+  },
+  "preparations": [
+    {
+      "label": "package-resources",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/apps/camctl/scripts/sync_resources.py"
+      ],
+      "cwd": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source",
+      "started_utc": "2026-10-26T00:37:05.242299+00:00",
+      "pid": 1962728,
+      "exit_code": 0,
+      "finished_utc": "2026-10-26T00:37:05.310905+00:00",
+      "wall_seconds": 0.06858124099380802
+    }
+  ],
+  "preparation": "package-resources",
+  "preparation_pid": 1962728,
+  "pid": 1962752,
+  "execution_started_utc": "2026-10-26T00:37:05.313379+00:00",
+  "progress": {
+    "status": "finished",
+    "exit_code": 0,
+    "collected": 12,
+    "outcomes": {
+      "passed": 12
+    },
+    "subchecks": {},
+    "elapsed_seconds": 104.76240263899672,
+    "utc": "2026-10-26T00:38:50.686999+00:00",
+    "pid": 1962752
+  },
+  "exit_code": 0,
+  "finished_utc": "2026-10-26T00:38:50.786808+00:00",
+  "wall_seconds": 107.15977053300594
+}

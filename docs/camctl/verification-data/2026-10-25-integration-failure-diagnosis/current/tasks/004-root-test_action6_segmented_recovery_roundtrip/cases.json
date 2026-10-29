@@ -1,0 +1,40 @@
+[
+  {
+    "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[unknown-prefix]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 38.831963336000626
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 72.07396950099792
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0023438390053343028
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 110.90827667600388
+  },
+  {
+    "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.004984029001207091
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 36.174453927000286
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007068109989631921
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 36.180144767000456
+  }
+]

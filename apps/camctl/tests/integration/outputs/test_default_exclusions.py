@@ -4,30 +4,30 @@ from copy import deepcopy
 from dataclasses import replace
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
-from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.schemas import create_validator, validation_errors
 from camctl.contracts.values import new_operation_key
-from camctl.history.validators import EventContext, EventValidationError, validate_event
-from camctl.outputs.competition import has_product_predecessor
+from camctl.history.validators import EventValidationError
 from camctl.outputs.definitions import SelectionMode
 from camctl.outputs.sources import SelectionSnapshot, select_outputs
-from camctl.outputs.obtain_flow import _fix_pending_selections
-from camctl.outputs.read_discovery import ReadDiscoveryOwner
+from camctl.outputs.obtain_flow import advance_obtain
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories import outputs
-from camctl.persistence.transaction import TransactionScope
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from .test_catalog_integrity import selection_database
 from .test_output_family import family_database
 from .test_product_competition import competition_database
 from .test_qualification import qualification_environment
-from .test_selection_authority import _snapshot
 from .test_sources import _NOW, _fixed_resolution
+from ..support.output_planning import capture_operation, validate_static_event
+from ..support.output_storage_cases import observe_product_competition
+from ..support.outputs import read_test_runtime
+from camctl.devices.drivers.hasselblad.driver import EVIDENCE
+from camctl.devices.read_session import ReadSession
+from .test_source_digest_failure_settlement import _ReadStream
 
 
 def _exclude(owned, identities=(703,), action_id=30):
@@ -82,21 +82,17 @@ def test_default_selection_filters_final_repaired_identity(selection_database, e
 def test_selection_guard_rechecks_original_exclusions(selection_database):
     owned = selection_database
     _exclude(owned)
-    snapshot = replace(_snapshot(owned.connection), items=(_snapshot(owned.connection).items[1],))
-    owned.connection.execute("BEGIN")
-    try:
-        plan = outputs._FixSelectionCommand(
-            outputs.FixSelection(61, snapshot, _NOW), new_operation_key(),
-        ).plan(TransactionScope(owned.connection, 1, 1))
-    finally:
-        owned.connection.rollback()
-    event = plan.events[0]
-    context = EventContext(TransactionRange(2, 2, 2), dict(plan.owners),
-                           deepcopy(plan.state_rows), read_coverage=plan.read_coverage)
-    validate_event(event, context)
-    context.state_rows["actions"][30]["input_fields_json"]["params"]["exclude_output_ids"] = ["705"]
+    facts = outputs.load_selection_facts(owned.connection, 11)
+    snapshot = select_outputs(_fixed_resolution((11,)), facts, SelectionMode.DEFAULT,
+                              excluded_output_ids=frozenset({703}))
+    proposal = capture_operation(owned, lambda actual: outputs.OutputsRepository().fix_selection(
+        outputs.FixSelection(61, snapshot, _NOW), new_operation_key(), actual))
+    event = proposal.events[0]
+    validate_static_event(event, proposal)
+    changed = deepcopy(proposal.state_rows)
+    changed["actions"][30]["input_fields_json"]["params"]["exclude_output_ids"] = ["705"]
     with pytest.raises(EventValidationError):
-        validate_event(event, context)
+        validate_static_event(event, replace(proposal, state_rows=changed))
 
 
 def test_excluded_selection_cannot_restore_excluded_target(selection_database):
@@ -104,7 +100,7 @@ def test_excluded_selection_cannot_restore_excluded_target(selection_database):
     _exclude(owned)
     before = tuple(owned.connection.iterdump())
     receipt = outputs.OutputsRepository().fix_selection(
-        outputs.FixSelection(61, _snapshot(owned.connection), _NOW), new_operation_key(), owned)
+        outputs.FixSelection(61, select_outputs(_fixed_resolution((11,)), outputs.load_selection_facts(owned.connection, 11), SelectionMode.DEFAULT), _NOW), new_operation_key(), owned)
     assert receipt.kind is DbOutcomeKind.ROLLED_BACK
     assert tuple(owned.connection.iterdump()) == before
 
@@ -157,14 +153,22 @@ def test_empty_selection_needs_fixed_exclusion_proof(selection_database, invalid
     assert tuple(owned.connection.iterdump()) == before
 
 
-def test_obtain_runtime_consumes_saved_default_exclusions(selection_database):
+@pytest.mark.asyncio
+async def test_obtain_runtime_consumes_saved_default_exclusions(selection_database, tmp_path):
     owned = selection_database
     _exclude(owned)
-    runtime = SimpleNamespace(owned=owned, outputs=outputs.OutputsRepository(),
-                              pending_segment_selections={}, discovery=ReadDiscoveryOwner())
-    _fix_pending_selections(runtime, _NOW)
+    class Source:
+        calls = []
+        async def open_read(self, source, offset, ticket, *, idle_timeout_s):
+            self.calls.append(source)
+            return ReadSession(source, offset, _ReadStream(b"x" * source.size_bytes), idle_timeout_s)
+    driver = Source()
+    async with read_test_runtime(owned, driver, EVIDENCE, staging=tmp_path / "staging",
+            occurred_at=lambda: _NOW) as runtime:
+        await advance_obtain(runtime)
     assert owned.connection.execute(
         "SELECT output_id FROM obtain_items WHERE selection_id=61 ORDER BY id").fetchall() == [(705,)]
+    assert [source.file_id for source in driver.calls] == ["file-0505"]
 
 
 def test_locally_qualified_final_target_is_excluded_even_after_host_cleanup(selection_database):
@@ -181,7 +185,6 @@ def test_locally_qualified_final_target_is_excluded_even_after_host_cleanup(sele
 def test_unfixed_excluded_obtain_does_not_block_product_successor(competition_database):
     owned = competition_database
     _exclude(owned, (701,), action_id=91)
-    reads = outputs._ProductReads(owned.connection, {})
-    assert not has_product_predecessor(reads, 31, 701, _NOW)
+    assert not observe_product_competition(owned, action_id=31, output_id=701, occurred_at=_NOW)
     _exclude(owned, None, action_id=91)
-    assert has_product_predecessor(outputs._ProductReads(owned.connection, {}), 31, 701, _NOW)
+    assert observe_product_competition(owned, action_id=31, output_id=701, occurred_at=_NOW)

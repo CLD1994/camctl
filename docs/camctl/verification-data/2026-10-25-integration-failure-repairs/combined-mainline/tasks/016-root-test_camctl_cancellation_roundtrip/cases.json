@@ -1,0 +1,21 @@
+[
+  {
+    "nodeid": "tests/integration/test_camctl_cancellation_roundtrip.py::test_cleanup_unknown_preserves_original_request_result",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002109868000843562
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 40.17597316100728
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008869650046108291
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 40.17896999401273
+  }
+]

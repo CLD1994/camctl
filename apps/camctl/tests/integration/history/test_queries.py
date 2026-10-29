@@ -18,6 +18,7 @@ from camctl.contracts.values import ConsistencyError
 from camctl.persistence.repositories.history import HistoryRepository
 
 from ..persistence.test_runtime import _create_valid_database
+from ..support.database import business_database
 
 pytestmark = pytest.mark.asyncio
 
@@ -54,37 +55,38 @@ async def _seed_plans(repository: HistoryRepository, count: int) -> HistoryBound
 
         previous = owned.connection.execute("SELECT MAX(request_id) FROM plans").fetchone()[0]
         first_request = 100 if previous is None else previous + 1
-        for index in range(count):
-            body = {
-                "request_id": str(first_request + index),
-                "created_at": "2026-01-15 08:00:00",
-                "name": f"plan-{index}",
-                "actions": [
-                    {
-                        "name": "shoot",
-                        "type": "camera_take_photo",
-                        "device_id": "cam-1",
-                        "scheduled_at": "2026-01-15 09:00:00",
-                        "params": {"type": "single_shot"},
-                        "policy": {"max_delay_ms": 1000},
-                    }
-                ],
-            }
-            source = parse_input(
-                await read_input(f"/tmp/plan-{index}.json", _StubSource(body), )
-            )
-            accepted = await accept_input(
-                source,
-                AcceptanceContext(
-                    mode=CommandMode.RUN,
-                    catalog=catalog,
-                    repository=AcceptanceRepository(),
-                    clock=type("C", (), {"utc_micros": staticmethod(lambda: 1)})(),
-                ),
-                new_operation_key(),
-                owned,
-            )
-            assert accepted.plan_id is not None
+        async with business_database(repository.path) as database:
+            for index in range(count):
+                body = {
+                    "request_id": str(first_request + index),
+                    "created_at": "2026-01-15 08:00:00",
+                    "name": f"plan-{index}",
+                    "actions": [
+                        {
+                            "name": "shoot",
+                            "type": "camera_take_photo",
+                            "device_id": "cam-1",
+                            "scheduled_at": "2026-01-15 09:00:00",
+                            "params": {"type": "single_shot"},
+                            "policy": {"max_delay_ms": 1000},
+                        }
+                    ],
+                }
+                source = parse_input(
+                    await read_input(f"/tmp/plan-{index}.json", _StubSource(body), )
+                )
+                accepted = await accept_input(
+                    source,
+                    AcceptanceContext(
+                        mode=CommandMode.RUN,
+                        catalog=catalog,
+                        repository=AcceptanceRepository(),
+                        clock=type("C", (), {"utc_micros": staticmethod(lambda: 1)})(),
+                    ),
+                    new_operation_key(),
+                    database,
+                )
+                assert accepted.plan_id is not None
         boundary = repository.current_boundary()
         return boundary
     finally:

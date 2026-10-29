@@ -30,7 +30,7 @@ async def _unended_query(environment):
         AttemptConfig(3, Decimal("10"), Decimal("0")), _NOW), new_operation_key(), owned)
     assert result.kind is DbOutcomeKind.COMPLETED, result.error
     assert result.value.ticket is not None
-    _apply_cleanup_cancel(owned)
+    await _apply_cleanup_cancel(owned)
     return item_id, output_id
 
 
@@ -71,7 +71,7 @@ async def test_cancel_cleanup_item_rejects_error_that_disagrees_with_original_de
         environment, confirmed_present, incorrect_code):
     _cfg, owned, _context, _driver = environment
     output_id = await _pending_cleanup(environment, confirmed_present=confirmed_present)
-    _apply_cleanup_cancel(owned)
+    await _apply_cleanup_cancel(owned)
     item_id = owned.connection.execute("SELECT id FROM cleanup_items").fetchone()[0]
     before = tuple(owned.connection.iterdump())
 

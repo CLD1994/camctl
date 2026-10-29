@@ -1,0 +1,11 @@
+{
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "/tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_cancellation_roundtrip/source/apps/camctl/scripts/sync_resources.py"
+  ],
+  "cwd": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_cancellation_roundtrip/source",
+  "started_utc": "2026-10-26T00:20:21.667322+00:00",
+  "pid": 1924289,
+  "exit_code": 0,
+  "finished_utc": "2026-10-26T00:20:21.935121+00:00"
+}

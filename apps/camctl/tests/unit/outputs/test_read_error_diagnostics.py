@@ -37,7 +37,7 @@ async def test_read_result_consumer_keeps_exception_and_read_end_on_original_req
     monkeypatch.setattr(media_flow, 'OperationRepository', lambda: operations)
     runtime = SimpleNamespace(database=database, operations=operations,
         pending_read_results={}, pending_read_business={}, pending_read_ends={},
-        continuing_read_tickets={}, occurred_at=lambda: 123,
+        continuing_read_tickets={}, pending_segment_inspection_results={}, occurred_at=lambda: 123,
         evidence=obtain_flow._LOCAL_READ_EVIDENCE, retry_gate=RetryWaitGate(),
         monotonic_ns=lambda: 456)
     ticket = AttemptTicket(1, 'read', '2', 'read/2', 5)
@@ -108,7 +108,8 @@ async def test_read_result_consumer_keeps_exception_and_read_end_on_original_req
                 pending_read_results=runtime.pending_read_results,
                 pending_read_business=runtime.pending_read_business,
                 pending_read_ends=runtime.pending_read_ends,
-                continuing_read_tickets=runtime.continuing_read_tickets)
+                continuing_read_tickets=runtime.continuing_read_tickets,
+                pending_segment_inspection_results=runtime.pending_segment_inspection_results)
         else:
             database.read.return_value = facts
             await obtain_flow._retry_read_results(runtime)

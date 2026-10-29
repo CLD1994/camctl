@@ -1,0 +1,199 @@
+{
+  "schema_version": 1,
+  "session_id": "ec915eb7-72ff-45bf-88c1-28434bf93c6e",
+  "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[empty-indexes5-0-failed]",
+  "command_prefix": [
+    "node",
+    "--import",
+    "tsx",
+    "/tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/client_driver.ts"
+  ],
+  "phase_timeout_seconds": 120,
+  "startup": {
+    "started_monotonic_ns": 110525418885249,
+    "finished_monotonic_ns": 110526951855101,
+    "elapsed_seconds": 1.532969852,
+    "outcome": "passed"
+  },
+  "commands": [
+    {
+      "id": 1,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/plan-body.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-plan-1.json"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-receipts/001-client-export.json",
+      "started_monotonic_ns": 110526953590784,
+      "finished_monotonic_ns": 110527434391745,
+      "elapsed_seconds": 0.480800961,
+      "outcome": "passed"
+    },
+    {
+      "id": 2,
+      "operation": "import",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/deployment/processing",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-store"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-receipts/002-client-import.json",
+      "started_monotonic_ns": 110542783206790,
+      "finished_monotonic_ns": 110542851355460,
+      "elapsed_seconds": 0.06814867,
+      "outcome": "passed"
+    },
+    {
+      "id": 3,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/plan-body.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-plan-2.json"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-receipts/003-client-export.json",
+      "started_monotonic_ns": 110542851831665,
+      "finished_monotonic_ns": 110543178575048,
+      "elapsed_seconds": 0.326743383,
+      "outcome": "passed"
+    },
+    {
+      "id": 4,
+      "operation": "import",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/deployment/processing",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-store"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-receipts/004-client-import.json",
+      "started_monotonic_ns": 110548194276444,
+      "finished_monotonic_ns": 110548273889433,
+      "elapsed_seconds": 0.079612989,
+      "outcome": "passed"
+    },
+    {
+      "id": 5,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/plan-body.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-plan-3.json"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-receipts/005-client-export.json",
+      "started_monotonic_ns": 110548275037882,
+      "finished_monotonic_ns": 110548305127630,
+      "elapsed_seconds": 0.030089748,
+      "outcome": "passed"
+    },
+    {
+      "id": 6,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/plan-body.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-plan-4.json"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-receipts/006-client-export.json",
+      "started_monotonic_ns": 110549843171639,
+      "finished_monotonic_ns": 110549879692181,
+      "elapsed_seconds": 0.036520542,
+      "outcome": "passed"
+    },
+    {
+      "id": 7,
+      "operation": "import",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/deployment/processing",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-store"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-receipts/007-client-import.json",
+      "started_monotonic_ns": 110554695264158,
+      "finished_monotonic_ns": 110554825531877,
+      "elapsed_seconds": 0.130267719,
+      "outcome": "passed"
+    },
+    {
+      "id": 8,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/plan-body.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-plan-5.json"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-receipts/008-client-export.json",
+      "started_monotonic_ns": 110554826082070,
+      "finished_monotonic_ns": 110554871546963,
+      "elapsed_seconds": 0.045464893,
+      "outcome": "passed"
+    },
+    {
+      "id": 9,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/plan-body.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-plan-6.json"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-receipts/009-client-export.json",
+      "started_monotonic_ns": 110557178705228,
+      "finished_monotonic_ns": 110557253468541,
+      "elapsed_seconds": 0.074763313,
+      "outcome": "passed"
+    },
+    {
+      "id": 10,
+      "operation": "import",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/deployment/processing",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-store"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-receipts/010-client-import.json",
+      "started_monotonic_ns": 110561953682664,
+      "finished_monotonic_ns": 110562346058117,
+      "elapsed_seconds": 0.392375453,
+      "outcome": "passed"
+    },
+    {
+      "id": 11,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/plan-body.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-plan-7.json"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-receipts/011-client-export.json",
+      "started_monotonic_ns": 110562347014516,
+      "finished_monotonic_ns": 110562409798877,
+      "elapsed_seconds": 0.062784361,
+      "outcome": "passed"
+    },
+    {
+      "id": 12,
+      "operation": "import-media",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/deployment/processing/1.OSV"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/after-latest-d896d4b2-pytest/test_installed_segment_source_5/world/client-receipts/012-media-1.json",
+      "started_monotonic_ns": 110564107250402,
+      "finished_monotonic_ns": 110564251046552,
+      "elapsed_seconds": 0.14379615,
+      "outcome": "passed"
+    }
+  ],
+  "close": {
+    "started_monotonic_ns": 110565682934945,
+    "finished_monotonic_ns": 110565761801277,
+    "elapsed_seconds": 0.078866332,
+    "outcome": "passed"
+  },
+  "node_pid": 1764242,
+  "owned_processes": [
+    {
+      "pid": 1764242,
+      "ppid": 1750057,
+      "pgid": 1764242,
+      "starttime": "11052541",
+      "state": "S"
+    }
+  ]
+}

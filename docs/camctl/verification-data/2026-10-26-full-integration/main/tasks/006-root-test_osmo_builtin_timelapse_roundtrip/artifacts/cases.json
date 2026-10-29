@@ -1,0 +1,78 @@
+[
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/006-root-test_osmo_builtin_timelapse_roundtrip/source/tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_describe_exposes_both_formal_capture_types",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 1.6681894849898526
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 3.4185086420038715
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.005881431992747821
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 5.092579558986472
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/006-root-test_osmo_builtin_timelapse_roundtrip/source/tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_capture_recovery_and_available_delivery[record-with-preview]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 27.631588541000383
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 68.31319974598591
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.09334611300437246
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 96.03813439999067
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/006-root-test_osmo_builtin_timelapse_roundtrip/source/tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_capture_recovery_and_available_delivery[timelapse-with-preview]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0014435149932978675
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 58.585264749999624
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.07204814300348517
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 58.65875640799641
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/006-root-test_osmo_builtin_timelapse_roundtrip/source/tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_capture_recovery_and_available_delivery[timelapse-without-preview]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002272689001983963
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 42.00831866200315
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.08858375300769694
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 42.09917510401283
+  }
+]

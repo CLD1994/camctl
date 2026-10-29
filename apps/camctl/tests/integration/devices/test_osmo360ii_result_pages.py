@@ -8,7 +8,8 @@ from adb_metadata_fixtures import collect_fake_metadata_many
 
 from camctl.bootstrap.capture_assembly import DriverResultListing
 from camctl.bootstrap.config import ConfigDefaults, load_config
-from camctl.capture.handlers import _begin_check_round
+from ..persistence.result_page_fixtures import begin_result_check
+from .result_page_storage import result_page_storage, allow_dispatch, SavedDirectoryScan
 from camctl.capture.result_pages import ResultPageSave
 from camctl.contracts.pages import Page
 from camctl.contracts.values import new_operation_key
@@ -30,7 +31,6 @@ from camctl.persistence.repositories.operations import OperationRepository
 from ..acceptance.test_acceptance import _plan_body
 from ..capture.test_baseline_history import _append, _fix
 from ..capture.test_baseline_start import _grant
-from ..capture.test_capture_contract import _runtime
 from ..scheduling.test_start_action import _SCHEDULED, _accept_plan, _start, owned
 
 
@@ -43,6 +43,9 @@ class Filesystem:
     def __init__(self, paths):
         self.paths = sorted(paths)
         self.directory_calls = []
+
+    def directory_scan(self, request):
+        return SavedDirectoryScan(self)
 
     async def read_directory(self, request, *, stop):
         self.directory_calls.append(request)
@@ -98,7 +101,7 @@ async def _world(owned, tmp_path, baseline, monkeypatch):
     operations = OperationRepository()
     ticket = granted.value.ticket
     result = await driver.control(ControlRequest("start_recording", BINDING, params, ticket,
-        Decimal("10"), lambda: None, start_return_meaning=StartReturn.SENT))
+        Decimal("10"), allow_dispatch, start_return_meaning=StartReturn.SENT))
     saved = operations.finish_attempt(AttemptFinish(ticket, validate_outcome(ticket, result.outcome, contract.evidence),
         _SCHEDULED, run_finish=RunFinish(RunOutcome.SUCCEEDED)), new_operation_key(), owned)
     assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
@@ -118,8 +121,8 @@ async def _world(owned, tmp_path, baseline, monkeypatch):
         "stop_returned_at_us": _SCHEDULED + 1, "file_completion_wait_ms": 30000, "prior_completion": None,
         "stop_response": {"status": row[0], "effect_state": row[1],
             "error": None if row[2] is None else json.loads(row[2]), "result": json.loads(row[3])}}
-    runtime = _runtime(owned)
-    return driver, runtime, _begin_check_round(runtime, 1).ticket, context
+    runtime = await result_page_storage(owned, _SCHEDULED + 2)
+    return driver, runtime, begin_result_check(owned, runtime, 1).ticket, context
 
 
 @pytest.mark.parametrize("paths,batch,baseline,expected", [
@@ -184,7 +187,7 @@ async def test_osmo_formal_result_adapter_preserves_observation_when_prior_osv_d
     filesystem = Filesystem([*paths, original, preview, ROOT + "/z/Z.tmp"])
     monkeypatch.setattr(driver, "_filesystem", lambda binding: filesystem)
     adapter = DriverResultListing(driver, BINDING, driver.contract.evidence,
-        capture_repository=runtime.capture, owned=owned)
+        capture_repository=runtime.capture, database=runtime.database)
     output_scope = runtime.action(1)["execution_spec_json"]["output_scope"]
     video_result_mode = runtime.action(1)["execution_spec_json"]["video_result_mode"]
 

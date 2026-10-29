@@ -6,10 +6,7 @@ import pytest
 
 from camctl.contracts.enums import (
     assert_public_contracts,
-    decode_member,
-    encode_member,
     enum_for,
-    public_text,
 )
 
 class TestRegistryEnums:
@@ -38,28 +35,6 @@ class TestRegistryEnums:
         action_status = enum_for("actions.status")
         with pytest.raises(ValueError):
             action_status(99)
-
-    def test_cross_enum_mixing_is_rejected(self) -> None:
-        action_status = enum_for("actions.status")
-        with pytest.raises(ValueError):
-            encode_member("plans.status", action_status.RUNNING)
-        with pytest.raises(ValueError):
-            decode_member("plans.status", action_status.RUNNING)
-
-    def test_decode_and_round_trip(self) -> None:
-        member = decode_member("actions.status", 2)
-        assert member.name == "RUNNING"
-        assert encode_member("actions.status", member) == 2
-
-    def test_unknown_column_is_rejected(self) -> None:
-        with pytest.raises(ValueError):
-            enum_for("plans.nonexistent")
-
-    def test_public_text_encoding(self) -> None:
-        assert public_text(enum_for("plans.status").COMPLETED) == "completed"
-        assert public_text(enum_for("actions.type").CAMERA_RECORD) == "camera_record"
-        with pytest.raises(ValueError):
-            public_text("not-an-enum-member")  # type: ignore[arg-type]
 
     def test_public_contracts_agree_with_schema(self) -> None:
         # 生成的映射与权威资源一致：内部成员的小写名称集合

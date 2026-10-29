@@ -1,0 +1,195 @@
+{
+  "observed_at": "2026-10-26T00:35:17.947642+00:00",
+  "status": "confirmed inherited production defect; final completed bootstrap has exactly two affected nodes",
+  "cause": "closing is imported only inside another function; _cleanup_pending_for_action.read references it globally",
+  "trigger": "cancel settlement with nonempty cleanup owner item identity set and no matching action_id fast path",
+  "provenance": {
+    "a7755d81": {
+      "function_start": 1326,
+      "function": "async def _cleanup_pending_for_action(deps, database, action_id):\n    \"\"\"取消等待同一会话的原保存责任，不能仅按成员终态完成。\"\"\"\n    item_ids = set(deps.cleanup_intents) | set(deps.cleanup_deletes) | set(deps.cleanup_companions)\n    item_ids.update(value.item_id for value in deps.cleanup_queries.values())\n    for value in deps.cleanup_saves.values():\n        if getattr(value.request, \"action_id\", None) == action_id:\n            return True\n        if hasattr(value.request, \"item_id\"):\n            item_ids.add(value.request.item_id)\n    identities = tuple(item_ids)\n    if not identities:\n        return False\n    def read(owned):\n        for item_id in identities:\n            with closing(owned.connection.execute(\n                \"SELECT 1 FROM cleanup_items WHERE id=? AND action_id=?\",\n                (item_id, action_id))) as cursor:\n                if cursor.fetchone() is not None:\n                    return True\n        return False\n    return await database.read(read)\n",
+      "closing_imports": [
+        {
+          "line": 624,
+          "text": "    from contextlib import closing",
+          "indentation": 4
+        }
+      ]
+    },
+    "272fda66": {
+      "function_start": 1346,
+      "function": "async def _cleanup_pending_for_action(deps, database, action_id):\n    \"\"\"取消等待同一会话的原保存责任，不能仅按成员终态完成。\"\"\"\n    item_ids = set(deps.cleanup_intents) | set(deps.cleanup_deletes) | set(deps.cleanup_companions)\n    item_ids.update(value.item_id for value in deps.cleanup_queries.values())\n    for value in deps.cleanup_saves.values():\n        if getattr(value.request, \"action_id\", None) == action_id:\n            return True\n        if hasattr(value.request, \"item_id\"):\n            item_ids.add(value.request.item_id)\n    identities = tuple(item_ids)\n    if not identities:\n        return False\n    def read(owned):\n        for item_id in identities:\n            with closing(owned.connection.execute(\n                \"SELECT 1 FROM cleanup_items WHERE id=? AND action_id=?\",\n                (item_id, action_id))) as cursor:\n                if cursor.fetchone() is not None:\n                    return True\n        return False\n    return await database.read(read)\n",
+      "closing_imports": [
+        {
+          "line": 638,
+          "text": "    from contextlib import closing",
+          "indentation": 4
+        }
+      ]
+    },
+    "9fbb734c": {
+      "function_start": 1348,
+      "function": "async def _cleanup_pending_for_action(deps, database, action_id):\n    \"\"\"取消等待同一会话的原保存责任，不能仅按成员终态完成。\"\"\"\n    item_ids = set(deps.cleanup_intents) | set(deps.cleanup_deletes) | set(deps.cleanup_companions)\n    item_ids.update(value.item_id for value in deps.cleanup_queries.values())\n    for value in deps.cleanup_saves.values():\n        if getattr(value.request, \"action_id\", None) == action_id:\n            return True\n        if hasattr(value.request, \"item_id\"):\n            item_ids.add(value.request.item_id)\n    identities = tuple(item_ids)\n    if not identities:\n        return False\n    def read(owned):\n        for item_id in identities:\n            with closing(owned.connection.execute(\n                \"SELECT 1 FROM cleanup_items WHERE id=? AND action_id=?\",\n                (item_id, action_id))) as cursor:\n                if cursor.fetchone() is not None:\n                    return True\n        return False\n    return await database.read(read)\n",
+      "closing_imports": [
+        {
+          "line": 640,
+          "text": "    from contextlib import closing",
+          "indentation": 4
+        }
+      ]
+    }
+  },
+  "logs": [
+    {
+      "path": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/tmp/pytest/test_real_session_applies_canc4/camctl.log",
+      "diagnostic": {
+        "error": "流程 cancel 异常: name 'closing' is not defined",
+        "exception": {
+          "type": "builtins.NameError",
+          "message": "name 'closing' is not defined",
+          "traceback": [
+            {
+              "filename": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/source/apps/camctl/src/camctl/session/service.py",
+              "lineno": 1406,
+              "function": "_drive_flows"
+            },
+            {
+              "filename": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/source/apps/camctl/src/camctl/bootstrap/flows.py",
+              "lineno": 648,
+              "function": "flow"
+            },
+            {
+              "filename": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/source/apps/camctl/src/camctl/cancellation/service.py",
+              "lineno": 146,
+              "function": "apply_cancel"
+            },
+            {
+              "filename": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/source/apps/camctl/src/camctl/cancellation/settlement.py",
+              "lineno": 84,
+              "function": "settle"
+            },
+            {
+              "filename": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/source/apps/camctl/src/camctl/cancellation/settlement.py",
+              "lineno": 310,
+              "function": "_settle_cleanup"
+            },
+            {
+              "filename": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/source/apps/camctl/src/camctl/bootstrap/lifecycle.py",
+              "lineno": 1368,
+              "function": "_cleanup_pending_for_action"
+            },
+            {
+              "filename": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/source/apps/camctl/src/camctl/persistence/business.py",
+              "lineno": 182,
+              "function": "read"
+            },
+            {
+              "filename": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/source/apps/camctl/src/camctl/persistence/executor.py",
+              "lineno": 352,
+              "function": "_execute"
+            },
+            {
+              "filename": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/source/apps/camctl/src/camctl/persistence/executor.py",
+              "lineno": 261,
+              "function": "<lambda>"
+            },
+            {
+              "filename": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/source/apps/camctl/src/camctl/persistence/business.py",
+              "lineno": 170,
+              "function": "execute"
+            },
+            {
+              "filename": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/source/apps/camctl/src/camctl/bootstrap/lifecycle.py",
+              "lineno": 1362,
+              "function": "read"
+            }
+          ],
+          "cause": null,
+          "context": null,
+          "suppress_context": false
+        }
+      },
+      "archived_original": "/tmp/camctl-full-272f-diagnosis/bootstrap/closing-original-1-camctl.log",
+      "sha256": "7566d52cf98aefb5c8887fcdfa9085958c61e1e323b63abfc64d60fb92e6c5fd"
+    },
+    {
+      "path": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/tmp/pytest/test_real_session_applies_canc5/camctl.log",
+      "diagnostic": {
+        "error": "流程 cancel 异常: name 'closing' is not defined",
+        "exception": {
+          "type": "builtins.NameError",
+          "message": "name 'closing' is not defined",
+          "traceback": [
+            {
+              "filename": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/source/apps/camctl/src/camctl/session/service.py",
+              "lineno": 1406,
+              "function": "_drive_flows"
+            },
+            {
+              "filename": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/source/apps/camctl/src/camctl/bootstrap/flows.py",
+              "lineno": 648,
+              "function": "flow"
+            },
+            {
+              "filename": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/source/apps/camctl/src/camctl/cancellation/service.py",
+              "lineno": 146,
+              "function": "apply_cancel"
+            },
+            {
+              "filename": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/source/apps/camctl/src/camctl/cancellation/settlement.py",
+              "lineno": 84,
+              "function": "settle"
+            },
+            {
+              "filename": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/source/apps/camctl/src/camctl/cancellation/settlement.py",
+              "lineno": 310,
+              "function": "_settle_cleanup"
+            },
+            {
+              "filename": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/source/apps/camctl/src/camctl/bootstrap/lifecycle.py",
+              "lineno": 1368,
+              "function": "_cleanup_pending_for_action"
+            },
+            {
+              "filename": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/source/apps/camctl/src/camctl/persistence/business.py",
+              "lineno": 182,
+              "function": "read"
+            },
+            {
+              "filename": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/source/apps/camctl/src/camctl/persistence/executor.py",
+              "lineno": 352,
+              "function": "_execute"
+            },
+            {
+              "filename": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/source/apps/camctl/src/camctl/persistence/executor.py",
+              "lineno": 261,
+              "function": "<lambda>"
+            },
+            {
+              "filename": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/source/apps/camctl/src/camctl/persistence/business.py",
+              "lineno": 170,
+              "function": "execute"
+            },
+            {
+              "filename": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/source/apps/camctl/src/camctl/bootstrap/lifecycle.py",
+              "lineno": 1362,
+              "function": "read"
+            }
+          ],
+          "cause": null,
+          "context": null,
+          "suppress_context": false
+        }
+      },
+      "archived_original": "/tmp/camctl-full-272f-diagnosis/bootstrap/closing-original-2-camctl.log",
+      "sha256": "8b496cfe1ae9f76cce3faa0954619d00f8c5295a34adfcf498efd975255823eb"
+    }
+  ],
+  "repair": "Import contextlib.closing in module or in _cleanup_pending_for_action; keep cursor closure inside worker callback",
+  "verification": "Existing cleanup_background_owner cancellation tests under original budgets; no test execution during diagnosis",
+  "finalized_at": "2026-10-26T01:17:37.184325+00:00",
+  "source": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+  "nodes": [
+    "apps/camctl/tests/integration/bootstrap/test_cleanup_background_owner.py::test_real_session_applies_cancel_before_device_call_returns[default-delete]",
+    "apps/camctl/tests/integration/bootstrap/test_cleanup_background_owner.py::test_real_session_applies_cancel_before_device_call_returns[default-query]"
+  ]
+}

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import pytest
 
+from ..support.acceptance import accept_source
+from ..support.database import database_path
+
 from camctl.acceptance.input import InputDiagnostic, InputStage, ParsedInput
 from camctl.acceptance.service import (
     AckDisposition,
@@ -167,6 +170,7 @@ async def test_reused_request_preserves_old_clock_status(environment, tmp_path) 
     assert _all_rows(connection, "history_events") == old_history
     assert _all_rows(connection, "history_transactions") == old_transactions
 
+    connection.commit()
     result = await _accept(environment, tmp_path, {"request_id": "42"})
     assert result.plan_disposition is PlanDisposition.REUSED
     assert _all_rows(connection, "history_events") == old_history
@@ -232,9 +236,7 @@ async def test_read_and_parse_diagnostics_are_unchecked(
         detail="controlled input failure",
     )
 
-    result = await accept_input(
-        source, context, new_operation_key(), _owned(environment)
-    )
+    result = await accept_source(source, context, database_path(_owned(environment)))
 
     assert result.plan_disposition is PlanDisposition.REJECTED
     assert expected_code in connection.execute(

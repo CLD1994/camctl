@@ -1,0 +1,15 @@
+[
+  {
+    "label": "package-resources",
+    "command": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/052-root-test_hasselblad_photo_parameters-shard-1/source/apps/camctl/scripts/sync_resources.py"
+    ],
+    "cwd": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/052-root-test_hasselblad_photo_parameters-shard-1/source",
+    "started_utc": "2026-10-26T00:40:26.554715+00:00",
+    "pid": 1971476,
+    "exit_code": 0,
+    "finished_utc": "2026-10-26T00:40:26.614256+00:00",
+    "wall_seconds": 0.05953640399093274
+  }
+]

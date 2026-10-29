@@ -6,17 +6,18 @@ import json
 
 import pytest
 
-from camctl.capture.handlers import _listing_round, _register_listing, capture_handler
+from camctl.capture.handlers import capture_handler
 from camctl.devices.capture_completion import validate_completion_context
 from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.devices.ports import DeviceCallResult
 from camctl.operations.attempts import AttemptConfig
 from camctl.persistence.repositories.history import HistoryRepository
 
-from .result_consumer_fixtures import ResultCatalog, consumer_world
+from .result_consumer_fixtures import ResultCatalog, result_driver
+from ..support.result_cases import result_case, result_case_for
 from .test_capture_contract import _NOW
 from .test_record_file_completion_wait import (
-    _completed_result, _result_port, _stop_context,
+    _completed_result, _REGISTRY, _stop_context,
 )
 from .test_result_page_history import _actual, _entry
 
@@ -40,13 +41,20 @@ def _osv(size=50):
         'format_id': 'osv', 'size_bytes': size}
 
 
+async def _native_world(tmp_path, consumer='timelapse', *, catalog=None, wait_config=None):
+    return await result_case_for().world(tmp_path, consumer,
+        catalog=NativeWaitCatalog() if catalog is None else catalog,
+        assembly_options={
+            'check_config': AttemptConfig(3, Decimal('10'), Decimal(0)),
+            'wait_config': (lambda action: CaptureWaitConfig(600000, 30000))
+                if wait_config is None else wait_config,
+        }, evidence_contracts=(_REGISTRY.contract('results_returned', 1),
+                              _REGISTRY.contract('adb_foreground_recovery', 1)))
+
+
 @pytest.mark.parametrize('size,success', [(50, True), (0, False)])
 async def test_natural_wait_context_preserves_original_sent_and_replays_nonzero_rule(tmp_path, size, success):
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, 'timelapse', catalog=NativeWaitCatalog())
-    runtime.check_config = AttemptConfig(3, Decimal('10'), Decimal('0'))
-    runtime.wait_config = lambda action: CaptureWaitConfig(
-        action['execution_spec_json']['target_duration_ms'],
-        action['execution_spec_json']['result_wait_margin_ms'], 0)
+    owned, runtime, action_id, handler = await _native_world(tmp_path)
     seen = []
     async def read(request, batch):
         context = request.params.get('completion_context')
@@ -59,25 +67,24 @@ async def test_natural_wait_context_preserves_original_sent_and_replays_nonzero_
         assert request.timeout_s == Decimal('10')
         seen.append(context)
         return DeviceCallResult.from_outcome(_actual(request.ticket, entries=[_osv(size)], finalized=True))
-    driver = _result_port(runtime, read)
+    driver = result_driver(result_case_for(), side_effect=read)
     try:
         await capture_handler(handler)(action_id, runtime)
-        assert runtime.action(action_id)['status'] == (3 if success else 4)
+        assert (await runtime.action(action_id))['status'] == (3 if success else 4)
         assert len(seen) == 1
         assert owned.connection.execute('SELECT COUNT(*) FROM outputs').fetchone() == ((1 if success else 0),)
         assert owned.connection.execute("SELECT COUNT(*) FROM operation_runs WHERE responsibility_key LIKE 'stop/%'").fetchone() == (0,)
         path = Path(owned.connection.execute('PRAGMA database_list').fetchone()[2])
         history = HistoryRepository(path)
         restored = history.restore_entity('action', action_id, history.current_boundary())
-        assert restored[('actions', action_id)]['status'] == runtime.action(action_id)['status']
+        assert restored[('actions', action_id)]['status'] == (await runtime.action(action_id))['status']
         driver.list_results.assert_awaited_once()
     finally:
         owned.connection.close()
 
 
 async def test_native_confirmed_stop_uses_independent_wait_and_original_page_evidence(tmp_path):
-    owned, runtime, action_id, _ = await consumer_world(tmp_path, 'cancel', catalog=NativeWaitCatalog())
-    runtime.check_config = AttemptConfig(3, Decimal('10'), Decimal('0'))
+    owned, runtime, action_id, _ = await _native_world(tmp_path, 'cancel')
     context = {**_stop_context(owned, action_id), 'kind': 'timelapse_stop', 'file_completion_wait_ms': 30000}
     completion = {'method': 'stop_return_and_wait', 'version': 1, 'activity_id': context['activity_id'],
         'stop_result_event_id': context['stop_result_event_id'], 'required_wait_ms': 30000,
@@ -86,18 +93,17 @@ async def test_native_confirmed_stop_uses_independent_wait_and_original_page_evi
         assert request.params.get('completion_context') == context
         assert request.timeout_s == Decimal('40')
         return _completed_result(request.ticket, context, entries=[_osv()], finalized=True, completion=completion)
-    driver = _result_port(runtime, read)
+    driver = result_driver(result_case_for(), side_effect=read)
     try:
-        listing = await _listing_round(runtime, action_id)
-        registered = tuple(_register_listing(runtime, action_id, listing))
-        assert registered[0][0].size_bytes == 50
+        await capture_handler("camera_timelapse")(action_id, runtime)
+        file_id, size = owned.connection.execute("SELECT id,size_bytes FROM device_files").fetchone()
+        assert size == 50
         evidence, = owned.connection.execute('SELECT completion_evidence_json FROM device_files').fetchone()
         assert 'stop_result_event_id' in evidence and 'result_page_event_id' in evidence
         assert 'wait_completed_event_id' not in evidence
         driver.list_results.assert_awaited_once()
         path = Path(owned.connection.execute('PRAGMA database_list').fetchone()[2])
         history = HistoryRepository(path)
-        file_id = registered[0][1]
         restored = history.restore_entity('device_file', file_id, history.current_boundary())
         assert restored[('device_files', file_id)]['size_bytes'] == 50
     finally:
@@ -111,11 +117,10 @@ async def test_natural_file_completion_retains_and_checks_original_page_sources(
     from camctl.contracts.values import new_operation_key
     from camctl.persistence.models import DbOutcomeKind
     from camctl.persistence.transaction import row_facts
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, 'timelapse', catalog=NativeWaitCatalog())
-    runtime.wait_config = lambda action: CaptureWaitConfig(600000, 30000)
+    owned, runtime, action_id, handler = await _native_world(tmp_path)
     async def read(request, batch):
         return DeviceCallResult.from_outcome(_actual(request.ticket, entries=[_osv()], finalized=True))
-    _result_port(runtime, read)
+    result_driver(result_case_for(), side_effect=read)
     try:
         await capture_handler(handler)(action_id, runtime)
         file_id, = owned.connection.execute('SELECT id FROM device_files').fetchone()
@@ -140,16 +145,15 @@ async def test_natural_file_completion_retains_and_checks_original_page_sources(
 
 
 async def test_optional_preview_of_original_outside_task_does_not_invalidate_new_original(tmp_path):
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, 'timelapse', catalog=NativeWaitCatalog())
-    runtime.wait_config = lambda action: CaptureWaitConfig(600000, 30000)
+    owned, runtime, action_id, handler = await _native_world(tmp_path)
     preview = {**_osv(), 'identity': '/DCIM/old.LRF', 'locator': {'path': '/DCIM/old.LRF'},
         'format_id': 'lrf', 'paired_identity': '/DCIM/old.OSV'}
     async def read(request, batch):
         return DeviceCallResult.from_outcome(_actual(request.ticket, entries=[_osv(), preview], finalized=True))
-    _result_port(runtime, read)
+    result_driver(result_case_for(), side_effect=read)
     try:
         await capture_handler(handler)(action_id, runtime)
-        assert runtime.action(action_id)['status'] == 3
+        assert (await runtime.action(action_id))['status'] == 3
         assert owned.connection.execute('SELECT COUNT(*) FROM outputs').fetchone() == (1,)
         assert owned.connection.execute('SELECT COUNT(*) FROM device_files WHERE source_action_id IS NULL').fetchone() == (1,)
     finally:
@@ -162,11 +166,10 @@ async def test_natural_file_event_guard_independently_checks_original_sources(tm
     from camctl.contracts.history_values import TransactionRange
     from camctl.history.validators import EventContext, EventValidationError, validate_event
     from camctl.persistence.transaction import event_envelope, row_facts, update_change
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, 'timelapse', catalog=NativeWaitCatalog())
-    runtime.wait_config = lambda action: CaptureWaitConfig(600000, 30000)
+    owned, runtime, action_id, handler = await _native_world(tmp_path)
     async def read(request, batch):
         return DeviceCallResult.from_outcome(_actual(request.ticket, entries=[_osv()], finalized=True))
-    _result_port(runtime, read)
+    result_driver(result_case_for(), side_effect=read)
     try:
         await capture_handler(handler)(action_id, runtime)
         file_id, = owned.connection.execute('SELECT id FROM device_files').fetchone()
@@ -220,8 +223,8 @@ class StartupNativeCatalog(NativeWaitCatalog):
 
 @pytest.mark.parametrize('margin_ms,wait_us', [(0, 330000000), (1000, 331000000)])
 async def test_new_native_context_and_history_preserve_original_startup_margin(tmp_path, margin_ms, wait_us):
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, 'timelapse', catalog=StartupNativeCatalog(margin_ms))
-    runtime.wait_config = lambda action: CaptureWaitConfig(300000, 30000, startup_margin_ms=margin_ms)
+    owned, runtime, action_id, handler = await _native_world(tmp_path, catalog=StartupNativeCatalog(margin_ms),
+        wait_config=lambda action: CaptureWaitConfig(300000, 30000, startup_margin_ms=margin_ms))
     seen = []
     async def read(request, batch):
         context = request.params['completion_context']
@@ -230,10 +233,10 @@ async def test_new_native_context_and_history_preserve_original_startup_margin(t
         assert context['target_duration_ms'] == 300000
         seen.append(context)
         return DeviceCallResult.from_outcome(_actual(request.ticket, entries=[_osv()], finalized=True))
-    _result_port(runtime, read)
+    result_driver(result_case_for(), side_effect=read)
     try:
         await capture_handler(handler)(action_id, runtime)
-        assert runtime.action(action_id)['status'] == 3
+        assert (await runtime.action(action_id))['status'] == 3
         path = Path(owned.connection.execute('PRAGMA database_list').fetchone()[2])
         history = HistoryRepository(path)
         restored = history.restore_entity('action', action_id, history.current_boundary())
@@ -248,11 +251,11 @@ async def test_new_natural_file_guard_uses_original_startup_and_actual_event_tim
     from camctl.contracts.history_values import TransactionRange
     from camctl.history.validators import EventContext, EventValidationError, validate_event
     from camctl.persistence.transaction import event_envelope, row_facts, update_change
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, 'timelapse', catalog=StartupNativeCatalog())
-    runtime.wait_config = lambda action: CaptureWaitConfig(300000, 30000, startup_margin_ms=1000)
+    owned, runtime, action_id, handler = await _native_world(tmp_path, catalog=StartupNativeCatalog(),
+        wait_config=lambda action: CaptureWaitConfig(300000, 30000, startup_margin_ms=1000))
     async def read(request, batch):
         return DeviceCallResult.from_outcome(_actual(request.ticket, entries=[_osv()], finalized=True))
-    _result_port(runtime, read)
+    result_driver(result_case_for(), side_effect=read)
     try:
         await capture_handler(handler)(action_id, runtime)
         file_id, = owned.connection.execute('SELECT id FROM device_files').fetchone()

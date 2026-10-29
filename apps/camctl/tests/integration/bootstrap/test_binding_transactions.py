@@ -2,12 +2,17 @@
 
 from dataclasses import replace
 import sqlite3
+from decimal import Decimal
 
 import pytest
 
 from camctl.capture.media import RecordingFailure
 from camctl.contracts.values import new_operation_key
-from camctl.operations.attempts import AttemptConfig
+from camctl.operations.attempts import AttemptConfig, AttemptFinish
+from camctl.operations.validation import validate_outcome
+from camctl.persistence.repositories.operations import OperationRepository
+from camctl.persistence.repositories.scheduling import SchedulingRepository, GrantRequest
+from camctl.scheduling.rules import LaunchWindow
 from camctl.operations.models import (
     AttemptStatus, CallOutcome, EffectState, ErrorValue, EvidenceValue,
     Settlement, SettlementBasis,
@@ -21,30 +26,36 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.transaction import TransactionError
 
 from ..capture.test_cancel_late_start import _cancel
-from ..capture.test_capture_contract import _environment, _runtime, _NOW
-from ..operations.test_result_reuse import _FaultConnection
+from ..capture.test_capture_contract import _environment, _EVIDENCE, _NOW
 from .test_binding_changes import environment
 
 
 def _unknown_owned(home, canceled):
     home.mkdir()
     owned = _environment(home, ((12, 2),))
-    runtime = _runtime(owned)
-    ticket, reason = runtime.grant(runtime.action(12))
-    assert ticket is not None, reason
-    runtime.finish(ticket, CallOutcome(
+    config = AttemptConfig(3, Decimal("10"), Decimal("3"))
+    granted = SchedulingRepository().grant_start(GrantRequest(
+        "cam-1", 12, LaunchWindow(_NOW, _NOW + 1_000_000), _NOW, config, _NOW),
+        new_operation_key(), owned)
+    assert granted.kind is DbOutcomeKind.COMPLETED, granted.error
+    ticket = granted.value.ticket
+    assert ticket is not None, granted.value.reason
+    outcome = CallOutcome(
         status=AttemptStatus.UNKNOWN, effect=EffectState.UNKNOWN,
         error=ErrorValue("transport_timeout", "transport"), observations=(),
         settlement=Settlement(SettlementBasis.OBSERVED,
                               EvidenceValue("operation_returned", 1, {})),
-    ))
+    )
+    saved = OperationRepository().finish_attempt(AttemptFinish(
+        ticket, validate_outcome(ticket, outcome, _EVIDENCE), _NOW), new_operation_key(), owned)
+    assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
     if canceled:
         _cancel(owned, 12)
     return owned, FinishBindingFailure(
         action_id=12, occurred_at=_NOW, canceled=canceled,
         failure=RecordingFailure("device_binding_unavailable", {
             "device_id": "cam-1", "expected_driver_id": "camctl-adb", "reason": "missing",
-        }), stop_config=runtime.stop_config,
+        }), stop_config=config,
         responsibility_keys=() if canceled else ("start/12",),
     )
 
@@ -67,6 +78,14 @@ class _CommitFailure:
         return getattr(self.connection, name)
 
 
+def _reject_operation_projection(connection):
+    """真实 SQLite 在流程投影写入时失败，不绑定 SQL 排版。"""
+    connection.execute(
+        "CREATE TEMP TRIGGER reject_operation_projection BEFORE UPDATE ON operation_runs"
+        " BEGIN SELECT RAISE(ABORT, '流程投影写入失败'); END")
+    return connection
+
+
 @pytest.mark.parametrize("canceled", [False, True])
 @pytest.mark.parametrize("phase", ["projection", "commit_before", "commit_after"])
 def test_binding_failure_recovers_whole_transaction(environment, canceled, phase):
@@ -76,7 +95,7 @@ def test_binding_failure_recovers_whole_transaction(environment, canceled, phase
     repository = CaptureRepository()
     key = new_operation_key()
     before = tuple(owned.connection.iterdump())
-    faulty = (_FaultConnection(owned.connection, "UPDATE operation_runs")
+    faulty = (_reject_operation_projection(owned.connection)
               if phase == "projection" else _CommitFailure(owned.connection, phase == "commit_after"))
     try:
         result = repository.finish_binding_failure(command, key, replace(owned, connection=faulty))

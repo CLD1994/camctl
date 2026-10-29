@@ -1,0 +1,127 @@
+{
+  "source_identity": {
+    "repo": "/tmp/camctl-sync8db-tests-ojv22ku3/action6",
+    "head": "70149be69088714b8574900b57efa1b16fe3fa68",
+    "branch": "test/sync8db-action6-ojv22ku3",
+    "status": "",
+    "test_sha256": "5581444d9f290d3cddc332f847632dcbe447008bcef9632aac4aea22fdd58f10",
+    "assert_count": 127,
+    "python": "Python 3.11.17",
+    "node": "v24.22.1"
+  },
+  "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters",
+  "pytest_exit_code": 1,
+  "pytest_result": {
+    "passed": 0,
+    "failed": 1,
+    "unexecuted": 7,
+    "seconds": 270.06,
+    "setup_seconds": 15.44,
+    "call_seconds": 253.58,
+    "teardown_seconds": 0.06
+  },
+  "failure_stage": "START reliably saved; native report condition timed out after original 240-second success budget",
+  "original_success_budgets_seconds": {
+    "START": 90,
+    "native_report": 240
+  },
+  "production_changed": false,
+  "tests_changed": false,
+  "final_git_status": "",
+  "wheel": {
+    "file": "/tmp/camctl-sync8db-evidence/action6/native/data/action6-builtin-package0/dist/camctl-0.1.0-py3-none-any.whl",
+    "sha256": "7d7aaeaebf40caa56cb8c1ad0979a4ebb62116e8753c26d239870e914827ad69"
+  },
+  "last_history_event": 67,
+  "counts": {
+    "segment_sets": 0,
+    "segment_members": 0,
+    "segment_inspections": 0,
+    "outputs": 0,
+    "deliveries": 0,
+    "history_events": 67
+  },
+  "direct_evidence": {
+    "duplicate_transactions": [
+      {
+        "operation_key": "cca9a84b303d05d4f17e70d6913efefd",
+        "count": 2,
+        "commands": [
+          "_FileCompleteCommand",
+          "_FileCompleteCommand"
+        ],
+        "outcomes": [
+          "completed",
+          "completed"
+        ],
+        "events": [
+          1,
+          null
+        ]
+      }
+    ],
+    "last_segment_save": {
+      "stage": "segment_save",
+      "elapsed_ms": 64.1,
+      "action_id": 1,
+      "method": "save_file_completion",
+      "resumed": true
+    },
+    "source_completed_device_files": 3,
+    "source_total_device_files": 8
+  },
+  "mechanism_inference": "Original segment save and lifecycle resume can submit the same pending key concurrently. DbExecutor stores a single future per key; a second submit before the first finish replaces its delivery target. This run did not instrument submit/finish ordering or inspect live coroutine futures.",
+  "log_evidence_boundary": "Early duplicate-key and segment-save records were read during execution into live-log-summary.json. Original camctl logs rotated before final archival; final camctl.log*.gz retain later no-op transactions.",
+  "resource": {
+    "scope": "each camctl CLI and descendants; pytest/client/C host outside",
+    "requested_combined_limit_bytes": 2147483648,
+    "all_leaf_combined_limits_correct": true,
+    "max_leaf_combined_peak_bytes": 378114048,
+    "oom_kills": 0,
+    "all_leaf_groups_removed": true,
+    "budget_launcher_exit_code": 1,
+    "delegation_removed": true,
+    "business_validation": "failed"
+  },
+  "process_cleanup": {
+    "observed_time_ns": 1792957932966879438,
+    "known_owned_pids": {
+      "1643356": {
+        "exists": false
+      },
+      "1643370": {
+        "exists": false
+      },
+      "1643383": {
+        "exists": false
+      },
+      "1643421": {
+        "exists": false
+      },
+      "1643468": {
+        "exists": false
+      },
+      "1643469": {
+        "exists": false
+      },
+      "1643819": {
+        "exists": false
+      },
+      "1643862": {
+        "exists": false
+      }
+    },
+    "matching_live_processes": [],
+    "delegation_exists": false,
+    "delegation_removal": {
+      "path": "/sys/fs/cgroup/memory/camctl-budget-1642514-45463310b7cb4bb0ae5c682894efe4b3",
+      "action": "--_remove",
+      "ok": true,
+      "exit_code": 0,
+      "stderr": ""
+    }
+  },
+  "warnings": [
+    "pytest default cache attempted /.pytest_cache and reported permission warnings; unrelated to business timeout"
+  ]
+}

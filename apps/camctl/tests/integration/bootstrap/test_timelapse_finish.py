@@ -23,12 +23,9 @@ import pytest
 
 from camctl.acceptance.ports import ParameterDefinition
 from camctl.acceptance.service import CommandMode
-from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.bootstrap.flows import cancel_flow, capture_flow
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
-from camctl.capture.handlers import CaptureRuntime
 from camctl.capture.timelapse import CaptureWaitConfig
-from camctl.operations.attempts import RetryWaitGate
 from camctl.contracts.workflow_errors import registered_error
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
 from camctl.devices.tasks import (
@@ -40,19 +37,15 @@ from camctl.devices.tasks import (
 from camctl.operations.attempts import AttemptConfig
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.repositories.capture import (
-    CaptureRepository,
     register_capture_guards,
 )
 from camctl.persistence.repositories.operations import (
-    OperationRepository,
     register_operation_guards,
 )
-from camctl.persistence.repositories.scheduling import SchedulingRepository
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.repositories.timelapse import (
-    TimelapseRepository,
     register_timelapse_guards,
 )
 from camctl.reporting.generation import GenerationSpec, generate_report_file
@@ -65,8 +58,8 @@ from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.repositories.cancellation import (
     register_cancellation_guards,
 )
-from camctl.scheduling.rules import LaunchWindow
 
+from ..support.session import capture_factory
 from ..capture.test_capture_contract import ResultsDouble, _entry
 from .test_recording_stop import (
     _await_query,
@@ -78,7 +71,7 @@ from .test_recording_stop import (
     _StopDouble,
     _submit_plan,
 )
-from .test_run_dispatch import _ActivityDriver, _parsed
+from .test_run_dispatch import _ActivityDriver
 
 register_operation_guards()
 register_capture_guards()
@@ -177,36 +170,13 @@ def _timelapse_plan(request_id: str, scheduled_at: str) -> dict:
     }
 
 
-def _timelapse_factory(driver, results, *, check_config: AttemptConfig | None = None,
+def _timelapse_factory(cfg, driver, results, *, check_config: AttemptConfig | None = None,
                        stopper=None, wait_ms: int = 2_000, extra_ms: int = 0):
-    retry_gate = RetryWaitGate()
-
-    def build(owned, device_id: str) -> CaptureRuntime:
-        overrides = {} if check_config is None else {"check_config": check_config}
-        if stopper is not None:
-            overrides["stopper"] = stopper
-        return CaptureRuntime(
-            owned=owned,
-            scheduling=SchedulingRepository(),
-            operations=OperationRepository(),
-            capture=CaptureRepository(),
-            timelapse=TimelapseRepository(),
-            driver=driver,
-            results=results,
-            evidence=_EVIDENCE,
-            wall_us=lambda: int(time.time() * 1_000_000),
-            monotonic_ns=time.monotonic_ns,
-            window_of=lambda action: LaunchWindow(
-                scheduled_at=action["scheduled_at"],
-                window_end=action["scheduled_at"] + action["max_delay_ms"] * 1000),
-            wait_config=lambda params: CaptureWaitConfig(
-                target_duration_ms=wait_ms, driver_margin_ms=0,
-                extra_wait_ms=extra_ms),
-            retry_gate=retry_gate,
-            **overrides,
-        )
-
-    return build
+    return capture_factory(
+        cfg, driver, results, _EVIDENCE, stopper=stopper,
+        check_config=check_config, extra_wait_ms=extra_ms,
+        wait_config=lambda params: CaptureWaitConfig(
+            target_duration_ms=wait_ms, driver_margin_ms=0, extra_wait_ms=extra_ms))
 
 
 def _run_session(deps, driver, results, *,
@@ -214,7 +184,7 @@ def _run_session(deps, driver, results, *,
                  stopper=None, wait_ms: int = 2_000, extra_ms: int = 0,
                  cancel_flow_paths=None):
     flows = {"scheduling": capture_flow(
-        _timelapse_factory(driver, results, check_config=check_config,
+        _timelapse_factory(deps.config, driver, results, check_config=check_config,
                            stopper=stopper, wait_ms=wait_ms, extra_ms=extra_ms))}
     if cancel_flow_paths is not None:
         flows["cancel"] = cancel_flow(

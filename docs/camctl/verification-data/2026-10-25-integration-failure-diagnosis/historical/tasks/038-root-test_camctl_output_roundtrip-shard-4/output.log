@@ -1,0 +1,82 @@
+.F                                                                       [100%]
+=================================== FAILURES ===================================
+______ test_repeated_obtain_of_same_output_yields_independent_deliveries _______
+
+tmp_path = PosixPath('/tmp/camctl-itopt-final-20261025/tasks/038-root-test_camctl_output_roundtrip-shard-4/tmp/pytest/test_repeated_obtain_of_same_o0')
+
+    def test_repeated_obtain_of_same_output_yields_independent_deliveries(
+            tmp_path: Path) -> None:
+        """同一产物的重复取回：两个取回动作各自取得独立交付；源产物保
+        持可用、设备原文件保留，两份 ready 副本字节与来源一致且文件名
+        互不相同，源文件与副本生命周期分开。"""
+        deployment = Deployment(tmp_path)
+        initialized = deployment.camctl(
+            "init", "--config", str(deployment.config_path))
+        assert initialized.exit_code == 0, initialized.stderr
+    
+        content = ("repeat-clip-" * 700)[:8192]
+        spec = stub_driver_spec(
+            {"1": [video_file("repeat-clip", size_bytes=len(content))]},
+            device_files={"repeat-clip": content})
+        deployment.install_client_capabilities(spec)
+    
+        shoot_at = future_schedule(1)
+        body = {
+            "request_id": "0",
+            "created_at": "2026-01-15 08:00:00",
+            "name": "repeated-obtain",
+            "actions": [
+                {
+                    "name": "拍录",
+                    "type": "camera_record",
+                    "device_id": "cam-1",
+                    "scheduled_at": shoot_at,
+                    "params": {"type": "video"},
+                    "policy": {"max_delay_ms": 5000},
+                },
+                {
+                    "name": "第一次取回",
+                    "type": "obtain_action_outputs",
+                    "scheduled_at": shoot_at,
+                    "params": {
+                        "source": {"action_name": "拍录"},
+                        "purpose": "manual",
+                    },
+                },
+                {
+                    "name": "第二次取回",
+                    "type": "obtain_action_outputs",
+                    "scheduled_at": shoot_at,
+                    "params": {
+                        "source": {"action_name": "拍录"},
+                        "purpose": "manual",
+                    },
+                },
+            ],
+        }
+        plan_path, _ = deployment.export_plan_with_client(body)
+        submitted = deployment.camctl(
+            "submit", str(plan_path), "--config", str(deployment.config_path),
+            driver=spec)
+        assert submitted.exit_code == 0, submitted.stderr
+        run = deployment.camctl(
+            "run", "--config", str(deployment.config_path), driver=spec)
+        assert run.exit_code == 0, run.stderr
+    
+        state_db = deployment.state_db
+>       assert _query(
+            state_db, "SELECT status FROM actions ORDER BY id") == [(3,), (3,), (3,)]
+E       assert [(5,), (4,), (4,)] == [(3,), (3,), (3,)]
+E         
+E         At index 0 diff: (5,) != (3,)
+E         Use -v to get more diff
+
+tests/integration/test_camctl_output_roundtrip.py:672: AssertionError
+============================== slowest durations ===============================
+14.70s call     tests/integration/test_camctl_output_roundtrip.py::test_plan_cancel_before_start_settles_auto_preview
+10.80s call     tests/integration/test_camctl_output_roundtrip.py::test_repeated_obtain_of_same_output_yields_independent_deliveries
+
+(4 durations < 0.005s hidden.  Use -vv to show these durations.)
+=========================== short test summary info ============================
+FAILED tests/integration/test_camctl_output_roundtrip.py::test_repeated_obtain_of_same_output_yields_independent_deliveries
+1 failed, 1 passed in 25.64s

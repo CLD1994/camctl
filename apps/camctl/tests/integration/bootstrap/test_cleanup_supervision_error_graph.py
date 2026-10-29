@@ -3,7 +3,7 @@ import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock, create_autospec
+from unittest.mock import AsyncMock, create_autospec
 
 import pytest
 
@@ -50,8 +50,7 @@ def _port(*, interruption=None, no_completion=False, drain_error=None):
     if drain_error is not None:
         executor.drain_required.side_effect = drain_error
     port = HostArtifacts(Path('/staging'), executor)
-    port._validate_request = Mock()
-    return port, request, actual, runner_error, handle
+    return port, request, actual, runner_error, handle, executor
 
 
 def _nodes(value):
@@ -73,7 +72,7 @@ def _assert_os_graph(error, *names):
 
 
 async def test_successful_completion_keeps_original_runner_exception_graph():
-    port, request, actual, runner, _ = _port()
+    port, request, actual, runner, _, _executor = _port()
     with pytest.raises(LocalArtifactTaskFailure) as caught:
         await port.delete(request)
     assert caught.value.actual is actual
@@ -82,7 +81,7 @@ async def test_successful_completion_keeps_original_runner_exception_graph():
 
 
 async def test_missing_completion_keeps_runner_drain_and_fallback_graphs():
-    port, request, _, _, _ = _port(no_completion=True, drain_error=_failure('drain'))
+    port, request, _, _, _, _executor = _port(no_completion=True, drain_error=_failure('drain'))
     with pytest.raises(ConsistencyError) as caught:
         await port.delete(request)
     _assert_os_graph(caught.value, 'runner', 'drain', 'fallback')
@@ -91,7 +90,7 @@ async def test_missing_completion_keeps_runner_drain_and_fallback_graphs():
 async def test_cancellation_with_failure_keeps_control_and_original_graph():
     interruption = asyncio.CancelledError('original cancellation')
     interruption.__cause__ = _failure('cancel-cause')
-    port, request, actual, _, _ = _port(interruption=interruption)
+    port, request, actual, _, _, _executor = _port(interruption=interruption)
     with pytest.raises(LocalArtifactTaskFailure) as caught:
         await port.delete(request)
     assert caught.value.actual is actual
@@ -102,7 +101,7 @@ async def test_cancellation_with_failure_keeps_control_and_original_graph():
 async def test_cancellation_notes_alone_do_not_become_supervision_error():
     interruption = asyncio.CancelledError('original cancellation')
     interruption.add_note('ordinary cancellation note')
-    port, request, actual, _, _ = _port(interruption=interruption)
+    port, request, actual, _, _, _executor = _port(interruption=interruption)
     with pytest.raises(LocalArtifactTaskFailure) as caught:
         await port.delete(request)
     assert caught.value.actual is actual
@@ -124,8 +123,8 @@ async def test_shared_owner_result_keeps_original_exception_object():
 async def test_shared_owner_exception_graph_survives_cleanup_collection():
     from camctl.session.supervision import TaskFailure, TaskRecord
     failure = _failure('shared-owner')
-    port, request, _, _, _ = _port()
-    port._executor.drain_required.return_value = SupervisionResult((), (
+    port, request, _, _, _, executor = _port()
+    executor.drain_required.return_value = SupervisionResult((), (
         TaskFailure(TaskRecord('other-file', 'save', 'cleanup', ('file:29',)), str(failure), failure),))
     with pytest.raises(LocalArtifactTaskFailure) as caught:
         await port.delete(request)

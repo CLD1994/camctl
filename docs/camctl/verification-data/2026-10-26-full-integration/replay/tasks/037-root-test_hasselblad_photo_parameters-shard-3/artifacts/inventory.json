@@ -1,0 +1,5 @@
+[
+  "tests/integration/test_hasselblad_photo_parameters.py::test_validate_parameters_requires_explicit_action_identity[action_type-]",
+  "tests/integration/test_hasselblad_photo_parameters.py::test_validate_parameters_requires_explicit_action_identity[device_id-None]",
+  "tests/integration/test_hasselblad_photo_parameters.py::test_validate_parameters_requires_explicit_action_identity[action_name-]"
+]

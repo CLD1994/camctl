@@ -13,25 +13,29 @@ from camctl.persistence.repositories.outputs import OutputsRepository
 from .test_read_associations import read_targets, _command
 from .test_local_read import local_read
 from .test_read_recovery import prepared_read
-from ..operations.test_result_reuse import _FaultConnection
+from ..support.outputs import observed_query
 
 
-class _RecoveryConnection(_FaultConnection):
+class _RecoveryConnection:
     def __init__(self, connection, table, fail_fetch):
-        super().__init__(connection, "unused")
-        self.prefix = f"SELECT id FROM {table} WHERE "
+        self._connection = connection
+        self.table = table
         self.fail_fetch = fail_fetch
         self.cursors = []
 
     def execute(self, sql, parameters=()):
-        cursor = self._connection.execute(sql, parameters)
-        if sql.startswith(self.prefix):
+        cursor, columns, reads = observed_query(self._connection, sql, parameters)
+        if columns == {"id"} and any(table == self.table for table, _column in reads):
             probe = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)
+            probe.description = cursor.description
             probe.close.side_effect = cursor.close
             probe.fetchall.side_effect = (sqlite3.OperationalError("read failed") if self.fail_fetch else cursor.fetchall)
             self.cursors.append(probe)
             return probe
         return cursor
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
 
 
 @pytest.mark.parametrize("table", ["file_copies", "intermediate_files", "operation_runs"])

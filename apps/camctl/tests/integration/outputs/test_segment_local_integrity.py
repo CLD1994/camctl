@@ -1,222 +1,18 @@
 """检查副本本地取回的重拷沿用原 READ_FILE 责任。"""
 
-from decimal import Decimal
 import hashlib
 import json
-from unittest.mock import patch
 
 import pytest
 
 import camctl.outputs.copy as copy_module
-from camctl.capture.handlers import capture_handler
-from camctl.capture.media import MediaPolicy
-from camctl.capture.media_flow import DriverReadSessions, MediaFlow
-from camctl.capture.segment_inspections import (
-    SegmentInspectionPhase,
-    SegmentInspectionRequest,
-    inspect_segment,
-)
-from camctl.contracts.video_coverage import CoverageMetric, CoverageTarget
 from camctl.contracts.enums import enum_for
-from camctl.contracts.values import new_operation_key
-from camctl.devices.bindings import DeviceBinding
-from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
-from camctl.devices.ports import DeviceCallResult, StopDriver
 from camctl.devices.read_session import ReadChunk
 from camctl.host_files.io import LocalSourceReader
-from camctl.host_files.media import MediaProbe, MediaStream
-from camctl.host_files.models import BoundDirectories
-from camctl.host_files.tasks import FileTaskExecutor
-from camctl.operations.attempts import RetryWaitGate
-from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.capture import register_capture_guards
-from camctl.persistence.repositories.operations import (
-    OperationRepository,
-    register_operation_guards,
-)
-from camctl.persistence.repositories.outputs import OutputsRepository
-from camctl.outputs.qualification import OperationConfig
-from camctl.session.supervision import Supervisor
+from camctl.outputs.obtain_flow import advance_obtain
+from ..support.output_segments import CONTENT as _CONTENT, bound_local_delivery
 
-from ..capture.result_consumer_fixtures import consumer_world, returned
-from ..capture.test_record_file_completion_wait import (
-    _completed_result,
-    _result_port,
-    _stop_context,
-)
-from ..capture.test_capture_contract import _NOW
-from ..persistence.test_segment_file_pairing import _entry
-from .test_segment_copy_reuse import (
-    _CONTENT,
-    _InspectionTools,
-    _ReadDriver,
-    _Digest,
-    _stopped_segmented_world,
-)
-from .test_segment_default_scope import _obtain
-
-from camctl.outputs.handoff import DeliveryDirectories
-from camctl.outputs.obtain_flow import (
-    DeviceReadAssembly,
-    ObtainRuntime,
-    advance_obtain,
-)
-
-
-register_capture_guards()
-register_operation_guards()
 pytestmark = pytest.mark.asyncio
-
-
-async def _bound_local_delivery(tmp_path):
-    owned, capture_runtime, source_action_id, handler = \
-        await _stopped_segmented_world(tmp_path)
-    capture_runtime.check_config = type(capture_runtime.check_config)(
-        1, Decimal("1"), Decimal(0))
-    action_id, selection_id = _obtain(
-        owned, capture_runtime, source_action_id, "default", 40)
-    context = _stop_context(owned, source_action_id)
-
-    async def read(request, _batch):
-        stem = "DJI_001/DJI_20261022100000_0001_D."
-        entries = [_entry(stem + "MP4"), _entry(stem + "LRF")]
-        return _completed_result(
-            request.ticket, context,
-            entries=sorted(entries, key=lambda item: item["identity"]),
-            finalized=True)
-
-    _result_port(capture_runtime, read)
-
-    class _PublicationBoundary(Exception):
-        pass
-
-    finish_segment_recording = capture_runtime.capture.finish_segment_recording
-
-    def hold_before_publication(*_args):
-        raise _PublicationBoundary
-
-    capture_runtime.capture.finish_segment_recording = hold_before_publication
-    with pytest.raises(_PublicationBoundary):
-        await capture_handler(handler)(source_action_id, capture_runtime)
-    capture_runtime.capture.finish_segment_recording = finish_segment_recording
-    set_id, = owned.connection.execute(
-        "SELECT id FROM segment_sets WHERE action_id=? ORDER BY version DESC LIMIT 1",
-        (source_action_id,),
-    ).fetchone()
-    member_id, = owned.connection.execute(
-        "SELECT id FROM segment_members WHERE set_id=? AND role=1 ORDER BY id LIMIT 1",
-        (set_id,),
-    ).fetchone()
-    staging = tmp_path / "staging"
-    for name in ("recording-inputs", "derived", "deliveries"):
-        (staging / name).mkdir(parents=True, exist_ok=True)
-    roots = BoundDirectories(staging=staging)
-    inspection_flow = MediaFlow(
-        owned=owned,
-        roots=roots,
-        sessions=DriverReadSessions(
-            owned, _ReadDriver(_CONTENT), ticket=None),
-        tools=_InspectionTools(),
-        policy=MediaPolicy(repair_margin_s=Decimal("2")),
-        occurred_at=lambda: _NOW + 20_000_000,
-        digest_supported=True,
-        digest=_Digest(hashlib.sha256(_CONTENT).hexdigest()),
-    )
-    inspection = await inspect_segment(
-        inspection_flow,
-        SegmentInspectionRequest(
-            action_id=source_action_id,
-            member_id=member_id,
-            target=CoverageTarget(CoverageMetric.DURATION_S, 60),
-            budget=OperationConfig(
-                inspection_flow.max_read_attempts,
-                inspection_flow.read_idle_timeout_s,
-                inspection_flow.retry_interval_s,
-            ),
-            occurred_at=_NOW + 20_000_000,
-        ),
-    )
-    assert inspection.phase is SegmentInspectionPhase.COMPLETED, inspection
-    from camctl.persistence.repositories.segment_inspections import (
-        read_inspection_for_member,
-    )
-
-    inspected = read_inspection_for_member(source_action_id, member_id, owned)
-    assert inspected.copy is not None
-    input_file_id = inspected.copy.target_file_id
-    input_path = staging / inspected.copy.input_relative_path
-    assert input_path.read_bytes() == _CONTENT
-
-    await capture_handler(handler)(source_action_id, capture_runtime)
-    assert owned.connection.execute(
-        "SELECT status FROM actions WHERE id=?", (source_action_id,),
-    ).fetchone()[0] != 2
-    fixed = owned.connection.execute(
-        "SELECT status FROM obtain_source_selections WHERE id=?", (selection_id,),
-    ).fetchone()[0]
-    if fixed == 1:
-        from camctl.persistence.repositories.segment_selections import (
-            FixSegmentSelection,
-            fix_segment_selection,
-        )
-
-        result = fix_segment_selection(
-            FixSegmentSelection(selection_id, _NOW + 21_000_000),
-            new_operation_key(), owned)
-        assert result.kind is DbOutcomeKind.COMPLETED, result.error
-
-    directories = DeliveryDirectories(
-        staging=staging,
-        ready=tmp_path / "ready",
-        processing=tmp_path / "processing",
-    )
-    directories.ready.mkdir(exist_ok=True)
-    directories.processing.mkdir(exist_ok=True)
-    executor = FileTaskExecutor(Supervisor())
-    device_id, driver_id = owned.connection.execute(
-        "SELECT device_id,driver_id FROM actions WHERE id=?", (source_action_id,),
-    ).fetchone()
-    read_evidence = EvidenceRegistry(contracts=(EvidenceContract(
-        type="read_returned", version=1, operation="read",
-        fields=frozenset()),))
-    runtime = ObtainRuntime(
-        owned=owned,
-        devices={device_id: DeviceReadAssembly(
-            driver=_ReadDriver(_CONTENT),
-            binding=DeviceBinding(device_id, driver_id),
-            evidence=read_evidence,
-            digest_supported=True,
-            digest_for=lambda _file_id: _Digest(hashlib.sha256(_CONTENT).hexdigest()),
-            retry_interval_s=Decimal("5"),
-            max_read_attempts=3,
-            read_idle_timeout_s=Decimal("10"),
-        )},
-        directories=directories,
-        segment_size=4,
-        retry_gate=RetryWaitGate(),
-        monotonic_ns=lambda: 20_000_000_000,
-        occurred_at=lambda: _NOW + 23_000_000,
-        outputs=OutputsRepository(),
-        operations=OperationRepository(),
-        file_executor=executor,
-    )
-
-    async def defer_local_reads(_runtime, _now):
-        return None
-
-    with patch("camctl.outputs.obtain_flow._advance_local_reads", defer_local_reads):
-        await advance_obtain(runtime)
-    copy_id, = owned.connection.execute(
-        "SELECT id FROM file_copies WHERE delivery_id IN "
-        "(SELECT id FROM deliveries WHERE action_id=?)", (action_id,),
-    ).fetchone()
-    copy_row = owned.connection.execute(
-        "SELECT source_intermediate_file_id,source_device_file_id,target_file_id"
-        " FROM file_copies WHERE id=?", (copy_id,),
-    ).fetchone()
-    assert copy_row[0] == input_file_id and copy_row[1] is None
-    assert copy_row[2] is not None
-    return owned, runtime, action_id, copy_id, input_path, directories
 
 
 async def _inject_target_mismatch(monkeypatch, mismatch_count):
@@ -249,10 +45,10 @@ def _read_attempt_state(owned, copy_id):
     return run, attempts
 
 
-async def _advance_until_terminal(runtime, owned, action_id, *, ticks=5):
+async def _advance_until_terminal(world, owned, action_id, *, ticks=5):
     for index in range(ticks):
-        runtime.monotonic_ns = lambda index=index: (20 + index * 10) * 1_000_000_000
-        await advance_obtain(runtime)
+        world.clock['mono'] = (20 + index * 10) * 1_000_000_000
+        await world.advance()
         status, = owned.connection.execute(
             "SELECT status FROM actions WHERE id=?", (action_id,),
         ).fetchone()
@@ -263,13 +59,14 @@ async def _advance_until_terminal(runtime, owned, action_id, *, ticks=5):
 @pytest.mark.parametrize("mismatch_count,expected", [(1, "ready"), (2, "exhausted")])
 async def test_local_recopy_keeps_read_attempt_and_checksum_exhaustion_is_final(
         tmp_path, monkeypatch, mismatch_count, expected):
-    owned, runtime, action_id, copy_id, input_path, directories = \
-        await _bound_local_delivery(tmp_path)
-    try:
+    async with bound_local_delivery(tmp_path, monkeypatch) as (world, action_id, copy_id, gate, advancing):
+        owned, runtime = world.owned, world.obtain
+        input_path, directories = world.input_path, world.directories
         digest_calls = await _inject_target_mismatch(monkeypatch, mismatch_count)
 
         # 首次目标摘要不一致后登记第二轮；原 READ_FILE 必须仍为同一个 RUNNING attempt。
-        await advance_obtain(runtime)
+        gate.release.set()
+        await advancing
         first_copy = owned.connection.execute(
             "SELECT round,recopies_used,committed_bytes"
             " FROM file_copies WHERE id=?", (copy_id,),
@@ -287,7 +84,7 @@ async def test_local_recopy_keeps_read_attempt_and_checksum_exhaustion_is_final(
         assert [(row[0], row[1]) for row in attempts] == [
             (1, int(enum_for("operation_attempts.status").RUNNING))]
 
-        await _advance_until_terminal(runtime, owned, action_id)
+        await _advance_until_terminal(world, owned, action_id)
         run, attempts = _read_attempt_state(owned, copy_id)
         assert runtime.devices[next(iter(runtime.devices))].driver.offsets == []
         if expected == "ready":
@@ -320,17 +117,16 @@ async def test_local_recopy_keeps_read_attempt_and_checksum_exhaustion_is_final(
             ).fetchone() == (2, 1, 4)
             assert digest_calls() == 2
         assert input_path.read_bytes() == _CONTENT
-    finally:
-        owned.connection.close()
 
 
 async def test_local_source_failure_after_recopy_falls_back_with_original_budget(
         tmp_path, monkeypatch):
-    owned, runtime, action_id, copy_id, input_path, directories = \
-        await _bound_local_delivery(tmp_path)
-    try:
+    async with bound_local_delivery(tmp_path, monkeypatch) as (world, action_id, copy_id, gate, advancing):
+        owned, runtime = world.owned, world.obtain
+        input_path, directories = world.input_path, world.directories
         target_digest_calls = await _inject_target_mismatch(monkeypatch, 1)
-        await advance_obtain(runtime)
+        gate.release.set()
+        await advancing
         assert target_digest_calls() == 1
         assert owned.connection.execute(
             "SELECT round,recopies_used,committed_bytes FROM file_copies WHERE id=?",
@@ -352,17 +148,17 @@ async def test_local_source_failure_after_recopy_falls_back_with_original_budget
 
         original_read_chunk = LocalSourceReader.read_chunk
         failing_reader = None
+        chunks_read = 0
 
         def fail_after_one_local_chunk(reader, limit):
-            nonlocal failing_reader
+            nonlocal failing_reader, chunks_read
             if failing_reader is None:
                 failing_reader = reader
-                reader._test_chunks_read = 0
-            if reader is failing_reader and reader._test_chunks_read >= 1:
+            if reader is failing_reader and chunks_read >= 1:
                 return ReadChunk(data=None, error="injected recopy source failure")
             result = original_read_chunk(reader, limit)
             if reader is failing_reader and result.data is not None:
-                reader._test_chunks_read += 1
+                chunks_read += 1
             return result
 
         monkeypatch.setattr(LocalSourceReader, "read_chunk", fail_after_one_local_chunk)
@@ -403,7 +199,7 @@ async def test_local_source_failure_after_recopy_falls_back_with_original_budget
 
         device_reader = runtime.devices[next(iter(runtime.devices))].driver
         assert device_reader.offsets == []
-        runtime.monotonic_ns = lambda: 25_000_000_000
+        world.clock['mono'] = 25_000_000_000
         for _ in range(5):
             await advance_obtain(runtime)
             status, = owned.connection.execute(
@@ -447,5 +243,3 @@ async def test_local_source_failure_after_recopy_falls_back_with_original_budget
             " WHERE r.copy_id=? AND a.id=?", (copy_id, read_identity),
         ).fetchone()[0] == 1
         assert delivery_id is not None
-    finally:
-        owned.connection.close()

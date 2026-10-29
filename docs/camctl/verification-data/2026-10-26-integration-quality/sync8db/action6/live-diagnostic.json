@@ -1,0 +1,430 @@
+{
+  "observed_time_ns": 1792957652066757541,
+  "tables": {
+    "actions": {
+      "count": 3,
+      "sample": [
+        {
+          "id": 1,
+          "plan_id": 1,
+          "input_index": 0,
+          "name": "capture",
+          "type": 3,
+          "device_id": "action6",
+          "scheduled_at": 1792957542000000,
+          "group_name": null,
+          "input_fields_json": "{\"params\":{\"type\":\"action6_timelapse\",\"interval_s\":2,\"duration_s\":300,\"outputs\":\"video_jpeg\",\"exposure\":{\"mode\":\"auto\"}},\"policy\":{\"max_delay_ms\":30000}}",
+          "effective_params_json": "{\"type\":\"action6_timelapse\",\"interval_s\":2,\"duration_s\":300,\"outputs\":\"video_jpeg\",\"exposure\":{\"mode\":\"auto\"}}",
+          "driver_id": "dji-action6",
+          "max_delay_ms": 30000,
+          "execution_spec_json": "{\"duration_based\":true,\"wait_after_send\":true,\"end_control\":1,\"stop_supported\":true,\"start_return_meaning\":1,\"completion_mode\":2,\"video_result_mode\":\"segmented\",\"ownership_mode\":2,\"output_scope\":{\"directories\":[\"/mnt/media_rw/emulated/DCIM\"]},\"product_rules\":[{\"kind\":\"video\",\"format_id\":\"mp4\",\"min_count\":1,\"exact_count\":null,\"require_pairing\":false,\"min_size_bytes\":1},{\"kind\":\"photo\",\"format_id\":\"jpeg\",\"min_count\":1,\"exact_count\":null,\"require_pairing\":false,\"min_size_bytes\":1}],\"result_policy\":\"action6_video_segments_v1\",\"startup_margin_ms\":0,\"target_duration_ms\":300000,\"result_wait_margin_ms\":30000,\"file_completion_wait_ms\":3000,\"cancel_completion_policy\":\"finite_device_end\"}",
+          "status": 2,
+          "execution_started": 1,
+          "cancel_requested": 0,
+          "error_code": null,
+          "error_details_json": null,
+          "first_window_observed_at": 1792957542000000,
+          "expiration_reason": null,
+          "source_resolution_state": null,
+          "resolved_source_plan_id": null,
+          "target_selection_state": null,
+          "created_event_id": 1,
+          "last_event_id": 58,
+          "change_count": 19
+        },
+        {
+          "id": 2,
+          "plan_id": 2,
+          "input_index": 0,
+          "name": "native-prefix-a",
+          "type": 4,
+          "device_id": null,
+          "scheduled_at": 1792957542000000,
+          "group_name": null,
+          "input_fields_json": "{\"params\":{\"source\":{\"action_instance_id\":\"1\"},\"purpose\":\"manual\",\"filter\":\"default\"}}",
+          "effective_params_json": null,
+          "driver_id": null,
+          "max_delay_ms": null,
+          "execution_spec_json": "{\"selection_mode\":1}",
+          "status": 2,
+          "execution_started": 1,
+          "cancel_requested": 0,
+          "error_code": null,
+          "error_details_json": null,
+          "first_window_observed_at": null,
+          "expiration_reason": null,
+          "source_resolution_state": 2,
+          "resolved_source_plan_id": 1,
+          "target_selection_state": null,
+          "created_event_id": 27,
+          "last_event_id": 32,
+          "change_count": 4
+        },
+        {
+          "id": 3,
+          "plan_id": 3,
+          "input_index": 0,
+          "name": "native-prefix-b",
+          "type": 4,
+          "device_id": null,
+          "scheduled_at": 1792957542000000,
+          "group_name": null,
+          "input_fields_json": "{\"params\":{\"source\":{\"action_instance_id\":\"1\"},\"purpose\":\"manual\",\"filter\":\"default\"}}",
+          "effective_params_json": null,
+          "driver_id": null,
+          "max_delay_ms": null,
+          "execution_spec_json": "{\"selection_mode\":1}",
+          "status": 2,
+          "execution_started": 1,
+          "cancel_requested": 0,
+          "error_code": null,
+          "error_details_json": null,
+          "first_window_observed_at": null,
+          "expiration_reason": null,
+          "source_resolution_state": 2,
+          "resolved_source_plan_id": 1,
+          "target_selection_state": null,
+          "created_event_id": 37,
+          "last_event_id": 42,
+          "change_count": 4
+        }
+      ]
+    },
+    "operation_runs": {
+      "count": 3,
+      "sample": [
+        {
+          "id": 1,
+          "action_id": 1,
+          "delivery_id": null,
+          "kind": 10,
+          "query_purpose": null,
+          "responsibility_key": "prepare/1/4214ec7da6e849f2bad250325b7aca14",
+          "activity_id": 1,
+          "copy_id": null,
+          "cleanup_item_id": null,
+          "obtain_item_id": null,
+          "session_key": "4214ec7da6e849f2bad250325b7aca14",
+          "status": 3,
+          "attempts_used": 1,
+          "max_attempts_used": 1,
+          "timeout_s_json": "10",
+          "retry_interval_s_json": null,
+          "retry_wait_required": 0,
+          "error_json": null
+        },
+        {
+          "id": 2,
+          "action_id": 1,
+          "delivery_id": null,
+          "kind": 1,
+          "query_purpose": null,
+          "responsibility_key": "start/1",
+          "activity_id": 1,
+          "copy_id": null,
+          "cleanup_item_id": null,
+          "obtain_item_id": null,
+          "session_key": null,
+          "status": 3,
+          "attempts_used": 1,
+          "max_attempts_used": 1,
+          "timeout_s_json": "30",
+          "retry_interval_s_json": null,
+          "retry_wait_required": 0,
+          "error_json": null
+        },
+        {
+          "id": 3,
+          "action_id": 1,
+          "delivery_id": null,
+          "kind": 7,
+          "query_purpose": null,
+          "responsibility_key": "results/1",
+          "activity_id": 1,
+          "copy_id": null,
+          "cleanup_item_id": null,
+          "obtain_item_id": null,
+          "session_key": null,
+          "status": 2,
+          "attempts_used": 1,
+          "max_attempts_used": 3,
+          "timeout_s_json": "10",
+          "retry_interval_s_json": "3",
+          "retry_wait_required": 0,
+          "error_json": null
+        }
+      ]
+    },
+    "operation_attempts": {
+      "count": 3,
+      "sample": [
+        {
+          "id": 1,
+          "run_id": 1,
+          "attempt_no": 1,
+          "copy_round": null,
+          "status": 2,
+          "intent_event_id": 7,
+          "result_event_id": 8,
+          "result_first_page_event_id": null,
+          "result_last_page_event_id": null,
+          "max_attempts_used": 1,
+          "timeout_s_json": "10",
+          "retry_interval_s_json": null,
+          "effect_state": 3,
+          "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"control_returned\",\"version\":1,\"data\":{}}},\"observations\":[{\"type\":\"capture_preparation_completed\",\"version\":1,\"data\":{\"activity_id\":\"1\"}}],\"call_info\":{\"local_exit\":{\"exit_code\":0}}}",
+          "error_json": null
+        },
+        {
+          "id": 2,
+          "run_id": 2,
+          "attempt_no": 1,
+          "copy_round": null,
+          "status": 2,
+          "intent_event_id": 15,
+          "result_event_id": 16,
+          "result_first_page_event_id": null,
+          "result_last_page_event_id": null,
+          "max_attempts_used": 1,
+          "timeout_s_json": "30",
+          "retry_interval_s_json": null,
+          "effect_state": 3,
+          "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"control_returned\",\"version\":1,\"data\":{}}},\"observations\":[{\"type\":\"timelapse_sent\",\"version\":1,\"data\":{\"activity_id\":\"1\",\"response_payload\":\"00\",\"confirmation_basis\":\"action6_timelapse_ack/v1\"}}],\"call_info\":{\"local_exit\":{\"exit_code\":0}}}",
+          "error_json": null
+        },
+        {
+          "id": 3,
+          "run_id": 3,
+          "attempt_no": 1,
+          "copy_round": null,
+          "status": 1,
+          "intent_event_id": 48,
+          "result_event_id": null,
+          "result_first_page_event_id": 57,
+          "result_last_page_event_id": 57,
+          "max_attempts_used": 3,
+          "timeout_s_json": "10",
+          "retry_interval_s_json": "3",
+          "effect_state": 1,
+          "result_json": null,
+          "error_json": null
+        }
+      ]
+    },
+    "outputs": {
+      "count": 0,
+      "sample": []
+    },
+    "deliveries": {
+      "count": 0,
+      "sample": []
+    },
+    "history_events": {
+      "count": 67
+    },
+    "segment_sets": {
+      "count": 0,
+      "sample": []
+    },
+    "segment_check_conclusions": {
+      "count": 0,
+      "sample": []
+    },
+    "segment_members": {
+      "count": 0,
+      "sample": []
+    },
+    "segment_inspections": {
+      "count": 0,
+      "sample": []
+    },
+    "segment_gaps": {
+      "count": 0,
+      "sample": []
+    },
+    "segment_scope_members": {
+      "count": 0,
+      "sample": []
+    }
+  },
+  "latest_events": [
+    {
+      "id": 67,
+      "transaction_id": 47,
+      "event_type": 17,
+      "event_version": 1,
+      "occurred_at": 1792957872425558,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{\"completion_request\":{\"locator\":null,\"original_name\":null,\"media_type\":null}},\"rows\":[{\"table\":\"device_files\",\"id\":3,\"before\":{\"exists\":true,\"values\":{\"completion_state\":1,\"completion_evidence_json\":null,\"size_bytes\":null}},\"after\":{\"exists\":true,\"values\":{\"completion_state\":3,\"completion_evidence_json\":{\"basis\":2,\"observation\":{\"identity\":\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120100_0999_D.LRF\",\"locator\":{\"path\":\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120100_0999_D.LRF\"},\"complete\":true,\"size_bytes\":79552,\"kind\":\"video\",\"format_id\":\"lrf\",\"original_name\":\"DJI_20261023120100_0999_D.LRF\",\"media_type\":null,\"paired_identity\":null},\"activity_id\":1,\"wait_completed_event_id\":47,\"result_page_event_id\":57,\"start_result_event_id\":16},\"size_bytes\":79552}}}]}"
+    },
+    {
+      "id": 66,
+      "transaction_id": 46,
+      "event_type": 17,
+      "event_version": 1,
+      "occurred_at": 1792957872425558,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":6,\"evidence\":{\"ownership_from_result_page_request\":{\"page\":{\"ticket\":{\"run_id\":3,\"attempt_id\":1,\"operation\":\"result\",\"target_id\":\"1\",\"responsibility_key\":\"results/1\"},\"page_no\":1,\"event_id\":57,\"next_cursor\":null},\"file_id\":3}},\"rows\":[{\"table\":\"device_files\",\"id\":3,\"before\":{\"exists\":true,\"values\":{\"source_action_id\":null,\"ownership_evidence_json\":null,\"role\":1}},\"after\":{\"exists\":true,\"values\":{\"source_action_id\":1,\"ownership_evidence_json\":{\"method\":4,\"result_page_event_id\":57},\"role\":3}}}]}"
+    },
+    {
+      "id": 65,
+      "transaction_id": 45,
+      "event_type": 17,
+      "event_version": 1,
+      "occurred_at": 1792957872425558,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":5,\"evidence\":{},\"rows\":[{\"table\":\"device_files\",\"id\":3,\"before\":{\"exists\":true,\"values\":{\"presence_state\":1}},\"after\":{\"exists\":true,\"values\":{\"presence_state\":2}}}]}"
+    },
+    {
+      "id": 64,
+      "transaction_id": 44,
+      "event_type": 17,
+      "event_version": 1,
+      "occurred_at": 1792957872425558,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{\"completion_request\":{\"locator\":null,\"original_name\":null,\"media_type\":null}},\"rows\":[{\"table\":\"device_files\",\"id\":2,\"before\":{\"exists\":true,\"values\":{\"completion_state\":1,\"completion_evidence_json\":null,\"size_bytes\":null}},\"after\":{\"exists\":true,\"values\":{\"completion_state\":3,\"completion_evidence_json\":{\"basis\":2,\"observation\":{\"identity\":\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120000_0998_D.MP4\",\"locator\":{\"path\":\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120000_0998_D.MP4\"},\"complete\":true,\"size_bytes\":79552,\"kind\":\"video\",\"format_id\":\"mp4\",\"original_name\":\"DJI_20261023120000_0998_D.MP4\",\"media_type\":null,\"paired_identity\":null},\"activity_id\":1,\"wait_completed_event_id\":47,\"result_page_event_id\":57,\"start_result_event_id\":16},\"size_bytes\":79552}}}]}"
+    },
+    {
+      "id": 63,
+      "transaction_id": 43,
+      "event_type": 17,
+      "event_version": 1,
+      "occurred_at": 1792957872425558,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":6,\"evidence\":{\"ownership_from_result_page_request\":{\"page\":{\"ticket\":{\"run_id\":3,\"attempt_id\":1,\"operation\":\"result\",\"target_id\":\"1\",\"responsibility_key\":\"results/1\"},\"page_no\":1,\"event_id\":57,\"next_cursor\":null},\"file_id\":2}},\"rows\":[{\"table\":\"device_files\",\"id\":2,\"before\":{\"exists\":true,\"values\":{\"source_action_id\":null,\"ownership_evidence_json\":null,\"role\":1}},\"after\":{\"exists\":true,\"values\":{\"source_action_id\":1,\"ownership_evidence_json\":{\"method\":4,\"result_page_event_id\":57},\"role\":2}}}]}"
+    },
+    {
+      "id": 62,
+      "transaction_id": 42,
+      "event_type": 17,
+      "event_version": 1,
+      "occurred_at": 1792957872425558,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":5,\"evidence\":{},\"rows\":[{\"table\":\"device_files\",\"id\":2,\"before\":{\"exists\":true,\"values\":{\"presence_state\":1}},\"after\":{\"exists\":true,\"values\":{\"presence_state\":2}}}]}"
+    },
+    {
+      "id": 61,
+      "transaction_id": 41,
+      "event_type": 17,
+      "event_version": 1,
+      "occurred_at": 1792957872425558,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":3,\"evidence\":{\"completion_request\":{\"locator\":null,\"original_name\":null,\"media_type\":null}},\"rows\":[{\"table\":\"device_files\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"completion_state\":1,\"completion_evidence_json\":null,\"size_bytes\":null}},\"after\":{\"exists\":true,\"values\":{\"completion_state\":3,\"completion_evidence_json\":{\"basis\":2,\"observation\":{\"identity\":\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120000_0998_D.LRF\",\"locator\":{\"path\":\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120000_0998_D.LRF\"},\"complete\":true,\"size_bytes\":79552,\"kind\":\"video\",\"format_id\":\"lrf\",\"original_name\":\"DJI_20261023120000_0998_D.LRF\",\"media_type\":null,\"paired_identity\":null},\"activity_id\":1,\"wait_completed_event_id\":47,\"result_page_event_id\":57,\"start_result_event_id\":16},\"size_bytes\":79552}}}]}"
+    },
+    {
+      "id": 60,
+      "transaction_id": 40,
+      "event_type": 17,
+      "event_version": 1,
+      "occurred_at": 1792957872425558,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":6,\"evidence\":{\"ownership_from_result_page_request\":{\"page\":{\"ticket\":{\"run_id\":3,\"attempt_id\":1,\"operation\":\"result\",\"target_id\":\"1\",\"responsibility_key\":\"results/1\"},\"page_no\":1,\"event_id\":57,\"next_cursor\":null},\"file_id\":1}},\"rows\":[{\"table\":\"device_files\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"source_action_id\":null,\"ownership_evidence_json\":null,\"role\":1}},\"after\":{\"exists\":true,\"values\":{\"source_action_id\":1,\"ownership_evidence_json\":{\"method\":4,\"result_page_event_id\":57},\"role\":3}}}]}"
+    },
+    {
+      "id": 59,
+      "transaction_id": 39,
+      "event_type": 17,
+      "event_version": 1,
+      "occurred_at": 1792957872425558,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":5,\"evidence\":{},\"rows\":[{\"table\":\"device_files\",\"id\":1,\"before\":{\"exists\":true,\"values\":{\"presence_state\":1}},\"after\":{\"exists\":true,\"values\":{\"presence_state\":2}}}]}"
+    },
+    {
+      "id": 58,
+      "transaction_id": 38,
+      "event_type": 35,
+      "event_version": 1,
+      "occurred_at": 1792957872425558,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":2,\"evidence\":{\"result_page_index\":{\"page_event_id\":57}},\"rows\":[{\"table\":\"result_page_files\",\"id\":1,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"created_event_id\":58,\"action_id\":1,\"run_id\":3,\"attempt_id\":3,\"page_event_id\":57,\"file_id\":1,\"identity\":\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120000_0998_D.LRF\",\"family_directory\":\"/mnt/media_rw/emulated/DCIM/DJI_001\",\"family_stem\":\"DJI_20261023120000_0998_D\",\"family_role\":2}}},{\"table\":\"result_page_files\",\"id\":2,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"created_event_id\":58,\"action_id\":1,\"run_id\":3,\"attempt_id\":3,\"page_event_id\":57,\"file_id\":2,\"identity\":\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120000_0998_D.MP4\",\"family_directory\":\"/mnt/media_rw/emulated/DCIM/DJI_001\",\"family_stem\":\"DJI_20261023120000_0998_D\",\"family_role\":1}}},{\"table\":\"result_page_files\",\"id\":3,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"created_event_id\":58,\"action_id\":1,\"run_id\":3,\"attempt_id\":3,\"page_event_id\":57,\"file_id\":3,\"identity\":\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120100_0999_D.LRF\",\"family_directory\":\"/mnt/media_rw/emulated/DCIM/DJI_001\",\"family_stem\":\"DJI_20261023120100_0999_D\",\"family_role\":2}}},{\"table\":\"result_page_files\",\"id\":4,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"created_event_id\":58,\"action_id\":1,\"run_id\":3,\"attempt_id\":3,\"page_event_id\":57,\"file_id\":4,\"identity\":\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120100_0999_D.MP4\",\"family_directory\":\"/mnt/media_rw/emulated/DCIM/DJI_001\",\"family_stem\":\"DJI_20261023120100_0999_D\",\"family_role\":1}}},{\"table\":\"result_page_files\",\"id\":5,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"created_event_id\":58,\"action_id\":1,\"run_id\":3,\"attempt_id\":3,\"page_event_id\":57,\"file_id\":5,\"identity\":\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120200_0001_D.LRF\",\"family_directory\":\"/mnt/media_rw/emulated/DCIM/DJI_002\",\"family_stem\":\"DJI_20261023120200_0001_D\",\"family_role\":2}}},{\"table\":\"result_page_files\",\"id\":6,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"created_event_id\":58,\"action_id\":1,\"run_id\":3,\"attempt_id\":3,\"page_event_id\":57,\"file_id\":6,\"identity\":\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120200_0001_D.MP4\",\"family_directory\":\"/mnt/media_rw/emulated/DCIM/DJI_002\",\"family_stem\":\"DJI_20261023120200_0001_D\",\"family_role\":1}}},{\"table\":\"result_page_files\",\"id\":7,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"created_event_id\":58,\"action_id\":1,\"run_id\":3,\"attempt_id\":3,\"page_event_id\":57,\"file_id\":7,\"identity\":\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120300_0002_D.LRF\",\"family_directory\":\"/mnt/media_rw/emulated/DCIM/DJI_002\",\"family_stem\":\"DJI_20261023120300_0002_D\",\"family_role\":2}}},{\"table\":\"result_page_files\",\"id\":8,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"created_event_id\":58,\"action_id\":1,\"run_id\":3,\"attempt_id\":3,\"page_event_id\":57,\"file_id\":8,\"identity\":\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120300_0002_D.MP4\",\"family_directory\":\"/mnt/media_rw/emulated/DCIM/DJI_002\",\"family_stem\":\"DJI_20261023120300_0002_D\",\"family_role\":1}}}]}"
+    },
+    {
+      "id": 57,
+      "transaction_id": 38,
+      "event_type": 35,
+      "event_version": 1,
+      "occurred_at": 1792957872425558,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{\"attempt_id\":3,\"result_page\":{\"run_id\":3,\"attempt_no\":1,\"activity_id\":1,\"page_no\":1,\"cursor\":null,\"outcome\":{\"status\":2,\"effect_state\":3,\"error\":null,\"result\":{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"result_returned\",\"version\":2,\"data\":{\"file_completion\":null,\"file_completion_source_page_event_id\":null,\"calls\":[{\"kind\":\"directory\",\"transport_error\":null,\"output_failure\":null,\"local_exit_code\":0,\"local_signal\":null,\"stderr_hex\":\"\"},{\"kind\":\"metadata\",\"transport_error\":null,\"output_failure\":null,\"local_exit_code\":0,\"local_signal\":null,\"stderr_hex\":\"\"}],\"call_count\":2,\"optional_preview_observations\":[]}}},\"observations\":[{\"type\":\"result_files_listed\",\"version\":2,\"data\":{\"activity_id\":\"1\",\"entries\":[{\"identity\":\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120000_0998_D.LRF\",\"locator\":{\"path\":\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120000_0998_D.LRF\"},\"complete\":true,\"size_bytes\":79552,\"kind\":\"video\",\"format_id\":\"lrf\",\"original_name\":\"DJI_20261023120000_0998_D.LRF\",\"media_type\":null,\"paired_identity\":null},{\"identity\":\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120000_0998_D.MP4\",\"locator\":{\"path\":\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120000_0998_D.MP4\"},\"complete\":true,\"size_bytes\":79552,\"kind\":\"video\",\"format_id\":\"mp4\",\"original_name\":\"DJI_20261023120000_0998_D.MP4\",\"media_type\":null,\"paired_identity\":null},{\"identity\":\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120100_0999_D.LRF\",\"locator\":{\"path\":\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120100_0999_D.LRF\"},\"complete\":true,\"size_bytes\":79552,\"kind\":\"video\",\"format_id\":\"lrf\",\"original_name\":\"DJI_20261023120100_0999_D.LRF\",\"media_type\":null,\"paired_identity\":null},{\"identity\":\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120100_0999_D.MP4\",\"locator\":{\"path\":\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120100_0999_D.MP4\"},\"complete\":true,\"size_bytes\":79552,\"kind\":\"video\",\"format_id\":\"mp4\",\"original_name\":\"DJI_20261023120100_0999_D.MP4\",\"media_type\":null,\"paired_identity\":null},{\"identity\":\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120200_0001_D.LRF\",\"locator\":{\"path\":\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120200_0001_D.LRF\"},\"complete\":true,\"size_bytes\":61038,\"kind\":\"video\",\"format_id\":\"lrf\",\"original_name\":\"DJI_20261023120200_0001_D.LRF\",\"media_type\":null,\"paired_identity\":null},{\"identity\":\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120200_0001_D.MP4\",\"locator\":{\"path\":\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120200_0001_D.MP4\"},\"complete\":true,\"size_bytes\":61038,\"kind\":\"video\",\"format_id\":\"mp4\",\"original_name\":\"DJI_20261023120200_0001_D.MP4\",\"media_type\":null,\"paired_identity\":null},{\"identity\":\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120300_0002_D.LRF\",\"locator\":{\"path\":\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120300_0002_D.LRF\"},\"complete\":true,\"size_bytes\":29189,\"kind\":\"video\",\"format_id\":\"lrf\",\"original_name\":\"DJI_20261023120300_0002_D.LRF\",\"media_type\":null,\"paired_identity\":null},{\"identity\":\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120300_0002_D.MP4\",\"locator\":{\"path\":\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120300_0002_D.MP4\"},\"complete\":true,\"size_bytes\":29189,\"kind\":\"video\",\"format_id\":\"mp4\",\"original_name\":\"DJI_20261023120300_0002_D.MP4\",\"media_type\":null,\"paired_identity\":null}],\"cursor\":null,\"next_cursor\":null,\"set_finalized\":true,\"completion_evidence\":null}}],\"call_info\":{\"local_exit\":{\"exit_code\":0}}}},\"baseline_position\":null,\"last_identity\":\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120300_0002_D.MP4\",\"file_ids\":[[\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120000_0998_D.LRF\",1],[\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120000_0998_D.MP4\",2],[\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120100_0999_D.LRF\",3],[\"/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120100_0999_D.MP4\",4],[\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120200_0001_D.LRF\",5],[\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120200_0001_D.MP4\",6],[\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120300_0002_D.LRF\",7],[\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120300_0002_D.MP4\",8]]}},\"rows\":[{\"table\":\"operation_attempts\",\"id\":3,\"before\":{\"exists\":true,\"values\":{\"result_first_page_event_id\":null,\"result_last_page_event_id\":null}},\"after\":{\"exists\":true,\"values\":{\"result_first_page_event_id\":57,\"result_last_page_event_id\":57}}}]}"
+    },
+    {
+      "id": 56,
+      "transaction_id": 38,
+      "event_type": 17,
+      "event_version": 1,
+      "occurred_at": 1792957872425558,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"device_files\",\"id\":8,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"observer_action_id\":1,\"source_action_id\":null,\"identity_key\":\"[\\\"action6\\\",\\\"dji-action6\\\",\\\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120300_0002_D.MP4\\\"]\",\"locator_json\":{\"path\":\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120300_0002_D.MP4\"},\"ownership_evidence_json\":null,\"original_name\":\"DJI_20261023120300_0002_D.MP4\",\"media_type\":null,\"role\":1,\"original_device_file_id\":null,\"pairing_evidence_json\":null,\"presence_state\":1,\"completion_state\":1,\"completion_evidence_json\":null,\"size_bytes\":null,\"checksum_support\":1,\"sha256\":null,\"last_error_json\":null}}}]}"
+    },
+    {
+      "id": 55,
+      "transaction_id": 38,
+      "event_type": 17,
+      "event_version": 1,
+      "occurred_at": 1792957872425558,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"device_files\",\"id\":7,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"observer_action_id\":1,\"source_action_id\":null,\"identity_key\":\"[\\\"action6\\\",\\\"dji-action6\\\",\\\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120300_0002_D.LRF\\\"]\",\"locator_json\":{\"path\":\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120300_0002_D.LRF\"},\"ownership_evidence_json\":null,\"original_name\":\"DJI_20261023120300_0002_D.LRF\",\"media_type\":null,\"role\":1,\"original_device_file_id\":null,\"pairing_evidence_json\":null,\"presence_state\":1,\"completion_state\":1,\"completion_evidence_json\":null,\"size_bytes\":null,\"checksum_support\":1,\"sha256\":null,\"last_error_json\":null}}}]}"
+    },
+    {
+      "id": 54,
+      "transaction_id": 38,
+      "event_type": 17,
+      "event_version": 1,
+      "occurred_at": 1792957872425558,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"device_files\",\"id\":6,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"observer_action_id\":1,\"source_action_id\":null,\"identity_key\":\"[\\\"action6\\\",\\\"dji-action6\\\",\\\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120200_0001_D.MP4\\\"]\",\"locator_json\":{\"path\":\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120200_0001_D.MP4\"},\"ownership_evidence_json\":null,\"original_name\":\"DJI_20261023120200_0001_D.MP4\",\"media_type\":null,\"role\":1,\"original_device_file_id\":null,\"pairing_evidence_json\":null,\"presence_state\":1,\"completion_state\":1,\"completion_evidence_json\":null,\"size_bytes\":null,\"checksum_support\":1,\"sha256\":null,\"last_error_json\":null}}}]}"
+    },
+    {
+      "id": 53,
+      "transaction_id": 38,
+      "event_type": 17,
+      "event_version": 1,
+      "occurred_at": 1792957872425558,
+      "clock_status": 2,
+      "change_seq": null,
+      "body_json": "{\"reason\":1,\"evidence\":{},\"rows\":[{\"table\":\"device_files\",\"id\":5,\"before\":{\"exists\":false,\"values\":{}},\"after\":{\"exists\":true,\"values\":{\"observer_action_id\":1,\"source_action_id\":null,\"identity_key\":\"[\\\"action6\\\",\\\"dji-action6\\\",\\\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120200_0001_D.LRF\\\"]\",\"locator_json\":{\"path\":\"/mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120200_0001_D.LRF\"},\"ownership_evidence_json\":null,\"original_name\":\"DJI_20261023120200_0001_D.LRF\",\"media_type\":null,\"role\":1,\"original_device_file_id\":null,\"pairing_evidence_json\":null,\"presence_state\":1,\"completion_state\":1,\"completion_evidence_json\":null,\"size_bytes\":null,\"checksum_support\":1,\"sha256\":null,\"last_error_json\":null}}}]}"
+    }
+  ],
+  "adb-calls.jsonl": {
+    "count": 12,
+    "kind_counts": {
+      "setting": 8,
+      "file": 3,
+      "start": 1
+    },
+    "last": {
+      "script": "tmp=$(mktemp) || exit $?\ntrap 'rm -f -- \"$tmp\"' 0\nprintf '%s\\000' CAMCTL-METADATA/2 || exit $?\nfor path in /mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120000_0998_D.LRF /mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120000_0998_D.MP4 /mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120100_0999_D.LRF /mnt/media_rw/emulated/DCIM/DJI_001/DJI_20261023120100_0999_D.MP4 /mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120200_0001_D.LRF /mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120200_0001_D.MP4 /mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120300_0002_D.LRF /mnt/media_rw/emulated/DCIM/DJI_002/DJI_20261023120300_0002_D.MP4; do\n    printf '%s\\000' \"$path\" || exit $?\n    { test -f \"$path\" && LC_ALL=C stat -c %s -- \"$path\"; status=$?; } 2> \"$tmp\" || exit $?\n    printf '\\000' || exit $?\n    cat \"$tmp\" || exit $?\n    printf '\\000' || exit $?\n    printf '%s\\000' \"$status\" || exit $?\ndone\nprintf 'END\\000' || exit $?",
+      "started_ns": 105236789550005,
+      "serial": "action6-test-serial",
+      "pid": 1643964,
+      "cli_pid": 1643468,
+      "started_clock_ns": 105553918953621,
+      "started_clock_utc_us": 1792957872314352,
+      "started_epoch": 2,
+      "kind": "file",
+      "file_kind": "metadata",
+      "returned_ns": 105236886717996,
+      "returncode": 0,
+      "returned_clock_ns": 105554014574652,
+      "returned_clock_utc_us": 1792957872409973,
+      "returned_epoch": 2
+    }
+  },
+  "command_counts": {
+    "_Command/completed": 745
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "session_id": "1a2894a8-4687-495e-a31c-cfd4391e4e3f",
+  "nodeid": "tmp/camctl-quality-osmo-20261026/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[normal-indexes0-2-succeeded]",
+  "command_prefix": [
+    "node",
+    "--import",
+    "tsx",
+    "/tmp/camctl-quality-osmo-20261026/tests/integration/client_driver.ts"
+  ],
+  "phase_timeout_seconds": 120,
+  "startup": {
+    "started_monotonic_ns": 101132498382322,
+    "finished_monotonic_ns": 101133615700243,
+    "elapsed_seconds": 1.117317921,
+    "outcome": "passed"
+  },
+  "commands": [
+    {
+      "id": 1,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-osmo-runtime/fixed-after-normal-pytest/test_installed_segment_source_0/world/client-store",
+        "/tmp/camctl-quality-osmo-runtime/fixed-after-normal-pytest/test_installed_segment_source_0/world/plan-body.json",
+        "/tmp/camctl-quality-osmo-runtime/fixed-after-normal-pytest/test_installed_segment_source_0/world/client-plan-1.json"
+      ],
+      "receipt_path": "/tmp/camctl-quality-osmo-runtime/fixed-after-normal-pytest/test_installed_segment_source_0/world/client-receipts/001-client-export.json",
+      "started_monotonic_ns": 101133617141955,
+      "finished_monotonic_ns": 101133895111999,
+      "elapsed_seconds": 0.277970044,
+      "outcome": "passed"
+    }
+  ],
+  "close": {
+    "started_monotonic_ns": 101225898719534,
+    "finished_monotonic_ns": 101225941232710,
+    "elapsed_seconds": 0.042513176,
+    "outcome": "passed"
+  },
+  "node_pid": 1553717,
+  "owned_processes": [
+    {
+      "pid": 1553717,
+      "ppid": 1552926,
+      "pgid": 1553717,
+      "starttime": "10113249",
+      "state": "S"
+    }
+  ]
+}

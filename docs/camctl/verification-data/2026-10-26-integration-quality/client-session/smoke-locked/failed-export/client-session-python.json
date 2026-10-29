@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "session_id": "dc88f680-3d10-4826-8a13-dfca36d89403",
+  "nodeid": "",
+  "command_prefix": [
+    "node",
+    "--import",
+    "tsx",
+    "/tmp/camctl-quality-client-session-20261026/tests/integration/client_driver.ts"
+  ],
+  "phase_timeout_seconds": 120,
+  "startup": {
+    "started_monotonic_ns": 100682078494200,
+    "finished_monotonic_ns": 100682926879061,
+    "elapsed_seconds": 0.848384861,
+    "outcome": "passed"
+  },
+  "commands": [
+    {
+      "id": 1,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/wrong-store",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/body.json",
+        "/tmp/camctl-quality-evidence/client-session/smoke-locked/invalid-plan.json"
+      ],
+      "receipt_path": "/tmp/camctl-quality-evidence/client-session/smoke-locked/failed-export.json",
+      "started_monotonic_ns": 100682927342105,
+      "finished_monotonic_ns": 100683002917896,
+      "elapsed_seconds": 0.075575791,
+      "outcome": "failed"
+    }
+  ],
+  "close": null,
+  "node_pid": 1542398,
+  "failure": "SessionError: 客户端命令失败：{\"message\": \"客户端命令store与会话store不一致\", \"stack\": \"Error: 客户端命令store与会话store不一致\\n    at dispatchClientCommand (/tmp/camctl-quality-client-session-20261026/tests/integration/client_driver.ts:1351:11)\\n    at worldClientSession (/tmp/camctl-quality-client-session-20261026/tests/integration/client_driver.ts:1254:35)\\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\\n    at async main (/tmp/camctl-quality-client-session-20261026/tests/integration/client_driver.ts:1360:5)\"}",
+  "cleanup": {
+    "survivors": [],
+    "notes": [],
+    "owned_processes": [
+      {
+        "pid": 1542398,
+        "ppid": 1542113,
+        "pgid": 1542398,
+        "starttime": "10068207",
+        "state": "R"
+      }
+    ]
+  }
+}

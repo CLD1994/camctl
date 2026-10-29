@@ -1,0 +1,42 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.17, pytest-9.1.1, pluggy-1.6.0 -- /tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python
+cachedir: .pytest_cache
+rootdir: /tmp/camctl-fix44-components-20261025/apps/camctl
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, mock-3.16.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 1 item
+
+apps/camctl/tests/integration/bootstrap/test_result_error_flow.py::test_state_result_stops_following_flow_without_report_failure_write FAILED [100%]
+
+=================================== FAILURES ===================================
+_____ test_state_result_stops_following_flow_without_report_failure_write ______
+apps/camctl/tests/integration/bootstrap/test_result_error_flow.py:147: in test_state_result_stops_following_flow_without_report_failure_write
+    assert supplied == [report.boundary]
+E   assert [] == [HistoryBoundary(txn_id=17, last_event_id=27)]
+E     
+E     Right contains one more item: HistoryBoundary(txn_id=17, last_event_id=27)
+E     
+E     Full diff:
+E     + []
+E     - [
+E     -     HistoryBoundary(
+E     -         txn_id=17,
+E     -         last_event_id=27,
+E     -     ),
+E     - ]
+- generated xml file: /tmp/camctl-fix44-components-evidence-20261025/worker-seam-bootstrap-red/junit.xml -
+=========================== short test summary info ============================
+FAILED apps/camctl/tests/integration/bootstrap/test_result_error_flow.py::test_state_result_stops_following_flow_without_report_failure_write - assert [] == [HistoryBoundary(txn_id=17, last_event_id=27)]
+  
+  Right contains one more item: HistoryBoundary(txn_id=17, last_event_id=27)
+  
+  Full diff:
+  + []
+  - [
+  -     HistoryBoundary(
+  -         txn_id=17,
+  -         last_event_id=27,
+  -     ),
+  - ]
+============================== 1 failed in 2.92s ===============================

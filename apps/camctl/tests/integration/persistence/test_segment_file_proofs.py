@@ -7,7 +7,7 @@ import sqlite3
 import pytest
 
 from camctl.capture.files import FileCompletionSave, OwnershipFromResultPageSave
-from camctl.capture.handlers import _begin_check_round
+from .result_page_fixtures import begin_result_check
 from camctl.capture.result_pages import ResultPageSave
 from camctl.capture.segment_models import FileCompletionState, PreviewPairingState
 from camctl.contracts.history_values import HistoryBoundary
@@ -16,7 +16,8 @@ from camctl.operations.models import EvidenceValue, Settlement, SettlementBasis
 from camctl.operations.validation import validate_outcome
 from camctl.history.validators import EventContext
 from camctl.persistence.repositories import result_pages
-from camctl.persistence.repositories.capture import _FileCompleteCommand
+from camctl.persistence.repositories import capture as capture_storage
+from .transaction_fixtures import plan_operation
 from camctl.persistence.transaction import BoundedCommandPlan, commit_operation
 
 from .test_segment_storage import SegmentedCatalog
@@ -49,7 +50,7 @@ async def _proof_world(tmp_path, size=10, *, entries=None, next_cursor=None):
     owned, runtime, source, _ = await consumer_world(
         tmp_path, "record", catalog=WaitSegmentedCatalog())
     try:
-        ticket = _begin_check_round(runtime, source).ticket
+        ticket = begin_result_check(owned,runtime, source).ticket
         context = _stop_context(owned, source)
         actual = replace(_actual(ticket, entries=(
                                   [_entry("raw.LRF", size=size)] if entries is None else entries),
@@ -87,7 +88,7 @@ async def test_unpaired_preview_completion_requires_saved_page_and_original_wait
         if bounded:
             class BoundedCompletion:
                 def plan(self, scope):
-                    finite = _FileCompleteCommand(command, key).plan(scope)
+                    finite = plan_operation(scope,capture_storage,lambda: runtime.capture.save_file_completion(command,key,owned))
                     return BoundedCommandPlan(
                         iter(finite.events),
                         lambda event, transaction: EventContext(
@@ -144,9 +145,22 @@ async def test_strict_file_input_does_not_consume_legacy_result_search(tmp_path,
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("damage", ["missing_page", "size", "observation", "future_page"])
-async def test_declared_completion_proof_damage_is_an_error(tmp_path, damage):
+async def test_declared_completion_proof_damage_is_rejected_at_its_owner(tmp_path, damage):
     owned, runtime, _, saved, file_id, context = await _proof_world(tmp_path)
     try:
+        if damage == "observation":
+            from camctl.persistence.models import DbOutcomeKind
+            before = _boundary(owned)
+            rejected = runtime.capture.save_file_completion(FileCompletionSave(
+                file_id, 3, runtime.wall_us(), basis=3, observation={"different": True},
+                size_bytes=10, activity_id=int(context["activity_id"]),
+                result_page_event_id=saved.ref.event_id,
+                stop_result_event_id=context["stop_result_event_id"]), new_operation_key(), owned)
+            assert rejected.kind is DbOutcomeKind.ROLLED_BACK
+            assert isinstance(rejected.error, ConsistencyError)
+            assert _boundary(owned) == before
+            assert not owned.connection.in_transaction
+            return
         _ok(runtime.capture.save_file_completion(FileCompletionSave(
             file_id, 3, runtime.wall_us(), basis=3,
             observation=saved.page.entries[0].evidence, size_bytes=10,
@@ -160,11 +174,8 @@ async def test_declared_completion_proof_damage_is_an_error(tmp_path, damage):
             raw = json.loads(owned.connection.execute(
                 "SELECT completion_evidence_json FROM device_files WHERE id=?", (file_id,)
             ).fetchone()[0])
-            if damage == "observation":
-                raw["observation"] = {"different": True}
-            else:
-                raw["result_page_event_id"] = (
-                    boundary.last_event_id + 1 if damage == "future_page" else 1)
+            raw["result_page_event_id"] = (
+                boundary.last_event_id + 1 if damage == "future_page" else 1)
             owned.connection.execute(
                 "UPDATE device_files SET completion_evidence_json=? WHERE id=?",
                 (json.dumps(raw), file_id))
@@ -201,8 +212,8 @@ async def test_unpaired_preview_can_use_its_original_natural_wait(tmp_path):
     owned, runtime, source, _ = await consumer_world(
         tmp_path, "timelapse", catalog=WaitSegmentedCatalog())
     try:
-        wait_id = complete_natural_wait(runtime, source)
-        ticket = _begin_check_round(runtime, source).ticket
+        wait_id = await complete_natural_wait(runtime, source)
+        ticket = begin_result_check(owned,runtime, source).ticket
         actual = _actual(ticket, entries=[_entry("natural.LRF")], finalized=True)
         page = _ok(runtime.capture.save_result_page(ResultPageSave(
             ticket, 1, None, validate_outcome(ticket, actual, _REGISTRY),

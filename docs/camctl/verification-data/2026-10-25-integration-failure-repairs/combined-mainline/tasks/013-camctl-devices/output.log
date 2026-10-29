@@ -1,0 +1,10 @@
+..                                                                       [100%]
+============================== slowest durations ===============================
+0.40s call     tests/integration/devices/test_adb_camera_registration.py::test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-action6]
+0.05s setup    tests/integration/devices/test_adb_camera_registration.py::test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-action6]
+0.04s call     tests/integration/devices/test_adb_camera_registration.py::test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-osmo360-ii]
+0.03s setup    tests/integration/devices/test_adb_camera_registration.py::test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-osmo360-ii]
+0.01s teardown tests/integration/devices/test_adb_camera_registration.py::test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-osmo360-ii]
+
+(1 durations < 0.005s hidden.  Use -vv to show these durations.)
+2 passed in 1.45s

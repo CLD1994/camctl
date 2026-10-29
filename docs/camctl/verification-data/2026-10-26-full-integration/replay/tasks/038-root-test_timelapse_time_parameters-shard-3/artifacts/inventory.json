@@ -1,0 +1,3 @@
+[
+  "tests/integration/test_timelapse_time_parameters.py::test_generated_views_are_current_and_independently_deliverable"
+]

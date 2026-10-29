@@ -3,7 +3,6 @@
 import json
 from dataclasses import replace
 from decimal import Decimal
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -14,22 +13,25 @@ from camctl.devices.drivers.adb_cameras.commands import CameraModel
 from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver
 from camctl.devices.evidence import EvidenceContract
 from camctl.devices.read_session import SourceFile
-from camctl.host_files.models import BoundDirectories, FilePurpose
 from camctl.logging_runtime.diagnostics import diagnostic_scope, error_diagnostics_context, flush_diagnostics
-from camctl.operations.attempts import AttemptFinish, RunFinish, RunOutcome
-from camctl.operations.models import AttemptStatus, AttemptTicket, CallOutcome, EffectState, ErrorValue, EvidenceValue, Settlement, SettlementBasis
 from camctl.operations.process import LocalExit, RawToolOutcome, SignalFailure, SignalStage, ToolStartError
-from camctl.operations.validation import validate_outcome
 from camctl.outputs import copy
-from camctl.outputs.obtain_flow import _LOCAL_READ_EVIDENCE
-from camctl.outputs.read_attempts import hold_read_result
-from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.repositories.outputs import OutputsRepository
+from camctl.outputs.obtain_flow import advance_obtain
+from camctl.contracts.values import ConsistencyError
+from camctl.contracts.enums import enum_for
+from ..support.capture import capture_database
+from ..support.outputs import obtain_factory, output_drivers
+from .test_source_digest_failure_settlement import _ReadDriver, _CONTENT
+from .test_read_associations import read_targets
+from .test_qualification import _NOW
 
 from unit.devices.test_adb_camera_driver import EVIDENCE, Transport, _driver
 from .test_read_diagnostics import Channel
 
 
-def digest_reader(raw):
+def _digest_driver(raw):
     class DigestTransport(Transport):
         async def run(self, spec, stop):
             self.calls.append(spec)
@@ -43,6 +45,11 @@ def digest_reader(raw):
     driver = AdbCameraDriver(replace(original.contract, evidence=evidence,
         digest_timeout_s=lambda size: Decimal("240")), original.devices,
         transport, terminate_grace_s=Decimal("1"), monotonic_ns=lambda: 0)
+    return driver, evidence, transport
+
+
+def digest_reader(raw):
+    driver, evidence, _ = _digest_driver(raw)
     binding = DeviceBinding("cam-1", CameraModel.ACTION6)
     source = SourceFile('["cam-1","dji-action6","/DCIM/source.mp4"]',
         {"path": "/DCIM/source.mp4"}, 100)
@@ -82,47 +89,52 @@ async def test_digest_adapter_retains_original_start_exception():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("save_failed", [False, True])
-async def test_verification_failure_logs_original_digest_facts_once_before_save(monkeypatch, save_failed):
+async def test_verification_failure_logs_original_digest_facts_once_before_save(read_targets, tmp_path, save_failed, monkeypatch):
+    owned = read_targets
     raw = raw_failure()
+    digest_driver, evidence, transport = _digest_driver(raw)
+    evidence = evidence.with_contract(EvidenceContract("read_returned", 1, "read", frozenset()))
+    read_driver = _ReadDriver()
+    driver = SimpleNamespace(open_read=read_driver.open_read, digest=digest_driver.digest)
+    owned.connection.execute("UPDATE actions SET status=3 WHERE id IN (11,12,32)")
+    owned.connection.execute("UPDATE actions SET driver_id=? WHERE id=11", (str(CameraModel.ACTION6),))
+    owned.connection.execute("UPDATE device_files SET identity_key=?,locator_json=?,size_bytes=?,checksum_support=2,sha256=NULL WHERE id=501",
+        ('["cam-1","dji-action6","/DCIM/source.mp4"]', '{"path":"/DCIM/source.mp4"}', len(_CONTENT)))
+    owned.connection.commit()
+    staging = tmp_path / "staging"
+    for name in ("deliveries", "recording-inputs", "derived"):
+        (staging / name).mkdir(parents=True)
+    factory = obtain_factory(devices={"cam-1": {"driver": str(CameraModel.ACTION6), "copy": {
+        "max_read_attempts":3, "retry_interval_s":Decimal(0)}}},
+        drivers=output_drivers(driver, evidence, driver_id=str(CameraModel.ACTION6), read=True, digest=True),
+        staging=staging, ready=tmp_path / "ready", processing=tmp_path / "processing", segment_size=len(_CONTENT),
+        occurred_at=lambda: _NOW + 23_000_000, monotonic_ns=lambda: 0)
+    runtime = factory(await capture_database(owned))
     saved = []
-    class Repository:
-        def save_verification(self, request, key, owned):
-            saved.append(request)
-            return DbOutcome(DbOutcomeKind.COMPLETED,
-                copy.VerificationResult(copy.VerificationDisposition.SAVED, request.state))
-    async def write(callback, **kwargs):
+    save_verification = OutputsRepository.save_verification
+    def verification(self, request, key, worker):
+        saved.append((request, key))
         if save_failed:
             raise OSError("verification save failed")
-        return callback(None)
-    async def inline(function, *args):
-        assert function is copy.hash_target
-        return SimpleNamespace(error=None, digest="b" * 64)
-    monkeypatch.setattr(copy.asyncio, "to_thread", inline)
-    context = copy.CompletionContext(Repository(), SimpleNamespace(write=write),
-        BoundDirectories(staging=Path("/staging")), 123, digest=digest_reader(raw))
-    facts = SimpleNamespace(target=SimpleNamespace(file_id=3, purpose=FilePurpose.DELIVERY_COPY,
-        relative_path="deliveries/3.part"), source_sha256=None, source_support=copy.SourceChecksumSupport.SUPPORTED,
-        source_size=100, committed_bytes=100, recopies_used=0)
+        return save_verification(self, request, key, worker)
+    monkeypatch.setattr(OutputsRepository, "save_verification", verification)
     channel = Channel()
     with error_diagnostics_context(channel, lambda _: None):
-        try:
-            async with diagnostic_scope():
-                with pytest.raises(copy.CopyCompletionError) as caught:
-                    await copy._verify_and_finish(2, context, facts)
-                assert caught.value.stage == "verification_failed"
-                ticket = AttemptTicket(1, "read", "2", "read/2", 5)
-                outcome = CallOutcome(status=AttemptStatus.SUCCEEDED, effect=EffectState.UNKNOWN,
-                    settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("read_returned", 1, {})))
-                hold_read_result(SimpleNamespace(pending_read_results={}, pending_read_ends={}),
-                    AttemptFinish(ticket, validate_outcome(ticket, outcome, _LOCAL_READ_EVIDENCE), 123,
-                        run_finish=RunFinish(RunOutcome.FAILED, ErrorValue("source_file_unconfirmed", "source_read"))),
-                    diagnostic_error=caught.value, diagnostic_stage="verification_failed")
-                assert not channel.records
-        except OSError as error:
-            assert save_failed and str(error) == "verification save failed"
+        async with diagnostic_scope():
+            if save_failed:
+                with pytest.raises(ConsistencyError, match="verification save failed"):
+                    await advance_obtain(runtime)
+            else:
+                await advance_obtain(runtime)
+            assert not channel.records
         await flush_diagnostics()
+        await flush_diagnostics()
+    assert len(saved) == len(transport.calls) == 1
+    assert len(read_driver.offsets) == 1
+    request, key = saved[0]
+    assert request.state == int(enum_for("file_copies.verification_state").FAILED)
     if not save_failed:
-        assert saved[0].state == int(copy._VERIFICATION.FAILED)
+        assert owned.connection.execute("SELECT verification_state FROM file_copies").fetchone() == (int(enum_for("file_copies.verification_state").FAILED),)
     assert len(channel.records) == 1
     record = channel.records[0]
     tool = record["details"]["raw_outcome"]
@@ -130,4 +142,4 @@ async def test_verification_failure_logs_original_digest_facts_once_before_save(
     assert tool["used_grace_s"] == "1.25"
     assert tool["signal_failures"] == [{"stage": "kill", "message": "kill permission denied"}]
     assert tool["stderr"] == {"hex": raw.stderr.hex(), "text": raw.stderr.decode("utf-8", "backslashreplace")}
-    assert b"private-media-stdout".decode() not in json.dumps(record)
+    assert "private-media-stdout" not in json.dumps(record)

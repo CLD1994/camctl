@@ -1,0 +1,71 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_______________ test_start_call_interruption_settles_unconfirmed _______________
+
+tmp_path = PosixPath('/tmp/camctl-itopt-final-20261025/tasks/049-root-test_camctl_session_recovery-shard-2/tmp/pytest/test_start_call_interruption_s0')
+
+    def test_start_call_interruption_settles_unconfirmed(tmp_path: Path) -> None:
+        """启动调用在途时进程被终止：恢复会话不重复启动、不补造发送时
+        间，按无法确认失败收场；同设备后续动作不被遗留活动阻塞，会话
+        正常退出。"""
+        deployment = Deployment(tmp_path)
+        initialized = deployment.camctl(
+            "init", "--config", str(deployment.config_path))
+        assert initialized.exit_code == 0, initialized.stderr
+    
+        # 控制端口被门阻塞：第一个会话的启动调用发出后停在等门，被进
+        # 程级终止留下"可能派发但没有可靠发送时间"的事实。
+        spec = stub_driver_spec(
+            {"2": [photo_file("shot-late")]},
+            timelapse_duration_s=5.0,
+            gates={"control": "control.gate"},
+            device_files={"shot-late": "photo-payload-late"})
+        deployment.install_client_capabilities(spec)
+    
+        plan_path, _ = deployment.export_plan_with_client(
+            timelapse_plan("0", future_schedule(1)))
+        submitted = deployment.camctl(
+            "submit", str(plan_path), "--config", str(deployment.config_path),
+            driver=spec)
+        assert submitted.exit_code == 0, submitted.stderr
+    
+        first = deployment.start_camctl(
+            "run", "--config", str(deployment.config_path), driver=spec)
+        state_db = deployment.state_db
+>       _await_row(
+            state_db,
+            "SELECT 1 FROM operation_attempts a"
+            " JOIN operation_runs r ON a.run_id = r.id"
+            " JOIN actions t ON t.id = r.action_id"
+            " WHERE t.name = 'timelapse' AND a.status = 1")
+
+tests/integration/test_camctl_session_recovery.py:220: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+state_db = PosixPath('/tmp/camctl-itopt-final-20261025/tasks/049-root-test_camctl_session_recovery-shard-2/tmp/pytest/test_start_call_interruption_s0/deployment/state.db')
+sql = "SELECT 1 FROM operation_attempts a JOIN operation_runs r ON a.run_id = r.id JOIN actions t ON t.id = r.action_id WHERE t.name = 'timelapse' AND a.status = 1"
+params = (), timeout_s = 30.0
+
+    def _await_row(state_db: Path, sql: str, params=(), *,
+                   timeout_s: float = 30.0) -> list[tuple]:
+        """轮询查询直到出现行；同步点，不使用随机 sleep。"""
+        deadline = time.monotonic() + timeout_s
+        while True:
+            rows = _query(state_db, sql, params)
+            if rows:
+                return rows
+>           assert time.monotonic() < deadline, f"等待超时: {sql}"
+E           AssertionError: 等待超时: SELECT 1 FROM operation_attempts a JOIN operation_runs r ON a.run_id = r.id JOIN actions t ON t.id = r.action_id WHERE t.name = 'timelapse' AND a.status = 1
+E           assert 38183.992802926 < 38183.991410687
+E            +  where 38183.992802926 = <built-in function monotonic>()
+E            +    where <built-in function monotonic> = time.monotonic
+
+tests/integration/test_camctl_session_recovery.py:65: AssertionError
+============================== slowest durations ===============================
+42.87s call     tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed
+0.01s teardown tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed
+
+(1 durations < 0.005s hidden.  Use -vv to show these durations.)
+=========================== short test summary info ============================
+FAILED tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed
+1 failed in 43.05s

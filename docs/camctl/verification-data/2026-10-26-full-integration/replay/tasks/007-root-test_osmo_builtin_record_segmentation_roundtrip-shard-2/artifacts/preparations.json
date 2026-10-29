@@ -1,0 +1,15 @@
+[
+  {
+    "label": "package-resources",
+    "command": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/007-root-test_osmo_builtin_record_segmentation_roundtrip-shard-2/source/apps/camctl/scripts/sync_resources.py"
+    ],
+    "cwd": "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/007-root-test_osmo_builtin_record_segmentation_roundtrip-shard-2/source",
+    "started_utc": "2026-10-26T00:57:42.992302+00:00",
+    "pid": 2014803,
+    "exit_code": 0,
+    "finished_utc": "2026-10-26T00:57:43.040393+00:00",
+    "wall_seconds": 0.048118915990926325
+  }
+]

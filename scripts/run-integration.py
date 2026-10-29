@@ -17,6 +17,9 @@ import subprocess
 import sys
 import time
 
+import camctl_memory
+from camctl_memory import DEFAULT_MEMORY_LIMIT, parse_memory_limit
+
 CAMCTL = 'apps/camctl/tests/integration'
 ROOT = 'tests/integration'
 HB_MODULE = ROOT + '/test_hasselblad_photo_roundtrip.py'
@@ -182,6 +185,13 @@ def test_environment(python, project, control, private, temporary):
     return environment
 
 
+def memory_pytest_arguments(args):
+    arguments = ['--camctl-memory-limit', args.camctl_memory_limit]
+    if args.camctl_memory_cgroup_root is not None:
+        arguments.extend(['--camctl-memory-cgroup-root', str(args.camctl_memory_cgroup_root)])
+    return arguments
+
+
 def managed_wait_sync(process):
     try:
         return process.wait()
@@ -233,7 +243,8 @@ def collect_and_shard(args, tasks, output, seed, python, versions, identity):
                         write_json(artifacts / 'prepare-command.json', preparation)
             if code:
                 raise subprocess.CalledProcessError(code, command)
-        command = [str(python), '-m', 'pytest', *task['targets'], '--collect-only', '-q', '-p', 'integration_progress']
+        command = [str(python), '-m', 'pytest', f'--rootdir={work}', *task['targets'], '--collect-only', '-q', '-p', 'integration_progress',
+                   '-p', 'camctl_memory_plugin', *memory_pytest_arguments(args)]
         record = {'command': command, 'cwd': str(work), 'started_utc': utc(),
                   'source': identity['snapshot_sha256'], 'versions': versions}
         started = time.monotonic()
@@ -352,9 +363,11 @@ async def execute(args, tasks, output, seed, python, cache, node_modules, versio
                     write_json(artifacts / 'inventory.json', task['targets'])
                 else:
                     environment['CAMCTL_INTEGRATION_PROGRESS'] = str(artifacts)
-                    command = [str(project / '.venv311/bin/python'), '-m', 'pytest', *task['targets'],
+                    root_arguments = [f'--rootdir={work}'] if task['scope'] == 'root' else []
+                    command = [str(project / '.venv311/bin/python'), '-m', 'pytest', *root_arguments, *task['targets'],
                                '-q', '--durations=0', '-p', 'integration_progress',
-                               '--basetemp', str(temporary / 'pytest')]
+                               '--basetemp', str(temporary / 'pytest'), '-p', 'camctl_memory_plugin',
+                               *memory_pytest_arguments(args)]
                 task['command'] = command
                 task['environment'] = {key: environment[key] for key in (
                     'PYTHONPATH', 'PYTHONPYCACHEPREFIX', 'UV_PYTHON', 'UV_PROJECT_ENVIRONMENT',
@@ -463,12 +476,17 @@ def main():
     parser.add_argument('--output', type=Path, help='新建的证据与隔离环境目录（默认 /tmp 下的新目录）')
     parser.add_argument('--node-modules', type=Path, help='已准备的客户端 node_modules（默认源工作区）')
     parser.add_argument('--uv-cache', type=Path, help='已准备的 uv 离线缓存（默认 uv cache dir）')
+    parser.add_argument('--camctl-memory-limit', default=DEFAULT_MEMORY_LIMIT,
+                        help='每个被测 camctl 及其全部后代共享的内存预算')
+    parser.add_argument('--camctl-memory-cgroup-root', type=lambda value: Path(value).absolute(),
+                        help='可创建专属预算组的 Linux 委派目录')
     preview = parser.add_mutually_exclusive_group()
     preview.add_argument('--list', action='store_true', help='只列出发现并选择的模块任务，不执行测试')
     preview.add_argument('--plan-only', action='store_true', help='冻结源码并收集长根模块的真实分片计划，不执行测试')
     args = parser.parse_args()
     output = None
     try:
+        parse_memory_limit(args.camctl_memory_limit)
         if args.jobs < 1:
             raise ValueError('--jobs 必须大于 0')
         args.root_shards = args.root_shards if args.root_shards is not None else args.jobs
@@ -512,6 +530,9 @@ def main():
         tasks = order_by_measurement(seed, select(discover(seed), args.scope, args.target))
         (output / 'control').mkdir()
         shutil.copy2(Path(__file__).with_name('integration_progress.py'), output / 'control')
+        shutil.copy2(Path(__file__).with_name('camctl_memory_plugin.py'),
+                     output / 'control' / 'camctl_memory_plugin.py')
+        shutil.copy2(Path(camctl_memory.__file__), output / 'control' / 'camctl_memory.py')
         tasks = collect_and_shard(args, tasks, output, seed, python, versions, identity)
         write_json(output / 'plan.json', tasks)
         if args.plan_only:

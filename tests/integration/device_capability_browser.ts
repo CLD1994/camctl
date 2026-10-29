@@ -1,7 +1,14 @@
 // 安装版 describe 与真实页面的联合凭据；测试报告不表示真实设备产物。
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { observePost } from "../../apps/client/tests/helpers/browser-post";
+import { checkVisibleCleanupSupport } from "../../apps/client/tests/integration/metadata-support";
 import { join } from "node:path";
 import { Application } from "../../apps/client/src/server/application";
 import { Files } from "../../apps/client/src/server/files";
@@ -24,6 +31,12 @@ async function main() {
   const { chromium, expect: check } = requireClient("@playwright/test");
   const [storeDir, currentFile, changedFile, receiptPath] =
     process.argv.slice(2);
+  const tracePath = receiptPath! + ".trace.jsonl";
+  const note = (phase: string, facts: Record<string, unknown> = {}) =>
+    appendFileSync(
+      tracePath,
+      JSON.stringify({ phase, at: performance.now(), ...facts }) + "\n",
+    );
   const current = readFileSync(currentFile!, "utf8");
   const changed = readFileSync(changedFile!, "utf8");
   const path = join(storeDir!, "device-capabilities.json");
@@ -134,13 +147,21 @@ async function main() {
     const files = new Files(app),
       requests = new RequestLifecycle();
     const server = createHttpApp(app, files, requests).listen(0, "127.0.0.1");
-    await new Promise<void>((resolve, reject) => {
-      server.once("listening", resolve);
-      server.once("error", reject);
+    server.prependListener("request", (request, response) => {
+      if (
+        !["/api/state", "/api/capabilities/reload"].includes(request.url ?? "")
+      )
+        return;
+      note("server-request", { method: request.method, url: request.url });
+      response.once("finish", () =>
+        note("server-response", {
+          method: request.method,
+          url: request.url,
+          status: response.statusCode,
+          version: app.capabilities.version,
+        }),
+      );
     });
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    page.setDefaultTimeout(5000);
     const stop = createStop(
       () =>
         new Promise<void>((resolve, reject) =>
@@ -150,34 +171,90 @@ async function main() {
       () => files.idle(),
       () => app.store.close(),
     );
-    await page.goto(
-      `http://127.0.0.1:${(server.address() as { port: number }).port}`,
-    );
-    return {
-      app,
-      page,
-      close: async () => {
-        await context.close();
-        await stop();
-      },
-    };
+    let context: Awaited<ReturnType<typeof browser.newContext>> | undefined;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once("listening", resolve);
+        server.once("error", reject);
+      });
+      context = await browser.newContext();
+      const page = await context.newPage();
+      page.setDefaultTimeout(5000);
+      let sequence = 0;
+      const active = new Map<unknown, number>();
+      page.on("request", (request: { url(): string; method(): string }) => {
+        if (!/\/api\/(state|capabilities\/reload)$/.test(request.url())) return;
+        active.set(request, ++sequence);
+        note("browser-request", {
+          id: sequence,
+          method: request.method(),
+          url: request.url(),
+        });
+      });
+      page.on(
+        "response",
+        (response: { request(): unknown; status(): number }) => {
+          if (active.has(response.request()))
+            note("browser-response", {
+              id: active.get(response.request()),
+              status: response.status(),
+            });
+        },
+      );
+      for (const event of ["requestfinished", "requestfailed"] as const)
+        page.on(event, (request: { failure(): unknown }) => {
+          if (active.has(request))
+            note(event, {
+              id: active.get(request),
+              failure: request.failure(),
+            });
+          active.delete(request);
+        });
+      page.on("pageerror", (error: Error) =>
+        note("pageerror", { message: error.message }),
+      );
+      page.on("console", (message: { type(): string; text(): string }) => {
+        if (message.type() === "error")
+          note("console-error", { message: message.text() });
+      });
+      await page.goto(
+        `http://127.0.0.1:${(server.address() as { port: number }).port}`,
+        {
+          waitUntil: "domcontentloaded",
+        },
+      );
+      return {
+        app,
+        page,
+        active,
+        close: async () => {
+          await context!.close();
+          await stop();
+        },
+      };
+    } catch (error) {
+      await context?.close();
+      await stop();
+      throw error;
+    }
   }
 
   const receipt: Record<string, boolean> = {};
-  let running = await start();
+  let running = await start().catch(async (error) => {
+    await browser.close();
+    throw error;
+  });
   async function inspect(expected: Record<string, boolean | undefined>) {
     const { page, app } = running;
     await page.getByTestId("nav-devices").click();
     if (Object.keys(expected).length > 0) {
-      await check(page.locator(".guide-device")).toHaveCount(devices.length);
-      for (const device of devices) {
-        const guide = page.locator(".guide-device").filter({
-          has: page.getByRole("heading", { name: device, exact: true }),
-        });
-        await check(guide.locator(".guide-cleanup-support strong")).toHaveText(
-          expected[device] === false ? "不支持删除" : "支持删除",
-        );
-      }
+      await checkVisibleCleanupSupport(
+        page,
+        devices.map((device) => ({
+          device,
+          text: expected[device] === false ? "不支持删除" : "支持删除",
+        })),
+      );
     }
     await page.getByTestId("nav-plans").click();
     await page.getByTestId("tab-records").click();
@@ -185,41 +262,87 @@ async function main() {
       .getByTestId("record-open-button")
       .filter({ hasText: "安装版来源记录" })
       .click();
+    const record = page.locator(".record-detail").filter({
+      has: page.getByRole("heading", { name: "安装版来源记录", exact: true }),
+    });
     await check(
-      page.getByRole("button", { name: "准备清理计划全部源产物" }),
+      record.getByRole("button", { name: "清理计划产物" }),
     ).toBeVisible();
+    async function expandAction(id: string, name: string) {
+      const card = record.locator(`.result-card[data-action-id="${id}"]`);
+      const toggle = card.getByRole("button", {
+        name: new RegExp(`动作 ${name}$`),
+      });
+      if ((await toggle.getAttribute("aria-expanded")) !== "true")
+        await toggle.click();
+      return card;
+    }
     for (const [index, device] of devices.entries()) {
-      const capture = page.locator(
-        `.result-card[data-action-id="${10 + index}"]`,
+      await expandAction(String(10 + index), device);
+    }
+    await check
+      .poll(() =>
+        record
+          .getByRole("button", { name: "清理全部产物", exact: true })
+          .evaluateAll((nodes) =>
+            nodes
+              .map((node) =>
+                node.closest(".result-card")?.getAttribute("data-action-id"),
+              )
+              .sort(),
+          ),
+      )
+      .toEqual(
+        devices
+          .flatMap((device, index) =>
+            expected[device] === false ? [] : [String(10 + index)],
+          )
+          .sort(),
       );
-      await capture
-        .getByRole("button", { name: `展开动作 ${device}`, exact: true })
-        .click();
-      await check(
-        capture.getByRole("button", {
-          name: "准备清理动作全部源产物",
-          exact: true,
-        }),
-      ).toHaveCount(expected[device] === false ? 0 : 1);
-    }
-    const retrieve = page.locator('.result-card[data-action-id="2"]');
-    await retrieve
-      .getByRole("button", { name: "展开动作 混合来源取回" })
-      .click();
-    let productIndex = 0;
-    for (const device of devices) {
-      const kinds = device === "hb-device" ? 3 : 1;
-      for (let offset = 0; offset < kinds; offset++) {
-        const product = retrieve.locator(".product-card").nth(productIndex++);
-        await product.locator("details.advanced > summary").click();
-        await check(
-          product.getByRole("button", { name: "准备清理源产物", exact: true }),
-        ).toHaveCount(offset === 2 || expected[device] !== false ? 1 : 0);
-        await check(
-          product.locator("details.advanced > .button-row .badge"),
-        ).toHaveText("可用");
-      }
-    }
+    const retrieve = await expandAction("2", "混合来源取回");
+    const expectedCleanup = devices.flatMap((device) =>
+      Array.from(
+        { length: device === "hb-device" ? 3 : 1 },
+        (_, offset) => offset === 2 || expected[device] !== false,
+      ),
+    );
+    await check(retrieve.locator(".product-card")).toHaveCount(
+      expectedCleanup.length,
+    );
+    const outputs =
+      app
+        .state()
+        .snapshot?.plans?.flatMap((plan) =>
+          (plan.actions ?? []).flatMap((action) => action.outputs ?? []),
+        ) ?? [];
+    assert.equal(outputs.length, expectedCleanup.length);
+    assert.ok(outputs.every((output) => output.availability === "available"));
+    await check
+      .poll(async () => {
+        const [buttons, badgeCount] = await Promise.all([
+          retrieve
+            .getByRole("button", { name: "清理产物", exact: true })
+            .evaluateAll((nodes) =>
+              nodes
+                .map((node) =>
+                  Array.from(
+                    node
+                      .closest(".result-card")!
+                      .querySelectorAll(".product-card"),
+                  ).indexOf(node.closest(".product-card")!),
+                )
+                .sort((a, b) => a - b),
+            ),
+          retrieve.locator(".product-card .product-actions .badge").count(),
+        ]);
+        return { buttons, badgeCount };
+      })
+      .toEqual({
+        buttons: expectedCleanup.flatMap((enabled, index) =>
+          enabled ? [index] : [],
+        ),
+        badgeCount: 0,
+      });
     assert.equal(saved(app), originalSaved);
   }
   async function reload(text: string, failed: boolean, retain = false) {
@@ -227,11 +350,35 @@ async function main() {
     writeFileSync(path, text);
     const oldVersion = app.capabilities.version;
     await page.getByTestId("nav-devices").click();
-    const response = page.waitForResponse((response: { url(): string }) =>
-      response.url().endsWith("/api/capabilities/reload"),
+    const button = page.getByRole("button", { name: "重新加载能力说明" });
+    await check(button).toBeEnabled();
+    const observation = observePost(
+      page,
+      new URL("/api/capabilities/reload", page.url()).href,
     );
-    await page.getByRole("button", { name: "重新加载能力说明" }).click();
-    assert.equal((await response).status(), 200);
+    let response;
+    try {
+      note("reload-click-start", {
+        failed,
+        retain,
+        oldVersion,
+        buttonWasEnabled: true,
+        activeRequests: [...running.active.values()],
+      });
+      await button.click();
+      const pending = observation.wait();
+      note("reload-click-finished", {
+        failed,
+        retain,
+        activeRequests: [...running.active.values()],
+      });
+      response = await pending;
+      note("reload-response-observed", { status: response.status() });
+    } finally {
+      observation.dispose();
+    }
+    assert.equal(response.status(), 200);
+    await check(button).toBeEnabled();
     if (failed) {
       await check(page.locator(".device-page .notice.warning")).toBeVisible();
       assert.ok(app.capabilities.error);
@@ -291,6 +438,37 @@ async function main() {
     assert.equal(saved(running.app), originalSaved);
     receipt.saved_inputs_unchanged = true;
     writeFileSync(receiptPath!, JSON.stringify(receipt));
+  } catch (error) {
+    note("failure", {
+      message: String(error),
+      version: running.app.capabilities.version,
+      capabilityError: running.app.capabilities.error,
+      activeRequests: [...running.active.values()],
+    });
+    try {
+      writeFileSync(
+        receiptPath! + ".failure.json",
+        JSON.stringify(
+          {
+            url: running.page.url(),
+            body: await running.page.locator("body").innerText(),
+            closed: running.page.isClosed(),
+            reloadDisabled: await running.page
+              .getByRole("button", { name: "重新加载能力说明" })
+              .isDisabled(),
+          },
+          null,
+          2,
+        ),
+      );
+      await running.page.screenshot({
+        path: receiptPath! + ".failure.png",
+        fullPage: true,
+      });
+    } catch (diagnosticError) {
+      note("diagnostic-failure", { message: String(diagnosticError) });
+    }
+    throw error;
   } finally {
     await running.close();
     await browser.close();

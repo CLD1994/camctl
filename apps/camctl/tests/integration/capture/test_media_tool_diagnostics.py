@@ -1,118 +1,108 @@
-"""媒体 producer 与原保存消费者组合，工具和数据库边界均使用内存替身。"""
+"""公开工具结果经正式媒体消费者、真实文件线程和保存重送交付完整诊断。"""
 import json
+from dataclasses import replace
+from decimal import Decimal
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, create_autospec
 
 import pytest
 
-from camctl.capture.media import check_observation_from_probe, _save_repair_failure
-from camctl.capture.media_flow import CaptureProcessingSaves, load_processing_status, run_recording_media
+from camctl.capture.media_flow import load_processing_status, run_recording_media
 from camctl.contracts.json_values import parse_exact_json
-from camctl.capture.processing import CheckResultSave
-from camctl.host_files import media
+from camctl.contracts.values import ConsistencyError
+from camctl.host_files.media import MediaArtifact, MediaProbe, MediaStream
 from camctl.host_files.models import FileObservation, FileObservationKind
-from camctl.logging_runtime.diagnostics import diagnostic_scope, error_diagnostics_context
-from camctl.operations.process import LocalExit, RawToolOutcome, ToolStartError, SignalFailure, SignalStage
-from camctl.persistence.business import BusinessDatabase
-from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from .test_input_copy import pipeline  # noqa: F401
+from camctl.logging_runtime.diagnostics import diagnostic_scope, error_diagnostics_context, flush_diagnostics
+from camctl.persistence.repositories.capture import CaptureRepository
+
+from .media_retry_fixtures import media_pipeline as pipeline
+from .test_osv_input_failure import prepared_input
+from ..support.capture_media_cases import (
+    ScriptTools, assembled_media, diagnostic_media_ports, diagnostic_probe,
+    diagnostic_tool_result, media_case, media_cases,
+)
 
 pytestmark = pytest.mark.asyncio
 
 
-@pytest.mark.parametrize('entry', ['probe', 'repair'])
-@pytest.mark.parametrize('mode', ['exit', 'spawn', 'stopped_before_start', 'cancelled', 'cancelled_with_errors'])
-async def test_media_diagnostics_reach_public_output_once_with_original_facts(monkeypatch, entry, mode):
-    raw = RawToolOutcome(LocalExit(exit_code=7), b'PRIVATE-MEDIA-STDOUT',
-        'cancelled' if mode.startswith('cancelled') else None, None,
-        (SignalFailure(SignalStage.TERMINATE, 'signal denied'),) if mode == 'cancelled_with_errors' else (),
-        output_failure='pipe close failed' if mode == 'cancelled_with_errors' else None,
-        stderr=b'RAW-MEDIA-ERROR\xff')
-    error = ToolStartError('tool launch failed')
-    error.__cause__ = OSError(2, 'media tool missing')
-    tool = AsyncMock(side_effect=error) if mode == 'spawn' else AsyncMock(return_value=raw)
-    monkeypatch.setattr(media, '_execute_tool', tool)
-    monkeypatch.setattr(media, 'resolve_file', lambda *_: SimpleNamespace(path='/staging/media.mp4'))
-    monkeypatch.setattr(media, 'observe_file', lambda *_: FileObservation(
-        FileObservationKind.VALID_OBJECT, Path('/staging/media.mp4'), is_file=True, size_bytes=1))
-    async def inline(function, *args):
-        return function(*args)
-    monkeypatch.setattr(media.asyncio, 'to_thread', inline)
-    control = SimpleNamespace(stop_requested=mode == 'stopped_before_start',
-        stop_event=SimpleNamespace(is_set=lambda: False))
-    actual = (await media._probe(None, None, media.ProbeRequest(), control) if entry == 'probe'
-        else await media._repair(None, None, None, media.RepairRequest(), control))
-    database = create_autospec(BusinessDatabase, instance=True)
-    database.read.return_value = (21,)
-    database.write.side_effect = [DbOutcome(DbOutcomeKind.UNKNOWN), DbOutcome(DbOutcomeKind.COMPLETED)]
-    saves = CaptureProcessingSaves(database)
-    records = []
-    with error_diagnostics_context(None, records.append):
-        for _ in range(2):
-            async with diagnostic_scope():
-                if entry == 'probe':
-                    await saves.save_check_result(CheckResultSave(3, check_observation_from_probe(actual),
-                        100, source_probe=actual))
-                else:
-                    await _save_repair_failure(SimpleNamespace(
-                        processing=SimpleNamespace(processing_id=3), occurred_at=100, saves=saves), None, actual)
+def assert_diagnostics(records, mode):
     if mode in ('stopped_before_start', 'cancelled'):
         assert records == []
+        return
+    document, = [json.loads(record) for record in records]
+    encoded = json.dumps(document, ensure_ascii=False)
+    if mode == 'spawn':
+        assert 'ToolStartError' in encoded
+        assert '"errno": 2' in encoded
+        assert 'media tool missing' in encoded
     else:
-        document, = [json.loads(record) for record in records]
-        encoded = json.dumps(document, ensure_ascii=False)
-        if mode == 'spawn':
-            assert 'ToolStartError' in encoded
-            assert '"errno": 2' in encoded
-            assert 'media tool missing' in encoded
-        else:
-            assert b'RAW-MEDIA-ERROR\xff'.hex() in encoded
-            assert 'RAW-MEDIA-ERROR' in encoded
-            assert 'exit_code' in encoded
-            assert 'PRIVATE-MEDIA-STDOUT' not in encoded
-            assert b'PRIVATE-MEDIA-STDOUT'.hex() not in encoded
-            if mode == 'cancelled_with_errors':
-                assert 'signal denied' in encoded and 'pipe close failed' in encoded
-    if mode == 'stopped_before_start':
-        tool.assert_not_awaited()
-    assert not saves.pending
-    assert database.write.await_count == 2
+        assert b'RAW-MEDIA-ERROR\xff'.hex() in encoded
+        assert 'RAW-MEDIA-ERROR' in encoded
+        assert 'exit_code' in encoded
+        assert 'PRIVATE-MEDIA-STDOUT' not in encoded
+        assert b'PRIVATE-MEDIA-STDOUT'.hex() not in encoded
+        if mode in ('signal_failure', 'cancelled_with_errors'):
+            assert 'signal denied' in encoded
+        if mode in ('output_failure', 'cancelled_with_errors'):
+            assert 'output failed' in encoded if mode == 'output_failure' else 'pipe close failed' in encoded
+        if mode == 'close_failure':
+            assert 'pipe close failed' in encoded
+
+
+@pytest.mark.parametrize('entry', ['probe', 'repair'])
+@pytest.mark.parametrize('mode', ['exit', 'spawn', 'stopped_before_start', 'cancelled', 'cancelled_with_errors'])
+async def test_media_diagnostics_reach_public_output_once_with_original_facts(pipeline, monkeypatch, entry, mode):
+    from ..bootstrap.test_binding_transactions import _CommitFailure
+    tool = await diagnostic_tool_result(mode)
+    source = diagnostic_probe(tool)
+    successful = MediaProbe(Decimal(200), None, (
+        MediaStream(0, 'video', 'h264', 64, 64, Decimal(200), False),))
+    artifact = MediaArtifact(source.error, FileObservation(
+        FileObservationKind.MISSING, Path(pipeline[1].staging) / 'derived/missing.mp4'),
+        tool_diagnostics=tool)
+    counts = diagnostic_media_ports(monkeypatch, probe=source if entry == 'probe' else None,
+        artifact=artifact, successful_probe=successful)
+    tools = ScriptTools(successful)
+    flow = await assembled_media(pipeline, None, tools)
+    stage = 'save_check_result' if entry == 'probe' else 'save_repair_result'
+    actual = getattr(CaptureRepository, stage)
+    requests = []
+    def save(repository, command, key, current):
+        relevant = entry == 'repair' or command.source_probe is not None
+        if relevant:
+            requests.append((command, key))
+            if len(requests) == 1:
+                current = replace(current, connection=_CommitFailure(current.connection, True))
+        return actual(repository, command, key, current)
+    monkeypatch.setattr(CaptureRepository, stage, save)
+    records = []
+    with error_diagnostics_context(None, records.append):
+        with pytest.raises(ConsistencyError):
+            async with diagnostic_scope():
+                await run_recording_media(flow, 1, 1, pipeline[2])
+        assert len(requests) == 1
+        async with diagnostic_scope():
+            await run_recording_media(flow, 1, 1, pipeline[2])
+        await media_case(flow).resume_saves()
+        await flush_diagnostics()
+    assert requests == [requests[0], requests[0]]
+    assert counts == {'probe': 1, 'repair': int(entry == 'repair')}
+    assert flow.file_executor.unfinished_files() == ()
+    assert_diagnostics(records, mode)
 
 
 @pytest.mark.parametrize('mode', ['exit', 'spawn', 'stopped_before_start', 'cancelled',
     'signal_failure', 'output_failure', 'close_failure'])
 async def test_saved_source_probe_json_roundtrip_preserves_control_and_does_not_repeat_error(
-        pipeline, monkeypatch, mode):
-    from .test_global_error_diagnostics import _flow
-    from .test_media_flow import ProbeTools, ReadDriverDouble
-    from .test_input_copy import _CONTENT
-    raw = RawToolOutcome(LocalExit(exit_code=7), b'PRIVATE-MEDIA-STDOUT',
-        'cancelled' if mode not in ('exit', 'spawn') else None, None,
-        (SignalFailure(SignalStage.TERMINATE, 'signal denied'),) if mode == 'signal_failure' else (),
-        output_failure={'output_failure': 'output failed', 'close_failure': 'pipe close failed'}.get(mode),
-        stderr=b'RAW-MEDIA-ERROR\xff')
-    error = ToolStartError('tool launch failed')
-    error.__cause__ = OSError(2, 'media tool missing')
-    monkeypatch.setattr(media, '_execute_tool',
-        AsyncMock(side_effect=error) if mode == 'spawn' else AsyncMock(return_value=raw))
-    monkeypatch.setattr(media, 'resolve_file', lambda *_: SimpleNamespace(path='/staging/input.osv'))
-    source = await media._probe(None, None, media.ProbeRequest(),
-        SimpleNamespace(stop_requested=mode == 'stopped_before_start'))
-    owned = pipeline[0]
-    owned.connection.execute("UPDATE device_files SET original_name='input.osv' WHERE id=11")
-    owned.connection.execute("UPDATE recording_processing SET check_decision=2,"
-        "check_basis_json=?,repair_state=3,repair_basis_json=? WHERE id=1", (
-        '{"reason":3,"target_duration_ms":60000,"control_elapsed_ns":75000000000}',
-        '{"reason":2,"target_duration_ms":60000,"threshold_s":62,"control_elapsed_ns":75000000000}'))
-    owned.connection.commit()
-    tools = ProbeTools(source)
-    flow = _flow(pipeline, ReadDriverDouble(_CONTENT), tools)
+        tmp_path, monkeypatch, mode):
+    tool = await diagnostic_tool_result(mode)
+    source = diagnostic_probe(tool)
+    counts = diagnostic_media_ports(monkeypatch, probe=source)
+    owned, runtime, flow, source_id, _original, tools, entry = await prepared_input(tmp_path, False, 'valid')
     records = []
     try:
         with error_diagnostics_context(None, records.append):
             async with diagnostic_scope():
-                prepared = await run_recording_media(flow, 1, 1, 11, target_extension='osv')
+                prepared = await run_recording_media(flow, 1, 1, source_id, target_extension='osv')
             assert prepared.phase.value == 'prepared'
             status = load_processing_status(owned, 1)
             assert status.source_probe.tool_diagnostics.control_only is (
@@ -125,25 +115,10 @@ async def test_saved_source_probe_json_roundtrip_preserves_control_and_does_not_
                 if 'source_probe' in body['evidence']]
             assert set(saved) == {'duration_s', 'error', 'format_name', 'streams', 'tool_control'}
             async with diagnostic_scope():
-                failed = await run_recording_media(flow, 1, 1, 11, target_extension='osv')
+                failed = await run_recording_media(flow, 1, 1, source_id, target_extension='osv')
         assert failed.phase.value == 'failed_saved'
-        assert tools.calls == ['probe']
+        assert counts == {'probe': 1, 'repair': 0}
         assert load_processing_status(owned, 1).repair_state == 6
-        if mode in ('stopped_before_start', 'cancelled'):
-            assert records == []
-        else:
-            document, = [json.loads(record) for record in records]
-            encoded = json.dumps(document)
-            if mode == 'spawn':
-                assert 'ToolStartError' in encoded and 'media tool missing' in encoded
-            else:
-                assert b'RAW-MEDIA-ERROR\xff'.hex() in encoded
-                assert 'PRIVATE-MEDIA-STDOUT' not in encoded
-                if mode == 'signal_failure':
-                    assert 'signal denied' in encoded
-                if mode == 'output_failure':
-                    assert 'output failed' in encoded
-                if mode == 'close_failure':
-                    assert 'pipe close failed' in encoded
+        assert_diagnostics(records, mode)
     finally:
         owned.connection.close()

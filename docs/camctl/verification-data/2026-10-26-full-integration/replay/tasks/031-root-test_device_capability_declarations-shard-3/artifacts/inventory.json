@@ -1,0 +1,4 @@
+[
+  "tests/integration/test_device_capability_declarations.py::test_installed_source_change_keeps_accepted_execution_definition",
+  "tests/integration/test_device_capability_declarations.py::test_installed_sources_control_browser_cleanup_across_reload_and_restart"
+]

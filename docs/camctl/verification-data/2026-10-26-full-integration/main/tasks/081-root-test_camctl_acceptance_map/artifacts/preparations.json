@@ -1,0 +1,15 @@
+[
+  {
+    "label": "package-resources",
+    "command": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/081-root-test_camctl_acceptance_map/source/apps/camctl/scripts/sync_resources.py"
+    ],
+    "cwd": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/081-root-test_camctl_acceptance_map/source",
+    "started_utc": "2026-10-26T00:41:29.262618+00:00",
+    "pid": 1974101,
+    "exit_code": 0,
+    "finished_utc": "2026-10-26T00:41:29.373428+00:00",
+    "wall_seconds": 0.11080861699883826
+  }
+]

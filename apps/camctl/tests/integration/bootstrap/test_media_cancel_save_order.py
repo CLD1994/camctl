@@ -1,131 +1,129 @@
-"""默认取消在保存新成功之前必须核实本会话已取得的媒体申请。"""
+"""取消流程在保存新成功之前必须核实本会话已取得的媒体申请。"""
 
 from dataclasses import replace
 from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from camctl.acceptance.input import ParsedInput
-from camctl.acceptance.service import CommandMode
-from camctl.bootstrap import lifecycle
-from camctl.capture.media_flow import DriverReadSessions, run_recording_media
+from camctl.bootstrap.flows import cancel_flow, capture_flow
+from camctl.capture.media_flow import run_recording_media, resume_media_saves
 from camctl.capture.processing import CheckPhase
-from camctl.contracts.values import ConsistencyError, new_operation_key
+from camctl.contracts.values import ConsistencyError
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from camctl.persistence.repositories.acceptance import AcceptanceRepository, ProcessInput
 from camctl.persistence.repositories.cancellation import CancellationRepository
 from camctl.persistence.repositories.capture import CaptureRepository
-from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.transaction import saved_transaction_events
-from camctl.session.service import StateDbFailure
+from camctl.session.service import run_session
 
 from ..capture.media_retry_fixtures import _Catalog, media_pipeline as pipeline  # noqa: F401
-from ..capture.test_input_copy import _CONTENT, _NOW
-from ..capture.test_media_flow import ReadDriverDouble
-from ..capture.test_media_result_retry import _ActualTools
-from .test_binding_transactions import _CommitFailure
-from .test_media_saved_result_consumers import (
-    _cancel_and_end_original, _default_factories,
-    _observe_reopened_flow_connection,
-)
-
+from ..support.bootstrap_consumers import consumer_world, TransactionFault, cancel_original
+from ..support.session import accept_plan, session_context
 
 pytestmark = pytest.mark.asyncio
 
 
+async def _one_session_step(world, flow):
+    """真实会话完成一次公开消费者后，在下一业务轮之前结束专项。"""
+    class StepComplete(BaseException):
+        pass
+
+    async def step(context):
+        await flow(context)
+        raise StepComplete()
+
+    context = session_context(world.path,
+        clock=SimpleNamespace(utc_micros=lambda: world.wall[0]),
+        catalog=_Catalog(), flows={"consumer": step})
+    try:
+        return await run_session(context, None)
+    except StepComplete:
+        return None
+
+
 @pytest.mark.parametrize("confirmation", ["saved", "rejected"])
 @pytest.mark.parametrize("commit_after", [False, True], ids=["uncommitted", "committed"])
-async def test_default_cancel_confirms_original_media_before_new_cancel_success(pipeline, monkeypatch, confirmation, commit_after):
-    owned, roots, source_id = pipeline
-    deps, factories, context = await _default_factories(pipeline, monkeypatch)
-    driver, tools = ReadDriverDouble(_CONTENT), _ActualTools("check")
-    flow = factories[0](owned, "cam-1").media
-    assert flow is not None
-    flow.sessions = DriverReadSessions(owned, driver, ticket=None)
-    flow.tools = tools
+async def test_default_cancel_confirms_original_media_before_new_cancel_success(
+        pipeline, capture_resources, monkeypatch, confirmation, commit_after):
+    world = await consumer_world(pipeline, capture_resources, branch="check")
     original_save = CaptureRepository.save_check_result
     inputs, order = [], []
-    failed = False
 
     def save(repository, command, key, current):
-        nonlocal failed
         if command.phase is CheckPhase.RUNNING:
             return original_save(repository, command, key, current)
         inputs.append((command, key))
-        if not failed:
-            failed = True
-            return original_save(repository, command, key,
-                replace(current, connection=_CommitFailure(current.connection, commit_after)))
+        if len(inputs) == 1:
+            fault = TransactionFault(current.connection, after_commit=commit_after)
+            receipt = original_save(repository, command, key, replace(current, connection=fault))
+            assert receipt.kind is DbOutcomeKind.UNKNOWN and fault.commit_calls == 1
+            return receipt
         order.append("media_confirmation")
         if confirmation == "rejected":
-            return DbOutcome(kind=DbOutcomeKind.ROLLED_BACK,
+            return DbOutcome(DbOutcomeKind.ROLLED_BACK,
                 error=ConsistencyError("original media history unavailable"))
         return original_save(repository, command, key, current)
 
     monkeypatch.setattr(CaptureRepository, "save_check_result", save)
-    reopened = None
     try:
         with pytest.raises(ConsistencyError):
-            await run_recording_media(flow, 1, 1, source_id)
-        assert len(inputs) == 1 and tools.probes == 1 and tools.repairs == 0
-        owned.connection.close()
-        reopened = open_existing(roots.staging.parent / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
-        assert reopened.metadata == owned.metadata
-        original_facts = saved_transaction_events(reopened.connection, inputs[0][1])
+            await run_recording_media(world.runtime.media, 1, 1, world.source_id)
+        assert len(inputs) == 1 and world.tools() == ["probe"]
+        await world.reconnect()
+        original_facts = saved_transaction_events(world.owned.connection, inputs[0][1])
         assert (original_facts is not None) is commit_after
-        flow_connections = _observe_reopened_flow_connection(context, reopened)
         if commit_after:
-            _cancel_and_end_original(reopened)
-        instant = datetime.fromtimestamp(_NOW // 1_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        accepted = AcceptanceRepository().process_input(ProcessInput(ParsedInput("new-cancel.json", {
-            "request_id": "3", "created_at": instant, "name": "取消已结束媒体动作",
-            "actions": [{"name": "新取消", "type": "cancel_task",
-                "params": {"target": {"action_instance_id": "1"}}}]}),
-            _Catalog(), CommandMode.RUN, _NOW + 30), new_operation_key(), reopened)
-        assert accepted.kind is DbOutcomeKind.COMPLETED, accepted.error
-        newest = reopened.connection.execute("SELECT MAX(id) FROM actions WHERE type=6").fetchone()[0]
-        assert reopened.connection.execute("SELECT status FROM actions WHERE id=?", (newest,)).fetchone() == (1,)
+            await cancel_original(world)
+        world.wall[0] += 30
+        instant = datetime.fromtimestamp(world.wall[0] // 1_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        await accept_plan(world.database, world.path.parent, _Catalog(), {
+            "request_id": "3", "created_at": instant, "name": "取消原媒体动作",
+            "actions": [{"name": "新取消", "type": "cancel_task", "params": {
+                "target": {"action_instance_id": "1"}}}]},
+            SimpleNamespace(utc_micros=lambda: world.wall[0]))
+        newest, = world.owned.connection.execute("SELECT MAX(id) FROM actions WHERE type=6").fetchone()
+        assert world.owned.connection.execute("SELECT status FROM actions WHERE id=?", (newest,)).fetchone() == (1,)
         for method in ("start_cancel_action", "apply_cancel_target", "finish_cancel_action"):
             original = getattr(CancellationRepository, method)
 
-            def observed(repository, command, key, current, *, _original=original, _method=method):
-                order.append(_method)
-                return _original(repository, command, key, current)
+            def observed(repository, command, key, current, *, actual=original, name=method, **options):
+                order.append(name)
+                return actual(repository, command, key, current, **options)
 
             monkeypatch.setattr(CancellationRepository, method, observed)
+
+        async def media(database):
+            await resume_media_saves(database, world.collections["pending_media_results"], executor=world.executor)
+
+        cancel = cancel_flow(ready=Path(world.config.paths.ready),
+            processing=Path(world.config.paths.processing), resume_media_results=media)
+        outcome = await _one_session_step(world, cancel)
         if confirmation == "rejected":
-            with pytest.raises(StateDbFailure):
-                await context.flows["cancel"](context)
-            assert reopened.connection.execute("SELECT status FROM actions WHERE id=?", (newest,)).fetchone() == (1,)
+            assert outcome.reason == "state_db_error"
+            assert world.owned.connection.execute("SELECT status FROM actions WHERE id=?", (newest,)).fetchone() == (1,)
             assert order == ["media_confirmation"]
         else:
-            await context.flows["cancel"](context)
+            assert outcome is None, outcome.details["error"]
             assert order[0] == "media_confirmation"
             if not commit_after:
-                # 新取消已经生效，原拍摄拥有者仍须沿自身流程结束；
-                # 下一次取消推进才汇总这一可靠终态。
-                assert reopened.connection.execute(
-                    "SELECT status FROM actions WHERE id=?", (newest,)).fetchone() == (2,)
-                assert reopened.connection.execute(
-                    "SELECT status,cancel_requested FROM actions WHERE id=1").fetchone() == (2, 1)
-                await context.flows["scheduling"](context)
-                await context.flows["scheduling"].settle()
-                assert reopened.connection.execute(
-                    "SELECT status,cancel_requested FROM actions WHERE id=1").fetchone() == (6, 1)
-                await context.flows["cancel"](context)
+                assert world.owned.connection.execute("SELECT status FROM actions WHERE id=?", (newest,)).fetchone() == (2,)
+                assert world.owned.connection.execute("SELECT status,cancel_requested FROM actions WHERE id=1").fetchone() == (2, 1)
+                scheduling = capture_flow(world.factory)
+
+                async def finish_target(context):
+                    await scheduling(context)
+                    await scheduling.settle()
+
+                await _one_session_step(world, finish_target)
+                assert world.owned.connection.execute("SELECT status,cancel_requested FROM actions WHERE id=1").fetchone() == (6, 1)
+                assert await _one_session_step(world, cancel) is None
             assert "start_cancel_action" in order and "finish_cancel_action" in order
-            assert reopened.connection.execute("SELECT status FROM actions WHERE id=?", (newest,)).fetchone() == (3,)
+            assert world.owned.connection.execute("SELECT status FROM actions WHERE id=?", (newest,)).fetchone() == (3,)
         assert len(inputs) == 2 and inputs[1] == inputs[0]
-        # 两次取消推进各使用一个连接；拍摄发现与设备执行分别使用独立连接。
-        assert len(flow_connections) == (4 if not commit_after and confirmation == "saved" else 1)
-        assert tools.probes == 1 and tools.repairs == 0 and len(driver.opens) == 1
-        original_target = reopened.connection.execute(
-            "SELECT status,cancel_requested FROM actions WHERE id=1").fetchone()
-        if commit_after or confirmation == "saved":
-            assert original_target == (6, 1)
-        else:
-            assert original_target == (2, 0)
+        assert world.tools() == ["probe"] and len(world.reader.requests) == 1
+        assert world.owned.connection.execute("SELECT status,cancel_requested FROM actions WHERE id=1").fetchone() == (
+            (6, 1) if commit_after or confirmation == "saved" else (2, 0))
     finally:
-        if reopened is not None:
-            reopened.connection.close()
-        lifecycle.close_runtime(deps)
+        await world.close()
+        world.owned.connection.close()

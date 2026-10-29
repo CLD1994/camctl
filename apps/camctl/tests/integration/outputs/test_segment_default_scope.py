@@ -40,6 +40,7 @@ from ..capture.test_record_file_completion_wait import (
 )
 from ..persistence.test_segment_file_pairing import _entry
 from .test_sources import _seed_output
+from ..support.outputs import prepare_obtain_selection, segmented_output_source
 
 pytestmark = pytest.mark.asyncio
 
@@ -58,95 +59,25 @@ async def _source(
     finalized=True,
     pending_capture_group=None,
 ):
-    owned, runtime, aid, handler, _ = await _stopped_world(
-        tmp_path,
-        control_known=known,
-        pending_capture_group=pending_capture_group,
+    entries = []
+    for index in indexes:
+        name = f"CAM_001/CAM_20261022100000_{index:04d}_D."
+        entries.extend((
+            _entry(name + "OSV", size=10 if sizes is None else sizes[index]),
+            _entry(name + "LRF"),
+        ))
+    return await segmented_output_source(
+        tmp_path, catalog=SegmentWaitCatalog(),
+        entries=sorted(entries, key=lambda item: item["identity"]),
+        known=known, finalized=finalized, pending_capture_group=pending_capture_group,
     )
-    runtime.check_config = type(runtime.check_config)(1, Decimal("1"), Decimal(0))
-    ctx = _stop_context(owned, aid)
-
-    async def read(request, batch):
-        entries = []
-        for index in indexes:
-            name = f"CAM_001/CAM_20261022100000_{index:04d}_D."
-            entries.extend(
-                (
-                    _entry(name + "OSV", size=10 if sizes is None else sizes[index]),
-                    _entry(name + "LRF"),
-                )
-            )
-        return _completed_result(
-            request.ticket,
-            ctx,
-            entries=sorted(entries, key=lambda item: item["identity"]),
-            finalized=finalized,
-        )
-
-    _result_port(runtime, read)
-    await capture_handler(handler)(aid, runtime)
-    return owned, runtime, aid
 
 
 def _obtain(owned, runtime, source_id, mode, request_id, *, exclude_output_ids=None):
-    now = runtime.wall_us()
-    instant = datetime.fromtimestamp(now // 1000000, timezone.utc).strftime(
-        "%Y-%m-%d %H:%M:%S"
+    return prepare_obtain_selection(
+        owned, catalog=ObtainCatalog(), now=runtime.wall_us(), source_id=source_id,
+        mode=mode, request_id=request_id, exclude_output_ids=exclude_output_ids,
     )
-    params = {
-        "source": source_id
-        if isinstance(source_id, dict)
-        else {"action_instance_id": str(source_id)}
-    }
-    if mode == "preview":
-        params["filter"] = "preview"
-    elif isinstance(mode, list):
-        params["output_ids"] = [str(identity) for identity in mode]
-    if exclude_output_ids is not None:
-        params["exclude_output_ids"] = [str(identity) for identity in exclude_output_ids]
-    request = {
-        "request_id": str(request_id),
-        "created_at": instant,
-        "name": "分段取回",
-        "actions": [
-            {
-                "name": "取回",
-                "type": "obtain_action_outputs",
-                "scheduled_at": instant,
-                "params": params,
-            }
-        ],
-    }
-    saved = AcceptanceRepository().process_input(
-        ProcessInput(
-            ParsedInput("obtain.json", request), ObtainCatalog(), CommandMode.RUN, now
-        ),
-        new_operation_key(),
-        owned,
-    )
-    assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
-    action_id = owned.connection.execute("SELECT MAX(id) FROM actions").fetchone()[0]
-    repo = OutputsRepository()
-    receipt = repo.start_obtain_action(
-        StartObtainAction(action_id, now), new_operation_key(), owned
-    )
-    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-    owner = row_facts(owned.connection, "actions", action_id)
-    receipt = repo.resolve_sources(
-        ResolveSources(
-            action_id,
-            read_source_spec(encode_json_value(owner["input_fields_json"])),
-            now,
-        ),
-        new_operation_key(),
-        owned,
-    )
-    assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-    selection = owned.connection.execute(
-        "SELECT s.id FROM obtain_source_selections s JOIN action_dependencies d ON d.id=s.dependency_id WHERE d.action_id=?",
-        (action_id,),
-    ).fetchone()[0]
-    return action_id, selection
 
 
 async def test_default_scope_and_explicit_ids_select_independently(tmp_path):
@@ -224,12 +155,13 @@ async def test_default_scope_and_explicit_ids_select_independently(tmp_path):
         owned.connection.close()
 
 
-async def test_cleanup_and_cold_recovery_preserve_scope_for_new_selections(tmp_path):
+async def test_cleanup_and_cold_recovery_preserve_scope_for_new_selections(tmp_path, capture_resources):
     from camctl.capture.files import FilePresenceSave
     from camctl.contracts.enums import enum_for
     from camctl.outputs.cleanup_flow import StartCleanupAction, FixCleanupTargets
     from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-    from ..bootstrap.test_output_binding_changes import _accept
+    from ..bootstrap.test_output_binding_changes import Catalog
+    from ..support.outputs import submit_output_document
     from .test_cleanup_query_save_recovery import _start_cleanup
 
     owned, runtime, aid = await _source(tmp_path)
@@ -261,7 +193,11 @@ async def test_cleanup_and_cold_recovery_preserve_scope_for_new_selections(tmp_p
         assert absent.kind is DbOutcomeKind.COMPLETED, absent.error
         owned.connection.close()
         owned = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
-        runtime.owned = owned
+        database = await capture_resources.restart_database(tmp_path / "state.db")
+        runtime = await capture_resources.runtime(
+            database, driver=runtime.driver, evidence=runtime.evidence,
+            wall_us=runtime.wall_us, monotonic_ns=runtime.monotonic_ns,
+        )
         history_before = owned.connection.execute("SELECT COUNT(*) FROM history_events").fetchone()
         repeated = fix_segment_selection(original_request, original_key, owned)
         assert repeated.kind is DbOutcomeKind.COMPLETED, repeated.error
@@ -286,10 +222,16 @@ async def test_cleanup_and_cold_recovery_preserve_scope_for_new_selections(tmp_p
         assert owned.connection.execute(
             "SELECT * FROM segment_scope_members ORDER BY ordinal").fetchall() == scope
 
-        _accept(owned, "903", [{"name": "清理来源", "type": "delete_action_outputs",
-            "scheduled_at": "2026-01-15 09:00:00",
-            "params": {"source": {"action_instance_id": str(aid)}}}])
-        cleanup_id = owned.connection.execute("SELECT MAX(id) FROM actions").fetchone()[0]
+        accepted = await submit_output_document(
+            runtime.database, catalog=Catalog(), occurred_at=runtime.wall_us(), body={
+                "request_id": "903", "created_at": "2026-01-15 08:00:00", "name": "清理来源",
+                "actions": [{"name": "清理来源", "type": "delete_action_outputs",
+                             "scheduled_at": "2026-01-15 09:00:00",
+                             "params": {"source": {"action_instance_id": str(aid)}}}],
+            })
+        assert accepted.plan_id is not None, accepted
+        cleanup_id = owned.connection.execute(
+            "SELECT id FROM actions WHERE plan_id=?", (accepted.plan_id,)).fetchone()[0]
         repository = OutputsRepository()
         started = repository.start_cleanup_action(StartCleanupAction(cleanup_id, runtime.wall_us()),
             new_operation_key(), owned)
@@ -314,11 +256,6 @@ async def test_group_waits_for_pending_source_and_keeps_successful_member_scope(
     from camctl.operations.attempts import RetryWaitGate
     from camctl.operations.models import ErrorValue
     from camctl.outputs.handoff import DeliveryDirectories
-    from camctl.outputs.obtain_flow import (
-        ObtainRuntime,
-        _fix_pending_selections,
-        _publish_and_finish,
-    )
     from camctl.outputs.obtain_summary import ObtainPhase, decide_obtain_finish
     from camctl.persistence.repositories.operations import OperationRepository
     from camctl.persistence.repositories.outputs import load_obtain_facts
@@ -331,7 +268,7 @@ async def test_group_waits_for_pending_source_and_keeps_successful_member_scope(
 
     owned, runtime, aid = await _source(tmp_path, pending_capture_group="同组分段")
     try:
-        plan_id = runtime.action(aid)["plan_id"]
+        plan_id = (await runtime.action(aid))["plan_id"]
         scenarios = []
         for request_id, scope in ((2, "group"), (3, "plan")):
             source = {"plan_instance_id": str(plan_id)}
@@ -341,27 +278,18 @@ async def test_group_waits_for_pending_source_and_keeps_successful_member_scope(
                 owned, runtime, source, "default", request_id
             )
             scenarios.append((scope, action, selection))
-        obtain = ObtainRuntime(
-            owned,
-            {},
-            DeliveryDirectories(
-                tmp_path / "staging", tmp_path / "ready", tmp_path / "processing"
-            ),
-            1024,
-            RetryWaitGate(),
-            runtime.monotonic_ns,
-            runtime.wall_us,
-            OutputsRepository(),
-            OperationRepository(),
-        )
-        _fix_pending_selections(obtain, runtime.wall_us())
+        for _scope, _action, selection in scenarios:
+            fixed = fix_segment_selection(
+                FixSegmentSelection(selection, runtime.wall_us()), new_operation_key(), owned)
+            assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
         for scope, action, _ in scenarios:
             facts = load_obtain_facts(owned.connection, action)
             assert facts.waiting_sources == 1 and facts.total == 3, scope
             assert decide_obtain_finish(facts).phase is ObtainPhase.WAIT_SOURCES, scope
-            await _publish_and_finish(
-                obtain, action, runtime.wall_us(), publish_limit=1
-            )
+            from camctl.persistence.repositories.outputs import FinishObtain
+            finish = OutputsRepository().finish_obtain(
+                FinishObtain(action, runtime.wall_us()), new_operation_key(), owned)
+            assert finish.kind is DbOutcomeKind.ROLLED_BACK
             assert row_facts(owned.connection, "actions", action)["status"] == 2
         pending = aid + 1
         now = runtime.wall_us()
@@ -372,7 +300,7 @@ async def test_group_waits_for_pending_source_and_keeps_successful_member_scope(
         ):
             receipt = save(request, new_operation_key(), owned)
             assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-        assert runtime.action(pending)["status"] == 2
+        assert (await runtime.action(pending))["status"] == 2
         runtime.baseline_directory = Directory(
             [
                 lambda request: DirectoryRead(
@@ -387,8 +315,13 @@ async def test_group_waits_for_pending_source_and_keeps_successful_member_scope(
             ]
         )
         await capture_handler("camera_record")(pending, runtime)
-        obtain.discovery.begin_round(owned.connection, now)
-        _fix_pending_selections(obtain, now)
+        pending_selections = [row[0] for row in owned.connection.execute(
+            "SELECT s.id FROM obtain_source_selections s JOIN action_dependencies d"
+            " ON d.id=s.dependency_id WHERE d.depends_on_action_id=? AND s.status=1", (pending,))]
+        assert len(pending_selections) == 2
+        for selection in pending_selections:
+            fixed = fix_segment_selection(FixSegmentSelection(selection, now), new_operation_key(), owned)
+            assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
         for scope, action, selection in scenarios:
             facts = load_obtain_facts(owned.connection, action)
             assert (
@@ -581,11 +514,6 @@ async def test_default_scope_failure_does_not_create_delivery_targets(tmp_path, 
     from camctl.contracts.workflow_errors import item_error_id
     from camctl.operations.attempts import RetryWaitGate
     from camctl.outputs.handoff import DeliveryDirectories
-    from camctl.outputs.obtain_flow import (
-        ObtainRuntime,
-        _fix_pending_selections,
-        _publish_and_finish,
-    )
     from camctl.persistence.repositories.operations import OperationRepository
 
     owned, runtime, aid = await _source(
@@ -598,20 +526,16 @@ async def test_default_scope_failure_does_not_create_delivery_targets(tmp_path, 
         identities = [row[0] for row in owned.connection.execute("SELECT id FROM outputs")]
         action, selection = _obtain(owned, runtime, aid, "default", 2,
                                     exclude_output_ids=identities if exclude else None)
-        obtain = ObtainRuntime(
-            owned,
-            {},
-            DeliveryDirectories(
-                tmp_path / "staging", tmp_path / "ready", tmp_path / "processing"
-            ),
-            1024,
-            RetryWaitGate(),
-            runtime.monotonic_ns,
-            runtime.wall_us,
-            OutputsRepository(),
-            OperationRepository(),
+        from types import SimpleNamespace
+        from camctl.devices.drivers.registry import DriverRegistry
+        from camctl.bootstrap.obtain_assembly import obtain_flow
+        from ..support.outputs import obtain_factory
+        factory = obtain_factory(
+            devices={}, drivers=DriverRegistry(), staging=tmp_path / "staging",
+            ready=tmp_path / "ready", processing=tmp_path / "processing",
+            occurred_at=runtime.wall_us, monotonic_ns=runtime.monotonic_ns,
         )
-        _fix_pending_selections(obtain, runtime.wall_us())
+        await obtain_flow(factory)(SimpleNamespace(database=runtime.database))
         row = row_facts(owned.connection, "obtain_source_selections", selection)
         code = (
             "default_segment_scope_empty"
@@ -631,7 +555,6 @@ async def test_default_scope_failure_does_not_create_delivery_targets(tmp_path, 
         assert owned.connection.execute(
             "SELECT COUNT(*) FROM file_copies"
         ).fetchone() == (0,)
-        await _publish_and_finish(obtain, action, runtime.wall_us(), publish_limit=1)
         finished = row_facts(owned.connection, "actions", action)
         assert finished["status"] == 4
         assert finished["error_details_json"] == {}
@@ -646,7 +569,7 @@ async def test_default_scope_failure_does_not_create_delivery_targets(tmp_path, 
 
 
 @pytest.mark.parametrize("all_excluded", [False, True])
-async def test_default_segment_exclusions_keep_scope_and_replay(tmp_path, all_excluded):
+async def test_default_segment_exclusions_keep_scope_and_replay(tmp_path, all_excluded, capture_resources):
     from camctl.persistence.repositories.outputs import FinishObtain
     from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
@@ -668,7 +591,11 @@ async def test_default_segment_exclusions_keep_scope_and_replay(tmp_path, all_ex
             if iteration == 0:
                 owned.connection.close()
                 owned = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
-                runtime.owned = owned
+                database = await capture_resources.restart_database(tmp_path / "state.db")
+                runtime = await capture_resources.runtime(
+                    database, driver=runtime.driver, evidence=runtime.evidence,
+                    wall_us=runtime.wall_us, monotonic_ns=runtime.monotonic_ns,
+                )
         if all_excluded:
             for operation_key in (new_operation_key(), new_operation_key()):
                 done = OutputsRepository().finish_obtain(

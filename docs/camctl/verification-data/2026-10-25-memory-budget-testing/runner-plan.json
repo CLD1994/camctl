@@ -1,0 +1,12 @@
+[
+  {
+    "id": "root/test_host_wait_failures",
+    "scope": "root",
+    "path": "tests/integration/test_host_wait_failures.py",
+    "targets": [
+      "tests/integration/test_host_wait_failures.py"
+    ],
+    "estimated_seconds": 0,
+    "historical_failure_observed": false
+  }
+]

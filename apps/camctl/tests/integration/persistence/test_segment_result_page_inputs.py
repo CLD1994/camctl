@@ -33,6 +33,12 @@ register_operation_guards()
 register_capture_guards()
 
 
+def _relation_values(*,identity,**values):
+    from camctl.persistence.repositories.result_pages import result_file_family
+    directory,stem,role=result_file_family(identity)
+    return {**values,'identity':identity,'family_directory':directory,'family_stem':stem,'family_role':role}
+
+
 def _osmo_entry(path: str, *, size: int | None, complete: bool = True) -> dict:
     suffix = path.rpartition(".")[2].lower()
     return {
@@ -419,7 +425,7 @@ async def test_page_read_rejects_corrupt_relation_without_rebuilding(owned, tmp_
 @pytest.mark.asyncio
 async def test_bounded_zero_difference_preserves_raw_page_without_index(
         owned, tmp_path, page_kind):
-    from camctl.persistence.transaction import _apply_rows
+    from ..support.output_planning import apply_values
 
     root = "/mnt/media_rw/emulated/DCIM"
     identity = f"{root}/already-seen.OSV"
@@ -449,7 +455,7 @@ async def test_bounded_zero_difference_preserves_raw_page_without_index(
             def context(event, transaction):
                 nonlocal previous
                 if previous is not None:
-                    _apply_rows(current, (previous,))
+                    apply_values(current, previous)
                 previous = event
                 return EventContext(transaction, finite.owners, deepcopy(current),
                     transaction_rows=deepcopy(finite.state_rows),
@@ -545,7 +551,7 @@ async def test_atomic_page_guard_recomputes_the_difference_and_index_rows(owned,
 @pytest.mark.parametrize("count", [1, 127, 128])
 @pytest.mark.asyncio
 async def test_bounded_entry_accepts_only_actual_append_then_index(owned, tmp_path, count):
-    from camctl.persistence.transaction import _apply_rows
+    from ..support.output_planning import apply_values
 
     root = "/mnt/media_rw/emulated/DCIM/CAM"
     runtime, ticket, _ = await _baseline_world(owned, tmp_path, ())
@@ -569,7 +575,7 @@ async def test_bounded_entry_accepts_only_actual_append_then_index(owned, tmp_pa
             def context(event, transaction):
                 nonlocal previous
                 if previous is not None:
-                    _apply_rows(current, (previous,))
+                    apply_values(current, previous)
                 previous = event
                 return EventContext(transaction, finite.owners, deepcopy(current),
                     transaction_rows=deepcopy(finite.state_rows),
@@ -613,7 +619,7 @@ async def test_bounded_entry_accepts_only_actual_append_then_index(owned, tmp_pa
 ])
 @pytest.mark.asyncio
 async def test_bounded_entry_rejects_mutated_page_group(owned, tmp_path, tamper):
-    from camctl.persistence.transaction import _apply_rows
+    from ..support.output_planning import apply_values
 
     root = "/mnt/media_rw/emulated/DCIM/CAM"
     identity = f"{root}/bounded-tamper.OSV"
@@ -668,7 +674,7 @@ async def test_bounded_entry_rejects_mutated_page_group(owned, tmp_path, tamper)
             def context(event, transaction):
                 nonlocal previous
                 if previous is not None:
-                    _apply_rows(current, (previous,))
+                    apply_values(current, previous)
                 previous = event
                 return EventContext(transaction, owners, deepcopy(current),
                     transaction_rows=deepcopy(finite.state_rows),
@@ -758,7 +764,7 @@ async def test_create_only_prefix_cannot_complete_without_page(owned, tmp_path, 
 
 def _bounded_from_finite(plan, *, transaction_rows=None, complete=None):
     """用真实 finite plan 事件及实际 CREATE 前缀构造 Bounded 入口。"""
-    from camctl.persistence.transaction import _apply_rows
+    from ..support.output_planning import apply_values
 
     state = deepcopy(plan.state_rows)
     create_type = load_event_registry()["events"]["DEVICE_FILE_OBSERVED"]["id"]
@@ -770,7 +776,7 @@ def _bounded_from_finite(plan, *, transaction_rows=None, complete=None):
     def context(event, transaction):
         nonlocal previous
         if previous is not None:
-            _apply_rows(state, (previous,))
+            apply_values(state, previous)
         previous = event
         return EventContext(
             transaction, plan.owners, deepcopy(state),
@@ -894,7 +900,7 @@ async def test_fix1_i1_real_baseline_rejects_caller_task_scope_and_common_extra(
                 scope.connection, "device_files", old_file_id)
             events = list(plan.events)
             append_index = next(i for i, event in enumerate(events)
-                if (event.event_type, event.reason) == (rp._TYPE, rp._APPEND))
+                if (event.event_type, event.reason) == (load_event_registry()['events']['RESULT_PAGE']['id'], load_event_registry()['events']['RESULT_PAGE']['branches']['APPEND']['reason']))
             index_index = append_index + 1
             append = events[append_index]
             evidence = deepcopy(dict(append.evidence))
@@ -905,7 +911,7 @@ async def test_fix1_i1_real_baseline_rejects_caller_task_scope_and_common_extra(
 
             index = events[index_index]
             relation_id = index.rows[-1].row_id + 1
-            values = rp._relation_values(
+            values = _relation_values(
                 created_event_id=index.event_id,
                 action_id=plan.result_page_write_scope.action_id,
                 run_id=ticket.run_id,
@@ -976,7 +982,7 @@ def _damage_page_group(owned, page_event_id, corruption, *, outside_file_id,
             "DELETE FROM result_page_files WHERE id=?", (relation_id,))
     elif corruption == "extra_relation":
         relation_id = next_row_id(owned.connection, "result_page_files")
-        values = rp._relation_values(
+        values = _relation_values(
             created_event_id=index_event_id, action_id=action_id, run_id=run_id,
             attempt_id=attempt_id, page_event_id=page_event_id,
             file_id=outside_file_id, identity=outside_identity)
@@ -988,7 +994,7 @@ def _damage_page_group(owned, page_event_id, corruption, *, outside_file_id,
             ",".join("?" for _ in range(len(names) + 1)) + ")",
             (relation_id, *(values[name] for name in names)))
     elif corruption == "same_count_replacement":
-        values = rp._relation_values(
+        values = _relation_values(
             created_event_id=index_event_id, action_id=action_id, run_id=run_id,
             attempt_id=attempt_id, page_event_id=page_event_id,
             file_id=outside_file_id, identity=outside_identity)
@@ -1162,7 +1168,7 @@ def _rewrite_page_group_members(owned, append_id, file_ids):
     rewritten_rows = []
     owned.connection.execute("DELETE FROM result_page_files WHERE page_event_id=?", (append_id,))
     for relation_id, (identity, file_id) in zip(relation_ids, file_ids):
-        values = rp._relation_values(
+        values = _relation_values(
             created_event_id=index_id, action_id=owner_action_id, run_id=run_id,
             attempt_id=attempt_id, page_event_id=append_id,
             file_id=file_id, identity=identity)

@@ -1,0 +1,13 @@
+内存预算启动收据：/tmp/camctl-quality-evidence/osmo/latest83-normal-budget/launcher.json
+.                                                                        [100%]
+=============================== warnings summary ===============================
+../../workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/cacheprovider.py:469
+  /workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/cacheprovider.py:469: PytestCacheWarning: could not create cache path /.pytest_cache/v/cache/nodeids: [Errno 13] Permission denied: '/pytest-cache-files-72aknzjo'
+    config.cache.set("cache/nodeids", sorted(self.cached_nodeids))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============================= slowest 10 durations =============================
+50.18s call     tmp/camctl-quality-osmo-20261026/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[normal-indexes0-2-succeeded]
+22.12s setup    tmp/camctl-quality-osmo-20261026/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[normal-indexes0-2-succeeded]
+0.13s teardown tmp/camctl-quality-osmo-20261026/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[normal-indexes0-2-succeeded]
+1 passed, 1 warning in 72.59s (0:01:12)

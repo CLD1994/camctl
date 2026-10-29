@@ -330,7 +330,7 @@ async def _recording_consumer(tmp_path):
         activity_id, = owned.connection.execute(
             "SELECT id FROM device_activities WHERE action_id=?", (action_id,),
         ).fetchone()
-        runtime = _configured(owned, StartDriver(returned("operation", "start_confirmed", activity_id)))
+        runtime = (await _configured(owned, StartDriver(returned("operation", "start_confirmed", activity_id))))
         runtime.evidence = RESULT_EVIDENCE
         runtime.stop_config = replace(
             runtime.stop_config, timeout_s=Decimal("0.125"), retry_interval_s=Decimal("1"),

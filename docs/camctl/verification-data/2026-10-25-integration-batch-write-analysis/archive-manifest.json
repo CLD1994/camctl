@@ -1,0 +1,24 @@
+{
+  "source_head": "98d3b28da5751e1e8c733f2712180cd5e0e119aa",
+  "scope": "N200、B4的四因素同一冻结输入对照；额外诊断只用于阶段与函数次数，不替代原容量验收。",
+  "files": {
+    "execution.json": "7fdb32925de34261b009eeb107c78d2acfeb42fd2a94eb68ba7faa93213e00ae",
+    "factor-results.json": "b0bb2914d48791739a932b8d97ca983cb710884b7f22208fb119604f3db15674",
+    "factor-summary.json": "528fd6dd56c59eefaf5084ae0a28a7dc45bc457322589572a7fce2f3be748bf5",
+    "measurement-window-audit.json": "9b06c1ce7ce04ee34cfe163082a3d05cc48e597abdf48a8a8a856defe499407c",
+    "metadata.json": "97829dd6046e9f4b61f4f6a24e2354bf0e849f177905e0659a759581b61a9ce0",
+    "path-analysis.json": "75513c5494e3c8ce773d52ead94afa19f36395116f4e07e38697430f0ab78a2a",
+    "probe.log": "530dc5da9e48d18f490f5f6df3f3152218eeecbf41df7eba0658f629a686edd0",
+    "probe.py": "2b520756e17a7357e96cf90aa335ae21bd6b153248564b8afd2f9b2556df7f55",
+    "progress.jsonl": "181fb48ce159fe864beda92732935fb6a4ce83b2c9755a1330ba02df7c7562dd",
+    "selected-function-counts.json": "d506fd03242567629fc8f7fba7f53f72fb817875b36e8dafd020a1fc6990d809",
+    "source-identity.json": "9bc61833ba35b2681b2ea55c16cd35c2678115447324ede987e2bb524daf8606",
+    "stages-execution.json": "c8f6d30df362f2624d2bd7a78d95e6f9ba49c6ca3b2fd1b5fd1d10b8564d1d75",
+    "stages.log": "17807b03e651ae013dae79797ee4ca16ccc3d5a5cd7c270b43f1412113400d12",
+    "stages.py": "da3710588aadf98a35b854f441b8e3b0c0788cd5cf37c955898f59926165b4aa",
+    "write-profile-functions.json": "2acafc1b8d803e072670a9e4626c996d6e662882cc3035458634b6746f7b77bd",
+    "write-sql-groups.json": "c0bdda6e021a1449f117e5e89ecfbc81d9559493a16d843f56aea6717e0a5a27",
+    "write-stages-no-profile.json": "8ffb3b10310b9d0caed1c4de670497e76ae3964d267b766fd23cac0cb928a487",
+    "write-transaction-stages.json": "50bf8781dc64b08622b1ff83470f4824cba7958edc89fdb5451029fbcc535af7"
+  }
+}

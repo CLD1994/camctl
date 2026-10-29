@@ -13,6 +13,7 @@ from camctl.reporting.policy import (
     publish_report, record_report_bytes, record_report_failure, record_report_publish_intent,
 )
 from camctl.reporting import policy
+from ..support.reporting import deny_storage_access
 
 from .test_publish import connection, _bytes, _freeze_report, _moved, _owned, _publish, _update
 
@@ -139,31 +140,19 @@ def test_intent_reuse_requires_original_first_byte_fact(connection, tmp_path, mu
 
 
 @pytest.mark.parametrize("phase", ["prepare", "intent", "publish", "failure"])
-@pytest.mark.parametrize("prefix", ["SELECT l.change_count", "SELECT event_id, change_count FROM entity_event_links",
-                                  "SELECT link.event_id, txn.operation_key"])
-def test_original_management_restore_failure_preserves_exception_and_database(connection, tmp_path, phase, prefix):
+@pytest.mark.parametrize("table,column", [
+    ("entity_event_links", "change_count"), ("entity_event_links", "event_id"),
+    ("history_transactions", "operation_key"),
+])
+def test_original_management_restore_failure_preserves_exception_and_database(connection, tmp_path, phase, table, column):
     report_id, key, _ = _original(connection, tmp_path, phase)
     _completed(_call(connection, report_id, "failure", new_operation_key(), error={"reason": "later"}))
-    problem = sqlite3.OperationalError("原报告恢复读取失败")
-
-    class FailingRead:
-        def execute(self, sql, parameters=()):
-            if sql.startswith(prefix):
-                raise problem
-            return connection.execute(sql, parameters)
-
-        @property
-        def total_changes(self):
-            return connection.total_changes
-
-        @property
-        def in_transaction(self):
-            return connection.in_transaction
-
     before = tuple(connection.iterdump())
-    result = _call(FailingRead(), report_id, phase, key)
+    with deny_storage_access(connection, sqlite3.SQLITE_READ, table, column) as observed:
+        result = _call(connection, report_id, phase, key)
+    assert observed
     assert result.kind is DbOutcomeKind.ROLLED_BACK
-    assert result.error is problem
+    assert type(result.error) is sqlite3.DatabaseError
     assert tuple(connection.iterdump()) == before
 
 
@@ -184,6 +173,10 @@ def test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key(connec
         @property
         def in_transaction(self):
             return connection.in_transaction
+
+        @property
+        def total_changes(self):
+            return connection.total_changes
 
         def execute(self, sql, parameters=()):
             if sql == "COMMIT":

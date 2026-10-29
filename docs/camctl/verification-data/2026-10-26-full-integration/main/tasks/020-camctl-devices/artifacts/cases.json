@@ -1,0 +1,4239 @@
+[
+  {
+    "nodeid": "tests/integration/devices/test_action6_file_commands.py::test_action6_original_binding_deletes_exact_file_and_queries_absence[clip.LRF]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0023048799921525642
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.021952476992737502
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006820060079917312
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.024939362992881797
+  },
+  {
+    "nodeid": "tests/integration/devices/test_action6_file_commands.py::test_action6_original_binding_deletes_exact_file_and_queries_absence[clip.MP4]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0022293999936664477
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.021226964992820285
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005444910057121888
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.024000855992198922
+  },
+  {
+    "nodeid": "tests/integration/devices/test_action6_file_commands.py::test_action6_original_binding_deletes_exact_file_and_queries_absence[frame.JPG]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010840199975064024
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.02449997400981374
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010607629956211895
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.026644757002941333
+  },
+  {
+    "nodeid": "tests/integration/devices/test_action6_file_commands.py::test_action6_original_binding_deletes_exact_file_and_queries_absence[frame.DNG]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0017633020033827052
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.02617013399139978
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008620040025562048
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.02879543999733869
+  },
+  {
+    "nodeid": "tests/integration/devices/test_action6_file_commands.py::test_action6_same_name_directory_is_unknown_and_keeps_contents",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013219810061855242
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.009901022000121884
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.001315294997766614
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.012538298004074022
+  },
+  {
+    "nodeid": "tests/integration/devices/test_action6_result_pages.py::test_action6_pages_register_many_jpegs_and_cross_page_mp4_lrf_pair",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.04535448800015729
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.002839811990270391
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.003021673997864127
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.05121597398829181
+  },
+  {
+    "nodeid": "tests/integration/devices/test_action6_result_pages.py::test_segmented_formal_adapter_pairs_only_new_files_after_complete_scan",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.02610792599443812
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.048689977993490174
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.004355849989224225
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.07915375397715252
+  },
+  {
+    "nodeid": "tests/integration/devices/test_action6_result_pages.py::test_action6_dng_stays_dng_and_missing_frozen_jpeg_rule_is_explicit",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.02873193399864249
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.0025615289923734963
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.004492057007155381
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.03578551999817137
+  },
+  {
+    "nodeid": "tests/integration/devices/test_action6_result_pages.py::test_formal_result_adapter_rejects_lrf_after_saved_original_disappears",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.027524906996404752
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.003007102000992745
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0030238540057325736
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.03355586300313007
+  },
+  {
+    "nodeid": "tests/integration/devices/test_action6_result_pages.py::test_formal_result_adapter_does_not_treat_baseline_original_as_new_history",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.04304318499634974
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.0017788990080589429
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0018209669942734763
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.046643050998682156
+  },
+  {
+    "nodeid": "tests/integration/devices/test_action6_result_pages.py::test_formal_result_adapter_rejects_a_forged_cursor_before_device_dispatch",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.032197420005104505
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.0018395149963907897
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.003728135008714162
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.037765070010209456
+  },
+  {
+    "nodeid": "tests/integration/devices/test_action6_result_pages.py::test_formal_result_adapter_rejects_later_cursor_without_saved_history",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.028037167998263612
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.0032104590063681826
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0032316730066668242
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.03447930001129862
+  },
+  {
+    "nodeid": "tests/integration/devices/test_action6_result_pages.py::test_formal_result_adapter_does_not_read_previous_attempt_history",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.029661047999979928
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.0021173820132389665
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0034745409939205274
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.03525297100713942
+  },
+  {
+    "nodeid": "tests/integration/devices/test_action6_result_pages.py::test_formal_result_adapter_rejects_continuation_after_failed_saved_page",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.02552631100115832
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.001949127996340394
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.002910912997322157
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.03038635199482087
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_static_and_runtime_registration_share_complete_contract_and_refresh_binding[dji-action6]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007863630016800016
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.03407411600346677
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005890400061616674
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.03544951901130844
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_static_and_runtime_registration_share_complete_contract_and_refresh_binding[dji-osmo360-ii]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008854560001054779
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.026979008995112963
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006473300018114969
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.028511794997029938
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_builtin_adb_contracts_keep_device_source_and_declared_delete_value",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00041373800195287913
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0017030209855875
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00041030799911823124
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0025270669866586104
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_incomplete_contract_contents_are_filtered_even_with_task_factory[setting]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004348290094640106
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0019015930010937154
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.001289018997340463
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.003625441007898189
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_incomplete_contract_contents_are_filtered_even_with_task_factory[start]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008407010027440265
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013334079994820058
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00036438800452742726
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0025384970067534596
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_incomplete_contract_contents_are_filtered_even_with_task_factory[result]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005229609960224479
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012455969990696758
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00030083600722718984
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0020693940023193136
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_incomplete_contract_contents_are_filtered_even_with_task_factory[task]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00050646900490392
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009510169911663979
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00047551500028930604
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.001933000996359624
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_incomplete_contract_contents_are_filtered_even_with_task_factory[files]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005171569937374443
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009278679935960099
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008495439979014918
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.002294568985234946
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_incomplete_contract_contents_are_filtered_even_with_task_factory[evidence]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.000452438005595468
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013888040120946243
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004642790008801967
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.002305521018570289
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_collision_is_rejected_before_either_registry_changes",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004300969885662198
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0017812660080380738
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004445659869816154
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.002655928983585909
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_builtin_camera_contracts_declare_file_cleanup_independently_of_capture_query",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006534749991260469
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0015105190104804933
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004552570026135072
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0026192510122200474
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-action6]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.037346523997257464
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.09066044200153556
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0027841730043292046
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.13079113900312223
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-osmo360-ii]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.04464534799626563
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.0021722860110457987
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.004085667998879217
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.05090330200619064
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_driver_ports_use_original_ticket_and_explicit_capabilities[stop-dji-action6]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001844639002229087
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.002907934001996182
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011914820061065257
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.005944055010331795
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_driver_ports_use_original_ticket_and_explicit_capabilities[stop-dji-osmo360-ii]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0019894129945896566
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.002567666000686586
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010574379994068295
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.005614516994683072
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_driver_ports_use_original_ticket_and_explicit_capabilities[result-dji-action6]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0032084550039144233
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.005580386001383886
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0014034670020919293
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.010192308007390238
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_driver_ports_use_original_ticket_and_explicit_capabilities[result-dji-osmo360-ii]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0019646080036181957
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0030951209919294342
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.002704291997360997
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.007764020992908627
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_driver_ports_use_original_ticket_and_explicit_capabilities[query-dji-action6]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0027176400035386905
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0034326439927099273
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0019081250065937638
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.008058409002842382
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_driver_ports_use_original_ticket_and_explicit_capabilities[query-dji-osmo360-ii]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012772649934049696
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011004680127371103
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008615999977337196
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0032393330038757995
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_file_query_uses_query_ticket_without_enabling_capture_state_query",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.000993738998658955
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.002523162998841144
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.001006571008474566
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.004523473005974665
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_fresh_cli_registers_camera_without_device_io[dji-action6]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0029897220083512366
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 1.3900130090041785
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0045934399968246
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 1.3975961710093543
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_fresh_cli_registers_camera_without_device_io[dji-osmo360-ii]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002009256000746973
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 1.3586473199975444
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.001104713010136038
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 1.3617612890084274
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_pending_contract_is_not_described_or_accepted[False-camera_record-dji-action6]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.03906718399957754
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.003322681994177401
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.007013424998149276
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.049403290991904214
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_pending_contract_is_not_described_or_accepted[False-camera_record-dji-osmo360-ii]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.03519744399818592
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.0029860020003980026
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.004328369002905674
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.042511815001489595
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_pending_contract_is_not_described_or_accepted[False-camera_timelapse-dji-action6]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.02556679298868403
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.0028075469890609384
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00381248899793718
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.03218682897568215
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_pending_contract_is_not_described_or_accepted[False-camera_timelapse-dji-osmo360-ii]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.020484838998527266
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.0017292950069531798
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.001793640010873787
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.024007774016354233
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_pending_contract_is_not_described_or_accepted[True-camera_record-dji-action6]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.023397076001856476
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.0019090349960606545
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0027661549975164235
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.028072265995433554
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_pending_contract_is_not_described_or_accepted[True-camera_record-dji-osmo360-ii]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.021339024999178946
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.0019490420090733096
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.002524555995478295
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.02581262300373055
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_pending_contract_is_not_described_or_accepted[True-camera_timelapse-dji-action6]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.02591179199225735
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.002789651000057347
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.005060807001427747
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.033762249993742444
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_pending_contract_is_not_described_or_accepted[True-camera_timelapse-dji-osmo360-ii]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.08292534400243312
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.004215199005557224
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.004449981002835557
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.0915905240108259
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_managed_transport_preserves_both_channels_and_process_group",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008166750048985705
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.013825426998664625
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005929100007051602
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.015235012004268356
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_late_normal_stop_ack_retains_timeout_under_osmo_response_contract",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005513819924090058
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.048232936998829246
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.000657144992146641
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.04944146398338489
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_real_large_response_is_explicitly_incomplete[stdout]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008794220048002899
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.04027045299881138
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007209509931271896
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.04187082599673886
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_real_large_response_is_explicitly_incomplete[stderr]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001372239988995716
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.028918623997014947
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005845679988851771
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.03087543198489584
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_stream_output_error_triggers_stop_before_normal_deadline",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006083399930503219
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.016041989001678303
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.002171583997551352
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.018821912992279977
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_recursive_paging_preserves_old_new_and_special_paths",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0019178819929948077
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.07897269999375567
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009559250029269606
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.08184650698967744
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_directory_paging_with_awk_that_cannot_preserve_nul[None-names0-True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0020228709909133613
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.019040104001760483
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009441870060982183
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.022007161998772062
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_directory_paging_with_awk_that_cannot_preserve_nul[0.mp4-names1-True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00259009501314722
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.01730563200544566
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011401530064176768
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.021035880025010556
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_directory_paging_with_awk_that_cannot_preserve_nul[a.mp4-names2-True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0024520970036974177
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.012998401987715624
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.000931070011574775
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.016381569002987817
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_directory_paging_with_awk_that_cannot_preserve_nul[bb.mp4-names3-False]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0014556649985024706
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.01278439798625186
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008464650018140674
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.015086527986568399
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_directory_paging_with_awk_that_cannot_preserve_nul[d.mp4-names4-False]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0018889959901571274
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.012804030993720517
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010306530020898208
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.015723679985967465
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_directory_paging_with_awk_that_cannot_preserve_nul[z.mp4-names5-False]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0034435319976182655
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.02027836900379043
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.002251137004350312
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.025973038005759008
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_directory_tool_failure_is_not_a_reliable_empty_page",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0035934460029238835
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.017623484003706835
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0017834730097092688
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.023000403016339988
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_directory_record_read_failure_is_not_a_reliable_end[0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.003354731001309119
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.016777445998741314
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0014257360016927123
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.021557913001743145
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_directory_record_read_failure_is_not_a_reliable_end[1]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002328093003598042
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.014229218999389559
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013451870036078617
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.017902499006595463
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_directory_sort_failure_keeps_actual_exit_and_diagnostic",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0017679300071904436
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.030516083992552012
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008049030002439395
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.033088916999986395
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_metadata_and_source_digest_come_from_remote_tool",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0014238900039345026
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.01240118101122789
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005655879940604791
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.014390659009222873
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_metadata_batch_script_preserves_raw_fields_statuses_and_special_paths",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011342460056766868
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.013334174989722669
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007922750082798302
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.015260696003679186
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_concrete_driver_file_ports_preserve_original_identity_and_content",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001406177005264908
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.04980985799920745
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010483560035936534
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.05226439100806601
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_missing_source_retains_access_error_without_host_digest",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010978430073009804
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.004098667996004224
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00046738899254705757
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.005663899995852262
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_empty_file_is_present_and_access_failure_remains_unknown",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008470129978377372
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.006711623995215632
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005024600104661658
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.008061097003519535
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_explicit_delete_only_removes_requested_file",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012367339950287715
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.006996031996095553
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005771340074716136
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.008809899998595938
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_read_session_preserves_unaligned_offset_and_actual_end",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013399820018094033
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.044391142000677064
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0018228669941890985
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.047553990996675566
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_read_shorter_than_fixed_source_is_a_failure",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002295611993758939
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.007225232999189757
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.001563472003908828
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.011084316996857524
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_wrong_original_binding_never_invokes_tool",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001368836994515732
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008742030040593818
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006563159986399114
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.002899355997215025
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_transport.py::test_stop_request_waits_for_actual_read_call_return",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010032339923782274
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.002312248994712718
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009586780070094392
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.004274160994100384
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_zero_byte_original_is_present_and_exact_absence_is_reliable[empty.OSV]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0016117960039991885
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.013978601011331193
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008172109955921769
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.01640760801092256
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_zero_byte_original_is_present_and_exact_absence_is_reliable[a 'quote'\\nzero.LRF]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002486404002411291
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.012169256006018259
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006763559940736741
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.015332016002503224
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_zero_byte_original_is_present_and_exact_absence_is_reliable[b\\\\literal * ?.OSV]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013999530056025833
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.01124779500241857
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005443139962153509
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.013192062004236504
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_delete_only_removes_exact_original_and_observes_once[source.OSV]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0023816230095690116
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.011710256003425457
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011914280039491132
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.015283307016943581
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_delete_only_removes_exact_original_and_observes_once[source.LRF]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013672630011569709
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.009593909009709023
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009328330052085221
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.011894005016074516
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_same_name_directory_is_unknown_and_never_recursively_deleted[file_query]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001112892001401633
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.007608620988321491
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.000503051996929571
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.009224564986652695
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_same_name_directory_is_unknown_and_never_recursively_deleted[delete]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.000950949004618451
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.008019357002922334
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006298190128291026
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.009600125020369887
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_unavailable_original_directory_cannot_prove_absence[missing]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013419169990811497
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.005111462000058964
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006568469980265945
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.007110225997166708
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_unavailable_original_directory_cannot_prove_absence[file]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010893649887293577
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.006854145001852885
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005149059870745987
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.008458415977656841
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_find_failure_retains_present_only_when_original_name_was_observed[1-True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0019975739996880293
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.018096284999046475
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005460910033434629
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.020639950002077967
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_find_failure_retains_present_only_when_original_name_was_observed[1-False]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013022029888816178
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.024121469992678612
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006815950036980212
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.02610526798525825
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_find_failure_retains_present_only_when_original_name_was_observed[127-True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002640889011672698
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.01950081399991177
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005413679900811985
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.022683071001665667
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_find_failure_retains_present_only_when_original_name_was_observed[127-False]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001287328006583266
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.018127581002772786
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010462189966347069
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.02046112800599076
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_observation_before_timeout_survives_actual_local_termination",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010699169943109155
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 5.024721118010348
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012871770013589412
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 5.027078212006018
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_real_output_limit_discards_any_retained_observation_after_local_settlement[stdout]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.004223634998197667
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0416793689946644
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011857350036734715
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.04708873899653554
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_real_output_limit_discards_any_retained_observation_after_local_settlement[stderr]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0029767069936497137
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.030970015010097995
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.000937177988816984
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.03488389999256469
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_original_parent_symlink_must_be_traversed_before_absence_can_be_claimed",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0019024070061277598
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.011175202002050355
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.001348342004348524
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.014425951012526639
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_uninterpretable_find_namespace_never_proves_absence[double-separator]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00288123099016957
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.03696730200317688
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0015946329949656501
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0414431659883121
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_uninterpretable_find_namespace_never_proves_absence[different-root]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002757680995273404
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.02705557001172565
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006521689938381314
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.030465420000837184
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_uninterpretable_find_namespace_never_proves_absence[dot-component]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0016243769932771102
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.02524574000563007
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0016474409931106493
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.028517557992017828
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_uninterpretable_find_namespace_never_proves_absence[missing-root]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0014055560022825375
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.04228075299761258
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006167460087453946
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.04430305500864051
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_uninterpretable_find_namespace_never_proves_absence[duplicate-root]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001214855001308024
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.02150292599981185
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007195950020104647
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.02343737600313034
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_filesystem_root_find_prefix_is_single_slash",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001121490990044549
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.02027793400338851
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007573309994768351
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.022156755992909893
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_failed_delete_uses_one_rm_and_one_scan_without_retry",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011646170023595914
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.036977700001443736
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0015150190010899678
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.039657336004893295
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_directory_permission_failure_is_unknown_and_preserves_the_file[file_query]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012602979986695573
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0043988170073134825
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004514379979809746
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.006110553003964014
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_file_commands.py::test_directory_permission_failure_is_unknown_and_preserves_the_file[delete]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0018077730055665597
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.006173242989461869
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007615539943799376
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.008742569989408366
+  },
+  {
+    "nodeid": "tests/integration/devices/test_catalog.py::TestSameSourceRules::test_describe_document_passes_public_schema",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.000435737005318515
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.402668750990415
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005945349985267967
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.4036990229942603
+  },
+  {
+    "nodeid": "tests/integration/devices/test_catalog.py::TestSameSourceRules::test_acceptance_uses_same_schema_and_defaults",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0002758610062301159
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.014869691003696062
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004252740036463365
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.015570826013572514
+  },
+  {
+    "nodeid": "tests/integration/devices/test_catalog.py::TestSameSourceRules::test_acceptance_rejects_what_schema_rejects",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00038600299740210176
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.008581221001804806
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00028769299387931824
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.009254916993086226
+  },
+  {
+    "nodeid": "tests/integration/devices/test_catalog.py::TestSameSourceRules::test_exact_multiple_from_same_schema",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00042321499495301396
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.02239893098885659
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009505280031589791
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.023772673986968584
+  },
+  {
+    "nodeid": "tests/integration/devices/test_catalog.py::TestSameSourceRules::test_document_rejected_by_schema_when_malformed",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.000905826993403025
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.005414731000200845
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005783559900010005
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.006898913983604871
+  },
+  {
+    "nodeid": "tests/integration/devices/test_catalog.py::test_device_support_keeps_local_failure_scope[False-cam-1-True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012422790023265406
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.014817864997894503
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00035177099925931543
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.01641191499948036
+  },
+  {
+    "nodeid": "tests/integration/devices/test_catalog.py::test_device_support_keeps_local_failure_scope[False-cam-2-False]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005026569997426122
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.005495775010786019
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00047358000301755965
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.006472012013546191
+  },
+  {
+    "nodeid": "tests/integration/devices/test_catalog.py::test_device_support_keeps_local_failure_scope[True-cam-1-True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006096449942560866
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.014173673000186682
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008114119991660118
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.01559472999360878
+  },
+  {
+    "nodeid": "tests/integration/devices/test_catalog.py::test_device_support_keeps_local_failure_scope[True-cam-2-False]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007641499978490174
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.007135546999052167
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004943940002704039
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.008394090997171588
+  },
+  {
+    "nodeid": "tests/integration/devices/test_catalog.py::test_alternate_parameter_type_has_same_exported_and_effective_defaults",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00033356800850015134
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.014148861999274231
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00034614700416568667
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.01482857701194007
+  },
+  {
+    "nodeid": "tests/integration/devices/test_catalog.py::test_invalid_parameter_definition_fails_describe_and_acceptance[changes0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006817669927841052
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.004979492994607426
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004885509988525882
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.00614981098624412
+  },
+  {
+    "nodeid": "tests/integration/devices/test_catalog.py::test_invalid_parameter_definition_fails_describe_and_acceptance[changes1]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005286480009090155
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.007371394996880554
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00046912299876566976
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.008369165996555239
+  },
+  {
+    "nodeid": "tests/integration/devices/test_catalog.py::test_invalid_parameter_definition_fails_describe_and_acceptance[changes2]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001607844009413384
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0041110859892796725
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008167000050889328
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.006535630003781989
+  },
+  {
+    "nodeid": "tests/integration/devices/test_catalog.py::test_invalid_parameter_definition_fails_describe_and_acceptance[changes3]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005943530122749507
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.003627401005360298
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007214530050987378
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.004943207022733986
+  },
+  {
+    "nodeid": "tests/integration/devices/test_catalog.py::test_invalid_parameter_definition_fails_describe_and_acceptance[changes4]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00033093499951064587
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.004330153009505011
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004092150047654286
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.005070303013781086
+  },
+  {
+    "nodeid": "tests/integration/devices/test_catalog.py::test_invalid_parameter_definition_fails_describe_and_acceptance[changes5]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006506659992737696
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.002907161004259251
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003183090011589229
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0038761360046919435
+  },
+  {
+    "nodeid": "tests/integration/devices/test_catalog.py::test_invalid_parameter_definition_fails_describe_and_acceptance[changes6]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004356499994173646
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.006745147009496577
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005735799932153895
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.007754377002129331
+  },
+  {
+    "nodeid": "tests/integration/devices/test_catalog.py::test_invalid_parameter_definition_fails_describe_and_acceptance[changes7]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006710930028930306
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.008083459993940778
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00039020100666675717
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.009144754003500566
+  },
+  {
+    "nodeid": "tests/integration/devices/test_catalog.py::test_valid_parameter_local_reference_is_self_contained",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005162269953871146
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.017691697998088785
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008707040105946362
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.019078629004070535
+  },
+  {
+    "nodeid": "tests/integration/devices/test_driver_contract.py::test_driver_declared_evidence_matches_consumers",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011885999992955476
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010969190043397248
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00038920600491110235
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0026747250085463747
+  },
+  {
+    "nodeid": "tests/integration/devices/test_driver_contract.py::test_error_and_boundary_observations_are_rejected",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008873040060279891
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004080439975950867
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003822590078925714
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0016776070115156472
+  },
+  {
+    "nodeid": "tests/integration/devices/test_driver_contract.py::test_unsupported_capability_is_not_callable",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005008080042898655
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003458230057731271
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00032784699578769505
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0011744780058506876
+  },
+  {
+    "nodeid": "tests/integration/devices/test_driver_contract.py::test_file_query_is_independent_from_capture_state_query",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007285189931280911
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007558030047221109
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00029533500492107123
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0017796570027712733
+  },
+  {
+    "nodeid": "tests/integration/devices/test_driver_contract.py::test_delete_declaration_requires_file_query_capability",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006917190039530396
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005255120049696416
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00044240000715944916
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0016596310160821304
+  },
+  {
+    "nodeid": "tests/integration/devices/test_driver_contract.py::test_registry_rejects_file_query_without_port",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007247659959830344
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005895340000279248
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00045369399595074356
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0017679939919617027
+  },
+  {
+    "nodeid": "tests/integration/devices/test_driver_contract.py::test_registry_rejects_file_query_with_incomplete_observation_shape",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006779010000173002
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.001055184009601362
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003554330032784492
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0020885180128971115
+  },
+  {
+    "nodeid": "tests/integration/devices/test_driver_contract.py::test_registry_rejects_delete_without_port",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006161460041766986
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005479030078276992
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005535859963856637
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0017176350083900616
+  },
+  {
+    "nodeid": "tests/integration/devices/test_driver_contract.py::test_registry_rejects_delete_without_registered_observation",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008146909967763349
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006128009990788996
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00042245700024068356
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0018499489960959181
+  },
+  {
+    "nodeid": "tests/integration/devices/test_driver_contract.py::test_call_failure_is_not_missing_capability",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006992060079937801
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013075449969619513
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005929409962845966
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.002599692001240328
+  },
+  {
+    "nodeid": "tests/integration/devices/test_driver_contract.py::test_registry_separates_software_and_device_verification",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.000657894997857511
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004163569974480197
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005638540023937821
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0016381059976993129
+  },
+  {
+    "nodeid": "tests/integration/devices/test_driver_contract.py::test_unknown_operation_is_rejected",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008052979974308982
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005576319963438436
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005231389950495213
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0018860689888242632
+  },
+  {
+    "nodeid": "tests/integration/devices/test_driver_contract.py::test_registry_rejects_duplicate_and_missing",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008165420003933832
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006744659913238138
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004708799970103428
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0019618879887275398
+  },
+  {
+    "nodeid": "tests/integration/devices/test_evidence.py::test_binding_errors_cover_capture_retrieval_cleanup_and_shutdown",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.022854012990137562
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.0016199869860429317
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0020001649972982705
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.026474164973478764
+  },
+  {
+    "nodeid": "tests/integration/devices/test_evidence.py::test_matched_binding_lets_all_operations_proceed",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.02525666999281384
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.0007095179898897186
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0020024840050609782
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.027968671987764537
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_download.py::test_fixed_download_reads_requested_offset_and_removes_owned_copy[0-original-II*\\x00fixed camera original content]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0018435070087434724
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.004267461990821175
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.001357201996142976
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.007468170995707624
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_download.py::test_fixed_download_reads_requested_offset_and_removes_owned_copy[0-thumbnail-\\xff\\xd8fixed capture preview\\xff\\xd9]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0019229500030633062
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.003755514000658877
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011772049911087379
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.006855668994830921
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_download.py::test_fixed_download_reads_requested_offset_and_removes_owned_copy[7-original-II*\\x00fixed camera original content]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013425009965430945
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.005160547996638343
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0016856049915077165
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.008188653984689154
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_download.py::test_fixed_download_reads_requested_offset_and_removes_owned_copy[7-thumbnail-\\xff\\xd8fixed capture preview\\xff\\xd9]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.004501357994740829
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.003647463003289886
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009173890139209107
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.009066210011951625
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_download.py::test_fixed_download_reads_requested_offset_and_removes_owned_copy[end-original-II*\\x00fixed camera original content]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011246270005358383
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0021687000116799027
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012818700051866472
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.004575197017402388
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_download.py::test_fixed_download_reads_requested_offset_and_removes_owned_copy[end-thumbnail-\\xff\\xd8fixed capture preview\\xff\\xd9]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0022615479974774644
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.004035629011923447
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010979720100294799
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0073951490194303915
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_download.py::test_partial_or_replaced_content_is_rejected_before_session[II*\\x00fixed camera original conten]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011420019873185083
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0022965559910517186
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.000857384002301842
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.004295941980672069
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_download.py::test_partial_or_replaced_content_is_rejected_before_session[xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0018599530012579635
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.003240103993448429
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009140500042121857
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.006014106998918578
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_download.py::test_source_identity_and_locator_must_match_before_dispatch",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001437889994122088
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009505079942755401
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00039645300421398133
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0027848509926116094
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_download.py::test_original_binding_and_serial_fail_before_download[missing]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008974660013336688
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005261699989205226
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00032374999136663973
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0017473859916208312
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_download.py::test_original_binding_and_serial_fail_before_download[mismatch]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009494700061623007
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0022045400110073388
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009187520045088604
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0040727620216785
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_download.py::test_original_binding_and_serial_fail_before_download[serial]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011989119957434013
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0016607160068815574
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010666440066415817
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.00392627200926654
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_download.py::test_nonzero_download_cleans_partial_and_retains_actual_exit",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0020298450108384714
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0034457159927114844
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0017259740125155076
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.007201535016065463
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_download.py::test_download_error_and_cleanup_error_are_both_retained",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002219860994955525
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0036231190024409443
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009925060003297403
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0068354859977262095
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_download.py::test_repeated_read_gets_an_independent_download_and_preserves_source",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009665769903222099
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0031904060015222058
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00177986899507232
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.005936851986916736
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_download.py::test_stopping_open_session_closes_file_and_removes_download",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013701889984076843
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0026516770012676716
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011024210107279941
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.00512428701040335
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_download.py::test_cleanup_error_is_not_a_successful_read_end_and_can_be_recovered",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002075380994938314
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0029674419929506257
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.000952760994550772
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.005995583982439712
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_download.py::test_real_managed_download_returns_fixed_bytes",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013655829970957711
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.09786204400006682
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0014699640014441684
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.10069759099860676
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_download.py::test_capture_artifacts_and_both_download_variants_have_identical_bytes",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0014851699961582199
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.617890367997461
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.001307918006205
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.6206834559998242
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_download.py::test_real_timeout_or_cancel_waits_for_process_exit_before_removing_partial[False]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011601209989748895
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.4045672650099732
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.001165021996712312
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.4068924080056604
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_download.py::test_real_timeout_or_cancel_waits_for_process_exit_before_removing_partial[True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010906429961323738
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.13777211200795136
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0014464949927059934
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.14030924999678973
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_managed_capture.py::test_default_managed_driver_and_real_capture_file_port_confirm_one_photo",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001640150003368035
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.3742898959899321
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010510550055187196
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.3769811009988189
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_managed_capture.py::test_serial_mismatch_stops_before_settings_capture_or_work_directory",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001008563005598262
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.12998834101017565
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008855320047587156
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.13188243602053262
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_managed_capture.py::test_nonzero_capture_retains_partial_raw_and_is_unknown_without_retry",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.003012638000654988
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.32115382800111547
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.001188056994578801
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.32535452299634926
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_managed_capture.py::test_exit_zero_does_not_confirm_missing_or_wrong_length_file[missing_preview-source_open-False]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013036829914199188
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.33407850698858965
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011397689959267154
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.3365219589759363
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_managed_capture.py::test_exit_zero_does_not_confirm_missing_or_wrong_length_file[wrong_preview_size-source_size-True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0028133269952377304
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.33857356900989544
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009549630049150437
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.3423418590100482
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_registration.py::test_hasselblad_catalog_and_task_binding_resolve_each_device_source",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001164943998446688
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.5694005069963168
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004429950058693066
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.5710084460006328
+  },
+  {
+    "nodeid": "tests/integration/devices/test_hasselblad_registration.py::test_invalid_hasselblad_source_rejects_registration_and_catalog_atomically",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011399619979783893
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.002643568004714325
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003705179988173768
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.004154048001510091
+  },
+  {
+    "nodeid": "tests/integration/devices/test_managed_port.py::test_real_managed_timeout_keeps_original_result_and_earlier_confirmation[False]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009162939968518913
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.25297491300443653
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006323459965642542
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.2545235529978527
+  },
+  {
+    "nodeid": "tests/integration/devices/test_managed_port.py::test_real_managed_timeout_keeps_original_result_and_earlier_confirmation[True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008509629988111556
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.2561035159887979
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005912969936616719
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.2575457759812707
+  },
+  {
+    "nodeid": "tests/integration/devices/test_managed_port.py::test_managed_file_query_preserves_query_ticket_and_target",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006575500010512769
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008880279929144308
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005092020001029596
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0020547799940686673
+  },
+  {
+    "nodeid": "tests/integration/devices/test_osmo360ii_result_pages.py::test_driver_pages_preserve_raw_range_order_and_actual_baseline_difference[paths0-2-baseline0-expected0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.024272323993500322
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.005999154003802687
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.002876553000533022
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.03314803099783603
+  },
+  {
+    "nodeid": "tests/integration/devices/test_osmo360ii_result_pages.py::test_driver_pages_preserve_raw_range_order_and_actual_baseline_difference[paths1-1-baseline1-expected1]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.022647947989753447
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.0033073630038416013
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0038383240025723353
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.029793634996167384
+  },
+  {
+    "nodeid": "tests/integration/devices/test_osmo360ii_result_pages.py::test_driver_pages_preserve_raw_range_order_and_actual_baseline_difference[paths2-1-baseline2-expected2]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.025903747999109328
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.0017731240077409893
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.002128435007762164
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.02980530701461248
+  },
+  {
+    "nodeid": "tests/integration/devices/test_osmo360ii_result_pages.py::test_driver_pages_preserve_raw_range_order_and_actual_baseline_difference[paths3-1-baseline3-expected3]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.030847501999232918
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.002466172998538241
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0030467289907392114
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.03636040398851037
+  },
+  {
+    "nodeid": "tests/integration/devices/test_osmo360ii_result_pages.py::test_driver_pages_preserve_raw_range_order_and_actual_baseline_difference[paths4-1-baseline4-expected4]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.02405922400066629
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.0027986479981336743
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.005165010996279307
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.03202288299507927
+  },
+  {
+    "nodeid": "tests/integration/devices/test_osmo360ii_result_pages.py::test_osmo_formal_result_adapter_preserves_observation_when_prior_osv_disappears",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.024672188999829814
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.0022433510021073744
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0021259389905026183
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.029041478992439806
+  },
+  {
+    "nodeid": "tests/integration/devices/test_read_session.py::test_real_file_offset_and_short_read",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010847049998119473
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0019460709881968796
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0015841340064071119
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.004614909994415939
+  },
+  {
+    "nodeid": "tests/integration/devices/test_read_session.py::test_cancel_while_waiting_and_recording_stop_still_runs",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006118340097600594
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.07193342900427524
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013527900009648874
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.07389805301500019
+  },
+  {
+    "nodeid": "tests/integration/devices/test_read_session.py::test_no_data_timeout_with_real_clock",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001106152994907461
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.10264178899524268
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.002118360993335955
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.1058663029834861
+  },
+  {
+    "nodeid": "tests/integration/devices/test_read_session_settlement.py::test_waiters_observe_actual_close_result_after_reader_returns[False-False]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001854273010394536
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0029116999940015376
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.001394557999446988
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.006160531003843062
+  },
+  {
+    "nodeid": "tests/integration/devices/test_read_session_settlement.py::test_waiters_observe_actual_close_result_after_reader_returns[False-True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001050740000209771
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0021388550085248426
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011092030035797507
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.004298798012314364
+  },
+  {
+    "nodeid": "tests/integration/devices/test_read_session_settlement.py::test_waiters_observe_actual_close_result_after_reader_returns[True-False]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010561759991105646
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.00277918299252633
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.002610660987556912
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.006446019979193807
+  },
+  {
+    "nodeid": "tests/integration/devices/test_read_session_settlement.py::test_waiters_observe_actual_close_result_after_reader_returns[True-True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009611790010239929
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.001913487009005621
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008880029927240685
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0037626690027536824
+  },
+  {
+    "nodeid": "tests/integration/devices/test_read_session_settlement.py::test_failed_stop_request_does_not_close_under_active_read",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005661379982484505
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0014484390121651813
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.001220224003191106
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.003234801013604738
+  },
+  {
+    "nodeid": "tests/integration/devices/test_read_session_settlement.py::test_idle_stop_keeps_event_loop_available_until_close_returns",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006812600040575489
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.001479514001403004
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008103800064418465
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0029711540119023994
+  },
+  {
+    "nodeid": "tests/integration/devices/test_read_session_settlement.py::test_stop_settles_after_partial_read_without_another_read[False-False]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00064677900809329
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0015806989977136254
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.000911156996153295
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0031386350019602105
+  },
+  {
+    "nodeid": "tests/integration/devices/test_read_session_settlement.py::test_stop_settles_after_partial_read_without_another_read[False-True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009916609997162595
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.002073621013551019
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011787289986386895
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.004244011011905968
+  },
+  {
+    "nodeid": "tests/integration/devices/test_read_session_settlement.py::test_stop_settles_after_partial_read_without_another_read[True-False]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010421379993204027
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0035254100075690076
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0014792989968555048
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.006046847003744915
+  },
+  {
+    "nodeid": "tests/integration/devices/test_read_session_settlement.py::test_stop_settles_after_partial_read_without_another_read[True-True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007007300009718165
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.002074321993859485
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0015840400010347366
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.004359091995866038
+  },
+  {
+    "nodeid": "tests/integration/devices/test_read_session_settlement.py::test_segment_stop_finishes_session_without_next_source_read",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009327360021416098
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.002150022002751939
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0019140700023854151
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.004996828007278964
+  },
+  {
+    "nodeid": "tests/integration/devices/test_transport.py::test_real_tool_confirms_digest",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006609770061913878
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.015120805997867137
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009483530011493713
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.016730136005207896
+  },
+  {
+    "nodeid": "tests/integration/devices/test_transport.py::test_real_tool_exit_alone_stays_unknown",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007445889932569116
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.018921646988019347
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0014999580016592517
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.02116619398293551
+  },
+  {
+    "nodeid": "tests/integration/devices/test_transport.py::test_real_tool_rejection_is_failure",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001608670994755812
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.018342581010074355
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011253539996687323
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0210766060044989
+  },
+  {
+    "nodeid": "tests/integration/devices/test_transport.py::test_real_tool_timeout_settles_by_assumption",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009074109984794632
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.10721138000371866
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.003287351006292738
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.11140614200849086
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_describe_preserves_decimal_reference",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009697670029709116
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.009621136006899178
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006288689910434186
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.011219772000913508
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_mathematical_integer_frames_survive_export[240]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010950699943350628
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.005290974004310556
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009621860081097111
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.00734823000675533
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_mathematical_integer_frames_survive_export[frames1]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0015695500042056665
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0062956350011518225
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006894999969517812
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.00855468500230927
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_mathematical_integer_frames_survive_export[frames2]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007119420042727143
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.009655899004428647
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.000805071002105251
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.011172912010806613
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_fractional_frames_cannot_be_rounded_into_integer[frames0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007260619895532727
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.00579059099254664
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011506060109240934
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0076672589930240065
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_fractional_frames_cannot_be_rounded_into_integer[frames1]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0019636570068541914
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.006059084000298753
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00081384000077378
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.008836581007926725
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_source_number_rejects_entire_document[bitrate-value0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002067559995339252
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.006471868997323327
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011009220033884048
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.009640350996050984
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_source_number_rejects_entire_document[bitrate-value1]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011138089903397486
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.010055746999569237
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007698209956288338
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.01193937698553782
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_source_number_rejects_entire_document[bitrate-value2]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012242860102560371
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.005735322993132286
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008643089968245476
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.00782391800021287
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_source_number_rejects_entire_document[bitrate-True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012453509989427403
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.007655417997739278
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005876960058230907
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.009488465002505109
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_source_number_rejects_entire_document[bitrate-False]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0015239549975376576
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.00462538399733603
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005852030008099973
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.006734541995683685
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_source_number_rejects_entire_document[bitrate-130.0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008684920030646026
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.004734160000225529
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005796320037916303
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.006182284007081762
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_source_number_rejects_entire_document[seconds-value0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.000971653003944084
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0047409690014319494
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007504710083594546
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.006463093013735488
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_source_number_rejects_entire_document[seconds-value1]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.000990643005934544
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.004142189005506225
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007305140024982393
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.005863346013939008
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_source_number_rejects_entire_document[seconds-value2]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009562799968989566
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.002922440995462239
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00034415899426676333
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.004222879986627959
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_source_number_rejects_entire_document[seconds-True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005938279937254265
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.004726415005279705
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011028470034943894
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.006423090002499521
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_source_number_rejects_entire_document[seconds-False]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007077039917930961
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.003155359998345375
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00041881400102283806
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.004281877991161309
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_source_number_rejects_entire_document[seconds-130.0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00045643099292647094
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0030041670106584206
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00042087699694093317
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0038814750005258247
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_source_number_rejects_entire_document[frames-value0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008514809887856245
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.003773395001189783
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00039188899972941726
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.005016764989704825
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_source_number_rejects_entire_document[frames-value1]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006595819868380204
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.003454054007306695
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00035190899507142603
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.004465544989216141
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_source_number_rejects_entire_document[frames-value2]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005303939979057759
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.004222613002639264
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006341379921650514
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.005387144992710091
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_source_number_rejects_entire_document[frames-True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005916749942116439
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0039433339989045635
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004057999904034659
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.004940808983519673
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_source_number_rejects_entire_document[frames-False]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005909310129936785
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0031306970049627125
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006982749910093844
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.004419903008965775
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_source_number_rejects_entire_document[frames-130.0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007622730045113713
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.004162871002336033
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00042011500045191497
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.005345259007299319
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_source_number_rejects_entire_document[lookup-value0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005527589964913204
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0031736670061945915
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003992590063717216
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.004125685009057634
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_source_number_rejects_entire_document[lookup-value1]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006252480088733137
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.003923455995391123
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006379919941537082
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.005186695998418145
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_source_number_rejects_entire_document[lookup-value2]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006624649977311492
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.003843938000500202
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005372539890231565
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.005043656987254508
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_source_number_rejects_entire_document[lookup-True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005806330009363592
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.003999988999566995
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007407950033666566
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.00532141700387001
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_source_number_rejects_entire_document[lookup-False]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009660249925218523
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.003290235996246338
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005939100083196536
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.004850170997087844
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_source_number_rejects_entire_document[lookup-130.0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010767180065158755
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0027769360021920875
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00034532800782471895
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.004198982016532682
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_estimate_does_not_hide_invalid_parameter_type_association",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00026092000189237297
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010066870017908514
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004707650077762082
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0017383720114594325
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_estimate_does_not_hide_duplicate_parameter_types",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004052010044688359
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009151589911198243
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003890610096277669
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0017094210052164271
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_estimate_does_not_hide_inconsistent_action_identity",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00044236799294594675
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.000817255990114063
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00023871700977906585
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0014983409928390756
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_estimate_rejects_export_even_with_another_valid_type[estimate0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00034807701013050973
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0039245039952220395
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00044270799844525754
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.004715289003797807
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_estimate_rejects_export_even_with_another_valid_type[estimate1]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006698979996144772
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0047118640068219975
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00046040800225455314
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.005842170008691028
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_invalid_estimate_rejects_export_even_with_another_valid_type[estimate2]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004100010119145736
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.003659669993794523
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00024794800265226513
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.004317619008361362
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_photo_estimate_rejects_entire_export",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00025589500728528947
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0025531510036671534
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00032149099570233375
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0031305370066547766
+  },
+  {
+    "nodeid": "tests/integration/devices/test_video_size_estimate.py::test_same_parameter_type_keeps_device_and_action_estimate_scope",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0002935899974545464
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.007572636008262634
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0015359789977082983
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.009402205003425479
+  }
+]

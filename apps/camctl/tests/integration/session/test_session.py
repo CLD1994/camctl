@@ -13,6 +13,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import pytest_asyncio
+
+from .support import ObservedWorkNotifier, open_session_database, session_context
 
 from camctl.acceptance.service import CommandMode
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
@@ -32,13 +35,15 @@ _MIN = 1_735_689_600_000_000
 
 
 class FakeClock:
-    """墙钟按脚本返回；受限场景读数早于已保存下界。"""
+    """墙钟依次返回脚本读数，耗尽后保持最后读数；受限读数早于下界。"""
 
     def __init__(self, readings: list[int]) -> None:
         self._readings = list(readings)
 
     def utc_micros(self) -> int:
-        return self._readings.pop(0)
+        if len(self._readings) > 1:
+            return self._readings.pop(0)
+        return self._readings[0]
 
     def monotonic_ns(self) -> int:
         return 0
@@ -105,38 +110,38 @@ def _facts(**overrides) -> WorkFacts:
     return WorkFacts(**base)
 
 
-@pytest.fixture
-def environment(tmp_path: Path):
+@pytest_asyncio.fixture
+async def environment(tmp_path: Path):
     _create_valid_database(tmp_path / "state.db")
     state_db = (tmp_path / "state.db").resolve()
     session_lock, admission_lock = lock_file_paths(state_db)
     recorder = Recorder()
-    holder = {"connection": None, "facts": _facts, "admission_lease": None}
+    holder = {"connection": None, "database": None, "facts": lambda _connection: _facts(), "admission_lease": None}
 
     def open_connection():
         owned = open_existing(state_db, DbOpenMode.EXISTING_RW, DbConfig())
         holder["connection"] = owned
         return owned
 
-    context = SessionContext(
-        mode=CommandMode.RUN,
-        catalog=None,
+    holder["factory"] = open_connection
+
+    async def open_database():
+        database = await open_session_database(state_db, factory=holder["factory"])
+        holder["database"] = database
+        return database
+
+    context = session_context(
+        state_db,
         clock=FakeClock([_MIN + 60_000_000]),
-        open_connection=open_connection,
-        acceptance_repository=AcceptanceRepository(),
-        session_repository=SessionRepository(),
-        paths=SessionPaths(session_lock=session_lock,
-                           admission_lock=admission_lock),
+        open_database=open_database,
         clock_policy=lambda connection: ClockCheckInput(
             lower_bound_micros=None, min_plausible_micros=_MIN,
             recheck_delay_s=0.0, recheck_count=1),
-        acquire_session=lambda: acquire_session(session_lock),
         acquire_admission=lambda: _tracked_admission(holder, admission_lock),
         facts_query=lambda connection: holder["facts"](connection),
     )
     yield context, recorder, holder, tmp_path
-    if holder["connection"] is not None:
-        holder["connection"].connection.close()
+    # run_session 负责关闭数据库，并通过返回结果交付关闭错误。
 
 
 def _tracked_admission(holder, admission_lock):
@@ -216,7 +221,7 @@ class TestRunLoop:
         from camctl.scheduling.notifications import WakeReason, WorkNotifier
 
         context, recorder, holder, _ = environment
-        notifier = WorkNotifier()
+        notifier = ObservedWorkNotifier()
         context.wake = notifier
         context.poll_interval_s = 30.0
         state = {"facts": _facts(unfinished_actions=1)}
@@ -230,7 +235,7 @@ class TestRunLoop:
 
         context.flows = {"work": flow}
         task = asyncio.create_task(_run(context))
-        await asyncio.sleep(0.05)
+        await asyncio.wait_for(notifier.wait_started.wait(), timeout=10)
         # 长轮询上限内只有通知能唤醒：仍停在第一轮。
         assert calls["count"] == 1
         notifier.mark_changed(WakeReason.NEW_WORK)
@@ -279,7 +284,7 @@ class TestRunLoop:
 
         context.flows = {"work": flow}
         # 待执行动作在 1 秒后：等待受该截止约束，而非轮询上限。
-        seeding = context.open_connection()
+        seeding = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
         try:
             connection = seeding.connection
             connection.execute("BEGIN IMMEDIATE")
@@ -348,8 +353,9 @@ class TestRunLoop:
         context.poll_interval_s = 30.0
         holder["facts"] = lambda connection: _facts(unfinished_actions=1)
         context.flows = {}
+        context.wake = ObservedWorkNotifier()
         task = asyncio.create_task(_run(context))
-        await asyncio.sleep(0.05)
+        await asyncio.wait_for(context.wake.wait_started.wait(), timeout=10)
         # 等待期间接纳仍被持有：探测观察到冲突。
         probe = probe_admission(context.paths.admission_lock)
         assert probe.status.value == "conflict"
@@ -689,8 +695,8 @@ class TestRuntimeLibraryClassification:
             runtime_module, "ensure_runtime_library", self._incompatible)
         context, _, _, tmp_path = environment
         missing = (tmp_path / "absent.db").resolve()
-        context.open_connection = lambda: open_existing(
-            missing, DbOpenMode.EXISTING_RW, DbConfig())
+        context.open_database = lambda: open_session_database(
+            missing)
         outcome = await _run(context)
         # 运行库不满足部署要求：按配置错误分类，会话不受理任何工作。
         assert outcome.succeeded is False
@@ -701,9 +707,8 @@ class TestRuntimeLibraryClassification:
 
     async def test_run_missing_database_still_state_db_error(self, environment):
         context, _, _, tmp_path = environment
-        context.open_connection = lambda: open_existing(
-            (tmp_path / "absent.db").resolve(),
-            DbOpenMode.EXISTING_RW, DbConfig())
+        context.open_database = lambda: open_session_database(
+            (tmp_path / "absent.db").resolve())
         outcome = await _run(context)
         # 运行库合格时，同一缺失目标仍按状态库错误分类。
         assert outcome.succeeded is False
@@ -723,8 +728,8 @@ class TestRuntimeLibraryClassification:
             mode=CommandMode.SUBMIT,
             catalog=None,
             clock=FakeClock([_MIN]),
-            open_connection=lambda: open_existing(
-                missing, DbOpenMode.EXISTING_RW, DbConfig()),
+            open_database=lambda: open_session_database(
+                missing),
             acceptance_repository=AcceptanceRepository(),
             session_repository=SessionRepository(),
             paths=SessionPaths(session_lock=tmp_path / "s.lock",
@@ -1234,8 +1239,8 @@ class TestSubmitVerification:
             mode=CommandMode.SUBMIT,
             catalog=None,
             clock=FakeClock([_MIN]),
-            open_connection=lambda: open_existing(
-                state_db, DbOpenMode.EXISTING_RW, DbConfig()),
+            open_database=lambda: open_session_database(
+                state_db),
             acceptance_repository=UnknownRepository(),
             session_repository=SessionRepository(),
             paths=SessionPaths(session_lock=tmp_path / "s.lock",
@@ -1270,8 +1275,8 @@ class TestSubmitVerification:
             mode=CommandMode.SUBMIT,
             catalog=None,
             clock=FakeClock([_MIN]),
-            open_connection=lambda: open_existing(
-                state_db, DbOpenMode.EXISTING_RW, DbConfig()),
+            open_database=lambda: open_session_database(
+                state_db),
             acceptance_repository=RolledBackRepository(),
             session_repository=SessionRepository(),
             paths=SessionPaths(session_lock=tmp_path / "s.lock",

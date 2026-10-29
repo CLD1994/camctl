@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from camctl_memory_plugin import run_test_command
+
 import base64
 from dataclasses import dataclass
 import hashlib
@@ -66,8 +68,8 @@ p2pBX5KAAAAADkGaqUmoQWyZTAgr//7w
 """
 
 
-def _run(command, *, cwd, env, timeout_s=180):
-    result = subprocess.run(command, cwd=cwd, env=env, capture_output=True,
+def _run(command, *, cwd, env, timeout_s=180, camctl=False):
+    result = run_test_command(command, camctl=camctl, receipt_root=cwd, cwd=cwd, env=env, capture_output=True,
                             text=True, timeout=timeout_s)
     assert result.returncode == 0, (command, result.stdout, result.stderr)
     return result
@@ -171,10 +173,10 @@ def test_installed_builtin_action6_capture_obtain_claim_and_ack(
     with deployment.config_path.open("a") as stream:
         stream.write("\n" + template_config.replace("REPLACE_ACTION6_SERIAL", "action6-test-serial"))
     initialized = _run([str(package.camctl), "init", "--config", str(deployment.config_path)],
-                       cwd=deployment.root, env=environment)
+                       cwd=deployment.root, env=environment, camctl=True)
     assert initialized.stdout == ""
     described = _run([str(package.camctl), "describe", "--config", str(deployment.config_path)],
-                    cwd=deployment.root, env=environment)
+                    cwd=deployment.root, env=environment, camctl=True)
     capabilities = json.loads(described.stdout)
     assert [(device["device_id"], device["driver_id"]) for device in capabilities["devices"]] == [
         ("action6", "dji-action6")]
@@ -251,8 +253,15 @@ def test_installed_builtin_action6_capture_obtain_claim_and_ack(
         assert [item["type"] for item in start_document["observations"]] == ["recording_sent"]
         assert start_document["observations"][0]["data"]["response_payload"] == "00"
         assert start_document["settlement"]["evidence"]["type"] == "control_returned"
-        assert start_document["settlement"]["evidence"]["version"] == 2
-        setting_calls = start_document["settlement"]["evidence"]["data"]["calls"]
+        assert start_document["settlement"]["evidence"]["version"] == 1
+        preparation_results = _results(deployment.state_db, action_id,
+                                      enum_for("operation_runs.kind").PREPARE_CAPTURE)
+        assert len(preparation_results) == 1
+        preparation_document = json.loads(preparation_results[0][2])
+        assert [item["type"] for item in preparation_document["observations"]] == ["capture_preparation_completed"]
+        assert preparation_document["settlement"]["evidence"]["type"] == "control_returned"
+        assert preparation_document["settlement"]["evidence"]["version"] == 2
+        setting_calls = preparation_document["settlement"]["evidence"]["data"]["calls"]
         aperture_call = next(call for call in setting_calls
                              if call["command"][-3:-1] == ["-c", "0x26"])
         assert aperture_call["command"][-1] == "1801"
@@ -273,8 +282,16 @@ def test_installed_builtin_action6_capture_obtain_claim_and_ack(
         replayed_start = read_result_document(
             stored_start[0][0], stored_start[0][1], json.loads(stored_start[0][2]),
             None if stored_start[0][3] is None else json.loads(stored_start[0][3]))
-        assert replayed_start.settlement.evidence.data["calls"] == setting_calls
         assert [item.type for item in replayed_start.observations] == ["recording_sent"]
+        stored_preparation = query_state(deployment.state_db,
+            "SELECT t.status,t.effect_state,t.result_json,t.error_json FROM operation_attempts t"
+            " JOIN operation_runs r ON r.id=t.run_id WHERE r.action_id=? AND r.kind=?",
+            (action_id, int(enum_for("operation_runs.kind").PREPARE_CAPTURE)))
+        assert len(stored_preparation) == 1
+        replayed_preparation = read_result_document(
+            stored_preparation[0][0], stored_preparation[0][1], json.loads(stored_preparation[0][2]),
+            None if stored_preparation[0][3] is None else json.loads(stored_preparation[0][3]))
+        assert replayed_preparation.settlement.evidence.data["calls"] == setting_calls
         result_rows = _results(deployment.state_db, action_id, enum_for("operation_runs.kind").CHECK_CAPTURE_RESULTS)
         assert result_rows
         completed = []

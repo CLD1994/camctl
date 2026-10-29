@@ -10,7 +10,8 @@ from camctl.contracts.workflow_errors import registered_error_spec, validate_err
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.outputs import FixSelection, load_selection_facts
 from camctl.persistence.transaction import row_facts
-from camctl.history.validators import EventValidationError, validate_event
+from camctl.history.validators import EventValidationError
+from ..support.output_planning import validate_static_event as validate_event
 from camctl.outputs.sources import SelectionMode, select_outputs
 
 from .test_sources import _NOW, _prepared_selection, _fixed_resolution, _seed_output, _set_selection_request

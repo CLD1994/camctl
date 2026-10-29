@@ -1,0 +1,113 @@
+
+==================================== ERRORS ====================================
+________ ERROR collecting tests/unit/bootstrap/test_background_flow.py _________
+apps/camctl/tests/unit/bootstrap/test_background_flow.py:9: in <module>
+    from camctl.bootstrap.flows import CaptureFlow
+apps/camctl/src/camctl/bootstrap/flows.py:29: in <module>
+    from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
+apps/camctl/src/camctl/capture/dispatch.py:14: in <module>
+    from camctl.capture.handlers import CaptureRuntime, HandlerOutcome, capture_handler
+apps/camctl/src/camctl/capture/handlers.py:33: in <module>
+    from camctl.persistence.repositories.finite_cancel import (
+apps/camctl/src/camctl/persistence/repositories/finite_cancel.py:6: in <module>
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in <module>
+    from camctl.persistence.business import settle_required
+apps/camctl/src/camctl/persistence/business.py:12: in <module>
+    from camctl.persistence.executor import DbExecutor
+apps/camctl/src/camctl/persistence/executor.py:18: in <module>
+    from camctl.persistence.models import (
+apps/camctl/src/camctl/persistence/models.py:16: in <module>
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:34: in <module>
+    _FORMAT_VERSIONS = enum_for("database_metadata.format_version")
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/contracts/enums.py:57: in enum_for
+    registry = load_registry()
+               ^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/contracts/enums.py:37: in load_registry
+    registry = json.loads(resource_bytes(_REGISTRY_RESOURCE))
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/resources.py:55: in resource_bytes
+    raise ResourceError(f"未登记的资源名: {name!r}")
+E   camctl.resources.ResourceError: 未登记的资源名: 'registry/enum-registry.json'
+____ ERROR collecting tests/unit/bootstrap/test_cleanup_background_owner.py ____
+apps/camctl/tests/unit/bootstrap/test_cleanup_background_owner.py:10: in <module>
+    from camctl.bootstrap import cleanup_assembly
+apps/camctl/src/camctl/bootstrap/cleanup_assembly.py:22: in <module>
+    from camctl.bootstrap.capture_assembly import (
+apps/camctl/src/camctl/bootstrap/capture_assembly.py:29: in <module>
+    from camctl.capture.handlers import (
+apps/camctl/src/camctl/capture/handlers.py:33: in <module>
+    from camctl.persistence.repositories.finite_cancel import (
+apps/camctl/src/camctl/persistence/repositories/finite_cancel.py:6: in <module>
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in <module>
+    from camctl.persistence.business import settle_required
+apps/camctl/src/camctl/persistence/business.py:12: in <module>
+    from camctl.persistence.executor import DbExecutor
+apps/camctl/src/camctl/persistence/executor.py:18: in <module>
+    from camctl.persistence.models import (
+apps/camctl/src/camctl/persistence/models.py:16: in <module>
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:34: in <module>
+    _FORMAT_VERSIONS = enum_for("database_metadata.format_version")
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/contracts/enums.py:57: in enum_for
+    registry = load_registry()
+               ^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/contracts/enums.py:37: in load_registry
+    registry = json.loads(resource_bytes(_REGISTRY_RESOURCE))
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/resources.py:55: in resource_bytes
+    raise ResourceError(f"未登记的资源名: {name!r}")
+E   camctl.resources.ResourceError: 未登记的资源名: 'registry/enum-registry.json'
+___ ERROR collecting tests/unit/bootstrap/test_report_background_progress.py ___
+apps/camctl/tests/unit/bootstrap/test_report_background_progress.py:8: in <module>
+    from support.business_database import inline_business_database
+apps/camctl/tests/support/business_database.py:5: in <module>
+    from camctl.persistence.business import BusinessDatabase
+apps/camctl/src/camctl/persistence/business.py:12: in <module>
+    from camctl.persistence.executor import DbExecutor
+apps/camctl/src/camctl/persistence/executor.py:18: in <module>
+    from camctl.persistence.models import (
+apps/camctl/src/camctl/persistence/models.py:16: in <module>
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:34: in <module>
+    _FORMAT_VERSIONS = enum_for("database_metadata.format_version")
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/contracts/enums.py:57: in enum_for
+    registry = load_registry()
+               ^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/contracts/enums.py:37: in load_registry
+    registry = json.loads(resource_bytes(_REGISTRY_RESOURCE))
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/resources.py:55: in resource_bytes
+    raise ResourceError(f"未登记的资源名: {name!r}")
+E   camctl.resources.ResourceError: 未登记的资源名: 'registry/enum-registry.json'
+____ ERROR collecting tests/unit/session/test_business_database_session.py _____
+apps/camctl/tests/unit/session/test_business_database_session.py:9: in <module>
+    from camctl.acceptance.service import CommandMode
+apps/camctl/src/camctl/acceptance/service.py:16: in <module>
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in <module>
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:34: in <module>
+    _FORMAT_VERSIONS = enum_for("database_metadata.format_version")
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/contracts/enums.py:57: in enum_for
+    registry = load_registry()
+               ^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/contracts/enums.py:37: in load_registry
+    registry = json.loads(resource_bytes(_REGISTRY_RESOURCE))
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/resources.py:55: in resource_bytes
+    raise ResourceError(f"未登记的资源名: {name!r}")
+E   camctl.resources.ResourceError: 未登记的资源名: 'registry/enum-registry.json'
+=========================== short test summary info ============================
+ERROR apps/camctl/tests/unit/bootstrap/test_background_flow.py - camctl.resou...
+ERROR apps/camctl/tests/unit/bootstrap/test_cleanup_background_owner.py - cam...
+ERROR apps/camctl/tests/unit/bootstrap/test_report_background_progress.py - c...
+ERROR apps/camctl/tests/unit/session/test_business_database_session.py - camc...
+!!!!!!!!!!!!!!!!!!! Interrupted: 4 errors during collection !!!!!!!!!!!!!!!!!!!!
+4 errors in 0.84s

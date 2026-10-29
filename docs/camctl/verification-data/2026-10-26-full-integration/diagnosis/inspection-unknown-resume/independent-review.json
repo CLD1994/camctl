@@ -1,0 +1,191 @@
+{
+  "schema_version": 1,
+  "recorded_at_utc": "2026-10-26T01:11:31.958340+00:00",
+  "reviewer": "/root/audit_executor_key",
+  "reviewed_commit": "69c9857f40b7d65385ec9538425c0849db9f56fd",
+  "review_worktree": "/tmp/camctl-merge-272f-inspection-resume",
+  "baseline_production_commit": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+  "scope": "独立只读审查 git show、相关生产调用、既有及新增测试、执行回执与 XML。未修改仓库，未运行测试。",
+  "reviewed_changes": [
+    "apps/camctl/src/camctl/capture/media_flow.py",
+    "apps/camctl/tests/unit/capture/test_internal_read_save_owner.py"
+  ],
+  "related_files_read": [
+    "apps/camctl/src/camctl/persistence/business.py",
+    "apps/camctl/src/camctl/outputs/read_attempts.py",
+    "apps/camctl/src/camctl/capture/segment_inspections.py",
+    "apps/camctl/src/camctl/capture/save_stage.py",
+    "apps/camctl/src/camctl/capture/handlers.py（相关调用片段）",
+    "apps/camctl/tests/integration/bootstrap/test_inspection_read_dispatch.py（原 UNKNOWN 恢复节点及相邻责任检查）",
+    "apps/camctl/tests/unit/outputs/test_read_save_handoff.py（相关原键、失败恢复、owner 与通知反例）"
+  ],
+  "rules_and_specifications_read": [
+    {
+      "path": "AGENTS.md",
+      "scope": "根工作区规则与任务读取条件"
+    },
+    {
+      "path": ".agents/rules/review.md",
+      "scope": "评审范围、分类与证据要求"
+    },
+    {
+      "path": ".agents/rules/testing.md",
+      "scope": "测试分类、真实接口、验证结果与覆盖边界"
+    },
+    {
+      "path": ".agents/rules/writing.md",
+      "scope": "证据与报告表达"
+    },
+    {
+      "path": ".agents/rules/design-and-planning.md",
+      "scope": "状态分类及契约闭合"
+    },
+    {
+      "path": "apps/camctl/README.md",
+      "scope": "组件入口和 Python 环境"
+    },
+    {
+      "path": "docs/architecture/README.md",
+      "scope": "行为规格及责任入口"
+    },
+    {
+      "path": "docs/architecture/reading-guide.md",
+      "scope": "相机、产物及持久化责任定位"
+    },
+    {
+      "path": "docs/camctl/persistence-runtime.md",
+      "scope": "数据库四类执行结果、原键/完整输入核实、SharedSave 共同等待及取消语义"
+    },
+    {
+      "path": "docs/camctl/module-contracts.md",
+      "scope": "实际阶段、取消接手和提交未知的分类"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-10-23-video-result-modes-and-segmentation-design.md",
+      "scope": "独立检查责任、原预算、检查事实可靠保存及副本保护"
+    }
+  ],
+  "mechanism_confirmed_by_static_review": {
+    "before": "检查结果保存未确认时 settle_inspection_read_failure 返回 False；完整 settlement 正常返回，被 SharedSave 永久保存为成功，显式 retry_failed 无法继续剩余消费和 slot 释放。",
+    "after": "未完成通过内部 _InternalReadSettlementPending 保存在共享任务的失败结果中；每个外部等待边界将其转换为既有等待结果。显式恢复只在 pending_read_results 中当前 settlement owner 匹配时重置失败任务，成功的 result_save 继续复用。"
+  },
+  "boundary_review": [
+    {
+      "boundary": "inspection UNKNOWN",
+      "method": "静态追踪与核验既有真实组件节点的红绿 XML/回执",
+      "conclusion": "保留原 PendingReadResult、Finish、原键及 slot；普通迟到等待不隐式重试。显式恢复先核实原检查申请，再消费 READ 与释放 slot。原两个提交前/后 UNKNOWN 参数有实际绿证据。"
+    },
+    {
+      "boundary": "inspection ROLLED_BACK",
+      "method": "静态路径核对",
+      "conclusion": "非 COMPLETED 的 False 同样成为完整共享阶段未完成结果，不缓存为成功；原检查申请继续保留。此次未新增或运行专门的 inspection 回滚反例。"
+    },
+    {
+      "boundary": "READ 提交后通知错误或控制错误",
+      "method": "静态审查和新增测试 XML 核验",
+      "conclusion": "原错误携带 COMPLETED 分类时仍推进必要消费；若检查尚待核实，原通知/控制错误优先于内部 Pending 信号，不被吞掉。"
+    },
+    {
+      "boundary": "inspection 提交后通知错误",
+      "method": "静态路径核对",
+      "conclusion": "沿 save_inspection_result 的实际回执消费及异常路径保留责任，由后续显式恢复继续。没有据原两个 UNKNOWN 参数宣称此分类已独立实测。"
+    },
+    {
+      "boundary": "多个及取消等待者",
+      "method": "静态审查和新增参数测试 XML 核验",
+      "conclusion": "同一 settlement 共享实际阶段；外层 settle_required 隔离外部取消，实际阶段结束后交付取消，不取消原保存。"
+    },
+    {
+      "boundary": "迟到等待者",
+      "method": "静态审查和新增测试 XML 核验",
+      "conclusion": "未完成阶段的普通迟到等待取得原等待结果；只有显式恢复可重试。恢复成功后的迟到调用不重复保存或释放。"
+    },
+    {
+      "boundary": "旧恢复快照及 owner 身份",
+      "method": "静态审查和新增测试 XML 核验",
+      "conclusion": "重置失败前核对当前 settlement 身份。现有新增反例覆盖旧 identity 已移除、后来 attempt2 存在的场景；同一 identity 替换新 owner 的直接反例尚可补强。"
+    },
+    {
+      "boundary": "slot UNKNOWN 或提交后通知错误",
+      "method": "静态核对相关既有业务保存路径及测试",
+      "conclusion": "继续由原 pending_read_business 与原申请键承担；不能通过重启旧 READ settlement 建立新释放申请。"
+    }
+  ],
+  "findings": {
+    "blocking": [],
+    "conclusion": "未发现阻止集成的新缺陷。结论限于本次实际审查范围及已核验证据，不代表新生产树全量集成通过。"
+  },
+  "verification": {
+    "tests_run_by_reviewer": false,
+    "repository_changed_by_reviewer": false,
+    "xml_verified": [
+      {
+        "path": "/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/red-original.xml",
+        "bytes": 9680,
+        "sha256": "9032055700643dfd2414fb3f13822148d43b8beb8513516ed7f7314c4f09bd72",
+        "tests": 2,
+        "failures": 2,
+        "errors": 0
+      },
+      {
+        "path": "/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/green-original.xml",
+        "bytes": 617,
+        "sha256": "d2c23556411520841683f76897f6f2495109d29f6577866ef5f67d928ee42858",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0
+      },
+      {
+        "path": "/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/green-inspection-file.xml",
+        "bytes": 4494,
+        "sha256": "fc4f9feff4e0206e3e81bcae3ca4ff88a1bb02412eb54c3af2be853d445f690e",
+        "tests": 24,
+        "failures": 0,
+        "errors": 0
+      },
+      {
+        "path": "/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/green-narrow-unit.xml",
+        "bytes": 16000,
+        "sha256": "c728ff3d939a7e2e19d6ae32849a191b7312e050308270cbd1ba5e9d3126b081",
+        "tests": 86,
+        "failures": 0,
+        "errors": 0
+      },
+      {
+        "path": "/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/red-unit.xml",
+        "bytes": 10561,
+        "sha256": "0cee1f5f598f63f2b2b59defea4693447e75f57d3903ed939d67ede38470ea28",
+        "tests": 8,
+        "failures": 2,
+        "errors": 0
+      },
+      {
+        "path": "/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/green-unit.xml",
+        "bytes": 1640,
+        "sha256": "a09197f2d7027e9624fc0b6ab8d7c0ef0ecdc80c9da1211bf381d38fb0aef8e2",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0
+      }
+    ],
+    "counts_not_additive": true,
+    "evidence_identity_limit": "执行回执记录当时 HEAD 为 9fbb734c，测试在该隔离工作区应用修复后、提交前运行；本次审查实际提交69c9857f及其干净工作树。回执不是对69c9857f提交后另起一轮测试的证明。",
+    "receipts_read": [
+      "green-original-receipt.json",
+      "green-inspection-file-receipt.json",
+      "green-narrow-unit-receipt.json"
+    ],
+    "runner_read": "run.py"
+  },
+  "nonblocking_followups": [
+    {
+      "suggestion": "增加同一 (run_id, attempt_id) 替换为新 settlement owner 的旧快照反例。",
+      "purpose": "直接证伪身份判断被弱化为 current 非空；保留新申请及其保存次数。"
+    },
+    {
+      "suggestion": "如进一步扩展此边界验证，单列 inspection ROLLED_BACK 和检查结果已提交但通知报错的反例。",
+      "purpose": "分别证明原申请/slot责任保留及已提交事实消费，不把 UNKNOWN 两参数外推到全部失败分类。"
+    }
+  ],
+  "excluded_issue": "bootstrap cleanup 的既有 closing 缺导入另列，不属于本提交修复或本次无阻断结论。"
+}

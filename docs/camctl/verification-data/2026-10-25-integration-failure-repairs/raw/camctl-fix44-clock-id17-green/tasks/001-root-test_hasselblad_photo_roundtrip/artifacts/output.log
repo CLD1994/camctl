@@ -1,0 +1,104 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_______ test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333] ________
+
+tmp_path = PosixPath('/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0')
+installed_camctl = <test_hasselblad_photo_parameters.InstalledCamctl object at 0x7f3a81aea210>
+host_demo = '/tmp/camctl-host-build-4a982f06b159445f9ffa9ca77895e279/host-demo'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f3a8114b110>
+case = PhotoCase(capture_format='jpeg', source='device', shutter='0.000333', focus_override=None)
+
+    @pytest.mark.parametrize("case", NORMAL_CASES, ids=lambda case: case.name)
+    def test_installed_hasselblad_photo_roundtrip(tmp_path, installed_camctl, host_demo, monkeypatch, case):
+        world = PhotoWorld(tmp_path, installed_camctl, case, host_demo)
+        monkeypatch.chdir(tmp_path)
+        world.start()
+        try:
+            world.host.submit(world.export_photo(browser_prefix=case.name in FULL_UI_CASE_NAMES))
+            report_path, report, capture = world.report("capture")
+            assert "result" not in capture
+            assert not {"steps", "diagnostics", "observations", "call_info"} & capture.keys()
+            assert json.loads(case.params_text, parse_float=Decimal) == capture["input_params"] == capture["effective_params"]
+            outputs = {output["kind"]: output for output in capture["outputs"]}
+            assert set(outputs) == {"original", "preview"}
+            assert outputs["original"]["output_id"] != outputs["preview"]["output_id"]
+            assert outputs["preview"]["preview_of_output_id"] == outputs["original"]["output_id"]
+            assert outputs["original"]["source_action_instance_id"] == outputs["preview"]["source_action_instance_id"]
+>           world.assert_precision_and_sources(report_path, capture)
+
+/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/source/tests/integration/test_hasselblad_photo_roundtrip.py:723: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/source/tests/integration/test_hasselblad_photo_roundtrip.py:643: in assert_precision_and_sources
+    self.history_before = self.observe_history("before")
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/source/tests/integration/test_hasselblad_photo_roundtrip.py:580: in observe_history
+    self.package.run(command)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <test_hasselblad_photo_parameters.InstalledCamctl object at 0x7f3a81d9ee50>
+command = [PosixPath('/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/hasselblad-ph...tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/history-expected.json'), ...]
+cwd = None, timeout = 180
+
+    def run(self, command, *, cwd: Path | None = None, timeout: int = 180):
+        argv = [str(part) for part in command]
+        working_directory = cwd or self.root
+        started = datetime.now(timezone.utc).isoformat()
+        completed = subprocess.run(
+            argv,
+            cwd=working_directory,
+            env=self.environment,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        log_directory = self.root / "commands"
+        log_directory.mkdir(exist_ok=True)
+        log_path = log_directory / f"{len(list(log_directory.glob('*.json'))) + 1:03}.json"
+        log_path.write_text(json.dumps({
+            "argv": argv,
+            "cwd": str(working_directory),
+            "python": sys.version,
+            "node": subprocess.run(["node", "--version"], capture_output=True, text=True).stdout.strip(),
+            "head": subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO, capture_output=True, text=True).stdout.strip(),
+            "started_utc": started,
+            "finished_utc": datetime.now(timezone.utc).isoformat(),
+            "exit_code": completed.returncode,
+            "stdout": completed.stdout,
+            "stderr": completed.stderr,
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+>       assert completed.returncode == 0, (
+            f"安装版命令失败，详情见 {log_path}: {argv!r}\n"
+            f"{completed.stdout}\n{completed.stderr}"
+        )
+E       AssertionError: 安装版命令失败，详情见 /tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/commands/004.json: ['/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/hasselblad-photo-installed0/venv/bin/python', '/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/_hasselblad_photo_entry.py', '--h8b-history', '/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/deployment/state.db', '/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/photo-request.json', '/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/history-expected.json', '/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/photo-history-before.json']
+E         
+E         Traceback (most recent call last):
+E           File "/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/_hasselblad_photo_entry.py", line 526, in <module>
+E             raise SystemExit(main())
+E                              ^^^^^^
+E           File "/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/_hasselblad_photo_entry.py", line 506, in main
+E             return _history_command(sys.argv[2:])
+E                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           File "/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/_hasselblad_photo_entry.py", line 240, in _history_command
+E             facts = _history_facts(database, request, expected, old)
+E                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           File "/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/_hasselblad_photo_entry.py", line 121, in _history_facts
+E             start = _assert_start_result(attempt, attempt["result_json"], target, expected)
+E                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           File "/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/test_installed_hasselblad_phot0/_hasselblad_photo_entry.py", line 55, in _assert_start_result
+E             assert [step["name"] for step in steps] == expected["steps"]
+E                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E         AssertionError
+E         
+E       assert 1 == 0
+E        +  where 1 = CompletedProcess(args=['/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest/h...ep in steps] == expected["steps"]\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError\n').returncode
+
+/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/source/tests/integration/test_hasselblad_photo_parameters.py:149: AssertionError
+============================== slowest durations ===============================
+14.71s setup    tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]
+11.85s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]
+
+(1 durations < 0.005s hidden.  Use -vv to show these durations.)
+=========================== short test summary info ============================
+FAILED tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]
+1 failed in 27.00s

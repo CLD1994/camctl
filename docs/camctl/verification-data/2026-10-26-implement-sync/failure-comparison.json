@@ -1,0 +1,301 @@
+[
+  {
+    "nodeid": "apps/camctl/tests/integration/bootstrap/test_cleanup_background_owner.py::test_real_session_applies_cancel_before_device_call_returns[direct-delete]",
+    "historical_category": "legacy_constructor_interface",
+    "historical_exception_lines": [
+      "TypeError: SessionContext.__init__() got an unexpected keyword argument 'open_connection'"
+    ],
+    "current_case": {
+      "nodeid": "tests/integration/bootstrap/test_cleanup_background_owner.py::test_real_session_applies_cancel_before_device_call_returns[direct-delete]",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 0.0016079600027296692
+        },
+        "call": {
+          "outcome": "failed",
+          "duration_seconds": 0.3234168809867697
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.0013110940053593367
+        }
+      },
+      "outcome": "failed",
+      "duration_seconds": 0.3263359349948587
+    },
+    "same_node_failed_in_previous_regression": true
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/bootstrap/test_cleanup_background_owner.py::test_real_session_applies_cancel_before_device_call_returns[direct-query]",
+    "historical_category": "legacy_constructor_interface",
+    "historical_exception_lines": [
+      "TypeError: SessionContext.__init__() got an unexpected keyword argument 'open_connection'"
+    ],
+    "current_case": {
+      "nodeid": "tests/integration/bootstrap/test_cleanup_background_owner.py::test_real_session_applies_cancel_before_device_call_returns[direct-query]",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 0.001347008001175709
+        },
+        "call": {
+          "outcome": "failed",
+          "duration_seconds": 0.34397610199812334
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.0012842680007452145
+        }
+      },
+      "outcome": "failed",
+      "duration_seconds": 0.34660737800004426
+    },
+    "same_node_failed_in_previous_regression": true
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/bootstrap/test_cleanup_background_owner.py::test_real_session_applies_cancel_before_device_call_returns[default-delete]",
+    "historical_category": "inherited_missing_closing_import",
+    "historical_exception_lines": [
+      "asyncio.exceptions.CancelledError",
+      "TimeoutError"
+    ],
+    "current_case": {
+      "nodeid": "tests/integration/bootstrap/test_cleanup_background_owner.py::test_real_session_applies_cancel_before_device_call_returns[default-delete]",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 0.0019050179980695248
+        },
+        "call": {
+          "outcome": "failed",
+          "duration_seconds": 2.584702208987437
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.0013475789892254397
+        }
+      },
+      "outcome": "failed",
+      "duration_seconds": 2.587954805974732
+    },
+    "same_node_failed_in_previous_regression": true
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/bootstrap/test_cleanup_background_owner.py::test_real_session_applies_cancel_before_device_call_returns[default-query]",
+    "historical_category": "inherited_missing_closing_import",
+    "historical_exception_lines": [
+      "asyncio.exceptions.CancelledError",
+      "TimeoutError"
+    ],
+    "current_case": {
+      "nodeid": "tests/integration/bootstrap/test_cleanup_background_owner.py::test_real_session_applies_cancel_before_device_call_returns[default-query]",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 0.001772838004399091
+        },
+        "call": {
+          "outcome": "failed",
+          "duration_seconds": 2.602623152997694
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.0022555030009243637
+        }
+      },
+      "outcome": "failed",
+      "duration_seconds": 2.6066514940030174
+    },
+    "same_node_failed_in_previous_regression": true
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/bootstrap/test_cleanup_background_owner.py::test_cleanup_stop_retains_started_host_result_and_original_pending[owner_stop-delete]",
+    "historical_category": "legacy_context_database_field",
+    "historical_exception_lines": [
+      "AttributeError: 'types.SimpleNamespace' object has no attribute 'database'"
+    ],
+    "current_case": {
+      "nodeid": "tests/integration/bootstrap/test_cleanup_background_owner.py::test_cleanup_stop_retains_started_host_result_and_original_pending[owner_stop-delete]",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 0.08380403900810052
+        },
+        "call": {
+          "outcome": "failed",
+          "duration_seconds": 0.060258647994487546
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.008716013006051071
+        }
+      },
+      "outcome": "failed",
+      "duration_seconds": 0.15277870000863913
+    },
+    "same_node_failed_in_previous_regression": true
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/bootstrap/test_cleanup_background_owner.py::test_cleanup_stop_retains_started_host_result_and_original_pending[owner_stop-query]",
+    "historical_category": "legacy_context_database_field",
+    "historical_exception_lines": [
+      "AttributeError: 'types.SimpleNamespace' object has no attribute 'database'"
+    ],
+    "current_case": {
+      "nodeid": "tests/integration/bootstrap/test_cleanup_background_owner.py::test_cleanup_stop_retains_started_host_result_and_original_pending[owner_stop-query]",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 0.09973634700872935
+        },
+        "call": {
+          "outcome": "failed",
+          "duration_seconds": 0.02808045200072229
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.006352094002068043
+        }
+      },
+      "outcome": "failed",
+      "duration_seconds": 0.13416889301151969
+    },
+    "same_node_failed_in_previous_regression": true
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/bootstrap/test_cleanup_background_owner.py::test_cleanup_stop_retains_started_host_result_and_original_pending[parent_cancel-delete]",
+    "historical_category": "legacy_context_database_field",
+    "historical_exception_lines": [
+      "AttributeError: 'types.SimpleNamespace' object has no attribute 'database'"
+    ],
+    "current_case": {
+      "nodeid": "tests/integration/bootstrap/test_cleanup_background_owner.py::test_cleanup_stop_retains_started_host_result_and_original_pending[parent_cancel-delete]",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 0.08432450098916888
+        },
+        "call": {
+          "outcome": "failed",
+          "duration_seconds": 0.019334889002493583
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.004389723006170243
+        }
+      },
+      "outcome": "failed",
+      "duration_seconds": 0.10804911299783271
+    },
+    "same_node_failed_in_previous_regression": true
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/bootstrap/test_cleanup_background_owner.py::test_cleanup_stop_retains_started_host_result_and_original_pending[parent_cancel-query]",
+    "historical_category": "legacy_context_database_field",
+    "historical_exception_lines": [
+      "AttributeError: 'types.SimpleNamespace' object has no attribute 'database'"
+    ],
+    "current_case": {
+      "nodeid": "tests/integration/bootstrap/test_cleanup_background_owner.py::test_cleanup_stop_retains_started_host_result_and_original_pending[parent_cancel-query]",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 0.05001647899916861
+        },
+        "call": {
+          "outcome": "failed",
+          "duration_seconds": 0.028953558998182416
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.00958983099553734
+        }
+      },
+      "outcome": "failed",
+      "duration_seconds": 0.08855986899288837
+    },
+    "same_node_failed_in_previous_regression": true
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/bootstrap/test_cleanup_background_owner.py::test_short_discovery_round_does_not_wake_another_empty_round[future]",
+    "historical_category": "legacy_context_database_field",
+    "historical_exception_lines": [
+      "AttributeError: 'types.SimpleNamespace' object has no attribute 'database'"
+    ],
+    "current_case": {
+      "nodeid": "tests/integration/bootstrap/test_cleanup_background_owner.py::test_short_discovery_round_does_not_wake_another_empty_round[future]",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 0.001307140992139466
+        },
+        "call": {
+          "outcome": "failed",
+          "duration_seconds": 0.10397708699747454
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.0009249630093108863
+        }
+      },
+      "outcome": "failed",
+      "duration_seconds": 0.1062091909989249
+    },
+    "same_node_failed_in_previous_regression": true
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/bootstrap/test_cleanup_background_owner.py::test_short_discovery_round_does_not_wake_another_empty_round[source_waiting]",
+    "historical_category": "legacy_context_database_field",
+    "historical_exception_lines": [
+      "AttributeError: 'types.SimpleNamespace' object has no attribute 'database'"
+    ],
+    "current_case": {
+      "nodeid": "tests/integration/bootstrap/test_cleanup_background_owner.py::test_short_discovery_round_does_not_wake_another_empty_round[source_waiting]",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 0.0014116370002739131
+        },
+        "call": {
+          "outcome": "failed",
+          "duration_seconds": 0.08647444599773735
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.0013178029912523925
+        }
+      },
+      "outcome": "failed",
+      "duration_seconds": 0.08920388598926365
+    },
+    "same_node_failed_in_previous_regression": true
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/bootstrap/test_cleanup_background_owner.py::test_other_flow_fatal_stops_cleanup_before_emergency_wait_and_preserves_actual",
+    "historical_category": "legacy_constructor_interface",
+    "historical_exception_lines": [
+      "TypeError: SessionContext.__init__() got an unexpected keyword argument 'open_connection'"
+    ],
+    "current_case": {
+      "nodeid": "tests/integration/bootstrap/test_cleanup_background_owner.py::test_other_flow_fatal_stops_cleanup_before_emergency_wait_and_preserves_actual",
+      "phases": {
+        "setup": {
+          "outcome": "passed",
+          "duration_seconds": 0.0013627330044982955
+        },
+        "call": {
+          "outcome": "failed",
+          "duration_seconds": 0.6787893849977991
+        },
+        "teardown": {
+          "outcome": "passed",
+          "duration_seconds": 0.008415941993007436
+        }
+      },
+      "outcome": "failed",
+      "duration_seconds": 0.6885680599953048
+    },
+    "same_node_failed_in_previous_regression": true
+  }
+]

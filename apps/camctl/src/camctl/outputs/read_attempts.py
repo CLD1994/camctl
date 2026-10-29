@@ -355,9 +355,12 @@ async def _save_pending_read_business(runtime, identity, pending, *, retry=False
         pending.shared.retry_failed()
 
     def apply_completed(receipt):
+        if runtime.pending_read_business.get(identity) is not pending:
+            return
         if pending.on_completed is not None:
             pending.on_completed(receipt.value)
-        del runtime.pending_read_business[identity]
+        if runtime.pending_read_business.get(identity) is pending:
+            del runtime.pending_read_business[identity]
 
     async def save_and_apply():
         held = runtime.pending_read_business.get(identity)
@@ -538,13 +541,18 @@ def hold_read_result(runtime, finish, *, business=None, key=None,
 
 async def save_read_result(runtime, pending, *, retry=False):
     """可靠保存原结果；业务收场完成前仍保留原结果与操作键。"""
-    if retry:
+    ticket = pending.ticket if isinstance(pending, PendingStoppedRead) else pending.finish.ticket
+    identity = (ticket.run_id, ticket.attempt_id)
+    current = runtime.pending_read_results.get(identity)
+    if retry and current is not None and current.result_save is pending.result_save:
         pending.result_save.retry_failed()
 
     async def save():
-        prepared = pending
-        if isinstance(pending, PendingStoppedRead):
-            prepared = await _prepare_stopped_read(runtime, pending)
+        prepared = runtime.pending_read_results.get(identity)
+        if prepared is None or prepared.result_save is not pending.result_save:
+            return None
+        if isinstance(prepared, PendingStoppedRead):
+            prepared = await _prepare_stopped_read(runtime, prepared)
         if prepared is None:
             return None
         outcome = await runtime.database.write(

@@ -34,12 +34,14 @@ _ALLOWED_TRANSACTION_OWNERS = {"HistoryRepository", "SqliteSnapshotStore"}
 # 许可限定到函数，不允许仓储的其他入口自开事务，也不允许BEGIN IMMEDIATE。
 _READ_TRANSACTION_FUNCTIONS = {
     "module:read_motor_facts",
-    "module:_fixed_file",
+    "module:_load_fixed_file",
     "module:verify_segment_finish",
     "module:read_segment_members",
-    "module:read_segment_output_candidates",
+    "module:read_segment_finish_candidates",
+    "module:read_segment_finish_scope",
     "module:segment_output_candidate",
-    "module:read_saved_result_file_input",
+    "module:read_result_file_input_from_reader",
+    "module:read_pairing_fact",
     "module:verify_ownership_from_result_page",
     "module:verify_result_file_pairing",
     "module:_read_transaction",

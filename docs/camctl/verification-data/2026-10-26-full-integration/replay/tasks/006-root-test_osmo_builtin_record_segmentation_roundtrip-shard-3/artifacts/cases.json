@@ -1,0 +1,59 @@
+[
+  {
+    "nodeid": "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[normal-indexes0-2-succeeded]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 19.60759887500899
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 45.68758163800521
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.085043016995769
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 65.38022353000997
+  },
+  {
+    "nodeid": "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[gap-indexes3-2-failed]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0018943539907922968
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 49.97720538399881
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.13519348698901013
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 50.11429322497861
+  },
+  {
+    "nodeid": "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[native-tail-indexes7-2-succeeded]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0026618530100677162
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 44.545171826001024
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.10618729199632071
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 44.65402097100741
+  }
+]

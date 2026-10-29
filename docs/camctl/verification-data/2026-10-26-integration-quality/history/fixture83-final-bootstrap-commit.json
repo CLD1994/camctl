@@ -1,0 +1,11 @@
+{
+  "baseline": "f143fbbecf68e9333ef6c4db36188b2c6c642630",
+  "commit": "2b58a7f35d7ab978d4d1f88a6fc07b9cea591d11",
+  "branch": "test/quality-bootstrap-async-20261026",
+  "worktree": "/tmp/camctl-quality-history-20261026",
+  "status": "",
+  "files": [
+    "apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py"
+  ],
+  "observed_utc": "2026-10-25T19:05:01.583055+00:00"
+}

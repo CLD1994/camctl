@@ -1,0 +1,12 @@
+[
+  {
+    "id": "camctl/bootstrap",
+    "scope": "camctl",
+    "path": "apps/camctl/tests/integration/bootstrap",
+    "targets": [
+      "apps/camctl/tests/integration/bootstrap/test_segment_input_cleanup.py",
+      "apps/camctl/tests/integration/bootstrap/test_inspection_read_dispatch.py"
+    ],
+    "estimated_seconds": 733.239981505747
+  }
+]

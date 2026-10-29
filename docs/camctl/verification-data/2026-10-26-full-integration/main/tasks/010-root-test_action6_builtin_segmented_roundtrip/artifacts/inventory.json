@@ -1,0 +1,4 @@
+[
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/010-root-test_action6_builtin_segmented_roundtrip/source/tests/integration/test_action6_builtin_segmented_roundtrip.py::test_installed_action6_segmented_default_scope_obtain_and_client_ack[ordinary]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/010-root-test_action6_builtin_segmented_roundtrip/source/tests/integration/test_action6_builtin_segmented_roundtrip.py::test_installed_action6_segmented_default_scope_obtain_and_client_ack[native-timelapse]"
+]

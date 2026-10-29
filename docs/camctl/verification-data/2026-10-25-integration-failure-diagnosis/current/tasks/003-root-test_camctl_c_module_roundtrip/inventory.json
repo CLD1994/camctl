@@ -1,0 +1,3 @@
+[
+  "tests/integration/test_camctl_c_module_roundtrip.py::test_capture_obtain_cleanup_roundtrip_via_c_module"
+]

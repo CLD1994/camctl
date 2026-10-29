@@ -14,6 +14,8 @@ from decimal import Decimal
 
 import pytest
 
+from ..support.outputs import output_operation
+
 from camctl.contracts.values import new_operation_key
 from camctl.outputs.copy import CompletionContext, CompletionPhase, complete_copy
 from camctl.outputs.handoff import (
@@ -37,7 +39,7 @@ from camctl.persistence.repositories.operations import register_operation_guards
 from camctl.persistence.repositories.outputs import (
     FinishObtain,
     ObtainFinishDisposition,
-    OutputsRepository,
+    OutputsRepository, load_obtain_facts,
 )
 from camctl.persistence.transaction import TransactionError
 from camctl.outputs.qualification import OperationConfig
@@ -66,40 +68,8 @@ def _value(owned, sql: str, *params):
     return row
 
 
-def _facts(owned, action_id: int) -> ObtainFacts:
-    """从已保存行装配汇总事实：选择固定性、待判定与逐项阶段。
-
-    该读取规则是调度接线前的参考装载实现：选择按依赖归属动作，
-    条目按选择，交付按条目保存的交付身份。
-    """
-    with closing(owned.connection.execute(
-        "SELECT s.id, s.status FROM obtain_source_selections s"
-        " JOIN action_dependencies d ON d.id = s.dependency_id"
-        " WHERE d.action_id=? ORDER BY s.id", (action_id,),
-    )) as cursor:
-        selections = cursor.fetchall()
-    sources = []
-    items: list[ObtainItemStage] = []
-    for selection_id, status in selections:
-        unresolved = _value(
-            owned,
-            "SELECT COUNT(*) FROM obtain_items WHERE selection_id=?"
-            " AND status=1", selection_id)[0]
-        sources.append(ObtainSourceFacts(
-            selection_fixed=status == 2, unresolved_items=unresolved))
-        with closing(owned.connection.execute(
-            "SELECT status, delivery_id FROM obtain_items"
-            " WHERE selection_id=? AND status<>1 ORDER BY id", (selection_id,),
-        )) as cursor:
-            rows = cursor.fetchall()
-        for item_status, delivery_id in rows:
-            delivery = None
-            if delivery_id is not None:
-                delivery = _value(
-                    owned, "SELECT status FROM deliveries WHERE id=?",
-                    delivery_id)[0]
-            items.append(obtain_item_stage(item_status, delivery))
-    return ObtainFacts(sources=tuple(sources), items=tuple(items))
+def _facts(owned, action_id):
+    return load_obtain_facts(owned.connection, action_id)
 
 
 @pytest.fixture
@@ -115,9 +85,12 @@ def prepared_env(read_targets, tmp_path):
     qualification = _qualified(owned, _command())
     roots = _roots(tmp_path)
     asyncio.run(_drive(owned, roots, qualification.copy_id, segment_size=10))
-    step = asyncio.run(complete_copy(qualification.copy_id, CompletionContext(
-        repository=OutputsRepository(), owned=owned, roots=roots,
-        occurred_at=_NOW + 5)))
+    step = asyncio.run(output_operation(
+        owned, complete_copy, qualification.copy_id, CompletionContext,
+        repository=OutputsRepository(),
+        roots=roots,
+        occurred_at=_NOW + 5,
+    ))
     assert step.phase is CompletionPhase.PREPARED
     owned.connection.commit()
     return owned, roots, qualification
@@ -170,13 +143,13 @@ def test_determined_summary_publishes_successes(prepared_env, tmp_path) -> None:
     processing = tmp_path / "processing"
     ready.mkdir()
     processing.mkdir()
-    result = asyncio.run(publish_delivery(
-        qualification.delivery_id,
-        DeliveryContext(
-            repository=OutputsRepository(), owned=owned,
-            directories=DeliveryDirectories(
+    result = asyncio.run(output_operation(
+        owned, publish_delivery, qualification.delivery_id, DeliveryContext,
+        repository=OutputsRepository(),
+        directories=DeliveryDirectories(
                 staging=roots.staging, ready=ready, processing=processing),
-            occurred_at=_NOW + 10)))
+        occurred_at=_NOW + 10,
+    ))
     assert result.phase is DeliveryPhase.PUBLISHED
     again = decide_obtain_finish(_facts(owned, 31))
     assert again.phase is ObtainPhase.READY_TO_PUBLISH
@@ -194,13 +167,13 @@ def _publish(owned, roots, delivery_id, tmp_path):
     processing = tmp_path / "processing"
     ready.mkdir(exist_ok=True)
     processing.mkdir(exist_ok=True)
-    result = asyncio.run(publish_delivery(
-        delivery_id,
-        DeliveryContext(
-            repository=OutputsRepository(), owned=owned,
-            directories=DeliveryDirectories(
+    result = asyncio.run(output_operation(
+        owned, publish_delivery, delivery_id, DeliveryContext,
+        repository=OutputsRepository(),
+        directories=DeliveryDirectories(
                 staging=roots.staging, ready=ready, processing=processing),
-            occurred_at=_NOW + 10)))
+        occurred_at=_NOW + 10,
+    ))
     assert result.phase is DeliveryPhase.PUBLISHED
 
 

@@ -130,12 +130,14 @@ def test_new_key_after_terminal_recovers_without_reregistering(
     first = _assert_completed(
         repository.finish_capture(_finish(), new_operation_key(), owned))
     events_before = _events(owned)
+    dump_before = tuple(owned.connection.iterdump())
 
     recovered = _assert_completed(
         repository.finish_capture(_finish(), new_operation_key(), owned))
     assert recovered.disposition is FinishDisposition.ALREADY
     assert recovered.output_ids == first.output_ids
     assert _events(owned) == events_before
+    assert tuple(owned.connection.iterdump()) == dump_before
 
 
 def test_new_key_after_terminal_rejects_appended_outputs(

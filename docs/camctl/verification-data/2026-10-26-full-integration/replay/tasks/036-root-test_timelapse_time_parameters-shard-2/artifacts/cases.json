@@ -1,0 +1,21 @@
+[
+  {
+    "nodeid": "tests/integration/test_timelapse_time_parameters.py::test_describe_python_browser_and_node_export_agree[dji-osmo360-ii]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001482153995311819
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 24.433192064010655
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.012090474003343843
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 24.44676469200931
+  }
+]

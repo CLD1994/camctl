@@ -1,4 +1,4 @@
-"""每个Hasselblad world独占一个真实Node客户端，控制连接只传文件路径。"""
+"""每个测试世界独占一个真实Node客户端，控制连接只传文件路径。"""
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
@@ -14,7 +14,7 @@ import time
 import uuid
 
 
-_TIMEOUT = 180.0  # 原一次性Node命令的预算，分别用于startup、操作和正常close。
+_TIMEOUT = 180.0  # 默认保持Hasselblad原预算；其他调用方显式传入自己的预算。
 _TERM_GRACE = 3.0
 _KILL_GRACE = 3.0
 
@@ -46,8 +46,10 @@ def _same(current: _Process | None, expected: _Process) -> bool:
 
 
 class ClientSession:
-    def __init__(self, command: list[str], *, cwd: Path, env: dict[str, str], root: Path):
+    def __init__(self, command: list[str], *, cwd: Path, env: dict[str, str], root: Path,
+                 timeout: float = _TIMEOUT):
         self.root, self.cwd = Path(root).resolve(), Path(cwd).resolve()
+        self.timeout = timeout
         self.session_id = str(uuid.uuid4())
         self.node_metrics = self.root / "client-session-node.json"
         self.python_metrics = self.root / "client-session-python.json"
@@ -64,11 +66,11 @@ class ClientSession:
         self.metrics = {
             "schema_version": 1, "session_id": self.session_id,
             "nodeid": os.environ.get("PYTEST_CURRENT_TEST", "").split(" (", 1)[0],
-            "command_prefix": command, "phase_timeout_seconds": _TIMEOUT,
+            "command_prefix": command, "phase_timeout_seconds": self.timeout,
             "startup": None, "commands": [], "close": None,
         }
         started = time.monotonic_ns()
-        deadline = time.monotonic() + _TIMEOUT
+        deadline = time.monotonic() + self.timeout
         try:
             self.root.mkdir(parents=True, exist_ok=True)
             self.listener = socket.socket()
@@ -117,7 +119,7 @@ class ClientSession:
     def _remaining(self, deadline: float) -> float:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise TimeoutError(f"客户端会话超过{_TIMEOUT:g}秒预算；{self.stderr_path}")
+            raise TimeoutError(f"客户端会话超过{self.timeout:g}秒预算；{self.stderr_path}")
         return remaining
 
     def _wait_readable(self, stream: socket.socket, deadline: float):
@@ -181,7 +183,7 @@ class ClientSession:
             raise SessionError(f"拒绝把旧文件作为新回执：{output}")
         command_id, started = self.next_id, time.monotonic_ns()
         self.next_id += 1
-        deadline = time.monotonic() + _TIMEOUT
+        deadline = time.monotonic() + self.timeout
         record = {"id": command_id, "operation": operation,
                   "arguments": [str(path) for path in arguments], "receipt_path": str(output)}
         self.metrics["commands"].append(record)
@@ -205,7 +207,7 @@ class ClientSession:
     def close(self):
         if self.state in ("closed", "failed"):
             return
-        started, deadline = time.monotonic_ns(), time.monotonic() + _TIMEOUT
+        started, deadline = time.monotonic_ns(), time.monotonic() + self.timeout
         try:
             self._capture()  # Node关闭组长前固定本会话的实际Chrome成员身份。
             reply = self._send(self.next_id, "close", [], deadline)

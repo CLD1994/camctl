@@ -1,0 +1,11 @@
+{
+  "production_commit": "61c675710d8350a96f2f7d164f5ff1d6a220684f",
+  "baseline_sha256": "5781356d0da0a73e46216638a870187aa5e40d4bbf9b3cdb1fdcf4e23d9a7452",
+  "after_sha256": "b0b468267e8f450010a6b2100c85f4aa3435f7d87b56efc08cb6de6a28afb874",
+  "baseline_assertions": 127,
+  "after_assertions": 127,
+  "all_assertions_unchanged_in_order": true,
+  "baseline_modified_tracked_files": [
+    "tests/integration/test_action6_segmented_recovery_roundtrip.py"
+  ]
+}

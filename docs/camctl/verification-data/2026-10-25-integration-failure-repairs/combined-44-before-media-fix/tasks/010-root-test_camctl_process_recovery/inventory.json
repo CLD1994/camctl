@@ -1,0 +1,4 @@
+[
+  "tests/integration/test_camctl_process_recovery.py::test_next_run_waits_for_old_group_settlement[0]",
+  "tests/integration/test_camctl_process_recovery.py::test_next_run_waits_for_old_group_settlement[7]"
+]

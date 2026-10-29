@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="2.539" timestamp="2026-10-26T04:14:35.721289+08:00" hostname="1e0518e0c6b4"><testcase classname="tests.integration.history.test_report_selection" name="test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window" time="0.388"><failure message="AttributeError: 'str' object has no attribute 'is_dir'">finished_photo = (OwnedConnection(connection=&lt;sqlite3.Connection object at 0x7f5eb792f6a0&gt;, metadata=DatabaseMetadata(application_id='c...processing_path='/srv/camctl/processing')), PosixPath('/tmp/pytest-of-cld/pytest-108/test_large_window_releases_ove0'))
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x7f5eb7bbbf90&gt;
+
+    @pytest.mark.asyncio
+    async def test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window(finished_photo, monkeypatch):
+        import gc
+        owned, path = finished_photo
+        # 所有规模数据由真实受理事务生成，没有手填不对应事件的投影或目录。
+        _submit_many(owned, 3, 1)
+        early_sparse_wm = _to_wm(owned.connection)
+&gt;       await _finish_many(owned, 128)
+
+apps/camctl/tests/integration/history/test_report_selection.py:310: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/tmp/camctl-quality-repair-evidence/history-preparation/history_preparation_timing.py:45: in finish
+    return await original_finish(owned, count, action_id=action_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/history/test_report_selection.py:404: in _finish_many
+    database = await BusinessDatabase.open(
+apps/camctl/src/camctl/persistence/business.py:80: in open
+    database._metadata = await database.read(lambda owned: owned.metadata,
+apps/camctl/src/camctl/persistence/business.py:130: in read
+    raise error
+apps/camctl/src/camctl/persistence/executor.py:321: in _run
+    owned = self._factory()
+            ^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/history/test_report_selection.py:405: in &lt;lambda&gt;
+    lambda: open_existing(path, DbOpenMode.EXISTING_RW, DbConfig()))
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+path = '/tmp/pytest-of-cld/pytest-108/test_large_window_releases_ove0/state.db'
+mode = &lt;DbOpenMode.EXISTING_RW: 'rw'&gt;
+config = DbConfig(busy_timeout_ms=9000, wal_autocheckpoint_pages=1000)
+
+    def open_existing(path, mode: DbOpenMode, config: DbConfig) -&gt; OwnedConnection:
+        """打开并核验既有状态库；不创建、不修复、不隐式升级。
+    
+        只能在连接所属线程调用。目录、缺失文件、非 SQLite 内容、
+        身份或结构非法分别报对应错误；格式不受支持单独表达。
+        """
+        ensure_runtime_library()
+&gt;       if path.is_dir():
+           ^^^^^^^^^^^
+E       AttributeError: 'str' object has no attribute 'is_dir'
+
+apps/camctl/src/camctl/persistence/runtime.py:413: AttributeError</failure></testcase></testsuite></testsuites>

@@ -1,105 +1,70 @@
-"""拍摄流程把状态前提失效传给会话，已保存设备失败仍为局部结果。"""
+"""实际会话区别状态库失败与已经可靠保存的设备失败。"""
 
-from dataclasses import replace
+import sqlite3
 from types import SimpleNamespace
 
 import pytest
 
 from camctl.bootstrap.flows import capture_flow
-from camctl.bootstrap.background_flow import CombinedLocalWork
-from camctl.session.service import _drive_flows
+from camctl.capture.handlers import capture_handler
+from camctl.operations.models import ErrorValue
 
-from ..capture.test_capture_contract import (
-    DriverDouble, _entry, _environment, _runtime, _NOW,
-)
-from camctl.capture.results import FileKind
-from ..operations.test_result_reuse import _FaultConnection
-from .test_binding_changes import _RecoveryDriver, _recovering_runtime, environment
-from .test_binding_transactions import _unknown_owned
+from ..capture.test_recording_start_runtime import _result
+from ..support.bootstrap_capture_cases import bootstrap_case, run_flow_round
+from ..support.capture import capture_assembly
+
+pytestmark = pytest.mark.asyncio
 
 
-class _FlowConnection:
-    """保持真实连接可由测试核对，业务流仅关闭本轮借用包装。"""
-
-    def __init__(self, connection, fail_prefix):
-        self._connection = connection
-        self._fault = _FaultConnection(connection, fail_prefix)
-
-    def execute(self, sql, parameters=()):
-        return self._fault.execute(sql, parameters)
-
-    @property
-    def in_transaction(self):
-        return self._connection.in_transaction
-
-    def close(self):
-        pass
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize("fault", ["query", "projection"])
-async def test_capture_state_failure_stops_later_device_flow(environment, fault):
-    _, _, home = environment
-    directory = home / "failure"
-    owned, _ = _unknown_owned(directory, False)
-    next_calls = []
-    driver = _RecoveryDriver()
-    from ..capture.test_capture_contract import ResultsDouble
+async def test_capture_state_failure_stops_later_device_flow(tmp_path, bootstrap_case, fault):
+    case = bootstrap_case
+    runtime = await case.world(tmp_path, control=_result())
+    await capture_handler(case.handler)(case.action_id, runtime)
+    case.factory = capture_assembly(**{**case.options, "devices": {}})
+    case.fault.table = "operation_attempts" if fault == "query" else "operation_runs"
+    case.fault.operation = sqlite3.SQLITE_READ if fault == "query" else sqlite3.SQLITE_UPDATE
+    case.fault.enabled = True
+    flow = capture_flow(case.factory_view)
+    following, snapshots = [], []
 
-    prefix = ("SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id = t.run_id"
-              if fault == "query" else "UPDATE operation_runs")
-    wrapped = replace(owned, connection=_FlowConnection(owned.connection, prefix))
-
-    async def next_device(context):
-        next_calls.append("called")
-
-    context = SimpleNamespace(
-        open_connection=lambda: wrapped, clock=SimpleNamespace(utc_micros=lambda: _NOW),
-        flows={"capture": capture_flow(lambda connection, device: _recovering_runtime(
-            connection, directory, "missing", driver, ResultsDouble({}))),
-               "next": next_device},
-    )
-    context.local_work = CombinedLocalWork((context.flows["capture"],))
-    try:
-        before = tuple(owned.connection.iterdump())
-
-        fatal = await _drive_flows(context)
-
-        assert fatal is not None
-        assert next_calls == []
-        assert driver.calls == []
-        assert tuple(owned.connection.iterdump()) == before
-    finally:
-        owned.connection.close()
-
-
-@pytest.mark.asyncio
-async def test_saved_device_failure_allows_other_device_work(environment):
-    _, _, home = environment
-    directory = home / "ordinary"
-    directory.mkdir()
-    owned = _environment(directory, ((11, 1),))
-    next_calls = []
-    driver = DriverDouble(error={"code": "device_error"})
-    wrapped = replace(owned, connection=_FlowConnection(owned.connection, "NEVER MATCH"))
+    async def capture(context):
+        before = tuple(case.owned.connection.iterdump())
+        try:
+            await flow(context)
+            await flow.settle()
+        finally:
+            snapshots.append((before, tuple(case.owned.connection.iterdump())))
 
     async def next_device(context):
-        next_calls.append("called")
+        following.append(context)
 
-    context = SimpleNamespace(
-        open_connection=lambda: wrapped, clock=SimpleNamespace(utc_micros=lambda: _NOW),
-        flows={"capture": capture_flow(lambda connection, device: _runtime(
-            connection, driver=driver, files={11: (_entry("photo", kind=FileKind.PHOTO),)})),
-               "next": next_device},
-    )
-    context.local_work = CombinedLocalWork((context.flows["capture"],))
-    try:
-        fatal = await _drive_flows(context)
-        await context.local_work.settle()
+    outcome = await run_flow_round(case.path,
+        clock=SimpleNamespace(utc_micros=case.clock.wall_us), catalog=case.catalog,
+        open_database=case.new_database, flows={"capture": capture, "next": next_device})
+    assert outcome.reason == "state_db_error" and case.fault.hits
+    assert following == [] and case.driver.control.await_count == 1
+    assert len(snapshots) == 1 and snapshots[0][0] == snapshots[0][1]
 
-        assert fatal is None
-        assert next_calls == ["called"]
-        assert driver.calls == ["take_photo"]
-        assert owned.connection.execute("SELECT status FROM actions WHERE id = 11").fetchone() == (4,)
-    finally:
-        owned.connection.close()
+
+async def test_saved_device_failure_allows_other_device_work(tmp_path, bootstrap_case):
+    case = bootstrap_case
+    await case.world(tmp_path, "photo", control=_result(no_effect=True,
+        error=ErrorValue("transport_timeout", "transport")))
+    following = []
+    flow = capture_flow(case.factory_view)
+
+    async def capture(context):
+        await flow(context)
+        await flow.settle()
+
+    async def next_device(context):
+        following.append(context)
+
+    outcome = await run_flow_round(case.path,
+        clock=SimpleNamespace(utc_micros=case.clock.wall_us), catalog=case.catalog,
+        open_database=case.new_database, flows={"capture": capture, "next": next_device})
+    assert outcome is None and len(following) == 1
+    assert case.driver.control.await_count == 1
+    assert case.owned.connection.execute("SELECT status FROM actions WHERE id=?",
+        (case.action_id,)).fetchone() == (4,)

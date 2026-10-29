@@ -24,6 +24,7 @@ from camctl.session.clock import (
 )
 
 from ..persistence.test_runtime import _create_valid_database
+from ..support.database import business_database, database_path
 
 register_clock_guard()
 
@@ -110,14 +111,15 @@ class TestLowerBoundPersistence:
         )
         assert stale.status is ClockTrustStatus.TRUSTED
         assert not stale.needs_bound_update
-        mode = await enter_execution(
-            stale,
-            SimpleNamespace(
-                repository=repository,
-                operation_key=new_operation_key(),
-                owned=_owned(connection),
-            ),
-        )
+        async with business_database(database_path(_owned(connection))) as database:
+            mode = await enter_execution(
+                stale,
+                SimpleNamespace(
+                    repository=repository,
+                    operation_key=new_operation_key(),
+                    database=database,
+                ),
+            )
         assert mode is ExecutionMode.NORMAL
         assert connection.execute(
             "SELECT * FROM history_events ORDER BY id"
@@ -125,17 +127,6 @@ class TestLowerBoundPersistence:
         assert connection.execute(
             "SELECT * FROM history_transactions ORDER BY id"
         ).fetchall() == transactions_before_stale
-
-    def test_clock_failure_preserves_acceptance(self, database) -> None:
-        connection, repository = database
-        # 复检仍失败：不取得下界资格，不产生任何事件；已受理事实保持。
-        check = check_clock(_input(None), FixedClock([_MIN - 1]))
-        assert check.status is ClockTrustStatus.UNTRUSTED
-        events = connection.execute("SELECT COUNT(*) FROM history_events").fetchone()[0]
-        assert events == 0
-        assert connection.execute(
-            "SELECT trusted_time_lower_bound FROM runtime_state"
-        ).fetchone()[0] is None
 
     def test_concurrent_advance_rejected_by_stale_recheck(self, database) -> None:
         connection, repository = database

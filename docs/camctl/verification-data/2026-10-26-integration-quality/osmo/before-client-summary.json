@@ -1,0 +1,12 @@
+{
+  "client_process_starts": 1,
+  "client_commands": [
+    {
+      "operation": "export",
+      "elapsed_seconds": 1.747496911,
+      "outcome": "passed"
+    }
+  ],
+  "completed_success_path": false,
+  "reason": "production append_result_members rollback before report or media import"
+}

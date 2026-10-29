@@ -1,0 +1,71 @@
+{
+  "id": "root/test_camctl_cancellation_roundtrip",
+  "scope": "root",
+  "path": "tests/integration/test_camctl_cancellation_roundtrip.py",
+  "targets": [
+    "tests/integration/test_camctl_cancellation_roundtrip.py::test_cleanup_unknown_preserves_original_request_result"
+  ],
+  "estimated_seconds": 6.5349627360010345,
+  "historical_failure_observed": true,
+  "status": "passed",
+  "number": 14,
+  "worker": 0,
+  "artifacts": "/tmp/camctl-fix44-final-20261025/tasks/014-root-test_camctl_cancellation_roundtrip/artifacts",
+  "cwd": "/tmp/camctl-fix44-final-20261025/tasks/014-root-test_camctl_cancellation_roundtrip/source",
+  "started_utc": "2026-10-25T08:58:45.368936+00:00",
+  "command": [
+    "/tmp/camctl-fix44-final-20261025/tasks/014-root-test_camctl_cancellation_roundtrip/source/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "tests/integration/test_camctl_cancellation_roundtrip.py::test_cleanup_unknown_preserves_original_request_result",
+    "-q",
+    "--durations=0",
+    "-p",
+    "integration_progress",
+    "--basetemp",
+    "/tmp/camctl-fix44-final-20261025/tasks/014-root-test_camctl_cancellation_roundtrip/tmp/pytest"
+  ],
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-fix44-final-20261025/control:/tmp/camctl-fix44-final-20261025/tasks/014-root-test_camctl_cancellation_roundtrip/source/apps/camctl/src",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-final-20261025/workers/0/python-cache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-final-20261025/workers/0/project-env",
+    "UV_CACHE_DIR": "/tmp/camctl-fix44-final-20261025/workers/0/uv-cache",
+    "UV_OFFLINE": "1",
+    "TMPDIR": "/tmp/camctl-fix44-final-20261025/tasks/014-root-test_camctl_cancellation_roundtrip/tmp"
+  },
+  "preparations": [
+    {
+      "label": "package-resources",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-fix44-final-20261025/tasks/014-root-test_camctl_cancellation_roundtrip/source/apps/camctl/scripts/sync_resources.py"
+      ],
+      "cwd": "/tmp/camctl-fix44-final-20261025/tasks/014-root-test_camctl_cancellation_roundtrip/source",
+      "started_utc": "2026-10-25T08:58:45.961991+00:00",
+      "pid": 1092801,
+      "exit_code": 0,
+      "finished_utc": "2026-10-25T08:58:46.034304+00:00",
+      "wall_seconds": 0.07230396701197606
+    }
+  ],
+  "preparation": "package-resources",
+  "preparation_pid": 1092801,
+  "pid": 1092812,
+  "execution_started_utc": "2026-10-25T08:58:46.036297+00:00",
+  "progress": {
+    "status": "finished",
+    "exit_code": 0,
+    "collected": 1,
+    "outcomes": {
+      "passed": 1
+    },
+    "subchecks": {},
+    "elapsed_seconds": 35.634636969989515,
+    "utc": "2026-10-25T08:59:24.412901+00:00",
+    "pid": 1092812
+  },
+  "exit_code": 0,
+  "finished_utc": "2026-10-25T08:59:24.540674+00:00",
+  "wall_seconds": 36.677925690994016
+}

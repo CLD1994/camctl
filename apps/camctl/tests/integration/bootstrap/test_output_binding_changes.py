@@ -7,10 +7,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import pytest_asyncio
 
 from .cleanup_helpers import finish_cleanup_round
 
-from camctl.acceptance.input import ParsedInput
 from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.bootstrap.capture_assembly import session_capture_assembly
@@ -30,10 +30,11 @@ from camctl.devices.ports import DeviceCallResult, DriverDeclaration
 from camctl.devices.read_session import ReadSession
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.acceptance import AcceptanceRepository, ProcessInput
+from camctl.persistence.repositories.acceptance import AcceptanceRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..capture.test_capture_contract import ResultsDouble
+from ..support.database import business_database
 from .test_binding_changes import _Catalog as CaptureCatalog, _NOW
 from .test_obtain_flow import _MemoryStream
 
@@ -74,9 +75,7 @@ class Driver:
         self.delete_requests, self.query_requests = [], []
 
     async def control(self, request):
-        identity = self.owned.connection.execute(
-            "SELECT d.id FROM device_activities d JOIN actions a ON a.id=d.action_id"
-            " WHERE a.device_id=?", (request.binding.device_id,)).fetchone()[0]
+        identity = request.ticket.target_id
         return DeviceCallResult((DeviceObservation(
             type="photo_taken", version=1, data={"activity_id": str(identity)}),), None)
 
@@ -142,8 +141,8 @@ def _read_registry(driver):
         for driver_id in ("camctl-adb", "alternate-camera")))
 
 
-@pytest.fixture
-def environment(tmp_path):
+@pytest_asyncio.fixture
+async def environment(tmp_path):
     cfg = load_config({
         "paths": {"state_db": str(tmp_path / "state.db"), "log_file": str(tmp_path / "log"),
                   **{name: str(tmp_path / name) for name in ("staging", "ready", "processing")}},
@@ -156,22 +155,31 @@ def environment(tmp_path):
         open_connection=lambda: open_existing(deps.state_db, DbOpenMode.EXISTING_RW, DbConfig()),
         clock=SimpleNamespace(utc_micros=lambda: _NOW))
     try:
-        yield cfg, owned, context, Driver(owned)
+        async with business_database(deps.state_db, capacity=cfg.database.queue_capacity) as database:
+            context.database = database
+            yield cfg, owned, context, Driver(owned)
     finally:
         owned.connection.close()
         close_runtime(deps)
 
 
-def _accept(owned, request_id, actions):
-    outcome = AcceptanceRepository().process_input(ProcessInput(
-        ParsedInput("plan.json", {"request_id": request_id, "created_at": "2026-01-15 08:00:00",
-                                  "name": "双设备", "actions": actions}),
-        Catalog(), CommandMode.RUN, _NOW), new_operation_key(), owned)
-    assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+async def _accept(owned, request_id, actions):
+    from camctl.acceptance.service import AcceptanceContext
+    from ..support.acceptance import accept_document
+    from ..support.database import database_path
+
+    path = database_path(owned)
+    result = await accept_document({
+        "request_id": request_id, "created_at": "2026-01-15 08:00:00",
+        "name": "双设备", "actions": actions}, AcceptanceContext(
+            mode=CommandMode.RUN, catalog=Catalog(), repository=AcceptanceRepository(),
+            clock=SimpleNamespace(utc_micros=lambda: _NOW)), path,
+        input_path=path.parent / f"request-{request_id}.json")
+    assert result.plan_id is not None, result
 
 
 async def _save_photos(cfg, owned, context, driver):
-    _accept(owned, "1", [{"name": device, "type": "camera_take_photo", "device_id": device,
+    await _accept(owned, "1", [{"name": device, "type": "camera_take_photo", "device_id": device,
                            "scheduled_at": "2026-01-15 09:00:00", "group": "files",
                            "params": {"type": "single_shot"}, "policy": {"max_delay_ms": 1000}}
                           for device in ("cam-a", "cam-b")])
@@ -205,7 +213,7 @@ def _changed(cfg, state):
 async def test_selected_obtain_item_binding_failure_keeps_other_device(environment, state):
     cfg, owned, context, driver = environment
     await _save_photos(cfg, owned, context, driver)
-    _accept(owned, "2", [{"name": "取回", "type": "obtain_action_outputs",
+    await _accept(owned, "2", [{"name": "取回", "type": "obtain_action_outputs",
                           "scheduled_at": "2026-01-15 09:00:00",
                           "params": {"source": {"plan_instance_id": "1", "group": "files"}}}])
     current = _changed(cfg, state)
@@ -234,7 +242,7 @@ async def test_cleanup_uses_each_members_original_binding(environment, state):
     cfg, owned, context, driver = environment
     await _save_photos(cfg, owned, context, driver)
     output_ids = [str(row[0]) for row in owned.connection.execute("SELECT id FROM outputs ORDER BY id")]
-    _accept(owned, "2", [{"name": "清理", "type": "delete_action_outputs",
+    await _accept(owned, "2", [{"name": "清理", "type": "delete_action_outputs",
                           "scheduled_at": "2026-01-15 09:00:00", "params": {"output_ids": output_ids}}])
     current = _changed(cfg, state)
     factory = session_cleanup_assembly(
@@ -259,7 +267,7 @@ async def test_matched_single_device_cleanup_saves_reliable_absence(environment)
     output_id = str(owned.connection.execute(
         "SELECT o.id FROM outputs o JOIN actions a ON a.id=o.source_action_id"
         " WHERE a.device_id='cam-a'").fetchone()[0])
-    _accept(owned, "2", [{"name": "清理", "type": "delete_action_outputs",
+    await _accept(owned, "2", [{"name": "清理", "type": "delete_action_outputs",
                           "scheduled_at": "2026-01-15 09:00:00",
                           "params": {"output_ids": [output_id]}}])
     factory = session_cleanup_assembly(
@@ -281,7 +289,7 @@ async def test_matched_single_device_cleanup_saves_reliable_absence(environment)
 async def test_verified_copy_publishes_without_source_device(environment, state):
     cfg, owned, context, driver = environment
     await _save_photos(cfg, owned, context, driver)
-    _accept(owned, "2", [{"name": "取回", "type": "obtain_action_outputs",
+    await _accept(owned, "2", [{"name": "取回", "type": "obtain_action_outputs",
                           "scheduled_at": "2026-01-15 09:00:00",
                           "params": {"source": {"plan_instance_id": "1", "group": "files"}}}])
 
@@ -308,7 +316,7 @@ async def test_verified_copy_publishes_without_source_device(environment, state)
 async def test_unfinished_read_binding_failure_closes_responsibility_and_keeps_progress(environment, state):
     cfg, owned, context, driver = environment
     await _save_photos(cfg, owned, context, driver)
-    _accept(owned, "2", [{"name": "取回", "type": "obtain_action_outputs",
+    await _accept(owned, "2", [{"name": "取回", "type": "obtain_action_outputs",
                           "scheduled_at": "2026-01-15 09:00:00",
                           "params": {"source": {"plan_instance_id": "1", "group": "files"}}}])
 
@@ -356,7 +364,7 @@ async def _pending_cleanup(environment, *, confirmed_present=False):
     output_id = owned.connection.execute(
         "SELECT o.id FROM outputs o JOIN actions a ON a.id=o.source_action_id"
         " WHERE a.device_id='cam-a'").fetchone()[0]
-    _accept(owned, "2", [{"name": "清理", "type": "delete_action_outputs",
+    await _accept(owned, "2", [{"name": "清理", "type": "delete_action_outputs",
                           "scheduled_at": "2026-01-15 09:00:00",
                           "params": {"output_ids": [str(output_id)]}}])
     driver.unknown_delete = True
@@ -426,7 +434,7 @@ async def test_cleanup_passes_committed_ticket_and_each_operation_timeout(enviro
     output_id = str(owned.connection.execute(
         "SELECT o.id FROM outputs o JOIN actions a ON a.id=o.source_action_id"
         " WHERE a.device_id='cam-a'").fetchone()[0])
-    _accept(owned, "2", [{"name": "清理", "type": "delete_action_outputs",
+    await _accept(owned, "2", [{"name": "清理", "type": "delete_action_outputs",
                           "scheduled_at": "2026-01-15 09:00:00",
                           "params": {"output_ids": [output_id]}}])
     devices = dict(cfg.devices)

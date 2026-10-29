@@ -2734,6 +2734,29 @@ def _verify_source_identity(connection, copy) -> tuple[int, SourceChecksumSuppor
     return copy["source_size"], support
 
 
+def _verify_delivery_source(connection, *, action_id, selection, output, copy) -> None:
+    """核对正式交付的原源身份，接受 H 授权的同原片检查副本。"""
+    if (output["device_file_id"] == copy["source_device_file_id"]
+            and output["intermediate_file_id"] == copy["source_intermediate_file_id"]):
+        return
+    if (output["kind"] != int(_OUTPUT_KIND.ORIGINAL)
+            or output["device_file_id"] is None
+            or output["intermediate_file_id"] is not None
+            or copy["source_device_file_id"] is not None
+            or copy["source_intermediate_file_id"] is None):
+        raise ConsistencyError("正式交付的产物与原读取源身份不一致")
+    from camctl.outputs.segment_copy_reuse import read_bound_check_copy_identity
+
+    bound = read_bound_check_copy_identity(
+        source_action_id=output["source_action_id"],
+        source_device_file_id=output["device_file_id"],
+        obtain_action_id=action_id, selection_id=selection["id"],
+        owned=SimpleNamespace(connection=connection))
+    if (bound is None or bound.copy.target_file_id != copy["source_intermediate_file_id"]
+            or bound.copy.source_size != copy["source_size"]):
+        raise ConsistencyError("正式交付的原检查副本与来源 H 授权不一致")
+
+
 def _read_attempt_facts(connection, copy_id: int) -> tuple[AttemptRecord, ...]:
     """读取拷贝唯一 READ_FILE 流程的全部尝试事实。"""
     with closing(connection.execute(
@@ -3992,6 +4015,7 @@ class _ReadSourceFallbackCommand:
         if (bound.inspection is None or bound.copy is None
                 or bound.inspection.inspection_id != inspection["id"]
                 or bound.copy.copy_id != check_copy["id"]
+                or check_copy["source_device_file_id"] != output["device_file_id"]
                 or bound.copy.target_file_id != current_file_id
                 or bound.copy.source_device_file_id != output["device_file_id"]
                 or bound.copy.inspection_state != int(_SEGMENT_INSPECTION_STATE.COMPLETED)
@@ -5152,7 +5176,8 @@ def _load_work_file_facts(owned: OwnedConnection, file_id: int) -> WorkFileFacts
                 published_event_id = set_row[0]
                 if published_event_id is not None:
                     owner_finished = owner_finished and all_bound_waiters_terminal(
-                        int(file["owner_action_id"]), int(published_event_id), owned)
+                        int(file["owner_action_id"]), int(published_event_id), owned,
+                        copy=facts.copy)
     with closing(connection.execute(
         "SELECT COUNT(*) FROM operation_attempts AS a"
         " JOIN operation_runs AS r ON a.run_id = r.id"
@@ -5351,10 +5376,11 @@ class _SettleCanceledObtainCommand:
                         raise ConsistencyError("取消取回的原副本与交付归属不一致")
                     output = self._load(connection, "outputs", delivery["output_id"])
                     dependency = self._state["action_dependencies"][dependency_id]
-                    if (dependency["depends_on_action_id"] != output["source_action_id"]
-                            or output["device_file_id"] != copy["source_device_file_id"]
-                            or output["intermediate_file_id"] != copy["source_intermediate_file_id"]):
+                    if dependency["depends_on_action_id"] != output["source_action_id"]:
                         raise ConsistencyError("取消取回的原来源、产物与副本关联不一致")
+                    _verify_delivery_source(connection, action_id=action_id,
+                        selection=self._state["obtain_source_selections"][selection_id],
+                        output=output, copy=copy)
                     try:
                         validate_relative_file_path(_target_purpose_model(copy, target),
                                                     target["id"], target["relative_path"])

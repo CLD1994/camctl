@@ -1,0 +1,11 @@
+{
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "/tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_device_capability_declarations/source/apps/camctl/scripts/sync_resources.py"
+  ],
+  "cwd": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_device_capability_declarations/source",
+  "started_utc": "2026-10-26T00:19:52.632397+00:00",
+  "pid": 1923667,
+  "exit_code": 0,
+  "finished_utc": "2026-10-26T00:19:52.931047+00:00"
+}

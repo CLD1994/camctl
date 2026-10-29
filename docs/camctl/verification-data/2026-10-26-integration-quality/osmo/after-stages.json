@@ -1,0 +1,124 @@
+{
+  "commands": [
+    {
+      "argv": [
+        "uv",
+        "build",
+        "--project",
+        "/tmp/camctl-quality-osmo-20261026/apps/camctl",
+        "--wheel",
+        "--out-dir",
+        "/tmp/camctl-quality-osmo-runtime/after-pytest/osmo-builtin-package0/dist"
+      ],
+      "cwd": "/tmp/camctl-quality-osmo-runtime/after-pytest/osmo-builtin-package0",
+      "started_ns": 100849532070395,
+      "outcome": "passed",
+      "elapsed_seconds": 0.549255433
+    },
+    {
+      "argv": [
+        "uv",
+        "export",
+        "--project",
+        "/tmp/camctl-quality-osmo-20261026/apps/camctl",
+        "--frozen",
+        "--no-dev",
+        "--no-emit-project",
+        "-o",
+        "/tmp/camctl-quality-osmo-runtime/after-pytest/osmo-builtin-package0/requirements.txt"
+      ],
+      "cwd": "/tmp/camctl-quality-osmo-runtime/after-pytest/osmo-builtin-package0",
+      "started_ns": 100850081568099,
+      "outcome": "passed",
+      "elapsed_seconds": 0.009382286
+    },
+    {
+      "argv": [
+        "uv",
+        "venv",
+        "--python",
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-quality-osmo-runtime/after-pytest/osmo-builtin-package0/venv"
+      ],
+      "cwd": "/tmp/camctl-quality-osmo-runtime/after-pytest/osmo-builtin-package0",
+      "started_ns": 100850091106146,
+      "outcome": "passed",
+      "elapsed_seconds": 0.010384737
+    },
+    {
+      "argv": [
+        "uv",
+        "pip",
+        "install",
+        "--python",
+        "/tmp/camctl-quality-osmo-runtime/after-pytest/osmo-builtin-package0/venv/bin/python",
+        "--require-hashes",
+        "-r",
+        "/tmp/camctl-quality-osmo-runtime/after-pytest/osmo-builtin-package0/requirements.txt"
+      ],
+      "cwd": "/tmp/camctl-quality-osmo-runtime/after-pytest/osmo-builtin-package0",
+      "started_ns": 100850101785596,
+      "outcome": "passed",
+      "elapsed_seconds": 0.072584287
+    },
+    {
+      "argv": [
+        "uv",
+        "pip",
+        "install",
+        "--python",
+        "/tmp/camctl-quality-osmo-runtime/after-pytest/osmo-builtin-package0/venv/bin/python",
+        "--no-deps",
+        "/tmp/camctl-quality-osmo-runtime/after-pytest/osmo-builtin-package0/dist/camctl-0.1.0-py3-none-any.whl"
+      ],
+      "cwd": "/tmp/camctl-quality-osmo-runtime/after-pytest/osmo-builtin-package0",
+      "started_ns": 100850174529466,
+      "outcome": "passed",
+      "elapsed_seconds": 0.050435292
+    },
+    {
+      "argv": [
+        "/tmp/camctl-quality-osmo-runtime/after-pytest/osmo-builtin-package0/runtime/normal/tools/camctl",
+        "init",
+        "--config",
+        "/tmp/camctl-quality-osmo-runtime/after-pytest/test_installed_segment_source_0/world/deployment/config.toml"
+      ],
+      "cwd": "/tmp/camctl-quality-osmo-runtime/after-pytest/test_installed_segment_source_0/world",
+      "started_ns": 100850231889939,
+      "outcome": "passed",
+      "elapsed_seconds": 1.324472779
+    },
+    {
+      "argv": [
+        "/tmp/camctl-quality-osmo-runtime/after-pytest/osmo-builtin-package0/runtime/normal/tools/camctl",
+        "describe",
+        "--config",
+        "/tmp/camctl-quality-osmo-runtime/after-pytest/test_installed_segment_source_0/world/deployment/config.toml"
+      ],
+      "cwd": "/tmp/camctl-quality-osmo-runtime/after-pytest/test_installed_segment_source_0/world",
+      "started_ns": 100851556794498,
+      "outcome": "passed",
+      "elapsed_seconds": 1.032538697
+    }
+  ],
+  "pytest_phases": [
+    {
+      "nodeid": "tmp/camctl-quality-osmo-20261026/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[normal-indexes0-2-succeeded]",
+      "when": "setup",
+      "duration": 10.853779701996245,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-osmo-20261026/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[normal-indexes0-2-succeeded]",
+      "when": "call",
+      "duration": 13.40458137600217,
+      "outcome": "failed"
+    },
+    {
+      "nodeid": "tmp/camctl-quality-osmo-20261026/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[normal-indexes0-2-succeeded]",
+      "when": "teardown",
+      "duration": 0.024703165006940253,
+      "outcome": "passed"
+    }
+  ]
+}

@@ -44,6 +44,37 @@ from camctl.persistence.repositories.session import CloseDecision, SessionReposi
 pytestmark = pytest.mark.asyncio
 
 
+@pytest.mark.parametrize("next_probe", [False, True])
+async def test_checked_report_yields_before_probe_and_can_discover_next_change(next_probe):
+    release = asyncio.Event()
+    calls, probes = [], []
+    should_advance = True
+
+    async def maintain(context):
+        calls.append(context)
+        await release.wait()
+
+    async def probe(context):
+        probes.append(context)
+        return should_advance
+
+    maintain.should_advance = probe
+    flow = background_flow.ReportBackgroundFlow(maintain)
+    await flow(1)
+    release.set()
+    await asyncio.sleep(0)
+    flow.check_completed()
+    should_advance = next_probe
+
+    await flow(2)
+
+    assert calls == [1] and probes == [1]
+    assert flow.required_settlements() == 0
+    should_advance = True
+    await flow(3)
+    assert calls == [1, 3] and probes == [1, 3]
+
+
 async def test_production_assembly_does_not_await_report_before_scheduling(mocker):
     entered, release = asyncio.Event(), asyncio.Event()
 

@@ -1,0 +1,6 @@
+[
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/006-root-test_osmo_builtin_timelapse_roundtrip/source/tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_describe_exposes_both_formal_capture_types",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/006-root-test_osmo_builtin_timelapse_roundtrip/source/tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_capture_recovery_and_available_delivery[record-with-preview]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/006-root-test_osmo_builtin_timelapse_roundtrip/source/tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_capture_recovery_and_available_delivery[timelapse-with-preview]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/006-root-test_osmo_builtin_timelapse_roundtrip/source/tests/integration/test_osmo_builtin_timelapse_roundtrip.py::test_installed_osmo_capture_recovery_and_available_delivery[timelapse-without-preview]"
+]

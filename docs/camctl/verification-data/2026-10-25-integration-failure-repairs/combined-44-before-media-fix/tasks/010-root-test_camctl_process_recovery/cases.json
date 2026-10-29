@@ -1,0 +1,40 @@
+[
+  {
+    "nodeid": "tests/integration/test_camctl_process_recovery.py::test_next_run_waits_for_old_group_settlement[0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 20.015694553992944
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 5.323777950005024
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.01428614700853359
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 25.3537586510065
+  },
+  {
+    "nodeid": "tests/integration/test_camctl_process_recovery.py::test_next_run_waits_for_old_group_settlement[7]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0014615050022257492
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 3.7121698450064287
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.014102806992013939
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 3.7277341570006683
+  }
+]

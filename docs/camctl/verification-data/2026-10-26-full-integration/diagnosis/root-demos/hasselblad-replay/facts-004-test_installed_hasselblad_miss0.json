@@ -1,0 +1,316 @@
+{
+  "complete-commit": null,
+  "complete-verifier": null,
+  "report-before-publish": null,
+  "start-recovery-observed": null,
+  "before-start-result": {
+    "pid": 2014353,
+    "pgid": 2014353,
+    "utc": "2026-10-26T00:57:38.656141+00:00",
+    "ticket": {
+      "attempt_id": 1,
+      "operation": "control",
+      "target_id": "1",
+      "responsibility_key": "start/1",
+      "run_id": 2
+    },
+    "operation_key": "998d6cf32d90ae1d4a956ec706c2f90c",
+    "target": {
+      "request_id": "4328453789645794893",
+      "plan_id": 1,
+      "action_id": 1,
+      "run_id": 2,
+      "activity_id": 1,
+      "responsibility_key": "start/1",
+      "run_kind": 1,
+      "device_id": "hb-host",
+      "driver_id": "hasselblad_cfv100c"
+    },
+    "finish": {
+      "ticket": {
+        "attempt_id": 1,
+        "operation": "control",
+        "target_id": "1",
+        "responsibility_key": "start/1",
+        "run_id": 2
+      },
+      "outcome": {
+        "outcome": {
+          "format_version": 1,
+          "status": "succeeded",
+          "error": null,
+          "effect": "confirmed",
+          "settlement": {
+            "basis": "observed",
+            "evidence": {
+              "type": "operation_returned",
+              "version": 1,
+              "data": {}
+            }
+          },
+          "observations": [
+            {
+              "type": "photo_taken",
+              "version": 1,
+              "data": {
+                "activity_id": "1",
+                "original": {
+                  "original_name": "host-copy.jpg",
+                  "size_bytes": 25,
+                  "sha256": "31dc7b9ceee282c7d2f64a29663c46b9c7334a792a4913de7e973ed81a564400",
+                  "media_type": "image/jpeg"
+                },
+                "preview": {
+                  "original_name": "host-copy.jpg.thumbnail.jpg",
+                  "size_bytes": 25,
+                  "sha256": "31dc7b9ceee282c7d2f64a29663c46b9c7334a792a4913de7e973ed81a564400",
+                  "media_type": "image/jpeg"
+                },
+                "steps": [
+                  {
+                    "name": "focus",
+                    "local_exit_code": 0,
+                    "local_signal": null,
+                    "transport_error": null,
+                    "output_failure": null,
+                    "stdout_size_bytes": 0,
+                    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                    "signal_failures": [],
+                    "setting_returned": true,
+                    "lens_operation_returned": true
+                  },
+                  {
+                    "name": "capture",
+                    "local_exit_code": 0,
+                    "local_signal": null,
+                    "transport_error": null,
+                    "output_failure": null,
+                    "stdout_size_bytes": 504,
+                    "stdout_sha256": "5ee773de711ea7cd793c5cd5074b9c6fdb9fca4d9fef7674aac599bf213e51d3",
+                    "signal_failures": [],
+                    "files": [
+                      {
+                        "host_name": "host-copy.jpg",
+                        "size_bytes": 25,
+                        "media_type": "image/jpeg"
+                      },
+                      {
+                        "host_name": "host-copy.jpg.thumbnail.jpg",
+                        "size_bytes": 25,
+                        "media_type": "image/jpeg"
+                      }
+                    ],
+                    "camera_locator": {
+                      "status": "path",
+                      "camera_path": "/CAMERA/DCIM/100HASSELBL/camera-copy.jpg",
+                      "camera_name": "camera-copy.jpg"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "hasselblad_start_entered",
+              "version": 1,
+              "data": {
+                "activity_id": "1"
+              }
+            }
+          ],
+          "call_info": {
+            "local_exit_code": 0,
+            "local_signal": null,
+            "remote_exit_code": null
+          },
+          "diagnostics": {
+            "call_limit": 14,
+            "calls": [
+              {
+                "step_index": 1,
+                "step_name": "focus",
+                "stdout": {
+                  "state": "complete",
+                  "data": {
+                    "hex": ""
+                  }
+                },
+                "stderr": {
+                  "state": "complete",
+                  "data": {
+                    "hex": ""
+                  }
+                }
+              },
+              {
+                "step_index": 2,
+                "step_name": "capture",
+                "stdout": {
+                  "state": "complete",
+                  "data": {
+                    "hex": "636170747572653a204f4b0a7361766564202f746d702f63616d63746c2d696e746567726174696f6e2d7265706c61792d32303236313032362d7531396c6b766f652f7461736b732f3030342d726f6f742d746573745f68617373656c626c61645f70686f746f5f726f756e64747269702d73686172642d332f746d702f7079746573742f746573745f696e7374616c6c65645f68617373656c626c61645f6d697373302f6465706c6f796d656e742f73746167696e672f636170747572652d776f726b2f312f686f73742d636f70792e6a706720283235206279746573290a7361766564202f746d702f63616d63746c2d696e746567726174696f6e2d7265706c61792d32303236313032362d7531396c6b766f652f7461736b732f3030342d726f6f742d746573745f68617373656c626c61645f70686f746f5f726f756e64747269702d73686172642d332f746d702f7079746573742f746573745f696e7374616c6c65645f68617373656c626c61645f6d697373302f6465706c6f796d656e742f73746167696e672f636170747572652d776f726b2f312f686f73742d636f70792e6a70672e7468756d626e61696c2e6a706720283235206279746573290a63616d6572612066696c653a202f43414d4552412f4443494d2f31303048415353454c424c2f63616d6572612d636f70792e6a70670a"
+                  }
+                },
+                "stderr": {
+                  "state": "complete",
+                  "data": {
+                    "hex": ""
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "settlement_contract": {
+          "type": "operation_returned",
+          "version": 1,
+          "operation": "control",
+          "fields": [
+            "terminate_grace_s"
+          ],
+          "identity_field": null,
+          "max_observations": 1,
+          "max_diagnostic_calls": 14
+        },
+        "observation_contracts": [
+          {
+            "type": "photo_taken",
+            "version": 1,
+            "operation": "control",
+            "fields": [
+              "activity_id",
+              "original",
+              "preview",
+              "steps"
+            ],
+            "identity_field": "activity_id",
+            "max_observations": 1,
+            "max_diagnostic_calls": null
+          },
+          {
+            "type": "hasselblad_start_entered",
+            "version": 1,
+            "operation": "control",
+            "fields": [
+              "activity_id"
+            ],
+            "identity_field": "activity_id",
+            "max_observations": 1,
+            "max_diagnostic_calls": null
+          }
+        ],
+        "ticket": {
+          "attempt_id": 1,
+          "operation": "control",
+          "target_id": "1",
+          "responsibility_key": "start/1",
+          "run_id": 2
+        }
+      },
+      "occurred_at": 1792976258648724,
+      "retry_wait": false,
+      "run_finish": {
+        "status": "succeeded",
+        "error": null
+      },
+      "recovery_max_event_id": null
+    },
+    "observation": {
+      "action_id": 1,
+      "occurred_at": 1792976258648724,
+      "sent_at": 1792976258648746,
+      "started_at": 1792976258648747,
+      "dispatch_state": 3,
+      "activity_state": 2
+    },
+    "start_finish": null,
+    "action_finish": null,
+    "expiration": null,
+    "in_transaction": false
+  },
+  "actions": [
+    {
+      "id": 1,
+      "type": 1,
+      "status": 2,
+      "execution_started": 1,
+      "error_code": null
+    }
+  ],
+  "operation_runs": [
+    {
+      "id": 1,
+      "action_id": 1,
+      "kind": 10,
+      "status": 3,
+      "responsibility_key": "prepare/1/09759d7912ee46328191048c02f74224"
+    },
+    {
+      "id": 2,
+      "action_id": 1,
+      "kind": 1,
+      "status": 2,
+      "responsibility_key": "start/1"
+    }
+  ],
+  "operation_attempts": [
+    {
+      "id": 1,
+      "run_id": 1,
+      "attempt_no": 1,
+      "status": 2,
+      "effect_state": 3,
+      "intent_event_id": 7,
+      "result_event_id": 8
+    },
+    {
+      "id": 2,
+      "run_id": 2,
+      "attempt_no": 1,
+      "status": 1,
+      "effect_state": 1,
+      "intent_event_id": 13,
+      "result_event_id": null
+    }
+  ],
+  "intermediate_files": [
+    {
+      "id": 1,
+      "owner_action_id": 1,
+      "owner_delivery_id": null,
+      "purpose": 5,
+      "relative_path": "capture-originals/1.jpg",
+      "retention_state": 1,
+      "cleanup_state": 1,
+      "size_bytes": null,
+      "sha256": null,
+      "last_error_json": null,
+      "created_event_id": 12,
+      "last_event_id": 12,
+      "change_count": 1
+    },
+    {
+      "id": 2,
+      "owner_action_id": 1,
+      "owner_delivery_id": null,
+      "purpose": 6,
+      "relative_path": "capture-previews/2.jpg",
+      "retention_state": 1,
+      "cleanup_state": 1,
+      "size_bytes": null,
+      "sha256": null,
+      "last_error_json": null,
+      "created_event_id": 12,
+      "last_event_id": 12,
+      "change_count": 1
+    }
+  ],
+  "outputs": [],
+  "reports": [
+    {
+      "id": 1,
+      "status": 1,
+      "from_wm": 0,
+      "to_wm": 2
+    }
+  ]
+}

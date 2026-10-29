@@ -1,0 +1,27 @@
+{
+  "failed": 280,
+  "phase": {
+    "call": 280
+  },
+  "classification": {
+    "old_runtime_owned_argument": 13,
+    "owned_connection_as_database": 266,
+    "context_manager_as_capture_runtime": 1
+  },
+  "distinct_failed_test_functions": 99,
+  "test_functions_identical_across_three_revisions": 95,
+  "source_commit": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+  "source_snapshot_sha256": "cf4f504b7648bb5004fd20e1d66bfb57ab6a2956a33b6203724b6f0262591950",
+  "original_artifacts": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/009-camctl-reporting/artifacts",
+  "collected": 452,
+  "outcomes": {
+    "passed": 172,
+    "failed": 280
+  },
+  "finished": true,
+  "exit_code": 1,
+  "elapsed_seconds": 71.20091571599187,
+  "confirmed_merge_introduced_production_first_causes": 0,
+  "confirmed_environment_runner_first_causes": 0,
+  "business_pass_claim": false
+}

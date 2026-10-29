@@ -15,6 +15,8 @@
 
 `--output` 必须是尚不存在的目录；不指定时在 `/tmp` 创建新目录。`--python` 默认采用启动脚本的解释器；入口核对 Python 3.11 和 pytest，不安装或同步该环境。客户端依赖默认取源工作区的 `apps/client/node_modules`，需按[客户端说明](../apps/client/README.md)的 `npm ci` 和 `package-lock.json` 预先安装，并与已准备的 Playwright Chromium 版本一致；共享依赖目录发生版本漂移时，先在独立目录按锁文件准备，再用 `--node-modules` 指向该目录。浏览器和媒体工具仍遵守[跨组件测试前提](../tests/integration/README.md)。uv 离线缓存默认取 `uv cache dir`，也可用 `--uv-cache` 指定已准备的缓存目录。
 
+`--camctl-memory-limit` 和 `--camctl-memory-cgroup-root` 分别配置被测 camctl 实例的内存与交换空间合计预算及资源组委派目录，直接 pytest 使用相同参数。预算由实例主进程与其全部后代共享，测试准备、客户端与运行器在组外；默认值由测试支持模块维护，不按 `--jobs` 平分。需要 sudo 委派时，在原命令外使用 `python scripts/run-memory-budget.py -- 原命令`；启动器仅为本次运行创建独立目录，原命令和业务保持调用用户身份。具体合计峰值验收、权限要求及独立无交换验收见[内存预算测试](../docs/camctl/memory-budget-testing.md)。列表和收集模式只解析配置，不启动受限业务；未实际执行的容量检查不计作通过。
+
 先用 `--list` 查看从实际源码发现的任务；该选项不执行测试。`--scope camctl`、`--scope root`、`--scope node` 分别选择组件目录、根 pytest 和根 Node，默认 `all`。`--target` 可以重复指定所选范围内的仓库相对目录、文件或 pytest nodeid；同一组件目录仍只启动一个 pytest，不同目录保持独立进程。文件、目录或函数已包含的参数节点不会再次分配；文件部分先规范化相对路径，拒绝逃出源码根的目标。例如：
 
 ```bash

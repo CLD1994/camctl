@@ -1,0 +1,3 @@
+[
+  "tests/integration/test_hasselblad_photo_parameters.py::test_installed_hasselblad_parameter_validation_agrees_across_consumers"
+]

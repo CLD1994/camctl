@@ -4,7 +4,6 @@ import pytest
 
 from camctl.persistence.models import DbOutcomeKind
 from camctl.capture import baseline_models as models
-from camctl.capture import baseline_saves
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.devices.bindings import DeviceBinding
@@ -24,6 +23,7 @@ from camctl.history.validators import ValidatedEvent
 from ..acceptance.test_acceptance import _plan_body
 from ..acceptance.test_adb_camera_definitions import _catalog, _params
 from ..scheduling.test_start_action import _SCHEDULED, _accept_plan, _start, owned
+from ..support.database import business_database, database_path
 
 pytestmark = pytest.mark.asyncio
 
@@ -31,7 +31,8 @@ pytestmark = pytest.mark.asyncio
 async def _activity(owned, tmp_path, *, request_id="42", device_id="cam-1"):
     body = _plan_body(request_id=request_id)
     body["actions"][0].update(type="camera_timelapse", device_id=device_id, params=_params("dji-action6", "camera_timelapse"))
-    await _accept_plan(owned, tmp_path, body, _catalog("dji-action6", device_id=device_id))
+    async with business_database(database_path(owned)) as database:
+        await _accept_plan(database, tmp_path, body, _catalog("dji-action6", device_id=device_id))
     action_id = owned.connection.execute("SELECT MAX(id) FROM actions").fetchone()[0]
     result = _start(owned, action_id, now=_SCHEDULED)
     assert result.kind is DbOutcomeKind.COMPLETED, result.error
@@ -253,17 +254,16 @@ async def test_committed_unknown_receipt_resumes_original_request(owned, tmp_pat
         def fix_baseline(self, command, key, connection):
             return self._save(super().fix_baseline, command, key, connection)
 
-    owner = baseline_saves.BaselineSaveOwner()
-    pending = owner.begin(request)
     repository = UnknownReceiptRepository()
-    receipt = owner.save(repository, owned)
-    assert receipt.kind is DbOutcomeKind.UNKNOWN and owner.pending == pending
-    with pytest.raises(ConsistencyError):
-        owner.take()
-    with pytest.raises(ConsistencyError):
-        owner.begin(replace(request, occurred_at=_SCHEDULED + 1))
-    assert owner.save(repository, owned).kind is DbOutcomeKind.COMPLETED
-    result = owner.take()
-    assert owner.pending is None and result.activity_id == activity_id
+    method = repository.append_baseline if kind == 'append' else repository.fix_baseline
+    key = new_operation_key()
+    path = database_path(owned)
+    async with business_database(path) as database:
+        receipt = await database.write(lambda connection: method(request, key, connection), key=key)
+    assert receipt.kind is DbOutcomeKind.UNKNOWN
+    async with business_database(path) as database:
+        resumed = await database.write(lambda connection: method(request, key, connection), key=key)
+    assert resumed.kind is DbOutcomeKind.COMPLETED, resumed.error
+    assert resumed.value.activity_id == activity_id
     assert calls[0] == calls[1] and calls[0][0] is request
     assert owned.connection.execute("SELECT COUNT(*) FROM history_events WHERE event_type=14").fetchone() == (1,)

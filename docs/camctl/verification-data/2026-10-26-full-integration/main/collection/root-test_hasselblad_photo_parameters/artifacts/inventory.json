@@ -1,0 +1,9 @@
+[
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_hasselblad_photo_parameters/source/tests/integration/test_hasselblad_photo_parameters.py::test_installed_hasselblad_parameter_validation_agrees_across_consumers",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_hasselblad_photo_parameters/source/tests/integration/test_hasselblad_photo_parameters.py::test_validate_parameters_requires_explicit_action_identity[action_type-None]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_hasselblad_photo_parameters/source/tests/integration/test_hasselblad_photo_parameters.py::test_validate_parameters_requires_explicit_action_identity[action_type-]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_hasselblad_photo_parameters/source/tests/integration/test_hasselblad_photo_parameters.py::test_validate_parameters_requires_explicit_action_identity[device_id-None]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_hasselblad_photo_parameters/source/tests/integration/test_hasselblad_photo_parameters.py::test_validate_parameters_requires_explicit_action_identity[device_id- ]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_hasselblad_photo_parameters/source/tests/integration/test_hasselblad_photo_parameters.py::test_validate_parameters_requires_explicit_action_identity[action_name-None]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_hasselblad_photo_parameters/source/tests/integration/test_hasselblad_photo_parameters.py::test_validate_parameters_requires_explicit_action_identity[action_name-]"
+]

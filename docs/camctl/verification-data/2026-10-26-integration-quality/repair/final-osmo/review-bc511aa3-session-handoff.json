@@ -1,0 +1,20 @@
+{
+  "reviewed_at": 1792961722.011345,
+  "commit": "bc511aa32ea23d8ac7ce09e3c7aa9d9bf7c7e592",
+  "worktree": "/tmp/camctl-quality-repair-lidlmje7/bootstrap-followup",
+  "method": "read-only source/diff/contract inspection; no modifications or tests",
+  "source_sha256": {
+    "apps/camctl/src/camctl/session/service.py": "78d89b92836f083ec14e11638b290b643cfa4f0b16d364d69607eefd4ea80af2",
+    "apps/camctl/tests/unit/session/test_completion_round_handoff.py": "cf59cc2d62ead932086d3853489cb6467f6bf3daa925b71990c7eb76138c53f2"
+  },
+  "blocking_findings": [],
+  "verified_boundaries": [
+    "Only normal drive() calls _drive_normal_flows; restricted flows and once-report retain their existing entrypoints.",
+    "When required_settlements initially equals zero, first ordinary discovery still executes. When check_completed does not finish all local responsibility, ordinary driving continues.",
+    "Existing pending results are synchronously delivered before any new ordinary flow; clock/configuration exceptions retain existing routes, StateDbFailure remains fatal, and BaseException cancellation is not swallowed.",
+    "The early decision is advisory only: after returning, main loop calls _run_work_facts again, settles current local owners, and uses the original close-admission write transaction. New persistent work observed inside that transaction keeps admission and returns to discovery.",
+    "A new local responsibility registered during the added preliminary WorkFacts await is included by the main-loop _run_work_facts call immediately afterwards; if it arrives during the later ordinary fact read, real owner settlement remains before final transaction."
+  ],
+  "coverage_limit": "New completion-round tests cover first discovery, staggered completion, running owners, report changes, close transaction competition and completed failure. They do not explicitly inject a new local owner during the added preliminary WorkFacts await or directly exercise EXIT_REPORT_ERROR/cancellation/restricted entry through this wrapper. Source review found existing paths preserved; no tests run in this review.",
+  "local_responsibility_assumption": "As in existing close protocol, new in-process required work must be registered in CombinedLocalWork and settled by its actual owner. The patch does not authorize skipping registered local work or transaction recheck."
+}

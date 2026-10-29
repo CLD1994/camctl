@@ -6,6 +6,9 @@ import json
 
 import pytest
 
+from ..support.acceptance import accept_source
+from ..support.database import database_path
+
 from camctl.acceptance.definitions import read_action_spec
 from camctl.acceptance.service import PlanDisposition
 from camctl.bootstrap.config import ConfigDefaults, load_config
@@ -150,8 +153,8 @@ async def test_shortest_exact_parameters_survive_resend_restart_and_history(
                                               f'"interval_s": {interval_token},'),
                     encoding="utf-8")
     read = await read_input(str(path), RealFileReader())
-    result = await accept_input(parse_input(read), replace(context, catalog=_catalog(driver)),
-                                new_operation_key(), _owned(environment))
+    result = await accept_source(parse_input(read), replace(context, catalog=_catalog(driver)),
+                                 database_path(_owned(environment)))
     assert result.plan_disposition is PlanDisposition.REGISTERED
     before = _action_facts(connection).tables["actions"][1]
     assert before["status"] == enum_for("actions.status").PENDING

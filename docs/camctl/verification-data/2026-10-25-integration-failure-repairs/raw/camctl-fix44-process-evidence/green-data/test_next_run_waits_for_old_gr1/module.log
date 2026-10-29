@@ -1,0 +1,18 @@
+call=1 attempt=1 command=run operation=spawn plan=(none) automatic=0 retries=0
+call=1 attempt=1 command=run pid=1056166 spawned execution=unknown
+call=2 submit accepted path=/tmp/camctl-fix44-process-evidence/green-data/test_next_run_waits_for_old_gr1/plan-201.json
+call=2 attempt=2 command=submit operation=spawn plan=/tmp/camctl-fix44-process-evidence/green-data/test_next_run_waits_for_old_gr1/plan-201.json automatic=0 retries=0
+call=2 attempt=2 command=submit pid=1056246 spawned execution=unknown
+call=2 command=submit pid=1056246 stream=exit_observed data=exit record retained; group settlement pending
+call=2 command=submit pid=1056246 stream=group_reaped data=all execution stopped; child record reaped
+call=2 command=submit pid=1056246 result=success exit_kind=0 exit=0 needs_run=1 overflow=0 io_error=0
+call=1 command=run pid=1056166 stream=exit_observed data=exit record retained; group settlement pending
+call=1 command=run pid=1056166 stream=group_kill_sent data=SIGKILL sent; settlement pending
+call=1 command=run pid=1056166 stream=group_kill_sent data=SIGKILL sent; settlement pending
+call=1 command=run pid=1056166 stream=group_reaped data=all execution stopped; child record reaped
+call=1 command=run pid=1056166 result=abnormal exit_kind=0 exit=7 needs_run=0 overflow=0 io_error=0
+call=1 stdout={"kind" : "succeeded"}
+
+call=1 attempt=1 diagnostic_published file=camctl-host-diagnostic-1056162-1-6VH2P3.log
+call=3 attempt=3 command=run operation=spawn plan=(none) automatic=0 retries=0
+call=3 attempt=3 command=run pid=1056257 spawned execution=unknown

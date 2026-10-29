@@ -74,7 +74,7 @@ async def test_cancel_late_unknown_reuses_stop_and_finishes(
                 await capture_handler(handler)(action_id, runtime)
 
         config = AttemptConfig(1, Decimal("10"), Decimal("1"))
-        runtime = _runtime(owned, stop_config=config)
+        runtime = (await _runtime(owned, stop_config=config))
         ticket, reason = runtime.grant(runtime.action(action_id))
         assert ticket is not None, reason
         _cancel(owned, action_id)
@@ -94,7 +94,7 @@ async def test_cancel_late_unknown_reuses_stop_and_finishes(
         if sent:
             owned.connection.execute("UPDATE device_activities SET sent_at = ? WHERE action_id = ?", (_NOW, action_id))
         # 新运行时不继承计时锚点，沿原 START/STOP 事实恢复。
-        runtime = _runtime(owned, stop_config=config)
+        runtime = (await _runtime(owned, stop_config=config))
         runtime.stopper = stop
         await advance(runtime)
         if stop_success == "confirmed_error":

@@ -643,29 +643,31 @@ def test_failed_existing_database_keeps_primary_error_and_release_secondary(
     state_db = Path(cfg.paths.state_db)
     state_db.write_bytes(b"preserve this invalid database file")
     original_bytes = state_db.read_bytes()
-    original_verify = initialization_module._verify_existing
-    body_results = []
+    reference = initialize_state(cfg, state_db)
+    original_open = initialization_module.open_existing
+    primary_errors = []
 
-    def observe_real_validation(*args, **kwargs):
-        result = original_verify(*args, **kwargs)
-        body_results.append(result)
-        return result
+    def observe_real_open(*args, **kwargs):
+        try:
+            return original_open(*args, **kwargs)
+        except StateDatabaseError as error:
+            primary_errors.append(error)
+            raise
 
     release_error = OSError(errno.EIO, "init-failed-library-release-sentinel")
     with monkeypatch.context() as patch:
-        patch.setattr(initialization_module, "_verify_existing", observe_real_validation)
+        patch.setattr(initialization_module, "open_existing", observe_real_open)
         calls = _install_linux_flock_failure(
             patch, stage="unlock", error=release_error
         )
         result = initialize_state(cfg, state_db)
 
-    assert len(body_results) == 1
-    body_result = body_results[0]
-    assert body_result.outcome is InitOutcome.FAILED
-    assert isinstance(body_result.error, StateDatabaseError)
+    assert reference.outcome is InitOutcome.FAILED
+    assert len(primary_errors) == 1
+    assert isinstance(primary_errors[0], StateDatabaseError)
     assert result.outcome is InitOutcome.FAILED
-    assert result.detail == body_result.detail
-    assert result.error is body_result.error
+    assert result.detail == reference.detail
+    assert result.error is primary_errors[0]
     assert len(result.secondary_errors) == 1
     secondary = result.secondary_errors[0]
     assert isinstance(secondary, LockError)
@@ -708,7 +710,18 @@ def test_cli_init_reports_release_lock_error_only_on_stderr(
     assert stdout.getvalue() == ""
     assert stderr.getvalue()
     assert "cli-init-release-diagnostic-sentinel" in stderr.getvalue()
-    assert len(stderr.getvalue().splitlines()) == 1
+    diagnostics = []
+    for line in stderr.getvalue().splitlines():
+        opening = line.find("{")
+        if opening >= 0:
+            diagnostics.append(json.loads(line[opening:]))
+    assert len(diagnostics) == 1
+    diagnostic = diagnostics[0]
+    assert diagnostic["type"].endswith(".LockError")
+    assert diagnostic["cause"]["errno"] == errno.EIO
+    assert "cli-init-release-diagnostic-sentinel" in diagnostic["cause"]["message"]
+    assert diagnostic["diagnostic_facts"]["lock"]["operation"] == "unlock"
+    assert diagnostic["diagnostic_facts"]["lock"]["close_result"] == "confirmed"
     lock_fd = _assert_one_lock_fd_closed(calls)
     assert calls["unlock"] == [lock_fd]
 
@@ -730,34 +743,17 @@ def test_cli_init_reports_release_lock_error_only_on_stderr(
 def test_cleanup_control_after_result_keeps_same_object_and_diagnostics(
     tmp_path: Path, monkeypatch, body_state: str, inject_close_error: bool
 ) -> None:
-    from camctl.persistence import initialization as initialization_module
-
     cfg = _config(tmp_path)
     state_db = Path(cfg.paths.state_db)
     if body_state == "failed":
         state_db.write_bytes(b"keep invalid library after cancellation")
         original_bytes = state_db.read_bytes()
-        original_body = initialization_module._verify_existing
-        body_results = []
-
-        def observe_real_validation(*args, **kwargs):
-            result = original_body(*args, **kwargs)
-            body_results.append(result)
-            return result
-
-        original_result = observe_real_validation
-        observed_method = "_verify_existing"
+        reference = initialize_state(cfg, state_db)
+        assert reference.outcome is InitOutcome.FAILED
+        expected_detail = reference.detail
     else:
-        original_body = initialization_module._create_new
-        body_results = []
-
-        def observe_real_creation(*args, **kwargs):
-            result = original_body(*args, **kwargs)
-            body_results.append(result)
-            return result
-
-        original_result = observe_real_creation
-        observed_method = "_create_new"
+        assert not state_db.exists()
+        expected_detail = str(state_db)
 
     control = asyncio.CancelledError(f"cleanup-{body_state}-control-sentinel")
     control.add_note("caller-owned initialization note")
@@ -767,7 +763,6 @@ def test_cleanup_control_after_result_keeps_same_object_and_diagnostics(
         else None
     )
     with monkeypatch.context() as patch:
-        patch.setattr(initialization_module, observed_method, original_result)
         calls = _install_linux_flock_failure(
             patch, stage="unlock", error=control, close_error=close_error
         )
@@ -775,13 +770,8 @@ def test_cleanup_control_after_result_keeps_same_object_and_diagnostics(
             initialize_state(cfg, state_db)
 
     assert caught.value is control
-    assert len(body_results) == 1
-    body_result = body_results[0]
-    assert body_result.outcome is (
-        InitOutcome.CREATED if body_state == "success" else InitOutcome.FAILED
-    )
     assert "caller-owned initialization note" in getattr(control, "__notes__", ())
-    assert body_result.detail in _diagnostic_evidence(control)
+    assert any(note.endswith(expected_detail) for note in control.__notes__)
     facts = lock_error_facts(control)
     assert facts is not None
     assert facts.operation is LockOperation.UNLOCK
@@ -793,7 +783,7 @@ def test_cleanup_control_after_result_keeps_same_object_and_diagnostics(
     if close_error is not None:
         notes = tuple(getattr(control, "__notes__", ()))
         assert any("cleanup close secondary sentinel" in note for note in notes)
-        assert any(body_result.detail in note for note in notes)
+        assert any(note.endswith(expected_detail) for note in notes)
         assert len(facts.secondary_errors) == 1
         close_facts = facts.secondary_errors[0]
         assert close_facts.operation is LockOperation.CLOSE
@@ -827,8 +817,6 @@ def test_cleanup_control_after_result_keeps_same_object_and_diagnostics(
 def test_original_control_survives_later_release_failure(
     tmp_path: Path, monkeypatch, release_kind: str
 ) -> None:
-    from camctl.persistence import initialization as initialization_module
-
     cfg = _config(tmp_path)
     state_db = Path(cfg.paths.state_db)
     body_control = asyncio.CancelledError("original initialization control sentinel")
@@ -844,13 +832,15 @@ def test_original_control_survives_later_release_failure(
         else None
     )
 
-    def interrupt_real_initialization(*args, **kwargs):
-        raise body_control
+    actual_mkdir = os.mkdir
+
+    def interrupt_real_directory(path, *args, **kwargs):
+        if os.fspath(path) == cfg.paths.staging:
+            raise body_control
+        return actual_mkdir(path, *args, **kwargs)
 
     with monkeypatch.context() as patch:
-        patch.setattr(
-            initialization_module, "_prepare_directories", interrupt_real_initialization
-        )
+        patch.setattr(os, "mkdir", interrupt_real_directory)
         calls = _install_linux_flock_failure(
             patch, stage="unlock", error=release_error, close_error=close_error
         )

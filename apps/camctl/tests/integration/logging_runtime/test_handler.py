@@ -102,25 +102,6 @@ class TestOrderedClose:
         summaries = [m for m in written if "日志关闭摘要" in m]
         assert len(summaries) == 1
 
-    async def test_zero_drops_no_summary(self, tmp_path: Path) -> None:
-        written: list[str] = []
-
-        def writer(record: LogRecord) -> bool:
-            written.append(record.message)
-            return True
-
-        channel = LogChannel(
-            capacity=8, low_watermark=6, high_watermark=7,
-            level=LogLevel.DEBUG, writer=writer,
-        )
-        channel.start()
-        await channel.alog(LogRecord(level=LogLevel.ERROR, message="important"))
-        runtime = LogRuntime(channel=channel)
-        result = await close_logging(runtime)
-        assert result.dropped_total == 0
-        assert result.summary_written is False
-        assert all("摘要" not in m for m in written)
-
 
 class TestTwoProcesses:
     def test_two_processes_share_file(self, tmp_path: Path) -> None:

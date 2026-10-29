@@ -34,7 +34,7 @@ class _InterruptedReadDriver(Driver):
 async def _history_cleanup(environment):
     cfg, owned, context, driver = environment
     await _save_photos(cfg, owned, context, driver)
-    _accept(owned, "2", [{"name": "取回", "type": "obtain_action_outputs",
+    await _accept(owned, "2", [{"name": "取回", "type": "obtain_action_outputs",
         "scheduled_at": "2026-01-15 09:00:00",
         "params": {"source": {"plan_instance_id": "1", "group": "files"}}}])
     interrupted = _InterruptedReadDriver(owned)

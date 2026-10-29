@@ -1,0 +1,145 @@
+{
+  "audited_at": "2026-10-26T01:20:31.479458+00:00",
+  "status": "complete_with_recorded_test_failures_and_resource_evidence_gap",
+  "frozen_production_batches": {
+    "versions": [
+      {
+        "source_head": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+        "snapshot_sha256": "cf4f504b7648bb5004fd20e1d66bfb57ab6a2956a33b6203724b6f0262591950",
+        "snapshot_files_unchanged": true,
+        "runner_status": "finished",
+        "runner_exit_code": 1,
+        "task_states": {
+          "failed": 61,
+          "passed": 24
+        },
+        "pytest_inventory_count": 10213,
+        "pytest_cases_count": 9096,
+        "pytest_outcomes": {
+          "failed": 4292,
+          "passed": 4798,
+          "skipped": 5,
+          "null": 1
+        },
+        "phase_counts": {
+          "setup": 9096,
+          "call": 8916,
+          "teardown": 9095
+        },
+        "subchecks_from_events": {
+          "passed": 342
+        },
+        "node_counts": {
+          "tests": 118,
+          "pass": 118,
+          "fail": 0,
+          "skipped": 0
+        },
+        "run": "main",
+        "root": "/tmp/camctl-integration-all-final-20261026-u19lkvoe",
+        "coverage_audit": "/tmp/camctl-full-272f-audit/coverage-audit.json",
+        "resource_audit": "/tmp/camctl-full-272f-audit/resource-audit.json"
+      },
+      {
+        "source_head": "354e38f95de04508a00d64d53bd17e213915548d",
+        "snapshot_sha256": "768f6bb2b8a7b25d6c8b4c1a7f2bb2db0017fe26664711b4f949f185d6a68aae",
+        "snapshot_files_unchanged": true,
+        "runner_status": "finished",
+        "runner_exit_code": 1,
+        "task_states": {
+          "failed": 9,
+          "passed": 30
+        },
+        "pytest_inventory_count": 1220,
+        "pytest_cases_count": 1220,
+        "pytest_outcomes": {
+          "failed": 794,
+          "passed": 426
+        },
+        "phase_counts": {
+          "setup": 1220,
+          "call": 1137,
+          "teardown": 1220
+        },
+        "subchecks_from_events": {},
+        "node_counts": {},
+        "run": "replay",
+        "root": "/tmp/camctl-integration-replay-20261026-u19lkvoe",
+        "coverage_audit": "/tmp/camctl-full-272f-audit/replay/coverage-audit.json",
+        "resource_audit": "/tmp/camctl-full-272f-audit/replay/resource-audit.json"
+      }
+    ],
+    "four_production_scope_trees_identical": true,
+    "guidance_runner_and_test_snapshot_differences_retained": true
+  },
+  "deduplicated_frozen_production_coverage": {
+    "expected_known_collectable_pytest_nodes": 10312,
+    "complete_unique_pytest_nodes": 10312,
+    "latest_complete_outcomes": {
+      "failed": 5083,
+      "passed": 5224,
+      "skipped": 5
+    },
+    "unique_latest_phase_counts": {
+      "setup": 10312,
+      "call": 10050,
+      "teardown": 10312
+    },
+    "unique_latest_setup_outcomes": {
+      "passed": 10050,
+      "failed": 259,
+      "skipped": 3
+    },
+    "missing_cases": [],
+    "incomplete_nodes": [],
+    "recorded_case_occurrences": 10316,
+    "complete_case_occurrences": 10315,
+    "repeated_unique_nodes": 4,
+    "repetition_explanation": "Three capture failure nodes passed after fixture repair. One session node was interrupted after setup and replayed completely. Original completed 12 session nodes and original root cancellation node were not repeated.",
+    "all_12_hasselblad_photo_matrix_nodes_replay_passed": true,
+    "node_tests_passed": 118,
+    "nested_pytest_subchecks_passed": 342,
+    "node_and_subcheck_counts_are_separate_from_main_pytest_nodes": true,
+    "uncollected_obsolete_files": [
+      {
+        "path": "apps/camctl/tests/integration/persistence/test_page_read_cache.py",
+        "reason": "Imports removed camctl.persistence.page_read_cache; original main collection failed; replay excluded this obsolete file.",
+        "unknown_test_count": true
+      }
+    ],
+    "capacity_note": "Five growth/history targets passed in main. The 513-input capacity test and 129-input pagination test (2 nodes) failed during shared fixture construction. An additional 5-input unbudgeted worker helper test (1 node) failed there too. No actual capacity worker or capacity memory receipt was produced."
+  },
+  "third_current_source_narrow_batch": {
+    "source_head": "4e42c81c965ecb6e901abf5f477b09cb163dc29e",
+    "selected_modules": 13,
+    "passed_nodes": 387,
+    "failed_nodes": 0,
+    "skipped_nodes": 0,
+    "exit_code": 0,
+    "xml_time_seconds": 17.591,
+    "wall_seconds": 18.17952452400641,
+    "audited_xml_and_current_source_hashes": true,
+    "production_changes_from_frozen_batches": [
+      "M\tapps/camctl/src/camctl/capture/media_flow.py"
+    ],
+    "audit": "/tmp/camctl-full-272f-audit/final-narrow-audit.json",
+    "excluded_from_frozen_production_union_counts": true,
+    "full_current_source_integration_pass_claimed": false
+  },
+  "resources": {
+    "audit": "/tmp/camctl-full-272f-audit/unified-resource-audit.json",
+    "complete_resource_acceptance": false,
+    "pending_final_evidence_gap": 89,
+    "all_owned_groups_and_known_pids_absent": true,
+    "both_launcher_delegations_removed": true
+  },
+  "evidence": {
+    "coverage": "/tmp/camctl-full-272f-audit/combined-coverage-audit.json",
+    "case_histories": "/tmp/camctl-full-272f-audit/combined-case-histories.json",
+    "source_identity": "/tmp/camctl-full-272f-audit/production-identity.json",
+    "resources": "/tmp/camctl-full-272f-audit/unified-resource-audit.json",
+    "capacity_gap": "/tmp/camctl-full-272f-audit/capacity-execution-gap.json",
+    "third_batch": "/tmp/camctl-full-272f-audit/final-narrow-audit.json"
+  },
+  "conclusion": "Coverage of 10312 known collectable pytest nodes is complete across two frozen test snapshots with identical production trees; 5083 latest results failed. One obsolete file remains uncollectable with unknown node count. The later production repair has a separate 387-node narrow validation. This is not full integration success."
+}

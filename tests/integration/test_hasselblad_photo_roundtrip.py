@@ -370,6 +370,7 @@ class PhotoWorld:
         self.launcher.write_text(f"#!{installed.python}\nimport runpy\nrunpy.run_path({str(entry)!r}, run_name='__main__')\n")
         self.launcher.chmod(0o700)
         self.package.environment["CAMCTL_HB_TEST_ROOT"] = str(root)
+        self.package.environment["CAMCTL_HB_TEST_STATE_DB"] = str(self.deployment.state_db)
         self.package.environment["CAMCTL_HB_TEST_INSTALLED_PYTHON"] = str(installed.python)
         self.host = HostDemo(self.deployment, host_demo, str(self.launcher))
         self.request_ids = {}
@@ -559,8 +560,10 @@ class PhotoWorld:
                    "shutter": "shutter", "wb-mode": "white_balance_mode", "wb": "white_balance",
                    "focus-mode": "focus_mode"}
         expected = {"params_text": self.case.params_text, "source": self.case.source,
-                    "steps": ["list", "info", *[aliases[item[1]] if item[0] == "set" else item[0]
-                                                  for item in self.case.settings_argv], "capture"],
+                    "prepare_steps": ["list", "info", *[aliases[item[1]]
+                                      for item in self.case.settings_argv if item[0] == "set"]],
+                    "steps": [*[item[0] for item in self.case.settings_argv
+                                if item[0] in ("focus", "autofocus")], "capture"],
                     "camera_name": "camera-copy" + extension,
                     "camera_path": "/CAMERA/DCIM/100HASSELBL/camera-copy" + extension,
                     "artifacts": {}}
@@ -1089,14 +1092,19 @@ def test_installed_hasselblad_missing_start_result_never_replays(tmp_path, insta
         assert after['id'] == before['id'] and after['intent_event_id'] == before['intent_event_id']
         assert (after['status'], after['effect_state']) == (codes['attempt_unknown'], codes['effect_unknown'])
         assert after['result_event_id'] is not None
-        assert (world.root / 'start-recovery-observed.json').is_file(), '缺少真实 recover_attempt 观察，不能据结果推造恢复依据'
-        recovery = _fault_marker(world, 'start-recovery-observed')
-        assert recovery['target'] == target and recovery['ticket'] == marker['ticket']
+        assert (world.root / 'start-recovery-assembly.json').is_file(), '缺少正式工厂实际消费的恢复输入'
+        recovery = _fault_marker(world, 'start-recovery-assembly')
+        assert recovery['target'] == target and recovery['attempt_no'] == before['attempt_no']
         assert recovery['intent_event_id'] == before['intent_event_id']
         assert recovery['boundary'] == 'HOST_LOCAL_SETTLED'
         assert recovery['horizon'] is not None and before['intent_event_id'] <= recovery['horizon'] <= recovery['max_event_before']
-        assert recovery['local_entry_active'] is False and recovery['returned'] is True and recovery['diagnostic'] is None
         assert recovery['attempt_status_before'] == codes['attempt_running']
+        settled = json.loads((world.root / 'old-group-after-stop.json').read_text())
+        assert settled['original_pid'] == marker['pid'] and settled['live_members'] == []
+        diagnostics = world.root / 'start-recovery-diagnostics.jsonl'
+        assert not diagnostics.exists() or all(
+            row.get('run_id') != target['run_id'] or row.get('attempt_id') != before['attempt_no']
+            for row in map(json.loads, diagnostics.read_text().splitlines()))
         result = json.loads(after['result_json'])
         assert result['settlement'] == {'basis':'assumed','evidence':{'type':'local_control_recovery','version':1,'data':{}}}
         assert result['observations'] == []
@@ -1140,7 +1148,7 @@ def test_installed_hasselblad_report_rebuild_keeps_frozen_bytes(tmp_path, instal
         row, = _rows(world.deployment.state_db, 'SELECT * FROM reports WHERE id=?', (report_id,))
         frozen, = _rows(world.deployment.state_db, 'SELECT * FROM history_transactions WHERE id=?', (marker['boundary']['txn_id'],))
         assert frozen['last_event_id'] == marker['boundary']['last_event_id']
-        assert marker['in_transaction'] is False
+        assert marker['returned_receipt'] == 'completed' and marker['query_only'] == 1
         management = marker['management']
         event, = _rows(world.deployment.state_db, 'SELECT * FROM history_events WHERE id=?', (management['event_id'],))
         transaction, = _rows(world.deployment.state_db, 'SELECT * FROM history_transactions WHERE id=?', (event['transaction_id'],))
@@ -1178,7 +1186,7 @@ def test_installed_hasselblad_report_rebuild_keeps_frozen_bytes(tmp_path, instal
         _restart_fault_host(world)
         rebuilt = _fault_marker(world, 'report-rebuilt-published')
         assert rebuilt['report_id'] == report_id and rebuilt['pid'] != marker['pid']
-        assert rebuilt['in_transaction'] is False and rebuilt['returned_receipt'] == 'completed'
+        assert rebuilt['query_only'] == 1 and rebuilt['returned_receipt'] == 'completed'
         assert rebuilt['publication']['report_id'] == report_id
         assert rebuilt['publication']['published_event_id'] == rebuilt['management']['event_id']
         new = world.deployment.ready / original_name

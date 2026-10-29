@@ -1,5 +1,7 @@
 """跨计划残留责任保留旧目标，不改变触发动作自己的 START 分区。"""
 from decimal import Decimal
+from copy import deepcopy
+from dataclasses import replace
 
 import pytest
 
@@ -11,9 +13,15 @@ from camctl.devices.evidence import EvidenceRegistry,EvidenceContract
 from camctl.operations.validation import validate_outcome
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
-from camctl.persistence.repositories.capture_facts import load_start_facts
-from camctl.persistence.transaction import row_facts
+from camctl.persistence.repositories.capture_facts import load_start_facts, start_facts_from_rows
+from camctl.persistence.transaction import row_facts, commit_operation
+from ..support.output_planning import capture_operation, event_case, validate_static_event, EventSequence
+from camctl.persistence.repositories.cancellation import register_cancellation_guards
+from camctl.persistence.repositories.outputs import register_outputs_guards
 from .test_start_scope_facts import save_generic_no_effect_start
+
+register_cancellation_guards()
+register_outputs_guards()
 from ..scheduling.test_resources import _seed_environment,_seed_plan,_seed_record_action,_seed_activity,_NOW
 
 
@@ -72,6 +80,60 @@ def complete_context(owned,action_id):
             ('operation_attempts','run_id'):frozenset(runs)}))
 
 
+
+def _prepare_static_cancel(owned):
+    """H1 小型夹具：原范围包含一个普通来源和一个终态 HB 来源。"""
+    connection = owned.connection
+    _seed_record_action(connection, 90, 1, input_index=1, status=1)
+    connection.execute("UPDATE actions SET status=6,cancel_requested=1,type=1,driver_id='hasselblad_cfv100c',"
+        " execution_started=0,execution_spec_json=? WHERE id=90",
+        ('{"output_storage":"host","start_call_timeout_s":180}',))
+    _seed_record_action(connection, 91, 2, input_index=1)
+    connection.execute("UPDATE actions SET type=6,device_id=NULL,effective_params_json=NULL,"
+        " driver_id=NULL,max_delay_ms=NULL,target_selection_state=1,input_fields_json=? WHERE id=91",
+        ('{"params":{"target":{"plan_instance_id":"1"}}}',))
+    connection.commit()
+
+
+def _static_cancel_scope(owned, start_context):
+    """公开仓储产生事件；当前 START 输入来自独立 SQL，未来提案另交付。"""
+    from camctl.cancellation.models import (
+        FixCancelTargets, FixedCancelSet, FixedTarget, SelectionBasis, CancellationEffect,
+    )
+    from camctl.persistence.repositories.cancellation import CancellationRepository
+    from camctl.history.reads import ReadCoverage
+
+    target = row_facts(owned.connection, "actions", 12)
+    effect = (CancellationEffect.NOT_REQUIRED if target["status"] in (3,4,5,6)
+              else CancellationEffect.NOT_APPLIED)
+    proposal = capture_operation(owned, lambda copy: CancellationRepository().fix_cancel_targets(
+        FixCancelTargets(91, FixedCancelSet((FixedTarget(12, SelectionBasis.DIRECT, effect),
+            FixedTarget(90, SelectionBasis.DIRECT, CancellationEffect.NOT_REQUIRED))), _NOW),
+        new_operation_key(), copy))
+    event, proposal = event_case(proposal, 4)
+    current = deepcopy(proposal.state_rows)
+    current.update(start_context.state_rows)
+    ranges = {key: value for key, value in proposal.read_coverage.ranges.items()
+              if key[0] not in ("device_activities", "operation_runs", "operation_attempts")}
+    ranges.update(start_context.read_coverage.ranges)
+    for table in ("device_activities", "operation_runs"):
+        key = table, "action_id"
+        # HB 来源 90 的可靠空范围另有实际 SQL 读取；不补回来源 12 的缺失证明。
+        assert owned.connection.execute(f"SELECT id FROM {table} WHERE action_id=90").fetchall() == []
+        ranges[key] = ranges.get(key, frozenset()) | {90}
+    return event, replace(proposal, state_rows=current,
+        owners={**proposal.owners, **start_context.owners}, read_coverage=ReadCoverage(ranges))
+
+
+def _validate_start_scope(owned, context):
+    event, proposal = _static_cancel_scope(owned, context)
+    return validate_static_event(event, proposal)
+
+
+def _row_start_facts(context, action):
+    own, runs, attempts, targets = pure_args(context, action["id"])
+    return start_facts_from_rows(action, own, runs, attempts, activity_targets=targets)
+
 def environment(tmp_path,*,own_activity=True):
     owned=_seed_environment(tmp_path)
     _seed_plan(owned.connection,1)
@@ -81,13 +143,13 @@ def environment(tmp_path,*,own_activity=True):
     _seed_record_action(owned.connection,12,1,status=2 if own_activity else 1)
     if own_activity: _seed_activity(owned.connection,12)
     owned.connection.commit()
+    _prepare_static_cancel(owned)
     return owned
 
 
 @pytest.mark.parametrize('phase',['stop_inflight','stop_returned','stop_ended','confirm_inflight','confirm_returned','confirm_ended'])
 @pytest.mark.parametrize('start_confirmation',[False,True])
 def test_foreign_residual_scope_keeps_sql_and_rows_start_facts_equal(tmp_path,phase,start_confirmation):
-    from camctl.persistence.repositories.cancellation import _source_start_rows
     owned=environment(tmp_path)
     try:
         stop,query=residual(owned,12,11,_NOW,phase)
@@ -99,11 +161,24 @@ def test_foreign_residual_scope_keeps_sql_and_rows_start_facts_equal(tmp_path,ph
         sql=load_start_facts(owned.connection,action)
         assert sql.not_started is (not start_confirmation)
         before=tuple(owned.connection.iterdump())
-        rows,_=_source_start_rows(complete_context(owned,12),action)
+        context=complete_context(owned,12)
+        _validate_start_scope(owned,context)
+        rows=_row_start_facts(context,action)
         assert rows==sql
         assert tuple(owned.connection.iterdump())==before
         assert stop.target_id=='11' and (query is None or query.target_id=='11')
         assert row_facts(owned.connection,'device_activities',11)['action_id']==11
+        if phase == 'stop_inflight' and not start_confirmation:
+            import sqlite3
+            from contextlib import closing
+            from camctl.persistence.runtime import OwnedConnection
+            _, proposal = _static_cancel_scope(owned, context)
+            with closing(sqlite3.connect(':memory:')) as copy:
+                owned.connection.backup(copy)
+                receipt = commit_operation(EventSequence(proposal.events, proposal),
+                    new_operation_key(), OwnedConnection(copy, owned.metadata))
+                assert receipt.kind == 'completed', receipt.error
+            assert tuple(owned.connection.iterdump()) == before
     finally:
         owned.connection.close()
 
@@ -120,7 +195,6 @@ def pure_args(context,action_id):
 @pytest.mark.parametrize('preflight',[False,True])
 @pytest.mark.parametrize('phase',['stop_inflight','confirm_ended'])
 def test_foreign_residual_and_preflight_do_not_require_trigger_activity(tmp_path,phase,preflight):
-    from camctl.persistence.repositories.cancellation import _source_start_rows
     owned=environment(tmp_path,own_activity=False)
     try:
         residual(owned,12,11,_NOW,phase)
@@ -129,7 +203,9 @@ def test_foreign_residual_and_preflight_do_not_require_trigger_activity(tmp_path
             assert ticket.target_id is None
         action=row_facts(owned.connection,'actions',12)
         sql=load_start_facts(owned.connection,action)
-        rows,_=_source_start_rows(complete_context(owned,12),action)
+        context=complete_context(owned,12)
+        _validate_start_scope(owned,context)
+        rows=_row_start_facts(context,action)
         assert rows==sql and rows.not_started and rows.activity is None and rows.run is None
         assert owned.connection.execute('SELECT id FROM device_activities WHERE action_id=12').fetchall()==[]
     finally:
@@ -161,7 +237,6 @@ def test_pending_query_is_only_a_complete_row_domain_input(tmp_path,purpose):
 
 @pytest.mark.parametrize('phase',['active','returned','ended'])
 def test_only_unfinished_original_start_confirmation_blocks_start_partition(tmp_path,phase):
-    from camctl.persistence.repositories.cancellation import _source_start_rows
     owned=environment(tmp_path)
     try:
         residual(owned,12,11,_NOW,'confirm_inflight')
@@ -173,7 +248,9 @@ def test_only_unfinished_original_start_confirmation_blocks_start_partition(tmp_
                 RunOutcome.UNCONFIRMED,_NOW,ErrorValue('result_unconfirmed','device')),new_operation_key(),owned)
             assert result.kind is DbOutcomeKind.COMPLETED,result.error
         action=row_facts(owned.connection,'actions',12)
-        rows,_=_source_start_rows(complete_context(owned,12),action)
+        context=complete_context(owned,12)
+        _validate_start_scope(owned,context)
+        rows=_row_start_facts(context,action)
         assert rows==load_start_facts(owned.connection,action)
         assert rows.not_started is (phase=='ended')
     finally:
@@ -188,14 +265,14 @@ def test_complete_residual_scope_rejects_wrong_responsibility_identity_and_range
     from dataclasses import replace
     from camctl.history.reads import ReadCoverage
     from camctl.history.validators import EventValidationError
-    from camctl.persistence.repositories.cancellation import _source_start_rows
     owned=environment(tmp_path)
     try:
         stop,query=residual(owned,12,11,_NOW,'confirm_inflight')
         save_generic_no_effect_start(owned,12,12,_NOW)
         action=row_facts(owned.connection,'actions',12)
         context=complete_context(owned,12)
-        assert _source_start_rows(context,action)[0]==load_start_facts(owned.connection,action)
+        _validate_start_scope(owned,context)
+        assert _row_start_facts(context,action)==load_start_facts(owned.connection,action)
         state=deepcopy(context.state_rows)
         coverage=dict(context.read_coverage.ranges)
         runs=state['operation_runs']
@@ -222,7 +299,7 @@ def test_complete_residual_scope_rejects_wrong_responsibility_identity_and_range
             else: attempt['attempt_no']=2
         broken=replace(context,state_rows=state,read_coverage=ReadCoverage(coverage))
         before=tuple(owned.connection.iterdump())
-        with pytest.raises(EventValidationError): _source_start_rows(broken,action)
+        with pytest.raises(EventValidationError): _validate_start_scope(owned,broken)
         assert tuple(owned.connection.iterdump())==before
     finally:
         owned.connection.close()
@@ -247,7 +324,7 @@ def test_complete_run_input_rejects_a_different_trigger_owner(tmp_path):
 def test_actual_cancel_loader_keeps_foreign_target_owner_and_exact_coverage(tmp_path):
     from camctl.contracts.history_values import TransactionRange
     from camctl.history.validators import EventContext
-    from camctl.persistence.repositories.cancellation import include_photo_entry_rows,_source_start_rows
+    from camctl.persistence.repositories.cancellation import include_photo_entry_rows
     owned=environment(tmp_path)
     try:
         residual(owned,12,11,_NOW,'confirm_inflight')
@@ -260,7 +337,8 @@ def test_actual_cancel_loader_keeps_foreign_target_owner_and_exact_coverage(tmp_
         assert not coverage.covers('device_activities','action_id',11)
         assert set(state)=={'device_activities','operation_runs','operation_attempts'}
         context=EventContext(TransactionRange(1,1,1),owners,state,read_coverage=coverage)
-        assert _source_start_rows(context,action)[0]==load_start_facts(owned.connection,action)
+        _validate_start_scope(owned,context)
+        assert _row_start_facts(context,action)==load_start_facts(owned.connection,action)
     finally:
         owned.connection.close()
 
@@ -308,17 +386,19 @@ def emergency_environment(tmp_path,with_attempt):
         attempts=(attempt,) if with_attempt else (),occurred_at=_NOW,key=new_operation_key(),owned=owned,
         timeout_s=Decimal(10),retry_interval_s=Decimal(1))
     assert result.kind is DbOutcomeKind.COMPLETED,result.error
+    _prepare_static_cancel(owned)
     return owned
 
 
 @pytest.mark.parametrize('with_attempt',[False,True])
 def test_saved_emergency_record_keeps_sql_and_rows_start_facts_equal(tmp_path,with_attempt):
-    from camctl.persistence.repositories.cancellation import _source_start_rows
     owned=emergency_environment(tmp_path,with_attempt)
     try:
         action=row_facts(owned.connection,'actions',12)
         before=tuple(owned.connection.iterdump())
-        rows,_=_source_start_rows(complete_context(owned,12),action)
+        context=complete_context(owned,12)
+        _validate_start_scope(owned,context)
+        rows=_row_start_facts(context,action)
         assert rows==load_start_facts(owned.connection,action)
         assert not rows.not_started and rows.run is None and rows.attempts_used==0
         assert tuple(owned.connection.iterdump())==before
@@ -331,12 +411,12 @@ def test_emergency_scope_keeps_original_owner_target_and_attempt_checks(tmp_path
     from copy import deepcopy
     from dataclasses import replace
     from camctl.history.validators import EventValidationError
-    from camctl.persistence.repositories.cancellation import _source_start_rows
     owned=emergency_environment(tmp_path,True)
     try:
         action=row_facts(owned.connection,'actions',12)
         context=complete_context(owned,12)
-        assert _source_start_rows(context,action)[0]==load_start_facts(owned.connection,action)
+        _validate_start_scope(owned,context)
+        assert _row_start_facts(context,action)==load_start_facts(owned.connection,action)
         state=deepcopy(context.state_rows)
         if fault=='owner':
             run=next(iter(state['operation_runs'].values()))
@@ -347,6 +427,6 @@ def test_emergency_scope_keeps_original_owner_target_and_attempt_checks(tmp_path
                 ('device_activities','id'):frozenset((11,12))}))
         elif fault=='missing_target': state['device_activities'].pop(12)
         else: next(iter(state['operation_attempts'].values()))['attempt_no']=2
-        with pytest.raises(EventValidationError): _source_start_rows(replace(context,state_rows=state),action)
+        with pytest.raises(EventValidationError): _validate_start_scope(owned,replace(context,state_rows=state))
     finally:
         owned.connection.close()

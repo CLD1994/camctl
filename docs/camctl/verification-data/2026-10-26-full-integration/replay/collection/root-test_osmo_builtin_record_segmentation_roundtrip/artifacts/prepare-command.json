@@ -1,0 +1,11 @@
+{
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "/tmp/camctl-integration-replay-20261026-u19lkvoe/collection/root-test_osmo_builtin_record_segmentation_roundtrip/source/apps/camctl/scripts/sync_resources.py"
+  ],
+  "cwd": "/tmp/camctl-integration-replay-20261026-u19lkvoe/collection/root-test_osmo_builtin_record_segmentation_roundtrip/source",
+  "started_utc": "2026-10-26T00:48:06.424862+00:00",
+  "pid": 1985932,
+  "exit_code": 0,
+  "finished_utc": "2026-10-26T00:48:06.862482+00:00"
+}

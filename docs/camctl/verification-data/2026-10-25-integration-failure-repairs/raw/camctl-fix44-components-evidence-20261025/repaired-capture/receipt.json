@@ -1,0 +1,40 @@
+{
+  "label": "repaired-capture",
+  "command": [
+    "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "apps/camctl/tests/integration/capture/test_action6_budget_cold_recovery.py",
+    "-vv",
+    "--tb=short",
+    "--basetemp",
+    "/tmp/camctl-fix44-components-evidence-20261025/repaired-capture/pytest-tmp",
+    "--junitxml",
+    "/tmp/camctl-fix44-components-evidence-20261025/repaired-capture/junit.xml"
+  ],
+  "cwd": "/tmp/camctl-fix44-components-20261025",
+  "started_at": "2026-10-25T08:26:39.099258+00:00",
+  "source_commit": "5d20849e53fbfb045d25a2799e268827967196b2",
+  "branch": "fix/fail44-components-20261025",
+  "status_before": "M apps/camctl/tests/integration/acceptance/test_acceptance.py\n M apps/camctl/tests/integration/bootstrap/test_distribution.py\n M apps/camctl/tests/integration/capture/test_action6_budget_cold_recovery.py",
+  "python": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+  "runtime": {
+    "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+    "sqlite": "3.53.1",
+    "camctl_source": "/tmp/camctl-fix44-components-20261025/apps/camctl/src/camctl/__init__.py"
+  },
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-fix44-components-20261025/apps/camctl/src",
+    "UV_CACHE_DIR": "/tmp/camctl-fix44-components-uv-cache",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311"
+  },
+  "source_files": {
+    "apps/camctl/tests/integration/capture/test_action6_budget_cold_recovery.py": "b5681806d5ca7c59f0ceca3746bc2023d174e0c37d0d47fe0da94f886bc7ca81"
+  },
+  "output": "/tmp/camctl-fix44-components-evidence-20261025/repaired-capture/output.log",
+  "junit": "/tmp/camctl-fix44-components-evidence-20261025/repaired-capture/junit.xml",
+  "pid": 1039465,
+  "exit_code": 0,
+  "duration_seconds": 3.560550278009032,
+  "finished_at": "2026-10-25T08:26:42.786260+00:00"
+}

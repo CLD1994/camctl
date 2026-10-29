@@ -1,0 +1,134 @@
+{
+  "complete-commit": null,
+  "complete-verifier": null,
+  "report-before-publish": null,
+  "start-recovery-observed": null,
+  "before-start-result": null,
+  "actions": [
+    {
+      "id": 1,
+      "type": 1,
+      "status": 3,
+      "execution_started": 1,
+      "error_code": null
+    }
+  ],
+  "operation_runs": [
+    {
+      "id": 1,
+      "action_id": 1,
+      "kind": 10,
+      "status": 3,
+      "responsibility_key": "prepare/1/e91c3cd459f94f18a8a1195b01706c4a"
+    },
+    {
+      "id": 2,
+      "action_id": 1,
+      "kind": 1,
+      "status": 3,
+      "responsibility_key": "start/1"
+    }
+  ],
+  "operation_attempts": [
+    {
+      "id": 1,
+      "run_id": 1,
+      "attempt_no": 1,
+      "status": 2,
+      "effect_state": 3,
+      "intent_event_id": 7,
+      "result_event_id": 8
+    },
+    {
+      "id": 2,
+      "run_id": 2,
+      "attempt_no": 1,
+      "status": 2,
+      "effect_state": 3,
+      "intent_event_id": 13,
+      "result_event_id": 14
+    }
+  ],
+  "intermediate_files": [
+    {
+      "id": 1,
+      "owner_action_id": 1,
+      "owner_delivery_id": null,
+      "purpose": 5,
+      "relative_path": "capture-originals/1.jpg",
+      "retention_state": 2,
+      "cleanup_state": 4,
+      "size_bytes": 31,
+      "sha256": "c3492b5482fbe81c83a135c093932391b75251591074e1286281a519a70628a7",
+      "last_error_json": null,
+      "created_event_id": 12,
+      "last_event_id": 36,
+      "change_count": 5
+    },
+    {
+      "id": 2,
+      "owner_action_id": 1,
+      "owner_delivery_id": null,
+      "purpose": 6,
+      "relative_path": "capture-previews/2.jpg",
+      "retention_state": 2,
+      "cleanup_state": 4,
+      "size_bytes": 25,
+      "sha256": "31dc7b9ceee282c7d2f64a29663c46b9c7334a792a4913de7e973ed81a564400",
+      "last_error_json": null,
+      "created_event_id": 12,
+      "last_event_id": 39,
+      "change_count": 5
+    }
+  ],
+  "outputs": [
+    {
+      "id": 1,
+      "source_action_id": 1,
+      "kind": 1,
+      "device_file_id": 1,
+      "intermediate_file_id": null,
+      "original_name": "host-copy.jpg",
+      "media_type": "image/jpeg",
+      "availability": 1,
+      "cleanup_status": 1,
+      "cleanup_error_json": null,
+      "media_json": "{\"check_status\":\"not_performed\",\"duration\":{\"status\":\"unknown\"}}",
+      "error_json": null,
+      "created_event_id": 31,
+      "last_event_id": 31,
+      "change_count": 1
+    },
+    {
+      "id": 2,
+      "source_action_id": 1,
+      "kind": 3,
+      "device_file_id": 2,
+      "intermediate_file_id": null,
+      "original_name": "host-copy.jpg.thumbnail.jpg",
+      "media_type": "image/jpeg",
+      "availability": 1,
+      "cleanup_status": 1,
+      "cleanup_error_json": null,
+      "media_json": "{\"check_status\":\"not_performed\",\"duration\":{\"status\":\"unknown\"}}",
+      "error_json": null,
+      "created_event_id": 32,
+      "last_event_id": 32,
+      "change_count": 1
+    }
+  ],
+  "reports": [
+    {
+      "id": 1,
+      "status": 5,
+      "from_wm": 0,
+      "to_wm": 2
+    },
+    {
+      "id": 2,
+      "status": 5,
+      "from_wm": 0,
+      "to_wm": 12
+    }
+  ]
+}

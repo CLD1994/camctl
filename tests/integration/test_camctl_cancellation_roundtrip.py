@@ -12,15 +12,16 @@ from __future__ import annotations
 import glob
 import json
 import sqlite3
+import time
 from pathlib import Path
 
+from _wsl_host_demo import wait_for
 from camctl_fixtures import (
+    CliResult,
     Deployment,
-    future_schedule,
     photo_file,
-    photo_plan,
     stub_driver_spec,
-    video_file,
+    terminate_process_tree,
 )
 
 #: 设备侧照片内容：替身按身份提供读取、摘要与存在性事实。
@@ -62,7 +63,7 @@ def test_cleanup_unknown_preserves_original_request_result(
         tmp_path: Path) -> None:
     """删除效果未知耗尽预算后清理失败；拍摄结果与产物保持，随后
     另一精确清理成功也不改写旧请求的失败事实。"""
-    deployment = Deployment(tmp_path)
+    deployment = Deployment(tmp_path, controlled_clock=True)
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
@@ -72,6 +73,7 @@ def test_cleanup_unknown_preserves_original_request_result(
             {"1": [photo_file("shot-1")]},
             device_files={"shot-1": _PHOTO_CONTENT}))
     # 客户端真实导出：拍摄与范围清理同计划，清理按名称引用来源。
+    shoot_at = deployment.schedule(1)
     body = {
         "request_id": "0",
         "created_at": "2026-01-15 08:00:00",
@@ -81,14 +83,14 @@ def test_cleanup_unknown_preserves_original_request_result(
                 "name": "shoot",
                 "type": "camera_take_photo",
                 "device_id": "cam-1",
-                "scheduled_at": future_schedule(1),
+                "scheduled_at": shoot_at,
                 "params": {"type": "single_shot"},
                 "policy": {"max_delay_ms": 5000},
             },
             {
                 "name": "purge",
                 "type": "delete_action_outputs",
-                "scheduled_at": future_schedule(2),
+                "scheduled_at": deployment.schedule(2),
                 "params": {"source": {"action_name": "shoot"}},
             },
         ],
@@ -98,14 +100,36 @@ def test_cleanup_unknown_preserves_original_request_result(
     failing = stub_driver_spec(
         {"1": [photo_file("shot-1")]},
         device_files={"shot-1": _PHOTO_CONTENT},
-        delete_error="设备删除失败")
+        delete_error={"code": "device_error", "stage": "delete",
+                      "details": {"message": "设备删除失败"}})
     submitted = deployment.camctl(
         "submit", str(plan_path), "--config", str(deployment.config_path),
         driver=failing)
     assert submitted.exit_code == 0, submitted.stderr
-    first_run = deployment.camctl(
+    deployment.freeze_at(shoot_at)
+    deadline = time.monotonic() + 180
+    process = deployment.start_camctl(
         "run", "--config", str(deployment.config_path), driver=failing)
-    assert first_run.exit_code == 0, first_run.stderr
+    try:
+        def failed_before_start():
+            if process.poll() is not None:
+                stdout, stderr = process.communicate()
+                return f"本次 run 已退出：{process.returncode}\n{stdout}\n{stderr}"
+            return None
+
+        wait_for(lambda: _query(deployment.state_db,
+            "SELECT r.id FROM operation_runs r JOIN actions a ON a.id=r.action_id"
+            " WHERE a.name='shoot' AND r.responsibility_key='start/' || a.id"
+            " AND r.status IN (3,4)") or None,
+            timeout_s=max(0, deadline - time.monotonic()),
+            message="照片 START 责任未收场", failure=failed_before_start)
+        deployment.resume_clock()
+        stdout, stderr = process.communicate(timeout=max(0, deadline - time.monotonic()))
+        first_run = CliResult(process.returncode, stdout, stderr)
+    finally:
+        if process.poll() is None:
+            terminate_process_tree(process)
+    assert first_run.exit_code == 0, first_run.stderr or first_run.stdout
 
     state_db = deployment.state_db
     # 拍摄成功；删除效果未知耗尽预算后成员失败并保留限制，产物不
@@ -146,7 +170,7 @@ def test_cleanup_unknown_preserves_original_request_result(
             {
                 "name": "purge2",
                 "type": "delete_action_outputs",
-                "scheduled_at": future_schedule(1),
+                "scheduled_at": deployment.schedule(1),
                 "params": {"output_ids": [output_id]},
             },
         ],

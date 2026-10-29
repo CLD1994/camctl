@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "session_id": "3d19fdf6-3dfe-432d-8a4e-801f74fba578",
+  "nodeid": "tmp/camctl-sync8db-tests-ojv22ku3/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters",
+  "command_prefix": [
+    "node",
+    "--import",
+    "tsx",
+    "/tmp/camctl-sync8db-tests-ojv22ku3/action6/tests/integration/client_driver.ts"
+  ],
+  "phase_timeout_seconds": 120,
+  "startup": {
+    "started_monotonic_ns": 105225838922262,
+    "finished_monotonic_ns": 105227423134362,
+    "elapsed_seconds": 1.5842121,
+    "outcome": "passed"
+  },
+  "commands": [
+    {
+      "id": 1,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-sync8db-evidence/action6/native/data/test_installed_action6_native_0/action6-native/client-store",
+        "/tmp/camctl-sync8db-evidence/action6/native/data/test_installed_action6_native_0/action6-native/plan-body.json",
+        "/tmp/camctl-sync8db-evidence/action6/native/data/test_installed_action6_native_0/action6-native/client-plan-1.json"
+      ],
+      "receipt_path": "/tmp/camctl-sync8db-evidence/action6/native/data/test_installed_action6_native_0/action6-native/client-export-session-1.json",
+      "started_monotonic_ns": 105227423694536,
+      "finished_monotonic_ns": 105227637537721,
+      "elapsed_seconds": 0.213843185,
+      "outcome": "passed"
+    },
+    {
+      "id": 2,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-sync8db-evidence/action6/native/data/test_installed_action6_native_0/action6-native/client-store",
+        "/tmp/camctl-sync8db-evidence/action6/native/data/test_installed_action6_native_0/action6-native/plan-body.json",
+        "/tmp/camctl-sync8db-evidence/action6/native/data/test_installed_action6_native_0/action6-native/client-plan-2.json"
+      ],
+      "receipt_path": "/tmp/camctl-sync8db-evidence/action6/native/data/test_installed_action6_native_0/action6-native/client-export-session-2.json",
+      "started_monotonic_ns": 105232381954369,
+      "finished_monotonic_ns": 105232793022733,
+      "elapsed_seconds": 0.411068364,
+      "outcome": "passed"
+    },
+    {
+      "id": 3,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-sync8db-evidence/action6/native/data/test_installed_action6_native_0/action6-native/client-store",
+        "/tmp/camctl-sync8db-evidence/action6/native/data/test_installed_action6_native_0/action6-native/plan-body.json",
+        "/tmp/camctl-sync8db-evidence/action6/native/data/test_installed_action6_native_0/action6-native/client-plan-3.json"
+      ],
+      "receipt_path": "/tmp/camctl-sync8db-evidence/action6/native/data/test_installed_action6_native_0/action6-native/client-export-session-3.json",
+      "started_monotonic_ns": 105234925544517,
+      "finished_monotonic_ns": 105234937564802,
+      "elapsed_seconds": 0.012020285,
+      "outcome": "passed"
+    }
+  ],
+  "close": {
+    "started_monotonic_ns": 105476575071214,
+    "finished_monotonic_ns": 105476615098432,
+    "elapsed_seconds": 0.040027218,
+    "outcome": "passed"
+  },
+  "node_pid": 1643383,
+  "owned_processes": [
+    {
+      "pid": 1643383,
+      "ppid": 1642538,
+      "pgid": 1643383,
+      "starttime": "10522583",
+      "state": "S"
+    },
+    {
+      "pid": 1643421,
+      "ppid": 1643383,
+      "pgid": 1643383,
+      "starttime": "10522621",
+      "state": "S"
+    }
+  ]
+}

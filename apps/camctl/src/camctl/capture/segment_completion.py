@@ -59,6 +59,8 @@ async def _resume_segment_writes(database, pending_writes, action_id):
     for identity, pending in tuple(pending_writes.items()):
         if action_id is not None and identity != action_id:
             continue
+        if pending_writes.get(identity) is not pending:
+            continue
         pending.save.retry_failed()
         with measure_performance("segment_save", action_id=identity,
                                  method=pending.method, resumed=True), db_operation_context(
@@ -72,6 +74,8 @@ async def _save(runtime, action_id, repository, method, *args):
 
 
 async def _write_segment_request(database, pending_writes, action_id, pending):
+    if pending_writes.get(action_id) is not pending:
+        return None
     if pending.method == "finish_segment_recording" and isinstance(pending.args[0], FinishSegmentRecording):
         request = pending.args[0]
         if request.failure is not None:

@@ -179,8 +179,8 @@ async def _exercise_first_exhaustion(tmp_path, monkeypatch, *, kind="video",
         owned.connection.close()
         reopened = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
         assert reopened.metadata == metadata
-        fresh_runtime = _runtime(reopened, driver=runtime.driver, results=runtime.results,
-            wall=formed_at + 5_000_000)
+        fresh_runtime = (await _runtime(reopened, driver=runtime.driver, results=runtime.results,
+            wall=formed_at + 5_000_000))
         fresh_runtime.evidence = RESULT_EVIDENCE
         assert not fresh_runtime.pending_result_closes and not fresh_runtime.pending_start_results
         assert fresh_runtime.listing_cache is None and not fresh_runtime.timelapse_deadlines

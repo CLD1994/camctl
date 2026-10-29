@@ -1,0 +1,240 @@
+{
+  "source_commit": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+  "comparisons": [
+    "a7755d8162ea0792e75f38f558bbd53734c3ca69",
+    "272fda66a0e4e58f2917677e808939a2cb174983"
+  ],
+  "inventory_count": 1406,
+  "test_files": {
+    "tests/integration/bootstrap/test_acceptance_clock_status.py": 4,
+    "tests/integration/bootstrap/test_action6_capture_completion.py": 6,
+    "tests/integration/bootstrap/test_adb_camera_dispatch.py": 16,
+    "tests/integration/bootstrap/test_adb_camera_products.py": 16,
+    "tests/integration/bootstrap/test_baseline_device_progress.py": 2,
+    "tests/integration/bootstrap/test_baseline_settlement.py": 17,
+    "tests/integration/bootstrap/test_binding_canceled_result_transactions.py": 14,
+    "tests/integration/bootstrap/test_binding_canceled_results.py": 4,
+    "tests/integration/bootstrap/test_binding_changes.py": 38,
+    "tests/integration/bootstrap/test_binding_failure_retained_files.py": 4,
+    "tests/integration/bootstrap/test_binding_transactions.py": 12,
+    "tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py": 13,
+    "tests/integration/bootstrap/test_cancel_origin_resume.py": 10,
+    "tests/integration/bootstrap/test_cancel_ready_runtime.py": 15,
+    "tests/integration/bootstrap/test_cancel_ready_transactions.py": 16,
+    "tests/integration/bootstrap/test_cancel_work_file_first_result.py": 6,
+    "tests/integration/bootstrap/test_capture_call_session_state.py": 10,
+    "tests/integration/bootstrap/test_capture_cancel_after_call.py": 3,
+    "tests/integration/bootstrap/test_capture_completion_default_recovery.py": 56,
+    "tests/integration/bootstrap/test_capture_completion_read_settlement.py": 12,
+    "tests/integration/bootstrap/test_capture_device_rounds.py": 6,
+    "tests/integration/bootstrap/test_capture_flow_failures.py": 3,
+    "tests/integration/bootstrap/test_cleanup_background_owner.py": 15,
+    "tests/integration/bootstrap/test_cleanup_flow.py": 7,
+    "tests/integration/bootstrap/test_cleanup_host_file_tasks.py": 32,
+    "tests/integration/bootstrap/test_cleanup_original_config.py": 28,
+    "tests/integration/bootstrap/test_cleanup_query_default_recovery.py": 22,
+    "tests/integration/bootstrap/test_cleanup_running_recovery.py": 2,
+    "tests/integration/bootstrap/test_cleanup_scope_sources.py": 8,
+    "tests/integration/bootstrap/test_closed_result_binding_recovery.py": 9,
+    "tests/integration/bootstrap/test_command_output.py": 3,
+    "tests/integration/bootstrap/test_composition.py": 9,
+    "tests/integration/bootstrap/test_configuration.py": 5,
+    "tests/integration/bootstrap/test_directory_binding_runtime.py": 25,
+    "tests/integration/bootstrap/test_directory_switch.py": 40,
+    "tests/integration/bootstrap/test_directory_switch_file_ids.py": 1,
+    "tests/integration/bootstrap/test_directory_switch_history.py": 3,
+    "tests/integration/bootstrap/test_distribution.py": 43,
+    "tests/integration/bootstrap/test_download_cleanup.py": 22,
+    "tests/integration/bootstrap/test_emergency_session_exit.py": 11,
+    "tests/integration/bootstrap/test_file_fact_consumers.py": 44,
+    "tests/integration/bootstrap/test_hasselblad_capture_assembly.py": 4,
+    "tests/integration/bootstrap/test_hasselblad_device_distribution.py": 2,
+    "tests/integration/bootstrap/test_hasselblad_read_waiting_session.py": 2,
+    "tests/integration/bootstrap/test_initialization.py": 27,
+    "tests/integration/bootstrap/test_inspection_read_dispatch.py": 24,
+    "tests/integration/bootstrap/test_internal_read_binding_reuse.py": 6,
+    "tests/integration/bootstrap/test_log_copy_diagnostics.py": 36,
+    "tests/integration/bootstrap/test_log_operation_settlement.py": 6,
+    "tests/integration/bootstrap/test_logging_composition.py": 4,
+    "tests/integration/bootstrap/test_media_assembly.py": 6,
+    "tests/integration/bootstrap/test_media_cancel_save_order.py": 4,
+    "tests/integration/bootstrap/test_media_local_settlement.py": 8,
+    "tests/integration/bootstrap/test_media_saved_result_consumers.py": 13,
+    "tests/integration/bootstrap/test_obtain_flow.py": 5,
+    "tests/integration/bootstrap/test_osmo_file_cleanup.py": 31,
+    "tests/integration/bootstrap/test_osmo_shared_recovery.py": 22,
+    "tests/integration/bootstrap/test_osmo_video_mode_completion.py": 3,
+    "tests/integration/bootstrap/test_osv_media_pipeline.py": 1,
+    "tests/integration/bootstrap/test_output_binding_cancellation.py": 11,
+    "tests/integration/bootstrap/test_output_binding_changes.py": 13,
+    "tests/integration/bootstrap/test_output_binding_transactions.py": 21,
+    "tests/integration/bootstrap/test_output_cleanup_recovery.py": 6,
+    "tests/integration/bootstrap/test_output_read_recovery.py": 18,
+    "tests/integration/bootstrap/test_package.py": 2,
+    "tests/integration/bootstrap/test_production_flows.py": 3,
+    "tests/integration/bootstrap/test_read_default_consumers.py": 15,
+    "tests/integration/bootstrap/test_read_default_raw_binding.py": 10,
+    "tests/integration/bootstrap/test_read_default_raw_binding_recovery.py": 8,
+    "tests/integration/bootstrap/test_read_default_raw_binding_save_gate.py": 4,
+    "tests/integration/bootstrap/test_read_default_save_gate.py": 6,
+    "tests/integration/bootstrap/test_read_discovery_default.py": 18,
+    "tests/integration/bootstrap/test_read_execution_runtime.py": 48,
+    "tests/integration/bootstrap/test_read_exhaustion_transactions.py": 5,
+    "tests/integration/bootstrap/test_read_failure_original_groups.py": 10,
+    "tests/integration/bootstrap/test_read_finish_time.py": 2,
+    "tests/integration/bootstrap/test_read_held_end_binding.py": 3,
+    "tests/integration/bootstrap/test_read_held_end_required_digest.py": 12,
+    "tests/integration/bootstrap/test_read_history_replay_report.py": 1,
+    "tests/integration/bootstrap/test_read_resume_transactions.py": 8,
+    "tests/integration/bootstrap/test_read_success_slot_result.py": 2,
+    "tests/integration/bootstrap/test_record_result_run_close_recovery.py": 24,
+    "tests/integration/bootstrap/test_recording_cancel_inflight_results.py": 2,
+    "tests/integration/bootstrap/test_recording_cancel_results_persistent.py": 10,
+    "tests/integration/bootstrap/test_recording_cancel_results_recovery.py": 10,
+    "tests/integration/bootstrap/test_recording_cancel_results_settlement.py": 6,
+    "tests/integration/bootstrap/test_recording_results_cancellation.py": 15,
+    "tests/integration/bootstrap/test_recording_results_saved_consumers.py": 15,
+    "tests/integration/bootstrap/test_recording_stop.py": 5,
+    "tests/integration/bootstrap/test_recovery_inputs.py": 3,
+    "tests/integration/bootstrap/test_report_flow.py": 4,
+    "tests/integration/bootstrap/test_report_shutdown.py": 8,
+    "tests/integration/bootstrap/test_residual_binding.py": 5,
+    "tests/integration/bootstrap/test_residual_binding_transactions.py": 11,
+    "tests/integration/bootstrap/test_residual_result_transactions.py": 3,
+    "tests/integration/bootstrap/test_residual_winddown.py": 9,
+    "tests/integration/bootstrap/test_restricted_report_cancellation.py": 2,
+    "tests/integration/bootstrap/test_restricted_session.py": 4,
+    "tests/integration/bootstrap/test_restricted_winddown.py": 6,
+    "tests/integration/bootstrap/test_result_error_flow.py": 2,
+    "tests/integration/bootstrap/test_result_exhaustion_default_recovery.py": 30,
+    "tests/integration/bootstrap/test_result_page_saves.py": 1,
+    "tests/integration/bootstrap/test_run_dispatch.py": 6,
+    "tests/integration/bootstrap/test_runtime_configuration_recovery.py": 4,
+    "tests/integration/bootstrap/test_segment_input_cleanup.py": 16,
+    "tests/integration/bootstrap/test_session_lock_errors.py": 19,
+    "tests/integration/bootstrap/test_session_wakeup_configuration.py": 2,
+    "tests/integration/bootstrap/test_start_close_default_recovery.py": 42,
+    "tests/integration/bootstrap/test_startup_log_sweep.py": 28,
+    "tests/integration/bootstrap/test_stop_close_default_recovery.py": 42,
+    "tests/integration/bootstrap/test_timelapse_finish.py": 12,
+    "tests/integration/bootstrap/test_tool_cancellation.py": 5,
+    "tests/integration/bootstrap/test_video_result_mode_binding.py": 4,
+    "tests/integration/bootstrap/test_work_file_empty_run.py": 1,
+    "tests/integration/bootstrap/test_work_file_fixed_range.py": 1,
+    "tests/integration/bootstrap/test_work_file_history.py": 2,
+    "tests/integration/bootstrap/test_work_file_new_responsibility.py": 2,
+    "tests/integration/bootstrap/test_work_file_runtime.py": 3
+  },
+  "tests_changed_since_a775": [],
+  "tests_changed_since_272": [
+    "apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py",
+    "apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py",
+    "apps/camctl/tests/integration/bootstrap/test_distribution.py",
+    "apps/camctl/tests/integration/bootstrap/test_inspection_read_dispatch.py",
+    "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py",
+    "apps/camctl/tests/integration/bootstrap/test_osmo_video_mode_completion.py",
+    "apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py",
+    "apps/camctl/tests/integration/bootstrap/test_read_default_consumers.py",
+    "apps/camctl/tests/integration/bootstrap/test_read_discovery_default.py",
+    "apps/camctl/tests/integration/bootstrap/test_result_error_flow.py",
+    "apps/camctl/tests/integration/bootstrap/test_segment_input_cleanup.py"
+  ],
+  "interface_checks": {
+    "a7755d81": {
+      "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py": [
+        {
+          "line": 152,
+          "source": "def _capture(world, **kwargs):"
+        }
+      ],
+      "apps/camctl/src/camctl/bootstrap/capture_assembly.py": [
+        {
+          "line": 817,
+          "source": "async def factory(database: Any, device_id: str) -> CaptureRuntime | None:"
+        }
+      ],
+      "apps/camctl/src/camctl/capture/handlers.py": [
+        {
+          "line": 1022,
+          "source": "async def action(self, action_id: int) -> Mapping[str, Any]:"
+        },
+        {
+          "line": 1077,
+          "source": "async def grant(self, action: Mapping[str, Any]):"
+        },
+        {
+          "line": 1400,
+          "source": "async def recover_attempt(self, ticket: AttemptTicket, *, retry_wait: bool = False) -> bool:"
+        },
+        {
+          "line": 2048,
+          "source": "async def grant(self, request):"
+        }
+      ]
+    },
+    "272fda66": {
+      "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py": [
+        {
+          "line": 127,
+          "source": "def _capture(world, **kwargs):"
+        }
+      ],
+      "apps/camctl/src/camctl/bootstrap/capture_assembly.py": [
+        {
+          "line": 817,
+          "source": "async def factory(database: Any, device_id: str) -> CaptureRuntime | None:"
+        }
+      ],
+      "apps/camctl/src/camctl/capture/handlers.py": [
+        {
+          "line": 1045,
+          "source": "async def action(self, action_id: int) -> Mapping[str, Any]:"
+        },
+        {
+          "line": 1100,
+          "source": "async def grant(self, action: Mapping[str, Any]):"
+        },
+        {
+          "line": 1426,
+          "source": "async def recover_attempt(self, ticket: AttemptTicket, *, retry_wait: bool = False) -> bool:"
+        },
+        {
+          "line": 2074,
+          "source": "async def grant(self, request):"
+        }
+      ]
+    },
+    "9fbb734c": {
+      "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py": [
+        {
+          "line": 152,
+          "source": "def _capture(world, **kwargs):"
+        }
+      ],
+      "apps/camctl/src/camctl/bootstrap/capture_assembly.py": [
+        {
+          "line": 817,
+          "source": "async def factory(database: Any, device_id: str) -> CaptureRuntime | None:"
+        }
+      ],
+      "apps/camctl/src/camctl/capture/handlers.py": [
+        {
+          "line": 1045,
+          "source": "async def action(self, action_id: int) -> Mapping[str, Any]:"
+        },
+        {
+          "line": 1100,
+          "source": "async def grant(self, action: Mapping[str, Any]):"
+        },
+        {
+          "line": 1426,
+          "source": "async def recover_attempt(self, ticket: AttemptTicket, *, retry_wait: bool = False) -> bool:"
+        },
+        {
+          "line": 2074,
+          "source": "async def grant(self, request):"
+        }
+      ]
+    }
+  }
+}

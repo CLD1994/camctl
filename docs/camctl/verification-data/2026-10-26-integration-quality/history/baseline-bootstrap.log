@@ -1,0 +1,6 @@
+.
+============================= slowest 10 durations =============================
+3.14s call     tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost
+0.09s setup    tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost
+0.01s teardown tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost
+1 passed in 3.87s

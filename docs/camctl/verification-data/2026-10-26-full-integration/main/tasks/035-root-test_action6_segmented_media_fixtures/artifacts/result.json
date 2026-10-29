@@ -1,0 +1,77 @@
+{
+  "id": "root/test_action6_segmented_media_fixtures",
+  "scope": "root",
+  "path": "tests/integration/test_action6_segmented_media_fixtures.py",
+  "targets": [
+    "tests/integration/test_action6_segmented_media_fixtures.py"
+  ],
+  "estimated_seconds": 2.307335803001479,
+  "historical_failure_observed": false,
+  "status": "passed",
+  "number": 35,
+  "worker": 3,
+  "artifacts": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/035-root-test_action6_segmented_media_fixtures/artifacts",
+  "cwd": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/035-root-test_action6_segmented_media_fixtures/source",
+  "started_utc": "2026-10-26T00:39:51.252461+00:00",
+  "command": [
+    "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/035-root-test_action6_segmented_media_fixtures/source/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "tests/integration/test_action6_segmented_media_fixtures.py",
+    "-q",
+    "--durations=0",
+    "-p",
+    "integration_progress",
+    "--basetemp",
+    "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/035-root-test_action6_segmented_media_fixtures/tmp/pytest",
+    "-p",
+    "camctl_memory_plugin",
+    "--camctl-memory-limit",
+    "2GiB",
+    "--camctl-memory-cgroup-root",
+    "/sys/fs/cgroup/memory/camctl-budget-1922809-b293c146ab7744439fec45b828581e67"
+  ],
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/control:/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/035-root-test_action6_segmented_media_fixtures/source/apps/camctl/src",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/workers/3/python-cache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/workers/3/project-env",
+    "UV_CACHE_DIR": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/workers/3/uv-cache",
+    "UV_OFFLINE": "1",
+    "TMPDIR": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/035-root-test_action6_segmented_media_fixtures/tmp"
+  },
+  "preparations": [
+    {
+      "label": "package-resources",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/035-root-test_action6_segmented_media_fixtures/source/apps/camctl/scripts/sync_resources.py"
+      ],
+      "cwd": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/035-root-test_action6_segmented_media_fixtures/source",
+      "started_utc": "2026-10-26T00:39:53.603586+00:00",
+      "pid": 1970137,
+      "exit_code": 0,
+      "finished_utc": "2026-10-26T00:39:53.678960+00:00",
+      "wall_seconds": 0.07536665799852926
+    }
+  ],
+  "preparation": "package-resources",
+  "preparation_pid": 1970137,
+  "pid": 1970143,
+  "execution_started_utc": "2026-10-26T00:39:53.680904+00:00",
+  "progress": {
+    "status": "finished",
+    "exit_code": 0,
+    "collected": 2,
+    "outcomes": {
+      "passed": 2
+    },
+    "subchecks": {},
+    "elapsed_seconds": 4.404732465001871,
+    "utc": "2026-10-26T00:39:58.389092+00:00",
+    "pid": 1970143
+  },
+  "exit_code": 0,
+  "finished_utc": "2026-10-26T00:39:58.464289+00:00",
+  "wall_seconds": 7.21182463299192
+}

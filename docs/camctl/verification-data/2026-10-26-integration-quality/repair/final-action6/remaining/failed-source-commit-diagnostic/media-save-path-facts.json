@@ -1,0 +1,21 @@
+{
+  "recording_processing": [
+    {
+      "id": 1,
+      "action_id": 1,
+      "source_device_file_id": null,
+      "check_state": 1,
+      "check_decision": 1,
+      "check_basis_json": null,
+      "media_json": "{}",
+      "repair_state": 1,
+      "repair_basis_json": null,
+      "repair_output_file_id": null,
+      "repair_error_json": null,
+      "discard_state": 1,
+      "discard_error_json": null
+    }
+  ],
+  "processing_copies": [],
+  "media_related_events": []
+}

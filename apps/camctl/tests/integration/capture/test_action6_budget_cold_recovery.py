@@ -7,9 +7,8 @@ from pathlib import Path
 import pytest
 
 from camctl.capture.handlers import capture_handler
-from camctl.capture.media_flow import DriverReadSessions
+from camctl.capture.media_flow import DriverReadSessions, MediaFlow
 from camctl.contracts.enums import enum_for
-from camctl.operations.attempts import RetryWaitGate
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.segment_inspections import (
     SegmentInspectionRepository,
@@ -24,81 +23,44 @@ from .test_action6_segmented_recovery import (
     _publish_ordinary_result,
 )
 from .test_capture_contract import _NOW
+from ..support.capture import capture_database
 from .test_input_copy import _CONTENT
 from .test_segment_inspections import _ReadDriver
 
 pytestmark = pytest.mark.asyncio
 
 
-class _OffsetReadDriver(_ReadDriver):
-    def __init__(self, content, *, fail_after=None):
-        super().__init__(content, fail_after=fail_after)
-        self.offsets = []
-
-    async def open_read(self, source, offset, ticket, *, idle_timeout_s):
-        self.offsets.append(offset)
-        return await super().open_read(
-            source, offset, ticket, idle_timeout_s=idle_timeout_s
-        )
+class _NoDeviceResults:
+    async def list_page(self, *args, **kwargs):
+        raise AssertionError("冷恢复应消费可靠结果页，不能重新列举设备")
 
 
-def _cold_runtime(runtime, owned, driver, *, now):
+async def _cold_runtime(runtime, owned, driver, *, now, resources):
     tools = runtime.media.tools
     tools.owned = owned
-    monotonic_ns = lambda: 100_000_000_000
-    media = replace(
-        runtime.media,
-        owned=owned,
-        sessions=DriverReadSessions(owned, driver, ticket=None),
-        occurred_at=lambda: now,
-        monotonic_ns=monotonic_ns,
-        retry_gate=RetryWaitGate(),
-        continuing_read_tickets={},
-        pending_read_results={},
-        pending_read_business={},
-        pending_read_ends={},
-        pending_media_results={},
-        pending_segment_inspection_results={},
-    )
-    return replace(
-        runtime,
-        owned=owned,
-        wall_us=lambda: now,
-        monotonic_ns=monotonic_ns,
-        recording_state=None,
-        media=media,
-        retry_gate=RetryWaitGate(),
-        listing_cache=None,
-        timelapse_deadlines={},
-        natural_wait_states={},
-        pending_start_results={},
-        pending_capture_completions={},
-        pending_host_photo_prepares={},
-        pending_host_photo_completions={},
-        pending_result_closes={},
-        pending_read_results={},
-        pending_read_business={},
-        pending_read_ends={},
-        continuing_read_tickets={},
-        pending_media_results={},
-        pending_file_observations={},
-        pending_baselines={},
-        pending_result_scans={},
-        pending_segment_writes={},
-    )
+    ns = [100_000_000_000]
+    database = await resources.restart_database(owned)
+    resumed = await resources.runtime(database, driver=runtime.driver, evidence=runtime.evidence,
+        results=_NoDeviceResults(), wall_us=lambda: now, monotonic_ns=lambda: ns[0])
+    resumed.media = MediaFlow(database=database, roots=runtime.media.roots,
+        sessions=DriverReadSessions(database, driver, ticket=None), tools=tools,
+        policy=runtime.media.policy, occurred_at=lambda: now,
+        digest_supported=True, digest=runtime.media.digest,
+        segment_size=runtime.media.segment_size, monotonic_ns=lambda: ns[0])
+    return resumed, ns
 
 
 async def test_action6_cold_recovery_decodes_saved_budget_and_continues_same_copy(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, capture_resources,
 ):
     owned, runtime, action_id, handler, tools = await _overrun_recording(
         tmp_path, (Decimal("70"),)
     )
-    first_driver = _OffsetReadDriver(_CONTENT, fail_after=4)
+    first_driver = _ReadDriver(_CONTENT, fail_after=4)
     active_owned = owned
     runtime.media = replace(
         runtime.media,
-        sessions=DriverReadSessions(owned, first_driver, ticket=None),
+        sessions=DriverReadSessions(await capture_database(owned), first_driver, ticket=None),
         segment_size=4,
     )
     try:
@@ -143,9 +105,9 @@ async def test_action6_cold_recovery_decodes_saved_budget_and_continues_same_cop
             DbConfig(),
         )
         active_owned = reopened
-        resumed_driver = _OffsetReadDriver(_CONTENT)
-        runtime = _cold_runtime(
-            runtime, reopened, resumed_driver, now=_NOW + 90_000_000
+        resumed_driver = _ReadDriver(_CONTENT)
+        runtime, ns = await _cold_runtime(
+            runtime, reopened, resumed_driver, now=_NOW + 90_000_000, resources=capture_resources
         )
 
         original_save = SegmentInspectionRepository.save_result
@@ -170,8 +132,7 @@ async def test_action6_cold_recovery_decodes_saved_budget_and_continues_same_cop
         )
         assert resumed_driver.offsets == []
 
-        runtime.media.monotonic_ns = lambda: 104_000_000_000
-        runtime.monotonic_ns = lambda: 104_000_000_000
+        ns[0] = 104_000_000_000
         await capture_handler(handler)(action_id, runtime)
 
         after_read = read_inspection_for_member(action_id, member_id, reopened)
@@ -198,9 +159,9 @@ async def test_action6_cold_recovery_decodes_saved_budget_and_continues_same_cop
             DbConfig(),
         )
         active_owned = cold_reopened
-        final_driver = _OffsetReadDriver(_CONTENT)
-        runtime = _cold_runtime(
-            runtime, cold_reopened, final_driver, now=_NOW + 100_000_000
+        final_driver = _ReadDriver(_CONTENT)
+        runtime, _ns = await _cold_runtime(
+            runtime, cold_reopened, final_driver, now=_NOW + 100_000_000, resources=capture_resources
         )
         monkeypatch.setattr(
             SegmentInspectionRepository, "save_result", original_save
@@ -213,6 +174,7 @@ async def test_action6_cold_recovery_decodes_saved_budget_and_continues_same_cop
         assert final_facts.copy.copy_id == original_copy_id
         assert tools.calls == [(final_facts.copy.target_file_id, False)]
         assert final_driver.offsets == []
-        assert runtime.action(action_id)["status"] == 3
+        runtime.driver.control.assert_awaited_once()
+        assert (await runtime.action(action_id))["status"] == 3
     finally:
         active_owned.connection.close()

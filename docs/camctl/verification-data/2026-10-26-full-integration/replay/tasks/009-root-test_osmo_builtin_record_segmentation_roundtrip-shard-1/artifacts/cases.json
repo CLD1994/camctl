@@ -1,0 +1,40 @@
+[
+  {
+    "nodeid": "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[overrun-indexes1-3-succeeded]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 29.109734644996934
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 74.29969457699917
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.5152313910075463
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 103.92466061300365
+  },
+  {
+    "nodeid": "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[empty-indexes5-0-failed]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012762140104314312
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 52.435705235999194
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.11119561998930294
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 52.54817706999893
+  }
+]

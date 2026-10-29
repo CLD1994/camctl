@@ -1,6 +1,8 @@
 """独立接入资料的配置示例与真实 CLI 发布、C 模块领取共同工作。"""
 from __future__ import annotations
 
+from camctl_memory_plugin import run_camctl, write_budgeted_launcher
+
 import json
 import os
 import shlex
@@ -31,9 +33,9 @@ def test_default_configuration_is_shared_by_init_and_run(tmp_path: Path, explici
         environment["USERPROFILE"] = str(home)
     options = ["--config", str(tmp_path / "missing.toml")] if explicit_missing else []
     for command in ["init", "run"]:
-        result = subprocess.run(
+        result = run_camctl(
             [sys.executable, "-c", _ENTRY, command, *options],
-            cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=30,
+            receipt_root=tmp_path, cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=30,
         )
         assert result.returncode == 0, result.stderr
     assert (home / ".camctl/state.db").is_file()
@@ -58,19 +60,24 @@ def test_shipped_deployment_guide_publishes_and_claims_same_report(
             stream.write("\n[paths]\nready = " + json.dumps(str(ready)) +
                          "\nprocessing = " + json.dumps(str(processing)) + "\n")
     environment = {**os.environ, "HOME": str(home)}
-    initialized = subprocess.run(
+    initialized = run_camctl(
         [sys.executable, "-c", _ENTRY, "init"],
-        cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=30,
+        receipt_root=tmp_path, cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=30,
     )
     assert initialized.returncode == 0, initialized.stderr
     assert (runtime / "state.db").is_file()
     assert ready.is_dir() and processing.is_dir()
     launcher = runtime / "venv/bin/camctl"
     launcher.parent.mkdir(parents=True)
-    launcher.write_text(
-        f"#!/bin/sh\nexec {shlex.quote(sys.executable)} -c {shlex.quote(_ENTRY)} \"$@\"\n"
-    )
-    launcher.chmod(0o755)
+    if custom_paths:
+        launcher.write_text(
+            f"#!/bin/sh\nexec {shlex.quote(sys.executable)} -c {shlex.quote(_ENTRY)} \"$@\"\n"
+        )
+        launcher.chmod(0o755)
+    else:
+        write_budgeted_launcher(
+            [sys.executable, "-c", _ENTRY], receipt_root=runtime, target=launcher,
+        )
     deployment = SimpleNamespace(
         root=runtime, ready=ready, processing=processing, config_path=None,
     )

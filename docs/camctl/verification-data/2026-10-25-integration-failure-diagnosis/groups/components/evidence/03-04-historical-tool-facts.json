@@ -1,0 +1,164 @@
+[
+  {
+    "diagnosis_id": 3,
+    "database": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/test_installed_device_photo_re0/camera-source/state.db",
+    "tool": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/test_installed_device_photo_re0/hb_cli",
+    "shebang": "#!/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/source/apps/camctl/.venv311/bin/python",
+    "actions": [
+      {
+        "id": 1,
+        "status": 4,
+        "execution_started": 1,
+        "error_code": 13,
+        "error_details_json": "{\"activity_id\":\"1\",\"reason\":\"device_failed\"}"
+      }
+    ],
+    "attempts": [
+      {
+        "id": 1,
+        "run_id": 1,
+        "attempt_no": 1,
+        "copy_round": null,
+        "status": 3,
+        "intent_event_id": 13,
+        "result_event_id": 14,
+        "result_first_page_event_id": null,
+        "result_last_page_event_id": null,
+        "max_attempts_used": 1,
+        "timeout_s_json": "180",
+        "retry_interval_s_json": null,
+        "effect_state": 2,
+        "result_json": {
+          "format_version": 1,
+          "settlement": {
+            "basis": "observed",
+            "evidence": {
+              "type": "operation_returned",
+              "version": 1,
+              "data": {}
+            }
+          },
+          "observations": [
+            {
+              "type": "hasselblad_start_entered",
+              "version": 1,
+              "data": {
+                "activity_id": "1"
+              }
+            }
+          ],
+          "call_info": {
+            "local_exit": {
+              "exit_code": 1
+            }
+          },
+          "diagnostics": {
+            "version": 1,
+            "call_limit": 14,
+            "calls": [
+              {
+                "step_index": 1,
+                "step_name": "list",
+                "stdout": {
+                  "state": "complete",
+                  "hex": ""
+                },
+                "stderr": {
+                  "state": "complete",
+                  "hex": "54726163656261636b20286d6f737420726563656e742063616c6c206c617374293a0a202046696c6520222f746d702f63616d63746c2d69746f70742d66696e616c2d32303236313032352f7461736b732f3030332d63616d63746c2d626f6f7473747261702f746d702f7079746573742f746573745f696e7374616c6c65645f6465766963655f70686f746f5f7265302f68625f636c69222c206c696e6520362c20696e203c6d6f64756c653e0a20202020696d706f72742063616d63746c0a4d6f64756c654e6f74466f756e644572726f723a204e6f206d6f64756c65206e616d6564202763616d63746c270a"
+                }
+              }
+            ]
+          }
+        },
+        "error_json": "{\"code\":\"device_error\",\"stage\":\"control\",\"details\":{\"step\":\"list\",\"reason\":\"exit_nonzero\",\"steps\":[{\"name\":\"list\",\"local_exit_code\":1,\"local_signal\":null,\"transport_error\":null,\"output_failure\":null,\"stdout_size_bytes\":0,\"stdout_sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"signal_failures\":[]}]}}",
+        "decoded_stderr": [
+          "Traceback (most recent call last):\n  File \"/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/test_installed_device_photo_re0/hb_cli\", line 6, in <module>\n    import camctl\nModuleNotFoundError: No module named 'camctl'\n"
+        ]
+      }
+    ],
+    "device_files": [],
+    "outputs": []
+  },
+  {
+    "diagnosis_id": 4,
+    "database": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/test_installed_device_photo_re1/camera-source/state.db",
+    "tool": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/test_installed_device_photo_re1/hb_cli",
+    "shebang": "#!/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/source/apps/camctl/.venv311/bin/python",
+    "actions": [
+      {
+        "id": 1,
+        "status": 4,
+        "execution_started": 1,
+        "error_code": 13,
+        "error_details_json": "{\"activity_id\":\"1\",\"reason\":\"device_failed\"}"
+      }
+    ],
+    "attempts": [
+      {
+        "id": 1,
+        "run_id": 1,
+        "attempt_no": 1,
+        "copy_round": null,
+        "status": 3,
+        "intent_event_id": 13,
+        "result_event_id": 14,
+        "result_first_page_event_id": null,
+        "result_last_page_event_id": null,
+        "max_attempts_used": 1,
+        "timeout_s_json": "180",
+        "retry_interval_s_json": null,
+        "effect_state": 2,
+        "result_json": {
+          "format_version": 1,
+          "settlement": {
+            "basis": "observed",
+            "evidence": {
+              "type": "operation_returned",
+              "version": 1,
+              "data": {}
+            }
+          },
+          "observations": [
+            {
+              "type": "hasselblad_start_entered",
+              "version": 1,
+              "data": {
+                "activity_id": "1"
+              }
+            }
+          ],
+          "call_info": {
+            "local_exit": {
+              "exit_code": 1
+            }
+          },
+          "diagnostics": {
+            "version": 1,
+            "call_limit": 14,
+            "calls": [
+              {
+                "step_index": 1,
+                "step_name": "list",
+                "stdout": {
+                  "state": "complete",
+                  "hex": ""
+                },
+                "stderr": {
+                  "state": "complete",
+                  "hex": "54726163656261636b20286d6f737420726563656e742063616c6c206c617374293a0a202046696c6520222f746d702f63616d63746c2d69746f70742d66696e616c2d32303236313032352f7461736b732f3030332d63616d63746c2d626f6f7473747261702f746d702f7079746573742f746573745f696e7374616c6c65645f6465766963655f70686f746f5f7265312f68625f636c69222c206c696e6520362c20696e203c6d6f64756c653e0a20202020696d706f72742063616d63746c0a4d6f64756c654e6f74466f756e644572726f723a204e6f206d6f64756c65206e616d6564202763616d63746c270a"
+                }
+              }
+            ]
+          }
+        },
+        "error_json": "{\"code\":\"device_error\",\"stage\":\"control\",\"details\":{\"step\":\"list\",\"reason\":\"exit_nonzero\",\"steps\":[{\"name\":\"list\",\"local_exit_code\":1,\"local_signal\":null,\"transport_error\":null,\"output_failure\":null,\"stdout_size_bytes\":0,\"stdout_sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"signal_failures\":[]}]}}",
+        "decoded_stderr": [
+          "Traceback (most recent call last):\n  File \"/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/test_installed_device_photo_re1/hb_cli\", line 6, in <module>\n    import camctl\nModuleNotFoundError: No module named 'camctl'\n"
+        ]
+      }
+    ],
+    "device_files": [],
+    "outputs": []
+  }
+]

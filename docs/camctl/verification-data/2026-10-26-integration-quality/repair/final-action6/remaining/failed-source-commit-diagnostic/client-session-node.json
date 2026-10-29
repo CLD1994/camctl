@@ -1,0 +1,494 @@
+{
+  "schema_version": 1,
+  "session_id": "00de3af4-43d9-4f52-8c0e-d1ef2ad2a0e0",
+  "node_pid": 1705485,
+  "counts": {
+    "node_process_starts": 1,
+    "application_starts": 1,
+    "files_starts": 1,
+    "http_server_starts": 0,
+    "browser_starts": 0
+  },
+  "browser_processes": [],
+  "commands": [
+    {
+      "id": 1,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-store",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/plan-body.json",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-plan-1.json",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-export-session-1.json"
+      ],
+      "started_monotonic_ns": "108030354653492",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 0,
+        "files_starts": 0,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "request_id": "617924946435437344",
+      "finished_monotonic_ns": "108030856663462",
+      "elapsed_seconds": 0.50200997,
+      "node_cpu_microseconds": {
+        "user": 394947,
+        "system": 36000
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 2,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-store",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/plan-body.json",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-plan-2.json",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-export-session-2.json"
+      ],
+      "started_monotonic_ns": "108034295414295",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "request_id": "5600346704421085182",
+      "finished_monotonic_ns": "108034729168025",
+      "elapsed_seconds": 0.43375373,
+      "node_cpu_microseconds": {
+        "user": 486946,
+        "system": 34567
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 3,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-store",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/plan-body.json",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-plan-3.json",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-export-session-3.json"
+      ],
+      "started_monotonic_ns": "108037215662279",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "request_id": "8176706247951917775",
+      "finished_monotonic_ns": "108037240346179",
+      "elapsed_seconds": 0.0246839,
+      "node_cpu_microseconds": {
+        "user": 19829,
+        "system": 0
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 4,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-store",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/plan-body.json",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-plan-4.json",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-export-session-4.json"
+      ],
+      "started_monotonic_ns": "108049608437697",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "request_id": "1609705515769019544",
+      "finished_monotonic_ns": "108049629345573",
+      "elapsed_seconds": 0.020907876,
+      "node_cpu_microseconds": {
+        "user": 8739,
+        "system": 0
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 5,
+      "operation": "import",
+      "arguments": [
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/deployment/processing",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-store",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-import-session-5.json"
+      ],
+      "started_monotonic_ns": "108056474543062",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "finished_monotonic_ns": "108056554605013",
+      "elapsed_seconds": 0.080061951,
+      "node_cpu_microseconds": {
+        "user": 98908,
+        "system": 21194
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 6,
+      "operation": "import-media",
+      "arguments": [
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-store",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/deployment/processing/1.MP4",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-media-1-session-6.json"
+      ],
+      "started_monotonic_ns": "108056560049278",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "finished_monotonic_ns": "108056688175925",
+      "elapsed_seconds": 0.128126647,
+      "node_cpu_microseconds": {
+        "user": 196304,
+        "system": 10926
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 7,
+      "operation": "import-media",
+      "arguments": [
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-store",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/deployment/processing/2.MP4",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-media-2-session-7.json"
+      ],
+      "started_monotonic_ns": "108056693612581",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "finished_monotonic_ns": "108056927866197",
+      "elapsed_seconds": 0.234253616,
+      "node_cpu_microseconds": {
+        "user": 237154,
+        "system": 57247
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 8,
+      "operation": "import-media",
+      "arguments": [
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-store",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/deployment/processing/3.MP4",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-media-3-session-8.json"
+      ],
+      "started_monotonic_ns": "108056939230430",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "finished_monotonic_ns": "108057065685413",
+      "elapsed_seconds": 0.126454983,
+      "node_cpu_microseconds": {
+        "user": 137090,
+        "system": 0
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 9,
+      "operation": "import-media",
+      "arguments": [
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-store",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/deployment/processing/4.MP4",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-media-4-session-9.json"
+      ],
+      "started_monotonic_ns": "108057070226476",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "finished_monotonic_ns": "108057197993261",
+      "elapsed_seconds": 0.127766785,
+      "node_cpu_microseconds": {
+        "user": 128561,
+        "system": 21623
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 10,
+      "operation": "import-media",
+      "arguments": [
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-store",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/deployment/processing/5.MP4",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-media-5-session-10.json"
+      ],
+      "started_monotonic_ns": "108057202062741",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "finished_monotonic_ns": "108057281196979",
+      "elapsed_seconds": 0.079134238,
+      "node_cpu_microseconds": {
+        "user": 50489,
+        "system": 32144
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 11,
+      "operation": "import-media",
+      "arguments": [
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-store",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/deployment/processing/6.MP4",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-media-6-session-11.json"
+      ],
+      "started_monotonic_ns": "108057284396421",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "finished_monotonic_ns": "108057372545899",
+      "elapsed_seconds": 0.088149478,
+      "node_cpu_microseconds": {
+        "user": 106864,
+        "system": 11847
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 12,
+      "operation": "import-media",
+      "arguments": [
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-store",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/deployment/processing/7.MP4",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-media-7-session-12.json"
+      ],
+      "started_monotonic_ns": "108057375264728",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "finished_monotonic_ns": "108057532983838",
+      "elapsed_seconds": 0.15771911,
+      "node_cpu_microseconds": {
+        "user": 41462,
+        "system": 50049
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 13,
+      "operation": "import-media",
+      "arguments": [
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-store",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/deployment/processing/8.MP4",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-media-8-session-13.json"
+      ],
+      "started_monotonic_ns": "108057536527953",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "finished_monotonic_ns": "108057667933072",
+      "elapsed_seconds": 0.131405119,
+      "node_cpu_microseconds": {
+        "user": 95476,
+        "system": 43520
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 14,
+      "operation": "import-media",
+      "arguments": [
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-store",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/deployment/processing/9.MP4",
+        "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record/client-media-9-session-14.json"
+      ],
+      "started_monotonic_ns": "108057671227267",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "finished_monotonic_ns": "108057785100496",
+      "elapsed_seconds": 0.113873229,
+      "node_cpu_microseconds": {
+        "user": 88622,
+        "system": 31047
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 15,
+      "operation": "close",
+      "arguments": [],
+      "started_monotonic_ns": "108237929119417",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "finished_monotonic_ns": "108237932963375",
+      "elapsed_seconds": 0.003843958,
+      "node_cpu_microseconds": {
+        "user": 1933,
+        "system": 0
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    }
+  ],
+  "node_cpu_scope": "process.cpuUsage只包含当前Node进程，不含Chromium或其他子进程。",
+  "status": "closed",
+  "node_cpu_at_ready_microseconds": {
+    "user": 1852444,
+    "system": 134038
+  },
+  "node_cpu_total_microseconds": {
+    "user": 4099442,
+    "system": 534862
+  }
+}

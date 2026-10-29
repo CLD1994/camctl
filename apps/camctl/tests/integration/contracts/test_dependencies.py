@@ -50,6 +50,8 @@ PORT_PREFIXES = (
     "camctl.devices.parameter_schemas",
     "camctl.acceptance.schema",
     "camctl.motor.notification",
+    "camctl.logging_runtime.diagnostics",
+    "camctl.logging_runtime.performance",
 )
 #: 装配入口与装配辅助：创建实际资源并传入流程，允许接触 SQLite、
 #: 配置与锁实现。报告生成子进程入口 worker 在自己的进程内承担同
@@ -64,6 +66,8 @@ ENTRY_PREFIXES = (
 #: 允许边：业务流程以连接类型做签名注解、以运行库异常类型做错误
 #: 分类，不打开连接。
 RUNTIME_TYPE_ONLY = {"OwnedConnection", "RuntimeLibraryError"}
+#: 流程提交完整操作和接手取消所使用的公开异步端口；不包含执行器构造。
+BUSINESS_PORT_NAMES = {"BusinessDatabase", "SharedSave", "settle_required"}
 #: 历史事件应用与公开投影所在的模块。
 HISTORY_APPLY_PREFIXES = (
     "camctl.contracts.public_projection",
@@ -154,10 +158,15 @@ def _check_edge(name: str, target: str, names: set[str]) -> list[str]:
         return []
     # 该历史仓储适配器只创建可重建的派生库；不授予整个 history 包
     # SQLite 权限，也不允许它直接打开业务状态库。
-    if name == "camctl.history.bounded" and (
+    if name in {"camctl.history.bounded", "camctl.reporting.failure_index"} and (
         target == "sqlite3" or _starts_with(target, (
             "camctl.persistence.derived_storage", "camctl.persistence.row_validation",
         ))
+    ):
+        return []
+    if name in {"camctl.logging_runtime.diagnostics", "camctl.logging_runtime.performance"} and _starts_with(
+        target, ("camctl.logging_runtime.models", "camctl.logging_runtime.service",
+                 "camctl.logging_runtime.admission"),
     ):
         return []
     if _starts_with(name, PORT_PREFIXES):
@@ -195,6 +204,7 @@ def _check_edge(name: str, target: str, names: set[str]) -> list[str]:
             or _starts_with(target, ("camctl.persistence", "camctl.bootstrap"))
             or (
                 _starts_with(target, ADAPTER_PREFIXES)
+                and not _starts_with(target, PORT_PREFIXES)
                 and not _starts_with(target, (own,))
             )
         ):
@@ -207,6 +217,15 @@ def _check_edge(name: str, target: str, names: set[str]) -> list[str]:
         ):
             return [f"{name} -> {target}（报告生成不导入会话或设备控制）"]
     if _starts_with(name, FLOW_PREFIXES):
+        if target == "camctl.persistence.business":
+            if names and names <= BUSINESS_PORT_NAMES:
+                return []
+            return [f"{name} -> {target}（业务流程只使用公开业务数据库端口）"]
+        if target.startswith("camctl.persistence.business."):
+            symbol = target.removeprefix("camctl.persistence.business.")
+            if symbol in BUSINESS_PORT_NAMES:
+                return []
+            return [f"{name} -> {target}（业务流程不依赖业务数据库内部实现）"]
         # R2 业务流程不自行打开 SQLite：连接层只允许类型注解。
         if target == "sqlite3":
             return [f"{name} -> {target}（业务流程不直接使用 sqlite3）"]
@@ -337,15 +356,46 @@ class TestCheckerDetectsViolations:
         assert _forbidden_edges({source: shared}) == []
         assert _forbidden_edges({source: flow})
 
+    @pytest.mark.parametrize("symbol", sorted(BUSINESS_PORT_NAMES))
+    @pytest.mark.parametrize("style", ["direct", "alias"])
+    def test_business_flows_use_only_named_database_ports(self, symbol, style):
+        source = "camctl.capture.fake"
+        statement = (f"from camctl.persistence.business import {symbol}\n"
+                     if style == "direct" else f"from camctl.persistence.business import {symbol} as Port\n")
+        imports = _imported_modules(source, statement)
+        assert _forbidden_edges({source: imports}) == []
+
+    @pytest.mark.parametrize("dependency", [
+        "import camctl.persistence.business\n",
+        "import camctl.persistence.business as internal\n",
+        "from camctl.persistence.business import _settle as internal\n",
+        "import camctl.persistence.business._settle as internal\n",
+        "from camctl.persistence.executor import DbExecutor\n",
+        "from camctl.persistence.runtime import open_existing\n",
+    ])
+    def test_database_port_does_not_grant_connection_or_executor_access(self, dependency):
+        source = "camctl.capture.fake"
+        assert _forbidden_edges({source: _imported_modules(source, dependency)})
+
+    @pytest.mark.parametrize("port,symbol", [
+        ("diagnostics", "record_error"), ("performance", "record_performance"),
+    ])
+    def test_device_adapter_uses_logging_ports_without_file_adapter_access(self, port, symbol):
+        source = "camctl.devices.fake"
+        imports = _imported_modules(source, f"from camctl.logging_runtime.{port} import {symbol}\n")
+        assert _forbidden_edges({source: imports}) == []
+        private = _imported_modules(source, "from camctl.logging_runtime.clh_adapter import FileChannel\n")
+        assert _forbidden_edges({source: private})
+
     @pytest.mark.parametrize("dependency", [
         "import sqlite3\n",
         "from camctl.persistence.derived_storage import configure_derived_connection\n",
         "from camctl.persistence.row_validation import ProjectionRowValidator\n",
     ])
-    def test_history_disk_adapter_owns_only_its_derived_storage_edges(self, dependency):
-        adapter = "camctl.history.bounded"
+    @pytest.mark.parametrize("adapter", ["camctl.history.bounded", "camctl.reporting.failure_index"])
+    def test_disk_adapter_owns_only_its_derived_storage_edges(self, dependency, adapter):
         assert _forbidden_edges({adapter: _imported_modules(adapter, dependency)}) == []
-        for flow in ("camctl.history.fake", "camctl.history.bounded.child", "camctl.capture.fake"):
+        for flow in ("camctl.history.fake", adapter + ".child", "camctl.reporting.fake", "camctl.capture.fake"):
             assert _forbidden_edges({flow: _imported_modules(flow, dependency)})
         assert _forbidden_edges({adapter: _imported_modules(
             adapter, "from camctl.persistence.runtime import open_existing\n")})

@@ -15,6 +15,7 @@ from decimal import Decimal
 import pytest
 
 from _action6_segmented_files import create_segmented_media_manifest
+from _client_session import ClientSession
 from _osmo_builtin_clock import format_utc, read_clock, set_frozen, set_running, whole_second_utc_us
 from _wsl_host_demo import HostDemo, query_state, wait_for
 from camctl.contracts.enums import enum_for
@@ -26,6 +27,42 @@ from test_osmo_builtin_timelapse_roundtrip import _action, _records
 
 
 _INTEGRATION = Path(__file__).resolve().parent
+
+
+class _ClientDeployment(Deployment):
+    """同一拍摄世界的计划、报告和媒体共用真实客户端会话。"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.client_session = None
+        self.client_receipts = {}
+
+    def run_client_driver(self, *args: str, output: Path) -> dict:
+        if self.client_session is None:
+            self.client_session = ClientSession(
+                ["node", "--import", "tsx", str(_INTEGRATION / "client_driver.ts")],
+                cwd=_INTEGRATION.parent.parent / "apps/client",
+                env=os.environ.copy(), root=self.root, timeout=120,
+            )
+        receipt = output.with_name(
+            f"{output.stem}-session-{self.client_session.next_id}{output.suffix}"
+        )
+        result = self.client_session.call(*args, output=receipt)
+        self.client_receipts[output] = receipt
+        return result
+
+    def close_client(self):
+        if self.client_session is not None:
+            self.client_session.close()
+
+
+@pytest.fixture
+def client_deployment(request):
+    def create(*args, **kwargs):
+        deployment = _ClientDeployment(*args, **kwargs)
+        request.addfinalizer(deployment.close_client)
+        return deployment
+    return create
 
 
 def _install_action6_tools(
@@ -114,6 +151,8 @@ def _install_action6_tools(
         "CAMCTL_OSMO_TEST_CLOCK_FILE": str(clock),
         "CAMCTL_OSMO_TEST_CLOCK_LOG": str(deployment.root / "clock-reads.jsonl"),
         "CAMCTL_OSMO_TEST_PROCESS_LOG": str(deployment.root / "cli-processes.jsonl"),
+        "CAMCTL_ACTION6_TEST_STATE_DB": str(deployment.state_db),
+        "CAMCTL_ACTION6_TEST_CLEANUP_RUNS": str(deployment.root / "cleanup-runs.jsonl"),
     })
     if observer_stage is not None:
         environment["CAMCTL_ACTION6_TEST_OBSERVER_STAGE"] = observer_stage
@@ -132,14 +171,15 @@ def _install_action6_tools(
 
 
 def _prepare_installed_action6(
-        tmp_path, package, *, native: bool, params_override: dict | None = None,
+        tmp_path, package, deployment_factory, *, native: bool, params_override: dict | None = None,
         include_jpeg: bool = False, values: tuple[int, ...] | None = None,
         observer_stage: str | None = None, read_gate: Path | None = None,
         local_read_gate: Path | None = None,
         fail_ffprobe_index: int | None = None,
 ):
-    deployment = Deployment(tmp_path / ("action6-native" if native else "action6-record"),
-                            devices=False)
+    deployment = deployment_factory(
+        tmp_path / ("action6-native" if native else "action6-record"), devices=False,
+    )
     template_name = "action6-timelapse.json" if native else "action6-record.json"
     resources_result = _run(
         [str(package.python), "-c", (
@@ -192,12 +232,14 @@ def _prepare_installed_action6(
         [str(camctl), "init", "--config", str(deployment.config_path)],
         cwd=deployment.root,
         env=environment,
+        camctl=True,
     )
     assert initialized.returncode == 0, initialized.stderr
     described = _run(
         [str(camctl), "describe", "--config", str(deployment.config_path)],
         cwd=deployment.root,
         env=environment,
+        camctl=True,
     )
     assert described.returncode == 0, described.stderr
     store = deployment.root / "client-store"
@@ -239,21 +281,30 @@ def _prepare_installed_action6(
 def _start_installed_capture(host_demo, package, scenario, monkeypatch):
     deployment = scenario["deployment"]
     demo = HostDemo(deployment, host_demo, launcher=str(scenario["camctl"]))
-    monkeypatch.chdir(package.python.parents[2])
-    demo.start(env=scenario["environment"])
-    demo.submit(scenario["plan"])
-    starts = wait_for(
-        lambda: query_state(
-            deployment.state_db,
-            "SELECT a.id FROM actions a JOIN operation_runs r ON r.action_id=a.id "
-            "JOIN operation_attempts t ON t.run_id=r.id "
-            "WHERE a.name='capture' AND r.kind=1 AND t.result_event_id IS NOT NULL",
-        ),
-        90,
-        "Action6 START 未可靠保存",
-    )
-    assert len(starts) == 1
-    return demo, int(starts[0][0])
+    failure = demo.watch_failures()
+    try:
+        monkeypatch.chdir(package.python.parents[2])
+        demo.start(env=scenario["environment"])
+        demo.submit(scenario["plan"])
+        starts = wait_for(
+            lambda: query_state(
+                deployment.state_db,
+                "SELECT a.id FROM actions a JOIN operation_runs r ON r.action_id=a.id "
+                "JOIN operation_attempts t ON t.run_id=r.id "
+                "WHERE a.name='capture' AND r.kind=1 AND t.result_event_id IS NOT NULL",
+            ),
+            90,
+            "Action6 START 未可靠保存",
+            failure=failure,
+        )
+        assert len(starts) == 1
+        return demo, int(starts[0][0])
+    except BaseException as error:
+        try:
+            demo.stop()
+        except BaseException as closing:
+            raise BaseExceptionGroup("Action6 START 观察或收场失败", [error, closing]) from None
+        raise
 
 
 def _submit_obtain(demo, deployment, *, action_name, source_id, selection):
@@ -480,7 +531,7 @@ def _assert_client_delivery_files(
             "file_name": delivery["file_name"],
             "size": delivery["size"],
             "sha256": digest,
-            "client_import_receipt": str(receipt),
+            "client_import_receipt": str(deployment.client_receipts[receipt]),
         })
     return evidence
 
@@ -519,10 +570,19 @@ def _release_clock(scenario, seconds: int):
     )
 
 
-def _cleanup_inspection_inputs(deployment, source_id, failure):
+def _cleanup_inspection_inputs(demo, scenario, source_id, failure):
+    deployment = scenario["deployment"]
     purpose = int(enum_for("intermediate_files.purpose").RECORDING_INPUT)
     released = int(enum_for("intermediate_files.retention_state").RELEASABLE)
     completed = int(enum_for("intermediate_files.cleanup_state").COMPLETED)
+    deadline = time.monotonic() + 180
+    run_log = deployment.root / "cleanup-runs.jsonl"
+    observation = {}
+
+    def save_observation():
+        (deployment.root / "inspection-cleanup-lifecycle.json").write_text(
+            json.dumps(observation, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
+        )
 
     def rows():
         return query_state(
@@ -532,17 +592,92 @@ def _cleanup_inspection_inputs(deployment, source_id, failure):
             (source_id, purpose),
         )
 
+    def finished(current):
+        return current and all(row[2] == released and row[3] == completed for row in current)
+
+    def cleanup_or_consumed():
+        current = rows()
+        if finished(current):
+            return "completed", current
+        runs = _records(run_log)
+        if not runs or not current:
+            return None
+        run = runs[-1]
+        remaining = {row[0] for row in current if row[3] != completed}
+        checked = {}
+        for event_id, body_json in query_state(
+            deployment.state_db,
+            "SELECT id,body_json FROM history_events WHERE id>? ORDER BY id",
+            (run["history_horizon"],),
+        ):
+            for row in json.loads(body_json)["rows"]:
+                if row["table"] == "runtime_state":
+                    file_id = row["after"].get("values", {}).get("cleanup_cursor_file_id")
+                    if file_id in remaining:
+                        checked[file_id] = event_id
+        if remaining and remaining <= checked.keys():
+            observation.update(previous_run=run, checked_event_ids=checked,
+                               files_before_next_run=current)
+            return "consumed", current
+        return None
+
+    outcome, current = wait_for(
+        cleanup_or_consumed, max(0, deadline - time.monotonic()),
+        "Action6 检查副本未完成清理或本轮检查", failure=failure,
+    )
+    identities = [(row[0], row[1]) for row in current]
+    observation.update(files_before_cleanup=current, budget_seconds=180)
+    save_observation()
+    if outcome == "consumed":
+        # 历史 KEEP 已占本轮机会；用途结束不允许在同一 run 再试。
+        previous_pid = observation["previous_run"]["pid"]
+        normal_exit = wait_for(
+            lambda: match.group(0) if (match := re.search(
+                rf"^call=\d+ command=run pid={previous_pid} "
+                r"result=success exit_kind=0 exit=0 needs_run=0\b.*$",
+                demo.module_log(), re.MULTILINE,
+            )) else None,
+            max(0, deadline - time.monotonic()),
+            "已检查的 Action6 副本等待当前正常 run 自然结束", failure=failure,
+        )
+        observation["previous_run_result"] = normal_exit
+        save_observation()
+
+        def previous_group_gone():
+            try:
+                os.killpg(previous_pid, 0)
+            except ProcessLookupError:
+                return True
+            return None
+
+        wait_for(
+            previous_group_gone, max(0, deadline - time.monotonic()),
+            "自然结束的 Action6 run 执行组尚未收场", failure=failure,
+        )
+        demo.stop()
+        failure = demo.watch_failures()
+        demo.start(env=scenario["environment"])
+        next_run = wait_for(
+            lambda: runs[-1] if (runs := _records(run_log))
+            and runs[-1]["pid"] != previous_pid else None,
+            max(0, deadline - time.monotonic()),
+            "下一次正常 run 未从真实 C host 启动", failure=failure,
+        )
+        observation["next_run"] = next_run
+        save_observation()
+
     retained = wait_for(
-        lambda: current if (current := rows())
-        and all(row[2] == released and row[3] == completed for row in current)
-        else None,
-        180,
+        lambda: current if finished(current := rows()) else None,
+        max(0, deadline - time.monotonic()),
         "全部绑定取回终态后，Action6 检查副本仍未完成清理",
         failure=failure,
     )
     assert retained
+    assert [(row[0], row[1]) for row in retained] == identities
     for _identity, relative_path, _retention, _cleanup in retained:
         assert not (deployment.staging / relative_path).exists()
+    observation["files_after_cleanup"] = retained
+    save_observation()
     return retained
 
 
@@ -567,7 +702,7 @@ def _cleanup_inspection_inputs(deployment, source_id, failure):
     ),
 )
 def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership(
-        tmp_path, host_demo, action6_package, monkeypatch, case, boundary,
+        tmp_path, host_demo, action6_package, monkeypatch, client_deployment, case, boundary,
         values, fail_ffprobe_index, source_status, coverage_status, confirmed,
         checked_count,
 ):
@@ -576,7 +711,7 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
     local_gate = tmp_path / "local-read-gate" if boundary == "local_read" else None
     observer = boundary if boundary in ("inspection_saved", "source_committed", "local_read") else None
     scenario = _prepare_installed_action6(
-        tmp_path, package, native=False,
+        tmp_path, package, client_deployment, native=False,
         values=values,
         observer_stage=observer,
         read_gate=adb_gate,
@@ -815,6 +950,7 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
             lambda: _report_with_statuses(deployment.ready, expected_report_statuses),
             240,
             f"Action6 来源及等待取回没有在 {boundary} 恢复后成功",
+            failure=failure,
         )
         source_report_path = _save_report_snapshot(
             deployment, report, f"action6-ordinary-{case}-source-report"
@@ -946,7 +1082,7 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
             for row in bound_copies
         )
         assert len({row[2] for row in bound_copies}) == checked_count * 2
-        _cleanup_inspection_inputs(deployment, source_id, failure)
+        _cleanup_inspection_inputs(demo, scenario, source_id, failure)
 
         final_report = report
         late_evidence = []
@@ -1023,11 +1159,11 @@ def test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_owners
 
 @pytest.mark.skipif(os.name != "posix", reason="安装版 POSIX C host 恢复链")
 def test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters(
-        tmp_path, host_demo, action6_package, monkeypatch,
+        tmp_path, host_demo, action6_package, monkeypatch, client_deployment,
 ):
     package = action6_package
     scenario = _prepare_installed_action6(
-        tmp_path, package, native=True, include_jpeg=False,
+        tmp_path, package, client_deployment, native=True, include_jpeg=False,
     )
     deployment = scenario["deployment"]
     demo, source_id = _start_installed_capture(host_demo, package, scenario, monkeypatch)
@@ -1050,6 +1186,7 @@ def test_installed_action6_native_required_photo_failure_keeps_reached_video_sco
             ),
             240,
             "Action6 native 必需照片缺失后未按真实处理器完成前缀检查和独立取回",
+            failure=failure,
         )
         report_path = _save_report_snapshot(
             deployment, report, "action6-native-photo-failure-report"
@@ -1122,7 +1259,7 @@ def test_installed_action6_native_required_photo_failure_keeps_reached_video_sco
             and row[8] == expected_sha_by_output_id[str(row[1])]
             for row in bound_copies
         )
-        _cleanup_inspection_inputs(deployment, source_id, failure)
+        _cleanup_inspection_inputs(demo, scenario, source_id, failure)
         ack = _assert_ack(demo, scenario, report)
         (deployment.root / "action6-native-photo-failure.json").write_text(
             json.dumps({
@@ -1233,11 +1370,13 @@ def test_installed_video_modes_freeze_for_both_cameras_and_both_video_actions(
         [str(package.camctl), "init", "--config", str(deployment.config_path)],
         cwd=deployment.root,
         env=package.environment,
+        camctl=True,
     )
     described = _run(
         [str(package.camctl), "describe", "--config", str(deployment.config_path)],
         cwd=deployment.root,
         env=package.environment,
+        camctl=True,
     )
     assert initialized.returncode == 0 and described.returncode == 0
     client_store = deployment.root / "client-store"
@@ -1258,6 +1397,7 @@ def test_installed_video_modes_freeze_for_both_cameras_and_both_video_actions(
             [str(package.camctl), "submit", str(plan), "--config", str(deployment.config_path)],
             cwd=deployment.root,
             env=package.environment,
+            camctl=True,
         )
         assert submitted.returncode == 0, submitted.stderr
         rows = query_state(
@@ -1288,6 +1428,7 @@ def test_installed_video_modes_freeze_for_both_cameras_and_both_video_actions(
         [str(package.camctl), "describe", "--config", str(deployment.config_path)],
         cwd=deployment.root,
         env=package.environment,
+        camctl=True,
     )
     assert switched_description.returncode == 0
     (client_store / "device-capabilities.json").write_text(

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from contextlib import closing
 from dataclasses import asdict, fields, is_dataclass
 from enum import Enum
 import json
@@ -54,6 +55,14 @@ def _assert_start_result(attempt, raw, target, expected):
     steps = photo["steps"]
     assert [step["name"] for step in steps] == expected["steps"]
     assert expected["steps"].count("capture") == 1
+    streams = _assert_step_calls(result, steps, expected)
+    return {"result_json": raw, "size": len(raw.encode()), "sha256": hashlib.sha256(raw.encode()).hexdigest(),
+            "ticket": {"attempt_no": ticket.attempt_id, "run_id": ticket.run_id,
+                       "activity_id": ticket.target_id, "responsibility_key": ticket.responsibility_key},
+            "photo": photo, "streams": streams}
+
+
+def _assert_step_calls(result, steps, expected):
     calls = result["diagnostics"]["calls"]
     assert len(calls) == len(steps)
     streams = []
@@ -82,10 +91,33 @@ def _assert_start_result(attempt, raw, target, expected):
                 # 真实 step 只登记 stdout 摘要；本成功工具样例的 stderr 独立预期为空。
                 assert data == b""
         streams.append({"step_index": index, "step_name": step["name"], **facts})
+    return streams
+
+
+def _assert_preparation_result(attempt, raw, target, expected):
+    from camctl.contracts.json_values import parse_exact_json
+    from camctl.operations.result_format import read_result_document
+    from camctl.operations.models import AttemptTicket, AttemptStatus, EffectState
+    from camctl.operations.validation import validate_outcome
+    from camctl.devices.drivers.hasselblad.driver import EVIDENCE
+    result = parse_exact_json(raw)
+    outcome = read_result_document(attempt["status"], attempt["effect_state"], result,
+                                   None if attempt["error_json"] is None else parse_exact_json(attempt["error_json"]))
+    ticket = AttemptTicket(attempt["attempt_no"], "control", str(target["activity_id"]),
+                           target["responsibility_key"], target["run_id"])
+    validate_outcome(ticket, outcome, EVIDENCE)
+    assert outcome.status is AttemptStatus.SUCCEEDED and outcome.effect is EffectState.CONFIRMED
+    assert [item["type"] for item in result["observations"]] == [
+        "capture_preparation_completed", "photo_preparation_steps"]
+    for observation in result["observations"]:
+        assert observation["version"] == 1 and observation["data"]["activity_id"] == str(target["activity_id"])
+    steps = result["observations"][1]["data"]["steps"]
+    assert [step["name"] for step in steps] == expected["prepare_steps"]
+    assert not {"focus", "autofocus", "capture"} & {step["name"] for step in steps}
     return {"result_json": raw, "size": len(raw.encode()), "sha256": hashlib.sha256(raw.encode()).hexdigest(),
             "ticket": {"attempt_no": ticket.attempt_id, "run_id": ticket.run_id,
                        "activity_id": ticket.target_id, "responsibility_key": ticket.responsibility_key},
-            "photo": photo, "streams": streams}
+            "streams": _assert_step_calls(result, steps, expected)}
 
 
 def _history_facts(database, request, expected, original=None):
@@ -119,6 +151,15 @@ def _history_facts(database, request, expected, original=None):
                   "run_id": run["id"], "attempt_id": attempt["id"], "activity_id": activity["id"],
                   "responsibility_key": run["responsibility_key"], "result_event_id": attempt["result_event_id"]}
         start = _assert_start_result(attempt, attempt["result_json"], target, expected)
+        prepare_run = one("SELECT * FROM operation_runs WHERE action_id=? AND kind=?",
+                          (action["id"], int(enum_for("operation_runs.kind").PREPARE_CAPTURE)))
+        prepare_attempt = one("SELECT * FROM operation_attempts WHERE run_id=?", (prepare_run["id"],))
+        assert prepare_run["activity_id"] == activity["id"]
+        assert prepare_run["responsibility_key"].startswith(f"prepare/{action['id']}/")
+        assert prepare_attempt["result_event_id"] < attempt["intent_event_id"]
+        preparation = _assert_preparation_result(prepare_attempt, prepare_attempt["result_json"],
+            {"activity_id": activity["id"], "responsibility_key": prepare_run["responsibility_key"],
+             "run_id": prepare_run["id"]}, expected)
         files = [dict(row) for row in connection.execute(
             "SELECT * FROM intermediate_files WHERE owner_action_id=? AND purpose IN (?,?) ORDER BY purpose",
             (action["id"], int(enum_for("intermediate_files.purpose").CAPTURE_ORIGINAL),
@@ -157,6 +198,7 @@ def _history_facts(database, request, expected, original=None):
         if original is not None:
             assert target == original["identity"] and entities == original["entities"]
             assert derived == original["boundaries"] and start == original["start"]
+            assert preparation == original["preparation"]
             boundaries = original["boundaries"]
         else:
             boundaries = derived
@@ -190,6 +232,13 @@ def _history_facts(database, request, expected, original=None):
             assert action_rows[("device_activities", activity["id"])]["action_id"] == action["id"]
             assert saved_attempt["result_json"] == parse_exact_json(attempt["result_json"])
             assert saved_attempt["result_event_id"] == attempt["result_event_id"]
+            saved_preparation = action_rows[("operation_attempts", prepare_attempt["id"])]
+            historical_preparation = action_rows[("operation_runs", prepare_run["id"])]
+            for field in ("action_id", "activity_id", "responsibility_key", "kind"):
+                assert historical_preparation[field] == prepare_run[field]
+            for field in ("run_id", "attempt_no", "result_event_id"):
+                assert saved_preparation[field] == prepare_attempt[field]
+            assert saved_preparation["result_json"] == parse_exact_json(prepare_attempt["result_json"])
             for index, role in enumerate(("original", "preview")):
                 file_rows = image[f"intermediate_file/{files[index]['id']}"]
                 completed = h.last_event_id >= boundaries["files_complete"]["last_event_id"]
@@ -226,7 +275,8 @@ def _history_facts(database, request, expected, original=None):
                     assert (origin["output_id"], origin["original_output_id"]) == (outputs[1]["id"], outputs[0]["id"])
             restored[phase] = image
         return {"identity": target, "boundaries": boundaries, "entities": entities,
-                "start": start, "complete_request": complete[0][1], "snapshots": restored}
+                "start": start, "preparation": preparation,
+                "complete_request": complete[0][1], "snapshots": restored}
     finally:
         connection.close()
 
@@ -382,30 +432,58 @@ def _install_fault(root: Path, fault: str):
         CaptureRepository.finish_start_result = finish_start_result
 
         if fault == "before-start-result":
-            from camctl.capture.handlers import CaptureRuntime
-            real_recovery = CaptureRuntime.recover_attempt
+            from camctl.bootstrap import capture_assembly
+            real_assembly = capture_assembly.session_capture_assembly
 
-            def recover(runtime, ticket, *, retry_wait=False):
-                target = _target(root, runtime.owned.connection)
-                matches = target is not None and ticket.operation == "control" and ticket.run_id == target["run_id"]
-                observed = None
-                if matches and not (root / "start-recovery-observed.json").exists():
-                    attempt = runtime.owned.connection.execute(
-                        "SELECT intent_event_id,status FROM operation_attempts WHERE run_id=? AND attempt_no=?",
-                        (ticket.run_id, ticket.attempt_id)).fetchone()
-                    maximum = runtime.owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
-                    local = runtime.start_entries.get(runtime.owned.metadata.instance_id, target["action_id"])
-                    observed = {"target":target,"ticket":asdict(ticket),
-                        "boundary":runtime.recovery_boundary.name,"horizon":runtime.recovery_max_event_id,
-                        "intent_event_id":attempt[0],"attempt_status_before":attempt[1],
-                        "max_event_before":maximum,"local_entry_active":local is not None and local.active}
-                result = real_recovery(runtime, ticket, retry_wait=retry_wait)
-                if observed is not None:
-                    diagnostic = runtime.last_recovery_diagnostic
-                    _write(root, "start-recovery-observed", {**observed,"returned":result,
-                        "diagnostic":None if diagnostic is None else diagnostic.reason.name})
-                return result
-            CaptureRuntime.recover_attempt = recover
+            def assembly(**kwargs):
+                readings = {}
+                horizon = kwargs["recovery_max_event_id"]
+                boundary = kwargs["recovery_boundary"]
+                diagnostic = kwargs.get("on_recovery_diagnostic")
+
+                def observed_horizon():
+                    value = horizon()
+                    readings["horizon"] = value
+                    return value
+
+                def observed_diagnostic(value):
+                    with (root / "start-recovery-diagnostics.jsonl").open("a") as stream:
+                        stream.write(json.dumps(_plain(value)) + "\n")
+                    if diagnostic is not None:
+                        diagnostic(value)
+
+                kwargs["recovery_max_event_id"] = observed_horizon
+                kwargs["on_recovery_diagnostic"] = observed_diagnostic
+                real_factory = real_assembly(**kwargs)
+
+                async def factory(database, device_id):
+                    runtime = await real_factory(database, device_id)
+                    checkpoint = root / "before-start-result.json"
+                    if not readings or not checkpoint.is_file() or (root / "start-recovery-assembly.json").exists():
+                        return runtime
+                    if json.loads(checkpoint.read_text())["pid"] == os.getpid():
+                        return runtime
+
+                    def read(owned):
+                        target = _target(root, owned.connection)
+                        if target is None or target["device_id"] != device_id:
+                            return None
+                        attempt = owned.connection.execute(
+                            "SELECT intent_event_id,status,attempt_no FROM operation_attempts WHERE run_id=?",
+                            (target["run_id"],)).fetchone()
+                        maximum = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
+                        return {"target": target, "intent_event_id": attempt[0],
+                            "attempt_status_before": attempt[1], "attempt_no": attempt[2],
+                            "max_event_before": maximum}
+
+                    observed = await database.read(read, description="测试观察原START恢复输入")
+                    if observed is not None:
+                        _write(root, "start-recovery-assembly", {
+                            **observed, "boundary": boundary.name, "horizon": readings["horizon"]})
+                    return runtime
+
+                return factory
+            capture_assembly.session_capture_assembly = assembly
 
     elif fault == "complete-receipt-loss":
         from camctl.persistence.repositories.host_capture import HostCaptureRepository
@@ -433,7 +511,11 @@ def _install_fault(root: Path, fault: str):
             if str(key) not in write_connections:
                 return real_verify(self, request, key, owned)
             original = write_connections[str(key)]
-            assert owned.connection is not original and query_only == 1
+            verifier_input = {"request": asdict(request), "operation_key": str(key),
+                "write_connection": id(original), "verifier_connection": id(owned.connection),
+                "query_only": query_only}
+            _write(root, "complete-verifier-input", verifier_input)
+            assert owned.connection is not original and query_only == 1, verifier_input
             result = real_verify(self, request, key, owned)
             _write(root, "complete-verifier", {
                 "request": asdict(request), "operation_key": str(key),
@@ -449,46 +531,54 @@ def _install_fault(root: Path, fault: str):
         from camctl.reporting.publication import DbPublicationSession
         real = DbPublicationSession.record_intent
 
-        def intent(self, report_id):
-            result = real(self, report_id)
+        def reader():
+            connection = sqlite3.connect(Path(os.environ["CAMCTL_HB_TEST_STATE_DB"]).as_uri() + "?mode=ro", uri=True)
+            connection.execute("PRAGMA query_only=1")
+            return connection
+
+        async def intent(self, report_id):
+            result = await real(self, report_id)
             if result.kind is not DbOutcomeKind.COMPLETED or (root / f"{fault}.once").exists():
                 return result
-            assert not self._owned.connection.in_transaction
-            path = self._owned.connection.execute("PRAGMA database_list").fetchone()[2]
-            target = _target(root, self._owned.connection)
-            if target is None:
-                return result
-            history = HistoryRepository(Path(path))
+            with closing(reader()) as connection:
+                target = _target(root, connection)
+                if target is None:
+                    return result
+                output_ids = [row[0] for row in connection.execute(
+                    "SELECT id FROM outputs WHERE source_action_id=? ORDER BY kind", (target["action_id"],))]
+                management = _report_management_fact(connection, report_id, "INTENT")
+                query_only, = connection.execute("PRAGMA query_only").fetchone()
+            history = HistoryRepository(Path(os.environ["CAMCTL_HB_TEST_STATE_DB"]))
             frozen = history.frozen_registration(report_id)
             restored = history.restore_entity("action", target["action_id"], frozen.boundary)
             action = restored.get(("actions", target["action_id"]))
             from camctl.contracts.enums import enum_for
-            output_ids = [row[0] for row in self._owned.connection.execute(
-                "SELECT id FROM outputs WHERE source_action_id=? ORDER BY kind", (target["action_id"],))]
             outputs = [history.restore_entity("output", identity, frozen.boundary).get(("outputs", identity))
                        for identity in output_ids]
             outputs = [row for row in outputs if row is not None and row["source_action_id"] == target["action_id"]]
             if action and action["status"] == int(enum_for("actions.status").SUCCEEDED) and len(outputs) == 2:
                 _barrier(root, fault, {"report_id": report_id, "target": target, "boundary": asdict(frozen.boundary),
                                       "from_wm": frozen.from_wm, "to_wm": frozen.to_wm,
-                                      "management": _report_management_fact(self._owned.connection, report_id, "INTENT"),
-                                      "in_transaction": self._owned.connection.in_transaction})
+                                      "management": management, "query_only": query_only,
+                                      "returned_receipt": result.kind.value})
             return result
         real_save_publication = DbPublicationSession.save_publication
 
-        def published(self, report_id, file_result):
-            result = real_save_publication(self, report_id, file_result)
+        async def published(self, report_id, file_result):
+            result = await real_save_publication(self, report_id, file_result)
             checkpoint = root / "report-before-publish.json"
             if result.kind is DbOutcomeKind.COMPLETED and checkpoint.is_file():
                 original = json.loads(checkpoint.read_text())
                 if report_id == original["report_id"]:
-                    assert not self._owned.connection.in_transaction
+                    with closing(reader()) as connection:
+                        target = _target(root, connection)
+                        management = _report_management_fact(connection, report_id, "PUBLISH", result.value.published_event_id)
+                        query_only, = connection.execute("PRAGMA query_only").fetchone()
                     _barrier(root, "report-rebuilt-published", {
                         "report_id": report_id, "returned_receipt": result.kind.value,
-                        "target": _target(root, self._owned.connection),
+                        "target": target,
                         "file_result": _plain(file_result), "publication": _plain(result.value),
-                        "management": _report_management_fact(self._owned.connection, report_id, "PUBLISH", result.value.published_event_id),
-                        "in_transaction": self._owned.connection.in_transaction,
+                        "management": management, "query_only": query_only,
                     })
             return result
         DbPublicationSession.record_intent = intent

@@ -122,7 +122,7 @@ async def test_default_cleanup_query_recovers_original_result(
     output_id = owned.connection.execute(
         "SELECT o.id FROM outputs o JOIN actions a ON a.id=o.source_action_id"
         " WHERE a.device_id='cam-a'").fetchone()[0]
-    _accept(owned, "2", [{
+    await _accept(owned, "2", [{
         "name": "默认清理", "type": "delete_action_outputs",
         "scheduled_at": "2026-01-15 09:00:00",
         "params": {"output_ids": [str(output_id)]},
@@ -454,7 +454,7 @@ async def test_host_artifact_query_recovers_after_save_fault(
     _seed_repaired_artifact(Path(cfg.paths.state_db), cfg, output_id)
     # 删除调用将失败，而目标文件确已不在：查询按真实缺席核实。
     (Path(cfg.paths.staging) / "derived" / "900.jpg").unlink()
-    _accept(owned, "2", [{
+    await _accept(owned, "2", [{
         "name": "清理主机成品", "type": "delete_action_outputs",
         "scheduled_at": "2026-01-15 09:00:00",
         "params": {"output_ids": [str(output_id)]},

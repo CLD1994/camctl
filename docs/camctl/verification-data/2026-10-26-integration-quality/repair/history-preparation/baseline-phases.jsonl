@@ -1,0 +1,6 @@
+{"phase": "call", "nodeid": "tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window", "state": "started"}
+{"phase": "accept_actions", "count": 3, "request_id": 1, "state": "started"}
+{"phase": "accept_actions", "count": 3, "request_id": 1, "seconds": 0.3052940819907235, "state": "finished"}
+{"phase": "finish_outputs", "count": 128, "state": "started"}
+{"phase": "finish_outputs", "count": 128, "seconds": 0.004240751994075254, "state": "finished"}
+{"phase": "call", "nodeid": "tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window", "state": "finished", "seconds": 0.3101727809989825, "preparation_seconds": 0.30953483398479875, "checks_seconds": 0.0006379470141837373, "failed": true}

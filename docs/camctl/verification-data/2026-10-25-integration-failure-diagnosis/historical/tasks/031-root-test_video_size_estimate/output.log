@@ -1,0 +1,75 @@
+F...........                                                             [100%]
+=================================== FAILURES ===================================
+____________ test_record_estimate_stays_out_of_execution_and_report ____________
+
+tmp_path = PosixPath('/tmp/camctl-itopt-final-20261025/tasks/031-root-test_video_size_estimate/tmp/pytest/test_record_estimate_stays_out0')
+
+    def test_record_estimate_stays_out_of_execution_and_report(tmp_path):
+        deployment = Deployment(tmp_path)
+        driver = stub_driver_spec({"1": [video_file("record-1")]})
+        driver["video_size_estimate_json"] = {"camera_record": json.dumps({
+            "bitrate_mbps": 130,
+            "duration": {"method": "direct", "seconds": {"source": "constant", "value": 1}},
+        })}
+        deployment.install_client_capabilities(driver)
+        action = _action()
+        result = _estimate(deployment, action)
+        expected = {"kind": "ready", "sizeBytes": 16_250_000,
+                    "playbackSeconds": 1, "bitrateMbps": 130}
+        assert result["estimate"] == expected
+        assert result["http_estimate"] == expected
+        assert result["drafts_before"] == result["drafts_after"]
+        assert len(result["drafts_before"]) == 1
+        assert result["http_action"] == action
+        initialized = deployment.camctl("init", "--config", str(deployment.config_path))
+        assert initialized.exit_code == 0, initialized.stderr
+        execution_action = {**action, "scheduled_at": future_schedule(3)}
+>       _execute_and_import(deployment, driver, execution_action, action["params"])
+
+tests/integration/test_video_size_estimate.py:92: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+deployment = <camctl_fixtures.Deployment object at 0x7f43cb392310>
+driver = {'driver_id': 'test-stub', 'timelapse_duration_s': 3.0, 'record_duration_s': 1.0, 'files': {'1': [{'identity': 'record-1', 'locator': {'path': '/DCIM/record-1'}, 'size_bytes': 8192, 'complete': True, ...}]}, ...}
+action = {'name': '估算交接', 'type': 'camera_record', 'device_id': 'cam-1', 'scheduled_at': '2026-10-25 00:04:29', ...}
+expected_params = {'type': 'video'}
+
+    def _execute_and_import(deployment, driver, action, expected_params):
+        plan, receipt = deployment.export_plan_with_client({
+            "name": "估算与文件事实", "actions": [action],
+        })
+        body = json.loads(plan.read_text(encoding="utf-8"))
+        assert body["actions"][0] == action
+        submitted = deployment.camctl(
+            "submit", str(plan), "--config", str(deployment.config_path), driver=driver)
+        assert submitted.exit_code == 0, submitted.stderr
+        assert submitted.message() == {"kind": "succeeded", "body": {"needs_run": True}}
+        executed = deployment.camctl("run", "--config", str(deployment.config_path), driver=driver)
+        assert executed.exit_code == 0, executed.stderr
+        assert executed.message() == {"kind": "succeeded"}
+        with closing(sqlite3.connect(deployment.state_db)) as connection:
+            effective, status = connection.execute(
+                "SELECT effective_params_json, status FROM actions").fetchone()
+            assert json.loads(effective) == expected_params
+>           assert status == 3
+E           assert 5 == 3
+
+tests/integration/test_video_size_estimate.py:57: AssertionError
+============================== slowest durations ===============================
+19.44s call     tests/integration/test_video_size_estimate.py::test_timelapse_estimate_uses_same_capture_duration_as_execution
+17.44s call     tests/integration/test_video_size_estimate.py::test_record_estimate_stays_out_of_execution_and_report
+8.68s call     tests/integration/test_video_size_estimate.py::test_valid_unavailable_estimate_does_not_prevent_plan_export[True-params2-value_missing]
+6.50s call     tests/integration/test_video_size_estimate.py::test_valid_unavailable_estimate_does_not_prevent_plan_export[False-params0-not_provided]
+6.33s call     tests/integration/test_video_size_estimate.py::test_valid_unavailable_estimate_does_not_prevent_plan_export[True-params1-lookup_missing]
+5.87s call     tests/integration/test_video_size_estimate.py::test_fractional_frame_parameter_is_not_rounded_by_http_or_plan_export
+5.19s call     tests/integration/test_video_size_estimate.py::test_exact_frame_constants_survive_describe_and_http[2.4e2]
+4.98s call     tests/integration/test_video_size_estimate.py::test_invalid_source_fails_cli_and_client_reload_keeps_enabled_definition[{"bitrate_mbps":130,"duration":{"method":"timelapse_frames","frames":{"source":"constant","value":1.00000000000000000001},"playback_fps":{"source":"constant","value":30}}}]
+4.87s call     tests/integration/test_video_size_estimate.py::test_invalid_source_fails_cli_and_client_reload_keeps_enabled_definition[{}]
+4.81s call     tests/integration/test_video_size_estimate.py::test_invalid_source_fails_cli_and_client_reload_keeps_enabled_definition[{"bitrate_mbps":0,"duration":{"method":"direct","seconds":{"source":"constant","value":1}}}]
+4.02s call     tests/integration/test_video_size_estimate.py::test_exact_frame_constants_survive_describe_and_http[240.0]
+3.64s call     tests/integration/test_video_size_estimate.py::test_exact_frame_constants_survive_describe_and_http[240]
+
+(24 durations < 0.005s hidden.  Use -vv to show these durations.)
+=========================== short test summary info ============================
+FAILED tests/integration/test_video_size_estimate.py::test_record_estimate_stays_out_of_execution_and_report
+1 failed, 11 passed in 91.91s (0:01:31)

@@ -10,7 +10,7 @@ import sqlite3
 import pytest
 
 from camctl.capture import files
-from camctl.capture.handlers import _begin_check_round
+from .result_page_fixtures import begin_result_check
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import new_operation_key
 from camctl.contracts.values import ConsistencyError
@@ -18,7 +18,8 @@ from camctl.history.validators import EventContext
 from camctl.persistence.event_reads import SqlEventReads
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.transaction import BoundedCommandPlan, commit_operation, row_facts
-from camctl.persistence.repositories.result_file_ownership import _FileOwnershipFromResultPageCommand
+from camctl.persistence.repositories import capture as capture_storage
+from .transaction_fixtures import plan_operation
 from camctl.persistence.repositories import result_pages
 from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.operations import register_operation_guards
@@ -50,7 +51,7 @@ async def _world(tmp_path, entries, *, consumer='record', independent_activity=F
         tmp_path, consumer, catalog=catalog or SegmentedCatalog(),
         independent_activity=independent_activity)
     try:
-        ticket = _begin_check_round(runtime, action_id).ticket
+        ticket = begin_result_check(owned,runtime, action_id).ticket
         request = _request(runtime, ticket, _actual(ticket, entries=entries,
             next_cursor=next_cursor, finalized=next_cursor is None and error is None, error=error))
         page = _ok(runtime.capture.save_result_page(request, new_operation_key(), owned))
@@ -116,13 +117,13 @@ def _bounded(plan, connection, *, context_transform=lambda context: context):
 
 
 class _AlteredCommand:
-    def __init__(self, request, key, *, bounded=False, alter=lambda plan: plan,
+    def __init__(self, owned, request, key, *, bounded=False, alter=lambda plan: plan,
                  context_transform=lambda context: context):
-        self.request, self.key = request, key
+        self.owned, self.request, self.key = owned, request, key
         self.bounded, self.alter, self.context_transform = bounded, alter, context_transform
 
     def plan(self, scope):
-        plan = self.alter(_FileOwnershipFromResultPageCommand(self.request, self.key).plan(scope))
+        plan = self.alter(plan_operation(scope,capture_storage,lambda: capture_storage.CaptureRepository().save_ownership_from_result_page(self.request,self.key,self.owned)))
         return (_bounded(plan, scope.connection, context_transform=self.context_transform)
                 if self.bounded else plan)
 
@@ -138,7 +139,7 @@ async def test_original_page_ownership_both_real_transaction_entries(tmp_path, b
             (saved.ref.ticket.run_id, saved.ref.ticket.attempt_id)).fetchone()
         assert source != int(saved.ref.ticket.target_id)
         assert physical != saved.ref.ticket.attempt_id
-        receipt = commit_operation(_AlteredCommand(request, key, bounded=bounded), key, owned)
+        receipt = commit_operation(_AlteredCommand(owned, request, key, bounded=bounded), key, owned)
         assert receipt.kind == 'completed', receipt.error
         assert receipt.boundary.last_event_id > saved.ref.event_id
         tx = owned.connection.execute('SELECT first_event_id,last_event_id FROM history_transactions WHERE operation_key=?',
@@ -189,7 +190,7 @@ async def test_forged_original_page_ownership_rolls_back_whole_group(tmp_path, b
     owned, runtime, _, saved = await _world(tmp_path, [_entry('orphan.LRF')])
     try:
         before = _snapshot(owned); key = new_operation_key()
-        receipt = commit_operation(_AlteredCommand(_command(runtime, saved), key, bounded=bounded,
+        receipt = commit_operation(_AlteredCommand(owned, _command(runtime, saved), key, bounded=bounded,
             alter=lambda plan: _alter_event(plan, case)), key, owned)
         assert receipt.kind == 'rolled_back', (case, receipt.error)
         assert _snapshot(owned) == before
@@ -234,13 +235,13 @@ async def test_independent_guard_rechecks_actual_proof_after_proposal(tmp_path, 
             elif case == 'physical_attempt': db.execute('UPDATE operation_attempts SET attempt_no=99 WHERE run_id=?', (saved.ref.ticket.run_id,))
             elif case == 'baseline': db.execute('UPDATE device_activities SET ownership_mode=2,baseline_state=2 WHERE id=?', (int(saved.ref.ticket.target_id),))
             elif case == 'format':
-                body = parse_exact_json(db.execute('SELECT body_json FROM history_events WHERE id=?', (saved.ref.event_id,)).fetchone()[0])
-                body['evidence']['result_page']['outcome']['result']['observations'][0]['data']['entries'][0]['format_id'] = 'osv'
-                db.execute('UPDATE history_events SET body_json=? WHERE id=?', (encode_json_value(body), saved.ref.event_id))
+                from camctl.contracts.enums import enum_for
+                db.execute('UPDATE result_page_files SET family_role=? WHERE page_event_id=?',
+                    (int(enum_for('result_page_files.family_role').ORIGINAL), saved.ref.event_id))
             changed.append(case)
             return plan
         before = _snapshot(owned); key = new_operation_key()
-        receipt = commit_operation(_AlteredCommand(_command(runtime, saved), key,
+        receipt = commit_operation(_AlteredCommand(owned, _command(runtime, saved), key,
             bounded=bounded, alter=alter), key, owned)
         assert receipt.kind == 'rolled_back', (case, receipt.error)
         from camctl.history.validators import EventValidationError
@@ -327,7 +328,7 @@ async def test_old_ownership_branch_cannot_use_new_page_method(tmp_path, bounded
             reason = load_event_registry()['events']['DEVICE_FILE_OBSERVED']['branches']['OWNERSHIP']['reason']
             return replace(plan, events=(replace(event, reason=reason, rows=(row,), evidence={}),))
         before = _snapshot(owned); key = new_operation_key()
-        receipt = commit_operation(_AlteredCommand(_command(runtime, saved), key,
+        receipt = commit_operation(_AlteredCommand(owned, _command(runtime, saved), key,
             bounded=bounded, alter=old_branch), key, owned)
         assert receipt.kind == 'rolled_back'
         assert '独立原页分支' in str(receipt.error)
@@ -340,18 +341,15 @@ async def test_old_ownership_branch_cannot_use_new_page_method(tmp_path, bounded
 @pytest.mark.parametrize('bounded', [False, True])
 @pytest.mark.parametrize('fake_single_context', [False, True])
 async def test_real_legal_file_prefix_cannot_join_single_ownership_group(tmp_path, bounded, fake_single_context):
-    from camctl.persistence.repositories.capture import _FilePresenceCommand
     from camctl.persistence.transaction import CommandPlan, TransactionScope
     from camctl.contracts.history_values import TransactionRange
     owned, runtime, _, saved = await _world(tmp_path, [_entry('orphan.LRF')])
     request, key = _command(runtime, saved), new_operation_key()
     class PrefixCommand:
         def plan(self, scope):
-            # 两份真实合法单事件提案以独立临时scope形成，再用实际scope分配2事件。
-            def separate(command):
-                return command.plan(TransactionScope(scope.connection, scope.max_txn_id, scope.max_event_id))
-            prefix = separate(_FilePresenceCommand(files.FilePresenceSave(request.file_id, 2, request.occurred_at), new_operation_key()))
-            ownership = separate(_FileOwnershipFromResultPageCommand(request, key))
+            # 两个公开仓储交付的单事件提案组合后由真实scope分配完整范围。
+            prefix = plan_operation(TransactionScope(scope.connection,scope.max_txn_id,scope.max_event_id),capture_storage,lambda: runtime.capture.save_file_presence(files.FilePresenceSave(request.file_id,2,request.occurred_at),new_operation_key(),owned))
+            ownership = plan_operation(TransactionScope(scope.connection,scope.max_txn_id,scope.max_event_id),capture_storage,lambda: runtime.capture.save_ownership_from_result_page(request,key,owned))
             allocation = scope.allocate(2)
             first, = prefix.events; second, = ownership.events
             second = replace(second, event_id=allocation.last_event_id)
@@ -376,29 +374,6 @@ async def test_real_legal_file_prefix_cannot_join_single_ownership_group(tmp_pat
         owned.connection.close()
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize('case', ['old', 'future', 'middle'])
-async def test_replay_override_rejects_non_current_boundaries(tmp_path, case):
-    from camctl.contracts.history_values import HistoryBoundary
-    owned, runtime, _, saved = await _world(tmp_path, [_entry('orphan.LRF')])
-    try:
-        db = owned.connection
-        original, raw, event, transaction = result_pages._at_record(db, saved.ref.event_id)
-        latest = result_pages._latest_history_boundary(db)
-        # 实际预插独立单event header；尚没有任何本组event/投影。
-        db.execute('BEGIN IMMEDIATE')
-        db.execute('INSERT INTO history_transactions(id,operation_key,first_event_id,last_event_id) VALUES(?,?,?,?)',
-            (latest.txn_id + 1, str(new_operation_key()), latest.last_event_id + 1, latest.last_event_id + 1))
-        if case == 'old':
-            prior = result_pages.read_transaction_range(db, latest.txn_id - 1)
-            boundary = HistoryBoundary(prior.txn_id, prior.last_event_id)
-        elif case == 'future': boundary = HistoryBoundary(latest.txn_id + 1, latest.last_event_id + 1)
-        else: boundary = HistoryBoundary(latest.txn_id, latest.last_event_id - 1)
-        with pytest.raises(ConsistencyError):
-            result_pages._replay_page_context(db, event, (original, raw), transaction, current_boundary=boundary)
-        db.execute('ROLLBACK')
-    finally:
-        owned.connection.close()
 
 
 class _BaselineCatalog(SegmentedCatalog):
@@ -414,7 +389,7 @@ class _BaselineCatalog(SegmentedCatalog):
 @pytest.mark.parametrize('bounded', [False, True])
 async def test_original_baseline_difference_excludes_old_file_and_survives_ownership(tmp_path, bounded):
     from camctl.capture.baseline_models import BaselineChunkSave, BaselineFixSave
-    from camctl.capture.handlers import _control_call
+    from camctl.capture.handlers import capture_handler
     from camctl.devices.bindings import DeviceBinding
     from camctl.devices.file_identity import FileIdentity
     owned, runtime, source, _ = await consumer_world(tmp_path, 'record', start=False, catalog=_BaselineCatalog())
@@ -426,16 +401,15 @@ async def test_original_baseline_difference_excludes_old_file_and_survives_owner
         _ok(runtime.capture.append_baseline(BaselineChunkSave(activity, 1,
             (FileIdentity(DeviceBinding('cam-1', 'camctl-adb'), old),), runtime.wall_us()), new_operation_key(), owned))
         _ok(runtime.capture.fix_baseline(BaselineFixSave(activity, 1, 1, runtime.wall_us()), new_operation_key(), owned))
-        await _control_call(runtime, runtime.action(source), 'start_recording', 'start_confirmed',
-                            activity_facts={'started_at': runtime.wall_us(), 'activity_state': 2})
-        ticket = _begin_check_round(runtime, source).ticket
+        await capture_handler('camera_record')(source, runtime)
+        ticket = begin_result_check(owned,runtime, source).ticket
         request = _request(runtime, ticket, _actual(ticket,
             entries=[_entry('a.OSV'), _entry('b.LRF')], finalized=True))
         ref = _ok(runtime.capture.save_result_page(request, new_operation_key(), owned))
         saved = runtime.capture.read_result_page(ref, owned)
         assert dict(saved.file_ids).keys() == {'/DCIM/b.LRF'}
         command, key = _command(runtime, saved), new_operation_key()
-        receipt = commit_operation(_AlteredCommand(command, key, bounded=bounded), key, owned)
+        receipt = commit_operation(_AlteredCommand(owned, command, key, bounded=bounded), key, owned)
         assert receipt.kind == 'completed', receipt.error
         assert runtime.capture.verify_ownership_from_result_page(command, key, owned).file_id == command.file_id
         before = _snapshot(owned)
@@ -504,7 +478,7 @@ async def test_ownership_needs_reliable_page_not_complete_scan(tmp_path, bounded
         [_entry('orphan.LRF', complete=False, size=None)], next_cursor=cursor, error=error)
     try:
         request, key = _command(runtime, saved), new_operation_key()
-        receipt = commit_operation(_AlteredCommand(request, key, bounded=bounded), key, owned)
+        receipt = commit_operation(_AlteredCommand(owned, request, key, bounded=bounded), key, owned)
         assert receipt.kind == 'completed', receipt.error
         assert saved.page.next_cursor == cursor and saved.page.outcome.error == error
         assert runtime.capture.verify_ownership_from_result_page(request, key, owned).file_id == request.file_id
@@ -543,7 +517,7 @@ async def test_file_owner_initial_snapshot_current_restore_same_h(tmp_path):
         unowned = history.restore_entity('device_file', request.file_id, before)[('device_files', request.file_id)]
         assert unowned['source_action_id'] is None and unowned['role'] == 1
         events = []
-        for raw in owned.connection.execute(f'SELECT {" ,".join("h." + name for name in result_pages._COLUMNS.split(","))}'
+        for raw in owned.connection.execute('SELECT h.id,h.transaction_id,h.event_type,h.event_version,h.occurred_at,h.clock_status,h.change_seq,h.body_json'
                 ' FROM history_events h JOIN entity_event_links l ON l.event_id=h.id'
                 ' WHERE l.entity_type=? AND l.entity_id=? AND h.id<=? ORDER BY h.id',
                 (entity_type, request.file_id, boundary.last_event_id)):

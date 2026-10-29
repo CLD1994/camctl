@@ -1,0 +1,13 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.17, pytest-9.1.1, pluggy-1.6.0 -- /tmp/camctl-fix44-browser-20261025/apps/camctl/.venv311/bin/python
+cachedir: .pytest_cache
+rootdir: /tmp/camctl-fix44-browser-20261025
+plugins: mock-3.16.0, asyncio-1.4.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 2 items
+
+tests/integration/test_device_capability_declarations.py::test_installed_metadata_reaches_parameter_form_and_device_guide PASSED [ 50%]
+tests/integration/test_device_capability_declarations.py::test_installed_sources_control_browser_cleanup_across_reload_and_restart PASSED [100%]
+
+- generated xml file: /tmp/camctl-fix44-browser-final-waits-20261025/affected.junit.xml -
+============================== 2 passed in 40.83s ==============================

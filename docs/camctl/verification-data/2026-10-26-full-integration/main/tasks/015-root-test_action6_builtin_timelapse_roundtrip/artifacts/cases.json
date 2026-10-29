@@ -1,0 +1,21 @@
+[
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/015-root-test_action6_builtin_timelapse_roundtrip/source/tests/integration/test_action6_builtin_timelapse_roundtrip.py::test_installed_action6_timelapse_restores_natural_deadline_obtains_and_deletes_exact_outputs",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 15.267894630000228
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 74.74160830800247
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0885212550056167
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 90.09802419300831
+  }
+]

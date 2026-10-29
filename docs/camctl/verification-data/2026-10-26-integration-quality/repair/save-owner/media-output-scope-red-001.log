@@ -1,0 +1,47 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+____ test_media_recovery_output_receipt_updates_joining_adapter_file_scope _____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fa9cd303850>
+
+    async def test_media_recovery_output_receipt_updates_joining_adapter_file_scope(monkeypatch):
+        from camctl.capture.processing import (
+            ProcessingDisposition, RepairOutcome, RepairOutputFile, RepairResultSave, RepairStart,
+        )
+    
+        database = _database()
+        database.read.return_value = (1,)
+        repository = create_autospec(CaptureRepository, instance=True, spec_set=True)
+        monkeypatch.setattr(media_flow, "CaptureRepository", lambda: repository)
+        pending = {}
+        normal = CaptureProcessingSaves(database, pending, file_ids=(11,))
+        recovery = CaptureProcessingSaves(database, pending)
+        command = RepairStart(1, "mp4", 100)
+        database.write.return_value = DbOutcome(DbOutcomeKind.UNKNOWN)
+        assert (await normal.start_repair_output(command)).disposition is SaveDisposition.UNKNOWN
+        entered, release = asyncio.Event(), asyncio.Event()
+        output = RepairOutputFile(ProcessingDisposition.SAVED, 22, "repaired.mp4")
+    
+        async def write(callback, **kwargs):
+            entered.set()
+            await release.wait()
+            return DbOutcome(DbOutcomeKind.COMPLETED, output)
+    
+        database.write.side_effect = write
+        first = asyncio.create_task(recovery.start_repair_output(command))
+        await entered.wait()
+        second = await _join(asyncio.create_task(normal.start_repair_output(command)))
+        release.set()
+        receipts = await asyncio.gather(first, second)
+    
+        assert all(receipt.value is output for receipt in receipts)
+>       assert normal.file_ids == (11, 22)
+E       assert (11,) == (11, 22)
+E         
+E         Right contains one more item: 22
+E         Use -v to get more diff
+
+apps/camctl/tests/unit/capture/test_capture_save_coordination.py:193: AssertionError
+=========================== short test summary info ============================
+FAILED apps/camctl/tests/unit/capture/test_capture_save_coordination.py::test_media_recovery_output_receipt_updates_joining_adapter_file_scope
+1 failed in 0.58s

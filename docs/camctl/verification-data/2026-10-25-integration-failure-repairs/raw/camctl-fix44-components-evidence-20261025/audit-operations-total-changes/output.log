@@ -1,0 +1,28 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.17, pytest-9.1.1, pluggy-1.6.0 -- /tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python
+cachedir: .pytest_cache
+rootdir: /tmp/camctl-fix44-components-20261025/apps/camctl
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, mock-3.16.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 1 item
+
+apps/camctl/tests/integration/operations/test_result_reuse.py::test_result_recovery_query_error_rolls_back_without_new_facts FAILED [100%]
+
+=================================== FAILURES ===================================
+________ test_result_recovery_query_error_rolls_back_without_new_facts _________
+apps/camctl/tests/integration/operations/test_result_reuse.py:456: in test_result_recovery_query_error_rolls_back_without_new_facts
+    assert isinstance(outcome.error, sqlite3.OperationalError), outcome.error
+E   AssertionError: AttributeError("'_FaultConnection' object has no attribute 'total_changes'")
+E   assert False
+E    +  where False = isinstance(AttributeError("'_FaultConnection' object has no attribute 'total_changes'"), <class 'sqlite3.OperationalError'>)
+E    +    where AttributeError("'_FaultConnection' object has no attribute 'total_changes'") = DbOutcome(kind=<DbOutcomeKind.ROLLED_BACK: 'rolled_back'>, value=None, error=AttributeError("'_FaultConnection' object has no attribute 'total_changes'"), boundary=None, stage=None).error
+E    +    and   <class 'sqlite3.OperationalError'> = sqlite3.OperationalError
+- generated xml file: /tmp/camctl-fix44-components-evidence-20261025/audit-operations-total-changes/junit.xml -
+=========================== short test summary info ============================
+FAILED apps/camctl/tests/integration/operations/test_result_reuse.py::test_result_recovery_query_error_rolls_back_without_new_facts - AssertionError: AttributeError("'_FaultConnection' object has no attribute 'total_changes'")
+assert False
+ +  where False = isinstance(AttributeError("'_FaultConnection' object has no attribute 'total_changes'"), <class 'sqlite3.OperationalError'>)
+ +    where AttributeError("'_FaultConnection' object has no attribute 'total_changes'") = DbOutcome(kind=<DbOutcomeKind.ROLLED_BACK: 'rolled_back'>, value=None, error=AttributeError("'_FaultConnection' object has no attribute 'total_changes'"), boundary=None, stage=None).error
+ +    and   <class 'sqlite3.OperationalError'> = sqlite3.OperationalError
+============================== 1 failed in 2.30s ===============================

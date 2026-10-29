@@ -1,0 +1,72 @@
+LIVE CANDIDATE ReadCandidate(copy_id=1, action_id=31, scheduled_at=1750000000000000, plan_id=1, input_index=31, device_id='cam-1', driver_id='camctl-adb', source_file_id=501, held=True)
+LIVE REF 0 ReadCandidate <- tuple (ReadCandidate(copy_id=1, action_id=31, scheduled_at=1750000000000000, plan_id=1, input_index=31, device_id='cam-1', driver_id='camctl-adb', source_file_id=501, held=True),)
+LIVE REF 1 tuple <- Page Page(items=(ReadCandidate(copy_id=1, action_id=31, scheduled_at=1750000000000000, plan_id=1, input_index=31, device_id='cam-1', driver_id='camctl-adb', source_file_id=501, held=Tru
+LIVE REF 2 Page <- ReadReceipt ReadReceipt(value=Page(items=(ReadCandidate(copy_id=1, action_id=31, scheduled_at=1750000000000000, plan_id=1, input_index=31, device_id='cam-1', driver_id='camctl-adb', source_fil
+LIVE REF 3 ReadReceipt <- Future <Future finished result=ReadReceipt(v...boundary=None)>
+LIVE REF 4 Future <- tuple (<Future finished result=ReadReceipt(v...boundary=None)>,)
+LIVE REF 5 tuple <- Handle <Handle Task.task_wakeup(<Future finis...oundary=None)>)>
+LIVE REF 6 Handle <- cell <cell at 0x7f2defe98910: Handle object at 0x7f2defe67160>
+LIVE REF 5 tuple <- cell <cell at 0x7f2defe988b0: tuple object at 0x7f2df1397bb0>
+LIVE REF 6 cell <- cell <cell at 0x7f2defe98910: cell object at 0x7f2defe988b0>
+LIVE REF 4 Future <- tuple (<built-in method task_wakeup of _asyncio.Task object at 0x7f2df0626440>, <Future finished result=ReadReceipt(v...boundary=None)>)
+LIVE REF 5 tuple <- cell <cell at 0x7f2defe988b0: tuple object at 0x7f2defe8cf80>
+LIVE REF 6 cell <- cell <cell at 0x7f2defe98910: cell object at 0x7f2defe988b0>
+LIVE REF 4 Future <- cell <cell at 0x7f2defe98850: _asyncio.Future object at 0x7f2deffbf9a0>
+LIVE REF 5 cell <- cell <cell at 0x7f2defe988b0: cell object at 0x7f2defe98850>
+LIVE REF 6 cell <- cell <cell at 0x7f2defe98910: cell object at 0x7f2defe988b0>
+LIVE REF 3 ReadReceipt <- cell <cell at 0x7f2defe987f0: ReadReceipt object at 0x7f2defe8ad10>
+LIVE REF 4 cell <- cell <cell at 0x7f2defe98850: cell object at 0x7f2defe987f0>
+LIVE REF 5 cell <- cell <cell at 0x7f2defe988b0: cell object at 0x7f2defe98850>
+LIVE REF 6 cell <- cell <cell at 0x7f2defe98910: cell object at 0x7f2defe988b0>
+LIVE REF 2 Page <- cell <cell at 0x7f2defe98790: Page object at 0x7f2defe8a950>
+LIVE REF 3 cell <- cell <cell at 0x7f2defe987f0: cell object at 0x7f2defe98790>
+LIVE REF 4 cell <- cell <cell at 0x7f2defe98850: cell object at 0x7f2defe987f0>
+LIVE REF 5 cell <- cell <cell at 0x7f2defe988b0: cell object at 0x7f2defe98850>
+LIVE REF 6 cell <- cell <cell at 0x7f2defe98910: cell object at 0x7f2defe988b0>
+LIVE REF 1 tuple <- cell <cell at 0x7f2defe98730: tuple object at 0x7f2defe6e6b0>
+LIVE REF 2 cell <- cell <cell at 0x7f2defe98790: cell object at 0x7f2defe98730>
+LIVE REF 3 cell <- cell <cell at 0x7f2defe987f0: cell object at 0x7f2defe98790>
+LIVE REF 4 cell <- cell <cell at 0x7f2defe98850: cell object at 0x7f2defe987f0>
+LIVE REF 5 cell <- cell <cell at 0x7f2defe988b0: cell object at 0x7f2defe98850>
+LIVE REF 6 cell <- cell <cell at 0x7f2defe98910: cell object at 0x7f2defe988b0>
+LIVE REF 0 ReadCandidate <- cell <cell at 0x7f2defe986d0: ReadCandidate object at 0x7f2defe8add0>
+LIVE REF 1 cell <- cell <cell at 0x7f2defe98730: cell object at 0x7f2defe986d0>
+LIVE REF 2 cell <- cell <cell at 0x7f2defe98790: cell object at 0x7f2defe98730>
+LIVE REF 3 cell <- cell <cell at 0x7f2defe987f0: cell object at 0x7f2defe98790>
+LIVE REF 4 cell <- cell <cell at 0x7f2defe98850: cell object at 0x7f2defe987f0>
+LIVE REF 5 cell <- cell <cell at 0x7f2defe988b0: cell object at 0x7f2defe98850>
+LIVE REF 6 cell <- cell <cell at 0x7f2defe98910: cell object at 0x7f2defe988b0>
+WORKER FRAME _run {'self': 'DbExecutor', 'owned': 'OwnedConnection', 'job': 'DbJob', 'granted': 'NoneType'}
+F
+=================================== FAILURES ===================================
+___________________ test_evicted_read_resumes_after_restart ____________________
+
+two_copies = (OwnedConnection(connection=<sqlite3.Connection object at 0x7f2df04507c0>, metadata=DatabaseMetadata(application_id='c...(outcome=<QualificationOutcome.GRANTED: 'granted'>, copy_id=2, run_id=2, delivery_id=2, target_file_id=2, reason=None))
+
+    @pytest.mark.asyncio
+    async def test_evicted_read_resumes_after_restart(two_copies):
+        import weakref
+        from camctl.outputs.read_discovery import ReadDiscoveryOwner
+        from ..bootstrap.test_output_read_recovery import _start_unended_read
+    
+        owned, early, _ = two_copies
+        repository = OutputsRepository(read_batch_size=1)
+        assert repository.grant_read_slot(_slot(early.copy_id), new_operation_key(), owned).kind is DbOutcomeKind.COMPLETED
+        ticket = _start_unended_read(owned, early.copy_id)
+        path = _scope(owned.connection).database
+        async with _discovery_database(path) as (database, _):
+            owner = ReadDiscoveryOwner(1)
+            await owner.begin_round(database, _NOW)
+            page = await owner.reads(database, "reads", _NOW)
+            reference = weakref.ref(page.items[0])
+            del page, owner
+            from live_referrers import diagnose
+            diagnose(reference)
+>           assert reference() is None
+E           AssertionError: assert ReadCandidate(copy_id=1, action_id=31, scheduled_at=1750000000000000, plan_id=1, input_index=31, device_id='cam-1', driver_id='camctl-adb', source_file_id=501, held=True) is None
+E            +  where ReadCandidate(copy_id=1, action_id=31, scheduled_at=1750000000000000, plan_id=1, input_index=31, device_id='cam-1', driver_id='camctl-adb', source_file_id=501, held=True) = <weakref at 0x7f2defe83560; to 'ReadCandidate' at 0x7f2defe8add0>()
+
+apps/camctl/tests/integration/outputs/test_read_discovery.py:304: AssertionError
+=========================== short test summary info ============================
+FAILED apps/camctl/tests/integration/outputs/test_read_discovery.py::test_evicted_read_resumes_after_restart
+1 failed in 1.01s

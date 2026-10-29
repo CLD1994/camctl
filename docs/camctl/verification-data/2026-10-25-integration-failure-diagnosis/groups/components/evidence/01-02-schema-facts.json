@@ -1,0 +1,162 @@
+[
+  {
+    "phase": "historical",
+    "diagnosis_id": 1,
+    "database": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/test_installed_hasselblad_phot0/hasselblad-installed-data/state/state.db",
+    "query": "SELECT format_version FROM database_metadata; SELECT id,status FROM actions ORDER BY id",
+    "metadata": [
+      {
+        "format_version": 3
+      }
+    ],
+    "actions": [
+      {
+        "id": 1,
+        "status": 1
+      },
+      {
+        "id": 2,
+        "status": 1
+      },
+      {
+        "id": 3,
+        "status": 1
+      }
+    ],
+    "operation_run_count": [
+      {
+        "count": 0
+      }
+    ],
+    "installed_registry": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/b7-distribution0/env/lib/python3.11/site-packages/camctl/_resources/registry/enum-registry.json",
+    "installed_format_members": {
+      "V1": 1,
+      "V2": 2,
+      "V3": 3
+    },
+    "installed_registry_sha256": "717140e203ea72e208d71e8f4d2aec3f4ec74a2fc2131ecbd149f284d688bd23",
+    "source_registry_sha256": "717140e203ea72e208d71e8f4d2aec3f4ec74a2fc2131ecbd149f284d688bd23",
+    "installed_matches_source_registry": true
+  },
+  {
+    "phase": "historical",
+    "diagnosis_id": 2,
+    "database": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/test_installed_hasselblad_phot1/hasselblad-installed-data/state/state.db",
+    "query": "SELECT format_version FROM database_metadata; SELECT id,status FROM actions ORDER BY id",
+    "metadata": [
+      {
+        "format_version": 3
+      }
+    ],
+    "actions": [
+      {
+        "id": 1,
+        "status": 1
+      },
+      {
+        "id": 2,
+        "status": 1
+      },
+      {
+        "id": 3,
+        "status": 1
+      }
+    ],
+    "operation_run_count": [
+      {
+        "count": 0
+      }
+    ],
+    "installed_registry": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/b7-distribution0/env/lib/python3.11/site-packages/camctl/_resources/registry/enum-registry.json",
+    "installed_format_members": {
+      "V1": 1,
+      "V2": 2,
+      "V3": 3
+    },
+    "installed_registry_sha256": "717140e203ea72e208d71e8f4d2aec3f4ec74a2fc2131ecbd149f284d688bd23",
+    "source_registry_sha256": "717140e203ea72e208d71e8f4d2aec3f4ec74a2fc2131ecbd149f284d688bd23",
+    "installed_matches_source_registry": true
+  },
+  {
+    "phase": "current",
+    "diagnosis_id": 1,
+    "database": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/tmp/pytest/test_installed_hasselblad_phot0/hasselblad-installed-data/state/state.db",
+    "query": "SELECT format_version FROM database_metadata; SELECT id,status FROM actions ORDER BY id",
+    "metadata": [
+      {
+        "format_version": 5
+      }
+    ],
+    "actions": [
+      {
+        "id": 1,
+        "status": 1
+      },
+      {
+        "id": 2,
+        "status": 1
+      },
+      {
+        "id": 3,
+        "status": 1
+      }
+    ],
+    "operation_run_count": [
+      {
+        "count": 0
+      }
+    ],
+    "installed_registry": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/tmp/pytest/b7-distribution0/env/lib/python3.11/site-packages/camctl/_resources/registry/enum-registry.json",
+    "installed_format_members": {
+      "V1": 1,
+      "V2": 2,
+      "V3": 3,
+      "V4": 4,
+      "V5": 5
+    },
+    "installed_registry_sha256": "0e404ce3ab7657be981a9ac499e16fb155d34a60c6b028c6e36c688689f9314d",
+    "source_registry_sha256": "0e404ce3ab7657be981a9ac499e16fb155d34a60c6b028c6e36c688689f9314d",
+    "installed_matches_source_registry": true
+  },
+  {
+    "phase": "current",
+    "diagnosis_id": 2,
+    "database": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/tmp/pytest/test_installed_hasselblad_phot1/hasselblad-installed-data/state/state.db",
+    "query": "SELECT format_version FROM database_metadata; SELECT id,status FROM actions ORDER BY id",
+    "metadata": [
+      {
+        "format_version": 5
+      }
+    ],
+    "actions": [
+      {
+        "id": 1,
+        "status": 1
+      },
+      {
+        "id": 2,
+        "status": 1
+      },
+      {
+        "id": 3,
+        "status": 1
+      }
+    ],
+    "operation_run_count": [
+      {
+        "count": 0
+      }
+    ],
+    "installed_registry": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/tmp/pytest/b7-distribution0/env/lib/python3.11/site-packages/camctl/_resources/registry/enum-registry.json",
+    "installed_format_members": {
+      "V1": 1,
+      "V2": 2,
+      "V3": 3,
+      "V4": 4,
+      "V5": 5
+    },
+    "installed_registry_sha256": "0e404ce3ab7657be981a9ac499e16fb155d34a60c6b028c6e36c688689f9314d",
+    "source_registry_sha256": "0e404ce3ab7657be981a9ac499e16fb155d34a60c6b028c6e36c688689f9314d",
+    "installed_matches_source_registry": true
+  }
+]

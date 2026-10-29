@@ -34,6 +34,7 @@ from camctl.session.service import run_session
 from ..acceptance.test_acceptance import Catalog, _plan_body
 from ..acceptance.test_atomicity import _process
 from .test_session import FakeClock, _MIN, _facts, environment
+from .support import assert_database_closed
 from .test_submit_boundary import runtime
 
 
@@ -237,7 +238,7 @@ def _wrap_runtime_connection(monkeypatch, factory):
 
 
 def _wrap_context_connection(context, holder, factory) -> list[_ConnectionProxy]:
-    original = context.open_connection
+    original = holder["factory"]
     proxies: list[_ConnectionProxy] = []
 
     def open_wrapped():
@@ -248,7 +249,7 @@ def _wrap_context_connection(context, holder, factory) -> list[_ConnectionProxy]
         holder["connection"] = wrapped
         return wrapped
 
-    context.open_connection = open_wrapped
+    holder["factory"] = open_wrapped
     return proxies
 
 
@@ -480,8 +481,7 @@ async def test_run_lock_program_error_is_internal_error(
             assert holder["admission_lease"] is None
         else:
             assert holder["admission_lease"] is not None
-        with pytest.raises(sqlite3.ProgrammingError):
-            holder["connection"].connection.execute("SELECT 1")
+        await assert_database_closed(holder["database"])
     if entry_point == "normal_close":
         assert holder["admission_lease"] is not None
         assert locks.probe_admission(path).is_free
@@ -563,8 +563,7 @@ async def test_admission_acquire_control_keeps_transaction_receipt(lock_environm
     assert locks.probe_admission(path).is_free
     session_lease = locks.acquire_session(context.paths.session_lock)
     session_lease.close()
-    with pytest.raises(sqlite3.ProgrammingError):
-        holder["connection"].connection.execute("SELECT 1")
+    await assert_database_closed(holder["database"])
 
 
 @pytest.mark.asyncio
@@ -814,8 +813,7 @@ async def test_close_admission_lock_failure_is_not_database_failure(lock_environ
     assert holder["admission_lease"] is not None
     assert locks.probe_admission(path).is_free
     assert locks.acquire_session(context.paths.session_lock).close() is None
-    with pytest.raises(sqlite3.ProgrammingError):
-        holder["connection"].connection.execute("SELECT 1")
+    await assert_database_closed(holder["database"])
 
 
 @pytest.mark.asyncio
@@ -929,9 +927,8 @@ async def test_close_errors_keep_order_before_rollback_error_and_not_duplicated(
 
     async def ordinary(current):
         ordinary_calls.append("ordinary")
-        flow_snapshots.append(
-            _database_snapshot(holder["connection"].connection)
-        )
+        flow_snapshots.append(await current.database.read(
+            lambda owned: _database_snapshot(owned.connection)))
 
     context.flows = {"ordinary": ordinary}
     outcome = await run_session(
@@ -999,8 +996,7 @@ async def test_close_errors_keep_order_before_rollback_error_and_not_duplicated(
     with closing(sqlite3.connect(tmp_path / "state.db")) as connection:
         assert connection.execute("SELECT COUNT(*) FROM plans").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM actions").fetchone()[0] == 1
-    with pytest.raises(sqlite3.ProgrammingError):
-        holder["connection"].connection.execute("SELECT 1")
+    await assert_database_closed(holder["database"])
     session_lease = locks.acquire_session(context.paths.session_lock)
     session_lease.close()
 
@@ -1037,14 +1033,16 @@ async def test_run_acquires_admission_inside_short_transaction(lock_environment)
     )
 
     async def ordinary(current):
-        connection = holder["connection"].connection
-        assert connection.in_transaction is False
-        assert holder["admission_lease"] is not None
-        begins = sum(statement == "BEGIN IMMEDIATE" for statement in connection.statements)
-        rollbacks = sum(statement == "ROLLBACK" for statement in connection.statements)
-        assert begins == observations[0][1]
-        assert rollbacks > observations[0][2]
-        flow_snapshots.append(_database_snapshot(connection))
+        def observe(owned):
+            connection = owned.connection
+            assert connection.in_transaction is False
+            assert holder["admission_lease"] is not None
+            begins = sum(statement == "BEGIN IMMEDIATE" for statement in connection.statements)
+            rollbacks = sum(statement == "ROLLBACK" for statement in connection.statements)
+            assert begins == observations[0][1]
+            assert rollbacks > observations[0][2]
+            return _database_snapshot(connection)
+        flow_snapshots.append(await current.database.read(observe))
 
     context.flows = {"ordinary": ordinary}
     outcome = await run_session(context, None)
@@ -1157,8 +1155,7 @@ async def test_transaction_control_keeps_original_object_and_closes_lease(lock_e
     assert locks.probe_admission(path).is_free
     session_lease = locks.acquire_session(context.paths.session_lock)
     session_lease.close()
-    with pytest.raises(sqlite3.ProgrammingError):
-        holder["connection"].connection.execute("SELECT 1")
+    await assert_database_closed(holder["database"])
 
 
 @pytest.mark.asyncio
@@ -1282,5 +1279,4 @@ async def test_final_lock_double_error_keeps_all_facts(
     session_lease = locks.acquire_session(session_path)
     session_lease.close()
     assert holder["connection"] is not None
-    with pytest.raises(sqlite3.ProgrammingError):
-        holder["connection"].connection.execute("SELECT 1")
+    await assert_database_closed(holder["database"])

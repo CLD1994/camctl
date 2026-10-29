@@ -17,7 +17,8 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.transaction import saved_transaction_events
 
 from .result_consumer_fixtures import returned
-from .test_cancel_timelapse_exhaustion_files import _apply_public_cancel
+from .test_natural_wait_time_eligibility import _request_cancel
+from ..support import database as database_support
 from .test_closed_result_local_consumption import (
     _assert_local_finish, _assert_preserved, _capture_facts, _rows,
     closed_consumer_world, fresh_closed_runtime,
@@ -41,16 +42,24 @@ class _ClosedInputFault:
         return getattr(self.connection, name)
 
     def execute(self, statement, parameters=()):
-        is_original_input = (
-            "FROM operation_runs r" in statement
-            and "JOIN operation_attempts t" in statement
-            and "t.result_json" in statement
-            and tuple(parameters) == (f"results/{self.activity_id}",))
-        if self.armed and is_original_input:
+        reads_original = False
+        def authorize(operation, table, column, _database, _source):
+            nonlocal reads_original
+            if operation == sqlite3.SQLITE_READ and table == "operation_attempts" and column == "result_json":
+                reads_original = True
+            return sqlite3.SQLITE_OK
+        self.connection.set_authorizer(authorize)
+        try:
+            cursor = self.connection.execute(statement, parameters)
+        finally:
+            self.connection.set_authorizer(None)
+        if self.armed and reads_original and tuple(parameters) == (f"results/{self.activity_id}",):
             self.armed = False
             self.hits += 1
+            cursor.close()
             raise self.error
-        return self.connection.execute(statement, parameters)
+        return cursor
+
 
 
 class _TerminalProjectionFault:
@@ -70,15 +79,25 @@ class _TerminalProjectionFault:
         return getattr(self.connection, name)
 
     def execute(self, statement, parameters=()):
-        result = self.connection.execute(statement, parameters)
-        if self.armed and statement.startswith("INSERT INTO outputs "):
+        output_write = rollback = False
+        def authorize(operation, table, _column, _database, _source):
+            nonlocal output_write, rollback
+            output_write |= operation == sqlite3.SQLITE_INSERT and table == "outputs"
+            rollback |= operation == sqlite3.SQLITE_TRANSACTION and table == "ROLLBACK"
+            return sqlite3.SQLITE_OK
+        self.connection.set_authorizer(authorize)
+        try:
+            result = self.connection.execute(statement, parameters)
+        finally:
+            self.connection.set_authorizer(None)
+        if self.armed and output_write:
             self.armed = False
             self.hits += 1
             self.fault_transaction = True
             self.output_count_before_rollback = self.connection.execute(
                 "SELECT COUNT(*) FROM outputs").fetchone()[0]
             raise self.error
-        if statement == "ROLLBACK" and self.fault_transaction:
+        if rollback and self.fault_transaction:
             self.rollback_count += 1
             self.output_count_after_rollback = self.connection.execute(
                 "SELECT COUNT(*) FROM outputs").fetchone()[0]
@@ -86,21 +105,20 @@ class _TerminalProjectionFault:
         return result
 
 
-class _TerminalReceiptSpy(CaptureRepository):
-    """保留真实复合事务，仅记录公开保存入口的实际回执。"""
 
-    def __init__(self):
-        self.receipts = []
-
-    def finish_capture(self, request, key, owned):
-        receipt = super().finish_capture(request, key, owned)
-        self.receipts.append(receipt)
-        return receipt
-
-    def finish_canceled_capture(self, request, key, owned):
-        receipt = super().finish_canceled_capture(request, key, owned)
-        self.receipts.append(receipt)
-        return receipt
+async def _fault_runtime(owned, world, binding, monkeypatch, fault_factory):
+    original_open = database_support.open_existing
+    faults = []
+    def open_faulty(*args, **kwargs):
+        current = original_open(*args, **kwargs)
+        fault = fault_factory(current.connection)
+        faults.append(fault)
+        return replace(current, connection=fault)
+    with monkeypatch.context() as patch:
+        patch.setattr(database_support, "open_existing", open_faulty)
+        runtime, methods = await fresh_closed_runtime(owned, world, binding)
+    fault, = faults
+    return runtime, methods, fault
 
 
 @pytest.mark.parametrize("consumer", ["photo", "timelapse", "canceled_timelapse"])
@@ -112,8 +130,8 @@ async def test_closed_input_sqlite_error_preserves_local_responsibility(
     owned = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         before = tuple(owned.connection.iterdump())
-        fault = _ClosedInputFault(owned.connection, world.activity_id)
-        runtime, methods = fresh_closed_runtime(replace(owned, connection=fault), world, binding)
+        runtime, methods, fault = await _fault_runtime(owned, world, binding,
+            monkeypatch, lambda connection: _ClosedInputFault(connection, world.activity_id))
         advance = capture_handler(world.handler)
 
         with pytest.raises(sqlite3.OperationalError) as raised:
@@ -146,10 +164,21 @@ async def test_closed_terminal_projection_rolls_back_outputs_and_action_together
     owned = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         before = tuple(owned.connection.iterdump())
-        fault = _TerminalProjectionFault(owned.connection)
-        runtime, methods = fresh_closed_runtime(replace(owned, connection=fault), world, binding)
-        receipts = _TerminalReceiptSpy()
-        runtime.capture = receipts
+        runtime, methods, fault = await _fault_runtime(owned, world, binding,
+            monkeypatch, _TerminalProjectionFault)
+        receipts = []
+        original_finish = CaptureRepository.finish_capture
+        original_cancel = CaptureRepository.finish_canceled_capture
+        def observe_finish(repository, request, key, current):
+            receipt = original_finish(repository, request, key, current)
+            receipts.append(receipt)
+            return receipt
+        def observe_cancel(repository, request, key, current):
+            receipt = original_cancel(repository, request, key, current)
+            receipts.append(receipt)
+            return receipt
+        monkeypatch.setattr(CaptureRepository, "finish_capture", observe_finish)
+        monkeypatch.setattr(CaptureRepository, "finish_canceled_capture", observe_cancel)
         advance = capture_handler(world.handler)
 
         with pytest.raises(ConsistencyError):
@@ -159,7 +188,7 @@ async def test_closed_terminal_projection_rolls_back_outputs_and_action_together
         assert fault.output_count_before_rollback == 1
         assert fault.rollback_count == 1 and fault.output_count_after_rollback == 0
         assert not fault.fault_transaction
-        failed_receipt, = receipts.receipts
+        failed_receipt, = receipts
         assert failed_receipt.kind is DbOutcomeKind.ROLLED_BACK
         assert failed_receipt.error is fault.error
         assert not owned.connection.in_transaction
@@ -170,12 +199,12 @@ async def test_closed_terminal_projection_rolls_back_outputs_and_action_together
         _assert_preserved(owned, world, methods)
 
         await advance(world.action_id, runtime)
-        assert len(receipts.receipts) == 2
-        assert receipts.receipts[-1].kind is DbOutcomeKind.COMPLETED
+        assert len(receipts) == 2
+        assert receipts[-1].kind is DbOutcomeKind.COMPLETED
         _assert_local_finish(owned, world, methods)
         completed = tuple(owned.connection.iterdump())
         await advance(world.action_id, runtime)
-        assert len(receipts.receipts) == 2
+        assert len(receipts) == 2
         assert tuple(owned.connection.iterdump()) == completed
         _assert_local_finish(owned, world, methods)
     finally:
@@ -196,11 +225,11 @@ async def test_canceled_closed_with_required_stop_keeps_device_qualification(
         assert owned.connection.execute(
             "SELECT COUNT(*) FROM operation_runs WHERE responsibility_key=?",
             (f"stop/{world.action_id}",)).fetchone() == (0,)
-        _apply_public_cancel(owned, world.action_id, world.formed_at + 10)
+        runtime, methods = await fresh_closed_runtime(owned, world, binding)
+        await _request_cancel(runtime, world.action_id, [world.formed_at + 10])
         history = _rows(owned, "history_events")
         results_before = owned.connection.execute(
             "SELECT * FROM operation_runs WHERE id=?", (world.run_id,)).fetchone()
-        runtime, methods = fresh_closed_runtime(owned, world, binding)
         methods[1].side_effect = None
         methods[1].return_value = DeviceCallResult.from_outcome(
             returned("stop", "stop_confirmed", world.activity_id))
@@ -265,11 +294,11 @@ async def test_canceled_closed_waits_for_actual_stop_owner_without_second_call(
     allow_return = asyncio.Event()
     owner = None
     try:
-        _apply_public_cancel(owned, world.action_id, world.formed_at + 10)
+        runtime, methods = await fresh_closed_runtime(owned, world, "matched")
+        await _request_cancel(runtime, world.action_id, [world.formed_at + 10])
         results_before = owned.connection.execute(
             "SELECT * FROM operation_runs WHERE id=?", (world.run_id,)).fetchone()
         history = _rows(owned, "history_events")
-        runtime, methods = fresh_closed_runtime(owned, world, "matched")
         entered = asyncio.Event()
 
         async def stop_owned(request):

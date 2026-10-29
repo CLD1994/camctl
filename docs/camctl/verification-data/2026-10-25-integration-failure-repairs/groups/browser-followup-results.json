@@ -1,0 +1,346 @@
+{
+  "source_head": "d1414c2eed789aaa37b03224ed3a9bff6033075c",
+  "source_diff_sha256": "49243a0eb5baa93050eac5f6b29eec457afb0550a092330960fb900514ac3caf",
+  "environment": {
+    "UV_CACHE_DIR": "/tmp/camctl-fix44-browser-resources-20261025/uv-cache",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-browser-20261025/apps/camctl/.venv311",
+    "UV_PYTHON": "/tmp/camctl-fix44-browser-20261025/apps/camctl/.venv311/bin/python",
+    "PYTHONPATH": "/tmp/camctl-fix44-browser-20261025/apps/camctl/src",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-browser-resources-20261025/pycache",
+    "TMPDIR": "/tmp/camctl-fix44-browser-followup-20261025/tmp",
+    "npm_config_cache": "/tmp/camctl-fix44-browser-resources-20261025/npm-cache",
+    "PLAYWRIGHT_BROWSERS_PATH": "/home/cld/.cache/ms-playwright",
+    "VITEST_MAX_WORKERS": "2"
+  },
+  "before": {
+    "packages": {
+      "@playwright/test": {
+        "version": "1.63.0",
+        "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/@playwright/test/package.json",
+        "sha256": "5587f932b8979b6889654b60e3c28aeb7ca0abbac00eec8c176c939a16149536"
+      },
+      "playwright": {
+        "version": "1.63.0",
+        "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/playwright/package.json",
+        "sha256": "8bc2ddebe8d9b051b9ecb87d62c6c63877e59d08617f32c3215681ca8bb70998"
+      },
+      "playwright-core": {
+        "version": "1.63.0",
+        "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/playwright-core/package.json",
+        "sha256": "f061c58427e47e843e26d201f0a57076c734e57c734ecbbd87d4a23b7a20db9b"
+      },
+      "vitest": {
+        "version": "5.0.1",
+        "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/vitest/package.json",
+        "sha256": "bb27a3b3f172321701a7b1f1d90a59e5c9596673176f553a91c1e93b9667abfa"
+      },
+      "vite": {
+        "version": "8.3.0",
+        "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/vite/package.json",
+        "sha256": "0a75f2254630e11aa4fde386a2f883e2acc8430acc3fb5a833f25da264c62a16"
+      },
+      "typescript": {
+        "version": "7.0.2",
+        "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/typescript/package.json",
+        "sha256": "3722b30210616a13a3213ded11575ba6b2dbab10c32a5ef67afca8513e27017e"
+      }
+    },
+    "browsers": [
+      {
+        "name": "chromium",
+        "revision": "1243",
+        "installByDefault": true,
+        "browserVersion": "153.0.8010.12",
+        "title": "Chrome for Testing"
+      },
+      {
+        "name": "chromium-headless-shell",
+        "revision": "1243",
+        "installByDefault": true,
+        "browserVersion": "153.0.8010.12",
+        "title": "Chrome Headless Shell"
+      }
+    ],
+    "chromium_executable": "/home/cld/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome",
+    "installed_manifests_sha256": "01df716406b76aba9d750bb446e87d38719441dfd9fb370327bc0366b4daf849",
+    "manifest_count": 180,
+    "lock_sha256": "4b2464a1f31bc9e3fd16870678a45a8ef89e83aa6df1f84f9f8fe6db6733c8e1"
+  },
+  "commands": [
+    {
+      "name": "root-id21",
+      "argv": [
+        "/tmp/camctl-fix44-browser-20261025/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_device_capability_declarations.py::test_installed_metadata_reaches_parameter_form_and_device_guide",
+        "-q",
+        "--basetemp",
+        "/tmp/camctl-fix44-browser-followup-20261025/pytest-id21",
+        "--junitxml",
+        "/tmp/camctl-fix44-browser-followup-20261025/logs/root-id21.xml"
+      ],
+      "cwd": "/tmp/camctl-fix44-browser-20261025",
+      "started_utc": "2026-10-25T09:11:31.947659+00:00",
+      "source_head": "d1414c2eed789aaa37b03224ed3a9bff6033075c",
+      "source_diff_sha256": "49243a0eb5baa93050eac5f6b29eec457afb0550a092330960fb900514ac3caf",
+      "exitcode": 0,
+      "elapsed_s": 94.427,
+      "log": "/tmp/camctl-fix44-browser-followup-20261025/logs/root-id21.log"
+    },
+    {
+      "name": "camera-parameters-file",
+      "argv": [
+        "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/.bin/vitest",
+        "run",
+        "tests/integration/browser-camera-parameters.test.ts"
+      ],
+      "cwd": "/tmp/camctl-fix44-browser-20261025/apps/client",
+      "started_utc": "2026-10-25T09:13:12.182760+00:00",
+      "source_head": "d1414c2eed789aaa37b03224ed3a9bff6033075c",
+      "source_diff_sha256": "49243a0eb5baa93050eac5f6b29eec457afb0550a092330960fb900514ac3caf",
+      "exitcode": 0,
+      "elapsed_s": 115.71,
+      "log": "/tmp/camctl-fix44-browser-followup-20261025/logs/camera-parameters-file.log"
+    },
+    {
+      "name": "diff-check",
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "cwd": "/tmp/camctl-fix44-browser-20261025",
+      "started_utc": "2026-10-25T09:15:15.220673+00:00",
+      "source_head": "d1414c2eed789aaa37b03224ed3a9bff6033075c",
+      "source_diff_sha256": "49243a0eb5baa93050eac5f6b29eec457afb0550a092330960fb900514ac3caf",
+      "exitcode": 0,
+      "elapsed_s": 0.009,
+      "log": "/tmp/camctl-fix44-browser-followup-20261025/logs/diff-check.log"
+    }
+  ],
+  "historical_failure_log": "/tmp/camctl-fix44-final-20261025/tasks/005-root-test_device_capability_declarations/artifacts/output.log",
+  "diagnostic_original": {
+    "argv": [
+      "node_modules/.bin/vitest",
+      "run",
+      "tests/integration/browser-camera-parameters.test.ts",
+      "tests/integration/browser-editing.test.ts",
+      "-t",
+      "能力源"
+    ],
+    "cwd": "/tmp/camctl-fix44-browser-20261025/apps/client",
+    "capabilities": "/tmp/camctl-fix44-final-20261025/tasks/005-root-test_device_capability_declarations/tmp/pytest/test_installed_metadata_reache0/installed-capabilities.json",
+    "exitcode": 1,
+    "duration_s_from_vitest": 86.51,
+    "log": "/tmp/camctl-fix44-browser-followup-20261025/logs/diagnostic-original-cwd.log",
+    "diagnostic_sources": [
+      "/tmp/camctl-fix44-browser-followup-20261025/diagnostic-browser-camera-parameters.test.ts",
+      "/tmp/camctl-fix44-browser-followup-20261025/diagnostic-browser-editing.test.ts"
+    ],
+    "observed_failure": "第4个hb-host世界在设备说明按钮performing click action耗尽原5000ms；先前元素已被确认可见、启用和稳定；当时活动BrowserContext数量为4。"
+  },
+  "direct_green": {
+    "same_argv_cwd_capabilities_as_diagnostic": true,
+    "exitcode": 0,
+    "duration_s_from_vitest": 48.82,
+    "log": "/tmp/camctl-fix44-browser-followup-20261025/logs/green-release-context.log",
+    "nested_passed": 5,
+    "nested_skipped_by_existing_filter": 103
+  },
+  "excluded_development_commands": [
+    {
+      "log": "/tmp/camctl-fix44-browser-followup-20261025/logs/diagnostic-original.log",
+      "exitcode": 130,
+      "reason": "诊断入口误用仓库根工作目录，停止后按客户端目录重跑。"
+    },
+    {
+      "log": "/tmp/camctl-fix44-browser-followup-20261025/logs/implementation-draft.log",
+      "exitcode": 1,
+      "reason": "开发中解构close时匹配到另一测试，定位后修正；不计入行为验证。"
+    }
+  ],
+  "snapshots": {
+    "root-id21": {
+      "packages": {
+        "@playwright/test": {
+          "version": "1.63.0",
+          "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/@playwright/test/package.json",
+          "sha256": "5587f932b8979b6889654b60e3c28aeb7ca0abbac00eec8c176c939a16149536"
+        },
+        "playwright": {
+          "version": "1.63.0",
+          "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/playwright/package.json",
+          "sha256": "8bc2ddebe8d9b051b9ecb87d62c6c63877e59d08617f32c3215681ca8bb70998"
+        },
+        "playwright-core": {
+          "version": "1.63.0",
+          "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/playwright-core/package.json",
+          "sha256": "f061c58427e47e843e26d201f0a57076c734e57c734ecbbd87d4a23b7a20db9b"
+        },
+        "vitest": {
+          "version": "5.0.1",
+          "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/vitest/package.json",
+          "sha256": "bb27a3b3f172321701a7b1f1d90a59e5c9596673176f553a91c1e93b9667abfa"
+        },
+        "vite": {
+          "version": "8.3.0",
+          "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/vite/package.json",
+          "sha256": "0a75f2254630e11aa4fde386a2f883e2acc8430acc3fb5a833f25da264c62a16"
+        },
+        "typescript": {
+          "version": "7.0.2",
+          "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/typescript/package.json",
+          "sha256": "3722b30210616a13a3213ded11575ba6b2dbab10c32a5ef67afca8513e27017e"
+        }
+      },
+      "browsers": [
+        {
+          "name": "chromium",
+          "revision": "1243",
+          "installByDefault": true,
+          "browserVersion": "153.0.8010.12",
+          "title": "Chrome for Testing"
+        },
+        {
+          "name": "chromium-headless-shell",
+          "revision": "1243",
+          "installByDefault": true,
+          "browserVersion": "153.0.8010.12",
+          "title": "Chrome Headless Shell"
+        }
+      ],
+      "chromium_executable": "/home/cld/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome",
+      "installed_manifests_sha256": "01df716406b76aba9d750bb446e87d38719441dfd9fb370327bc0366b4daf849",
+      "manifest_count": 180,
+      "lock_sha256": "4b2464a1f31bc9e3fd16870678a45a8ef89e83aa6df1f84f9f8fe6db6733c8e1",
+      "same_dependency_identity": true
+    },
+    "camera-parameters-file": {
+      "packages": {
+        "@playwright/test": {
+          "version": "1.63.0",
+          "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/@playwright/test/package.json",
+          "sha256": "5587f932b8979b6889654b60e3c28aeb7ca0abbac00eec8c176c939a16149536"
+        },
+        "playwright": {
+          "version": "1.63.0",
+          "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/playwright/package.json",
+          "sha256": "8bc2ddebe8d9b051b9ecb87d62c6c63877e59d08617f32c3215681ca8bb70998"
+        },
+        "playwright-core": {
+          "version": "1.63.0",
+          "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/playwright-core/package.json",
+          "sha256": "f061c58427e47e843e26d201f0a57076c734e57c734ecbbd87d4a23b7a20db9b"
+        },
+        "vitest": {
+          "version": "5.0.1",
+          "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/vitest/package.json",
+          "sha256": "bb27a3b3f172321701a7b1f1d90a59e5c9596673176f553a91c1e93b9667abfa"
+        },
+        "vite": {
+          "version": "8.3.0",
+          "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/vite/package.json",
+          "sha256": "0a75f2254630e11aa4fde386a2f883e2acc8430acc3fb5a833f25da264c62a16"
+        },
+        "typescript": {
+          "version": "7.0.2",
+          "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/typescript/package.json",
+          "sha256": "3722b30210616a13a3213ded11575ba6b2dbab10c32a5ef67afca8513e27017e"
+        }
+      },
+      "browsers": [
+        {
+          "name": "chromium",
+          "revision": "1243",
+          "installByDefault": true,
+          "browserVersion": "153.0.8010.12",
+          "title": "Chrome for Testing"
+        },
+        {
+          "name": "chromium-headless-shell",
+          "revision": "1243",
+          "installByDefault": true,
+          "browserVersion": "153.0.8010.12",
+          "title": "Chrome Headless Shell"
+        }
+      ],
+      "chromium_executable": "/home/cld/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome",
+      "installed_manifests_sha256": "01df716406b76aba9d750bb446e87d38719441dfd9fb370327bc0366b4daf849",
+      "manifest_count": 180,
+      "lock_sha256": "4b2464a1f31bc9e3fd16870678a45a8ef89e83aa6df1f84f9f8fe6db6733c8e1",
+      "same_dependency_identity": true
+    },
+    "diff-check": {
+      "packages": {
+        "@playwright/test": {
+          "version": "1.63.0",
+          "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/@playwright/test/package.json",
+          "sha256": "5587f932b8979b6889654b60e3c28aeb7ca0abbac00eec8c176c939a16149536"
+        },
+        "playwright": {
+          "version": "1.63.0",
+          "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/playwright/package.json",
+          "sha256": "8bc2ddebe8d9b051b9ecb87d62c6c63877e59d08617f32c3215681ca8bb70998"
+        },
+        "playwright-core": {
+          "version": "1.63.0",
+          "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/playwright-core/package.json",
+          "sha256": "f061c58427e47e843e26d201f0a57076c734e57c734ecbbd87d4a23b7a20db9b"
+        },
+        "vitest": {
+          "version": "5.0.1",
+          "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/vitest/package.json",
+          "sha256": "bb27a3b3f172321701a7b1f1d90a59e5c9596673176f553a91c1e93b9667abfa"
+        },
+        "vite": {
+          "version": "8.3.0",
+          "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/vite/package.json",
+          "sha256": "0a75f2254630e11aa4fde386a2f883e2acc8430acc3fb5a833f25da264c62a16"
+        },
+        "typescript": {
+          "version": "7.0.2",
+          "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/typescript/package.json",
+          "sha256": "3722b30210616a13a3213ded11575ba6b2dbab10c32a5ef67afca8513e27017e"
+        }
+      },
+      "browsers": [
+        {
+          "name": "chromium",
+          "revision": "1243",
+          "installByDefault": true,
+          "browserVersion": "153.0.8010.12",
+          "title": "Chrome for Testing"
+        },
+        {
+          "name": "chromium-headless-shell",
+          "revision": "1243",
+          "installByDefault": true,
+          "browserVersion": "153.0.8010.12",
+          "title": "Chrome Headless Shell"
+        }
+      ],
+      "chromium_executable": "/home/cld/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome",
+      "installed_manifests_sha256": "01df716406b76aba9d750bb446e87d38719441dfd9fb370327bc0366b4daf849",
+      "manifest_count": 180,
+      "lock_sha256": "4b2464a1f31bc9e3fd16870678a45a8ef89e83aa6df1f84f9f8fe6db6733c8e1",
+      "same_dependency_identity": true
+    }
+  },
+  "result_commit": "62b275c07aa54c7f4fee6b374942b98549228869",
+  "commit_matches_tested_patch": true,
+  "post_commit_worktree_clean": true,
+  "final_summary": {
+    "root_id21_passed": 1,
+    "nested_browser_passed": 5,
+    "camera_file_passed": 39,
+    "all_dependency_snapshots_unchanged": true,
+    "unchanged_timeouts_ms": {
+      "metadata_test": 60000,
+      "device_guide_test": 20000,
+      "playwright_actions": 5000
+    },
+    "production_business_modified": false,
+    "resource_boundary": "每个能力世界完成原字段/指南/草稿/完整参数断言后关闭其BrowserContext、HTTP与存储，断言context数归零；afterEach复用同一关闭承诺。"
+  }
+}

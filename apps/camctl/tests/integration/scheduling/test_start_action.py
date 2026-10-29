@@ -12,6 +12,9 @@ from pathlib import Path
 
 import pytest
 
+from ..support.acceptance import accept_source
+from ..support.database import database_path
+
 from camctl.acceptance.input import parse_input, read_input
 from camctl.acceptance.service import AcceptanceContext, CommandMode, accept_input
 from camctl.contracts.values import new_operation_key, to_utc_micros
@@ -61,7 +64,7 @@ async def _accept_plan(owned: OwnedConnection, tmp_path: Path, body: dict,
     target = tmp_path / "plan.json"
     target.write_text(__import__("json").dumps(body), encoding="utf-8")
     read = await read_input(str(target), RealFileReader())
-    result = await accept_input(
+    result = await accept_source(
         parse_input(read),
         AcceptanceContext(
             mode=CommandMode.RUN,
@@ -69,7 +72,7 @@ async def _accept_plan(owned: OwnedConnection, tmp_path: Path, body: dict,
             repository=AcceptanceRepository(),
             clock=type("C", (), {"utc_micros": staticmethod(lambda: _NOW)})(),
         ),
-        new_operation_key(), owned,
+        database_path(owned),
     )
     assert result.plan_id is not None
     return result.plan_id

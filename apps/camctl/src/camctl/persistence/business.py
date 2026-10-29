@@ -154,7 +154,8 @@ class BusinessDatabase:
         except asyncio.CancelledError as cancelled:
             if not future.done():
                 try:
-                    await _settle(asyncio.ensure_future(self._executor.withdraw(key)))
+                    await _settle(asyncio.ensure_future(
+                        self._executor.withdraw(key, expected_result=future)))
                 except DbExecutorError:
                     # 已完成但尚未投递时，唯一原Future仍拥有真实结果。
                     pass

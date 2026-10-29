@@ -208,6 +208,8 @@ class Deployment:
     def camctl(self, *args: str, driver: dict | None = None,
                timeout_s: float = 180.0) -> CliResult:
         """运行真实 camctl CLI；driver 提供时经部署装配桥接入替身。"""
+        from camctl_memory_plugin import run_camctl
+
         environment = os.environ.copy()
         environment["CAMCTL_TEST_STATE_DB"] = str(self.state_db)
         for name in ("CAMCTL_TEST_CLOCK_FILE", "CAMCTL_TEST_CLOCK_LOG"):
@@ -222,8 +224,8 @@ class Deployment:
             command = [sys.executable, str(_BRIDGE), *args]
         else:
             command = [sys.executable, "-c", _DIRECT_ENTRY, *args]
-        completed = subprocess.run(
-            command, capture_output=True, text=True, env=environment,
+        completed = run_camctl(
+            command, receipt_root=self.root, capture_output=True, text=True, env=environment,
             timeout=timeout_s)
         return CliResult(completed.returncode, completed.stdout, completed.stderr)
 
@@ -233,6 +235,8 @@ class Deployment:
         POSIX 上以独立会话启动，测试按进程组终止整个会话树；工具
         与 worker 后代保持在会话组内，不脱离。
         """
+        from camctl_memory_plugin import start_camctl
+
         environment = os.environ.copy()
         environment["CAMCTL_TEST_STATE_DB"] = str(self.state_db)
         for name in ("CAMCTL_TEST_CLOCK_FILE", "CAMCTL_TEST_CLOCK_LOG"):
@@ -248,8 +252,9 @@ class Deployment:
         else:
             command = [sys.executable, "-c", _DIRECT_ENTRY, *args]
         kwargs = {"start_new_session": True} if os.name == "posix" else {}
-        return subprocess.Popen(
+        return start_camctl(
             command,
+            receipt_root=self.root,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             env=environment, **kwargs)
 
@@ -371,7 +376,7 @@ def stub_driver_spec(files: dict[str, list[dict]], *,
                      record_duration_s: float = 1.0,
                      gates: dict[str, str] | None = None,
                      device_files: dict[str, str] | None = None,
-                     delete_error: str | None = None,
+                     delete_error: dict | None = None,
                      photo_preview_supported: bool = False) -> dict:
     """设备替身剧本：驱动能力、按活动身份的结果文件与同步门。
 

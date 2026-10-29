@@ -390,11 +390,11 @@ Linux x86_64 上的 Node.js 24.20.0、25.9.0 和 26.12.0 分别使用当前锁�
 
 | 检查 | 命令与内容 |
 | --- | --- |
-| 类型检查 | `pnpm run typecheck`，检查服务端、网页和共享规则的接口。 |
-| 构建 | `pnpm run build`，检查类型并构建随本地服务交付的网页。 |
-| 单元测试 | `pnpm run test:unit`，验证独立函数的行为契约；使用受真实接口约束的替身控制协作者输入和故障。 |
-| 集成测试 | `pnpm run test:integration`，先构建当前网页，再验证真实 SQLite、文件、HTTP、服务进程和 Chromium 浏览器之间的协作。 |
-| 完整测试 | `pnpm test`，依次执行单元测试和上述集成检查。 |
+| 类型检查 | `npm run typecheck`，检查服务端、网页和共享规则的接口。 |
+| 构建 | `npm run build`，检查类型并构建随本地服务交付的网页。 |
+| 单元测试 | `npm run test:unit`，验证独立函数的行为契约；使用受真实接口约束的替身控制协作者输入和故障。 |
+| 集成测试 | `npm run test:integration`，先构建当前网页，再验证真实 SQLite、文件、HTTP、服务进程和 Chromium 浏览器之间的协作。 |
+| 完整测试 | `npm test`，依次执行单元测试和上述集成检查。 |
 
 浏览器测试使用本次源码生成的网页。公共协议检查在仓库根执行 `node scripts/check-protocol.mjs`；文档文件链接检查在仓库根执行 `node scripts/check-doc-links.mjs`，该脚本不校验标题锚点。
 

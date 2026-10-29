@@ -1,0 +1,445 @@
+[
+  {
+    "path": "tests/integration/_hasselblad_photo_entry.py",
+    "qualified_name": "_install_fault",
+    "revisions": {
+      "a7755d81": {
+        "line": 395,
+        "end_line": 546,
+        "kind": "FunctionDef",
+        "sha256": "0394e58e6545c43191c2c63cbbace8165c6a474e97c3faa60b599f2b6803cdc5",
+        "signature": "root: Path, fault: str"
+      },
+      "272fda66": {
+        "line": 346,
+        "end_line": 497,
+        "kind": "FunctionDef",
+        "sha256": "0394e58e6545c43191c2c63cbbace8165c6a474e97c3faa60b599f2b6803cdc5",
+        "signature": "root: Path, fault: str"
+      },
+      "9fbb734c": {
+        "line": 395,
+        "end_line": 546,
+        "kind": "FunctionDef",
+        "sha256": "0394e58e6545c43191c2c63cbbace8165c6a474e97c3faa60b599f2b6803cdc5",
+        "signature": "root: Path, fault: str"
+      },
+      "354e38f9": {
+        "line": 395,
+        "end_line": 546,
+        "kind": "FunctionDef",
+        "sha256": "0394e58e6545c43191c2c63cbbace8165c6a474e97c3faa60b599f2b6803cdc5",
+        "signature": "root: Path, fault: str"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+    "qualified_name": "test_installed_hasselblad_complete_commit_receipt_loss_reuses_request",
+    "revisions": {
+      "a7755d81": {
+        "line": 993,
+        "end_line": 1028,
+        "kind": "FunctionDef",
+        "sha256": "6b8fb17badc02fbe347d41a8705de39f79f1218af479d527004449c148586d2c",
+        "signature": "tmp_path, installed_camctl, host_demo, monkeypatch, case"
+      },
+      "272fda66": {
+        "line": 991,
+        "end_line": 1026,
+        "kind": "FunctionDef",
+        "sha256": "6b8fb17badc02fbe347d41a8705de39f79f1218af479d527004449c148586d2c",
+        "signature": "tmp_path, installed_camctl, host_demo, monkeypatch, case"
+      },
+      "9fbb734c": {
+        "line": 993,
+        "end_line": 1028,
+        "kind": "FunctionDef",
+        "sha256": "6b8fb17badc02fbe347d41a8705de39f79f1218af479d527004449c148586d2c",
+        "signature": "tmp_path, installed_camctl, host_demo, monkeypatch, case"
+      },
+      "354e38f9": {
+        "line": 993,
+        "end_line": 1028,
+        "kind": "FunctionDef",
+        "sha256": "6b8fb17badc02fbe347d41a8705de39f79f1218af479d527004449c148586d2c",
+        "signature": "tmp_path, installed_camctl, host_demo, monkeypatch, case"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+    "qualified_name": "test_installed_hasselblad_report_rebuild_keeps_frozen_bytes",
+    "revisions": {
+      "a7755d81": {
+        "line": 1131,
+        "end_line": 1216,
+        "kind": "FunctionDef",
+        "sha256": "ae9c7303ed3830efa2133a7a4b5916467f5a8c9827761b22df06456c5d6ddf34",
+        "signature": "tmp_path, installed_camctl, host_demo, monkeypatch"
+      },
+      "272fda66": {
+        "line": 1129,
+        "end_line": 1214,
+        "kind": "FunctionDef",
+        "sha256": "ae9c7303ed3830efa2133a7a4b5916467f5a8c9827761b22df06456c5d6ddf34",
+        "signature": "tmp_path, installed_camctl, host_demo, monkeypatch"
+      },
+      "9fbb734c": {
+        "line": 1131,
+        "end_line": 1216,
+        "kind": "FunctionDef",
+        "sha256": "ae9c7303ed3830efa2133a7a4b5916467f5a8c9827761b22df06456c5d6ddf34",
+        "signature": "tmp_path, installed_camctl, host_demo, monkeypatch"
+      },
+      "354e38f9": {
+        "line": 1131,
+        "end_line": 1216,
+        "kind": "FunctionDef",
+        "sha256": "ae9c7303ed3830efa2133a7a4b5916467f5a8c9827761b22df06456c5d6ddf34",
+        "signature": "tmp_path, installed_camctl, host_demo, monkeypatch"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+    "qualified_name": "test_installed_hasselblad_missing_start_result_never_replays",
+    "revisions": {
+      "a7755d81": {
+        "line": 1062,
+        "end_line": 1128,
+        "kind": "FunctionDef",
+        "sha256": "58a3a94279dc08903dbf7a3af830189ee63ff69a496a4088b9747ee15bc039ec",
+        "signature": "tmp_path, installed_camctl, host_demo, monkeypatch"
+      },
+      "272fda66": {
+        "line": 1060,
+        "end_line": 1126,
+        "kind": "FunctionDef",
+        "sha256": "58a3a94279dc08903dbf7a3af830189ee63ff69a496a4088b9747ee15bc039ec",
+        "signature": "tmp_path, installed_camctl, host_demo, monkeypatch"
+      },
+      "9fbb734c": {
+        "line": 1062,
+        "end_line": 1128,
+        "kind": "FunctionDef",
+        "sha256": "58a3a94279dc08903dbf7a3af830189ee63ff69a496a4088b9747ee15bc039ec",
+        "signature": "tmp_path, installed_camctl, host_demo, monkeypatch"
+      },
+      "354e38f9": {
+        "line": 1062,
+        "end_line": 1128,
+        "kind": "FunctionDef",
+        "sha256": "58a3a94279dc08903dbf7a3af830189ee63ff69a496a4088b9747ee15bc039ec",
+        "signature": "tmp_path, installed_camctl, host_demo, monkeypatch"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/src/camctl/capture/host_photo.py",
+    "qualified_name": "_verify",
+    "revisions": {
+      "a7755d81": {
+        "line": 91,
+        "end_line": 93,
+        "kind": "AsyncFunctionDef",
+        "sha256": "c2c3c3430225cd54803f87667ed10898f46e94e70bb92fd2ec0f316dec234fac",
+        "signature": "runtime, repository, request, key"
+      },
+      "272fda66": {
+        "line": 91,
+        "end_line": 93,
+        "kind": "AsyncFunctionDef",
+        "sha256": "c2c3c3430225cd54803f87667ed10898f46e94e70bb92fd2ec0f316dec234fac",
+        "signature": "runtime, repository, request, key"
+      },
+      "9fbb734c": {
+        "line": 91,
+        "end_line": 93,
+        "kind": "AsyncFunctionDef",
+        "sha256": "c2c3c3430225cd54803f87667ed10898f46e94e70bb92fd2ec0f316dec234fac",
+        "signature": "runtime, repository, request, key"
+      },
+      "354e38f9": {
+        "line": 91,
+        "end_line": 93,
+        "kind": "AsyncFunctionDef",
+        "sha256": "c2c3c3430225cd54803f87667ed10898f46e94e70bb92fd2ec0f316dec234fac",
+        "signature": "runtime, repository, request, key"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/src/camctl/capture/host_photo.py",
+    "qualified_name": "_request_result",
+    "revisions": {
+      "a7755d81": {
+        "line": 96,
+        "end_line": 116,
+        "kind": "AsyncFunctionDef",
+        "sha256": "630ebc6497c76c8c4713f7c7c3a557539a05bc7312576eaccffbd2ea53424d10",
+        "signature": "runtime, repository, pending: PendingHostPhotoRequest, save"
+      },
+      "272fda66": {
+        "line": 96,
+        "end_line": 116,
+        "kind": "AsyncFunctionDef",
+        "sha256": "630ebc6497c76c8c4713f7c7c3a557539a05bc7312576eaccffbd2ea53424d10",
+        "signature": "runtime, repository, pending: PendingHostPhotoRequest, save"
+      },
+      "9fbb734c": {
+        "line": 96,
+        "end_line": 116,
+        "kind": "AsyncFunctionDef",
+        "sha256": "630ebc6497c76c8c4713f7c7c3a557539a05bc7312576eaccffbd2ea53424d10",
+        "signature": "runtime, repository, pending: PendingHostPhotoRequest, save"
+      },
+      "354e38f9": {
+        "line": 96,
+        "end_line": 116,
+        "kind": "AsyncFunctionDef",
+        "sha256": "630ebc6497c76c8c4713f7c7c3a557539a05bc7312576eaccffbd2ea53424d10",
+        "signature": "runtime, repository, pending: PendingHostPhotoRequest, save"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/src/camctl/persistence/runtime.py",
+    "qualified_name": "open_existing",
+    "revisions": {
+      "a7755d81": {
+        "line": 406,
+        "end_line": 441,
+        "kind": "FunctionDef",
+        "sha256": "f1560ff94cef4002e810ceda12d2a78e1fc2264a19b5cfb3c65b0f577960c7ed",
+        "signature": "path, mode: DbOpenMode, config: DbConfig"
+      },
+      "272fda66": {
+        "line": 406,
+        "end_line": 441,
+        "kind": "FunctionDef",
+        "sha256": "f1560ff94cef4002e810ceda12d2a78e1fc2264a19b5cfb3c65b0f577960c7ed",
+        "signature": "path, mode: DbOpenMode, config: DbConfig"
+      },
+      "9fbb734c": {
+        "line": 406,
+        "end_line": 441,
+        "kind": "FunctionDef",
+        "sha256": "f1560ff94cef4002e810ceda12d2a78e1fc2264a19b5cfb3c65b0f577960c7ed",
+        "signature": "path, mode: DbOpenMode, config: DbConfig"
+      },
+      "354e38f9": {
+        "line": 406,
+        "end_line": 441,
+        "kind": "FunctionDef",
+        "sha256": "f1560ff94cef4002e810ceda12d2a78e1fc2264a19b5cfb3c65b0f577960c7ed",
+        "signature": "path, mode: DbOpenMode, config: DbConfig"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/src/camctl/bootstrap/lifecycle.py",
+    "qualified_name": "_open_connection",
+    "revisions": {
+      "a7755d81": {
+        "line": 605,
+        "end_line": 606,
+        "kind": "FunctionDef",
+        "sha256": "816549b3fd01ce0e25d132f78e29fe137b82b6bdfdea3245548349a78b2b4515",
+        "signature": "state_db: Path, config: DbConfig"
+      },
+      "272fda66": {
+        "line": 619,
+        "end_line": 620,
+        "kind": "FunctionDef",
+        "sha256": "816549b3fd01ce0e25d132f78e29fe137b82b6bdfdea3245548349a78b2b4515",
+        "signature": "state_db: Path, config: DbConfig"
+      },
+      "9fbb734c": {
+        "line": 621,
+        "end_line": 622,
+        "kind": "FunctionDef",
+        "sha256": "816549b3fd01ce0e25d132f78e29fe137b82b6bdfdea3245548349a78b2b4515",
+        "signature": "state_db: Path, config: DbConfig"
+      },
+      "354e38f9": {
+        "line": 621,
+        "end_line": 622,
+        "kind": "FunctionDef",
+        "sha256": "816549b3fd01ce0e25d132f78e29fe137b82b6bdfdea3245548349a78b2b4515",
+        "signature": "state_db: Path, config: DbConfig"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/src/camctl/persistence/executor.py",
+    "qualified_name": "DbExecutor._execute",
+    "revisions": {
+      "a7755d81": {
+        "line": 339,
+        "end_line": 393,
+        "kind": "FunctionDef",
+        "sha256": "2dcec95fabcac805ea8264c625cc8ee4e7433d3f56bb3e6b1843b7608108294b",
+        "signature": "self, job: DbJob, owned: OwnedConnection"
+      },
+      "272fda66": {
+        "line": 339,
+        "end_line": 393,
+        "kind": "FunctionDef",
+        "sha256": "2dcec95fabcac805ea8264c625cc8ee4e7433d3f56bb3e6b1843b7608108294b",
+        "signature": "self, job: DbJob, owned: OwnedConnection"
+      },
+      "9fbb734c": {
+        "line": 342,
+        "end_line": 396,
+        "kind": "FunctionDef",
+        "sha256": "2dcec95fabcac805ea8264c625cc8ee4e7433d3f56bb3e6b1843b7608108294b",
+        "signature": "self, job: DbJob, owned: OwnedConnection"
+      },
+      "354e38f9": {
+        "line": 342,
+        "end_line": 396,
+        "kind": "FunctionDef",
+        "sha256": "2dcec95fabcac805ea8264c625cc8ee4e7433d3f56bb3e6b1843b7608108294b",
+        "signature": "self, job: DbJob, owned: OwnedConnection"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/src/camctl/reporting/publication.py",
+    "qualified_name": "DbPublicationSession.record_intent",
+    "revisions": {
+      "a7755d81": {
+        "line": 278,
+        "end_line": 279,
+        "kind": "AsyncFunctionDef",
+        "sha256": "a0ef0c21d63ea1ed41c932542c08a698a0374e01cc59991a901603401adbde67",
+        "signature": "self, report_id"
+      },
+      "272fda66": {
+        "line": 278,
+        "end_line": 279,
+        "kind": "AsyncFunctionDef",
+        "sha256": "a0ef0c21d63ea1ed41c932542c08a698a0374e01cc59991a901603401adbde67",
+        "signature": "self, report_id"
+      },
+      "9fbb734c": {
+        "line": 278,
+        "end_line": 279,
+        "kind": "AsyncFunctionDef",
+        "sha256": "a0ef0c21d63ea1ed41c932542c08a698a0374e01cc59991a901603401adbde67",
+        "signature": "self, report_id"
+      },
+      "354e38f9": {
+        "line": 278,
+        "end_line": 279,
+        "kind": "AsyncFunctionDef",
+        "sha256": "a0ef0c21d63ea1ed41c932542c08a698a0374e01cc59991a901603401adbde67",
+        "signature": "self, report_id"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/src/camctl/reporting/publication.py",
+    "qualified_name": "DbPublicationSession.save_publication",
+    "revisions": {
+      "a7755d81": {
+        "line": 281,
+        "end_line": 282,
+        "kind": "AsyncFunctionDef",
+        "sha256": "9a3edda6ee4b4d8def3b7035e23a8925f14710085e4da3a622065c3a779753fc",
+        "signature": "self, report_id, file_result"
+      },
+      "272fda66": {
+        "line": 281,
+        "end_line": 282,
+        "kind": "AsyncFunctionDef",
+        "sha256": "9a3edda6ee4b4d8def3b7035e23a8925f14710085e4da3a622065c3a779753fc",
+        "signature": "self, report_id, file_result"
+      },
+      "9fbb734c": {
+        "line": 281,
+        "end_line": 282,
+        "kind": "AsyncFunctionDef",
+        "sha256": "9a3edda6ee4b4d8def3b7035e23a8925f14710085e4da3a622065c3a779753fc",
+        "signature": "self, report_id, file_result"
+      },
+      "354e38f9": {
+        "line": 281,
+        "end_line": 282,
+        "kind": "AsyncFunctionDef",
+        "sha256": "9a3edda6ee4b4d8def3b7035e23a8925f14710085e4da3a622065c3a779753fc",
+        "signature": "self, report_id, file_result"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/src/camctl/capture/handlers.py",
+    "qualified_name": "CaptureRuntime.recover_attempt",
+    "revisions": {
+      "a7755d81": {
+        "line": 1400,
+        "end_line": 1472,
+        "kind": "AsyncFunctionDef",
+        "sha256": "26636d741d5ab317e19e053406af9bd75df98c986b30697ffea6e078ca0b4985",
+        "signature": "self, ticket: AttemptTicket, *, retry_wait: bool=False"
+      },
+      "272fda66": {
+        "line": 1426,
+        "end_line": 1498,
+        "kind": "AsyncFunctionDef",
+        "sha256": "26636d741d5ab317e19e053406af9bd75df98c986b30697ffea6e078ca0b4985",
+        "signature": "self, ticket: AttemptTicket, *, retry_wait: bool=False"
+      },
+      "9fbb734c": {
+        "line": 1426,
+        "end_line": 1498,
+        "kind": "AsyncFunctionDef",
+        "sha256": "26636d741d5ab317e19e053406af9bd75df98c986b30697ffea6e078ca0b4985",
+        "signature": "self, ticket: AttemptTicket, *, retry_wait: bool=False"
+      },
+      "354e38f9": {
+        "line": 1426,
+        "end_line": 1498,
+        "kind": "AsyncFunctionDef",
+        "sha256": "26636d741d5ab317e19e053406af9bd75df98c986b30697ffea6e078ca0b4985",
+        "signature": "self, ticket: AttemptTicket, *, retry_wait: bool=False"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "docs/camctl/database/consistency-verification.md",
+    "contract": "**验收 HBF-02**",
+    "revisions": {
+      "a7755d81": {
+        "line": 113,
+        "text": "- **验收 HBF-02**：准备或完整字节事务提交结果未知时，先结束原写事务，再用独立只读连接核实原操作键及完整申请；确认已提交时验证两份原事实和完整历史边界，可靠未提交时才允许沿原键重试。核实仍未知时保留原键和申请，不创建替代文件身份、不重复拍摄，也不把无法读取解释为回滚。格式 1 保持现有用途边界且不经重复 `init` 升级；格式 2 才允许登记主机照片用途。"
+      },
+      "272fda66": {
+        "line": 113,
+        "text": "- **验收 HBF-02**：准备或完整字节事务提交结果未知时，先结束原写事务，再用独立只读连接核实原操作键及完整申请；确认已提交时验证两份原事实和完整历史边界，可靠未提交时才允许沿原键重试。核实仍未知时保留原键和申请，不创建替代文件身份、不重复拍摄，也不把无法读取解释为回滚。格式 1 保持现有用途边界且不经重复 `init` 升级；格式 2 才允许登记主机照片用途。"
+      },
+      "9fbb734c": {
+        "line": 113,
+        "text": "- **验收 HBF-02**：准备或完整字节事务提交结果未知时，先结束原写事务，再用独立只读连接核实原操作键及完整申请；确认已提交时验证两份原事实和完整历史边界，可靠未提交时才允许沿原键重试。核实仍未知时保留原键和申请，不创建替代文件身份、不重复拍摄，也不把无法读取解释为回滚。格式 1 保持现有用途边界且不经重复 `init` 升级；格式 2 才允许登记主机照片用途。"
+      },
+      "354e38f9": {
+        "line": 113,
+        "text": "- **验收 HBF-02**：准备或完整字节事务提交结果未知时，先结束原写事务，再用独立只读连接核实原操作键及完整申请；确认已提交时验证两份原事实和完整历史边界，可靠未提交时才允许沿原键重试。核实仍未知时保留原键和申请，不创建替代文件身份、不重复拍摄，也不把无法读取解释为回滚。格式 1 保持现有用途边界且不经重复 `init` 升级；格式 2 才允许登记主机照片用途。"
+      }
+    },
+    "same_all": true
+  }
+]

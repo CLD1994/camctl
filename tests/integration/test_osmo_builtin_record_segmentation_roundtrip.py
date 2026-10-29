@@ -7,11 +7,15 @@ import os
 from pathlib import Path
 import re
 import shutil
+import sys
 
 import pytest
 import test_osmo_builtin_timelapse_roundtrip as osmo_roundtrip
+from camctl_memory_plugin import finalize_receipts
 
+from _client_session import ClientSession
 from _osmo_builtin_clock import format_utc, read_clock, set_running
+from _osmo_copy_observation import assert_copy_resumed_before_data
 from _wsl_host_demo import HostDemo, query_state, wait_for
 from camctl_fixtures import Deployment
 from test_camctl_c_module_roundtrip import _report_with_statuses
@@ -19,7 +23,6 @@ from test_osmo_builtin_timelapse_roundtrip import (
     _action,
     _capture_body,
     _capture_params,
-    _client_driver,
     _describe,
     _install_osmo_process_tools,
     _osmo_config,
@@ -149,6 +152,7 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
         cwd=deployment.root,
         env=environment,
         log_dir=package.log_dir,
+        camctl=True,
     )
     described = _describe(
         [str(camctl), "describe", "--config", str(deployment.config_path)],
@@ -161,15 +165,35 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
     (store / "device-capabilities.json").write_text(
         json.dumps(described), encoding="utf-8"
     )
-    deployment.run_client_driver = lambda *args, output: _client_driver(
-        package, *args, output=output
-    )
-    plan, _ = deployment.export_plan_with_client(
-        _capture_body(action_type, params, scheduled_at=format_utc(initial["utc_us"]))
-    )
-    demo = HostDemo(deployment, host_demo, launcher=str(camctl))
-    monkeypatch.chdir(package.root)
+    client = None
+    demo = None
     try:
+        client = ClientSession(
+            ["node", "--import", "tsx", str(Path(__file__).with_name("client_driver.ts"))],
+            cwd=Path(__file__).resolve().parents[2] / "apps/client",
+            env=package.environment,
+            root=deployment.root,
+            timeout=120,
+        )
+        receipts = deployment.root / "client-receipts"
+        receipts.mkdir()
+        receipt_number = 0
+
+        def client_driver(*args, output):
+            nonlocal receipt_number
+            receipt_number += 1
+            return client.call(
+                *args,
+                output=receipts / f"{receipt_number:03d}-{output.name}",
+            )
+
+        deployment.run_client_driver = client_driver
+        plan, _ = deployment.export_plan_with_client(
+            _capture_body(action_type, params, scheduled_at=format_utc(initial["utc_us"]))
+        )
+        demo = HostDemo(deployment, host_demo, launcher=str(camctl))
+        failure = demo.watch_failures()
+        monkeypatch.chdir(package.root)
         demo.start(env=environment)
         demo.submit(plan)
         wait_for(
@@ -180,6 +204,7 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
             ),
             90,
             "START 尚未可靠保存",
+            failure=failure,
         )
         if scenario == "overrun":
             demo.stop()
@@ -281,6 +306,7 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
             copy_gate = Path(environment["CAMCTL_OSMO_TEST_READ_GATE"])
             if scenario == "native-tail" and name == "original":
                 copy_gate.unlink()
+                read_log_start = len(_records(adb_log))
             demo.submit(request)
             if stage == "selection" and name == "original":
                 demo, observed = _resume_marker(
@@ -288,10 +314,12 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
                 )
                 assert observed["items"]
             if scenario == "native-tail" and name == "original":
-                wait_for(
-                    lambda: any(
-                        call["kind"] == "read_blocked" for call in _records(adb_log)
-                    ),
+                interrupted_read = wait_for(
+                    lambda: next((
+                        call for call in _records(adb_log)[read_log_start:]
+                        if call["kind"] == "read_blocked"
+                        and call.get("forwarded_bytes", 0) >= 65536
+                    ), None),
                     90,
                     "取回尚未到达实际数据块同步点",
                 )
@@ -303,6 +331,17 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
                     90,
                     "读取尚未提交第一块进度",
                 )
+                assert len(saved_copy) == 1
+                request_id = int(json.loads(request.read_text(encoding="utf-8"))["request_id"])
+                delivery_query = (
+                    "SELECT d.id,d.output_id FROM deliveries d"
+                    " JOIN actions a ON a.id=d.action_id JOIN plans p ON p.id=a.plan_id"
+                    " WHERE p.request_id=? ORDER BY d.id"
+                )
+                saved_deliveries = query_state(
+                    deployment.state_db, delivery_query, (request_id,)
+                )
+                assert saved_copy[0][1] in [identity for identity, _ in saved_deliveries]
                 demo.stop()
                 assert (
                     query_state(
@@ -311,10 +350,55 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
                     )
                     == saved_copy
                 )
-                copy_gate.touch()
+                assert not any(
+                    call["kind"] == "read"
+                    and call["started_ns"] == interrupted_read["started_ns"]
+                    for call in _records(adb_log)
+                )
+                # 恢复的真实读取先暂停，再核对原身份和可靠偏移。
+                environment["CAMCTL_OSMO_TEST_READ_GATE_AFTER_BYTES"] = "0"
                 demo = HostDemo(deployment, host_demo, launcher=str(camctl))
                 demo.start(env=environment)
+                resumed_failure = demo.watch_failures(
+                    request_id=request_id, expected_statuses={name: "SUCCEEDED"}
+                )
                 demo.submit(request)
+                resumed_read = wait_for(
+                    lambda: next((
+                        call for call in _records(adb_log)
+                        if call["kind"] == "read_started"
+                        and call["started_ns"] > interrupted_read["started_ns"]
+                    ), None),
+                    120,
+                    "原请求恢复尚未开始读取原片",
+                    failure=resumed_failure,
+                )
+                resumed_gate = wait_for(
+                    lambda: next((
+                        call for call in _records(adb_log)
+                        if call["kind"] == "read_blocked"
+                        and call["started_ns"] == resumed_read["started_ns"]
+                    ), None),
+                    30,
+                    "恢复读取尚未在转发新字节前暂停",
+                    failure=resumed_failure,
+                )
+                assert_copy_resumed_before_data(
+                    interrupted_read=interrupted_read,
+                    resumed_read=resumed_read,
+                    resumed_gate=resumed_gate,
+                    saved_copy=saved_copy[0],
+                    resumed_copies=query_state(
+                        deployment.state_db,
+                        "SELECT id,delivery_id,committed_bytes FROM file_copies WHERE delivery_id=?",
+                        (saved_copy[0][1],),
+                    ),
+                    saved_deliveries=saved_deliveries,
+                    resumed_deliveries=query_state(
+                        deployment.state_db, delivery_query, (request_id,)
+                    ),
+                )
+                copy_gate.touch()
             expected_status = "succeeded" if expected else "failed"
             latest = wait_for(
                 lambda: _report_or_error(deployment, {name: expected_status}),
@@ -324,6 +408,16 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
             obtained = _action(latest, name)
             deliveries = obtained.get("deliveries", [])
             assert [delivery["output_id"] for delivery in deliveries] == expected
+            if scenario == "native-tail" and name == "original":
+                assert [
+                    (int(delivery["delivery_id"]), int(delivery["output_id"]))
+                    for delivery in deliveries
+                ] == saved_deliveries
+                assert query_state(
+                    deployment.state_db,
+                    "SELECT id,delivery_id FROM file_copies WHERE delivery_id=?",
+                    (saved_copy[0][1],),
+                ) == [saved_copy[0][:2]]
             if not expected:
                 failure = obtained["result"]["failures"][0]["error"]
                 assert failure["code"] == (
@@ -373,8 +467,7 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
                     delivery["size"] == len(content)
                     and delivery["sha256"] == hashlib.sha256(content).hexdigest()
                 )
-                media = _client_driver(
-                    package,
+                media = deployment.run_client_driver(
                     "import-media",
                     str(store),
                     str(file),
@@ -441,8 +534,31 @@ def test_installed_segment_source_default_explicit_delivery_and_ack(
         )
         _assert_adb_process_provenance(package, adb_log)
     finally:
-        demo.stop()
-        archive = osmo_roundtrip._archive_logs(package.root, package.log_dir)
-        shutil.copytree(
-            deployment.root, archive / "cases" / scenario, dirs_exist_ok=True
-        )
+        primary = sys.exception()
+        errors = []
+        if demo is not None:
+            try:
+                demo.stop()
+            except BaseException as error:
+                errors.append(error)
+        if client is not None:
+            try:
+                client.close()
+            except BaseException as error:
+                errors.append(error)
+        try:
+            finalize_receipts(deployment.root)
+        except BaseException as error:
+            errors.append(error)
+        try:
+            archive = osmo_roundtrip._archive_logs(package.root, package.log_dir)
+            shutil.copytree(
+                deployment.root, archive / "cases" / scenario, dirs_exist_ok=True
+            )
+        except BaseException as error:
+            errors.append(error)
+        if errors:
+            raise BaseExceptionGroup(
+                "OSMO 分段世界操作或收场失败",
+                ([primary] if primary is not None else []) + errors,
+            )

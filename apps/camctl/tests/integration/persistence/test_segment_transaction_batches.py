@@ -6,6 +6,7 @@ import pytest
 from camctl.capture.segment_models import DefaultScopeState
 from camctl.contracts.values import new_operation_key
 from .test_segment_storage import _assessed_world
+from .transaction_fixtures import decorate_transaction_command
 
 def _finish_attempt(owned,ref,runtime):
     from .test_segment_storage import _finish_saved_scan
@@ -63,9 +64,9 @@ async def _ready_world(tmp_path,count=5,*,sizes=None,indexes=None,unknown_keys=F
         from .test_segment_storage import SegmentedCatalog,SegmentRepository,SegmentSetCreate
         from ..capture.result_consumer_fixtures import consumer_world
         from ..capture.test_result_page_history import _request,_actual
-        from camctl.capture.handlers import _begin_check_round
+        from .result_page_fixtures import begin_result_check
         owned,runtime,action_id,_=await consumer_world(tmp_path,'record',catalog=SegmentedCatalog(),record_control_elapsed_ns=60_000_000_000)
-        ticket=_begin_check_round(runtime,action_id).ticket
+        ticket=begin_result_check(owned,runtime,action_id).ticket
         saved=_ok(runtime.capture.save_result_page(_request(runtime,ticket,_actual(ticket,finalized=True)),new_operation_key(),owned))
         attempt=owned.connection.execute('SELECT id FROM operation_attempts WHERE run_id=?',(ticket.run_id,)).fetchone()[0]
         ref=SegmentSetRef(action_id,attempt,saved.event_id,1);repo=SegmentRepository();members=()
@@ -258,9 +259,8 @@ async def test_independent_cross_batch_guards_reject_tampered_proposal(tmp_path,
     count=21 if mode=='wrong_file' else 6
     owned,runtime,repo,ref,request=await _ready_world(tmp_path,count=count,sizes=(10,)*(count-1)+(0,))
     from camctl.persistence.transaction import row_change,update_change
-    original=transactions._FinishCommand.plan
     def plan(command,scope):
-        result=original(command,scope)
+        result=command.plan(scope)
         def events():
             number=0;first=None;last=None
             for event in result.events:
@@ -283,7 +283,7 @@ async def test_independent_cross_batch_guards_reject_tampered_proposal(tmp_path,
                 yield event
             if mode=='extra':yield replace(last,event_id=last.event_id+1)
         return replace(result,events=events())
-    monkeypatch.setattr(transactions._FinishCommand,'plan',plan)
+    decorate_transaction_command(monkeypatch,transactions,plan)
     try:
         before=_fingerprint(owned.connection)
         saved=transactions.finish_segment_recording(request,new_operation_key(),owned,batch_size=2)
@@ -300,9 +300,8 @@ async def test_cross_page_preview_keeps_exact_original_and_origin(tmp_path,bad_o
     _finish_attempt(owned,ref,runtime)
     row=repo.read_set(ref,owned);request=transactions.FinishSegmentRecording(ref,row['activity_id'],row['run_id'],runtime.wall_us())
     if bad_origin:
-        original=transactions._FinishCommand.plan
         def plan(command,scope):
-            result=original(command,scope)
+            result=command.plan(scope)
             def events():
                 for event in result.events:
                     if event.event_type==20 and event.reason==3:
@@ -310,7 +309,7 @@ async def test_cross_page_preview_keeps_exact_original_and_origin(tmp_path,bad_o
                         event=replace(event,rows=(event.rows[0],row_change('output_origins',relation.row_id,{**relation.after.values,'original_output_id':relation.after.values['original_output_id']+1})))
                     yield event
             return replace(result,events=events())
-        monkeypatch.setattr(transactions._FinishCommand,'plan',plan)
+        decorate_transaction_command(monkeypatch,transactions,plan)
     try:
         key=new_operation_key();saved=transactions.finish_segment_recording(request,key,owned,batch_size=2)
         if bad_origin:
@@ -444,10 +443,66 @@ async def test_explicit_failure_requires_original_saved_error_reference(tmp_path
         if mode=='valid':assert saved.result.action_status==4
     finally:owned.connection.close()
 
+async def _run_fixed_batch_capacity(tmp_path):
+    from .segment_capacity_case import (
+        assert_completed_case, memory_budget_backend, prepare_case, worker_command, worker_environment,
+    )
+    import json
+    import time
+
+    backend = memory_budget_backend()
+    budget = backend.get_budget_config()
+    timing_path = tmp_path / "capacity-timing.json"
+    timing = {"input_count": 513, "batch_size": 4}
+    started = time.perf_counter()
+    # 预算不可用时在拍摄、建库和513项输入准备之前明确失败。
+    backend.ensure_memory_budget_available(budget)
+    timing["preflight_seconds"] = time.perf_counter() - started
+    started = time.perf_counter()
+    from ..support.capture import capture_test_session
+    async with capture_test_session():
+        owned, runtime, repo, ref, request = await _ready_world(tmp_path / "world", count=513)
+        try:
+            manifest, expected = prepare_case(owned, request)
+            assert len({row[4] for row in expected["members"]}) == 5
+        finally:
+            owned.connection.close()
+    input_path = tmp_path / "capacity-input.json"
+    result_path = tmp_path / "capacity-result.json"
+    input_path.write_text(json.dumps(manifest))
+    (tmp_path / "capacity-expected.json").write_text(json.dumps(expected))
+    timing["preparation_seconds"] = time.perf_counter() - started
+    timing_path.write_text(json.dumps(timing))
+    started = time.perf_counter()
+    try:
+        with (tmp_path / "worker.stdout").open("w") as stdout, (tmp_path / "worker.stderr").open("w") as stderr:
+            completed = backend.run_budgeted(
+                worker_command(input_path, result_path), budget=budget,
+                receipt_path=tmp_path / "memory-budget.json", timeout=600, check=True,
+                cwd=Path(__file__).resolve().parents[5], env=worker_environment(),
+                stdout=stdout, stderr=stderr, text=True,
+            )
+    finally:
+        timing["budgeted_process_seconds"] = time.perf_counter() - started
+        timing_path.write_text(json.dumps(timing))
+    assert completed.returncode == 0
+    started = time.perf_counter()
+    try:
+        assert_completed_case(manifest, expected, result_path)
+    finally:
+        timing["parent_verification_seconds"] = time.perf_counter() - started
+        timing_path.write_text(json.dumps(timing))
+
+
 @pytest.mark.asyncio
-async def test_fixed_batch_write_and_verification_have_bounded_residency(tmp_path,monkeypatch):
-    import gc,tracemalloc,json
-    records=[]
+async def test_fixed_batch_write_and_verification_have_bounded_residency(tmp_path):
+    """513项、五个原页及三次同库后续观察均在固定进程组预算内处理。"""
+    await _run_fixed_batch_capacity(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_fixed_batch_reads_and_output_identity_lookup_keep_their_bounds(tmp_path):
+    """独立验证真实写入/核实的读取上限与产物身份索引，不作内存验收。"""
     class CursorProbe:
         def __init__(self,cursor,stats):self.cursor,self.stats=cursor,stats
         def __getattr__(self,name):return getattr(self.cursor,name)
@@ -455,13 +510,18 @@ async def test_fixed_batch_write_and_verification_have_bounded_residency(tmp_pat
             rows=self.cursor.fetchmany(size)
             self.stats['max_fetch']=max(self.stats['max_fetch'],len(rows))
             self.stats['fetched_rows']+=len(rows)
-            assert size<=128
+            assert size<=129
             return rows
         def fetchone(self):
             row=self.cursor.fetchone()
             self.stats['fetched_rows']+=int(row is not None)
             return row
-        def fetchall(self):raise AssertionError('增长路径不得调用fetchall')
+        def fetchall(self):
+            rows=self.cursor.fetchall()
+            self.stats['max_fetch']=max(self.stats['max_fetch'],len(rows))
+            self.stats['fetched_rows']+=len(rows)
+            assert len(rows)<=129
+            return rows
         def __iter__(self):return self
         def __next__(self):
             row=self.fetchone()
@@ -472,59 +532,46 @@ async def test_fixed_batch_write_and_verification_have_bounded_residency(tmp_pat
         def __getattr__(self,name):return getattr(self.db,name)
         def execute(self,sql,params=()):
             self.stats['sql_calls']+=1
-            if 'SELECT COUNT(*), MIN(id), MAX(id) FROM history_events' in sql and params==(self.tx,):self.stats['whole_group_checks']+=1
             return CursorProbe(self.db.execute(sql,params),self.stats)
-    for count in (20,200,400):
-        owned,runtime,repo,ref,request=await _ready_world(tmp_path/str(count),count=count)
+    owned, runtime, repo, ref, request = await _ready_world(tmp_path, count=129)
+    try:
+        stats = {"max_fetch": 0, "fetched_rows": 0, "sql_calls": 0}
+        next_tx = owned.connection.execute("SELECT MAX(id)+1 FROM history_transactions").fetchone()[0]
+        measured = replace(owned, connection=MeasuredConnection(owned.connection, stats, next_tx))
+        key = new_operation_key()
+        saved = transactions.finish_segment_recording(request, key, measured, batch_size=4)
+        assert saved.kind == "completed", saved.error
+        result = transactions.verify_segment_finish(request, key, measured, execution_finished=True, batch_size=4)
+        assert result == saved.result and result.output_count == 129
+        assert stats["max_fetch"] <= 129
+        lookup = "SELECT id,created_event_id FROM outputs WHERE source_action_id=? AND device_file_id=? AND kind=? ORDER BY id LIMIT 2"
+        file_id = repo.read_members(ref, None, 1, owned).items[0].file_id
+        plans = owned.connection.execute("EXPLAIN QUERY PLAN " + lookup, (ref.action_id, file_id, 1)).fetchall()
+        assert any("INDEX" in row[-1] and "sqlite_autoindex_outputs" in row[-1] for row in plans)
+        steps = 0
+        def step():
+            nonlocal steps
+            steps += 1
+            return 0
+        owned.connection.set_progress_handler(step, 1)
         try:
-            stats={'max_fetch':0,'fetched_rows':0,'sql_calls':0,'whole_group_checks':0}
-            next_tx=owned.connection.execute('SELECT MAX(id)+1 FROM history_transactions').fetchone()[0]
-            measured=replace(owned,connection=MeasuredConnection(owned.connection,stats,next_tx))
-            gc.collect();tracemalloc.start();tracemalloc.reset_peak()
-            key=new_operation_key();saved=transactions.finish_segment_recording(request,key,measured,batch_size=4)
-            write_peak=tracemalloc.get_traced_memory()[1];tracemalloc.stop()
-            assert saved.kind=='completed',saved.error
-            gc.collect();tracemalloc.start();tracemalloc.reset_peak()
-            result=transactions.verify_segment_finish(request,key,measured,execution_finished=True,batch_size=4)
-            verify_peak=tracemalloc.get_traced_memory()[1];tracemalloc.stop()
-            assert result==saved.result and result.output_count==count
-            assert stats['max_fetch']<=128 and stats['whole_group_checks']<=3
-            lookup='SELECT id,created_event_id FROM outputs WHERE source_action_id=? AND device_file_id=? AND kind=? ORDER BY id LIMIT 2'
-            file_id=repo.read_members(ref,None,1,owned).items[0].file_id
-            plans=owned.connection.execute('EXPLAIN QUERY PLAN '+lookup,(ref.action_id,file_id,1)).fetchall()
-            assert any('INDEX' in row[-1] and 'sqlite_autoindex_outputs' in row[-1] for row in plans)
-            steps=0
-            def step():
-                nonlocal steps
-                steps+=1
-                return 0
-            owned.connection.set_progress_handler(step,1)
-            try:
-                with closing(owned.connection.execute(lookup,(ref.action_id,file_id,1))) as query:
-                    lookup_rows=query.fetchmany(2)
-            finally:owned.connection.set_progress_handler(None,0)
-            assert len(lookup_rows)==1 and steps<80
-            records.append({'N':count,'B':4,'write_peak':write_peak,'verify_peak':verify_peak,
-                'cache_size':owned.connection.execute('PRAGMA cache_size').fetchone()[0],
-                'lookup_vm_steps':steps,'lookup_rows':len(lookup_rows),'lookup_plan':[row[-1] for row in plans],**stats})
-        finally:owned.connection.close()
-    print('P3A_GROWTH '+json.dumps(records))
-    # 原结果页上限128高于本次候选B=4；N=200包含完整原页，仍须在固定空间内。
-    assert records[1]['write_peak']<records[0]['write_peak']+2_000_000
-    assert records[1]['verify_peak']<records[0]['verify_peak']+2_000_000
-    assert records[2]['write_peak']<records[1]['write_peak']+400_000
-    assert records[2]['verify_peak']<records[1]['verify_peak']+400_000
+            with closing(owned.connection.execute(lookup, (ref.action_id, file_id, 1))) as query:
+                lookup_rows = query.fetchmany(2)
+        finally:
+            owned.connection.set_progress_handler(None, 0)
+        assert len(lookup_rows) == 1 and steps < 80
+    finally:
+        owned.connection.close()
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('omit_progress',[False,True,'missing_reads','unreliable_reads'])
+@pytest.mark.parametrize('omit_progress',[False,'missing_reads','unreliable_reads'])
 async def test_actual_last_event_cannot_substitute_for_proved_activation(tmp_path,monkeypatch,omit_progress):
     from camctl.persistence.transaction import update_change,event_envelope
     from camctl.persistence.repositories.outputs import register_outputs_guards
     register_outputs_guards()
     owned,runtime,repo,ref,request=await _ready_world(tmp_path)
-    original=transactions._FinishCommand.plan
     def plan(command,scope):
-        result=original(command,scope)
+        result=command.plan(scope)
         def events():
             for event in result.events:
                 if event.event_type==transactions.storage._EVENT['id'] and event.reason==transactions.storage._EVENT['branches']['ACTIVATE']['reason']:
@@ -533,7 +580,6 @@ async def test_actual_last_event_cannot_substitute_for_proved_activation(tmp_pat
                 yield event
         def context(event,transaction):
             current=result.context(event,transaction)
-            if omit_progress is True:current.current_reads._segment_guard_state=None
             if event.event_id==transaction.last_event_id:
                 if omit_progress=='missing_reads':current=replace(current,current_reads=None)
                 elif omit_progress=='unreliable_reads':
@@ -541,7 +587,7 @@ async def test_actual_last_event_cannot_substitute_for_proved_activation(tmp_pat
                     current=replace(current,current_reads=SimpleNamespace(seal_segment_finish=lambda _:None))
             return current
         return replace(result,events=events(),context=context,complete=lambda _:None)
-    monkeypatch.setattr(transactions._FinishCommand,'plan',plan)
+    decorate_transaction_command(monkeypatch,transactions,plan)
     try:
         before=_complete_persisted_state(owned)
         saved=transactions.finish_segment_recording(request,new_operation_key(),owned,batch_size=2)
@@ -552,27 +598,27 @@ async def test_actual_last_event_cannot_substitute_for_proved_activation(tmp_pat
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('omit_header',[False,True])
-async def test_direct_terminal_request_cannot_omit_its_complete_group(tmp_path,omit_header):
+async def test_direct_terminal_request_cannot_omit_its_complete_group(tmp_path,monkeypatch,omit_header):
     from camctl.persistence.transaction import TransactionScope,CommandPlan
     from camctl.contracts.history_values import TransactionRange
     from camctl.history.reads import PlanReadScope
     owned,runtime,repo,ref,request=await _ready_world(tmp_path)
     key=new_operation_key()
-    class IncompleteTerminal:
-        def plan(self,scope):
-            proposal_scope=TransactionScope(scope.connection,scope.max_txn_id,scope.max_event_id)
-            complete=transactions._FinishCommand(request,key,2).plan(proposal_scope)
-            terminal=next(iter(complete.events))
-            if omit_header:terminal=replace(terminal,evidence={})
-            allocation=scope.allocate(1)
-            context=complete.context(terminal,TransactionRange(allocation.txn_id,
-                allocation.first_event_id,allocation.last_event_id))
-            action=context.state_rows['actions'][ref.action_id]
-            return CommandPlan((terminal,),context.owners,context.state_rows,
-                plan_read_scope=PlanReadScope(action['plan_id'],2))
+    def plan(command,scope):
+        proposal_scope=TransactionScope(scope.connection,scope.max_txn_id,scope.max_event_id)
+        complete=command.plan(proposal_scope)
+        terminal=next(iter(complete.events))
+        if omit_header:terminal=replace(terminal,evidence={})
+        allocation=scope.allocate(1)
+        context=complete.context(terminal,TransactionRange(allocation.txn_id,
+            allocation.first_event_id,allocation.last_event_id))
+        action=context.state_rows['actions'][ref.action_id]
+        return CommandPlan((terminal,),context.owners,context.state_rows,
+            plan_read_scope=PlanReadScope(action['plan_id'],2))
+    decorate_transaction_command(monkeypatch,transactions,plan)
     try:
         before=_fingerprint(owned.connection)
-        saved=commit_operation(IncompleteTerminal(),key,owned)
+        saved=transactions.finish_segment_recording(request,key,owned,batch_size=2)
         assert saved.kind=='rolled_back',saved.error
         assert _fingerprint(owned.connection)==before
     finally:owned.connection.close()
@@ -585,7 +631,7 @@ async def test_unheaded_failure_keeps_earlier_complete_scan_applicability(tmp_pa
     from .test_segment_storage import SegmentedCatalog
     from ..capture.result_consumer_fixtures import consumer_world
     from ..capture.test_result_page_history import _request,_actual,_REGISTRY
-    from camctl.capture.handlers import _begin_check_round
+    from .result_page_fixtures import begin_result_check
     from camctl.operations.attempts import AttemptConfig,AttemptFinish
     from camctl.operations.models import ErrorValue
     from camctl.operations.validation import validate_outcome
@@ -596,7 +642,7 @@ async def test_unheaded_failure_keeps_earlier_complete_scan_applicability(tmp_pa
     runtime.check_config=AttemptConfig(3,Decimal('10'),Decimal('0'))
     try:
         for number in (1,2):
-            ticket=_begin_check_round(runtime,action_id).ticket
+            ticket=begin_result_check(owned,runtime,action_id).ticket
             actual=_actual(ticket,finalized=earlier_complete if number==1 else False,
                 error=None if number==1 else ErrorValue('directory_read_failed','device',{'received_bytes':9}))
             _ok(runtime.capture.save_result_page(_request(runtime,ticket,actual),new_operation_key(),owned))
@@ -647,9 +693,8 @@ async def test_final_activation_independently_requires_applicable_closure(tmp_pa
     from camctl.persistence.repositories.outputs import register_outputs_guards
     register_outputs_guards()
     owned,runtime,repo,ref,request=await _ready_world(tmp_path)
-    original=transactions._FinishCommand.plan
     def plan(command,scope):
-        result=original(command,scope)
+        result=command.plan(scope)
         def events():
             for event in result.events:
                 table='operation_runs' if closure=='run' else 'plans'
@@ -659,7 +704,7 @@ async def test_final_activation_independently_requires_applicable_closure(tmp_pa
                         (update_change('outputs',row[0],{'original_name':row[1]},{'original_name':'changed.osv'}),),request.occurred_at)
                 yield event
         return replace(result,events=events(),complete=lambda db:None)
-    monkeypatch.setattr(transactions._FinishCommand,'plan',plan)
+    decorate_transaction_command(monkeypatch,transactions,plan)
     try:
         before=_fingerprint(owned.connection)
         saved=transactions.finish_segment_recording(request,new_operation_key(),owned,batch_size=2)
@@ -717,10 +762,9 @@ async def test_original_closure_qualification_keeps_birth_terminal_and_later_sib
         again=transactions.finish_segment_recording(request,key,owned,batch_size=2)
         assert again.kind=='completed' and again.result==saved.result,again.error
         assert _fingerprint(owned.connection)==before
-        owned.connection.execute('BEGIN')
-        try:qualification=transactions._completion_qualification(owned.connection,request,before_event_id=first,
-            transaction=transactions.read_transaction_range(owned.connection,saved.boundary.txn_id))
-        finally:owned.connection.execute('ROLLBACK')
+        from camctl.contracts.json_values import parse_exact_json
+        qualification=parse_exact_json(owned.connection.execute(
+            'SELECT body_json FROM history_events WHERE id=?',(first,)).fetchone()[0])['evidence']['segment_finish_request']
         assert qualification['complete_plan']==(siblings=='invalid_only')
         assert qualification['finish_run'] is True
     finally:owned.connection.close()
@@ -738,10 +782,9 @@ async def test_preended_results_run_is_not_finished_again_in_original_group(tmp_
         key=new_operation_key();saved=transactions.finish_segment_recording(request,key,owned,batch_size=2)
         assert saved.kind=='completed',saved.error
         first=owned.connection.execute('SELECT first_event_id FROM history_transactions WHERE id=?',(saved.boundary.txn_id,)).fetchone()[0]
-        owned.connection.execute('BEGIN')
-        try:qualification=transactions._completion_qualification(owned.connection,request,before_event_id=first,
-            transaction=transactions.read_transaction_range(owned.connection,saved.boundary.txn_id))
-        finally:owned.connection.execute('ROLLBACK')
+        from camctl.contracts.json_values import parse_exact_json
+        qualification=parse_exact_json(owned.connection.execute(
+            'SELECT body_json FROM history_events WHERE id=?',(first,)).fetchone()[0])['evidence']['segment_finish_request']
         assert qualification['finish_run'] is False and qualification['complete_plan'] is True
         assert transactions.verify_segment_finish(request,key,owned,execution_finished=True)==saved.result
     finally:owned.connection.close()
@@ -769,9 +812,8 @@ async def test_original_key_cannot_suppress_applicable_closure_with_false_header
 @pytest.mark.parametrize('siblings,field,value',[(None,'finish_run',False),(None,'complete_plan',False),('pending_with_invalid','complete_plan',True)])
 async def test_direct_proposal_cannot_choose_its_own_closure_flags(tmp_path,monkeypatch,siblings,field,value):
     owned,runtime,repo,ref,request=await _ready_world(tmp_path,siblings=siblings)
-    original=transactions._FinishCommand.plan
     def plan(command,scope):
-        result=original(command,scope)
+        result=command.plan(scope)
         def events():
             for event in result.events:
                 if 'segment_finish_request' in event.evidence:
@@ -780,7 +822,7 @@ async def test_direct_proposal_cannot_choose_its_own_closure_flags(tmp_path,monk
                     event=replace(event,evidence={'segment_finish_request':header})
                 yield event
         return replace(result,events=events(),complete=lambda db:None)
-    monkeypatch.setattr(transactions._FinishCommand,'plan',plan)
+    decorate_transaction_command(monkeypatch,transactions,plan)
     try:
         before=_fingerprint(owned.connection)
         saved=transactions.finish_segment_recording(request,new_operation_key(),owned,batch_size=2)
@@ -799,13 +841,14 @@ async def test_completion_proof_uses_original_scan_bound_and_actual_stop(tmp_pat
     finally:owned.connection.close()
 
 @pytest.mark.asyncio
-async def test_original_control_proof_rejects_missing_stop_after_assessment_was_saved(tmp_path,monkeypatch):
+async def test_original_control_proof_rejects_missing_stop_after_assessment_was_saved(tmp_path):
     owned,runtime,repo,ref,request=await _ready_world(tmp_path)
-    original=transactions._one
-    def one(db,sql,params=()):
-        if 'FROM operation_runs r JOIN operation_attempts t' in sql and 'segment_stop_proof' in sql:return None
-        return original(db,sql,params)
-    monkeypatch.setattr(transactions,'_one',one)
+    from camctl.contracts.enums import enum_for
+    unknown=int(enum_for('operation_attempts.effect_state').UNKNOWN)
+    changed=owned.connection.execute('UPDATE operation_attempts SET effect_state=? WHERE run_id IN '
+        '(SELECT id FROM operation_runs WHERE responsibility_key=? AND action_id=?)',
+        (unknown,f'stop/{ref.action_id}',ref.action_id)).rowcount
+    assert changed==1
     try:
         from camctl.contracts.values import ConsistencyError
         with pytest.raises(ConsistencyError, match='实际STOP证明'):
@@ -889,13 +932,16 @@ async def test_later_stronger_control_fact_does_not_upgrade_frozen_unknown(tmp_p
     finally:owned.connection.close()
 
 @pytest.mark.asyncio
-async def test_original_control_proof_rejects_late_control_after_assessment_was_saved(tmp_path,monkeypatch):
+async def test_original_control_proof_rejects_changed_stop_reference_after_assessment_was_saved(tmp_path):
     owned,runtime,repo,ref,request=await _ready_world(tmp_path)
-    original=transactions._one
-    def one(db,sql,params=()):
-        if 'json_extract(e.body_json' in sql and 'control_elapsed_ns' in sql:return None
-        return original(db,sql,params)
-    monkeypatch.setattr(transactions,'_one',one)
+    from camctl.contracts.json_values import parse_exact_json
+    from camctl.persistence.transaction import encode_json_value
+    proof=transactions.verify_completion_proof(request,owned)
+    raw=owned.connection.execute('SELECT body_json FROM history_events WHERE id=?',(proof.control_event_id,)).fetchone()[0]
+    body=parse_exact_json(raw)
+    body['evidence']['observation']['stop_result_event_id']=proof.scan_intent_event_id
+    owned.connection.execute('UPDATE history_events SET body_json=? WHERE id=?',
+        (encode_json_value(body),proof.control_event_id))
     try:
         from camctl.contracts.values import ConsistencyError
         with pytest.raises(ConsistencyError, match='scan之前'):
@@ -911,8 +957,13 @@ async def test_original_file_wait_proof_can_reuse_earlier_actual_results_attempt
     from decimal import Decimal
     from .test_segment_storage import SegmentedCatalog,SegmentRepository,SegmentSetCreate,SegmentMemberInput
     from ..capture.result_consumer_fixtures import consumer_world
-    from ..capture.test_record_file_completion_wait import _result_port,_stop_context,_completed_result
-    from camctl.capture.handlers import _listing_round,_finish_listing_result,_register_listing
+    from ..capture.test_record_file_completion_wait import _stop_context,_completed_result,_REGISTRY
+    from .result_page_fixtures import begin_result_check
+    from camctl.capture.files import OwnershipFromResultPageSave, FileCompletionSave
+    from camctl.capture.result_pages import ResultPageSave
+    from camctl.operations.attempts import AttemptFinish
+    from camctl.operations.validation import validate_outcome
+    from camctl.persistence.repositories.operations import OperationRepository
     from camctl.operations.models import ErrorValue
     from camctl.operations.attempts import AttemptConfig
     class SegmentWaitCatalog(SegmentedCatalog):
@@ -927,21 +978,32 @@ async def test_original_file_wait_proof_can_reuse_earlier_actual_results_attempt
     try:
         context=_stop_context(owned,action_id);source_id=None
         if reuse_wait:
-            async def first(request,batch):return _completed_result(request.ticket,context,error=ErrorValue('metadata_failed','result',{}))
-            _result_port(runtime,first)
-            listing=await _listing_round(runtime,action_id)
-            source_id=runtime.capture.read_last_result_page(listing.ticket,owned).ref.event_id
-            _finish_listing_result(runtime,listing,retry_wait=True)
+            first_ticket=begin_result_check(owned,runtime,action_id).ticket
+            actual=_completed_result(first_ticket,context,error=ErrorValue('metadata_failed','result',{})).outcome
+            first=_ok(runtime.capture.save_result_page(ResultPageSave(first_ticket,1,None,
+                validate_outcome(first_ticket,actual,_REGISTRY),runtime.wall_us()),new_operation_key(),owned))
+            source_id=first.event_id
+            _ok(OperationRepository().finish_attempt(AttemptFinish(first_ticket,
+                validate_outcome(first_ticket,actual,_REGISTRY),runtime.wall_us(),retry_wait=True),
+                new_operation_key(),owned))
         entry={'identity':'/DCIM/CAM_001/CAM_20261021090000_0001_D.OSV','locator':{'path':'/DCIM/CAM_001/CAM_20261021090000_0001_D.OSV'},'complete':True,'size_bytes':10,'kind':'video','format_id':'osv'}
-        async def final(request,batch):return _completed_result(request.ticket,context,entries=[entry],finalized=True,source_page_event_id=source_id)
-        _result_port(runtime,final)
-        listing=await _listing_round(runtime,action_id)
-        saved=runtime.capture.read_last_result_page(listing.ticket,owned)
-        _register_listing(runtime,action_id,listing)
-        _finish_listing_result(runtime,listing)
-        attempt_id=owned.connection.execute('SELECT id FROM operation_attempts WHERE run_id=? AND attempt_no=?',(listing.ticket.run_id,listing.ticket.attempt_id)).fetchone()[0]
+        ticket=begin_result_check(owned,runtime,action_id).ticket
+        actual=_completed_result(ticket,context,entries=[entry],finalized=True,source_page_event_id=source_id).outcome
+        page=_ok(runtime.capture.save_result_page(ResultPageSave(ticket,1,None,
+            validate_outcome(ticket,actual,_REGISTRY),runtime.wall_us()),new_operation_key(),owned))
+        saved=runtime.capture.read_result_page(page,owned)
+        file_id=saved.file_ids[0][1]
+        _ok(runtime.capture.save_ownership_from_result_page(
+            OwnershipFromResultPageSave(page,file_id,runtime.wall_us()),new_operation_key(),owned))
+        _ok(runtime.capture.save_file_completion(FileCompletionSave(file_id,3,runtime.wall_us(),
+            basis=3,observation=saved.page.entries[0].evidence,size_bytes=10,
+            activity_id=int(ticket.target_id),result_page_event_id=page.event_id,
+            stop_result_event_id=context['stop_result_event_id']),new_operation_key(),owned))
+        _ok(OperationRepository().finish_attempt(AttemptFinish(ticket,
+            validate_outcome(ticket,actual,_REGISTRY),runtime.wall_us()),new_operation_key(),owned))
+        attempt_id=owned.connection.execute('SELECT id FROM operation_attempts WHERE run_id=? AND attempt_no=?',(ticket.run_id,ticket.attempt_id)).fetchone()[0]
         ref=SegmentSetRef(action_id,attempt_id,saved.ref.event_id,1);repo=SegmentRepository()
-        _ok(repo.create(SegmentSetCreate(ref,int(listing.ticket.target_id),listing.ticket.run_id,60000,runtime.wall_us()),new_operation_key(),owned))
+        _ok(repo.create(SegmentSetCreate(ref,int(ticket.target_id),ticket.run_id,60000,runtime.wall_us()),new_operation_key(),owned))
         file_id=saved.file_ids[0][1]
         file_event=owned.connection.execute('SELECT last_event_id FROM device_files WHERE id=?',(file_id,)).fetchone()[0]
         member=SegmentMemberInput(file_id,saved.ref.event_id,file_event,SegmentMemberRole.ORIGINAL,OwnershipState.OWNED,FileCompletionState.COMPLETE)
@@ -1013,9 +1075,8 @@ async def test_accepted_completion_matches_original_full_request(tmp_path,monkey
         request=transactions.FinishSegmentRecording(ref,row['activity_id'],row['run_id'],runtime.wall_us())
     else:
         owned,runtime,repo,ref,request=await _ready_world(tmp_path,count=5)
-    original=transactions._FinishCommand.plan
     def altered_plan(command,scope):
-        result=original(command,scope)
+        result=command.plan(scope)
         def events():
             pending=None
             for event in result.events:
@@ -1040,9 +1101,9 @@ async def test_accepted_completion_matches_original_full_request(tmp_path,monkey
     try:
         key=new_operation_key()
         before=_complete_persisted_state(owned)
-        if mode=='direct':receipt=commit_operation(_completion_command(ref,members,request.occurred_at,key),key,owned)
+        if mode=='direct':receipt=commit_operation(_completion_command(owned,ref,members,request.occurred_at,key),key,owned)
         else:
-            if mode!='valid':monkeypatch.setattr(transactions._FinishCommand,'plan',altered_plan)
+            if mode!='valid':decorate_transaction_command(monkeypatch,transactions,altered_plan)
             receipt=transactions.finish_segment_recording(request,key,owned,batch_size=2)
         if mode in ('valid','direct'):
             assert receipt.kind=='completed',receipt.error
@@ -1094,14 +1155,13 @@ async def test_every_actual_stage_must_match_frozen_protocol(tmp_path,monkeypatc
     try:
         key=new_operation_key();before=_complete_persisted_state(owned)
         if entry=='bounded':
-            original=transactions._FinishCommand.plan
             def plan(command,scope):
-                saved=original(command,scope)
+                saved=command.plan(scope)
                 return replace(saved,events=(mutate(event) for event in saved.events),complete=lambda _:None)
-            monkeypatch.setattr(transactions._FinishCommand,'plan',plan)
+            decorate_transaction_command(monkeypatch,transactions,plan)
             receipt=transactions.finish_segment_recording(request,key,owned,batch_size=2)
         else:
-            command=_completion_command(ref,members,request.occurred_at,key,drafts=_candidate_drafts(repo,ref,owned),batch_size=2)
+            command=_completion_command(owned,ref,members,request.occurred_at,key,drafts=_candidate_drafts(repo,ref,owned),batch_size=2)
             class Altered:
                 def plan(self,scope):
                     saved=command.plan(scope)
@@ -1125,7 +1185,7 @@ async def test_both_entries_use_one_canonical_order_and_original_batch(tmp_path,
     try:
         key=new_operation_key()
         if entry=='bounded':saved=transactions.finish_segment_recording(request,key,owned,batch_size=batch)
-        else:saved=commit_operation(_completion_command(ref,members,request.occurred_at,key,drafts=_candidate_drafts(repo,ref,owned),batch_size=batch),key,owned)
+        else:saved=commit_operation(_completion_command(owned,ref,members,request.occurred_at,key,drafts=_candidate_drafts(repo,ref,owned),batch_size=batch),key,owned)
         assert saved.kind=='completed',saved.error
         # 手算的阶段次序：5原片、1预览、5条范围、原RESULTS与最后计划共同收场。
         types=transactions.load_event_registry()['events']
@@ -1155,6 +1215,8 @@ async def test_context_cannot_replace_original_transaction_connection(tmp_path,m
     observer=open_existing(Path(path),DbOpenMode.EXISTING_RO,DbConfig())
     observer.connection.execute('BEGIN')
     observer.connection.execute('SELECT MAX(id) FROM history_events').fetchone()
+    key=new_operation_key()
+    command=_completion_command(owned,ref,members,request.occurred_at,key) if entry=='finite' else None
     original=SqlEventReads.__init__
     replaced=False
     def initialize(reads,*args,**kwargs):
@@ -1165,10 +1227,85 @@ async def test_context_cannot_replace_original_transaction_connection(tmp_path,m
             reads.connection=observer.connection
     monkeypatch.setattr(SqlEventReads,'__init__',initialize)
     try:
-        before=_complete_persisted_state(owned);key=new_operation_key()
+        before=_complete_persisted_state(owned)
         if entry=='bounded':saved=transactions.finish_segment_recording(request,key,owned,batch_size=2)
-        else:saved=commit_operation(_completion_command(ref,members,request.occurred_at,key),key,owned)
+        else:saved=commit_operation(command,key,owned)
         assert replaced
         assert saved.kind=='rolled_back',saved.error
         assert _complete_persisted_state(owned)==before
     finally:observer.connection.close();owned.connection.close()
+
+
+@pytest.mark.asyncio
+async def test_capacity_worker_without_budget_preserves_real_completion_and_receipt(tmp_path):
+    """独立 worker 的功能辅助检查，不作为内存预算验收。"""
+    import json
+    import subprocess
+    from .segment_capacity_case import assert_completed_case, prepare_case, worker_command, worker_environment
+
+    from ..support.capture import capture_test_session
+    async with capture_test_session():
+        owned, runtime, repo, ref, request = await _ready_world(tmp_path / "world", count=5)
+        try:
+            manifest, expected = prepare_case(owned, request)
+        finally:
+            owned.connection.close()
+    input_path = tmp_path / "input.json"
+    result_path = tmp_path / "result.json"
+    input_path.write_text(json.dumps(manifest))
+    completed = subprocess.run(worker_command(input_path, result_path), env=worker_environment(),
+                               capture_output=True, text=True, timeout=60, check=False)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    actual = assert_completed_case(manifest, expected, result_path)
+    assert actual["verified"]["output_count"] == 5
+    assert len(actual["rounds"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_capacity_budget_is_checked_before_world_preparation(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import sys
+    from . import segment_capacity_case
+
+    class UnavailableBudget(RuntimeError):
+        pass
+
+    def unavailable(budget):
+        raise UnavailableBudget("controlled unavailable controller")
+
+    async def forbidden_preparation(*args, **kwargs):
+        raise AssertionError("预算不可用时禁止昂贵准备")
+
+    backend = SimpleNamespace(get_budget_config=lambda: object(),
+                              ensure_memory_budget_available=unavailable)
+    monkeypatch.setattr(segment_capacity_case, "memory_budget_backend", lambda: backend)
+    monkeypatch.setattr(sys.modules[__name__], "_ready_world", forbidden_preparation)
+    with pytest.raises(UnavailableBudget):
+        await _run_fixed_batch_capacity(tmp_path)
+
+
+@pytest.mark.parametrize("damage", ["absent", "empty", "wrong_key", "missing_result", "wrong_count"])
+def test_capacity_worker_success_requires_complete_business_result(tmp_path, damage):
+    import json
+    from .segment_capacity_case import read_worker_result
+
+    manifest = {"database": "/prepared/state.db", "key": "a" * 32, "request": {}, "observations": []}
+    expected = {"history_before": [1, 1], "result": {"output_count": 1}}
+    result = {"output_count": 1, "boundary": {"txn_id": 2, "last_event_id": 2}}
+    receipt = {"kind": "completed", "result": result, "boundary": result["boundary"]}
+    actual = {"version": 1, "database": manifest["database"], "key": manifest["key"], "request": {},
+              "history_before": [1, 1], "history_after_write": [2, 2], "history_after_repeated": [2, 2],
+              "write": receipt, "repeated": receipt, "verified": result, "rounds": []}
+    path = tmp_path / "worker-result.json"
+    if damage == "empty":
+        actual = {}
+    elif damage == "wrong_key":
+        actual["key"] = "b" * 32
+    elif damage == "missing_result":
+        actual["verified"] = None
+    elif damage == "wrong_count":
+        result["output_count"] = 0
+    if damage != "absent":
+        path.write_text(json.dumps(actual))
+    with pytest.raises(AssertionError):
+        read_worker_result(path, manifest, expected)

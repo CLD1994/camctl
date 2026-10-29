@@ -17,7 +17,7 @@ from camctl.persistence.transaction import row_facts
 from .test_read_associations import read_targets, _command
 from .test_local_read import local_read
 from .test_qualification import _seed_action
-from ..operations.test_result_reuse import _FaultConnection
+from ..support.output_source_cases import QueryProbe, OperationFailure, reads_table
 
 
 @pytest.fixture(params=["device", "host"])
@@ -172,30 +172,29 @@ def test_rejection_query_or_write_failure_preserves_all_original_facts(target, p
     _availability(owned.connection, command, 2, 5)
     owned.connection.commit()
     before = tuple(owned.connection.iterdump())
-    fault = replace(owned, connection=_FaultConnection(owned.connection, prefix))
-    result = OutputsRepository().grant_file(command, new_operation_key(), fault)
+    probe=(QueryProbe(owned.connection,lambda reads,columns,args: ('cleanup_items','output_id') in reads and 'id' not in columns,
+        'execute') if prefix=='SELECT COUNT(*)' else
+        OperationFailure(owned.connection,sqlite3.SQLITE_UPDATE,'obtain_items'))
+    fault=replace(owned,connection=probe)
+    result=OutputsRepository().grant_file(command,new_operation_key(),fault)
     assert result.kind is DbOutcomeKind.ROLLED_BACK
-    assert isinstance(result.error, sqlite3.OperationalError), result.error
+    assert result.error is probe.error
+    assert probe.queries if isinstance(probe,QueryProbe) else probe.matches>0
     assert tuple(owned.connection.iterdump()) == before
 
 
-class _RestrictionConnection(_FaultConnection):
-    def __init__(self, connection, fail_fetch=False):
-        super().__init__(connection, "unused")
-        self.fail_fetch = fail_fetch
-        self.query = None
-        self.cursor = None
+class _RestrictionConnection(QueryProbe):
+    def __init__(self,connection,fail_fetch=False):
+        super().__init__(connection,lambda reads,columns,args: ('cleanup_items','output_id') in reads and 'id' not in columns,
+            'fetch' if fail_fetch else None,error=sqlite3.OperationalError('restriction read failed'))
 
-    def execute(self, sql, parameters=()):
-        cursor = self._connection.execute(sql, parameters)
-        if sql.startswith("SELECT COUNT(*)") and "cleanup_items" in sql:
-            self.query = sql, parameters
-            self.cursor = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)
-            self.cursor.close.side_effect = cursor.close
-            self.cursor.fetchone.side_effect = (sqlite3.OperationalError("restriction read failed")
-                                               if self.fail_fetch else cursor.fetchone)
-            return self.cursor
-        return cursor
+    @property
+    def cursor(self):
+        return self.cursors[-1]
+
+    @property
+    def query(self):
+        return self.queries[-1]
 
 
 @pytest.mark.parametrize("restricted", [False, True])

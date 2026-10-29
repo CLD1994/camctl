@@ -1,0 +1,240 @@
+[
+  {
+    "tmp": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/tmp/pytest/test_action6_candidates_keep_v0",
+    "actions": [
+      [
+        1,
+        4,
+        "{\"activity_id\":\"1\",\"reason\":\"baseline_read_failed\"}"
+      ]
+    ],
+    "activity": [
+      [
+        1,
+        null,
+        "{\"code\":\"adb_directory_failed\",\"stage\":\"device_file_access\",\"details\":{\"reason\":\"call_failed\",\"transport_error\":\"output_failed\",\"output_failure\":\"stdout: stdout_sink_failed: ValueError: 目录路径不属于原固定目录\",\"local_exit_code\":null,\"local_signal\":15,\"stderr\":\"\"}}"
+      ]
+    ]
+  },
+  {
+    "tmp": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/tmp/pytest/test_action6_candidates_keep_v1",
+    "actions": [
+      [
+        1,
+        4,
+        "{\"activity_id\":\"1\",\"reason\":\"baseline_read_failed\"}"
+      ]
+    ],
+    "activity": [
+      [
+        1,
+        null,
+        "{\"code\":\"adb_directory_failed\",\"stage\":\"device_file_access\",\"details\":{\"reason\":\"call_failed\",\"transport_error\":\"output_failed\",\"output_failure\":\"stdout: stdout_sink_failed: ValueError: 目录路径不属于原固定目录\",\"local_exit_code\":null,\"local_signal\":15,\"stderr\":\"\"}}"
+      ]
+    ]
+  },
+  {
+    "tmp": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/tmp/pytest/test_action6_candidates_keep_v10",
+    "actions": [
+      [
+        1,
+        4,
+        "{\"activity_id\":\"1\",\"reason\":\"baseline_read_failed\"}"
+      ]
+    ],
+    "activity": [
+      [
+        1,
+        null,
+        "{\"code\":\"adb_directory_failed\",\"stage\":\"device_file_access\",\"details\":{\"reason\":\"call_failed\",\"transport_error\":\"output_failed\",\"output_failure\":\"stdout: stdout_sink_failed: ValueError: 目录路径不属于原固定目录\",\"local_exit_code\":null,\"local_signal\":15,\"stderr\":\"\"}}"
+      ]
+    ]
+  },
+  {
+    "tmp": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/tmp/pytest/test_action6_candidates_keep_v11",
+    "actions": [
+      [
+        1,
+        4,
+        "{\"activity_id\":\"1\",\"reason\":\"baseline_read_failed\"}"
+      ]
+    ],
+    "activity": [
+      [
+        1,
+        null,
+        "{\"code\":\"adb_directory_failed\",\"stage\":\"device_file_access\",\"details\":{\"reason\":\"call_failed\",\"transport_error\":\"output_failed\",\"output_failure\":\"stdout: stdout_sink_failed: ValueError: 目录路径不属于原固定目录\",\"local_exit_code\":null,\"local_signal\":15,\"stderr\":\"\"}}"
+      ]
+    ]
+  },
+  {
+    "tmp": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/tmp/pytest/test_action6_candidates_keep_v12",
+    "actions": [
+      [
+        1,
+        4,
+        "{\"activity_id\":\"1\",\"reason\":\"baseline_read_failed\"}"
+      ]
+    ],
+    "activity": [
+      [
+        1,
+        null,
+        "{\"code\":\"adb_directory_failed\",\"stage\":\"device_file_access\",\"details\":{\"reason\":\"call_failed\",\"transport_error\":\"output_failed\",\"output_failure\":\"stdout: stdout_sink_failed: ValueError: 目录路径不属于原固定目录\",\"local_exit_code\":null,\"local_signal\":15,\"stderr\":\"\"}}"
+      ]
+    ]
+  },
+  {
+    "tmp": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/tmp/pytest/test_action6_candidates_keep_v13",
+    "actions": [
+      [
+        1,
+        4,
+        "{\"activity_id\":\"1\",\"reason\":\"baseline_read_failed\"}"
+      ]
+    ],
+    "activity": [
+      [
+        1,
+        null,
+        "{\"code\":\"adb_directory_failed\",\"stage\":\"device_file_access\",\"details\":{\"reason\":\"call_failed\",\"transport_error\":\"output_failed\",\"output_failure\":\"stdout: stdout_sink_failed: ValueError: 目录路径不属于原固定目录\",\"local_exit_code\":null,\"local_signal\":15,\"stderr\":\"\"}}"
+      ]
+    ]
+  },
+  {
+    "tmp": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/tmp/pytest/test_action6_candidates_keep_v2",
+    "actions": [
+      [
+        1,
+        4,
+        "{\"activity_id\":\"1\",\"reason\":\"baseline_read_failed\"}"
+      ]
+    ],
+    "activity": [
+      [
+        1,
+        null,
+        "{\"code\":\"adb_directory_failed\",\"stage\":\"device_file_access\",\"details\":{\"reason\":\"call_failed\",\"transport_error\":\"output_failed\",\"output_failure\":\"stdout: stdout_sink_failed: ValueError: 目录路径不属于原固定目录\",\"local_exit_code\":null,\"local_signal\":15,\"stderr\":\"\"}}"
+      ]
+    ]
+  },
+  {
+    "tmp": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/tmp/pytest/test_action6_candidates_keep_v3",
+    "actions": [
+      [
+        1,
+        4,
+        "{\"activity_id\":\"1\",\"reason\":\"baseline_read_failed\"}"
+      ]
+    ],
+    "activity": [
+      [
+        1,
+        null,
+        "{\"code\":\"adb_directory_failed\",\"stage\":\"device_file_access\",\"details\":{\"reason\":\"call_failed\",\"transport_error\":\"output_failed\",\"output_failure\":\"stdout: stdout_sink_failed: ValueError: 目录路径不属于原固定目录\",\"local_exit_code\":null,\"local_signal\":15,\"stderr\":\"\"}}"
+      ]
+    ]
+  },
+  {
+    "tmp": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/tmp/pytest/test_action6_candidates_keep_v4",
+    "actions": [
+      [
+        1,
+        4,
+        "{\"activity_id\":\"1\",\"reason\":\"baseline_read_failed\"}"
+      ]
+    ],
+    "activity": [
+      [
+        1,
+        null,
+        "{\"code\":\"adb_directory_failed\",\"stage\":\"device_file_access\",\"details\":{\"reason\":\"call_failed\",\"transport_error\":\"output_failed\",\"output_failure\":\"stdout: stdout_sink_failed: ValueError: 目录路径不属于原固定目录\",\"local_exit_code\":null,\"local_signal\":15,\"stderr\":\"\"}}"
+      ]
+    ]
+  },
+  {
+    "tmp": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/tmp/pytest/test_action6_candidates_keep_v5",
+    "actions": [
+      [
+        1,
+        4,
+        "{\"activity_id\":\"1\",\"reason\":\"baseline_read_failed\"}"
+      ]
+    ],
+    "activity": [
+      [
+        1,
+        null,
+        "{\"code\":\"adb_directory_failed\",\"stage\":\"device_file_access\",\"details\":{\"reason\":\"call_failed\",\"transport_error\":\"output_failed\",\"output_failure\":\"stdout: stdout_sink_failed: ValueError: 目录路径不属于原固定目录\",\"local_exit_code\":null,\"local_signal\":15,\"stderr\":\"\"}}"
+      ]
+    ]
+  },
+  {
+    "tmp": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/tmp/pytest/test_action6_candidates_keep_v6",
+    "actions": [
+      [
+        1,
+        4,
+        "{\"activity_id\":\"1\",\"reason\":\"baseline_read_failed\"}"
+      ]
+    ],
+    "activity": [
+      [
+        1,
+        null,
+        "{\"code\":\"adb_directory_failed\",\"stage\":\"device_file_access\",\"details\":{\"reason\":\"call_failed\",\"transport_error\":\"output_failed\",\"output_failure\":\"stdout: stdout_sink_failed: ValueError: 目录路径不属于原固定目录\",\"local_exit_code\":null,\"local_signal\":15,\"stderr\":\"\"}}"
+      ]
+    ]
+  },
+  {
+    "tmp": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/tmp/pytest/test_action6_candidates_keep_v7",
+    "actions": [
+      [
+        1,
+        4,
+        "{\"activity_id\":\"1\",\"reason\":\"baseline_read_failed\"}"
+      ]
+    ],
+    "activity": [
+      [
+        1,
+        null,
+        "{\"code\":\"adb_directory_failed\",\"stage\":\"device_file_access\",\"details\":{\"reason\":\"call_failed\",\"transport_error\":\"output_failed\",\"output_failure\":\"stdout: stdout_sink_failed: ValueError: 目录路径不属于原固定目录\",\"local_exit_code\":null,\"local_signal\":15,\"stderr\":\"\"}}"
+      ]
+    ]
+  },
+  {
+    "tmp": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/tmp/pytest/test_action6_candidates_keep_v8",
+    "actions": [
+      [
+        1,
+        4,
+        "{\"activity_id\":\"1\",\"reason\":\"baseline_read_failed\"}"
+      ]
+    ],
+    "activity": [
+      [
+        1,
+        null,
+        "{\"code\":\"adb_directory_failed\",\"stage\":\"device_file_access\",\"details\":{\"reason\":\"call_failed\",\"transport_error\":\"output_failed\",\"output_failure\":\"stdout: stdout_sink_failed: ValueError: 目录路径不属于原固定目录\",\"local_exit_code\":null,\"local_signal\":15,\"stderr\":\"\"}}"
+      ]
+    ]
+  },
+  {
+    "tmp": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/003-camctl-bootstrap/tmp/pytest/test_action6_candidates_keep_v9",
+    "actions": [
+      [
+        1,
+        4,
+        "{\"activity_id\":\"1\",\"reason\":\"baseline_read_failed\"}"
+      ]
+    ],
+    "activity": [
+      [
+        1,
+        null,
+        "{\"code\":\"adb_directory_failed\",\"stage\":\"device_file_access\",\"details\":{\"reason\":\"call_failed\",\"transport_error\":\"output_failed\",\"output_failure\":\"stdout: stdout_sink_failed: ValueError: 目录路径不属于原固定目录\",\"local_exit_code\":null,\"local_signal\":15,\"stderr\":\"\"}}"
+      ]
+    ]
+  }
+]

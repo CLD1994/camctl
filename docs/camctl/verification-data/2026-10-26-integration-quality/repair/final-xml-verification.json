@@ -1,0 +1,58 @@
+{
+  "unit": {
+    "xml": "/tmp/camctl-quality-repair-evidence/final-fixed-root/unit/result.xml",
+    "cases": 8737,
+    "passed": 8736,
+    "failed_or_error": 0,
+    "skipped": 1
+  },
+  "capture": {
+    "xml": "/tmp/camctl-quality-repair-evidence/final-fixed-root/capture/result.xml",
+    "cases": 37,
+    "passed": 37,
+    "failed_or_error": 0,
+    "skipped": 0
+  },
+  "persistence": {
+    "xml": "/tmp/camctl-quality-repair-evidence/final-fixed-root/persistence/result.xml",
+    "cases": 11,
+    "passed": 11,
+    "failed_or_error": 0,
+    "skipped": 0
+  },
+  "outputs": {
+    "xml": "/tmp/camctl-quality-repair-evidence/final-fixed-root/outputs/result.xml",
+    "cases": 30,
+    "passed": 30,
+    "failed_or_error": 0,
+    "skipped": 0
+  },
+  "bootstrap": {
+    "xml": "/tmp/camctl-quality-repair-evidence/final-bootstrap-root/bootstrap/result.xml",
+    "cases": 55,
+    "passed": 55,
+    "failed_or_error": 0,
+    "skipped": 0
+  },
+  "action6": {
+    "xml": "/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/result.xml",
+    "cases": 8,
+    "passed": 8,
+    "failed_or_error": 0,
+    "skipped": 0
+  },
+  "osmo": {
+    "xml": "/tmp/camctl-quality-repair-evidence/final-osmo/final-osmo-after-handoff.xml",
+    "cases": 8,
+    "passed": 8,
+    "failed_or_error": 0,
+    "skipped": 0
+  },
+  "history": {
+    "xml": "/tmp/camctl-quality-repair-evidence/final-history-after-handoff/pytest-results.xml",
+    "cases": 2,
+    "passed": 2,
+    "failed_or_error": 0,
+    "skipped": 0
+  }
+}

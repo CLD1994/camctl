@@ -116,8 +116,6 @@ class ResultPageSaveOwner:
         async def save_and_apply():
             _delivery_error = None
             if pending.response is not None:
-                if _delivery_error is not None:
-                    raise _delivery_error
                 return DbOutcome(DbOutcomeKind.COMPLETED, pending.response)
             try:
                 receipt = await database.write(
@@ -138,7 +136,8 @@ class ResultPageSaveOwner:
                     ObjectId(response.event_id)
                 except ValueError as error:
                     raise ConsistencyError("结果页回执缺少实际历史身份") from error
-                self.pending = replace(pending, response=response)
+                if self.pending is not None and self.pending.save is pending.save:
+                    self.pending = replace(pending, response=response)
             if _delivery_error is not None:
                 raise _delivery_error
             if receipt.kind is not DbOutcomeKind.COMPLETED:
@@ -155,9 +154,11 @@ class ResultPageSaveOwner:
             self.pending.save.retry_failed()
         return await self.save(repository, database)
 
-    def take(self) -> ResultPageRef:
+    def take(self, *, expected=None) -> ResultPageRef:
         if self.pending is None or self.pending.response is None:
             raise ConsistencyError("原页尚未可靠交接，不能读取下一页")
+        if expected is not None and self.pending.save is not expected.save:
+            raise ConsistencyError("不能消费后续结果页保存申请的回执")
         response = self.pending.response
         self.pending = None
         return response

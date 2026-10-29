@@ -1,0 +1,8 @@
+[
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_session_recovery/source/tests/integration/test_camctl_session_recovery.py::test_process_restart_resumes_interrupted_work",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_session_recovery/source/tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_session_recovery/source/tests/integration/test_camctl_session_recovery.py::test_concurrent_submits_and_duplicate_identity",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_session_recovery/source/tests/integration/test_camctl_session_recovery.py::test_future_action_waits_and_past_window_expires",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_session_recovery/source/tests/integration/test_camctl_session_recovery.py::test_report_failure_preserves_device_work_and_redelivers",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_session_recovery/source/tests/integration/test_camctl_session_recovery.py::test_late_result_preserves_terminal_decision"
+]

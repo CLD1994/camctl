@@ -18,7 +18,6 @@ from camctl.acceptance.service import (
     AckDisposition,
     CommandMode,
     PlanDisposition,
-    accept_input,
 )
 from camctl.acceptance.ports import ParameterDefinition
 from camctl.contracts.values import new_operation_key
@@ -29,6 +28,8 @@ from camctl.persistence.repositories.acceptance import (
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..persistence.test_runtime import _create_valid_database
+from ..support.acceptance import accept_document, accept_source
+from ..support.database import database_path
 
 register_acceptance_guards()
 
@@ -93,14 +94,6 @@ def environment(tmp_path: Path):
     owned.connection.close()
 
 
-def _write_input(tmp_path: Path, body: dict) -> Path:
-    import json
-
-    target = tmp_path / "plan.json"
-    target.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
-    return target
-
-
 def _plan_body(*, request_id: str = "42", ack: str | None = None, actions=None) -> dict:
     body = {
         "request_id": request_id,
@@ -125,10 +118,11 @@ def _plan_body(*, request_id: str = "42", ack: str | None = None, actions=None) 
 
 
 async def _accept(environment, tmp_path: Path, body: dict):
-    connection, context = environment
-    path = _write_input(tmp_path, body)
-    read = await read_input(str(path), RealFileReader())
-    return await accept_input(parse_input(read), context, new_operation_key(), _owned(environment))
+    _, context = environment
+    return await accept_document(
+        body, context, database_path(_owned(environment)),
+        input_path=tmp_path / "plan.json",
+    )
 
 
 def _owned(environment):
@@ -379,7 +373,7 @@ class TestAckIndependence:
         target.write_bytes(b'{"request_id": "42", "last_report_id": "9"')
         read = await read_input(str(target), RealFileReader())
         parsed = parse_input(read)
-        result = await accept_input(parsed, context, new_operation_key(), _owned(environment))
+        result = await accept_source(parsed, context, database_path(_owned(environment)))
         assert result.plan_disposition is PlanDisposition.REJECTED
         assert result.ack_disposition is AckDisposition.NOT_PROCESSED
         assert result.ack_watermark == 0

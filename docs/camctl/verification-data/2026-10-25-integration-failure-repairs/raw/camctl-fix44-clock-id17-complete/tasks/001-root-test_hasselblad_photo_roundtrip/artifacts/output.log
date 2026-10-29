@@ -1,0 +1,8 @@
+.......                                                                  [100%]
+============================== slowest durations ===============================
+46.72s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]
+18.36s setup    tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]
+0.12s call     tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[missing-photo]
+
+(18 durations < 0.005s hidden.  Use -vv to show these durations.)
+7 passed in 65.61s (0:01:05)

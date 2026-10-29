@@ -1,0 +1,183 @@
+{
+  "scope": "ffa2369a 引入的批量读取严格计数验收弱化补齐；仅测试侧。",
+  "base_commit": "ffa2369a021237f085a9bceb8c7aa33463c402b4",
+  "cause": "先按正确正文、所属对象或可见性过滤再计数，会漏掉同身份但正文错误/隐藏的重复节点；这属于本轮批量读取引入的验收弱化。",
+  "current_assertions": [
+    "控件先按label独立检查全部匹配数恰好1，再核对可见控件、所属对象与说明。",
+    "任务说明先按设备与任务身份独立检查全部.guide-description恰好1，再核对可见正文。",
+    "指南字段先按原标题条件独立检查全部匹配数恰好1，再核对可见说明。",
+    "删除声明保持设备块总数，并独立检查每设备全部strong声明数恰好1，再核对可见正文。",
+    "动作与产物清理按钮使用原getByRole/button精确名称选择，保留原角色、可访问名称及ARIA隐藏过滤，再批量核对身份与数量。"
+  ],
+  "commands": [
+    {
+      "name": "strict-count-red",
+      "argv": [
+        "node_modules/.bin/vitest",
+        "run",
+        "tests/integration/metadata-support.test.ts",
+        "-t",
+        "重复"
+      ],
+      "exitcode": 1,
+      "outcome": "7 failed / 5 skipped：同label错误说明、不同对象、隐藏重复控件及可见/隐藏重复任务说明与字段说明，均被旧批量读取意外接受。",
+      "log": "/tmp/camctl-fix44-browser-final-waits-20261025/logs/strict-count-red.log",
+      "cwd": "/tmp/camctl-fix44-browser-20261025/apps/client"
+    },
+    {
+      "name": "strict-count-green",
+      "argv": [
+        "node_modules/.bin/vitest",
+        "run",
+        "tests/unit/browser-post.test.ts",
+        "tests/integration/metadata-support.test.ts"
+      ],
+      "exitcode": 0,
+      "outcome": "20 passed / 55.05s",
+      "log": "/tmp/camctl-fix44-browser-final-waits-20261025/logs/strict-count-green.log",
+      "cwd": "/tmp/camctl-fix44-browser-20261025/apps/client"
+    },
+    {
+      "name": "strict-declaration-red",
+      "argv": [
+        "node_modules/.bin/vitest",
+        "run",
+        "tests/integration/metadata-support.test.ts",
+        "-t",
+        "删除声明"
+      ],
+      "exitcode": 1,
+      "outcome": "1 failed / 2 passed / 12 skipped：原可见清单接受隐藏重复声明，可见重复与正常正文已有正确拒绝/通过。",
+      "log": "/tmp/camctl-fix44-browser-final-waits-20261025/logs/strict-declaration-red.log",
+      "cwd": "/tmp/camctl-fix44-browser-20261025/apps/client"
+    },
+    {
+      "name": "strict-declaration-green",
+      "argv": [
+        "node_modules/.bin/vitest",
+        "run",
+        "tests/integration/metadata-support.test.ts",
+        "-t",
+        "删除声明"
+      ],
+      "exitcode": 0,
+      "outcome": "3 passed / 12 skipped / 10.98s",
+      "log": "/tmp/camctl-fix44-browser-final-waits-20261025/logs/strict-declaration-green.log",
+      "cwd": "/tmp/camctl-fix44-browser-20261025/apps/client"
+    },
+    {
+      "name": "strict-count-final-typecheck",
+      "argv": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
+      "exitcode": 0,
+      "log": "/tmp/camctl-fix44-browser-final-waits-20261025/logs/strict-count-final-typecheck.log",
+      "cwd": "/tmp/camctl-fix44-browser-20261025/apps/client"
+    },
+    {
+      "name": "strict-final-helper",
+      "argv": [
+        "node",
+        "--import",
+        "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/tsx/dist/loader.mjs",
+        "/tmp/camctl-fix44-browser-20261025/tests/integration/device_capability_browser.ts",
+        "/tmp/camctl-fix44-browser-final-waits-20261025/strict-final-helper-store",
+        "/tmp/camctl-fix44-verified-20261025/tasks/007-root-test_device_capability_declarations/tmp/pytest/test_installed_sources_control0/current.json",
+        "/tmp/camctl-fix44-verified-20261025/tasks/007-root-test_device_capability_declarations/tmp/pytest/test_installed_sources_control0/changed.json",
+        "/tmp/camctl-fix44-browser-final-waits-20261025/strict-final-helper.json"
+      ],
+      "cwd": "/tmp/camctl-fix44-browser-20261025/apps/client",
+      "started_utc": "2026-10-25T09:59:42.319248+00:00",
+      "elapsed_s": 16.951,
+      "exitcode": 0,
+      "log": "/tmp/camctl-fix44-browser-final-waits-20261025/logs/strict-final-helper.log"
+    }
+  ],
+  "budgets_unchanged": {
+    "click_ms": 5000,
+    "post_response_after_click_ms": 5000,
+    "metadata_ms": 60000,
+    "editing_ms": 20000,
+    "root_subprocess_s": 180
+  },
+  "direct_helper_receipt": {
+    "installed": true,
+    "changed_source": true,
+    "invalid_reload": true,
+    "duplicate_key_reload": true,
+    "restored_source": true,
+    "failed_startup": true,
+    "empty_directory": true,
+    "saved_inputs_unchanged": true
+  },
+  "trace": "/tmp/camctl-fix44-browser-final-waits-20261025/strict-final-helper.json.trace.jsonl",
+  "dependencies_unchanged": true,
+  "dependencies": {
+    "packages": {
+      "@playwright/test": {
+        "version": "1.63.0",
+        "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/@playwright/test/package.json",
+        "sha256": "5587f932b8979b6889654b60e3c28aeb7ca0abbac00eec8c176c939a16149536"
+      },
+      "playwright": {
+        "version": "1.63.0",
+        "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/playwright/package.json",
+        "sha256": "8bc2ddebe8d9b051b9ecb87d62c6c63877e59d08617f32c3215681ca8bb70998"
+      },
+      "playwright-core": {
+        "version": "1.63.0",
+        "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/playwright-core/package.json",
+        "sha256": "f061c58427e47e843e26d201f0a57076c734e57c734ecbbd87d4a23b7a20db9b"
+      },
+      "vitest": {
+        "version": "5.0.1",
+        "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/vitest/package.json",
+        "sha256": "bb27a3b3f172321701a7b1f1d90a59e5c9596673176f553a91c1e93b9667abfa"
+      },
+      "vite": {
+        "version": "8.3.0",
+        "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/vite/package.json",
+        "sha256": "0a75f2254630e11aa4fde386a2f883e2acc8430acc3fb5a833f25da264c62a16"
+      },
+      "typescript": {
+        "version": "7.0.2",
+        "path": "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/typescript/package.json",
+        "sha256": "3722b30210616a13a3213ded11575ba6b2dbab10c32a5ef67afca8513e27017e"
+      }
+    },
+    "browsers": [
+      {
+        "name": "chromium",
+        "revision": "1243",
+        "installByDefault": true,
+        "browserVersion": "153.0.8010.12",
+        "title": "Chrome for Testing"
+      },
+      {
+        "name": "chromium-headless-shell",
+        "revision": "1243",
+        "installByDefault": true,
+        "browserVersion": "153.0.8010.12",
+        "title": "Chrome Headless Shell"
+      }
+    ],
+    "chromium_executable": "/home/cld/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome",
+    "installed_manifests_sha256": "01df716406b76aba9d750bb446e87d38719441dfd9fb370327bc0366b4daf849",
+    "manifest_count": 180,
+    "lock_sha256": "4b2464a1f31bc9e3fd16870678a45a8ef89e83aa6df1f84f9f8fe6db6733c8e1"
+  },
+  "read_only_review": {
+    "reviewer": "/root/fix44_browser/dependency_audit",
+    "outcome": "未发现本范围剩余严格计数遗漏；未执行测试。"
+  },
+  "validation_boundary": "20项与后续3项声明守卫分批通过；直接helper通过；未重复两个完整root节点，留根最终源码统一定向验证。",
+  "source_files": {
+    "apps/client/tests/integration/metadata-support.ts": "83fd8459d85051cd5bf0c89025568f627b152a1175dfda50cc713fdeb57b2a81",
+    "apps/client/tests/integration/metadata-support.test.ts": "a93f5f19f3bd78ea3ec4490a266f665c30311a4f06ab8c58a1efa7d434a37a61",
+    "tests/integration/device_capability_browser.ts": "f5632cfa57178388ed33f030ae007715d49c9d71f6634a47f81405d3c776b5f6"
+  },
+  "commit": "4532d8a310918c48f23b8e2bbe6d1901eedbc774",
+  "worktree_clean": true
+}

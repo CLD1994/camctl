@@ -64,7 +64,7 @@ async def test_cancel_waits_for_actual_start_confirmation_before_stop(tmp_path):
     owned = _world(tmp_path)
     query = task = None
     try:
-        runtime = _configured(owned, StartDriver(_result()))
+        runtime = (await _configured(owned, StartDriver(_result())))
         runtime.evidence = EvidenceRegistry((
             runtime.evidence.contract("operation_returned", 1),
             runtime.evidence.contract("query_returned", 1),
@@ -91,7 +91,7 @@ async def test_canceled_confirmation_keeps_actual_observation_and_original_termi
     query = task = None
     try:
         driver = StartDriver(_result())
-        runtime = _configured(owned, driver)
+        runtime = (await _configured(owned, driver))
         query, task = await _held_confirmation(runtime, late_error=late_error)
         _cancel(owned, 12)
         query.release.set()

@@ -1,0 +1,120 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_______________ test_next_run_waits_for_old_group_settlement[0] ________________
+
+session_factory = <function session_factory.<locals>.create at 0x7fb8d6798720>
+exit_code = 0
+
+    @pytest.mark.parametrize("exit_code", [0, 7])
+    def test_next_run_waits_for_old_group_settlement(session_factory, exit_code):
+>       session = session_factory(exit_code=exit_code)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_camctl_process_recovery.py:221: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/integration/test_camctl_process_recovery.py:206: in create
+    session.__init__(tmp_path, recovery_driver, **options)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <test_camctl_process_recovery.GroupSession object at 0x7fb8d670a590>
+root = PosixPath('/tmp/camctl-fix44-process-evidence/red-data/test_next_run_waits_for_old_gr0')
+driver = PosixPath('/tmp/camctl-fix44-process-evidence/red-data/host-recovery-build0/host_driver')
+exit_code = 0, retries = 0, server = 'none', repeat_error = False
+
+    def __init__(self, root: Path, driver: Path, *, exit_code=7, retries=0,
+                 server="none", repeat_error=False):
+        self.root = root
+        self.deployment = Deployment(root, devices=False)
+        initialized = self.deployment.camctl("init", "--config", str(self.deployment.config_path))
+>       assert initialized.exit_code == 0, initialized.stderr
+E       AssertionError: Traceback (most recent call last):
+E           File "<string>", line 1, in <module>
+E           File "/tmp/camctl-fix44-process-20261025/apps/camctl/src/camctl/cli.py", line 200, in main
+E             return _run_init(command, out, err)
+E                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           File "/tmp/camctl-fix44-process-20261025/apps/camctl/src/camctl/cli.py", line 343, in _run_init
+E             from camctl.bootstrap.application import ConfigAdapter
+E           File "/tmp/camctl-fix44-process-20261025/apps/camctl/src/camctl/bootstrap/application.py", line 17, in <module>
+E             from camctl.bootstrap.config import ConfigDefaults, ConfigError, ConfigSnapshot, load_config
+E           File "/tmp/camctl-fix44-process-20261025/apps/camctl/src/camctl/bootstrap/config.py", line 18, in <module>
+E             from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE
+E           File "/tmp/camctl-fix44-process-20261025/apps/camctl/src/camctl/outputs/read_discovery.py", line 9, in <module>
+E             from camctl.devices.capture_preparation import CAPTURE_ACTION_TYPES
+E           File "/tmp/camctl-fix44-process-20261025/apps/camctl/src/camctl/devices/capture_preparation.py", line 17, in <module>
+E             _ACTION = enum_for("actions.type")
+E                       ^^^^^^^^^^^^^^^^^^^^^^^^
+E           File "/tmp/camctl-fix44-process-20261025/apps/camctl/src/camctl/contracts/enums.py", line 57, in enum_for
+E             registry = load_registry()
+E                        ^^^^^^^^^^^^^^^
+E           File "/tmp/camctl-fix44-process-20261025/apps/camctl/src/camctl/contracts/enums.py", line 37, in load_registry
+E             registry = json.loads(resource_bytes(_REGISTRY_RESOURCE))
+E                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           File "/tmp/camctl-fix44-process-20261025/apps/camctl/src/camctl/resources.py", line 55, in resource_bytes
+E             raise ResourceError(f"未登记的资源名: {name!r}")
+E         camctl.resources.ResourceError: 未登记的资源名: 'registry/enum-registry.json'
+E         
+E       assert 1 == 0
+E        +  where 1 = CliResult(exit_code=1, stdout='', stderr='Traceback (most recent call last):\n  File "<string>", line 1, in <module>\n...raise ResourceError(f"未登记的资源名: {name!r}")\ncamctl.resources.ResourceError: 未登记的资源名: \'registry/enum-registry.json\'\n').exit_code
+
+tests/integration/test_camctl_process_recovery.py:62: AssertionError
+_______________ test_next_run_waits_for_old_group_settlement[7] ________________
+
+session_factory = <function session_factory.<locals>.create at 0x7fb8d67a0900>
+exit_code = 7
+
+    @pytest.mark.parametrize("exit_code", [0, 7])
+    def test_next_run_waits_for_old_group_settlement(session_factory, exit_code):
+>       session = session_factory(exit_code=exit_code)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_camctl_process_recovery.py:221: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/integration/test_camctl_process_recovery.py:206: in create
+    session.__init__(tmp_path, recovery_driver, **options)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <test_camctl_process_recovery.GroupSession object at 0x7fb8d66c4310>
+root = PosixPath('/tmp/camctl-fix44-process-evidence/red-data/test_next_run_waits_for_old_gr1')
+driver = PosixPath('/tmp/camctl-fix44-process-evidence/red-data/host-recovery-build0/host_driver')
+exit_code = 7, retries = 0, server = 'none', repeat_error = False
+
+    def __init__(self, root: Path, driver: Path, *, exit_code=7, retries=0,
+                 server="none", repeat_error=False):
+        self.root = root
+        self.deployment = Deployment(root, devices=False)
+        initialized = self.deployment.camctl("init", "--config", str(self.deployment.config_path))
+>       assert initialized.exit_code == 0, initialized.stderr
+E       AssertionError: Traceback (most recent call last):
+E           File "<string>", line 1, in <module>
+E           File "/tmp/camctl-fix44-process-20261025/apps/camctl/src/camctl/cli.py", line 200, in main
+E             return _run_init(command, out, err)
+E                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           File "/tmp/camctl-fix44-process-20261025/apps/camctl/src/camctl/cli.py", line 343, in _run_init
+E             from camctl.bootstrap.application import ConfigAdapter
+E           File "/tmp/camctl-fix44-process-20261025/apps/camctl/src/camctl/bootstrap/application.py", line 17, in <module>
+E             from camctl.bootstrap.config import ConfigDefaults, ConfigError, ConfigSnapshot, load_config
+E           File "/tmp/camctl-fix44-process-20261025/apps/camctl/src/camctl/bootstrap/config.py", line 18, in <module>
+E             from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE
+E           File "/tmp/camctl-fix44-process-20261025/apps/camctl/src/camctl/outputs/read_discovery.py", line 9, in <module>
+E             from camctl.devices.capture_preparation import CAPTURE_ACTION_TYPES
+E           File "/tmp/camctl-fix44-process-20261025/apps/camctl/src/camctl/devices/capture_preparation.py", line 17, in <module>
+E             _ACTION = enum_for("actions.type")
+E                       ^^^^^^^^^^^^^^^^^^^^^^^^
+E           File "/tmp/camctl-fix44-process-20261025/apps/camctl/src/camctl/contracts/enums.py", line 57, in enum_for
+E             registry = load_registry()
+E                        ^^^^^^^^^^^^^^^
+E           File "/tmp/camctl-fix44-process-20261025/apps/camctl/src/camctl/contracts/enums.py", line 37, in load_registry
+E             registry = json.loads(resource_bytes(_REGISTRY_RESOURCE))
+E                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           File "/tmp/camctl-fix44-process-20261025/apps/camctl/src/camctl/resources.py", line 55, in resource_bytes
+E             raise ResourceError(f"未登记的资源名: {name!r}")
+E         camctl.resources.ResourceError: 未登记的资源名: 'registry/enum-registry.json'
+E         
+E       assert 1 == 0
+E        +  where 1 = CliResult(exit_code=1, stdout='', stderr='Traceback (most recent call last):\n  File "<string>", line 1, in <module>\n...raise ResourceError(f"未登记的资源名: {name!r}")\ncamctl.resources.ResourceError: 未登记的资源名: \'registry/enum-registry.json\'\n').exit_code
+
+tests/integration/test_camctl_process_recovery.py:62: AssertionError
+=========================== short test summary info ============================
+FAILED tests/integration/test_camctl_process_recovery.py::test_next_run_waits_for_old_group_settlement[0]
+FAILED tests/integration/test_camctl_process_recovery.py::test_next_run_waits_for_old_group_settlement[7]
+2 failed in 11.27s

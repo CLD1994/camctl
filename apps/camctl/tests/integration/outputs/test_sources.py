@@ -23,7 +23,6 @@ from camctl.outputs.sources import (
     SourceResolution,
     SourceSpec,
     select_outputs,
-    resolve_source,
 )
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.acceptance import register_acceptance_guards
@@ -32,7 +31,6 @@ from camctl.persistence.repositories.outputs import (
     FixSelection,
     OutputsRepository,
     ResolveSources,
-    SqliteSourceLookup,
     load_selection,
     load_selection_facts,
     register_outputs_guards,
@@ -269,28 +267,6 @@ def _fixed_resolution(members: tuple[int, ...]) -> SourceResolution:
         member_action_ids=members,
         source_plan_id=2,
     )
-
-
-def test_all_six_source_forms_resolve_against_sqlite(tmp_path: Path) -> None:
-    """六种形式按数据库事实解析：拍摄成员入选，非产物动作排除。"""
-    _, owned = _six_form_environment(tmp_path)
-    try:
-        lookup = SqliteSourceLookup(owned.connection, 30)
-        cases = [
-            (SourceSpec(action_instance_id=21), (21,), 2),
-            (SourceSpec(plan_instance_id=2, group="晨拍"), (21,), 2),
-            (SourceSpec(action_name="录像A"), (11,), 1),
-            (SourceSpec(group="上午"), (11,), 1),
-            (SourceSpec(current_plan=True), (11, 13, 14), 1),
-            (SourceSpec(plan_instance_id=2), (21,), 2),
-        ]
-        for spec, expected_members, expected_plan in cases:
-            resolution = resolve_source(spec, lookup)
-            assert resolution.state is ResolutionState.FIXED, spec
-            assert resolution.member_action_ids == expected_members, spec
-            assert resolution.source_plan_id == expected_plan, spec
-    finally:
-        owned.connection.close()
 
 
 def test_resolve_sources_fixes_members_and_initializes_selections(

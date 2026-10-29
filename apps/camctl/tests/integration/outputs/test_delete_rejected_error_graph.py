@@ -1,115 +1,142 @@
-"""删除原结果保存未完成时，逐层消费保留同一数据库实际错误。"""
-from unittest.mock import AsyncMock, create_autospec
+"""公开删除及默认轮次在保存未完成时保留原数据库和监督错误图。"""
+
+import asyncio
+from contextlib import asynccontextmanager
+import json
+from pathlib import Path
 
 import pytest
 
 from camctl.contracts.values import ConsistencyError
-from camctl.operations.models import AttemptStatus, AttemptTicket
-from camctl.outputs import cleanup_flow
+from camctl.host_files.tasks import FileTaskExecutor
+from camctl.logging_runtime.diagnostics import diagnostic_scope, error_diagnostics_context
+from camctl.operations.error_diagnostics import exception_diagnostic
+from camctl.outputs.cleanup_flow import (
+    CleanupSupervisionDiagnostic, CleanupSupervisionFault, LocalArtifactTaskFailure,
+    advance_cleanup, delete_source_file,
+)
 from camctl.persistence.models import DbOutcome, DbOutcomeKind, db_outcome_for
 from camctl.persistence.repositories.outputs import OutputsRepository
-from unit.outputs.test_cleanup_query_save_responsibility import _runtime, _saved, _actual_result, original_config_reader
-from unit.outputs.test_cleanup_delete_save_responsibility import _pending
+from camctl.session.supervision import Supervisor
+
+from .test_cleanup_delete_save_recovery import _prepared, _configured
+from ..bootstrap.test_output_binding_changes import environment
 
 pytestmark = pytest.mark.asyncio
 
 
+class _SavePort(OutputsRepository):
+    def __init__(self, outcome=None):
+        self.outcome = outcome
+        self.calls = []
+
+    def finish_cleanup_attempt(self, request, key, owned):
+        self.calls.append((request, key))
+        if self.outcome is not None:
+            return self.outcome
+        return super().finish_cleanup_attempt(request, key, owned)
+
+
 @pytest.mark.parametrize('kind', [DbOutcomeKind.NOT_EXECUTED, DbOutcomeKind.ROLLED_BACK, DbOutcomeKind.UNKNOWN])
-async def test_original_delete_rejection_carries_complete_database_outcome(monkeypatch, kind):
-    runtime = _runtime(_actual_result(False), _saved(AttemptStatus.FAILED))
-    runtime.outputs = create_autospec(OutputsRepository, instance=True)
+async def test_original_delete_rejection_carries_complete_database_outcome(environment, kind):
+    owned, _, runtime, driver, item_id = await _prepared(environment)
     error = ValueError('original delete save failure')
     error.__cause__ = OSError(5, 'delete save IO')
     outcome = DbOutcome(kind, error=error, secondary_errors=(RuntimeError('save close failure'),))
-    runtime.outputs.finish_cleanup_attempt.return_value = outcome
-    pending = _pending(runtime, AttemptTicket(1, 'delete', '91', 'delete/91', 7))
-    runtime.pending_deletes[91] = pending
-    step = await cleanup_flow._save_delete_return(runtime, pending)
+    port = _SavePort(outcome)
+    runtime.outputs = port
+    step = await delete_source_file(runtime, item_id)
     assert db_outcome_for(step.exception) is outcome
-    monkeypatch.setattr(cleanup_flow, 'delete_source_file', AsyncMock(return_value=step))
     with pytest.raises(ConsistencyError) as caught:
-        await cleanup_flow._advance_cleanup_round(runtime)
-    assert caught.value is step.exception
+        await advance_cleanup(runtime)
+    assert db_outcome_for(caught.value) is outcome
     assert db_outcome_for(caught.value).error is error
     assert db_outcome_for(caught.value).secondary_errors == outcome.secondary_errors
+    assert port.calls == [port.calls[0], port.calls[0]]
+    assert len(driver.deletes) == 1
+    assert owned.connection.execute('SELECT result_json FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.cleanup_item_id=?',
+        (item_id,)).fetchone() == (None,)
 
 
-async def test_delete_save_control_keeps_original_identity_and_actual_result():
-    import asyncio
-    runtime = _runtime(_actual_result(False), _saved(AttemptStatus.FAILED))
-    runtime.outputs = create_autospec(OutputsRepository, instance=True)
+async def test_delete_save_control_keeps_original_identity_and_actual_result(environment):
+    owned, _, runtime, driver, item_id = await _prepared(environment)
     control = asyncio.CancelledError('original worker cancellation')
     outcome = DbOutcome(DbOutcomeKind.UNKNOWN, error=OSError(5, 'save IO failure'), control=control)
-    runtime.outputs.finish_cleanup_attempt.return_value = outcome
-    pending = _pending(runtime, AttemptTicket(1, 'delete', '91', 'delete/91', 7))
-    with pytest.raises(asyncio.CancelledError) as caught:
-        await cleanup_flow._save_delete_return(runtime, pending)
-    assert caught.value is control
-    assert db_outcome_for(control) is outcome
-    assert not pending.saved
+    port = _SavePort(outcome)
+    runtime.outputs = port
+    for _ in range(2):
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await delete_source_file(runtime, item_id)
+        assert caught.value is control
+        assert db_outcome_for(control) is outcome
+    assert port.calls == [port.calls[0], port.calls[0]]
+    assert len(driver.deletes) == 1
+    assert owned.connection.execute('SELECT result_json FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.cleanup_item_id=?',
+        (item_id,)).fetchone() == (None,)
 
 
-async def test_original_supervision_result_replay_logs_one_complete_graph():
-    import json
-    from camctl.bootstrap.cleanup_assembly import _exception_facts
-    from camctl.logging_runtime.diagnostics import diagnostic_scope, error_diagnostics_context
-    from camctl.devices.ports import DeviceCallResult
-    from camctl.outputs.cleanup_flow import CleanupSupervisionDiagnostic, LocalArtifactTaskFailure
-    runtime = _runtime(_actual_result(False), _saved(AttemptStatus.SUCCEEDED))
-    runtime.outputs = create_autospec(OutputsRepository, instance=True)
-    runtime.outputs.finish_cleanup_attempt.return_value = _saved(AttemptStatus.SUCCEEDED)
-    pending = _pending(runtime, AttemptTicket(1, 'delete', '91', 'delete/91', 7))
-    pending.actual = DeviceCallResult(pending.actual.observations, None)
+@asynccontextmanager
+async def _supervised_world(environment, outcome=None):
+    from ..bootstrap.test_cleanup_flow import _seed_repaired_artifact
+    owned, _, _, driver, item_id = await _prepared(environment)
+    cfg = environment[0]
+    output_id, = owned.connection.execute('SELECT output_id FROM cleanup_items WHERE id=?', (item_id,)).fetchone()
+    _seed_repaired_artifact(Path(cfg.paths.state_db), cfg, output_id)
+    supervisor = Supervisor()
+    runtime = await _configured(environment, owned, driver, file_executor=FileTaskExecutor(supervisor))
+    original = ValueError('original runner supervision failure')
+    original.__cause__ = OSError(13, 'original runner OS failure', '/staging/source')
+    diagnostic = CleanupSupervisionDiagnostic((
+        CleanupSupervisionFault('runner', None, None, None, (), type(original).__name__, str(original)),
+        CleanupSupervisionFault('runner.cause', None, None, None, (), 'PermissionError', str(original.__cause__)),
+    ), original)
+    actual_port = runtime.local_files
+    calls = []
+    class SupervisedFiles:
+        async def delete(self, request):
+            result = await actual_port.delete(request)
+            calls.append((request, result))
+            raise LocalArtifactTaskFailure(result, diagnostic) from original
+        async def query_file(self, request):
+            return await actual_port.query_file(request)
+    runtime.local_files = SupervisedFiles()
+    saves = _SavePort(outcome)
+    runtime.outputs = saves
     try:
-        try:
-            raise OSError(13, 'original runner OS failure', '/staging/source')
-        except OSError as cause:
-            raise ValueError('original runner supervision failure') from cause
-    except ValueError as original:
-        diagnostic = CleanupSupervisionDiagnostic(tuple(_exception_facts(original, 'runner')), original)
-        carrier = LocalArtifactTaskFailure(pending.actual, diagnostic)
-        carrier.__cause__ = original
-    pending.supervision_diagnostic = diagnostic
-    pending.diagnostic_exception = carrier
-    records = []
-    with error_diagnostics_context(None, records.append):
-        async with diagnostic_scope():
-            await cleanup_flow._save_delete_return(runtime, pending)
-            await cleanup_flow._save_delete_return(runtime, pending)
-            with pytest.raises(ConsistencyError) as delivery:
-                cleanup_flow._deliver_supervision(pending, '删除')
-            assert cleanup_flow._deliver_supervision(pending, '删除') is None
-    assert len(records) == 1
-    assert 'original runner supervision failure' in records[0]
-    assert '"errno":13' in records[0]
-    assert json.loads(records[0])['context']['cleanup_item_id'] == 91
-    assert delivery.value.__cause__ is diagnostic.exception
-    runtime.outputs.finish_cleanup_attempt.assert_called_once()
+        yield owned, runtime, item_id, original, saves, calls
+    finally:
+        await supervisor.drain_required()
 
 
-async def test_database_control_and_supervision_error_keep_original_control():
-    import asyncio
-    import json
-    from camctl.operations.error_diagnostics import exception_diagnostic
-    from camctl.persistence.models import _attach_db_outcome
-    from camctl.bootstrap.cleanup_assembly import _exception_facts
-    from camctl.outputs.cleanup_flow import CleanupSupervisionDiagnostic
-    runtime = _runtime(_actual_result(False), _saved(AttemptStatus.FAILED))
-    pending = _pending(runtime, AttemptTicket(1, 'delete', '91', 'delete/91', 7))
-    runner = ValueError('runner supervision failure')
-    runner.__cause__ = OSError(13, 'runner original IO failure')
-    pending.supervision_diagnostic = CleanupSupervisionDiagnostic(tuple(_exception_facts(runner, 'runner')), runner)
+async def test_original_supervision_result_replay_logs_one_complete_graph(environment):
+    async with _supervised_world(environment) as (owned, runtime, item_id, original, saves, calls):
+        records = []
+        with error_diagnostics_context(None, records.append):
+            async with diagnostic_scope():
+                with pytest.raises(ConsistencyError) as delivered:
+                    await delete_source_file(runtime, item_id)
+                assert delivered.value.__cause__ is original
+                assert (await delete_source_file(runtime, item_id)).phase == 'succeeded'
+                assert (await delete_source_file(runtime, item_id)).phase == 'already_terminal'
+        assert len(records) == 1
+        assert 'original runner supervision failure' in records[0]
+        assert '"errno":13' in records[0]
+        assert json.loads(records[0])['context']['cleanup_item_id'] == item_id
+        assert len(calls) == len(saves.calls) == 1
+        assert owned.connection.execute('SELECT status FROM cleanup_items WHERE id=?', (item_id,)).fetchone() == (4,)
+
+
+async def test_database_control_and_supervision_error_keep_original_control(environment):
     control = asyncio.CancelledError('original database control')
     original_cause = OSError(5, 'original save failure')
     control.__cause__ = original_cause
     outcome = DbOutcome(DbOutcomeKind.UNKNOWN, error=original_cause, control=control)
-    _attach_db_outcome(control, outcome)
-    with pytest.raises(asyncio.CancelledError) as caught:
-        cleanup_flow._raise_supervision_with_error(pending, control, 'original save pending')
-    assert caught.value is control
-    assert control.__cause__ is original_cause
-    assert db_outcome_for(control) is outcome
-    assert not pending.supervision_diagnostic_delivered
-    document = json.dumps(exception_diagnostic(control), ensure_ascii=False)
-    assert 'runner supervision failure' in document and 'runner original IO failure' in document
-    assert 'errno' in document
+    async with _supervised_world(environment, outcome) as (_, runtime, item_id, original, saves, calls):
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await delete_source_file(runtime, item_id)
+        assert caught.value is control and control.__cause__ is original_cause
+        assert db_outcome_for(control) is outcome
+        document = json.dumps(exception_diagnostic(control), ensure_ascii=False)
+        assert 'original runner supervision failure' in document and 'original runner OS failure' in document
+        assert 'errno' in document
+        assert len(calls) == len(saves.calls) == 1

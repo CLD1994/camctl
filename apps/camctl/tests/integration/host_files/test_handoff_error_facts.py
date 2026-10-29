@@ -1,5 +1,4 @@
-"""文件交接把真实系统错误交回协程，同时保持原交接事实。"""
-from pathlib import Path
+"""公开文件交接入口在真实文件上保存原异常及交接事实。"""
 from unittest.mock import Mock
 
 import pytest
@@ -8,19 +7,16 @@ from camctl.host_files import handoff
 from camctl.host_files.io import DirectorySyncStage
 
 
-def _publication(monkeypatch):
-    monkeypatch.setattr(Path, "resolve", lambda path: path)
-    monkeypatch.setattr(handoff, "_stat", Mock(side_effect=[object(), FileNotFoundError()]))
-    monkeypatch.setattr(handoff, "_RENAME_WITHOUT_OVERWRITE", False)
-    monkeypatch.setattr(handoff, "_DIRECTORY_SYNC_SUPPORTED", True)
-    monkeypatch.setattr(handoff, "_link", Mock())
-    monkeypatch.setattr(handoff, "_unlink", Mock())
-    monkeypatch.setattr(handoff, "_sync_directory", Mock())
-    return Path('/staging/source'), handoff.HandoffDirectories(Path('/staging'), Path('/ready'))
+def _publication(tmp_path):
+    staging, ready = tmp_path / 'staging', tmp_path / 'ready'
+    staging.mkdir(); ready.mkdir()
+    source = staging / 'source'
+    source.write_bytes(b'original staged bytes')
+    return source, handoff.HandoffDirectories(staging, ready)
 
 
-def test_publish_preserves_unlink_and_directory_sync_errors(monkeypatch):
-    source, directories = _publication(monkeypatch)
+def test_publish_preserves_unlink_and_directory_sync_errors(tmp_path, monkeypatch):
+    source, directories = _publication(tmp_path)
     remove = OSError(5, 'source unlink failed')
     sync = OSError(28, 'ready directory sync failed')
     monkeypatch.setattr(handoff, '_unlink', Mock(side_effect=remove))
@@ -33,30 +29,41 @@ def test_publish_preserves_unlink_and_directory_sync_errors(monkeypatch):
     assert result.source_removed is False
     assert isinstance(result.exception, ExceptionGroup)
     assert result.exception.exceptions == (remove, sync)
+    assert source.read_bytes() == (directories.ready / 'target').read_bytes() == b'original staged bytes'
 
 
-def test_publish_success_retains_failed_target_inspection(monkeypatch):
-    source, directories = _publication(monkeypatch)
+def test_publish_success_retains_failed_target_inspection(tmp_path, monkeypatch):
+    source, directories = _publication(tmp_path)
     inspect = PermissionError(13, 'target stat failed')
-    monkeypatch.setattr(handoff, '_stat', Mock(side_effect=[object(), inspect]))
+    stat = handoff._stat
+    def inspect_target(path):
+        if path == directories.ready / 'target':
+            raise inspect
+        return stat(path)
+    monkeypatch.setattr(handoff, '_stat', inspect_target)
 
     result = handoff.publish_staged_file_sync(source, directories, handoff.ReadyName('target'))
 
     assert result.stage is handoff.PublishStage.MOVED
     assert result.directory is DirectorySyncStage.SYNCED
     assert result.exception is inspect
+    assert not source.exists()
+    assert (directories.ready / 'target').read_bytes() == b'original staged bytes'
 
 
-def test_withdraw_unknown_preserves_interruption(monkeypatch):
+def test_withdraw_unknown_preserves_interruption(tmp_path, monkeypatch):
+    target = tmp_path / 'target'
+    target.write_bytes(b'camctl owned bytes')
     failure = InterruptedError('unlink interrupted')
     monkeypatch.setattr(handoff, '_remove', Mock(side_effect=failure))
-    result = handoff.withdraw_ready_file(handoff.HandoffIdentity(Path('/ready'), 'target'))
+    result = handoff.withdraw_ready_file(handoff.HandoffIdentity(tmp_path, 'target'))
     assert result.stage is handoff.WithdrawStage.UNKNOWN
     assert result.exception is failure
+    assert target.read_bytes() == b'camctl owned bytes'
 
 
-def test_absent_withdrawal_has_no_error(monkeypatch):
-    monkeypatch.setattr(handoff, '_remove', Mock(side_effect=FileNotFoundError()))
-    result = handoff.withdraw_ready_file(handoff.HandoffIdentity(Path('/ready'), 'target'))
+def test_absent_withdrawal_has_no_error(tmp_path):
+    result = handoff.withdraw_ready_file(handoff.HandoffIdentity(tmp_path, 'target'))
     assert result.stage is handoff.WithdrawStage.NOT_PRESENT
     assert result.exception is None
+    assert not (tmp_path / 'target').exists()

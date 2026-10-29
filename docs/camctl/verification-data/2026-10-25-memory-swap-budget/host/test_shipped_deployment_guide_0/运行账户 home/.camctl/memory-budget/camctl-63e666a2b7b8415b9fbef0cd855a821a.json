@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "budget_scope": "memory_and_swap",
+  "status": "recovered",
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-c",
+    "from camctl.cli import main; raise SystemExit(main())",
+    "submit",
+    "/tmp/camctl-memsw-validation/host-deployment-tmp/test_shipped_deployment_guide_0/plan.json"
+  ],
+  "requested_limit": "2147483648B",
+  "limit_bytes": 2147483648,
+  "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1482483-d11e20e498a74543ba8552f62f21f238",
+  "pid": 1483042,
+  "controller": "cgroup-v1",
+  "group": "/sys/fs/cgroup/memory/camctl-budget-1482483-d11e20e498a74543ba8552f62f21f238/camctl-memory-1483042-aff42fd69a504d40bf0f26bc193691ce",
+  "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1482483-d11e20e498a74543ba8552f62f21f238",
+  "baseline": {
+    "budget_scope": "memory_and_swap",
+    "limit_bytes": 2147483648,
+    "combined_limit_bytes": 2147483648,
+    "peak_bytes": 0,
+    "combined_peak_bytes": 0,
+    "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+    "swap_peak_bytes": null,
+    "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+    "host_swap_bytes": 4294967296,
+    "events": {
+      "oom_kill_disable": 0,
+      "under_oom": 0,
+      "oom_kill": 0,
+      "failcnt": 0,
+      "memsw_failcnt": 0
+    }
+  },
+  "evidence": {
+    "budget_scope": "memory_and_swap",
+    "limit_bytes": 2147483648,
+    "combined_limit_bytes": 2147483648,
+    "peak_bytes": 45907968,
+    "combined_peak_bytes": 45907968,
+    "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+    "swap_peak_bytes": null,
+    "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+    "host_swap_bytes": 4294967296,
+    "events": {
+      "oom_kill_disable": 0,
+      "under_oom": 0,
+      "oom_kill": 0,
+      "failcnt": 0,
+      "memsw_failcnt": 0
+    }
+  },
+  "final_status": "recovered",
+  "group_removed": true
+}

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="3" skipped="0" tests="3" time="0.816" timestamp="2026-10-26T00:15:33.267400+08:00" hostname="1e0518e0c6b4"><testcase classname="" name="test_real_cgroup_finishes_the_whole_process_tree" time="0.003"><failure message="camctl_memory.BudgetEnvironmentError: cgroup v1 宿主存在交换空间，无法保证全局回收期间不换页">tests/integration/test_memory_budget_launcher.py:124: in test_real_cgroup_finishes_the_whole_process_tree
+    memory.ensure_memory_budget_available(budget)
+scripts/camctl_memory.py:261: in ensure_memory_budget_available
+    group = _new_group(config)
+            ^^^^^^^^^^^^^^^^^^
+scripts/camctl_memory.py:216: in _new_group
+    raise BudgetEnvironmentError("cgroup v1 宿主存在交换空间，无法保证全局回收期间不换页")
+E   camctl_memory.BudgetEnvironmentError: cgroup v1 宿主存在交换空间，无法保证全局回收期间不换页</failure></testcase><testcase classname="" name="test_real_cgroup_detects_aggregate_child_oom_when_parent_returns_zero" time="0.001"><failure message="camctl_memory.BudgetEnvironmentError: cgroup v1 宿主存在交换空间，无法保证全局回收期间不换页">tests/integration/test_memory_budget_launcher.py:152: in test_real_cgroup_detects_aggregate_child_oom_when_parent_returns_zero
+    memory.ensure_memory_budget_available(budget)
+scripts/camctl_memory.py:261: in ensure_memory_budget_available
+    group = _new_group(config)
+            ^^^^^^^^^^^^^^^^^^
+scripts/camctl_memory.py:216: in _new_group
+    raise BudgetEnvironmentError("cgroup v1 宿主存在交换空间，无法保证全局回收期间不换页")
+E   camctl_memory.BudgetEnvironmentError: cgroup v1 宿主存在交换空间，无法保证全局回收期间不换页</failure></testcase><testcase classname="tests.integration.persistence.test_segment_transaction_batches" name="test_fixed_batch_write_and_verification_have_bounded_residency" time="0.003"><failure message="camctl_memory.BudgetEnvironmentError: cgroup v1 宿主存在交换空间，无法保证全局回收期间不换页">apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py:481: in test_fixed_batch_write_and_verification_have_bounded_residency
+    await _run_fixed_batch_capacity(tmp_path)
+apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py:456: in _run_fixed_batch_capacity
+    backend.ensure_memory_budget_available(budget)
+scripts/camctl_memory.py:261: in ensure_memory_budget_available
+    group = _new_group(config)
+            ^^^^^^^^^^^^^^^^^^
+scripts/camctl_memory.py:216: in _new_group
+    raise BudgetEnvironmentError("cgroup v1 宿主存在交换空间，无法保证全局回收期间不换页")
+E   camctl_memory.BudgetEnvironmentError: cgroup v1 宿主存在交换空间，无法保证全局回收期间不换页</failure></testcase></testsuite></testsuites>

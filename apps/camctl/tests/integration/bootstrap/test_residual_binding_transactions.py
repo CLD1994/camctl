@@ -3,51 +3,51 @@
 from dataclasses import replace
 
 import pytest
+import pytest_asyncio
 
-from camctl.capture.residual import _advance_winddown, residual_candidates
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import (
     CaptureRepository, FinishCapture, FinishResidualBindingFailure,
     OutputCatalogFacts, RecordingFailure,
 )
-from camctl.persistence.repositories.scheduling import StartActionRequest
+from camctl.persistence.repositories.scheduling import SchedulingRepository, StartActionRequest
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.transaction import TransactionError
 
-from ..operations.test_result_reuse import _FaultConnection
-from .test_binding_changes import environment, _NOW
-from .test_binding_transactions import _CommitFailure
-from .test_residual_binding import _accept, _action, _residual
+from ..support.bootstrap_residual_recovery import residual_case
+from ..support.bootstrap_recovery import StorageGate, TransactionFault
 
 
-async def _command(environment, orphan):
-    runtime, _, _, old_action, original_trigger, activity, flow = await _residual(
-        environment, cancel_trigger=True)
-    owned, _, _ = environment
-    await _advance_winddown(runtime, residual_candidates(owned.connection, "cam-1")[0], flow)
-    keys = (f"followup/{original_trigger}/{activity}", f"query/residual/{original_trigger}/{activity}")
-    assert owned.connection.execute(
-        "SELECT COUNT(*) FROM operation_runs WHERE responsibility_key IN (?, ?) AND status = 2", keys,
+@pytest_asyncio.fixture
+async def environment(tmp_path, monkeypatch, capture_resources):
+    async with residual_case(tmp_path, capture_resources, monkeypatch, cancel_trigger=True) as case:
+        yield case
+
+
+async def _command(case, orphan):
+    await case.advance()
+    keys = (f"followup/{case.trigger}/{case.activity}", f"query/residual/{case.trigger}/{case.activity}")
+    assert case.owned.connection.execute(
+        "SELECT COUNT(*) FROM operation_runs WHERE responsibility_key IN (?,?) AND status=2", keys,
     ).fetchone() == (2,)
     trigger = None
     if not orphan:
-        trigger = _accept(owned, 4, _action("camera_take_photo", "新驱动触发"), "alternate-camera")
-        started = runtime.scheduling.start_action(
-            StartActionRequest(trigger, _NOW, _NOW), new_operation_key(), owned)
+        trigger = await case.accept(4, case.photo("新驱动触发"), driver_id="alternate-camera")
+        started = SchedulingRepository().start_action(
+            StartActionRequest(trigger, case.wall[0], case.wall[0]), new_operation_key(), case.owned)
         assert started.kind is DbOutcomeKind.COMPLETED, started.error
-    command = FinishResidualBindingFailure(
-        trigger, activity, _NOW, RecordingFailure("device_binding_unavailable", {
-            "device_id": "cam-1", "expected_driver_id": "camctl-adb",
-            "actual_driver_id": "alternate-camera", "reason": "mismatch"}), keys)
-    return command, old_action, original_trigger
+    command = FinishResidualBindingFailure(trigger, case.activity, case.wall[0],
+        RecordingFailure("device_binding_unavailable", {"device_id": "cam-1",
+            "expected_driver_id": "camctl-adb", "actual_driver_id": "alternate-camera", "reason": "mismatch"}), keys)
+    return command, case.old_action, case.trigger
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("orphan", [False, True])
 @pytest.mark.parametrize("phase", ["projection", "commit_before", "commit_after"])
 async def test_residual_binding_failure_recovers_full_responsibility_group(environment, orphan, phase):
-    owned, _, home = environment
+    owned, home = environment.owned, environment.home
     command, old_action, original_trigger = await _command(environment, orphan)
     repository = CaptureRepository()
     key = new_operation_key()
@@ -55,10 +55,14 @@ async def test_residual_binding_failure_recovers_full_responsibility_group(envir
     attempts = owned.connection.execute("SELECT * FROM operation_attempts ORDER BY id").fetchall()
     activity = owned.connection.execute(
         "SELECT * FROM device_activities WHERE id = ?", (command.activity_id,)).fetchone()
-    faulty = (_FaultConnection(owned.connection, "UPDATE operation_runs") if phase == "projection"
-              else _CommitFailure(owned.connection, phase == "commit_after"))
-
-    failed = repository.finish_residual_binding_failure(command, key, replace(owned, connection=faulty))
+    if phase == "projection":
+        gate = StorageGate(table="operation_runs", column="status")
+        failed = gate.submit(repository.finish_residual_binding_failure, command, key, owned)
+        assert gate.hits >= 1
+    else:
+        fault = TransactionFault(owned.connection, after_commit=phase == "commit_after")
+        failed = repository.finish_residual_binding_failure(command, key, replace(owned, connection=fault))
+        assert fault.commit_calls == 1
 
     assert failed.kind is (DbOutcomeKind.ROLLED_BACK if phase == "projection" else DbOutcomeKind.UNKNOWN)
     if phase == "projection":
@@ -113,14 +117,14 @@ async def test_residual_binding_failure_recovers_full_responsibility_group(envir
 @pytest.mark.asyncio
 @pytest.mark.parametrize("changed", ["time", "action_branch", "reason", "responsibilities"])
 async def test_residual_binding_original_key_rejects_changed_input(environment, changed):
-    owned, _, _ = environment
+    owned = environment.owned
     command, _, _ = await _command(environment, False)
     repository = CaptureRepository()
     key = new_operation_key()
     saved = repository.finish_residual_binding_failure(command, key, owned)
     assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
     if changed == "time":
-        changed_command = replace(command, occurred_at=_NOW + 1)
+        changed_command = replace(command, occurred_at=environment.wall[0] + 1)
     elif changed == "action_branch":
         changed_command = replace(command, action_id=None)
     elif changed == "reason":
@@ -139,12 +143,12 @@ async def test_residual_binding_original_key_rejects_changed_input(environment, 
 
 @pytest.mark.asyncio
 async def test_residual_binding_original_key_rejects_action_only_group(environment):
-    owned, _, _ = environment
+    owned = environment.owned
     command, _, _ = await _command(environment, False)
     repository = CaptureRepository()
     key = new_operation_key()
     partial = repository.finish_capture(FinishCapture(
-        command.action_id, (), OutputCatalogFacts(command.action_id, True), _NOW,
+        command.action_id, (), OutputCatalogFacts(command.action_id, True), environment.wall[0],
         RecordingFailure("device_activity_unresolved", {
             "activity_id": str(command.activity_id), "device_id": "cam-1"})), key, owned)
     assert partial.kind is DbOutcomeKind.COMPLETED, partial.error

@@ -9,7 +9,7 @@
 所有命令都从仓库根目录执行，用 uv 管理的 Python 3.11（部署规格版本）：
 
 ```bash
-# 单元测试（约 10 秒）
+# 单元测试（按实际环境、源码和完整选中范围记录耗时）
 UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camctl --group test --python 3.11 pytest apps/camctl/tests/unit -q
 
 # 组件集成测试：按目录逐个跑，不要合并成一条命令
@@ -45,6 +45,16 @@ UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camct
 - 只处理由本次执行会话持有且已确认残留的进程。不得按进程名批量终止其他 Python 进程，也不得在共享工作区用 `git stash` 做旧代码对照；需要对照时使用独立快照或工作区。
 
 完整目标范围有一次带日志和退出码的通过结果后即可记录通过，不强制再跑第二轮。仍有未解决的资源错误时，针对失败用例或相关范围复测并保留新证据。
+
+## 共用测试环境
+
+集成测试的真实状态库、异步业务数据库与完整关闭由 [integration/support](integration/support/README.md) 集中维护。业务场景使用所属模块的正式入口；公开仓储的事务与格式测试按其自身契约准备和核对数据。`tests/support` 中内联执行 callback 的工具仅供局部单元使用，不能替代集成测试的数据库线程或实际资源收场。
+
+## 内存预算测试
+
+直接 pytest 与隔离集成入口通过相同的 `--camctl-memory-limit` 和 `--camctl-memory-cgroup-root` 配置预算及专属委派目录，默认值由测试支持模块唯一维护。容量验收在独立被测进程组中执行，准备、断言与 pytest 不混入预算；普通同进程组件用例不据此宣称已经通过整个程序的预算验收。
+
+合计峰值与后代进程核对、sudo 专属委派、环境错误及运行示例见[内存预算测试说明](../../../docs/camctl/memory-budget-testing.md)。严格无交换能力单独验收；配置解析或辅助执行器的单元测试通过，不能代替真实受限业务验收。
 
 ## 写测试时容易踩的点
 

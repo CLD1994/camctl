@@ -1,0 +1,2890 @@
+{
+  "scope": {
+    "diagnosis_ids": [
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "read_only": true,
+    "production_or_test_source_modified": false,
+    "additional_pytest_started": false,
+    "full_regression_started": false
+  },
+  "historical_source": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+  "current_source": "1973dc05c0d517a890b92e5dcfc1ee32da9266dd",
+  "summary": "11例均是既有测试夹具契约漂移。历史首错为metadata裸长度不符合批量帧；当前首错前移为目录流被当作源READ。",
+  "cases": [
+    {
+      "diagnosis_id": 5,
+      "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_result_pages_are_consumed_before_new_listing[partial]",
+      "root_cause": "共享设备替身未随正式分段文件端口迁移：历史批量元数据响应不带协议帧；当前目录流仍复用源READ故障行为。",
+      "classification": "既有测试夹具契约漂移；当前仍失败但首错前移；没有证据据此修改生产恢复逻辑",
+      "trigger": "预存被标记为partial的第一页后关闭并重开数据库，消费原RESULTS尝试。",
+      "historical": {
+        "source": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+        "reproduced": true,
+        "first_real_error": {
+          "id": 3,
+          "run_id": 3,
+          "attempt_no": 1,
+          "status": 3,
+          "intent_event_id": 15,
+          "result_event_id": 21,
+          "result_first_page_event_id": 17,
+          "result_last_page_event_id": 17,
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "result_returned",
+                "version": 1,
+                "data": {
+                  "file_completion": {
+                    "method": "stop_return_and_wait",
+                    "version": 1,
+                    "activity_id": "1",
+                    "stop_result_event_id": 12,
+                    "required_wait_ms": 30000,
+                    "observed_wait_ns": 30000000000,
+                    "completed": true
+                  },
+                  "file_completion_source_page_event_id": null,
+                  "calls": [
+                    {
+                      "kind": "directory",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 0,
+                      "local_signal": null,
+                      "stderr_hex": ""
+                    },
+                    {
+                      "kind": "metadata",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 0,
+                      "local_signal": null,
+                      "stderr_hex": ""
+                    }
+                  ],
+                  "call_count": 2,
+                  "optional_preview_observations": []
+                }
+              }
+            },
+            "observations": [
+              {
+                "type": "result_files_listed",
+                "version": 2,
+                "data": {
+                  "activity_id": "1",
+                  "entries": [
+                    {
+                      "identity": "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV",
+                      "locator": {
+                        "path": "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV"
+                      },
+                      "complete": false,
+                      "size_bytes": null,
+                      "kind": "video",
+                      "format_id": "osv",
+                      "original_name": "CAM_20261022100000_0007_D.OSV",
+                      "media_type": null,
+                      "paired_identity": null
+                    }
+                  ],
+                  "cursor": null,
+                  "next_cursor": {
+                    "device_id": "cam-1",
+                    "driver_id": "dji-osmo360-ii",
+                    "directories": [
+                      "/mnt/media_rw/emulated/DCIM"
+                    ],
+                    "directory_index": 0,
+                    "after_path": "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV"
+                  },
+                  "set_finalized": false,
+                  "completion_evidence": null
+                }
+              }
+            ],
+            "call_info": {
+              "local_exit": {
+                "exit_code": 0
+              }
+            }
+          },
+          "error_json": {
+            "code": "adb_metadata_failed",
+            "stage": "device_file_access",
+            "details": {
+              "reason": "invalid_response_frame",
+              "transport_error": null,
+              "output_failure": null,
+              "local_exit_code": 0,
+              "local_signal": null,
+              "stderr": "",
+              "frame_errors": [
+                {
+                  "reason": "invalid_header"
+                }
+              ]
+            }
+          }
+        },
+        "effect": "第一页虽然带next_cursor，但携带真实元数据错误；恢复按实际错误页结束原尝试为FAILED(3)，不会生成UNKNOWN(4)。",
+        "db_path": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/test_original_result_pages_are1/state.db",
+        "log": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log:L433-L467",
+        "baseline_same_identity": {
+          "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_result_pages_are_consumed_before_new_listing[partial]",
+          "baseline_outcome": "failed",
+          "current_outcome": "failed",
+          "scope": "camctl",
+          "task": "camctl/bootstrap",
+          "call_seconds": 1.6893608270038385,
+          "complete": true
+        },
+        "regression_assessment": "计时基线中同身份已失败；不是冻结48d2ee64完整优化运行新增失败。未追溯最初引入提交。"
+      },
+      "current": {
+        "source": "1973dc05c0d517a890b92e5dcfc1ee32da9266dd",
+        "reproduced": true,
+        "central_case": {
+          "nodeid": "tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_result_pages_are_consumed_before_new_listing[partial]",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.13890836800419493
+            },
+            "call": {
+              "outcome": "failed",
+              "duration_seconds": 2.989666526998917
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.01843405800173059
+            }
+          },
+          "outcome": "failed",
+          "duration_seconds": 3.1470089530048426
+        },
+        "first_real_error": {
+          "id": 4,
+          "run_id": 4,
+          "attempt_no": 1,
+          "status": 3,
+          "intent_event_id": 18,
+          "result_event_id": 20,
+          "result_first_page_event_id": 19,
+          "result_last_page_event_id": 19,
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "result_returned",
+                "version": 1,
+                "data": {
+                  "file_completion": {
+                    "method": "stop_return_and_wait",
+                    "version": 1,
+                    "activity_id": "1",
+                    "stop_result_event_id": 15,
+                    "required_wait_ms": 30000,
+                    "observed_wait_ns": 30000000000,
+                    "completed": true
+                  },
+                  "file_completion_source_page_event_id": null,
+                  "calls": [
+                    {
+                      "kind": "directory",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 7,
+                      "local_signal": null,
+                      "stderr_hex": "736f7572636520696e746572727570746564"
+                    }
+                  ],
+                  "call_count": 1,
+                  "optional_preview_observations": []
+                }
+              }
+            },
+            "observations": [],
+            "call_info": {
+              "local_exit": {
+                "exit_code": 7
+              }
+            }
+          },
+          "error_json": {
+            "code": "adb_directory_failed",
+            "stage": "device_file_access",
+            "details": {
+              "reason": "call_failed",
+              "transport_error": null,
+              "output_failure": null,
+              "local_exit_code": 7,
+              "local_signal": null,
+              "stderr": "source interrupted"
+            }
+          }
+        },
+        "root_cause": "分段目录扫描改走run_stream；旧替身将目录流识别为源READ，发送b\"part\"并退出7，生产保存adb_directory_failed，未进入元数据查询。",
+        "effect": "预存第一页已经是目录读取错误；恢复同样保存原FAILED(3)，不是预期的无错部分页。",
+        "db_path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/tmp/pytest/test_original_result_pages_are0/state.db",
+        "log": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/artifacts/output.log:L287-L320"
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py",
+          "lines": [
+            63,
+            85
+          ],
+          "fact": "run返回裸长度；run_stream无目录分支且忽略allowed_ticket"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/directory_scan.py",
+          "lines": [
+            194,
+            209
+          ],
+          "fact": "目录扫描调用transport.run_stream并核对真实退出"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/filesystem.py",
+          "lines": [
+            103,
+            177
+          ],
+          "fact": "metadata帧解码器拒绝裸长度"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/camctl/file-runtime.md",
+          "lines": [
+            104,
+            126
+          ],
+          "fact": "目录与metadata的正式契约"
+        },
+        {
+          "path": "/tmp/camctl-diag-osmo-probe.json",
+          "fact": "最小纯脚本验证两层夹具响应和新票据误拒绝"
+        },
+        {
+          "path": "/tmp/camctl-diag-osmo-db-evidence.json",
+          "selector": "cases[diagnosis_id=5]",
+          "fact": "只读提取的历史与当前数据库行及原结果页事件"
+        }
+      ],
+      "suggested_owner": "bootstrap集成测试夹具；共享Channel同时影响test_osmo_video_mode_completion.py的导入消费者",
+      "recommendation": "仅在测试侧区分目录流与源READ流，按真实目录/metadata协议返回；维护原票据限制、调用记录、无错partial/terminal前置分类；保留全部原行为断言。",
+      "acceptance": "预存的第一页必须无错误、保存有完整文件大小、next_cursor非空且集合未完成；重开后原尝试UNKNOWN，原页不变且不重放旧票据。",
+      "uncertainties": [
+        "未实施夹具修复，因此不声明修复后全部通过；屏蔽的后续业务分支仍需窄范围验收。",
+        "没有设备或ARM验证，也没有完整回归；当前结论只覆盖历史原始证据和中央定向运行中的这11个身份。"
+      ]
+    },
+    {
+      "diagnosis_id": 6,
+      "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_result_pages_are_consumed_before_new_listing[terminal]",
+      "root_cause": "共享设备替身未随正式分段文件端口迁移：历史批量元数据响应不带协议帧；当前目录流仍复用源READ故障行为。",
+      "classification": "既有测试夹具契约漂移；当前仍失败但首错前移；没有证据据此修改生产恢复逻辑",
+      "trigger": "预存terminal结果页后关闭并重开数据库，消费原RESULTS尝试。",
+      "historical": {
+        "source": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+        "reproduced": true,
+        "first_real_error": {
+          "id": 3,
+          "run_id": 3,
+          "attempt_no": 1,
+          "status": 3,
+          "intent_event_id": 15,
+          "result_event_id": 21,
+          "result_first_page_event_id": 17,
+          "result_last_page_event_id": 17,
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "result_returned",
+                "version": 1,
+                "data": {
+                  "file_completion": {
+                    "method": "stop_return_and_wait",
+                    "version": 1,
+                    "activity_id": "1",
+                    "stop_result_event_id": 12,
+                    "required_wait_ms": 30000,
+                    "observed_wait_ns": 30000000000,
+                    "completed": true
+                  },
+                  "file_completion_source_page_event_id": null,
+                  "calls": [
+                    {
+                      "kind": "directory",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 0,
+                      "local_signal": null,
+                      "stderr_hex": ""
+                    },
+                    {
+                      "kind": "metadata",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 0,
+                      "local_signal": null,
+                      "stderr_hex": ""
+                    }
+                  ],
+                  "call_count": 2,
+                  "optional_preview_observations": []
+                }
+              }
+            },
+            "observations": [
+              {
+                "type": "result_files_listed",
+                "version": 2,
+                "data": {
+                  "activity_id": "1",
+                  "entries": [
+                    {
+                      "identity": "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV",
+                      "locator": {
+                        "path": "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV"
+                      },
+                      "complete": false,
+                      "size_bytes": null,
+                      "kind": "video",
+                      "format_id": "osv",
+                      "original_name": "CAM_20261022100000_0007_D.OSV",
+                      "media_type": null,
+                      "paired_identity": null
+                    }
+                  ],
+                  "cursor": null,
+                  "next_cursor": null,
+                  "set_finalized": false,
+                  "completion_evidence": null
+                }
+              }
+            ],
+            "call_info": {
+              "local_exit": {
+                "exit_code": 0
+              }
+            }
+          },
+          "error_json": {
+            "code": "adb_metadata_failed",
+            "stage": "device_file_access",
+            "details": {
+              "reason": "invalid_response_frame",
+              "transport_error": null,
+              "output_failure": null,
+              "local_exit_code": 0,
+              "local_signal": null,
+              "stderr": "",
+              "frame_errors": [
+                {
+                  "reason": "invalid_header"
+                }
+              ]
+            }
+          }
+        },
+        "effect": "所谓terminal页实际带元数据错误，设备文件size_bytes=NULL，未生成期待的原片。",
+        "db_path": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/test_original_result_pages_are2/state.db",
+        "log": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log:L467-L508",
+        "baseline_same_identity": {
+          "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_result_pages_are_consumed_before_new_listing[terminal]",
+          "baseline_outcome": "failed",
+          "current_outcome": "failed",
+          "scope": "camctl",
+          "task": "camctl/bootstrap",
+          "call_seconds": 0.9279179450022639,
+          "complete": true
+        },
+        "regression_assessment": "计时基线中同身份已失败；不是冻结48d2ee64完整优化运行新增失败。未追溯最初引入提交。"
+      },
+      "current": {
+        "source": "1973dc05c0d517a890b92e5dcfc1ee32da9266dd",
+        "reproduced": true,
+        "central_case": {
+          "nodeid": "tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_result_pages_are_consumed_before_new_listing[terminal]",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.11276717799773905
+            },
+            "call": {
+              "outcome": "failed",
+              "duration_seconds": 1.083951706001244
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.009177510000881739
+            }
+          },
+          "outcome": "failed",
+          "duration_seconds": 1.2058963939998648
+        },
+        "first_real_error": {
+          "id": 4,
+          "run_id": 4,
+          "attempt_no": 1,
+          "status": 3,
+          "intent_event_id": 18,
+          "result_event_id": 20,
+          "result_first_page_event_id": 19,
+          "result_last_page_event_id": 19,
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "result_returned",
+                "version": 1,
+                "data": {
+                  "file_completion": {
+                    "method": "stop_return_and_wait",
+                    "version": 1,
+                    "activity_id": "1",
+                    "stop_result_event_id": 15,
+                    "required_wait_ms": 30000,
+                    "observed_wait_ns": 30000000000,
+                    "completed": true
+                  },
+                  "file_completion_source_page_event_id": null,
+                  "calls": [
+                    {
+                      "kind": "directory",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 7,
+                      "local_signal": null,
+                      "stderr_hex": "736f7572636520696e746572727570746564"
+                    }
+                  ],
+                  "call_count": 1,
+                  "optional_preview_observations": []
+                }
+              }
+            },
+            "observations": [],
+            "call_info": {
+              "local_exit": {
+                "exit_code": 7
+              }
+            }
+          },
+          "error_json": {
+            "code": "adb_directory_failed",
+            "stage": "device_file_access",
+            "details": {
+              "reason": "call_failed",
+              "transport_error": null,
+              "output_failure": null,
+              "local_exit_code": 7,
+              "local_signal": null,
+              "stderr": "source interrupted"
+            }
+          }
+        },
+        "root_cause": "分段目录扫描改走run_stream；旧替身将目录流识别为源READ，发送b\"part\"并退出7，生产保存adb_directory_failed，未进入元数据查询。",
+        "effect": "所谓terminal页实际带目录错误，无device_files可供断言。",
+        "db_path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/tmp/pytest/test_original_result_pages_are1/state.db",
+        "log": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/artifacts/output.log:L321-L364"
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py",
+          "lines": [
+            63,
+            85
+          ],
+          "fact": "run返回裸长度；run_stream无目录分支且忽略allowed_ticket"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/directory_scan.py",
+          "lines": [
+            194,
+            209
+          ],
+          "fact": "目录扫描调用transport.run_stream并核对真实退出"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/filesystem.py",
+          "lines": [
+            103,
+            177
+          ],
+          "fact": "metadata帧解码器拒绝裸长度"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/camctl/file-runtime.md",
+          "lines": [
+            104,
+            126
+          ],
+          "fact": "目录与metadata的正式契约"
+        },
+        {
+          "path": "/tmp/camctl-diag-osmo-probe.json",
+          "fact": "最小纯脚本验证两层夹具响应和新票据误拒绝"
+        },
+        {
+          "path": "/tmp/camctl-diag-osmo-db-evidence.json",
+          "selector": "cases[diagnosis_id=6]",
+          "fact": "只读提取的历史与当前数据库行及原结果页事件"
+        }
+      ],
+      "suggested_owner": "bootstrap集成测试夹具；共享Channel同时影响test_osmo_video_mode_completion.py的导入消费者",
+      "recommendation": "仅在测试侧区分目录流与源READ流，按真实目录/metadata协议返回；维护原票据限制、调用记录、无错partial/terminal前置分类；保留全部原行为断言。",
+      "acceptance": "预存末页必须是完整成功页，大小50及原时刻保存；重开后仅用原可靠页发布单个原片并成功，不调用设备。",
+      "uncertainties": [
+        "未实施夹具修复，因此不声明修复后全部通过；屏蔽的后续业务分支仍需窄范围验收。",
+        "没有设备或ARM验证，也没有完整回归；当前结论只覆盖历史原始证据和中央定向运行中的这11个身份。"
+      ]
+    },
+    {
+      "diagnosis_id": 7,
+      "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_unavailable_original_read_keeps_progress_and_uses_own_consumer[missing-False]",
+      "root_cause": "共享设备替身未随正式分段文件端口迁移：历史批量元数据响应不带协议帧；当前目录流仍复用源READ故障行为。",
+      "classification": "既有测试夹具契约漂移；当前仍失败但首错前移；没有证据据此修改生产恢复逻辑",
+      "trigger": "构造外部正式源及未完成READ前，先通过分段拍摄结果页完成来源动作。",
+      "historical": {
+        "source": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+        "reproduced": true,
+        "first_real_error": {
+          "id": 3,
+          "run_id": 3,
+          "attempt_no": 1,
+          "status": 3,
+          "intent_event_id": 15,
+          "result_event_id": 21,
+          "result_first_page_event_id": 17,
+          "result_last_page_event_id": 17,
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "result_returned",
+                "version": 1,
+                "data": {
+                  "file_completion": {
+                    "method": "stop_return_and_wait",
+                    "version": 1,
+                    "activity_id": "1",
+                    "stop_result_event_id": 12,
+                    "required_wait_ms": 30000,
+                    "observed_wait_ns": 30000000000,
+                    "completed": true
+                  },
+                  "file_completion_source_page_event_id": null,
+                  "calls": [
+                    {
+                      "kind": "directory",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 0,
+                      "local_signal": null,
+                      "stderr_hex": ""
+                    },
+                    {
+                      "kind": "metadata",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 0,
+                      "local_signal": null,
+                      "stderr_hex": ""
+                    }
+                  ],
+                  "call_count": 2,
+                  "optional_preview_observations": []
+                }
+              }
+            },
+            "observations": [
+              {
+                "type": "result_files_listed",
+                "version": 2,
+                "data": {
+                  "activity_id": "1",
+                  "entries": [
+                    {
+                      "identity": "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV",
+                      "locator": {
+                        "path": "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV"
+                      },
+                      "complete": false,
+                      "size_bytes": null,
+                      "kind": "video",
+                      "format_id": "osv",
+                      "original_name": "CAM_20261022100000_0007_D.OSV",
+                      "media_type": null,
+                      "paired_identity": null
+                    }
+                  ],
+                  "cursor": null,
+                  "next_cursor": null,
+                  "set_finalized": false,
+                  "completion_evidence": null
+                }
+              }
+            ],
+            "call_info": {
+              "local_exit": {
+                "exit_code": 0
+              }
+            }
+          },
+          "error_json": {
+            "code": "adb_metadata_failed",
+            "stage": "device_file_access",
+            "details": {
+              "reason": "invalid_response_frame",
+              "transport_error": null,
+              "output_failure": null,
+              "local_exit_code": 0,
+              "local_signal": null,
+              "stderr": "",
+              "frame_errors": [
+                {
+                  "reason": "invalid_header"
+                }
+              ]
+            }
+          }
+        },
+        "effect": "来源准备阶段RESULTS先因元数据帧错误失败，动作status=4；历史在_pending_read:345的status=3断言结束，目标READ恢复未执行。",
+        "db_path": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/test_unavailable_original_read0/state.db",
+        "log": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log:L508-L581",
+        "baseline_same_identity": {
+          "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_unavailable_original_read_keeps_progress_and_uses_own_consumer[missing-False]",
+          "baseline_outcome": "failed",
+          "current_outcome": "failed",
+          "scope": "camctl",
+          "task": "camctl/bootstrap",
+          "call_seconds": 0.9122590240003774,
+          "complete": true
+        },
+        "regression_assessment": "计时基线中同身份已失败；不是冻结48d2ee64完整优化运行新增失败。未追溯最初引入提交。"
+      },
+      "current": {
+        "source": "1973dc05c0d517a890b92e5dcfc1ee32da9266dd",
+        "reproduced": true,
+        "central_case": {
+          "nodeid": "tests/integration/bootstrap/test_osmo_shared_recovery.py::test_unavailable_original_read_keeps_progress_and_uses_own_consumer[missing-False]",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.07328339200466871
+            },
+            "call": {
+              "outcome": "failed",
+              "duration_seconds": 1.4935667059980915
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.043101276001834776
+            }
+          },
+          "outcome": "failed",
+          "duration_seconds": 1.609951374004595
+        },
+        "first_real_error": {
+          "id": 4,
+          "run_id": 4,
+          "attempt_no": 1,
+          "status": 3,
+          "intent_event_id": 18,
+          "result_event_id": 20,
+          "result_first_page_event_id": 19,
+          "result_last_page_event_id": 19,
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "result_returned",
+                "version": 1,
+                "data": {
+                  "file_completion": {
+                    "method": "stop_return_and_wait",
+                    "version": 1,
+                    "activity_id": "1",
+                    "stop_result_event_id": 15,
+                    "required_wait_ms": 30000,
+                    "observed_wait_ns": 30000000000,
+                    "completed": true
+                  },
+                  "file_completion_source_page_event_id": null,
+                  "calls": [
+                    {
+                      "kind": "directory",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 7,
+                      "local_signal": null,
+                      "stderr_hex": "736f7572636520696e746572727570746564"
+                    }
+                  ],
+                  "call_count": 1,
+                  "optional_preview_observations": []
+                }
+              }
+            },
+            "observations": [],
+            "call_info": {
+              "local_exit": {
+                "exit_code": 7
+              }
+            }
+          },
+          "error_json": {
+            "code": "adb_directory_failed",
+            "stage": "device_file_access",
+            "details": {
+              "reason": "call_failed",
+              "transport_error": null,
+              "output_failure": null,
+              "local_exit_code": 7,
+              "local_signal": null,
+              "stderr": "source interrupted"
+            }
+          }
+        },
+        "root_cause": "分段目录扫描改走run_stream；旧替身将目录流识别为源READ，发送b\"part\"并退出7，生产保存adb_directory_failed，未进入元数据查询。",
+        "effect": "来源准备阶段RESULTS先因目录流错误失败且未登记device_files；当前在_pending_read:330取源ID时报TypeError，目标READ恢复未执行。",
+        "db_path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/tmp/pytest/test_unavailable_original_read0/state.db",
+        "log": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/artifacts/output.log:L365-L420"
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py",
+          "lines": [
+            63,
+            85
+          ],
+          "fact": "run返回裸长度；run_stream无目录分支且忽略allowed_ticket"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/directory_scan.py",
+          "lines": [
+            194,
+            209
+          ],
+          "fact": "目录扫描调用transport.run_stream并核对真实退出"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/filesystem.py",
+          "lines": [
+            103,
+            177
+          ],
+          "fact": "metadata帧解码器拒绝裸长度"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/camctl/file-runtime.md",
+          "lines": [
+            104,
+            126
+          ],
+          "fact": "目录与metadata的正式契约"
+        },
+        {
+          "path": "/tmp/camctl-diag-osmo-probe.json",
+          "fact": "最小纯脚本验证两层夹具响应和新票据误拒绝"
+        },
+        {
+          "path": "/tmp/camctl-diag-osmo-db-evidence.json",
+          "selector": "cases[diagnosis_id=7]",
+          "fact": "只读提取的历史与当前数据库行及原结果页事件"
+        }
+      ],
+      "suggested_owner": "bootstrap集成测试夹具；共享Channel同时影响test_osmo_video_mode_completion.py的导入消费者",
+      "recommendation": "仅在测试侧区分目录流与源READ流，按真实目录/metadata协议返回；维护原票据限制、调用记录、无错partial/terminal前置分类；保留全部原行为断言。",
+      "acceptance": "先证明来源动作成功、存在非空正式源和未完成READ票据，再执行本用例指定的missing/mismatch、恢复资格或提交未知分支；核对原READ状态、原key、数据库及源流不被重放。",
+      "uncertainties": [
+        "未实施夹具修复，因此不声明修复后全部通过；屏蔽的后续业务分支仍需窄范围验收。",
+        "没有设备或ARM验证，也没有完整回归；当前结论只覆盖历史原始证据和中央定向运行中的这11个身份。"
+      ]
+    },
+    {
+      "diagnosis_id": 8,
+      "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_unavailable_original_read_keeps_progress_and_uses_own_consumer[mismatch-False]",
+      "root_cause": "共享设备替身未随正式分段文件端口迁移：历史批量元数据响应不带协议帧；当前目录流仍复用源READ故障行为。",
+      "classification": "既有测试夹具契约漂移；当前仍失败但首错前移；没有证据据此修改生产恢复逻辑",
+      "trigger": "构造外部正式源及未完成READ前，先通过分段拍摄结果页完成来源动作。",
+      "historical": {
+        "source": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+        "reproduced": true,
+        "first_real_error": {
+          "id": 3,
+          "run_id": 3,
+          "attempt_no": 1,
+          "status": 3,
+          "intent_event_id": 15,
+          "result_event_id": 21,
+          "result_first_page_event_id": 17,
+          "result_last_page_event_id": 17,
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "result_returned",
+                "version": 1,
+                "data": {
+                  "file_completion": {
+                    "method": "stop_return_and_wait",
+                    "version": 1,
+                    "activity_id": "1",
+                    "stop_result_event_id": 12,
+                    "required_wait_ms": 30000,
+                    "observed_wait_ns": 30000000000,
+                    "completed": true
+                  },
+                  "file_completion_source_page_event_id": null,
+                  "calls": [
+                    {
+                      "kind": "directory",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 0,
+                      "local_signal": null,
+                      "stderr_hex": ""
+                    },
+                    {
+                      "kind": "metadata",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 0,
+                      "local_signal": null,
+                      "stderr_hex": ""
+                    }
+                  ],
+                  "call_count": 2,
+                  "optional_preview_observations": []
+                }
+              }
+            },
+            "observations": [
+              {
+                "type": "result_files_listed",
+                "version": 2,
+                "data": {
+                  "activity_id": "1",
+                  "entries": [
+                    {
+                      "identity": "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV",
+                      "locator": {
+                        "path": "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV"
+                      },
+                      "complete": false,
+                      "size_bytes": null,
+                      "kind": "video",
+                      "format_id": "osv",
+                      "original_name": "CAM_20261022100000_0007_D.OSV",
+                      "media_type": null,
+                      "paired_identity": null
+                    }
+                  ],
+                  "cursor": null,
+                  "next_cursor": null,
+                  "set_finalized": false,
+                  "completion_evidence": null
+                }
+              }
+            ],
+            "call_info": {
+              "local_exit": {
+                "exit_code": 0
+              }
+            }
+          },
+          "error_json": {
+            "code": "adb_metadata_failed",
+            "stage": "device_file_access",
+            "details": {
+              "reason": "invalid_response_frame",
+              "transport_error": null,
+              "output_failure": null,
+              "local_exit_code": 0,
+              "local_signal": null,
+              "stderr": "",
+              "frame_errors": [
+                {
+                  "reason": "invalid_header"
+                }
+              ]
+            }
+          }
+        },
+        "effect": "来源准备阶段RESULTS先因元数据帧错误失败，动作status=4；历史在_pending_read:345的status=3断言结束，目标READ恢复未执行。",
+        "db_path": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/test_unavailable_original_read2/state.db",
+        "log": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log:L581-L654",
+        "baseline_same_identity": {
+          "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_unavailable_original_read_keeps_progress_and_uses_own_consumer[mismatch-False]",
+          "baseline_outcome": "failed",
+          "current_outcome": "failed",
+          "scope": "camctl",
+          "task": "camctl/bootstrap",
+          "call_seconds": 0.9806944590018247,
+          "complete": true
+        },
+        "regression_assessment": "计时基线中同身份已失败；不是冻结48d2ee64完整优化运行新增失败。未追溯最初引入提交。"
+      },
+      "current": {
+        "source": "1973dc05c0d517a890b92e5dcfc1ee32da9266dd",
+        "reproduced": true,
+        "central_case": {
+          "nodeid": "tests/integration/bootstrap/test_osmo_shared_recovery.py::test_unavailable_original_read_keeps_progress_and_uses_own_consumer[mismatch-False]",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.07656322700495366
+            },
+            "call": {
+              "outcome": "failed",
+              "duration_seconds": 0.5845114090043353
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.021136469003977254
+            }
+          },
+          "outcome": "failed",
+          "duration_seconds": 0.6822111050132662
+        },
+        "first_real_error": {
+          "id": 4,
+          "run_id": 4,
+          "attempt_no": 1,
+          "status": 3,
+          "intent_event_id": 18,
+          "result_event_id": 20,
+          "result_first_page_event_id": 19,
+          "result_last_page_event_id": 19,
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "result_returned",
+                "version": 1,
+                "data": {
+                  "file_completion": {
+                    "method": "stop_return_and_wait",
+                    "version": 1,
+                    "activity_id": "1",
+                    "stop_result_event_id": 15,
+                    "required_wait_ms": 30000,
+                    "observed_wait_ns": 30000000000,
+                    "completed": true
+                  },
+                  "file_completion_source_page_event_id": null,
+                  "calls": [
+                    {
+                      "kind": "directory",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 7,
+                      "local_signal": null,
+                      "stderr_hex": "736f7572636520696e746572727570746564"
+                    }
+                  ],
+                  "call_count": 1,
+                  "optional_preview_observations": []
+                }
+              }
+            },
+            "observations": [],
+            "call_info": {
+              "local_exit": {
+                "exit_code": 7
+              }
+            }
+          },
+          "error_json": {
+            "code": "adb_directory_failed",
+            "stage": "device_file_access",
+            "details": {
+              "reason": "call_failed",
+              "transport_error": null,
+              "output_failure": null,
+              "local_exit_code": 7,
+              "local_signal": null,
+              "stderr": "source interrupted"
+            }
+          }
+        },
+        "root_cause": "分段目录扫描改走run_stream；旧替身将目录流识别为源READ，发送b\"part\"并退出7，生产保存adb_directory_failed，未进入元数据查询。",
+        "effect": "来源准备阶段RESULTS先因目录流错误失败且未登记device_files；当前在_pending_read:330取源ID时报TypeError，目标READ恢复未执行。",
+        "db_path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/tmp/pytest/test_unavailable_original_read1/state.db",
+        "log": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/artifacts/output.log:L421-L476"
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py",
+          "lines": [
+            63,
+            85
+          ],
+          "fact": "run返回裸长度；run_stream无目录分支且忽略allowed_ticket"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/directory_scan.py",
+          "lines": [
+            194,
+            209
+          ],
+          "fact": "目录扫描调用transport.run_stream并核对真实退出"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/filesystem.py",
+          "lines": [
+            103,
+            177
+          ],
+          "fact": "metadata帧解码器拒绝裸长度"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/camctl/file-runtime.md",
+          "lines": [
+            104,
+            126
+          ],
+          "fact": "目录与metadata的正式契约"
+        },
+        {
+          "path": "/tmp/camctl-diag-osmo-probe.json",
+          "fact": "最小纯脚本验证两层夹具响应和新票据误拒绝"
+        },
+        {
+          "path": "/tmp/camctl-diag-osmo-db-evidence.json",
+          "selector": "cases[diagnosis_id=8]",
+          "fact": "只读提取的历史与当前数据库行及原结果页事件"
+        }
+      ],
+      "suggested_owner": "bootstrap集成测试夹具；共享Channel同时影响test_osmo_video_mode_completion.py的导入消费者",
+      "recommendation": "仅在测试侧区分目录流与源READ流，按真实目录/metadata协议返回；维护原票据限制、调用记录、无错partial/terminal前置分类；保留全部原行为断言。",
+      "acceptance": "先证明来源动作成功、存在非空正式源和未完成READ票据，再执行本用例指定的missing/mismatch、恢复资格或提交未知分支；核对原READ状态、原key、数据库及源流不被重放。",
+      "uncertainties": [
+        "未实施夹具修复，因此不声明修复后全部通过；屏蔽的后续业务分支仍需窄范围验收。",
+        "没有设备或ARM验证，也没有完整回归；当前结论只覆盖历史原始证据和中央定向运行中的这11个身份。"
+      ]
+    },
+    {
+      "diagnosis_id": 9,
+      "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_recovery_requires_boundary_horizon_and_authorization[boundary-UNCONFIRMED_BOUNDARY-read]",
+      "root_cause": "共享设备替身未随正式分段文件端口迁移：历史批量元数据响应不带协议帧；当前目录流仍复用源READ故障行为。",
+      "classification": "既有测试夹具契约漂移；当前仍失败但首错前移；没有证据据此修改生产恢复逻辑",
+      "trigger": "构造外部正式源及未完成READ前，先通过分段拍摄结果页完成来源动作。",
+      "historical": {
+        "source": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+        "reproduced": true,
+        "first_real_error": {
+          "id": 3,
+          "run_id": 3,
+          "attempt_no": 1,
+          "status": 3,
+          "intent_event_id": 15,
+          "result_event_id": 21,
+          "result_first_page_event_id": 17,
+          "result_last_page_event_id": 17,
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "result_returned",
+                "version": 1,
+                "data": {
+                  "file_completion": {
+                    "method": "stop_return_and_wait",
+                    "version": 1,
+                    "activity_id": "1",
+                    "stop_result_event_id": 12,
+                    "required_wait_ms": 30000,
+                    "observed_wait_ns": 30000000000,
+                    "completed": true
+                  },
+                  "file_completion_source_page_event_id": null,
+                  "calls": [
+                    {
+                      "kind": "directory",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 0,
+                      "local_signal": null,
+                      "stderr_hex": ""
+                    },
+                    {
+                      "kind": "metadata",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 0,
+                      "local_signal": null,
+                      "stderr_hex": ""
+                    }
+                  ],
+                  "call_count": 2,
+                  "optional_preview_observations": []
+                }
+              }
+            },
+            "observations": [
+              {
+                "type": "result_files_listed",
+                "version": 2,
+                "data": {
+                  "activity_id": "1",
+                  "entries": [
+                    {
+                      "identity": "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV",
+                      "locator": {
+                        "path": "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV"
+                      },
+                      "complete": false,
+                      "size_bytes": null,
+                      "kind": "video",
+                      "format_id": "osv",
+                      "original_name": "CAM_20261022100000_0007_D.OSV",
+                      "media_type": null,
+                      "paired_identity": null
+                    }
+                  ],
+                  "cursor": null,
+                  "next_cursor": null,
+                  "set_finalized": false,
+                  "completion_evidence": null
+                }
+              }
+            ],
+            "call_info": {
+              "local_exit": {
+                "exit_code": 0
+              }
+            }
+          },
+          "error_json": {
+            "code": "adb_metadata_failed",
+            "stage": "device_file_access",
+            "details": {
+              "reason": "invalid_response_frame",
+              "transport_error": null,
+              "output_failure": null,
+              "local_exit_code": 0,
+              "local_signal": null,
+              "stderr": "",
+              "frame_errors": [
+                {
+                  "reason": "invalid_header"
+                }
+              ]
+            }
+          }
+        },
+        "effect": "来源准备阶段RESULTS先因元数据帧错误失败，动作status=4；历史在_pending_read:345的status=3断言结束，目标READ恢复未执行。",
+        "db_path": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/test_original_recovery_require1/state.db",
+        "log": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log:L654-L734",
+        "baseline_same_identity": {
+          "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_recovery_requires_boundary_horizon_and_authorization[boundary-UNCONFIRMED_BOUNDARY-read]",
+          "baseline_outcome": "failed",
+          "current_outcome": "failed",
+          "scope": "camctl",
+          "task": "camctl/bootstrap",
+          "call_seconds": 1.5311941510008182,
+          "complete": true
+        },
+        "regression_assessment": "计时基线中同身份已失败；不是冻结48d2ee64完整优化运行新增失败。未追溯最初引入提交。"
+      },
+      "current": {
+        "source": "1973dc05c0d517a890b92e5dcfc1ee32da9266dd",
+        "reproduced": true,
+        "central_case": {
+          "nodeid": "tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_recovery_requires_boundary_horizon_and_authorization[boundary-UNCONFIRMED_BOUNDARY-read]",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.07991951599979075
+            },
+            "call": {
+              "outcome": "failed",
+              "duration_seconds": 0.49647782900137827
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.020927252997353207
+            }
+          },
+          "outcome": "failed",
+          "duration_seconds": 0.5973245979985222
+        },
+        "first_real_error": {
+          "id": 4,
+          "run_id": 4,
+          "attempt_no": 1,
+          "status": 3,
+          "intent_event_id": 18,
+          "result_event_id": 20,
+          "result_first_page_event_id": 19,
+          "result_last_page_event_id": 19,
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "result_returned",
+                "version": 1,
+                "data": {
+                  "file_completion": {
+                    "method": "stop_return_and_wait",
+                    "version": 1,
+                    "activity_id": "1",
+                    "stop_result_event_id": 15,
+                    "required_wait_ms": 30000,
+                    "observed_wait_ns": 30000000000,
+                    "completed": true
+                  },
+                  "file_completion_source_page_event_id": null,
+                  "calls": [
+                    {
+                      "kind": "directory",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 7,
+                      "local_signal": null,
+                      "stderr_hex": "736f7572636520696e746572727570746564"
+                    }
+                  ],
+                  "call_count": 1,
+                  "optional_preview_observations": []
+                }
+              }
+            },
+            "observations": [],
+            "call_info": {
+              "local_exit": {
+                "exit_code": 7
+              }
+            }
+          },
+          "error_json": {
+            "code": "adb_directory_failed",
+            "stage": "device_file_access",
+            "details": {
+              "reason": "call_failed",
+              "transport_error": null,
+              "output_failure": null,
+              "local_exit_code": 7,
+              "local_signal": null,
+              "stderr": "source interrupted"
+            }
+          }
+        },
+        "root_cause": "分段目录扫描改走run_stream；旧替身将目录流识别为源READ，发送b\"part\"并退出7，生产保存adb_directory_failed，未进入元数据查询。",
+        "effect": "来源准备阶段RESULTS先因目录流错误失败且未登记device_files；当前在_pending_read:330取源ID时报TypeError，目标READ恢复未执行。",
+        "db_path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/tmp/pytest/test_original_recovery_require0/state.db",
+        "log": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/artifacts/output.log:L477-L539"
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py",
+          "lines": [
+            63,
+            85
+          ],
+          "fact": "run返回裸长度；run_stream无目录分支且忽略allowed_ticket"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/directory_scan.py",
+          "lines": [
+            194,
+            209
+          ],
+          "fact": "目录扫描调用transport.run_stream并核对真实退出"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/filesystem.py",
+          "lines": [
+            103,
+            177
+          ],
+          "fact": "metadata帧解码器拒绝裸长度"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/camctl/file-runtime.md",
+          "lines": [
+            104,
+            126
+          ],
+          "fact": "目录与metadata的正式契约"
+        },
+        {
+          "path": "/tmp/camctl-diag-osmo-probe.json",
+          "fact": "最小纯脚本验证两层夹具响应和新票据误拒绝"
+        },
+        {
+          "path": "/tmp/camctl-diag-osmo-db-evidence.json",
+          "selector": "cases[diagnosis_id=9]",
+          "fact": "只读提取的历史与当前数据库行及原结果页事件"
+        }
+      ],
+      "suggested_owner": "bootstrap集成测试夹具；共享Channel同时影响test_osmo_video_mode_completion.py的导入消费者",
+      "recommendation": "仅在测试侧区分目录流与源READ流，按真实目录/metadata协议返回；维护原票据限制、调用记录、无错partial/terminal前置分类；保留全部原行为断言。",
+      "acceptance": "先证明来源动作成功、存在非空正式源和未完成READ票据，再执行本用例指定的missing/mismatch、恢复资格或提交未知分支；核对原READ状态、原key、数据库及源流不被重放。",
+      "uncertainties": [
+        "未实施夹具修复，因此不声明修复后全部通过；屏蔽的后续业务分支仍需窄范围验收。",
+        "没有设备或ARM验证，也没有完整回归；当前结论只覆盖历史原始证据和中央定向运行中的这11个身份。"
+      ]
+    },
+    {
+      "diagnosis_id": 10,
+      "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_recovery_requires_boundary_horizon_and_authorization[horizon-MISSING_HORIZON-read]",
+      "root_cause": "共享设备替身未随正式分段文件端口迁移：历史批量元数据响应不带协议帧；当前目录流仍复用源READ故障行为。",
+      "classification": "既有测试夹具契约漂移；当前仍失败但首错前移；没有证据据此修改生产恢复逻辑",
+      "trigger": "构造外部正式源及未完成READ前，先通过分段拍摄结果页完成来源动作。",
+      "historical": {
+        "source": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+        "reproduced": true,
+        "first_real_error": {
+          "id": 3,
+          "run_id": 3,
+          "attempt_no": 1,
+          "status": 3,
+          "intent_event_id": 15,
+          "result_event_id": 21,
+          "result_first_page_event_id": 17,
+          "result_last_page_event_id": 17,
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "result_returned",
+                "version": 1,
+                "data": {
+                  "file_completion": {
+                    "method": "stop_return_and_wait",
+                    "version": 1,
+                    "activity_id": "1",
+                    "stop_result_event_id": 12,
+                    "required_wait_ms": 30000,
+                    "observed_wait_ns": 30000000000,
+                    "completed": true
+                  },
+                  "file_completion_source_page_event_id": null,
+                  "calls": [
+                    {
+                      "kind": "directory",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 0,
+                      "local_signal": null,
+                      "stderr_hex": ""
+                    },
+                    {
+                      "kind": "metadata",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 0,
+                      "local_signal": null,
+                      "stderr_hex": ""
+                    }
+                  ],
+                  "call_count": 2,
+                  "optional_preview_observations": []
+                }
+              }
+            },
+            "observations": [
+              {
+                "type": "result_files_listed",
+                "version": 2,
+                "data": {
+                  "activity_id": "1",
+                  "entries": [
+                    {
+                      "identity": "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV",
+                      "locator": {
+                        "path": "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV"
+                      },
+                      "complete": false,
+                      "size_bytes": null,
+                      "kind": "video",
+                      "format_id": "osv",
+                      "original_name": "CAM_20261022100000_0007_D.OSV",
+                      "media_type": null,
+                      "paired_identity": null
+                    }
+                  ],
+                  "cursor": null,
+                  "next_cursor": null,
+                  "set_finalized": false,
+                  "completion_evidence": null
+                }
+              }
+            ],
+            "call_info": {
+              "local_exit": {
+                "exit_code": 0
+              }
+            }
+          },
+          "error_json": {
+            "code": "adb_metadata_failed",
+            "stage": "device_file_access",
+            "details": {
+              "reason": "invalid_response_frame",
+              "transport_error": null,
+              "output_failure": null,
+              "local_exit_code": 0,
+              "local_signal": null,
+              "stderr": "",
+              "frame_errors": [
+                {
+                  "reason": "invalid_header"
+                }
+              ]
+            }
+          }
+        },
+        "effect": "来源准备阶段RESULTS先因元数据帧错误失败，动作status=4；历史在_pending_read:345的status=3断言结束，目标READ恢复未执行。",
+        "db_path": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/test_original_recovery_require3/state.db",
+        "log": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log:L734-L814",
+        "baseline_same_identity": {
+          "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_recovery_requires_boundary_horizon_and_authorization[horizon-MISSING_HORIZON-read]",
+          "baseline_outcome": "failed",
+          "current_outcome": "failed",
+          "scope": "camctl",
+          "task": "camctl/bootstrap",
+          "call_seconds": 0.5494573690011748,
+          "complete": true
+        },
+        "regression_assessment": "计时基线中同身份已失败；不是冻结48d2ee64完整优化运行新增失败。未追溯最初引入提交。"
+      },
+      "current": {
+        "source": "1973dc05c0d517a890b92e5dcfc1ee32da9266dd",
+        "reproduced": true,
+        "central_case": {
+          "nodeid": "tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_recovery_requires_boundary_horizon_and_authorization[horizon-MISSING_HORIZON-read]",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.05564456799766049
+            },
+            "call": {
+              "outcome": "failed",
+              "duration_seconds": 0.6359097070017015
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.0700250989975757
+            }
+          },
+          "outcome": "failed",
+          "duration_seconds": 0.7615793739969376
+        },
+        "first_real_error": {
+          "id": 4,
+          "run_id": 4,
+          "attempt_no": 1,
+          "status": 3,
+          "intent_event_id": 18,
+          "result_event_id": 20,
+          "result_first_page_event_id": 19,
+          "result_last_page_event_id": 19,
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "result_returned",
+                "version": 1,
+                "data": {
+                  "file_completion": {
+                    "method": "stop_return_and_wait",
+                    "version": 1,
+                    "activity_id": "1",
+                    "stop_result_event_id": 15,
+                    "required_wait_ms": 30000,
+                    "observed_wait_ns": 30000000000,
+                    "completed": true
+                  },
+                  "file_completion_source_page_event_id": null,
+                  "calls": [
+                    {
+                      "kind": "directory",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 7,
+                      "local_signal": null,
+                      "stderr_hex": "736f7572636520696e746572727570746564"
+                    }
+                  ],
+                  "call_count": 1,
+                  "optional_preview_observations": []
+                }
+              }
+            },
+            "observations": [],
+            "call_info": {
+              "local_exit": {
+                "exit_code": 7
+              }
+            }
+          },
+          "error_json": {
+            "code": "adb_directory_failed",
+            "stage": "device_file_access",
+            "details": {
+              "reason": "call_failed",
+              "transport_error": null,
+              "output_failure": null,
+              "local_exit_code": 7,
+              "local_signal": null,
+              "stderr": "source interrupted"
+            }
+          }
+        },
+        "root_cause": "分段目录扫描改走run_stream；旧替身将目录流识别为源READ，发送b\"part\"并退出7，生产保存adb_directory_failed，未进入元数据查询。",
+        "effect": "来源准备阶段RESULTS先因目录流错误失败且未登记device_files；当前在_pending_read:330取源ID时报TypeError，目标READ恢复未执行。",
+        "db_path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/tmp/pytest/test_original_recovery_require1/state.db",
+        "log": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/artifacts/output.log:L540-L602"
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py",
+          "lines": [
+            63,
+            85
+          ],
+          "fact": "run返回裸长度；run_stream无目录分支且忽略allowed_ticket"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/directory_scan.py",
+          "lines": [
+            194,
+            209
+          ],
+          "fact": "目录扫描调用transport.run_stream并核对真实退出"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/filesystem.py",
+          "lines": [
+            103,
+            177
+          ],
+          "fact": "metadata帧解码器拒绝裸长度"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/camctl/file-runtime.md",
+          "lines": [
+            104,
+            126
+          ],
+          "fact": "目录与metadata的正式契约"
+        },
+        {
+          "path": "/tmp/camctl-diag-osmo-probe.json",
+          "fact": "最小纯脚本验证两层夹具响应和新票据误拒绝"
+        },
+        {
+          "path": "/tmp/camctl-diag-osmo-db-evidence.json",
+          "selector": "cases[diagnosis_id=10]",
+          "fact": "只读提取的历史与当前数据库行及原结果页事件"
+        }
+      ],
+      "suggested_owner": "bootstrap集成测试夹具；共享Channel同时影响test_osmo_video_mode_completion.py的导入消费者",
+      "recommendation": "仅在测试侧区分目录流与源READ流，按真实目录/metadata协议返回；维护原票据限制、调用记录、无错partial/terminal前置分类；保留全部原行为断言。",
+      "acceptance": "先证明来源动作成功、存在非空正式源和未完成READ票据，再执行本用例指定的missing/mismatch、恢复资格或提交未知分支；核对原READ状态、原key、数据库及源流不被重放。",
+      "uncertainties": [
+        "未实施夹具修复，因此不声明修复后全部通过；屏蔽的后续业务分支仍需窄范围验收。",
+        "没有设备或ARM验证，也没有完整回归；当前结论只覆盖历史原始证据和中央定向运行中的这11个身份。"
+      ]
+    },
+    {
+      "diagnosis_id": 11,
+      "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_recovery_requires_boundary_horizon_and_authorization[authorization-EVIDENCE_UNAVAILABLE-read]",
+      "root_cause": "共享设备替身未随正式分段文件端口迁移：历史批量元数据响应不带协议帧；当前目录流仍复用源READ故障行为。",
+      "classification": "既有测试夹具契约漂移；当前仍失败但首错前移；没有证据据此修改生产恢复逻辑",
+      "trigger": "构造外部正式源及未完成READ前，先通过分段拍摄结果页完成来源动作。",
+      "historical": {
+        "source": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+        "reproduced": true,
+        "first_real_error": {
+          "id": 3,
+          "run_id": 3,
+          "attempt_no": 1,
+          "status": 3,
+          "intent_event_id": 15,
+          "result_event_id": 21,
+          "result_first_page_event_id": 17,
+          "result_last_page_event_id": 17,
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "result_returned",
+                "version": 1,
+                "data": {
+                  "file_completion": {
+                    "method": "stop_return_and_wait",
+                    "version": 1,
+                    "activity_id": "1",
+                    "stop_result_event_id": 12,
+                    "required_wait_ms": 30000,
+                    "observed_wait_ns": 30000000000,
+                    "completed": true
+                  },
+                  "file_completion_source_page_event_id": null,
+                  "calls": [
+                    {
+                      "kind": "directory",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 0,
+                      "local_signal": null,
+                      "stderr_hex": ""
+                    },
+                    {
+                      "kind": "metadata",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 0,
+                      "local_signal": null,
+                      "stderr_hex": ""
+                    }
+                  ],
+                  "call_count": 2,
+                  "optional_preview_observations": []
+                }
+              }
+            },
+            "observations": [
+              {
+                "type": "result_files_listed",
+                "version": 2,
+                "data": {
+                  "activity_id": "1",
+                  "entries": [
+                    {
+                      "identity": "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV",
+                      "locator": {
+                        "path": "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV"
+                      },
+                      "complete": false,
+                      "size_bytes": null,
+                      "kind": "video",
+                      "format_id": "osv",
+                      "original_name": "CAM_20261022100000_0007_D.OSV",
+                      "media_type": null,
+                      "paired_identity": null
+                    }
+                  ],
+                  "cursor": null,
+                  "next_cursor": null,
+                  "set_finalized": false,
+                  "completion_evidence": null
+                }
+              }
+            ],
+            "call_info": {
+              "local_exit": {
+                "exit_code": 0
+              }
+            }
+          },
+          "error_json": {
+            "code": "adb_metadata_failed",
+            "stage": "device_file_access",
+            "details": {
+              "reason": "invalid_response_frame",
+              "transport_error": null,
+              "output_failure": null,
+              "local_exit_code": 0,
+              "local_signal": null,
+              "stderr": "",
+              "frame_errors": [
+                {
+                  "reason": "invalid_header"
+                }
+              ]
+            }
+          }
+        },
+        "effect": "来源准备阶段RESULTS先因元数据帧错误失败，动作status=4；历史在_pending_read:345的status=3断言结束，目标READ恢复未执行。",
+        "db_path": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/test_original_recovery_require5/state.db",
+        "log": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log:L814-L894",
+        "baseline_same_identity": {
+          "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_recovery_requires_boundary_horizon_and_authorization[authorization-EVIDENCE_UNAVAILABLE-read]",
+          "baseline_outcome": "failed",
+          "current_outcome": "failed",
+          "scope": "camctl",
+          "task": "camctl/bootstrap",
+          "call_seconds": 0.5508819899987429,
+          "complete": true
+        },
+        "regression_assessment": "计时基线中同身份已失败；不是冻结48d2ee64完整优化运行新增失败。未追溯最初引入提交。"
+      },
+      "current": {
+        "source": "1973dc05c0d517a890b92e5dcfc1ee32da9266dd",
+        "reproduced": true,
+        "central_case": {
+          "nodeid": "tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_recovery_requires_boundary_horizon_and_authorization[authorization-EVIDENCE_UNAVAILABLE-read]",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.07024391400045715
+            },
+            "call": {
+              "outcome": "failed",
+              "duration_seconds": 1.036960662000638
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.12032306800392689
+            }
+          },
+          "outcome": "failed",
+          "duration_seconds": 1.227527644005022
+        },
+        "first_real_error": {
+          "id": 4,
+          "run_id": 4,
+          "attempt_no": 1,
+          "status": 3,
+          "intent_event_id": 18,
+          "result_event_id": 20,
+          "result_first_page_event_id": 19,
+          "result_last_page_event_id": 19,
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "result_returned",
+                "version": 1,
+                "data": {
+                  "file_completion": {
+                    "method": "stop_return_and_wait",
+                    "version": 1,
+                    "activity_id": "1",
+                    "stop_result_event_id": 15,
+                    "required_wait_ms": 30000,
+                    "observed_wait_ns": 30000000000,
+                    "completed": true
+                  },
+                  "file_completion_source_page_event_id": null,
+                  "calls": [
+                    {
+                      "kind": "directory",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 7,
+                      "local_signal": null,
+                      "stderr_hex": "736f7572636520696e746572727570746564"
+                    }
+                  ],
+                  "call_count": 1,
+                  "optional_preview_observations": []
+                }
+              }
+            },
+            "observations": [],
+            "call_info": {
+              "local_exit": {
+                "exit_code": 7
+              }
+            }
+          },
+          "error_json": {
+            "code": "adb_directory_failed",
+            "stage": "device_file_access",
+            "details": {
+              "reason": "call_failed",
+              "transport_error": null,
+              "output_failure": null,
+              "local_exit_code": 7,
+              "local_signal": null,
+              "stderr": "source interrupted"
+            }
+          }
+        },
+        "root_cause": "分段目录扫描改走run_stream；旧替身将目录流识别为源READ，发送b\"part\"并退出7，生产保存adb_directory_failed，未进入元数据查询。",
+        "effect": "来源准备阶段RESULTS先因目录流错误失败且未登记device_files；当前在_pending_read:330取源ID时报TypeError，目标READ恢复未执行。",
+        "db_path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/tmp/pytest/test_original_recovery_require2/state.db",
+        "log": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/artifacts/output.log:L603-L665"
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py",
+          "lines": [
+            63,
+            85
+          ],
+          "fact": "run返回裸长度；run_stream无目录分支且忽略allowed_ticket"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/directory_scan.py",
+          "lines": [
+            194,
+            209
+          ],
+          "fact": "目录扫描调用transport.run_stream并核对真实退出"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/filesystem.py",
+          "lines": [
+            103,
+            177
+          ],
+          "fact": "metadata帧解码器拒绝裸长度"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/camctl/file-runtime.md",
+          "lines": [
+            104,
+            126
+          ],
+          "fact": "目录与metadata的正式契约"
+        },
+        {
+          "path": "/tmp/camctl-diag-osmo-probe.json",
+          "fact": "最小纯脚本验证两层夹具响应和新票据误拒绝"
+        },
+        {
+          "path": "/tmp/camctl-diag-osmo-db-evidence.json",
+          "selector": "cases[diagnosis_id=11]",
+          "fact": "只读提取的历史与当前数据库行及原结果页事件"
+        }
+      ],
+      "suggested_owner": "bootstrap集成测试夹具；共享Channel同时影响test_osmo_video_mode_completion.py的导入消费者",
+      "recommendation": "仅在测试侧区分目录流与源READ流，按真实目录/metadata协议返回；维护原票据限制、调用记录、无错partial/terminal前置分类；保留全部原行为断言。",
+      "acceptance": "先证明来源动作成功、存在非空正式源和未完成READ票据，再执行本用例指定的missing/mismatch、恢复资格或提交未知分支；核对原READ状态、原key、数据库及源流不被重放。",
+      "uncertainties": [
+        "未实施夹具修复，因此不声明修复后全部通过；屏蔽的后续业务分支仍需窄范围验收。",
+        "没有设备或ARM验证，也没有完整回归；当前结论只覆盖历史原始证据和中央定向运行中的这11个身份。"
+      ]
+    },
+    {
+      "diagnosis_id": 12,
+      "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_formal_read_recovery_reuses_original_finish_after_real_unknown_commit",
+      "root_cause": "共享设备替身未随正式分段文件端口迁移：历史批量元数据响应不带协议帧；当前目录流仍复用源READ故障行为。",
+      "classification": "既有测试夹具契约漂移；当前仍失败但首错前移；没有证据据此修改生产恢复逻辑",
+      "trigger": "构造外部正式源及未完成READ前，先通过分段拍摄结果页完成来源动作。",
+      "historical": {
+        "source": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+        "reproduced": true,
+        "first_real_error": {
+          "id": 3,
+          "run_id": 3,
+          "attempt_no": 1,
+          "status": 3,
+          "intent_event_id": 15,
+          "result_event_id": 21,
+          "result_first_page_event_id": 17,
+          "result_last_page_event_id": 17,
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "result_returned",
+                "version": 1,
+                "data": {
+                  "file_completion": {
+                    "method": "stop_return_and_wait",
+                    "version": 1,
+                    "activity_id": "1",
+                    "stop_result_event_id": 12,
+                    "required_wait_ms": 30000,
+                    "observed_wait_ns": 30000000000,
+                    "completed": true
+                  },
+                  "file_completion_source_page_event_id": null,
+                  "calls": [
+                    {
+                      "kind": "directory",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 0,
+                      "local_signal": null,
+                      "stderr_hex": ""
+                    },
+                    {
+                      "kind": "metadata",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 0,
+                      "local_signal": null,
+                      "stderr_hex": ""
+                    }
+                  ],
+                  "call_count": 2,
+                  "optional_preview_observations": []
+                }
+              }
+            },
+            "observations": [
+              {
+                "type": "result_files_listed",
+                "version": 2,
+                "data": {
+                  "activity_id": "1",
+                  "entries": [
+                    {
+                      "identity": "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV",
+                      "locator": {
+                        "path": "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV"
+                      },
+                      "complete": false,
+                      "size_bytes": null,
+                      "kind": "video",
+                      "format_id": "osv",
+                      "original_name": "CAM_20261022100000_0007_D.OSV",
+                      "media_type": null,
+                      "paired_identity": null
+                    }
+                  ],
+                  "cursor": null,
+                  "next_cursor": null,
+                  "set_finalized": false,
+                  "completion_evidence": null
+                }
+              }
+            ],
+            "call_info": {
+              "local_exit": {
+                "exit_code": 0
+              }
+            }
+          },
+          "error_json": {
+            "code": "adb_metadata_failed",
+            "stage": "device_file_access",
+            "details": {
+              "reason": "invalid_response_frame",
+              "transport_error": null,
+              "output_failure": null,
+              "local_exit_code": 0,
+              "local_signal": null,
+              "stderr": "",
+              "frame_errors": [
+                {
+                  "reason": "invalid_header"
+                }
+              ]
+            }
+          }
+        },
+        "effect": "来源准备阶段RESULTS先因元数据帧错误失败，动作status=4；历史在_pending_read:345的status=3断言结束，目标READ恢复未执行。",
+        "db_path": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/test_formal_read_recovery_reus0/state.db",
+        "log": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log:L894-L967",
+        "baseline_same_identity": {
+          "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_formal_read_recovery_reuses_original_finish_after_real_unknown_commit",
+          "baseline_outcome": "failed",
+          "current_outcome": "failed",
+          "scope": "camctl",
+          "task": "camctl/bootstrap",
+          "call_seconds": 0.5150229199934984,
+          "complete": true
+        },
+        "regression_assessment": "计时基线中同身份已失败；不是冻结48d2ee64完整优化运行新增失败。未追溯最初引入提交。"
+      },
+      "current": {
+        "source": "1973dc05c0d517a890b92e5dcfc1ee32da9266dd",
+        "reproduced": true,
+        "central_case": {
+          "nodeid": "tests/integration/bootstrap/test_osmo_shared_recovery.py::test_formal_read_recovery_reuses_original_finish_after_real_unknown_commit",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.0944770799978869
+            },
+            "call": {
+              "outcome": "failed",
+              "duration_seconds": 0.917324779999035
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.05534521299705375
+            }
+          },
+          "outcome": "failed",
+          "duration_seconds": 1.0671470729939756
+        },
+        "first_real_error": {
+          "id": 4,
+          "run_id": 4,
+          "attempt_no": 1,
+          "status": 3,
+          "intent_event_id": 18,
+          "result_event_id": 20,
+          "result_first_page_event_id": 19,
+          "result_last_page_event_id": 19,
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "result_returned",
+                "version": 1,
+                "data": {
+                  "file_completion": {
+                    "method": "stop_return_and_wait",
+                    "version": 1,
+                    "activity_id": "1",
+                    "stop_result_event_id": 15,
+                    "required_wait_ms": 30000,
+                    "observed_wait_ns": 30000000000,
+                    "completed": true
+                  },
+                  "file_completion_source_page_event_id": null,
+                  "calls": [
+                    {
+                      "kind": "directory",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 7,
+                      "local_signal": null,
+                      "stderr_hex": "736f7572636520696e746572727570746564"
+                    }
+                  ],
+                  "call_count": 1,
+                  "optional_preview_observations": []
+                }
+              }
+            },
+            "observations": [],
+            "call_info": {
+              "local_exit": {
+                "exit_code": 7
+              }
+            }
+          },
+          "error_json": {
+            "code": "adb_directory_failed",
+            "stage": "device_file_access",
+            "details": {
+              "reason": "call_failed",
+              "transport_error": null,
+              "output_failure": null,
+              "local_exit_code": 7,
+              "local_signal": null,
+              "stderr": "source interrupted"
+            }
+          }
+        },
+        "root_cause": "分段目录扫描改走run_stream；旧替身将目录流识别为源READ，发送b\"part\"并退出7，生产保存adb_directory_failed，未进入元数据查询。",
+        "effect": "来源准备阶段RESULTS先因目录流错误失败且未登记device_files；当前在_pending_read:330取源ID时报TypeError，目标READ恢复未执行。",
+        "db_path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/tmp/pytest/test_formal_read_recovery_reus0/state.db",
+        "log": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/artifacts/output.log:L666-L721"
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py",
+          "lines": [
+            63,
+            85
+          ],
+          "fact": "run返回裸长度；run_stream无目录分支且忽略allowed_ticket"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/directory_scan.py",
+          "lines": [
+            194,
+            209
+          ],
+          "fact": "目录扫描调用transport.run_stream并核对真实退出"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/filesystem.py",
+          "lines": [
+            103,
+            177
+          ],
+          "fact": "metadata帧解码器拒绝裸长度"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/camctl/file-runtime.md",
+          "lines": [
+            104,
+            126
+          ],
+          "fact": "目录与metadata的正式契约"
+        },
+        {
+          "path": "/tmp/camctl-diag-osmo-probe.json",
+          "fact": "最小纯脚本验证两层夹具响应和新票据误拒绝"
+        },
+        {
+          "path": "/tmp/camctl-diag-osmo-db-evidence.json",
+          "selector": "cases[diagnosis_id=12]",
+          "fact": "只读提取的历史与当前数据库行及原结果页事件"
+        }
+      ],
+      "suggested_owner": "bootstrap集成测试夹具；共享Channel同时影响test_osmo_video_mode_completion.py的导入消费者",
+      "recommendation": "仅在测试侧区分目录流与源READ流，按真实目录/metadata协议返回；维护原票据限制、调用记录、无错partial/terminal前置分类；保留全部原行为断言。",
+      "acceptance": "先证明来源动作成功、存在非空正式源和未完成READ票据，再执行本用例指定的missing/mismatch、恢复资格或提交未知分支；核对原READ状态、原key、数据库及源流不被重放。",
+      "uncertainties": [
+        "未实施夹具修复，因此不声明修复后全部通过；屏蔽的后续业务分支仍需窄范围验收。",
+        "没有设备或ARM验证，也没有完整回归；当前结论只覆盖历史原始证据和中央定向运行中的这11个身份。"
+      ]
+    },
+    {
+      "diagnosis_id": 13,
+      "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_new_result_round_has_new_ticket_and_keeps_original_budget_and_pages[none]",
+      "root_cause": "共享设备替身未随正式分段文件端口迁移：历史批量元数据响应不带协议帧；当前目录流仍复用源READ故障行为。",
+      "classification": "既有测试夹具契约漂移；当前仍失败但首错前移；没有证据据此修改生产恢复逻辑",
+      "trigger": "首轮没有结果页，重开后提高本次可用预算并允许第二个RESULTS票据。",
+      "historical": {
+        "source": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+        "reproduced": true,
+        "first_real_error": {
+          "id": 4,
+          "run_id": 3,
+          "attempt_no": 2,
+          "status": 3,
+          "intent_event_id": 18,
+          "result_event_id": 24,
+          "result_first_page_event_id": 20,
+          "result_last_page_event_id": 20,
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "result_returned",
+                "version": 1,
+                "data": {
+                  "file_completion": {
+                    "method": "stop_return_and_wait",
+                    "version": 1,
+                    "activity_id": "1",
+                    "stop_result_event_id": 12,
+                    "required_wait_ms": 30000,
+                    "observed_wait_ns": 30000000000,
+                    "completed": true
+                  },
+                  "file_completion_source_page_event_id": null,
+                  "calls": [
+                    {
+                      "kind": "directory",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 0,
+                      "local_signal": null,
+                      "stderr_hex": ""
+                    },
+                    {
+                      "kind": "metadata",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 0,
+                      "local_signal": null,
+                      "stderr_hex": ""
+                    }
+                  ],
+                  "call_count": 2,
+                  "optional_preview_observations": []
+                }
+              }
+            },
+            "observations": [
+              {
+                "type": "result_files_listed",
+                "version": 2,
+                "data": {
+                  "activity_id": "1",
+                  "entries": [
+                    {
+                      "identity": "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV",
+                      "locator": {
+                        "path": "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV"
+                      },
+                      "complete": false,
+                      "size_bytes": null,
+                      "kind": "video",
+                      "format_id": "osv",
+                      "original_name": "CAM_20261022100000_0007_D.OSV",
+                      "media_type": null,
+                      "paired_identity": null
+                    }
+                  ],
+                  "cursor": null,
+                  "next_cursor": null,
+                  "set_finalized": false,
+                  "completion_evidence": null
+                }
+              }
+            ],
+            "call_info": {
+              "local_exit": {
+                "exit_code": 0
+              }
+            }
+          },
+          "error_json": {
+            "code": "adb_metadata_failed",
+            "stage": "device_file_access",
+            "details": {
+              "reason": "invalid_response_frame",
+              "transport_error": null,
+              "output_failure": null,
+              "local_exit_code": 0,
+              "local_signal": null,
+              "stderr": "",
+              "frame_errors": [
+                {
+                  "reason": "invalid_header"
+                }
+              ]
+            }
+          }
+        },
+        "effect": "首轮正确UNKNOWN且预算被保留；第二轮收到旧裸长度响应而FAILED，来源动作status=4。",
+        "db_path": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/test_new_result_round_has_new_0/state.db",
+        "log": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log:L967-L1010",
+        "baseline_same_identity": {
+          "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_new_result_round_has_new_ticket_and_keeps_original_budget_and_pages[none]",
+          "baseline_outcome": "failed",
+          "current_outcome": "failed",
+          "scope": "camctl",
+          "task": "camctl/bootstrap",
+          "call_seconds": 0.5152810119980131,
+          "complete": true
+        },
+        "regression_assessment": "计时基线中同身份已失败；不是冻结48d2ee64完整优化运行新增失败。未追溯最初引入提交。"
+      },
+      "current": {
+        "source": "1973dc05c0d517a890b92e5dcfc1ee32da9266dd",
+        "reproduced": true,
+        "central_case": {
+          "nodeid": "tests/integration/bootstrap/test_osmo_shared_recovery.py::test_new_result_round_has_new_ticket_and_keeps_original_budget_and_pages[none]",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.08949343200220028
+            },
+            "call": {
+              "outcome": "failed",
+              "duration_seconds": 0.7021452129993122
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.0077985699972487055
+            }
+          },
+          "outcome": "failed",
+          "duration_seconds": 0.7994372149987612
+        },
+        "first_real_error": {
+          "type": "fixture_assertion",
+          "message": "原READ不能重开源流",
+          "source_line": 82
+        },
+        "root_cause": "新RESULTS尝试已获新票据，但目录扫描改走run_stream；旧替身无条件将流识别为READ，被forbidden断言拒绝，尚未返回目录或元数据。",
+        "effect": "首轮正确UNKNOWN；第二轮目录流在替身中被误判为旧READ重放，直接抛AssertionError。",
+        "db_path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/tmp/pytest/test_new_result_round_has_new_0/state.db",
+        "log": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/artifacts/output.log:L722-L807"
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py",
+          "lines": [
+            63,
+            85
+          ],
+          "fact": "run返回裸长度；run_stream无目录分支且忽略allowed_ticket"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/directory_scan.py",
+          "lines": [
+            194,
+            209
+          ],
+          "fact": "目录扫描调用transport.run_stream并核对真实退出"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/filesystem.py",
+          "lines": [
+            103,
+            177
+          ],
+          "fact": "metadata帧解码器拒绝裸长度"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/camctl/file-runtime.md",
+          "lines": [
+            104,
+            126
+          ],
+          "fact": "目录与metadata的正式契约"
+        },
+        {
+          "path": "/tmp/camctl-diag-osmo-probe.json",
+          "fact": "最小纯脚本验证两层夹具响应和新票据误拒绝"
+        },
+        {
+          "path": "/tmp/camctl-diag-osmo-db-evidence.json",
+          "selector": "cases[diagnosis_id=13]",
+          "fact": "只读提取的历史与当前数据库行及原结果页事件"
+        }
+      ],
+      "suggested_owner": "bootstrap集成测试夹具；共享Channel同时影响test_osmo_video_mode_completion.py的导入消费者",
+      "recommendation": "仅在测试侧区分目录流与源READ流，按真实目录/metadata协议返回；维护原票据限制、调用记录、无错partial/terminal前置分类；保留全部原行为断言。",
+      "acceptance": "首轮UNKNOWN；第二轮目录流和metadata均只接受新票据，并被result_tickets记为第二轮；预算保留[(1,1),(2,2)]且动作成功。",
+      "uncertainties": [
+        "未实施夹具修复，因此不声明修复后全部通过；屏蔽的后续业务分支仍需窄范围验收。",
+        "没有设备或ARM验证，也没有完整回归；当前结论只覆盖历史原始证据和中央定向运行中的这11个身份。"
+      ]
+    },
+    {
+      "diagnosis_id": 14,
+      "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_new_result_round_has_new_ticket_and_keeps_original_budget_and_pages[partial]",
+      "root_cause": "共享设备替身未随正式分段文件端口迁移：历史批量元数据响应不带协议帧；当前目录流仍复用源READ故障行为。",
+      "classification": "既有测试夹具契约漂移；当前仍失败但首错前移；没有证据据此修改生产恢复逻辑",
+      "trigger": "首轮已保存partial页，重开后提高预算并预期以新票据继续核实。",
+      "historical": {
+        "source": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+        "reproduced": true,
+        "first_real_error": {
+          "id": 3,
+          "run_id": 3,
+          "attempt_no": 1,
+          "status": 3,
+          "intent_event_id": 15,
+          "result_event_id": 21,
+          "result_first_page_event_id": 17,
+          "result_last_page_event_id": 17,
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "result_returned",
+                "version": 1,
+                "data": {
+                  "file_completion": {
+                    "method": "stop_return_and_wait",
+                    "version": 1,
+                    "activity_id": "1",
+                    "stop_result_event_id": 12,
+                    "required_wait_ms": 30000,
+                    "observed_wait_ns": 30000000000,
+                    "completed": true
+                  },
+                  "file_completion_source_page_event_id": null,
+                  "calls": [
+                    {
+                      "kind": "directory",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 0,
+                      "local_signal": null,
+                      "stderr_hex": ""
+                    },
+                    {
+                      "kind": "metadata",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 0,
+                      "local_signal": null,
+                      "stderr_hex": ""
+                    }
+                  ],
+                  "call_count": 2,
+                  "optional_preview_observations": []
+                }
+              }
+            },
+            "observations": [
+              {
+                "type": "result_files_listed",
+                "version": 2,
+                "data": {
+                  "activity_id": "1",
+                  "entries": [
+                    {
+                      "identity": "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV",
+                      "locator": {
+                        "path": "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV"
+                      },
+                      "complete": false,
+                      "size_bytes": null,
+                      "kind": "video",
+                      "format_id": "osv",
+                      "original_name": "CAM_20261022100000_0007_D.OSV",
+                      "media_type": null,
+                      "paired_identity": null
+                    }
+                  ],
+                  "cursor": null,
+                  "next_cursor": {
+                    "device_id": "cam-1",
+                    "driver_id": "dji-osmo360-ii",
+                    "directories": [
+                      "/mnt/media_rw/emulated/DCIM"
+                    ],
+                    "directory_index": 0,
+                    "after_path": "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV"
+                  },
+                  "set_finalized": false,
+                  "completion_evidence": null
+                }
+              }
+            ],
+            "call_info": {
+              "local_exit": {
+                "exit_code": 0
+              }
+            }
+          },
+          "error_json": {
+            "code": "adb_metadata_failed",
+            "stage": "device_file_access",
+            "details": {
+              "reason": "invalid_response_frame",
+              "transport_error": null,
+              "output_failure": null,
+              "local_exit_code": 0,
+              "local_signal": null,
+              "stderr": "",
+              "frame_errors": [
+                {
+                  "reason": "invalid_header"
+                }
+              ]
+            }
+          }
+        },
+        "effect": "原页带元数据错误，原尝试依法保存FAILED而不是UNKNOWN，未到预期新轮次。",
+        "db_path": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/test_new_result_round_has_new_1/state.db",
+        "log": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log:L1010-L1043",
+        "baseline_same_identity": {
+          "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_new_result_round_has_new_ticket_and_keeps_original_budget_and_pages[partial]",
+          "baseline_outcome": "failed",
+          "current_outcome": "failed",
+          "scope": "camctl",
+          "task": "camctl/bootstrap",
+          "call_seconds": 0.4827602709992789,
+          "complete": true
+        },
+        "regression_assessment": "计时基线中同身份已失败；不是冻结48d2ee64完整优化运行新增失败。未追溯最初引入提交。"
+      },
+      "current": {
+        "source": "1973dc05c0d517a890b92e5dcfc1ee32da9266dd",
+        "reproduced": true,
+        "central_case": {
+          "nodeid": "tests/integration/bootstrap/test_osmo_shared_recovery.py::test_new_result_round_has_new_ticket_and_keeps_original_budget_and_pages[partial]",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.126313991000643
+            },
+            "call": {
+              "outcome": "failed",
+              "duration_seconds": 2.823115418999805
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.012351966004644055
+            }
+          },
+          "outcome": "failed",
+          "duration_seconds": 2.961781376005092
+        },
+        "first_real_error": {
+          "id": 4,
+          "run_id": 4,
+          "attempt_no": 1,
+          "status": 3,
+          "intent_event_id": 18,
+          "result_event_id": 20,
+          "result_first_page_event_id": 19,
+          "result_last_page_event_id": 19,
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "result_returned",
+                "version": 1,
+                "data": {
+                  "file_completion": {
+                    "method": "stop_return_and_wait",
+                    "version": 1,
+                    "activity_id": "1",
+                    "stop_result_event_id": 15,
+                    "required_wait_ms": 30000,
+                    "observed_wait_ns": 30000000000,
+                    "completed": true
+                  },
+                  "file_completion_source_page_event_id": null,
+                  "calls": [
+                    {
+                      "kind": "directory",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 7,
+                      "local_signal": null,
+                      "stderr_hex": "736f7572636520696e746572727570746564"
+                    }
+                  ],
+                  "call_count": 1,
+                  "optional_preview_observations": []
+                }
+              }
+            },
+            "observations": [],
+            "call_info": {
+              "local_exit": {
+                "exit_code": 7
+              }
+            }
+          },
+          "error_json": {
+            "code": "adb_directory_failed",
+            "stage": "device_file_access",
+            "details": {
+              "reason": "call_failed",
+              "transport_error": null,
+              "output_failure": null,
+              "local_exit_code": 7,
+              "local_signal": null,
+              "stderr": "source interrupted"
+            }
+          }
+        },
+        "root_cause": "分段目录扫描改走run_stream；旧替身将目录流识别为源READ，发送b\"part\"并退出7，生产保存adb_directory_failed，未进入元数据查询。",
+        "effect": "原页带目录错误，原尝试依法保存FAILED而不是UNKNOWN，未到预期新轮次。",
+        "db_path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/tmp/pytest/test_new_result_round_has_new_1/state.db",
+        "log": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/artifacts/output.log:L808-L840"
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py",
+          "lines": [
+            63,
+            85
+          ],
+          "fact": "run返回裸长度；run_stream无目录分支且忽略allowed_ticket"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/directory_scan.py",
+          "lines": [
+            194,
+            209
+          ],
+          "fact": "目录扫描调用transport.run_stream并核对真实退出"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/filesystem.py",
+          "lines": [
+            103,
+            177
+          ],
+          "fact": "metadata帧解码器拒绝裸长度"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/camctl/file-runtime.md",
+          "lines": [
+            104,
+            126
+          ],
+          "fact": "目录与metadata的正式契约"
+        },
+        {
+          "path": "/tmp/camctl-diag-osmo-probe.json",
+          "fact": "最小纯脚本验证两层夹具响应和新票据误拒绝"
+        },
+        {
+          "path": "/tmp/camctl-diag-osmo-db-evidence.json",
+          "selector": "cases[diagnosis_id=14]",
+          "fact": "只读提取的历史与当前数据库行及原结果页事件"
+        }
+      ],
+      "suggested_owner": "bootstrap集成测试夹具；共享Channel同时影响test_osmo_video_mode_completion.py的导入消费者",
+      "recommendation": "仅在测试侧区分目录流与源READ流，按真实目录/metadata协议返回；维护原票据限制、调用记录、无错partial/terminal前置分类；保留全部原行为断言。",
+      "acceptance": "构造无错的真实部分页，重开后原尝试UNKNOWN，第二轮使用新票据，可靠原页保持且预算不重置。",
+      "uncertainties": [
+        "未实施夹具修复，因此不声明修复后全部通过；屏蔽的后续业务分支仍需窄范围验收。",
+        "没有设备或ARM验证，也没有完整回归；当前结论只覆盖历史原始证据和中央定向运行中的这11个身份。"
+      ]
+    },
+    {
+      "diagnosis_id": 15,
+      "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_video_mode_completion.py::test_osmo_native_segment_resume_publishes_saved_conclusion_without_device_calls",
+      "root_cause": "共享设备替身未随正式分段文件端口迁移：历史批量元数据响应不带协议帧；当前目录流仍复用源READ故障行为。",
+      "classification": "既有测试夹具契约漂移；当前仍失败但首错前移；没有证据据此修改生产恢复逻辑",
+      "trigger": "原生延时已形成并保存分段核实结论后，关闭重开数据库，仅发布保存的结论。",
+      "historical": {
+        "source": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+        "reproduced": true,
+        "first_real_error": {
+          "id": 2,
+          "run_id": 2,
+          "attempt_no": 1,
+          "status": 3,
+          "intent_event_id": 13,
+          "result_event_id": 19,
+          "result_first_page_event_id": 15,
+          "result_last_page_event_id": 15,
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "result_returned",
+                "version": 1,
+                "data": {
+                  "file_completion": null,
+                  "file_completion_source_page_event_id": null,
+                  "calls": [
+                    {
+                      "kind": "directory",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 0,
+                      "local_signal": null,
+                      "stderr_hex": ""
+                    },
+                    {
+                      "kind": "metadata",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 0,
+                      "local_signal": null,
+                      "stderr_hex": ""
+                    }
+                  ],
+                  "call_count": 2,
+                  "optional_preview_observations": []
+                }
+              }
+            },
+            "observations": [
+              {
+                "type": "result_files_listed",
+                "version": 2,
+                "data": {
+                  "activity_id": "1",
+                  "entries": [
+                    {
+                      "identity": "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV",
+                      "locator": {
+                        "path": "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV"
+                      },
+                      "complete": false,
+                      "size_bytes": null,
+                      "kind": "video",
+                      "format_id": "osv",
+                      "original_name": "CAM_20261022100000_0007_D.OSV",
+                      "media_type": null,
+                      "paired_identity": null
+                    }
+                  ],
+                  "cursor": null,
+                  "next_cursor": null,
+                  "set_finalized": false,
+                  "completion_evidence": null
+                }
+              }
+            ],
+            "call_info": {
+              "local_exit": {
+                "exit_code": 0
+              }
+            }
+          },
+          "error_json": {
+            "code": "adb_metadata_failed",
+            "stage": "device_file_access",
+            "details": {
+              "reason": "invalid_response_frame",
+              "transport_error": null,
+              "output_failure": null,
+              "local_exit_code": 0,
+              "local_signal": null,
+              "stderr": "",
+              "frame_errors": [
+                {
+                  "reason": "invalid_header"
+                }
+              ]
+            }
+          }
+        },
+        "effect": "预存的核实结论已经是current_result=3/capture_failed/device_failed；恢复忠实发布失败，action=4且outputs=0。",
+        "db_path": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/tmp/pytest/test_osmo_native_segment_resum0/state.db",
+        "log": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/artifacts/output.log:L1043-L1110",
+        "baseline_same_identity": {
+          "nodeid": "apps/camctl/tests/integration/bootstrap/test_osmo_video_mode_completion.py::test_osmo_native_segment_resume_publishes_saved_conclusion_without_device_calls",
+          "baseline_outcome": "failed",
+          "current_outcome": "failed",
+          "scope": "camctl",
+          "task": "camctl/bootstrap",
+          "call_seconds": 0.9931156870006816,
+          "complete": true
+        },
+        "regression_assessment": "计时基线中同身份已失败；不是冻结48d2ee64完整优化运行新增失败。未追溯最初引入提交。"
+      },
+      "current": {
+        "source": "1973dc05c0d517a890b92e5dcfc1ee32da9266dd",
+        "reproduced": true,
+        "central_case": {
+          "nodeid": "tests/integration/bootstrap/test_osmo_video_mode_completion.py::test_osmo_native_segment_resume_publishes_saved_conclusion_without_device_calls",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.15091059699625475
+            },
+            "call": {
+              "outcome": "failed",
+              "duration_seconds": 1.0646644700027537
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.005159434003871866
+            }
+          },
+          "outcome": "failed",
+          "duration_seconds": 1.2207345010028803
+        },
+        "first_real_error": {
+          "id": 3,
+          "run_id": 3,
+          "attempt_no": 1,
+          "status": 3,
+          "intent_event_id": 16,
+          "result_event_id": 18,
+          "result_first_page_event_id": 17,
+          "result_last_page_event_id": 17,
+          "result_json": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "result_returned",
+                "version": 1,
+                "data": {
+                  "file_completion": null,
+                  "file_completion_source_page_event_id": null,
+                  "calls": [
+                    {
+                      "kind": "directory",
+                      "transport_error": null,
+                      "output_failure": null,
+                      "local_exit_code": 7,
+                      "local_signal": null,
+                      "stderr_hex": "736f7572636520696e746572727570746564"
+                    }
+                  ],
+                  "call_count": 1,
+                  "optional_preview_observations": []
+                }
+              }
+            },
+            "observations": [],
+            "call_info": {
+              "local_exit": {
+                "exit_code": 7
+              }
+            }
+          },
+          "error_json": {
+            "code": "adb_directory_failed",
+            "stage": "device_file_access",
+            "details": {
+              "reason": "call_failed",
+              "transport_error": null,
+              "output_failure": null,
+              "local_exit_code": 7,
+              "local_signal": null,
+              "stderr": "source interrupted"
+            }
+          }
+        },
+        "root_cause": "分段目录扫描改走run_stream；旧替身将目录流识别为源READ，发送b\"part\"并退出7，生产保存adb_directory_failed，未进入元数据查询。",
+        "effect": "预存结论也已经是目录错误导致的失败；恢复没有设备调用，仍依法发布原失败。",
+        "db_path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/tmp/pytest/test_osmo_native_segment_resum0/state.db",
+        "log": "/tmp/camctl-44-diagnostic-current-20261025/tasks/001-camctl-bootstrap/artifacts/output.log:L841-L907"
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py",
+          "lines": [
+            63,
+            85
+          ],
+          "fact": "run返回裸长度；run_stream无目录分支且忽略allowed_ticket"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/directory_scan.py",
+          "lines": [
+            194,
+            209
+          ],
+          "fact": "目录扫描调用transport.run_stream并核对真实退出"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/filesystem.py",
+          "lines": [
+            103,
+            177
+          ],
+          "fact": "metadata帧解码器拒绝裸长度"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/camctl/file-runtime.md",
+          "lines": [
+            104,
+            126
+          ],
+          "fact": "目录与metadata的正式契约"
+        },
+        {
+          "path": "/tmp/camctl-diag-osmo-probe.json",
+          "fact": "最小纯脚本验证两层夹具响应和新票据误拒绝"
+        },
+        {
+          "path": "/tmp/camctl-diag-osmo-db-evidence.json",
+          "selector": "cases[diagnosis_id=15]",
+          "fact": "只读提取的历史与当前数据库行及原结果页事件"
+        }
+      ],
+      "suggested_owner": "bootstrap集成测试夹具；共享Channel同时影响test_osmo_video_mode_completion.py的导入消费者",
+      "recommendation": "仅在测试侧区分目录流与源READ流，按真实目录/metadata协议返回；维护原票据限制、调用记录、无错partial/terminal前置分类；保留全部原行为断言。",
+      "acceptance": "在关闭前断言结论本身成功并引用完整合格结果页；重开后禁用全部设备调用，验证保存的原结论原样发布为成功且产物身份、事件边界不变。",
+      "uncertainties": [
+        "未实施夹具修复，因此不声明修复后全部通过；屏蔽的后续业务分支仍需窄范围验收。",
+        "没有设备或ARM验证，也没有完整回归；当前结论只覆盖历史原始证据和中央定向运行中的这11个身份。"
+      ]
+    }
+  ],
+  "artifacts": [
+    "/tmp/camctl-diag-osmo-findings.md",
+    "/tmp/camctl-diag-osmo-db-evidence.json",
+    "/tmp/camctl-diag-osmo-probe.py",
+    "/tmp/camctl-diag-osmo-probe.json"
+  ]
+}

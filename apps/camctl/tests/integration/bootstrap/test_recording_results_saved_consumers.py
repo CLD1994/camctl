@@ -1,24 +1,23 @@
-"""默认入口在筛选业务终态前，核实原录像共同收场申请。"""
+"""公开会话入口在业务终态筛选前核实原录像共同事务。"""
 
 from dataclasses import replace
 import sqlite3
 
 import pytest
 
-from camctl.bootstrap import lifecycle
 from camctl.capture.handlers import capture_handler
 from camctl.contracts.values import ConsistencyError
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
-from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.transaction import saved_transaction_events
-from camctl.session.service import StateDbFailure
 
 from ..capture.media_retry_fixtures import media_pipeline as pipeline  # noqa: F401
 from ..capture.test_capture_contract import ResultsDouble, _entry
 from ..capture.test_input_copy import _CONTENT, _NOW
-from ..capture.test_record_media_result_settlement import _TrackedCommitFailure, _WaitingProbe, _attempts
-from .test_read_default_consumers import _default_world
+from ..capture.test_record_media_result_settlement import _attempts
+from ..support.bootstrap_consumers import (
+    StorageGate, TransactionFault, consumer_world, FirstProbeUnavailableExecutor,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -49,94 +48,68 @@ class _UnavailableOriginalKey:
 ])
 @pytest.mark.parametrize("confirmation", ["saved", "rolled-back", "unknown"])
 async def test_default_entry_confirms_original_recording_transaction_after_terminal(
-        pipeline, monkeypatch, entrance, confirmation):
-    from decimal import Decimal
-
-    owned, roots, _source_id = pipeline
-    world = await _default_world(pipeline, monkeypatch)
-    deps, factories, context, reader, driver, _ends, wall, factory_calls = world
-    reopened = None
+        pipeline, capture_resources, monkeypatch, entrance, confirmation):
+    results = ResultsDouble({1: (replace(_entry("original-recording", size=len(_CONTENT)),
+        locator={"path": "/DCIM/original.mp4"}, original_name="original.mp4"),)})
+    world = await consumer_world(pipeline, capture_resources, duration="61", results=results,
+        executor_factory=FirstProbeUnavailableExecutor)
     try:
-        runtime = factories[0](owned, "cam-1")
-        runtime.results = ResultsDouble({1: (replace(
-            _entry("original-recording", size=len(_CONTENT)),
-            locator={"path": "/DCIM/original.mp4"}, original_name="original.mp4"),)})
-        tools = _WaitingProbe(Decimal("61"))
-        runtime.media.tools = tools
-        await capture_handler("camera_record")(1, runtime)
-        original_attempts = _attempts(owned)
+        await capture_handler("camera_record")(1, world.runtime)
+        assert len(world.executor.checkpoints) == 1 and world.tools() == []
+        assert len(world.reader.requests) == 1 and results.calls == [1]
+        assert world.owned.connection.execute("SELECT check_state FROM recording_processing WHERE id=1").fetchone() == (2,)
+        assert world.owned.connection.execute(
+            "SELECT status,retry_wait_required FROM operation_runs WHERE responsibility_key='results/1'").fetchone() == (2, 1)
+        original_attempts = _attempts(world.owned)
         original_save = CaptureRepository.finish_recording_results
-        inputs, outcomes, unavailable = [], [], []
+        inputs, outcomes = [], []
+        gate = StorageGate(original_key=True, unknown=confirmation == "unknown")
 
         def save(repository, request, key, current):
             inputs.append((request, key))
             if len(inputs) == 1:
-                fault = _TrackedCommitFailure(current.connection, True)
+                fault = TransactionFault(current.connection, after_commit=True)
                 result = original_save(repository, request, key, replace(current, connection=fault))
                 assert fault.commit_calls == 1
+            elif confirmation != "saved":
+                result = gate.submit(lambda *args: original_save(repository, *args), request, key, current)
             else:
-                if confirmation != "saved":
-                    fault = _UnavailableOriginalKey(current.connection, key, confirmation == "unknown")
-                    unavailable.append(fault)
-                    current = replace(current, connection=fault)
                 result = original_save(repository, request, key, current)
             outcomes.append(result)
             return result
 
         monkeypatch.setattr(CaptureRepository, "finish_recording_results", save)
-        wall[0] = _NOW + 200_000_000
-        with pytest.raises((ConsistencyError, AssertionError)) as first_error:
-            await capture_handler("camera_record")(1, runtime)
+        world.wall[0] = _NOW + 200_000_000
+        with pytest.raises(ConsistencyError):
+            await capture_handler("camera_record")(1, world.runtime)
         assert len(inputs) == 1 and outcomes[0].kind is DbOutcomeKind.UNKNOWN
         request, key = inputs[0]
-        assert request.capture.occurred_at == wall[0]
-        owned.connection.close()
-        reopened = open_existing(roots.staging.parent / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
-        assert reopened.metadata == owned.metadata
-        assert saved_transaction_events(reopened.connection, key) is not None
-        assert reopened.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (3,)
-        assert _attempts(reopened) == original_attempts
-        before = tuple(reopened.connection.iterdump())
-        before_calls = tuple(driver.calls)
-        original_open, opened = context.open_connection, []
-
-        def open_connection():
-            current = original_open()
-            assert current.metadata == reopened.metadata and current.connection is not reopened.connection
-            opened.append(current)
-            return current
-
-        context.open_connection = open_connection
-        wall[0] = _NOW + 300_000_000
-        selected = {
-            "normal": context.flows["scheduling"],
-            "residual": context.flows["residual"],
-            "restricted": context.restricted_flows["winddown"],
-            "normal-cancel": context.flows["cancel"],
-            "restricted-cancel": context.restricted_flows["cancel"],
-        }[entrance]
-        if confirmation == "saved":
-            await selected(context)
-        else:
-            with pytest.raises(StateDbFailure):
-                await selected(context)
-
+        assert request.capture.occurred_at == world.wall[0]
+        assert world.tools() == ["probe"]
+        await world.reconnect()
+        assert saved_transaction_events(world.owned.connection, key) is not None
+        assert world.owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (3,)
+        assert _attempts(world.owned) == original_attempts
+        world.wall[0] = _NOW + 300_000_000
+        world.prime_clock()
+        before = tuple(world.owned.connection.iterdump())
+        before_calls = tuple(world.driver.calls)
+        await world.replay(entrance, kind="completion", failure=confirmation != "saved")
         assert inputs == [(request, key), (request, key)]
         expected = {"saved": DbOutcomeKind.COMPLETED,
             "rolled-back": DbOutcomeKind.ROLLED_BACK, "unknown": DbOutcomeKind.UNKNOWN}[confirmation]
         assert outcomes[1].kind is expected, outcomes[1].error
-        assert len(opened) == 1 and len(factory_calls) == 1
-        if confirmation == "saved":
-            assert not runtime.pending_capture_completions
-        else:
-            assert unavailable[0].key_reads == 1
-            pending = runtime.pending_capture_completions[1]
-            assert (pending.request, pending.key) == (request, key)
-        assert tuple(reopened.connection.iterdump()) == before
-        assert len(reader.requests) == 1 and tuple(driver.calls) == before_calls
-        assert runtime.results.calls == [1] and tools.calls == ["probe", "probe"]
-        assert isinstance(first_error.value, ConsistencyError)
+        if confirmation != "saved":
+            assert gate.hits == gate.rollbacks == 1
+        assert tuple(world.owned.connection.iterdump()) == before
+        assert len(world.reader.requests) == 1 and tuple(world.driver.calls) == before_calls
+        assert results.calls == [1] and world.tools() == ["probe"]
+        if confirmation != "saved":
+            # 原责任在失败后仍可按原输入恢复，不依赖查看集合内容。
+            monkeypatch.setattr(CaptureRepository, "finish_recording_results",
+                lambda repository, command, operation_key, owned: original_save(repository, command, operation_key, owned))
+            await world.replay(entrance, kind="completion")
+            assert tuple(world.owned.connection.iterdump()) == before
     finally:
-        if reopened is not None:
-            reopened.connection.close()
-        lifecycle.close_runtime(deps)
+        await world.close()
+        world.owned.connection.close()

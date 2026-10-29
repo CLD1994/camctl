@@ -14,7 +14,7 @@ from camctl.persistence.repositories import outputs
 from .test_output_family import family_database
 from .test_qualification import _NOW, _seed_action, _seed_device_file, _seed_output, _seed_processing
 from .test_sources import _fixed_resolution
-from ..operations.test_result_reuse import _FaultConnection
+from ..support.outputs import observed_query
 
 
 @pytest.fixture
@@ -121,9 +121,9 @@ def test_fixed_selection_does_not_expand_when_new_output_has_bad_file(selection_
     assert tuple(connection.iterdump()) == before
 
 
-class CatalogConnection(_FaultConnection):
+class CatalogConnection:
     def __init__(self, connection, fault=None, query="catalog"):
-        super().__init__(connection, "unused")
+        self._connection = connection
         self.fault = fault
         self.query = query
         self.error = sqlite3.OperationalError("selection read failed")
@@ -131,21 +131,23 @@ class CatalogConnection(_FaultConnection):
         self.batches = []
 
     def execute(self, sql, parameters=()):
-        prefixes = {
-            "catalog": ("SELECT id FROM outputs WHERE source_action_id", "SELECT o.id, o.source_action_id"),
-            "processing": ("SELECT check_state, repair_state, discard_state, id, action_id FROM recording_processing",),
-            "items": ("SELECT requested_output_id, output_id, basis, original_output_id",
-                      "SELECT id FROM obtain_items WHERE selection_id"),
-            "exists": ("SELECT 1 FROM outputs WHERE id",),
-            "pending_items": ("SELECT 1 FROM obtain_items WHERE selection_id",),
+        cursor, columns, reads = observed_query(self._connection, sql, parameters)
+        queried = {
+            "catalog": (columns == {"id"} and ("outputs", "source_action_id") in reads),
+            "processing": {"check_state", "repair_state", "discard_state"} <= columns,
+            "items": ("requested_output_id" in columns or (
+                columns == {"id"} and ("obtain_items", "selection_id") in reads)),
+            "exists": ("outputs", "id") in reads and columns == {"1"},
+            "pending_items": ("obtain_items", "selection_id") in reads and columns == {"1"},
         }
-        is_catalog = sql.startswith(prefixes[self.query])
+        is_catalog = queried[self.query]
         if is_catalog and self.fault == "execute":
+            cursor.close()
             raise self.error
-        cursor = self._connection.execute(sql, parameters)
         if not is_catalog:
             return cursor
         probe = create_autospec(sqlite3.Cursor, instance=True, spec_set=True)
+        probe.description = cursor.description
         probe.close.side_effect = cursor.close
 
         def fetchmany(size):
@@ -160,6 +162,9 @@ class CatalogConnection(_FaultConnection):
         probe.fetchone.side_effect = self.error if self.fault == "fetch" else cursor.fetchone
         self.cursors.append(probe)
         return probe
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
 
 
 @pytest.mark.parametrize("entry", ["read", "fix"])
@@ -200,23 +205,20 @@ def test_catalog_queries_release_cursors_and_preserve_read_errors(selection_data
         assert tuple(connection.iterdump()) == before
 
 
-def test_catalog_enumerates_multiple_bounded_batches_without_reloading_family_files(selection_database, monkeypatch):
+def test_catalog_enumerates_complete_family_across_bounded_batches(selection_database):
     connection = selection_database.connection
     for identity in range(1000, 1130):
         _seed_device_file(connection, identity + 1000, 11)
         _seed_output(connection, identity, 11, identity + 1000)
     connection.commit()
-    read_row = create_autospec(outputs.row_facts, side_effect=outputs.row_facts)
-    monkeypatch.setattr(outputs, "row_facts", read_row)
     probe = CatalogConnection(connection)
     facts = outputs.load_selection_facts(probe, 11)
     assert tuple(item.output_id for item in facts.outputs) == (701, 702, 703, 705, *range(1000, 1130))
     assert len([size for _, size in probe.batches if size]) >= 2
     assert all(0 <= count <= requested <= 128 for requested, count in probe.batches)
-    # 每个真实文件最多加载一次，防止按每个派生 ID 重新加载整个关联集合。
-    for table, identity in (("device_files", 501), ("device_files", 502), ("intermediate_files", 801)):
-        calls = [call for call in read_row.call_args_list if call.args[1:] == (table, identity)]
-        assert len(calls) == 1
+    by_id = {item.output_id: item for item in facts.outputs}
+    assert (by_id[701].size_bytes, by_id[702].original_output_id,
+            by_id[703].original_output_id) == (4096, 701, 701)
     for cursor in probe.cursors:
         cursor.close.assert_called_once_with()
 

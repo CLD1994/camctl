@@ -1,0 +1,21 @@
+[
+  {
+    "nodeid": "tests/integration/test_timelapse_time_parameters.py::test_describe_python_browser_and_node_export_agree[dji-action6]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011154289968544617
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 25.972471273998963
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.014027348996023647
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 25.98761405199184
+  }
+]

@@ -1,0 +1,5 @@
+[
+  "tests/integration/test_device_capability_declarations.py::test_installed_declarations_match_checkout_and_protocol_resources",
+  "tests/integration/test_device_capability_declarations.py::test_installed_arbitrary_driver_keeps_empty_actions_and_individual_sources",
+  "tests/integration/test_device_capability_declarations.py::test_installed_document_survives_client_loader_http_and_invalid_reload"
+]

@@ -1,0 +1,248 @@
+EEEEEEEEEEEEE                                                            [100%]
+==================================== ERRORS ====================================
+_ ERROR at setup of test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.WRITE-admission] _
+'test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.WRITE-admission]' requested an async fixture 'controlled', with no plugin or hook that handled it. This is an error, as pytest does not natively support it.
+See: https://docs.pytest.org/en/stable/deprecations.html#sync-test-depending-on-async-fixture
+_ ERROR at setup of test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.WRITE-queued] _
+
+self = <Coroutine test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.WRITE-queued]>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+E       AssertionError
+
+/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest_asyncio/plugin.py:558: AssertionError
+_ ERROR at setup of test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.WRITE-dispatched] _
+
+self = <Coroutine test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.WRITE-dispatched]>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+E       AssertionError
+
+/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest_asyncio/plugin.py:558: AssertionError
+_ ERROR at setup of test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.WRITE-awaiting_delivery] _
+
+self = <Coroutine test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.WRITE-awaiting_delivery]>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+E       AssertionError
+
+/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest_asyncio/plugin.py:558: AssertionError
+_ ERROR at setup of test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.READ-admission] _
+
+self = <Coroutine test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.READ-admission]>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+E       AssertionError
+
+/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest_asyncio/plugin.py:558: AssertionError
+_ ERROR at setup of test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.READ-queued] _
+
+self = <Coroutine test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.READ-queued]>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+E       AssertionError
+
+/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest_asyncio/plugin.py:558: AssertionError
+_ ERROR at setup of test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.READ-dispatched] _
+
+self = <Coroutine test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.READ-dispatched]>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+E       AssertionError
+
+/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest_asyncio/plugin.py:558: AssertionError
+_ ERROR at setup of test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.READ-awaiting_delivery] _
+
+self = <Coroutine test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.READ-awaiting_delivery]>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+E       AssertionError
+
+/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest_asyncio/plugin.py:558: AssertionError
+_ ERROR at setup of test_unknown_result_allows_original_key_verification_after_delivery _
+
+self = <Coroutine test_unknown_result_allows_original_key_verification_after_delivery>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+E       AssertionError
+
+/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest_asyncio/plugin.py:558: AssertionError
+___ ERROR at setup of test_late_admission_timeout_does_not_settle_reused_key ___
+
+self = <Coroutine test_late_admission_timeout_does_not_settle_reused_key>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+E       AssertionError
+
+/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest_asyncio/plugin.py:558: AssertionError
+_ ERROR at setup of test_late_withdrawal_cannot_cancel_new_operation_with_reused_key _
+
+self = <Coroutine test_late_withdrawal_cannot_cancel_new_operation_with_reused_key>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+E       AssertionError
+
+/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest_asyncio/plugin.py:558: AssertionError
+_ ERROR at setup of test_result_delivery_clears_old_dispatch_before_original_key_reuse _
+
+self = <Coroutine test_result_delivery_clears_old_dispatch_before_original_key_reuse>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+E       AssertionError
+
+/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest_asyncio/plugin.py:558: AssertionError
+__ ERROR at setup of test_business_cancel_withdraws_only_its_original_result ___
+
+self = <Coroutine test_business_cancel_withdraws_only_its_original_result>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+E       AssertionError
+
+/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest_asyncio/plugin.py:558: AssertionError
+=========================== short test summary info ============================
+ERROR apps/camctl/tests/unit/persistence/test_executor_identity.py::test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.WRITE-admission]
+ERROR apps/camctl/tests/unit/persistence/test_executor_identity.py::test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.WRITE-queued]
+ERROR apps/camctl/tests/unit/persistence/test_executor_identity.py::test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.WRITE-dispatched]
+ERROR apps/camctl/tests/unit/persistence/test_executor_identity.py::test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.WRITE-awaiting_delivery]
+ERROR apps/camctl/tests/unit/persistence/test_executor_identity.py::test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.READ-admission]
+ERROR apps/camctl/tests/unit/persistence/test_executor_identity.py::test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.READ-queued]
+ERROR apps/camctl/tests/unit/persistence/test_executor_identity.py::test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.READ-dispatched]
+ERROR apps/camctl/tests/unit/persistence/test_executor_identity.py::test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.READ-awaiting_delivery]
+ERROR apps/camctl/tests/unit/persistence/test_executor_identity.py::test_unknown_result_allows_original_key_verification_after_delivery
+ERROR apps/camctl/tests/unit/persistence/test_executor_identity.py::test_late_admission_timeout_does_not_settle_reused_key
+ERROR apps/camctl/tests/unit/persistence/test_executor_identity.py::test_late_withdrawal_cannot_cancel_new_operation_with_reused_key
+ERROR apps/camctl/tests/unit/persistence/test_executor_identity.py::test_result_delivery_clears_old_dispatch_before_original_key_reuse
+ERROR apps/camctl/tests/unit/persistence/test_executor_identity.py::test_business_cancel_withdraws_only_its_original_result
+13 errors in 0.25s

@@ -1,0 +1,78 @@
+{
+  "budget_scope": "memory_and_swap",
+  "uid": 1002,
+  "gid": 1002,
+  "requested_limit": "2GiB",
+  "limit_bytes": 2147483648,
+  "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "camctl_memory_plugin",
+    "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py::test_fixed_batch_write_and_verification_have_bounded_residency",
+    "-q",
+    "--tb=short",
+    "--basetemp=/tmp/camctl-memsw-validation/capacity-with-plugin-tmp",
+    "--junitxml=/tmp/camctl-memsw-validation/capacity-with-plugin.xml"
+  ],
+  "status": "finished",
+  "started_at": 1792949423.9430099,
+  "errors": [],
+  "delegation_path": "/sys/fs/cgroup/memory/camctl-budget-1481519-f5421145e9bd455c8c7d002c366b0fd9",
+  "delegation": {
+    "path": "/sys/fs/cgroup/memory/camctl-budget-1481519-f5421145e9bd455c8c7d002c366b0fd9",
+    "action": "--_delegate",
+    "identity": {
+      "device": 70,
+      "inode": 9243
+    },
+    "version": 1,
+    "ok": true,
+    "exit_code": 0,
+    "stderr": ""
+  },
+  "executed_command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "camctl_memory_plugin",
+    "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py::test_fixed_batch_write_and_verification_have_bounded_residency",
+    "-q",
+    "--tb=short",
+    "--basetemp=/tmp/camctl-memsw-validation/capacity-with-plugin-tmp",
+    "--junitxml=/tmp/camctl-memsw-validation/capacity-with-plugin.xml",
+    "--camctl-memory-limit",
+    "2GiB",
+    "--camctl-memory-cgroup-root",
+    "/sys/fs/cgroup/memory/camctl-budget-1481519-f5421145e9bd455c8c7d002c366b0fd9"
+  ],
+  "command_pid": 1481522,
+  "command_pgid": 1481522,
+  "command_exit_code": 0,
+  "groups": [
+    {
+      "path": "/sys/fs/cgroup/memory/camctl-budget-1481519-f5421145e9bd455c8c7d002c366b0fd9",
+      "remaining_pids": [],
+      "role": "delegation",
+      "resource": {
+        "memory.limit_in_bytes": "9223372036854771712",
+        "memory.memsw.limit_in_bytes": "9223372036854771712",
+        "memory.max_usage_in_bytes": "36110336",
+        "memory.memsw.max_usage_in_bytes": "36110336",
+        "memory.oom_control": "oom_kill_disable 0\nunder_oom 0\noom_kill 0"
+      }
+    }
+  ],
+  "removal": {
+    "path": "/sys/fs/cgroup/memory/camctl-budget-1481519-f5421145e9bd455c8c7d002c366b0fd9",
+    "action": "--_remove",
+    "ok": true,
+    "exit_code": 0,
+    "stderr": ""
+  },
+  "exit_code": 0,
+  "finished_at": 1792949482.4379575
+}

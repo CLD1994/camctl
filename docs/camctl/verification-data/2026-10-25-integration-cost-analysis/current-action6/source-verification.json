@@ -1,0 +1,10 @@
+{
+  "source_head": "fc3104424fd8ce64152cbdd6f1b4899d38e011e1",
+  "verified_tracked_files": 534,
+  "changed_tracked_files": [],
+  "dependency_versions": {
+    "playwright": "1.63.0",
+    "chromium": "/home/cld/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome"
+  },
+  "browser_usage": "该native单例只调用export/import/import-media，未请求Chromium页面；依赖副本版本已核对。"
+}

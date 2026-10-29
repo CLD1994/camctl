@@ -1,0 +1,241 @@
+[
+  {
+    "nodeid": "tests/integration/session/test_clock.py::TestLowerBoundPersistence::test_first_trusted_check_saves_bound_event",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.07241079199593514
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.06638675800058991
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.007819406993803568
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.14661695699032862
+  },
+  {
+    "nodeid": "tests/integration/session/test_clock.py::TestLowerBoundPersistence::test_second_run_advances_only_strictly",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.040148016007151455
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.013019215999520384
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006118008997873403
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.05928524100454524
+  },
+  {
+    "nodeid": "tests/integration/session/test_clock.py::TestLowerBoundPersistence::test_clock_failure_preserves_acceptance",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.03624898999987636
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006487719947472215
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0021235489984974265
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.039021310993121006
+  },
+  {
+    "nodeid": "tests/integration/session/test_clock.py::TestLowerBoundPersistence::test_concurrent_advance_rejected_by_stale_recheck",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.042457720992388204
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.007871246998547576
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.005899839001358487
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.05622880699229427
+  },
+  {
+    "nodeid": "tests/integration/session/test_handoff.py::TestSubmitRacesAdmissionClose::test_acceptor_present_hands_work_over",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.03539862600155175
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006272610044106841
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.002066403001663275
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.038092290007625706
+  },
+  {
+    "nodeid": "tests/integration/session/test_handoff.py::TestSubmitRacesAdmissionClose::test_close_first_then_submit_requests_run",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.06228368199663237
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009482860041316599
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0026624609890859574
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.06589442898984998
+  },
+  {
+    "nodeid": "tests/integration/session/test_handoff.py::TestSubmitRacesAdmissionClose::test_no_pending_work_close_keeps_admission_released",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.051214007995440625
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013829370000166818
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0029386310052359477
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.055535576000693254
+  },
+  {
+    "nodeid": "tests/integration/session/test_handoff.py::TestSubmitRacesAdmissionClose::test_new_work_keeps_admission_for_current_run",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.03560325199214276
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0018697060004342347
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0031145989923970774
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.04058755698497407
+  },
+  {
+    "nodeid": "tests/integration/session/test_handoff.py::TestSubmitRacesAdmissionClose::test_report_failure_waits_for_new_changes",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.03557411200017668
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010314300016034395
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0034080530022038147
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.04001359500398394
+  },
+  {
+    "nodeid": "tests/integration/session/test_handoff.py::TestSubmitRacesAdmissionClose::test_report_failure_closes_real_admission",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.04408839099050965
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0017243670008610934
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0023148869950091466
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.04812764498637989
+  },
+  {
+    "nodeid": "tests/integration/session/test_handoff.py::TestProbeIsolation::test_multiple_submits_probing_do_not_misdetect",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0627571840013843
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.00035647999902721494
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009038529969984666
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.06401751699740998
+  },
+  {
+    "nodeid": "tests/integration/session/test_handoff.py::TestProbeIsolation::test_failed_submit_after_close_keeps_admission_closed",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.035607826008345
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.000663457001792267
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008219010051107034
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.03709318401524797
+  },
+  {
+    "nodeid": "tests/integration/session/test_local_work_observer_control.py::test_helper_observer_and_real_typed_control_keep_first_identity[single-stop-False-False]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012221509969094768
+      }
+    },
+    "outcome": null,
+    "duration_seconds": 0.0012221509969094768
+  }
+]

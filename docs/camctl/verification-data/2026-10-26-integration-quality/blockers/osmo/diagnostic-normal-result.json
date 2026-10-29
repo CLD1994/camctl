@@ -1,0 +1,40 @@
+{
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "scripts/run-memory-budget.py",
+    "--evidence-dir",
+    "/tmp/camctl-failure-repair-evidence/osmo/diagnostic-normal-budget",
+    "--",
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "camctl_memory_plugin",
+    "-p",
+    "osmo_timing",
+    "-p",
+    "osmo_diagnostic_plugin",
+    "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[normal-indexes0-2-succeeded]",
+    "-q",
+    "--junitxml",
+    "/tmp/camctl-failure-repair-evidence/osmo/diagnostic-normal.xml",
+    "--basetemp",
+    "/tmp/camctl-failure-repair-runtime/osmo/diagnostic-normal-pytest",
+    "--durations=10"
+  ],
+  "cwd": "/tmp/camctl-failure-repair-20261026-4f5dfpqh/osmo",
+  "git_head": "1e697c89b311fdc4de032ae7dd25ba22252ce5ae",
+  "git_status": "?? apps/client/node_modules\n",
+  "test_sha256": "e295d5a5288f9db125ea3504b7ddc2213480255dc32783d163814d393b3be435",
+  "python": "Python 3.11.17",
+  "concurrent_load": "Other quality agents may run isolated workspaces concurrently; single diagnostic sample only.",
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-failure-repair-20261026-4f5dfpqh/osmo/apps/camctl/src:/tmp/camctl-failure-repair-20261026-4f5dfpqh/osmo/apps/camctl/tests:/tmp/camctl-failure-repair-20261026-4f5dfpqh/osmo/scripts:/tmp/camctl-failure-repair-20261026-4f5dfpqh/osmo/tests/integration:/tmp/camctl-failure-repair-evidence/osmo",
+    "TMPDIR": "/tmp/camctl-failure-repair-runtime/osmo/tmp",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-failure-repair-runtime/osmo/pycache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "OSMO_TIMING_FILE": "/tmp/camctl-failure-repair-evidence/osmo/diagnostic-normal-stages.json"
+  },
+  "exitcode": 0,
+  "wall_seconds": 107.45810886099935
+}

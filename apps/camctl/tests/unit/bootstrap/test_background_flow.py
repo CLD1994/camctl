@@ -98,6 +98,55 @@ async def test_completed_flow_is_consumed_before_next_task_can_start():
     assert calls == [1, 3]
 
 
+@pytest.mark.parametrize("checks", [1, 3])
+async def test_external_completion_check_yields_before_starting_next_discovery(checks):
+    release = asyncio.Event()
+    calls = []
+
+    async def body(context):
+        calls.append(context)
+        await release.wait()
+
+    flow = BackgroundFlow(body)
+    await flow(1)
+    release.set()
+    await asyncio.sleep(0)
+    for _ in range(checks):
+        flow.check_completed()
+    assert flow.required_settlements() == 0
+
+    await flow(2)
+
+    assert calls == [1] and flow.required_settlements() == 0
+    await flow(3)
+    assert calls == [1, 3]
+
+
+async def test_external_completion_error_is_delivered_before_another_discovery():
+    release = asyncio.Event()
+    failure = ValueError("original discovery failed")
+    calls = []
+
+    async def body(context):
+        calls.append(context)
+        await release.wait()
+        if context == 1:
+            raise failure
+
+    flow = BackgroundFlow(body)
+    await flow(1)
+    release.set()
+    await asyncio.sleep(0)
+    assert flow.required_settlements() == 1
+    with pytest.raises(ValueError) as caught:
+        flow.check_completed()
+    assert caught.value is failure and calls == [1]
+    flow.check_completed()
+    assert flow.required_settlements() == 0
+    await flow(2)
+    assert calls == [1, 2]
+
+
 async def test_original_flow_error_is_delivered_to_the_session():
     release = asyncio.Event()
     failure = ValueError("source facts invalid")

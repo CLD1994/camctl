@@ -1,0 +1,40 @@
+[
+  {
+    "nodeid": "tests/integration/test_camctl_c_module_roundtrip.py::test_capture_obtain_cleanup_roundtrip_via_c_module",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 40.168031369001255
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 90.36660279300122
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.011553887990885414
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 130.54618804999336
+  },
+  {
+    "nodeid": "tests/integration/test_camctl_c_module_roundtrip.py::test_auto_preview_roundtrip_via_c_module",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.025748480009497143
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 38.83070712100016
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.008856239990564063
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 38.86531184100022
+  }
+]

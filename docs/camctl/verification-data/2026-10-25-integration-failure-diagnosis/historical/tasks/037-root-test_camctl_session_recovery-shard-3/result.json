@@ -1,0 +1,79 @@
+{
+  "id": "root/test_camctl_session_recovery/shard-3",
+  "scope": "root",
+  "path": "tests/integration/test_camctl_session_recovery.py",
+  "targets": [
+    "tests/integration/test_camctl_session_recovery.py::test_concurrent_submits_and_duplicate_identity",
+    "tests/integration/test_camctl_session_recovery.py::test_future_action_waits_and_past_window_expires"
+  ],
+  "estimated_seconds": 19.179248734002613,
+  "historical_failure_observed": true,
+  "parent_id": "root/test_camctl_session_recovery",
+  "shard": 3,
+  "shards": 4,
+  "collection": "/tmp/camctl-itopt-final-20261025/collection/root-test_camctl_session_recovery/artifacts",
+  "collected_nodes": 6,
+  "status": "failed",
+  "number": 37,
+  "worker": 0,
+  "artifacts": "/tmp/camctl-itopt-final-20261025/tasks/037-root-test_camctl_session_recovery-shard-3/artifacts",
+  "cwd": "/tmp/camctl-itopt-final-20261025/tasks/037-root-test_camctl_session_recovery-shard-3/source",
+  "started_utc": "2026-10-25T00:05:24.749227+00:00",
+  "command": [
+    "/tmp/camctl-itopt-final-20261025/tasks/037-root-test_camctl_session_recovery-shard-3/source/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "tests/integration/test_camctl_session_recovery.py::test_concurrent_submits_and_duplicate_identity",
+    "tests/integration/test_camctl_session_recovery.py::test_future_action_waits_and_past_window_expires",
+    "-q",
+    "--durations=0",
+    "-p",
+    "integration_progress",
+    "--basetemp",
+    "/tmp/camctl-itopt-final-20261025/tasks/037-root-test_camctl_session_recovery-shard-3/tmp/pytest"
+  ],
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-itopt-final-20261025/control:/tmp/camctl-itopt-final-20261025/tasks/037-root-test_camctl_session_recovery-shard-3/source/apps/camctl/src",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-itopt-final-20261025/workers/0/python-cache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-itopt-final-20261025/workers/0/project-env",
+    "UV_CACHE_DIR": "/tmp/camctl-itopt-final-20261025/workers/0/uv-cache",
+    "UV_OFFLINE": "1",
+    "TMPDIR": "/tmp/camctl-itopt-final-20261025/tasks/037-root-test_camctl_session_recovery-shard-3/tmp"
+  },
+  "preparations": [
+    {
+      "label": "package-resources",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-itopt-final-20261025/tasks/037-root-test_camctl_session_recovery-shard-3/source/apps/camctl/scripts/sync_resources.py"
+      ],
+      "cwd": "/tmp/camctl-itopt-final-20261025/tasks/037-root-test_camctl_session_recovery-shard-3/source",
+      "started_utc": "2026-10-25T00:05:25.062268+00:00",
+      "pid": 482012,
+      "exit_code": 0,
+      "finished_utc": "2026-10-25T00:05:25.118558+00:00",
+      "wall_seconds": 0.056285464001121
+    }
+  ],
+  "preparation": "package-resources",
+  "preparation_pid": 482012,
+  "pid": 482038,
+  "execution_started_utc": "2026-10-25T00:05:25.119578+00:00",
+  "progress": {
+    "status": "finished",
+    "exit_code": 1,
+    "collected": 2,
+    "outcomes": {
+      "failed": 1,
+      "passed": 1
+    },
+    "subchecks": {},
+    "elapsed_seconds": 31.308823375999054,
+    "utc": "2026-10-25T00:05:56.759122+00:00",
+    "pid": 482038
+  },
+  "exit_code": 1,
+  "finished_utc": "2026-10-25T00:05:56.859873+00:00",
+  "wall_seconds": 31.97488280000107
+}

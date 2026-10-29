@@ -1,0 +1,40 @@
+[
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.06348033998801839
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 78.28146599599859
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.012819313997169957
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 78.35776564998378
+  },
+  {
+    "nodeid": "tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0014793430018471554
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 115.1558357560134
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0020573130022967234
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 115.15937241201755
+  }
+]

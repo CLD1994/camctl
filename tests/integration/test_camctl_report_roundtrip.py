@@ -354,6 +354,17 @@ def _log_copies(directory: Path) -> list[Path]:
     return sorted(directory.glob("log-copy-*.log"))
 
 
+def _diagnostic_objects(value):
+    """按交付的异常图读取原诊断事实。"""
+    if isinstance(value, dict):
+        yield value
+        for item in value.values():
+            yield from _diagnostic_objects(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _diagnostic_objects(item)
+
+
 @pytest.mark.skipif(
     os.name != "posix",
     reason="会话中替换数据库文件的故障注入需要 POSIX 重命名语义；"
@@ -365,10 +376,9 @@ def test_state_db_failure_delivers_log_copy(
     束（标记删除），再次失效取得新一轮首次触发；C 主程序按既有
     ready→processing 流程中转日志副本，保留完整文件名和内容。
 
-    注入点取报告生成子进程写出 staging 临时文件的时刻：报告流程
-    阻塞等待生成完成，同轮其余流程不可能运行；已打开的数据库连接
-    在自己的文件描述符上完成生成本轮的发布，下一轮报告流程打开
-    状态库失败，构成不依赖轮询时序的报告处理失败。
+    报告生成子进程写出 staging 临时文件后，测试移走状态库文件。
+    已打开的连接继续持有原文件，后续报告任务打开原路径时观察到
+    状态库失效；日志副本保留该任务交付的原异常事实。
     """
     deployment = Deployment(tmp_path, devices=False)
     initialized = deployment.camctl(
@@ -381,9 +391,8 @@ def test_state_db_failure_delivers_log_copy(
     def _run_fault_round(plan_path: Path, tag: str) -> None:
         """递交计划并在报告生成子进程运行期间替换走会话的状态库。
 
-        计划携带一个远期动作使会话在生成本轮完成后仍有未完成责
-        任，必须进入下一轮；下一轮报告流程的连接打开失败触发日志
-        副本，随后其余流程的连接打开失败使会话按状态库错误退出。
+            计划携带远期动作，使会话继续承担后续处理责任。报告任务
+            打开原状态库路径失败后交付日志副本，会话按状态库错误退出。
         """
         submitted = deployment.camctl(
             "submit", str(plan_path), "--config", str(deployment.config_path))
@@ -420,11 +429,15 @@ def test_state_db_failure_delivers_log_copy(
     copies = _log_copies(deployment.ready)
     assert len(copies) == 1
     first_copy = copies[0]
-    trigger_text = first_copy.read_text(encoding="utf-8", errors="replace")
-    # 触发记录呈现报告处理失败及其状态库原因；错误类型取决于失效
-    # 被哪个打开动作观察到（文件缺失或打开失败），不逐字断言。
-    assert "报告处理失败: " in trigger_text
-    assert "状态库" in trigger_text
+    trigger_records = [json.loads(line) for line in first_copy.read_text(encoding="utf-8").splitlines()]
+    report_errors = [record for record in trigger_records
+                     if record["level"] == "ERROR" and record["stage"] == "report"]
+    assert report_errors
+    database_errors = [value for record in report_errors for value in _diagnostic_objects(record["error"])
+                       if value.get("type", "").rsplit(".", 1)[-1] in ("DatabaseMissingError", "DatabaseOpenError")
+                       and str(deployment.state_db) in value.get("message", "")]
+    assert database_errors
+    assert all(error["traceback"] for error in database_errors)
     marker = json.loads(marker_path.read_bytes())
     assert marker["copy_name"] == first_copy.name
     assert marker["stage"] == "published"

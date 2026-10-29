@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from enum import Enum
 from pathlib import Path
@@ -11,6 +11,7 @@ from typing import Any, Mapping
 
 from camctl.capture.input_copy import InputContext, InputPhase, InputStep, obtain_recording_input
 from camctl.capture.media_facts import probe_document, read_probe
+from camctl.capture.save_stage import RequiredSaveStage
 from camctl.capture.media_flow import (
     MediaFlow, _finish_internal_read, _resume_local_internal_end, _ensure_checksum_support, _read_dispatched,
 )
@@ -25,14 +26,14 @@ from camctl.outputs.qualification import FileCandidate, OperationConfig, Qualifi
 from camctl.outputs.read_attempts import hold_read_end, retry_read_business, retry_read_ends, run_owned_read
 from camctl.outputs.slots import SlotOutcome, SlotRequest
 from camctl.persistence.business import settle_required
-from camctl.persistence.models import DbOutcomeKind, db_failure, db_outcome_errors
+from camctl.persistence.models import DbOutcomeKind, db_failure, db_outcome_errors, db_outcome_for
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.repositories.segment_inspections import (
     InspectionCreate, InspectionResultSave, SegmentInspectionRef,
     SegmentInspectionRepository, read_inspection_for_member,
 )
 from camctl.outputs.read_discovery import DEFAULT_BATCH_SIZE, positive_limit
-from camctl.logging_runtime.diagnostics import record_error
+from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
 
 __all__ = [
     "SegmentInspectionPhase",
@@ -128,22 +129,60 @@ def _step_from_ref(ref: SegmentInspectionRef, copy_id: int | None = None) -> Seg
                                  reason=reason)
 
 
-async def _save_result(flow: MediaFlow, request: InspectionResultSave) -> bool:
+@dataclass(frozen=True)
+class PendingInspectionResult:
+    request: InspectionResultSave
+    key: str
+    stage: RequiredSaveStage = field(default_factory=RequiredSaveStage, compare=False, repr=False)
+    diagnostic: DiagnosticState = field(default_factory=DiagnosticState, compare=False, repr=False)
+
+
+async def save_inspection_result(database, pending_results, request, *, key=None,
+                                 expected=None, finish_rejected=False):
+    """原结果、原键及其消费共同受同一阶段拥有者协调。"""
     identity = request.inspection_id
-    pending = flow.pending_segment_inspection_results.get(identity)
+    pending = pending_results.get(identity)
+    if expected is not None and pending is not expected:
+        return None
     if pending is None:
-        pending = (request, new_operation_key())
-        flow.pending_segment_inspection_results[identity] = pending
-    elif pending[0] != request:
+        pending = PendingInspectionResult(request, new_operation_key() if key is None else key)
+        pending_results[identity] = pending
+    elif pending.request != request or key is not None and pending.key != key:
         raise ConsistencyError("同一分段检查已有不同的待保存结果")
-    outcome = await flow.database.write(lambda owned: SegmentInspectionRepository().save_result(pending[0], pending[1], owned), key=pending[1])
-    if outcome.kind is DbOutcomeKind.COMPLETED:
-        del flow.pending_segment_inspection_results[identity]
-        return True
-    if any(not isinstance(error, asyncio.CancelledError) for error in db_outcome_errors(outcome)):
-        record_error(db_failure(ConsistencyError, "原分段检查结果保存未可靠完成", outcome),
-            stage="capture.segment_save", context={"inspection_id": identity})
-    return False
+
+    def consume(outcome):
+        terminal = (outcome.kind is DbOutcomeKind.COMPLETED or
+            finish_rejected and outcome.kind is not DbOutcomeKind.UNKNOWN)
+        if terminal and pending_results.get(identity) is pending:
+            del pending_results[identity]
+
+    async def save_and_apply():
+        if pending_results.get(identity) is not pending:
+            return None
+        try:
+            outcome = await database.write(lambda owned: SegmentInspectionRepository().save_result(
+                pending.request, pending.key, owned), key=pending.key,
+                description="保存原分段检查结果")
+        except BaseException as error:
+            receipt = db_outcome_for(error)
+            if receipt is not None:
+                consume(receipt)
+            raise
+        if (outcome.kind is not DbOutcomeKind.COMPLETED
+                and any(not isinstance(error, asyncio.CancelledError)
+                        for error in db_outcome_errors(outcome))):
+            record_error(db_failure(ConsistencyError, "原分段检查结果保存未可靠完成", outcome),
+                stage="capture.segment_save", context={"inspection_id": identity},
+                state=pending.diagnostic)
+        consume(outcome)
+        return outcome
+
+    return await pending.stage.run(save_and_apply)
+
+
+async def _save_result(flow: MediaFlow, request: InspectionResultSave) -> bool:
+    outcome = await save_inspection_result(flow.database, flow.pending_segment_inspection_results, request)
+    return outcome is None or outcome.kind is DbOutcomeKind.COMPLETED
 
 
 async def settle_inspection_read_failure(flow: MediaFlow, copy_id: int,
@@ -490,7 +529,7 @@ async def inspect_segment(flow: MediaFlow, request: SegmentInspectionRequest) ->
     # 原 inspection request/key 的未知回执先重送；它可能已在数据库
     # 可靠提交，只是本进程尚未收到回执。
     pending = flow.pending_segment_inspection_results.get(ref.inspection_id)
-    if pending is not None and not (await _save_result(flow, pending[0])):
+    if pending is not None and not (await _save_result(flow, pending.request)):
         return SegmentInspectionStep(SegmentInspectionPhase.WAITING,
             ref.inspection_id, copy_id, reason="result_save_unknown")
 
@@ -519,7 +558,7 @@ async def inspect_segment(flow: MediaFlow, request: SegmentInspectionRequest) ->
     await retry_read_ends(flow)
 
     pending = flow.pending_segment_inspection_results.get(ref.inspection_id)
-    if pending is not None and not (await _save_result(flow, pending[0])):
+    if pending is not None and not (await _save_result(flow, pending.request)):
         return SegmentInspectionStep(SegmentInspectionPhase.WAITING,
             ref.inspection_id, copy_id, reason="result_save_unknown")
 

@@ -196,17 +196,19 @@ async def _submit_plan(owned) -> int:
         ],
     }
     source = parse_input(await read_input("/tmp/plan.json", _StubSource(body)))
-    accepted = await accept_input(
-        source,
-        AcceptanceContext(
-            mode=CommandMode.RUN,
-            catalog=StubCatalog(),
-            repository=AcceptanceRepository(),
-            clock=type("C", (), {"utc_micros": staticmethod(lambda: 1)})(),
-        ),
-        new_operation_key(),
-        owned,
-    )
+    from ..support.database import business_database, database_path
+    async with business_database(database_path(owned)) as database:
+        accepted = await accept_input(
+            source,
+            AcceptanceContext(
+                mode=CommandMode.RUN,
+                catalog=StubCatalog(),
+                repository=AcceptanceRepository(),
+                clock=type("C", (), {"utc_micros": staticmethod(lambda: 1)})(),
+            ),
+            new_operation_key(),
+            database,
+        )
     assert accepted.plan_id is not None
     with closing(owned.connection.execute(
             "SELECT id FROM actions WHERE plan_id = ?", (accepted.plan_id,))) as cursor:

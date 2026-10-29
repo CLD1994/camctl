@@ -1,0 +1,50 @@
+{
+  "('~', 0, '<built-in method gc.collect>')": {
+    "primitive_calls": 181,
+    "calls": 181,
+    "own_seconds": 4.87836926,
+    "cumulative_seconds": 4.87836926,
+    "callers": {
+      "('/tmp/camctl-quality-outputs-20261026/apps/camctl/tests/integration/outputs/test_read_discovery.py', 270, 'test_candidate_capacity_tracks_batch_not_total')": [
+        179,
+        179,
+        4.829156794,
+        4.829156794
+      ],
+      "('/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/unraisableexception.py', 31, 'gc_collect_harder')": [
+        2,
+        2,
+        0.049212466,
+        0.049212466
+      ]
+    }
+  },
+  "('/tmp/camctl-quality-outputs-20261026/apps/camctl/src/camctl/outputs/read_discovery.py', 183, 'read_candidates')": {
+    "primitive_calls": 179,
+    "calls": 179,
+    "own_seconds": 0.006158852,
+    "cumulative_seconds": 0.13627050200000002,
+    "callers": {}
+  },
+  "('/tmp/camctl-quality-outputs-20261026/apps/camctl/tests/integration/outputs/test_read_discovery.py', 270, 'test_candidate_capacity_tracks_batch_not_total')": {
+    "primitive_calls": 1,
+    "calls": 1,
+    "own_seconds": 0.011575671000000001,
+    "cumulative_seconds": 10.381203734000001,
+    "callers": {}
+  },
+  "('/tmp/camctl-quality-outputs-20261026/apps/camctl/src/camctl/outputs/read_discovery.py', 326, 'reads')": {
+    "primitive_calls": 179,
+    "calls": 179,
+    "own_seconds": 0.0019579980000000003,
+    "cumulative_seconds": 0.140644191,
+    "callers": {}
+  },
+  "('/tmp/camctl-quality-outputs-20261026/apps/camctl/src/camctl/persistence/repositories/outputs.py', 5836, 'grant_file')": {
+    "primitive_calls": 122,
+    "calls": 122,
+    "own_seconds": 0.0033761940000000003,
+    "cumulative_seconds": 4.852431439,
+    "callers": {}
+  }
+}

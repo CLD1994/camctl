@@ -143,11 +143,11 @@ class _Settlement:
                                SettlementOutcome(complete=True)))
 
 
-def _runtime(owned, settlement):
+def _runtime(database, settlement):
     from camctl.cancellation.service import CancellationRuntime
 
     return CancellationRuntime(
-        owned=owned, repository=CancellationRepository(),
+        database=database, repository=CancellationRepository(),
         settlement=settlement, occurred_at=lambda: _NOW + 10)
 
 
@@ -174,7 +174,7 @@ class TestWaitScope:
 
 class TestOriginSettlement:
     @pytest.mark.asyncio
-    async def test_c1_canceled_c2_succeeded_a_continues(self, pipeline):
+    async def test_c1_canceled_c2_succeeded_a_continues(self, pipeline, cancellation_database):
         """C1 canceled、C2 succeeded 与 A 仍停止可同时成立。"""
         from camctl.cancellation.service import (
             OriginSettle, settle_origin_cancel)
@@ -186,13 +186,13 @@ class TestOriginSettlement:
             cancellation_effect=CancellationEffect.NOT_APPLIED),))
         progress = await apply_cancel(
             ApplyCancel(origin_action_id=60, item_ids=(92,)),
-            _runtime(owned, _Settlement({})))
+            _runtime(cancellation_database, _Settlement({})))
         assert [item.status for item in progress.items] == [3]
         assert _value(
             owned, "SELECT cancel_requested FROM actions WHERE id = 50") == (1,)
         # C1 完成自身收场：停止等待、未结束项转取消并保留效果。
         outcome = await settle_origin_cancel(
-            OriginSettle(origin_action_id=50), _runtime(owned, _Settlement({})))
+            OriginSettle(origin_action_id=50), _runtime(cancellation_database, _Settlement({})))
         assert outcome.value.action_status == 6, outcome
         # A 的取消事实保持，A 仍在原停止流程中。
         assert _value(
@@ -205,7 +205,7 @@ class TestOriginSettlement:
             owned, "SELECT status FROM actions WHERE id = 50") == (6,)
 
     @pytest.mark.asyncio
-    async def test_interrupt_boundaries_reenter_idempotently(self, pipeline):
+    async def test_interrupt_boundaries_reenter_idempotently(self, pipeline, cancellation_database):
         """停止等待提交后、最终结果提交前中断：重入幂等完成。"""
         from camctl.cancellation.service import OriginSettle, settle_origin_cancel
 
@@ -230,18 +230,18 @@ class TestOriginSettlement:
             "SELECT id FROM history_events ORDER BY id").fetchall()) == before
         # 边界三：最终结果提交后重入恢复。
         outcome = await settle_origin_cancel(
-            OriginSettle(origin_action_id=50), _runtime(owned, _Settlement({})))
+            OriginSettle(origin_action_id=50), _runtime(cancellation_database, _Settlement({})))
         assert outcome.value.action_status == 6
         settled = tuple(owned.connection.execute(
             "SELECT id FROM history_events ORDER BY id").fetchall())
         resumed = await settle_origin_cancel(
-            OriginSettle(origin_action_id=50), _runtime(owned, _Settlement({})))
+            OriginSettle(origin_action_id=50), _runtime(cancellation_database, _Settlement({})))
         assert resumed.value.action_status == 6
         assert tuple(owned.connection.execute(
             "SELECT id FROM history_events ORDER BY id").fetchall()) == settled
 
     @pytest.mark.asyncio
-    async def test_c2_with_both_reuses_original_flow(self, pipeline):
+    async def test_c2_with_both_reuses_original_flow(self, pipeline, cancellation_database):
         """C2 同时包含 C1 与 A：分别等待，A 复用原取消流程。"""
         owned = pipeline
         from camctl.cancellation.service import (
@@ -252,7 +252,7 @@ class TestOriginSettlement:
             "UPDATE actions SET cancel_requested = 1 WHERE id = 50")
         owned.connection.commit()
         await settle_origin_cancel(
-            OriginSettle(origin_action_id=50), _runtime(owned, _Settlement({})))
+            OriginSettle(origin_action_id=50), _runtime(cancellation_database, _Settlement({})))
         _fix_c2(owned, (
             FixedTarget(action_id=11, basis=SelectionBasis.DIRECT,
                         cancellation_effect=CancellationEffect.NOT_APPLIED),
@@ -261,7 +261,7 @@ class TestOriginSettlement:
         ))
         progress = await apply_cancel(
             ApplyCancel(origin_action_id=60, item_ids=(92, 93)),
-            _runtime(owned, _Settlement({})))
+            _runtime(cancellation_database, _Settlement({})))
         by_target = {item.target_action_id: item for item in progress.items}
         # C1 已终态：按既有终态成功。
         assert by_target[50].status == 3

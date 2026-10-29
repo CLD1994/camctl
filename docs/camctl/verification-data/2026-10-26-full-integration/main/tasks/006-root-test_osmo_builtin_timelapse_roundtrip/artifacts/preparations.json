@@ -1,0 +1,15 @@
+[
+  {
+    "label": "package-resources",
+    "command": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/006-root-test_osmo_builtin_timelapse_roundtrip/source/apps/camctl/scripts/sync_resources.py"
+    ],
+    "cwd": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/006-root-test_osmo_builtin_timelapse_roundtrip/source",
+    "started_utc": "2026-10-26T00:27:44.202930+00:00",
+    "pid": 1937812,
+    "exit_code": 0,
+    "finished_utc": "2026-10-26T00:27:44.268974+00:00",
+    "wall_seconds": 0.06602218199986964
+  }
+]

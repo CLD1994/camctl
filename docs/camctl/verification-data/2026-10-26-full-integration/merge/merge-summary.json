@@ -1,0 +1,1553 @@
+{
+  "schema_version": 1,
+  "created_at_utc": "2026-10-26T00:24:52.886924+00:00",
+  "purpose": "供正式合并报告采用的本轮证据暂存；不是最终全量结果审计",
+  "source_identity": {
+    "commit": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+    "tree": "18445d6ef21a717006084a71fe18902ff078b2e5",
+    "parents": [
+      "a7755d8162ea0792e75f38f558bbd53734c3ca69",
+      "272fda66a0e4e58f2917677e808939a2cb174983"
+    ],
+    "camctl_source_tree": "41d5df8c08f76f604e938e9666311086167456f4",
+    "protocol_tree": "910ef832e99649a4cd3b910a0f74cf92cf1b533d",
+    "worktree_at_collection": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+    "working_tree_status_at_collection": "clean",
+    "final_combination_identity_source": "协调者 /root 确认 352 项在全部最终源码上运行后才提交 9fbb734c"
+  },
+  "conflict_count": 13,
+  "conflict_resolution": [
+    {
+      "path": "apps/camctl/src/camctl/capture/baseline.py",
+      "decision": "以 SharedSave 共享原保存与内存应用；保留本分支原拥有者身份、期待申请消费和可靠关闭保护；父级消费 READ 结果共同等待，迟到结果不能删除后续基准。",
+      "merged_blob": "722e131fc9f2cbedc03b573aab61dce8dcdbf16c",
+      "merged_bytes": 20426,
+      "merged_sha256": "80b371805b4317626fc404070c7637714319f2b7781d5d96469edd945ea1ad7a",
+      "first_parent_blob": "feb093c70f9c423c205a6e47b75f5b8b99778c37",
+      "second_parent_blob": "3a60fb6cf4327a1ab94411ad91a7e11b63484bf9",
+      "validation_run_ids": [
+        "capture-core-narrow",
+        "capture-read-consumption",
+        "capture-consumption-notification-green",
+        "final-merged-combination"
+      ]
+    },
+    {
+      "path": "apps/camctl/src/camctl/capture/baseline_reads.py",
+      "decision": "保留上游原 READ 申请及完整保存任务，核对原保存阶段身份后应用；增加父级消费共享任务，实际结果仍由原拥有者交付。",
+      "merged_blob": "ff6148c3e42198c7c2fa8cd6ca7323d5f1089ccb",
+      "merged_bytes": 10106,
+      "merged_sha256": "a5b4054430644aac325ee491227404d0074ec765f0a18eccbbf12b9ca135e23f",
+      "first_parent_blob": "905222525ed695acbe3f4bfbd0976329fccd4995",
+      "second_parent_blob": "d1d3b80fffa103538ef61c77b7ed04b393a98235",
+      "validation_run_ids": [
+        "capture-core-narrow",
+        "capture-consumption-notification-green",
+        "final-merged-combination"
+      ]
+    },
+    {
+      "path": "apps/camctl/src/camctl/capture/baseline_saves.py",
+      "decision": "以 SharedSave 为原保存责任；回执缓存及 take 只作用于原保存阶段，不能覆盖或消费新阶段；未知结果沿原输入、原键恢复。",
+      "merged_blob": "d85e265c0c98e114c36100e994bf0a43d192ff83",
+      "merged_bytes": 8310,
+      "merged_sha256": "fd2cfb1fac9cff53e1d7757b22c39ebd076e2930e8d14189ea348075a3cf02ed",
+      "first_parent_blob": "aa5c905c30738ae8178d9d1894239bc1297b1600",
+      "second_parent_blob": "c541e63223d84401caf1a35bb84c5758b1ff28b5",
+      "validation_run_ids": [
+        "capture-core-narrow",
+        "final-merged-combination"
+      ]
+    },
+    {
+      "path": "apps/camctl/src/camctl/capture/media_flow.py",
+      "decision": "保留完整读取诊断与上游共享收场；保留本分支媒体保存阶段、分段检查结果恢复、原申请身份及输出文件保护范围。",
+      "merged_blob": "d99e59607fa7928befddddce32d89037c4c9324c",
+      "merged_bytes": 56951,
+      "merged_sha256": "f4a07806c8eb3612f23beb877364f994c5b5eaed68cd5c8bd0efc5b9b56065c4",
+      "first_parent_blob": "caf155ff5d46012421d3d4f396b9b8a1ae4d4097",
+      "second_parent_blob": "3cdfb5ed07573d4c3fed02d9c5c76729802a7552",
+      "validation_run_ids": [
+        "read-fixture-adaptation",
+        "final-merged-combination"
+      ]
+    },
+    {
+      "path": "apps/camctl/src/camctl/capture/preparation.py",
+      "decision": "采用上游意图、结果独立 SharedSave 及取消/wakeup 逻辑；保留非 COMPLETED DbOutcome 附件，恢复快照、实际保存前和删除时均核对原请求对象。",
+      "merged_blob": "5341d4801d7de7244b125ec48eb8c2986cc8b9d8",
+      "merged_bytes": 32926,
+      "merged_sha256": "09a5f8c3dc9edbb04ac0c2b2d001074d701342891871d611707124e10c21c42f",
+      "first_parent_blob": "79d7314b64af10928c8b1ab4c6a9287004385182",
+      "second_parent_blob": "3ec977532b4237dc558b895f15f706224f0ef17e",
+      "validation_run_ids": [
+        "preparation-narrow",
+        "final-merged-combination"
+      ]
+    },
+    {
+      "path": "apps/camctl/src/camctl/capture/result_pages.py",
+      "decision": "以 SharedSave 共享原结果页保存；只为原阶段记住回执，take 必须匹配预期阶段，晚到等待者不能覆盖新页。",
+      "merged_blob": "fa897f8afe10736a708df1d730ef71e2c3ccc392",
+      "merged_bytes": 7415,
+      "merged_sha256": "c825447b10c7eadcfa86b748b526baf1ce7e42fe6aa10b4c8aca1eb83ed74fd2",
+      "first_parent_blob": "6e3aa77d8b8d25f091c1727daa684f0db4cb3777",
+      "second_parent_blob": "f65a7a1f6ec15b22742e5dd6ac09b154d56f350b",
+      "validation_run_ids": [
+        "capture-core-narrow",
+        "final-merged-combination"
+      ]
+    },
+    {
+      "path": "apps/camctl/src/camctl/capture/result_scans.py",
+      "decision": "共享原页保存到资格核对及完整应用；保留本分支原页阶段快照和精确 take，遇到已替换原阶段时结束旧等待。",
+      "merged_blob": "71b3805f9634d27a21e175a4424ed56e231469ee",
+      "merged_bytes": 20814,
+      "merged_sha256": "d01b3a70dd990a5c5d7a0662022bc68eb31d4cf738fd017283d111e8c6455379",
+      "first_parent_blob": "2cdfca6740faf0c0063a1a59ed5e446242647039",
+      "second_parent_blob": "c64a117c8eeb374028b9ba70f19f6fb8d7ff15f0",
+      "validation_run_ids": [
+        "capture-core-narrow",
+        "final-merged-combination"
+      ]
+    },
+    {
+      "path": "apps/camctl/src/camctl/capture/segment_completion.py",
+      "decision": "以 SharedSave 共享原分段保存和消费；恢复扫描及执行前核对原 pending 对象，迟到保存不能消费新申请。",
+      "merged_blob": "b08650a4cf14988517b77a08704809698292b635",
+      "merged_bytes": 44784,
+      "merged_sha256": "2b189d97ac9039e5e83a5ad7b14029c683ad895fe60ca78fa60175fedadb750f",
+      "first_parent_blob": "1f2c842e3d2ffc0cf9fa7b1f2493c6fdfe4086e4",
+      "second_parent_blob": "72a4077e707237b2b349545563083151a647336c",
+      "validation_run_ids": [
+        "capture-core-narrow",
+        "final-merged-combination"
+      ]
+    },
+    {
+      "path": "apps/camctl/src/camctl/outputs/read_attempts.py",
+      "decision": "保留上游 READ 诊断、共享结果保存和业务收场；结果保存及 on_completed/移除操作只能处理匹配的原申请，取消和通知错误不丢实际回执。",
+      "merged_blob": "0b8a1b7d1882c881fafa9455f59acc85ccfc23f8",
+      "merged_bytes": 34484,
+      "merged_sha256": "41368b57c6ef541c8f8bf1af936129a84a3043e2080c2eac94fb793feea54fcd",
+      "first_parent_blob": "7b5153ac05f793e56f629b4c2573f32e7d53aa78",
+      "second_parent_blob": "2720f90b1a69dd45596629e3590b77fd9a6bc203",
+      "validation_run_ids": [
+        "read-fixture-adaptation",
+        "final-merged-combination"
+      ]
+    },
+    {
+      "path": "apps/camctl/src/camctl/persistence/executor.py",
+      "decision": "同键结果交付前拒绝新申请；保留 expected_result 原 Future 的锁内撤回保护及迟到超时身份核对；完成交付同锁清除派发状态并释放操作键。",
+      "merged_blob": "c83d917208c832f0a858cba92cb11be10cf466a1",
+      "merged_bytes": 18355,
+      "merged_sha256": "46ba106daff38da6ade772ed14ea625df62c42180777578e0bac5eda4dfb604a",
+      "first_parent_blob": "33b84d9dd0cbe684d0597744f58cbe9a7e9a4ac9",
+      "second_parent_blob": "13b468bbe2530c169f227380917af2a742998d74",
+      "validation_run_ids": [
+        "executor-narrow",
+        "final-merged-combination"
+      ]
+    },
+    {
+      "path": "apps/camctl/src/camctl/session/service.py",
+      "decision": "保留完成结果先交接再判断正常会话退出的顺序；采用上游 SessionOutcome 与完整错误诊断，兼容本分支正常接纳与受限收场。",
+      "merged_blob": "ea53e5d88361091f1d219c7653d9a8b4c5a07bca",
+      "merged_bytes": 82176,
+      "merged_sha256": "110c87883b38553e2dc5398dbada4c09fc7dc5b4992c1161b472eb9249f36f86",
+      "first_parent_blob": "4721f982973a19f1b216711692c1ecc3d3f2e089",
+      "second_parent_blob": "e0c11bdbfc7c104f165a90d8cf105a2d533f182e",
+      "validation_run_ids": [
+        "session-red",
+        "session-narrow",
+        "final-merged-combination"
+      ]
+    },
+    {
+      "path": "docs/camctl/persistence-runtime.md",
+      "decision": "合并同键唯一结果/原 Future 撤回/原派发释放规则，与上游共享保存任务、完整状态应用及明确失败重试契约。",
+      "merged_blob": "847871cda2ead9848ca0e2516443cc1131e2224d",
+      "merged_bytes": 59402,
+      "merged_sha256": "031298a829df04721f5928bcf1056ec642b778f75988efc2aea7bac173167361",
+      "first_parent_blob": "a68e699dbb80c988d313d2e9af1176931ba44ffe",
+      "second_parent_blob": "dcef790f170068fcd58deffe267232ae42f48d8c",
+      "validation_run_ids": []
+    },
+    {
+      "path": "docs/camctl/verification.md",
+      "decision": "同时保留本分支计时和预算结果入口与上游读取诊断、准备结果交付两项带日期记录；保留各自历史源码与验证边界。",
+      "merged_blob": "d13b49fa358354ab8171a4e50af23cc23e47f344",
+      "merged_bytes": 422843,
+      "merged_sha256": "67bcd56281c6f72bbaee095437e2ff488382f9a57e6d07e33b6c9e9fa3b6111b",
+      "first_parent_blob": "00c8c43b6d77d6ec7403cad23906f51848456b64",
+      "second_parent_blob": "34aeefc020956d8e4f99e17b09d677537dfea208",
+      "validation_run_ids": []
+    }
+  ],
+  "additional_reviewed_seams": [
+    "persistence/business.py：上游 SharedSave 与 settle_required 及原控制错误回执保留；BusinessDatabase 撤回继续携带原 Future。",
+    "persistence/repositories/history.py：撤回继续携带 expected_result=future，迟到取消不能撤销复用键的新申请。",
+    "bootstrap/background_flow.py 与 bootstrap/lifecycle.py：正常完成交接、完整诊断及分段检查恢复参数同时保留。",
+    "capture/segment_baseline.py：基准父级先消费实际 READ 结果，再传播成功通知失败；首轮全单元之后的生产修复，不能沿用首轮源码身份。"
+  ],
+  "test_adaptations": [
+    "test_preparation_save_owner.py：适配 request_saves / _save_cached_request，保留原断言和参数范围。",
+    "test_read_save_handoff.py：补 pending_segment_inspection_results。",
+    "test_read_error_diagnostics.py：为真实恢复入口补 pending_segment_inspection_results，未改业务预期；99 项直接范围随后通过。"
+  ],
+  "runs": [
+    {
+      "id": "executor-resource-preparation-error",
+      "scope": "独立执行器工作区首次收集；缺少生成资源",
+      "evidence": {
+        "xml": "evidence/executor/collection-without-resources-unit.xml",
+        "log": "evidence/executor/collection-without-resources-unit.log",
+        "receipt": "evidence/executor/collection-without-resources-summary.json"
+      },
+      "result": {
+        "counts": {
+          "tests": 4,
+          "failures": 0,
+          "errors": 4,
+          "skipped": 0,
+          "passed": 0
+        },
+        "xml_suite_attributes": [
+          {
+            "name": "pytest",
+            "errors": "4",
+            "failures": "0",
+            "skipped": "0",
+            "tests": "4",
+            "time": "0.486",
+            "timestamp": "2026-10-26T08:09:59.719197+08:00",
+            "hostname": "1e0518e0c6b4"
+          }
+        ],
+        "case_classes": {
+          "": 4
+        },
+        "failures": [
+          {
+            "classname": "",
+            "name": "tests.unit.persistence.test_executor_identity",
+            "message": "collection failure",
+            "details": "apps/camctl/tests/unit/persistence/test_executor_identity.py:11: in <module>\n    from camctl.persistence.executor import DbExecutor\napps/camctl/src/camctl/persistence/executor.py:18: in <module>\n    from camctl.persistence.models import (\napps/camctl/src/camctl/persistence/models.py:16: in <module>\n    from camctl.persistence.runtime import (\napps/camctl/src/camctl/persistence/runtime.py:34: in <module>\n    _FORMAT_VERSIONS = enum_for(\"database_metadata.format_version\")\n                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\napps/camctl/src/camctl/contracts/enums.py:57: in enum_for\n    registry = load_registry()\n               ^^^^^^^^^^^^^^^\napps/camctl/src/camctl/contracts/enums.py:37: in load_registry\n    registry = json.loads(resource_bytes(_REGISTRY_RESOURCE))\n                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\napps/camctl/src/camctl/resources.py:55: in resource_bytes\n    raise ResourceError(f\"未登记的资源名: {name!r}\")\nE   camctl.resources.ResourceError: 未登记的资源名: 'registry/enum-registry.json'"
+          },
+          {
+            "classname": "",
+            "name": "tests.unit.persistence.test_executor_handoff",
+            "message": "collection failure",
+            "details": "apps/camctl/tests/unit/persistence/test_executor_handoff.py:12: in <module>\n    from camctl.persistence.executor import DbExecutor\napps/camctl/src/camctl/persistence/executor.py:18: in <module>\n    from camctl.persistence.models import (\napps/camctl/src/camctl/persistence/models.py:16: in <module>\n    from camctl.persistence.runtime import (\napps/camctl/src/camctl/persistence/runtime.py:34: in <module>\n    _FORMAT_VERSIONS = enum_for(\"database_metadata.format_version\")\n                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\napps/camctl/src/camctl/contracts/enums.py:57: in enum_for\n    registry = load_registry()\n               ^^^^^^^^^^^^^^^\napps/camctl/src/camctl/contracts/enums.py:37: in load_registry\n    registry = json.loads(resource_bytes(_REGISTRY_RESOURCE))\n                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\napps/camctl/src/camctl/resources.py:55: in resource_bytes\n    raise ResourceError(f\"未登记的资源名: {name!r}\")\nE   camctl.resources.ResourceError: 未登记的资源名: 'registry/enum-registry.json'"
+          },
+          {
+            "classname": "",
+            "name": "tests.unit.persistence.test_business_database",
+            "message": "collection failure",
+            "details": "apps/camctl/tests/unit/persistence/test_business_database.py:9: in <module>\n    from camctl.persistence.executor import DbExecutor\napps/camctl/src/camctl/persistence/executor.py:18: in <module>\n    from camctl.persistence.models import (\napps/camctl/src/camctl/persistence/models.py:16: in <module>\n    from camctl.persistence.runtime import (\napps/camctl/src/camctl/persistence/runtime.py:34: in <module>\n    _FORMAT_VERSIONS = enum_for(\"database_metadata.format_version\")\n                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\napps/camctl/src/camctl/contracts/enums.py:57: in enum_for\n    registry = load_registry()\n               ^^^^^^^^^^^^^^^\napps/camctl/src/camctl/contracts/enums.py:37: in load_registry\n    registry = json.loads(resource_bytes(_REGISTRY_RESOURCE))\n                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\napps/camctl/src/camctl/resources.py:55: in resource_bytes\n    raise ResourceError(f\"未登记的资源名: {name!r}\")\nE   camctl.resources.ResourceError: 未登记的资源名: 'registry/enum-registry.json'"
+          },
+          {
+            "classname": "",
+            "name": "tests.unit.persistence.test_shared_save",
+            "message": "collection failure",
+            "details": "apps/camctl/tests/unit/persistence/test_shared_save.py:7: in <module>\n    from camctl.persistence import business\napps/camctl/src/camctl/persistence/business.py:12: in <module>\n    from camctl.persistence.executor import DbExecutor\napps/camctl/src/camctl/persistence/executor.py:18: in <module>\n    from camctl.persistence.models import (\napps/camctl/src/camctl/persistence/models.py:16: in <module>\n    from camctl.persistence.runtime import (\napps/camctl/src/camctl/persistence/runtime.py:34: in <module>\n    _FORMAT_VERSIONS = enum_for(\"database_metadata.format_version\")\n                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\napps/camctl/src/camctl/contracts/enums.py:57: in enum_for\n    registry = load_registry()\n               ^^^^^^^^^^^^^^^\napps/camctl/src/camctl/contracts/enums.py:37: in load_registry\n    registry = json.loads(resource_bytes(_REGISTRY_RESOURCE))\n                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\napps/camctl/src/camctl/resources.py:55: in resource_bytes\n    raise ResourceError(f\"未登记的资源名: {name!r}\")\nE   camctl.resources.ResourceError: 未登记的资源名: 'registry/enum-registry.json'"
+          }
+        ]
+      },
+      "exit_code": 2,
+      "exit_code_source": "evidence/executor/collection-without-resources-summary.json",
+      "notes": [
+        "4 项均在收集阶段报缺少 registry/enum-registry.json；标准资源同步后完成下一轮，不能计为执行器逻辑失败或通过。"
+      ],
+      "recorded_command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/unit/persistence/test_executor_identity.py",
+        "apps/camctl/tests/unit/persistence/test_executor_handoff.py",
+        "apps/camctl/tests/unit/persistence/test_business_database.py",
+        "apps/camctl/tests/unit/persistence/test_shared_save.py",
+        "-q",
+        "--tb=short",
+        "--junitxml=/tmp/camctl-quality-repair-evidence/merge-272f-executor/unit.xml"
+      ],
+      "pytest_summary_lines": []
+    },
+    {
+      "id": "executor-narrow",
+      "scope": "执行器身份、handoff、BusinessDatabase、SharedSave 窄单元",
+      "evidence": {
+        "xml": "evidence/executor/unit.xml",
+        "log": "evidence/executor/unit.log",
+        "receipt": "evidence/executor/summary.json"
+      },
+      "result": {
+        "counts": {
+          "tests": 112,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 112
+        },
+        "xml_suite_attributes": [
+          {
+            "name": "pytest",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "tests": "112",
+            "time": "0.688",
+            "timestamp": "2026-10-26T08:10:59.863233+08:00",
+            "hostname": "1e0518e0c6b4"
+          }
+        ],
+        "case_classes": {
+          "tests.unit.persistence.test_executor_identity": 13,
+          "tests.unit.persistence.test_executor_handoff": 52,
+          "tests.unit.persistence.test_business_database": 32,
+          "tests.unit.persistence.test_shared_save": 15
+        },
+        "failures": []
+      },
+      "exit_code": 0,
+      "exit_code_source": "evidence/executor/summary.json",
+      "notes": [
+        "尚在独立未提交合并工作区，只代表所测三个持久化模块及四个测试文件。"
+      ],
+      "recorded_command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/unit/persistence/test_executor_identity.py",
+        "apps/camctl/tests/unit/persistence/test_executor_handoff.py",
+        "apps/camctl/tests/unit/persistence/test_business_database.py",
+        "apps/camctl/tests/unit/persistence/test_shared_save.py",
+        "-q",
+        "--tb=short",
+        "--junitxml=/tmp/camctl-quality-repair-evidence/merge-272f-executor/unit.xml"
+      ],
+      "pytest_summary_lines": [
+        "112 passed in 0.69s"
+      ]
+    },
+    {
+      "id": "session-red",
+      "scope": "会话错误分支保留旧 str 返回值的红色反例",
+      "evidence": {
+        "xml": "evidence/session/red.xml",
+        "log": "evidence/session/red.log",
+        "receipt": "evidence/session/red.json"
+      },
+      "result": {
+        "counts": {
+          "tests": 4,
+          "failures": 2,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 2
+        },
+        "xml_suite_attributes": [
+          {
+            "name": "pytest",
+            "errors": "0",
+            "failures": "2",
+            "skipped": "0",
+            "tests": "4",
+            "time": "0.615",
+            "timestamp": "2026-10-26T08:09:10.960932+08:00",
+            "hostname": "1e0518e0c6b4"
+          }
+        ],
+        "case_classes": {
+          "tests.unit.session.test_error_diagnostics": 4
+        },
+        "failures": [
+          {
+            "classname": "tests.unit.session.test_error_diagnostics",
+            "name": "test_background_failure_is_complete_in_final_machine_result[False-check_completed]",
+            "message": "AttributeError: 'str' object has no attribute 'succeeded'",
+            "details": "apps/camctl/tests/unit/session/test_error_diagnostics.py:61: in test_background_failure_is_complete_in_final_machine_result\n    outcome = await run_session(context, None)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\napps/camctl/src/camctl/session/service.py:702: in run_session\n    return await _run_session(context, source)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\napps/camctl/src/camctl/session/service.py:1201: in _run_session\n    raise original.with_traceback(original.__traceback__)\napps/camctl/src/camctl/session/service.py:1059: in _run_session\n    and not outcome.succeeded\n            ^^^^^^^^^^^^^^^^^\nE   AttributeError: 'str' object has no attribute 'succeeded'"
+          },
+          {
+            "classname": "tests.unit.session.test_error_diagnostics",
+            "name": "test_background_failure_is_complete_in_final_machine_result[True-check_completed]",
+            "message": "AttributeError: 'str' object has no attribute 'succeeded'",
+            "details": "apps/camctl/tests/unit/session/test_error_diagnostics.py:61: in test_background_failure_is_complete_in_final_machine_result\n    outcome = await run_session(context, None)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\napps/camctl/src/camctl/session/service.py:702: in run_session\n    return await _run_session(context, source)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\napps/camctl/src/camctl/session/service.py:1201: in _run_session\n    raise original.with_traceback(original.__traceback__)\napps/camctl/src/camctl/session/service.py:1059: in _run_session\n    and not outcome.succeeded\n            ^^^^^^^^^^^^^^^^^\nE   AttributeError: 'str' object has no attribute 'succeeded'"
+          }
+        ]
+      },
+      "exit_code": 1,
+      "exit_code_source": "evidence/session/red.json",
+      "notes": [],
+      "recorded_command": [
+        "apps/camctl/tests/unit/session/test_error_diagnostics.py",
+        "-k",
+        "background_failure",
+        "-q",
+        "--tb=short",
+        "--junitxml=/tmp/camctl-quality-repair-evidence/merge-272f-session/red.xml"
+      ],
+      "pytest_summary_lines": [
+        "2 failed, 2 passed, 6 deselected in 0.61s"
+      ]
+    },
+    {
+      "id": "session-narrow",
+      "scope": "service、background_flow、lifecycle 三模块叠加干净上游依赖的局部组合",
+      "evidence": {
+        "xml": "evidence/session/green.xml",
+        "log": "evidence/session/green.log",
+        "receipt": "evidence/session/green.json"
+      },
+      "result": {
+        "counts": {
+          "tests": 214,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 214
+        },
+        "xml_suite_attributes": [
+          {
+            "name": "pytest",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "tests": "214",
+            "time": "6.728",
+            "timestamp": "2026-10-26T08:09:37.674711+08:00",
+            "hostname": "1e0518e0c6b4"
+          }
+        ],
+        "case_classes": {
+          "tests.unit.session.test_completion_round_handoff": 7,
+          "tests.unit.session.test_error_diagnostics": 10,
+          "tests.unit.session.test_business_database_session": 12,
+          "tests.unit.session.test_completed_work": 3,
+          "tests.unit.bootstrap.test_background_flow": 19,
+          "tests.unit.bootstrap.test_cleanup_background_owner": 39,
+          "tests.unit.bootstrap.test_idle_completion_notifications": 2,
+          "tests.unit.bootstrap.test_report_background_progress": 78,
+          "tests.unit.bootstrap.test_local_work_error_diagnostics": 13,
+          "tests.unit.bootstrap.test_session_terminal_diagnostics": 31
+        },
+        "failures": []
+      },
+      "exit_code": 0,
+      "exit_code_source": "evidence/session/green.json",
+      "notes": [
+        "不代表当时尚未完成的其他合并冲突或完整合并树。"
+      ],
+      "recorded_command": [
+        "apps/camctl/tests/unit/session/test_completion_round_handoff.py",
+        "apps/camctl/tests/unit/session/test_error_diagnostics.py",
+        "apps/camctl/tests/unit/session/test_business_database_session.py",
+        "apps/camctl/tests/unit/session/test_completed_work.py",
+        "apps/camctl/tests/unit/bootstrap/test_background_flow.py",
+        "apps/camctl/tests/unit/bootstrap/test_cleanup_background_owner.py",
+        "apps/camctl/tests/unit/bootstrap/test_idle_completion_notifications.py",
+        "apps/camctl/tests/unit/bootstrap/test_report_background_progress.py",
+        "apps/camctl/tests/unit/bootstrap/test_local_work_error_diagnostics.py",
+        "apps/camctl/tests/unit/bootstrap/test_session_terminal_diagnostics.py",
+        "-q",
+        "--tb=short",
+        "--junitxml=/tmp/camctl-quality-repair-evidence/merge-272f-session/green.xml"
+      ],
+      "pytest_summary_lines": [
+        "214 passed in 6.73s"
+      ]
+    },
+    {
+      "id": "capture-core-narrow",
+      "scope": "基准、页保存、分段保存和 SharedSave 局部组合",
+      "evidence": {
+        "xml": "evidence/capture-core/result.xml",
+        "log": "evidence/capture-core/pytest.log",
+        "receipt": "evidence/capture-core/receipt.json"
+      },
+      "result": {
+        "counts": {
+          "tests": 80,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 80
+        },
+        "xml_suite_attributes": [
+          {
+            "name": "pytest",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "tests": "80",
+            "time": "2.737",
+            "timestamp": "2026-10-26T08:11:47.714383+08:00",
+            "hostname": "1e0518e0c6b4"
+          }
+        ],
+        "case_classes": {
+          "tests.unit.capture.test_save_owner_handoff": 36,
+          "tests.unit.capture.test_baseline_save_owner": 12,
+          "tests.unit.capture.test_result_page_saves": 8,
+          "tests.unit.capture.test_capture_save_coordination": 9,
+          "tests.unit.persistence.test_shared_save": 15
+        },
+        "failures": []
+      },
+      "exit_code": 0,
+      "exit_code_source": "evidence/capture-core/receipt.json",
+      "notes": [
+        "未解析的其他模块使用 a7755d81 快照保持可导入，属于局部组合。"
+      ],
+      "recorded_command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/unit/capture/test_save_owner_handoff.py",
+        "apps/camctl/tests/unit/capture/test_baseline_save_owner.py",
+        "apps/camctl/tests/unit/capture/test_result_page_saves.py",
+        "apps/camctl/tests/unit/capture/test_capture_save_coordination.py",
+        "apps/camctl/tests/unit/persistence/test_shared_save.py",
+        "-q",
+        "--junitxml=/tmp/camctl-quality-repair-evidence/merge-272f-capture-core/result.xml"
+      ],
+      "pytest_summary_lines": [
+        "80 passed in 2.73s"
+      ]
+    },
+    {
+      "id": "capture-read-consumption",
+      "scope": "基准 READ 结果父级消费的聚焦见证",
+      "evidence": {
+        "xml": "evidence/capture-core/consumption-result.xml",
+        "log": "evidence/capture-core/consumption-pytest.log",
+        "receipt": "evidence/capture-core/consumption-receipt.json"
+      },
+      "result": {
+        "counts": {
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 3
+        },
+        "xml_suite_attributes": [
+          {
+            "name": "pytest",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "tests": "3",
+            "time": "0.900",
+            "timestamp": "2026-10-26T08:12:52.700371+08:00",
+            "hostname": "1e0518e0c6b4"
+          }
+        ],
+        "case_classes": {
+          "camctl-quality-repair-evidence.merge-272f-capture-core.test_read_consumption_merge": 3
+        },
+        "failures": []
+      },
+      "exit_code": 0,
+      "exit_code_source": "evidence/capture-core/consumption-receipt.json",
+      "notes": [
+        "原测试脚本仍在原证据目录；本归档只保留日志、XML 和回执。"
+      ],
+      "recorded_command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "/tmp/camctl-quality-repair-evidence/merge-272f-capture-core/test_read_consumption_merge.py",
+        "-q",
+        "--junitxml=/tmp/camctl-quality-repair-evidence/merge-272f-capture-core/consumption-result.xml"
+      ],
+      "pytest_summary_lines": [
+        "3 passed in 0.90s"
+      ]
+    },
+    {
+      "id": "capture-consumption-notification-red",
+      "scope": "父级消费完成后通知原错误的红色反例",
+      "evidence": {
+        "xml": "evidence/capture-core/consumption-notification/red.xml",
+        "log": "evidence/capture-core/consumption-notification/red.log",
+        "receipt": "evidence/capture-core/consumption-notification/red-receipt.json"
+      },
+      "result": {
+        "counts": {
+          "tests": 4,
+          "failures": 4,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 0
+        },
+        "xml_suite_attributes": [
+          {
+            "name": "pytest",
+            "errors": "0",
+            "failures": "4",
+            "skipped": "0",
+            "tests": "4",
+            "time": "0.482",
+            "timestamp": "2026-10-26T08:16:52.783680+08:00",
+            "hostname": "1e0518e0c6b4"
+          }
+        ],
+        "case_classes": {
+          "tests.unit.capture.test_baseline_save_owner": 4
+        },
+        "failures": [
+          {
+            "classname": "tests.unit.capture.test_baseline_save_owner",
+            "name": "test_baseline_parent_consumes_completed_read_before_shared_delivery_error[notification-error-exhausted]",
+            "message": "AssertionError: assert {'writes': 1,...ending=True))} == {'writes': 1,..., True, None)}\n  \n  Omitting 2 identical items, use -vv to show\n  Differing items:\n  {'applications': []} != {'applications': [('read_no', 1), ('cursor', None), ('exhausted', True), ('read_owner', None)]}\n  {'state': (0, None, False, PendingBaselineRead(intent=BaselineReadIntent(action_id=1, activity_id=2, binding=DeviceBin...ment_at=None, settlement_clock_attempted=False, locally_created=True, aborted_before_call=False, wakeup_pending=True))} != {'state': (1, None, True, None)}\n  Use -v to get more diff",
+            "details": "monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7ff9f3887750>\nmocker = <pytest_mock.plugin.MockerFixture object at 0x7ff9f3887810>\ncontinued = False, failure_type = <class 'RuntimeError'>\n\n    @pytest.mark.parametrize(\"continued\", [False, True], ids=[\"exhausted\", \"continued\"])\n    @pytest.mark.parametrize(\"failure_type\", [RuntimeError, asyncio.CancelledError],\n        ids=[\"notification-error\", \"completed-cancellation\"])\n    async def test_baseline_parent_consumes_completed_read_before_shared_delivery_error(\n            monkeypatch, mocker, continued, failure_type):\n        intent = _intent()\n        cursor = (DirectoryCursor(intent.binding, intent.directories, 0, \"/data/A/b.mp4\")\n            if continued else None)\n        intent_view = BaselineReadCallView(7, 11, BaselineReadState.INTENDED, intent,\n            None, None, None, None, None, HistoryBoundary(1, 11))\n        read_owner = PendingBaselineRead(intent, intent_view=intent_view)\n        request = BaselineReadReturn(7, 1000, None,\n            DirectoryRead(None, None, Page((), cursor)))\n        response = BaselineReadCallView(7, 11, BaselineReadState.RETURNED, intent,\n            12, 1000, None, cursor, None, HistoryBoundary(2, 12))\n        read_owner.saves.begin(request, key=intent.result_save_key)\n        owner = PendingBaseline(intent.activity_id, intent.binding, intent.directories,\n            read_owner=read_owner)\n        take = mocker.spy(read_owner.saves, \"take\")\n        applications = _observe_applications(monkeypatch, owner,\n            {\"read_no\", \"cursor\", \"exhausted\", \"read_owner\"})\n        database, entered, release = _gated_database()\n        failure = failure_type(\"已提交后的交付失败\")\n        _attach_db_outcome(failure, DbOutcome(DbOutcomeKind.COMPLETED, response))\n    \n        async def write(callback, **kwargs):\n            entered.set()\n            await release.wait()\n            raise failure\n    \n        database.write.side_effect = write\n        runtime = SimpleNamespace(pending_baselines={intent.action_id: owner},\n            capture=create_autospec(CaptureRepository, instance=True, spec_set=True),\n            database=database)\n        tasks = [asyncio.create_task(resume_baseline_save(intent.action_id, runtime=runtime))\n            for _ in range(2)]\n        try:\n            await entered.wait()\n            assert applications == []\n        finally:\n            release.set()\n            results = await asyncio.gather(*tasks, return_exceptions=True)\n    \n        if failure_type is asyncio.CancelledError:\n            assert all(isinstance(result, asyncio.CancelledError) for result in results)\n        else:\n            assert all(result is failure for result in results)\n        assert read_owner.result is response\n        assert read_owner.saves.pending is None\n>       assert {\n            \"writes\": database.write.await_count,\n            \"takes\": take.call_count,\n            \"applications\": applications,\n            \"state\": (owner.read_no, owner.cursor, owner.exhausted, owner.read_owner),\n        } == {\n            \"writes\": 1,\n            \"takes\": 1,\n            \"applications\": [(\"read_no\", intent.read_no), (\"cursor\", cursor),\n                (\"exhausted\", not continued), (\"read_owner\", None)],\n            \"state\": (intent.read_no, cursor, not continued, None),\n        }\nE       AssertionError: assert {'writes': 1,...ending=True))} == {'writes': 1,..., True, None)}\nE         \nE         Omitting 2 identical items, use -vv to show\nE         Differing items:\nE         {'applications': []} != {'applications': [('read_no', 1), ('cursor', None), ('exhausted', True), ('read_owner', None)]}\nE         {'state': (0, None, False, PendingBaselineRead(intent=BaselineReadIntent(action_id=1, activity_id=2, binding=DeviceBin...ment_at=None, settlement_clock_attempted=False, locally_created=True, aborted_before_call=False, wakeup_pending=True))} != {'state': (1, None, True, None)}\nE         Use -v to get more diff\n\napps/camctl/tests/unit/capture/test_baseline_save_owner.py:270: AssertionError"
+          },
+          {
+            "classname": "tests.unit.capture.test_baseline_save_owner",
+            "name": "test_baseline_parent_consumes_completed_read_before_shared_delivery_error[notification-error-continued]",
+            "message": "AssertionError: assert {'writes': 1,...ending=True))} == {'writes': 1,... False, None)}\n  \n  Omitting 2 identical items, use -vv to show\n  Differing items:\n  {'applications': []} != {'applications': [('read_no', 1), ('cursor', DirectoryCursor(binding=DeviceBinding(device_id='cam-1', driver_id='camer...s=('/data/A', '/data/B'), directory_index=0, after_path='/data/A/b.mp4')), ('exhausted', False), ('read_owner', None)]}\n  {'state': (0, None, False, PendingBaselineRead(intent=BaselineReadIntent(action_id=1, activity_id=2, binding=DeviceBin...ment_at=None, settlement_clock_attempted=False, locally_created=True, aborted_before_call=False, wakeup_pending=True))} != {'state':...\n  \n  ...Full output truncated (2 lines hidden), use '-vv' to show",
+            "details": "monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7ff9f3886e10>\nmocker = <pytest_mock.plugin.MockerFixture object at 0x7ff9f3887950>\ncontinued = True, failure_type = <class 'RuntimeError'>\n\n    @pytest.mark.parametrize(\"continued\", [False, True], ids=[\"exhausted\", \"continued\"])\n    @pytest.mark.parametrize(\"failure_type\", [RuntimeError, asyncio.CancelledError],\n        ids=[\"notification-error\", \"completed-cancellation\"])\n    async def test_baseline_parent_consumes_completed_read_before_shared_delivery_error(\n            monkeypatch, mocker, continued, failure_type):\n        intent = _intent()\n        cursor = (DirectoryCursor(intent.binding, intent.directories, 0, \"/data/A/b.mp4\")\n            if continued else None)\n        intent_view = BaselineReadCallView(7, 11, BaselineReadState.INTENDED, intent,\n            None, None, None, None, None, HistoryBoundary(1, 11))\n        read_owner = PendingBaselineRead(intent, intent_view=intent_view)\n        request = BaselineReadReturn(7, 1000, None,\n            DirectoryRead(None, None, Page((), cursor)))\n        response = BaselineReadCallView(7, 11, BaselineReadState.RETURNED, intent,\n            12, 1000, None, cursor, None, HistoryBoundary(2, 12))\n        read_owner.saves.begin(request, key=intent.result_save_key)\n        owner = PendingBaseline(intent.activity_id, intent.binding, intent.directories,\n            read_owner=read_owner)\n        take = mocker.spy(read_owner.saves, \"take\")\n        applications = _observe_applications(monkeypatch, owner,\n            {\"read_no\", \"cursor\", \"exhausted\", \"read_owner\"})\n        database, entered, release = _gated_database()\n        failure = failure_type(\"已提交后的交付失败\")\n        _attach_db_outcome(failure, DbOutcome(DbOutcomeKind.COMPLETED, response))\n    \n        async def write(callback, **kwargs):\n            entered.set()\n            await release.wait()\n            raise failure\n    \n        database.write.side_effect = write\n        runtime = SimpleNamespace(pending_baselines={intent.action_id: owner},\n            capture=create_autospec(CaptureRepository, instance=True, spec_set=True),\n            database=database)\n        tasks = [asyncio.create_task(resume_baseline_save(intent.action_id, runtime=runtime))\n            for _ in range(2)]\n        try:\n            await entered.wait()\n            assert applications == []\n        finally:\n            release.set()\n            results = await asyncio.gather(*tasks, return_exceptions=True)\n    \n        if failure_type is asyncio.CancelledError:\n            assert all(isinstance(result, asyncio.CancelledError) for result in results)\n        else:\n            assert all(result is failure for result in results)\n        assert read_owner.result is response\n        assert read_owner.saves.pending is None\n>       assert {\n            \"writes\": database.write.await_count,\n            \"takes\": take.call_count,\n            \"applications\": applications,\n            \"state\": (owner.read_no, owner.cursor, owner.exhausted, owner.read_owner),\n        } == {\n            \"writes\": 1,\n            \"takes\": 1,\n            \"applications\": [(\"read_no\", intent.read_no), (\"cursor\", cursor),\n                (\"exhausted\", not continued), (\"read_owner\", None)],\n            \"state\": (intent.read_no, cursor, not continued, None),\n        }\nE       AssertionError: assert {'writes': 1,...ending=True))} == {'writes': 1,... False, None)}\nE         \nE         Omitting 2 identical items, use -vv to show\nE         Differing items:\nE         {'applications': []} != {'applications': [('read_no', 1), ('cursor', DirectoryCursor(binding=DeviceBinding(device_id='cam-1', driver_id='camer...s=('/data/A', '/data/B'), directory_index=0, after_path='/data/A/b.mp4')), ('exhausted', False), ('read_owner', None)]}\nE         {'state': (0, None, False, PendingBaselineRead(intent=BaselineReadIntent(action_id=1, activity_id=2, binding=DeviceBin...ment_at=None, settlement_clock_attempted=False, locally_created=True, aborted_before_call=False, wakeup_pending=True))} != {'state':...\nE         \nE         ...Full output truncated (2 lines hidden), use '-vv' to show\n\napps/camctl/tests/unit/capture/test_baseline_save_owner.py:270: AssertionError"
+          },
+          {
+            "classname": "tests.unit.capture.test_baseline_save_owner",
+            "name": "test_baseline_parent_consumes_completed_read_before_shared_delivery_error[completed-cancellation-exhausted]",
+            "message": "AssertionError: assert {'writes': 1,...ending=True))} == {'writes': 1,..., True, None)}\n  \n  Omitting 2 identical items, use -vv to show\n  Differing items:\n  {'applications': []} != {'applications': [('read_no', 1), ('cursor', None), ('exhausted', True), ('read_owner', None)]}\n  {'state': (0, None, False, PendingBaselineRead(intent=BaselineReadIntent(action_id=1, activity_id=2, binding=DeviceBin...ment_at=None, settlement_clock_attempted=False, locally_created=True, aborted_before_call=False, wakeup_pending=True))} != {'state': (1, None, True, None)}\n  Use -v to get more diff",
+            "details": "monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7ff9f3886f10>\nmocker = <pytest_mock.plugin.MockerFixture object at 0x7ff9f3886bd0>\ncontinued = False, failure_type = <class 'asyncio.exceptions.CancelledError'>\n\n    @pytest.mark.parametrize(\"continued\", [False, True], ids=[\"exhausted\", \"continued\"])\n    @pytest.mark.parametrize(\"failure_type\", [RuntimeError, asyncio.CancelledError],\n        ids=[\"notification-error\", \"completed-cancellation\"])\n    async def test_baseline_parent_consumes_completed_read_before_shared_delivery_error(\n            monkeypatch, mocker, continued, failure_type):\n        intent = _intent()\n        cursor = (DirectoryCursor(intent.binding, intent.directories, 0, \"/data/A/b.mp4\")\n            if continued else None)\n        intent_view = BaselineReadCallView(7, 11, BaselineReadState.INTENDED, intent,\n            None, None, None, None, None, HistoryBoundary(1, 11))\n        read_owner = PendingBaselineRead(intent, intent_view=intent_view)\n        request = BaselineReadReturn(7, 1000, None,\n            DirectoryRead(None, None, Page((), cursor)))\n        response = BaselineReadCallView(7, 11, BaselineReadState.RETURNED, intent,\n            12, 1000, None, cursor, None, HistoryBoundary(2, 12))\n        read_owner.saves.begin(request, key=intent.result_save_key)\n        owner = PendingBaseline(intent.activity_id, intent.binding, intent.directories,\n            read_owner=read_owner)\n        take = mocker.spy(read_owner.saves, \"take\")\n        applications = _observe_applications(monkeypatch, owner,\n            {\"read_no\", \"cursor\", \"exhausted\", \"read_owner\"})\n        database, entered, release = _gated_database()\n        failure = failure_type(\"已提交后的交付失败\")\n        _attach_db_outcome(failure, DbOutcome(DbOutcomeKind.COMPLETED, response))\n    \n        async def write(callback, **kwargs):\n            entered.set()\n            await release.wait()\n            raise failure\n    \n        database.write.side_effect = write\n        runtime = SimpleNamespace(pending_baselines={intent.action_id: owner},\n            capture=create_autospec(CaptureRepository, instance=True, spec_set=True),\n            database=database)\n        tasks = [asyncio.create_task(resume_baseline_save(intent.action_id, runtime=runtime))\n            for _ in range(2)]\n        try:\n            await entered.wait()\n            assert applications == []\n        finally:\n            release.set()\n            results = await asyncio.gather(*tasks, return_exceptions=True)\n    \n        if failure_type is asyncio.CancelledError:\n            assert all(isinstance(result, asyncio.CancelledError) for result in results)\n        else:\n            assert all(result is failure for result in results)\n        assert read_owner.result is response\n        assert read_owner.saves.pending is None\n>       assert {\n            \"writes\": database.write.await_count,\n            \"takes\": take.call_count,\n            \"applications\": applications,\n            \"state\": (owner.read_no, owner.cursor, owner.exhausted, owner.read_owner),\n        } == {\n            \"writes\": 1,\n            \"takes\": 1,\n            \"applications\": [(\"read_no\", intent.read_no), (\"cursor\", cursor),\n                (\"exhausted\", not continued), (\"read_owner\", None)],\n            \"state\": (intent.read_no, cursor, not continued, None),\n        }\nE       AssertionError: assert {'writes': 1,...ending=True))} == {'writes': 1,..., True, None)}\nE         \nE         Omitting 2 identical items, use -vv to show\nE         Differing items:\nE         {'applications': []} != {'applications': [('read_no', 1), ('cursor', None), ('exhausted', True), ('read_owner', None)]}\nE         {'state': (0, None, False, PendingBaselineRead(intent=BaselineReadIntent(action_id=1, activity_id=2, binding=DeviceBin...ment_at=None, settlement_clock_attempted=False, locally_created=True, aborted_before_call=False, wakeup_pending=True))} != {'state': (1, None, True, None)}\nE         Use -v to get more diff\n\napps/camctl/tests/unit/capture/test_baseline_save_owner.py:270: AssertionError"
+          },
+          {
+            "classname": "tests.unit.capture.test_baseline_save_owner",
+            "name": "test_baseline_parent_consumes_completed_read_before_shared_delivery_error[completed-cancellation-continued]",
+            "message": "AssertionError: assert {'writes': 1,...ending=True))} == {'writes': 1,... False, None)}\n  \n  Omitting 2 identical items, use -vv to show\n  Differing items:\n  {'applications': []} != {'applications': [('read_no', 1), ('cursor', DirectoryCursor(binding=DeviceBinding(device_id='cam-1', driver_id='camer...s=('/data/A', '/data/B'), directory_index=0, after_path='/data/A/b.mp4')), ('exhausted', False), ('read_owner', None)]}\n  {'state': (0, None, False, PendingBaselineRead(intent=BaselineReadIntent(action_id=1, activity_id=2, binding=DeviceBin...ment_at=None, settlement_clock_attempted=False, locally_created=True, aborted_before_call=False, wakeup_pending=True))} != {'state':...\n  \n  ...Full output truncated (2 lines hidden), use '-vv' to show",
+            "details": "monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7ff9f37aea90>\nmocker = <pytest_mock.plugin.MockerFixture object at 0x7ff9f35db9d0>\ncontinued = True, failure_type = <class 'asyncio.exceptions.CancelledError'>\n\n    @pytest.mark.parametrize(\"continued\", [False, True], ids=[\"exhausted\", \"continued\"])\n    @pytest.mark.parametrize(\"failure_type\", [RuntimeError, asyncio.CancelledError],\n        ids=[\"notification-error\", \"completed-cancellation\"])\n    async def test_baseline_parent_consumes_completed_read_before_shared_delivery_error(\n            monkeypatch, mocker, continued, failure_type):\n        intent = _intent()\n        cursor = (DirectoryCursor(intent.binding, intent.directories, 0, \"/data/A/b.mp4\")\n            if continued else None)\n        intent_view = BaselineReadCallView(7, 11, BaselineReadState.INTENDED, intent,\n            None, None, None, None, None, HistoryBoundary(1, 11))\n        read_owner = PendingBaselineRead(intent, intent_view=intent_view)\n        request = BaselineReadReturn(7, 1000, None,\n            DirectoryRead(None, None, Page((), cursor)))\n        response = BaselineReadCallView(7, 11, BaselineReadState.RETURNED, intent,\n            12, 1000, None, cursor, None, HistoryBoundary(2, 12))\n        read_owner.saves.begin(request, key=intent.result_save_key)\n        owner = PendingBaseline(intent.activity_id, intent.binding, intent.directories,\n            read_owner=read_owner)\n        take = mocker.spy(read_owner.saves, \"take\")\n        applications = _observe_applications(monkeypatch, owner,\n            {\"read_no\", \"cursor\", \"exhausted\", \"read_owner\"})\n        database, entered, release = _gated_database()\n        failure = failure_type(\"已提交后的交付失败\")\n        _attach_db_outcome(failure, DbOutcome(DbOutcomeKind.COMPLETED, response))\n    \n        async def write(callback, **kwargs):\n            entered.set()\n            await release.wait()\n            raise failure\n    \n        database.write.side_effect = write\n        runtime = SimpleNamespace(pending_baselines={intent.action_id: owner},\n            capture=create_autospec(CaptureRepository, instance=True, spec_set=True),\n            database=database)\n        tasks = [asyncio.create_task(resume_baseline_save(intent.action_id, runtime=runtime))\n            for _ in range(2)]\n        try:\n            await entered.wait()\n            assert applications == []\n        finally:\n            release.set()\n            results = await asyncio.gather(*tasks, return_exceptions=True)\n    \n        if failure_type is asyncio.CancelledError:\n            assert all(isinstance(result, asyncio.CancelledError) for result in results)\n        else:\n            assert all(result is failure for result in results)\n        assert read_owner.result is response\n        assert read_owner.saves.pending is None\n>       assert {\n            \"writes\": database.write.await_count,\n            \"takes\": take.call_count,\n            \"applications\": applications,\n            \"state\": (owner.read_no, owner.cursor, owner.exhausted, owner.read_owner),\n        } == {\n            \"writes\": 1,\n            \"takes\": 1,\n            \"applications\": [(\"read_no\", intent.read_no), (\"cursor\", cursor),\n                (\"exhausted\", not continued), (\"read_owner\", None)],\n            \"state\": (intent.read_no, cursor, not continued, None),\n        }\nE       AssertionError: assert {'writes': 1,...ending=True))} == {'writes': 1,... False, None)}\nE         \nE         Omitting 2 identical items, use -vv to show\nE         Differing items:\nE         {'applications': []} != {'applications': [('read_no', 1), ('cursor', DirectoryCursor(binding=DeviceBinding(device_id='cam-1', driver_id='camer...s=('/data/A', '/data/B'), directory_index=0, after_path='/data/A/b.mp4')), ('exhausted', False), ('read_owner', None)]}\nE         {'state': (0, None, False, PendingBaselineRead(intent=BaselineReadIntent(action_id=1, activity_id=2, binding=DeviceBin...ment_at=None, settlement_clock_attempted=False, locally_created=True, aborted_before_call=False, wakeup_pending=True))} != {'state':...\nE         \nE         ...Full output truncated (2 lines hidden), use '-vv' to show\n\napps/camctl/tests/unit/capture/test_baseline_save_owner.py:270: AssertionError"
+          }
+        ]
+      },
+      "exit_code": 1,
+      "exit_code_source": "evidence/capture-core/consumption-notification/red-receipt.json",
+      "notes": [],
+      "recorded_command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/unit/capture/test_baseline_save_owner.py",
+        "-q",
+        "-k",
+        "parent_consumes_completed_read",
+        "--junitxml=/tmp/camctl-quality-repair-evidence/merge-272f-capture-core/consumption-notification/red.xml"
+      ],
+      "pytest_summary_lines": [
+        "4 failed, 12 deselected in 0.48s"
+      ]
+    },
+    {
+      "id": "capture-consumption-notification-green",
+      "scope": "segment_baseline 通知错误在父级消费后交付的窄回归",
+      "evidence": {
+        "xml": "evidence/capture-core/consumption-notification/green.xml",
+        "log": "evidence/capture-core/consumption-notification/green.log",
+        "receipt": "evidence/capture-core/consumption-notification/green-receipt.json"
+      },
+      "result": {
+        "counts": {
+          "tests": 50,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 50
+        },
+        "xml_suite_attributes": [
+          {
+            "name": "pytest",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "tests": "50",
+            "time": "3.212",
+            "timestamp": "2026-10-26T08:17:21.199856+08:00",
+            "hostname": "1e0518e0c6b4"
+          }
+        ],
+        "case_classes": {
+          "tests.unit.capture.test_baseline_save_owner": 16,
+          "tests.unit.capture.test_baseline_scan": 34
+        },
+        "failures": []
+      },
+      "exit_code": 0,
+      "exit_code_source": "evidence/capture-core/consumption-notification/green-receipt.json",
+      "notes": [],
+      "recorded_command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/unit/capture/test_baseline_save_owner.py",
+        "apps/camctl/tests/unit/capture/test_baseline_scan.py",
+        "-q",
+        "--junitxml=/tmp/camctl-quality-repair-evidence/merge-272f-capture-core/consumption-notification/green.xml"
+      ],
+      "pytest_summary_lines": [
+        "50 passed in 3.21s"
+      ]
+    },
+    {
+      "id": "first-full-unit",
+      "scope": "合并过程首轮完整单元；非最终 9fbb734c 生产树",
+      "evidence": {
+        "xml": "evidence/first-full-unit/camctl-merge-272f-unit.xml",
+        "log": "evidence/first-full-unit/camctl-merge-272f-unit.log"
+      },
+      "result": {
+        "counts": {
+          "tests": 9223,
+          "failures": 4,
+          "errors": 0,
+          "skipped": 1,
+          "passed": 9218
+        },
+        "xml_suite_attributes": [
+          {
+            "name": "pytest",
+            "errors": "0",
+            "failures": "4",
+            "skipped": "1",
+            "tests": "9223",
+            "time": "149.413",
+            "timestamp": "2026-10-26T08:12:44.865937+08:00",
+            "hostname": "1e0518e0c6b4"
+          }
+        ],
+        "case_classes": {
+          "tests.unit.acceptance.test_definitions": 14,
+          "tests.unit.acceptance.test_identity": 23,
+          "tests.unit.acceptance.test_input.TestReadInput": 3,
+          "tests.unit.acceptance.test_input.TestParseStages": 6,
+          "tests.unit.acceptance.test_input.TestDiagnosticIdentity": 1,
+          "tests.unit.acceptance.test_parent_notification.TestDerivePlanState": 5,
+          "tests.unit.acceptance.test_parent_notification.TestNotifyAcceptance": 4,
+          "tests.unit.acceptance.test_validation.TestPreciseNumbers": 6,
+          "tests.unit.acceptance.test_validation.TestRuleErrors": 1,
+          "tests.unit.acceptance.test_validation": 7,
+          "tests.unit.bootstrap.test_application_config": 15,
+          "tests.unit.bootstrap.test_background_flow": 19,
+          "tests.unit.bootstrap.test_baseline_scan_shutdown": 10,
+          "tests.unit.bootstrap.test_capture_execution_config": 12,
+          "tests.unit.bootstrap.test_capture_preparation_handoff_flow": 2,
+          "tests.unit.bootstrap.test_capture_preparation_init": 12,
+          "tests.unit.bootstrap.test_capture_preparation_session": 1,
+          "tests.unit.bootstrap.test_capture_recovery_assembly": 10,
+          "tests.unit.bootstrap.test_capture_window_progress": 29,
+          "tests.unit.bootstrap.test_cleanup_background_owner": 39,
+          "tests.unit.bootstrap.test_cli_recovery_boundary": 2,
+          "tests.unit.bootstrap.test_command_output.TestParseCommand": 5,
+          "tests.unit.bootstrap.test_command_output.TestSessionResultChannel": 7,
+          "tests.unit.bootstrap.test_command_output.TestMainSyntaxExitCode": 3,
+          "tests.unit.bootstrap.test_command_output": 6,
+          "tests.unit.bootstrap.test_configuration": 10,
+          "tests.unit.bootstrap.test_configuration.TestCapacityParsing": 14,
+          "tests.unit.bootstrap.test_configuration.TestDefaultsAndOverride": 3,
+          "tests.unit.bootstrap.test_configuration.TestObtainConfiguration": 10,
+          "tests.unit.bootstrap.test_configuration.TestCombinationAndTypes": 11,
+          "tests.unit.bootstrap.test_configuration.TestSnapshotImmutability": 2,
+          "tests.unit.bootstrap.test_configuration.TestDeviceRecordingConfig": 3,
+          "tests.unit.bootstrap.test_configuration.TestDeviceRetryIntervalConfig": 4,
+          "tests.unit.bootstrap.test_configuration.TestAttemptSubtableConfig": 4,
+          "tests.unit.bootstrap.test_describe.TestDescribeWithoutDatabase": 4,
+          "tests.unit.bootstrap.test_device_execution_config": 130,
+          "tests.unit.bootstrap.test_hasselblad_configuration": 10,
+          "tests.unit.bootstrap.test_idle_completion_notifications": 2,
+          "tests.unit.bootstrap.test_local_work_error_diagnostics": 13,
+          "tests.unit.bootstrap.test_notification_argument": 11,
+          "tests.unit.bootstrap.test_output_device_configuration": 10,
+          "tests.unit.bootstrap.test_preparation_work_facts": 3,
+          "tests.unit.bootstrap.test_read_execution_config": 4,
+          "tests.unit.bootstrap.test_recovery_logging": 3,
+          "tests.unit.bootstrap.test_report_background_progress": 78,
+          "tests.unit.bootstrap.test_report_connection_errors": 2,
+          "tests.unit.bootstrap.test_residual_recovery_boundary": 11,
+          "tests.unit.bootstrap.test_result_candidate_filter": 11,
+          "tests.unit.bootstrap.test_result_history_performance": 23,
+          "tests.unit.bootstrap.test_result_listing.TestDriverResultListing": 9,
+          "tests.unit.bootstrap.test_result_listing.TestExecutionWaitConfig": 3,
+          "tests.unit.bootstrap.test_result_reading_context": 5,
+          "tests.unit.bootstrap.test_result_round_adapter": 6,
+          "tests.unit.bootstrap.test_result_scan_shutdown": 5,
+          "tests.unit.bootstrap.test_runtime_database_factory": 2,
+          "tests.unit.bootstrap.test_session_terminal_diagnostics": 31,
+          "tests.unit.bootstrap.test_software_recovery_config": 12,
+          "tests.unit.bootstrap.test_timelapse_assembly": 2,
+          "tests.unit.bootstrap.test_video_result_configuration": 10,
+          "tests.unit.bootstrap.test_work_file_owner": 3,
+          "tests.unit.cancellation.test_cancel_entry_database": 2,
+          "tests.unit.cancellation.test_capture_preparation_settlement": 3,
+          "tests.unit.cancellation.test_controller_cancel.TestDecideOriginCancel": 5,
+          "tests.unit.cancellation.test_controller_cancel.TestWaitScopeDoesNotExpand": 2,
+          "tests.unit.cancellation.test_effects.TestSummarizeCancel": 6,
+          "tests.unit.cancellation.test_eligibility.TestDecideCancelEligibility": 9,
+          "tests.unit.cancellation.test_eligibility_database_boundary": 12,
+          "tests.unit.cancellation.test_preparation_wait": 5,
+          "tests.unit.cancellation.test_service_database": 2,
+          "tests.unit.cancellation.test_target_types.TestDecideSyncCancel": 3,
+          "tests.unit.cancellation.test_targets.TestResolveCancelTarget": 9,
+          "tests.unit.cancellation.test_targets.TestPrepareCancelSet": 6,
+          "tests.unit.capture.test_action6_duplicate_segment_prefix": 1,
+          "tests.unit.capture.test_action6_recovery_prefix": 9,
+          "tests.unit.capture.test_action6_saved_conclusion": 2,
+          "tests.unit.capture.test_async_result_consumers": 4,
+          "tests.unit.capture.test_baseline_failure_input": 1,
+          "tests.unit.capture.test_baseline_read_models": 49,
+          "tests.unit.capture.test_baseline_save_owner": 12,
+          "tests.unit.capture.test_baseline_saves": 6,
+          "tests.unit.capture.test_baseline_scan": 34,
+          "tests.unit.capture.test_capture_database_handoff": 7,
+          "tests.unit.capture.test_capture_save_coordination": 9,
+          "tests.unit.capture.test_completion_save_responsibility": 28,
+          "tests.unit.capture.test_control_outcome": 2,
+          "tests.unit.capture.test_definitions.TestCaptureDefinition": 30,
+          "tests.unit.capture.test_definitions.TestCompletionRouting": 3,
+          "tests.unit.capture.test_definitions.TestHandlerRouting": 2,
+          "tests.unit.capture.test_discard": 13,
+          "tests.unit.capture.test_dispatch_failures": 6,
+          "tests.unit.capture.test_dispatch_qualification": 33,
+          "tests.unit.capture.test_emergency.TestEligibility": 6,
+          "tests.unit.capture.test_emergency.TestBudget": 2,
+          "tests.unit.capture.test_emergency.TestEmergencyStop": 19,
+          "tests.unit.capture.test_emergency_guard.TestAttemptedStopEvidence": 8,
+          "tests.unit.capture.test_emergency_guard.TestStopObservationBoundaries": 3,
+          "tests.unit.capture.test_emergency_guard.TestAggregateErrorWithoutActivityChange": 18,
+          "tests.unit.capture.test_emergency_guard.TestRunAndTargetActivityErrorAgreement": 15,
+          "tests.unit.capture.test_emergency_guard.TestEmergencyConfiguration": 46,
+          "tests.unit.capture.test_execution_specs": 130,
+          "tests.unit.capture.test_file_fact_identity": 11,
+          "tests.unit.capture.test_file_inputs.TestFileIdentityKey": 5,
+          "tests.unit.capture.test_file_inputs.TestFileObservationSave": 11,
+          "tests.unit.capture.test_file_inputs.TestOwnershipSave": 9,
+          "tests.unit.capture.test_file_inputs.TestFileCompletionSave": 24,
+          "tests.unit.capture.test_file_inputs.TestCapturedChecksum": 7,
+          "tests.unit.capture.test_host_photo_selection": 10,
+          "tests.unit.capture.test_host_timer_stop_guard": 20,
+          "tests.unit.capture.test_input_copy": 32,
+          "tests.unit.capture.test_internal_read_save_owner": 4,
+          "tests.unit.capture.test_media_database_ownership": 10,
+          "tests.unit.capture.test_media_execution": 63,
+          "tests.unit.capture.test_media_facts": 6,
+          "tests.unit.capture.test_media_processing.TestPolicy": 1,
+          "tests.unit.capture.test_media_processing.TestThreshold": 5,
+          "tests.unit.capture.test_media_processing.TestLowerBound": 2,
+          "tests.unit.capture.test_media_processing.TestInsufficientEvidence": 3,
+          "tests.unit.capture.test_media_processing.TestResultSeparation": 2,
+          "tests.unit.capture.test_media_processing.TestProcessingError": 2,
+          "tests.unit.capture.test_media_processing.TestCheckBasis": 3,
+          "tests.unit.capture.test_media_processing.TestRepairBasis": 4,
+          "tests.unit.capture.test_media_processing.TestMediaObservation": 6,
+          "tests.unit.capture.test_media_processing.TestDecisionCommands": 4,
+          "tests.unit.capture.test_media_processing.TestResultCommands": 6,
+          "tests.unit.capture.test_media_processing.TestClassifyCheckDuration": 2,
+          "tests.unit.capture.test_media_processing.TestProcessingDisposition": 1,
+          "tests.unit.capture.test_media_save_identity": 5,
+          "tests.unit.capture.test_media_stopped_read_resume": 2,
+          "tests.unit.capture.test_observed_pairings": 5,
+          "tests.unit.capture.test_optional_preview": 10,
+          "tests.unit.capture.test_osv_media": 60,
+          "tests.unit.capture.test_output_promotion": 20,
+          "tests.unit.capture.test_pending_save_concurrency": 16,
+          "tests.unit.capture.test_photo.TestDeclaredCompletion": 10,
+          "tests.unit.capture.test_photo.TestCancelAndFailure": 6,
+          "tests.unit.capture.test_photo.TestRunPhoto": 2,
+          "tests.unit.capture.test_preparation": 77,
+          "tests.unit.capture.test_preparation_database_handoff": 3,
+          "tests.unit.capture.test_preparation_discovery": 5,
+          "tests.unit.capture.test_preparation_save_owner": 42,
+          "tests.unit.capture.test_preparation_sources": 13,
+          "tests.unit.capture.test_product_checks": 36,
+          "tests.unit.capture.test_record_media_source": 13,
+          "tests.unit.capture.test_record_segments": 54,
+          "tests.unit.capture.test_recording_finish.TestPhases": 6,
+          "tests.unit.capture.test_recording_finish.TestStopBudgetShared": 3,
+          "tests.unit.capture.test_recording_finish.TestCanceledStop": 4,
+          "tests.unit.capture.test_recording_finish.TestReconciliationTiming": 3,
+          "tests.unit.capture.test_recording_finish.TestRecoveredControl": 4,
+          "tests.unit.capture.test_recording_finish.TestConservativeWinddown": 5,
+          "tests.unit.capture.test_recording_finish.TestTimingWaivedStop": 3,
+          "tests.unit.capture.test_recording_finish": 5,
+          "tests.unit.capture.test_recording_result": 19,
+          "tests.unit.capture.test_recording_start.TestStopTarget": 2,
+          "tests.unit.capture.test_recording_start": 8,
+          "tests.unit.capture.test_recording_wakeups": 38,
+          "tests.unit.capture.test_residual_dispatch_database": 14,
+          "tests.unit.capture.test_result_error_contract": 30,
+          "tests.unit.capture.test_result_error_guards": 99,
+          "tests.unit.capture.test_result_inputs": 13,
+          "tests.unit.capture.test_result_page_saves": 8,
+          "tests.unit.capture.test_result_pages": 26,
+          "tests.unit.capture.test_result_run_close_recovery": 14,
+          "tests.unit.capture.test_result_scan": 14,
+          "tests.unit.capture.test_results.TestAssess": 8,
+          "tests.unit.capture.test_results.TestRelease": 4,
+          "tests.unit.capture.test_save_owner_handoff": 36,
+          "tests.unit.capture.test_saved_response_handoff": 4,
+          "tests.unit.capture.test_segment_async_database": 6,
+          "tests.unit.capture.test_segment_error_headers": 30,
+          "tests.unit.capture.test_segment_inspections_metrics": 4,
+          "tests.unit.capture.test_segment_save_timing": 2,
+          "tests.unit.capture.test_software_recovery_enablement": 12,
+          "tests.unit.capture.test_start_gate": 36,
+          "tests.unit.capture.test_stop_result_handoff": 3,
+          "tests.unit.capture.test_task_ownership": 16,
+          "tests.unit.capture.test_timelapse.TestWaitPlan": 5,
+          "tests.unit.capture.test_timelapse.TestRestartRecovery": 5,
+          "tests.unit.capture.test_timelapse.TestOtherPaths": 4,
+          "tests.unit.capture.test_timelapse": 3,
+          "tests.unit.capture.test_timelapse_paged_conclusion": 2,
+          "tests.unit.capture.test_video_result_contract": 7,
+          "tests.unit.contracts.test_boundaries.TestHistoryBoundary": 13,
+          "tests.unit.contracts.test_boundaries.TestPage": 8,
+          "tests.unit.contracts.test_boundaries.TestValidatePage": 17,
+          "tests.unit.contracts.test_enums": 18,
+          "tests.unit.contracts.test_historical_json_projection": 53,
+          "tests.unit.contracts.test_json_values": 12,
+          "tests.unit.contracts.test_json_values.TestParseExactJson": 21,
+          "tests.unit.contracts.test_json_values.TestMissing": 4,
+          "tests.unit.contracts.test_json_values.TestNumberJudgements": 3,
+          "tests.unit.contracts.test_projection_structure": 14,
+          "tests.unit.contracts.test_public_projection": 4,
+          "tests.unit.contracts.test_report_read_requests": 10,
+          "tests.unit.contracts.test_schemas": 65,
+          "tests.unit.contracts.test_values.TestObjectId": 28,
+          "tests.unit.contracts.test_values.TestUtcMicros": 22,
+          "tests.unit.contracts.test_values.TestCreationTime": 13,
+          "tests.unit.contracts.test_values.TestDurationMillis": 21,
+          "tests.unit.contracts.test_values.TestOperationKey": 6,
+          "tests.unit.contracts.test_video_coverage": 16,
+          "tests.unit.devices.test_action6_record_contract": 32,
+          "tests.unit.devices.test_action6_record_results": 17,
+          "tests.unit.devices.test_action6_responses": 75,
+          "tests.unit.devices.test_action6_results": 34,
+          "tests.unit.devices.test_action6_session_settings": 8,
+          "tests.unit.devices.test_adb_camera_commands": 141,
+          "tests.unit.devices.test_adb_camera_driver": 131,
+          "tests.unit.devices.test_adb_camera_filesystem": 54,
+          "tests.unit.devices.test_adb_camera_parameters": 199,
+          "tests.unit.devices.test_adb_camera_video_estimates": 19,
+          "tests.unit.devices.test_adb_directory_scan": 28,
+          "tests.unit.devices.test_adb_file_commands": 44,
+          "tests.unit.devices.test_adb_read_diagnostics": 15,
+          "tests.unit.devices.test_adb_startup_timing": 2,
+          "tests.unit.devices.test_builtin_driver_registration": 10,
+          "tests.unit.devices.test_capture_completion": 22,
+          "tests.unit.devices.test_capture_preparation": 36,
+          "tests.unit.devices.test_capture_timing": 13,
+          "tests.unit.devices.test_catalog": 19,
+          "tests.unit.devices.test_catalog.TestApplyDefaults": 4,
+          "tests.unit.devices.test_catalog.TestBuildCatalog": 5,
+          "tests.unit.devices.test_catalog.TestDescribeDocument": 2,
+          "tests.unit.devices.test_catalog.TestVideoEstimateMetadata": 9,
+          "tests.unit.devices.test_definitions_runtime": 8,
+          "tests.unit.devices.test_evidence.TestDeclaration": 1,
+          "tests.unit.devices.test_evidence.TestBindings": 5,
+          "tests.unit.devices.test_evidence.TestEvidence": 8,
+          "tests.unit.devices.test_file_identity": 22,
+          "tests.unit.devices.test_firmware_identity": 17,
+          "tests.unit.devices.test_hasselblad_capture_preparation": 35,
+          "tests.unit.devices.test_hasselblad_commands": 129,
+          "tests.unit.devices.test_hasselblad_configuration": 26,
+          "tests.unit.devices.test_hasselblad_control_recovery": 4,
+          "tests.unit.devices.test_hasselblad_definitions": 3,
+          "tests.unit.devices.test_hasselblad_driver": 62,
+          "tests.unit.devices.test_hasselblad_file_identity": 21,
+          "tests.unit.devices.test_hasselblad_parameters": 6,
+          "tests.unit.devices.test_hasselblad_read_diagnostics": 3,
+          "tests.unit.devices.test_hasselblad_responses": 164,
+          "tests.unit.devices.test_managed_port": 6,
+          "tests.unit.devices.test_osmo360ii_capture": 47,
+          "tests.unit.devices.test_osmo360ii_file_commands": 9,
+          "tests.unit.devices.test_osmo360ii_responses": 35,
+          "tests.unit.devices.test_osmo360ii_results": 35,
+          "tests.unit.devices.test_osmo360ii_session_settings": 12,
+          "tests.unit.devices.test_osmo360ii_settings": 32,
+          "tests.unit.devices.test_preparation_contract": 15,
+          "tests.unit.devices.test_read_parameters": 49,
+          "tests.unit.devices.test_read_session": 7,
+          "tests.unit.devices.test_read_session_settlement": 20,
+          "tests.unit.devices.test_recording_completion": 33,
+          "tests.unit.devices.test_recovery_declaration": 6,
+          "tests.unit.devices.test_result_candidate_metadata": 5,
+          "tests.unit.devices.test_segment_path_residency": 12,
+          "tests.unit.devices.test_simulation_service_failure": 6,
+          "tests.unit.devices.test_start_entry": 15,
+          "tests.unit.devices.test_transport": 11,
+          "tests.unit.devices.test_video_segment_profiles": 5,
+          "tests.unit.history.test_capture_preparation_events": 9,
+          "tests.unit.history.test_changes.TestRebuildUsesHistoricalRelationship": 1,
+          "tests.unit.history.test_changes.TestReportTargetRules": 5,
+          "tests.unit.history.test_changes.TestPerEventCounting": 1,
+          "tests.unit.history.test_changes.TestChangeSeqConsistency": 2,
+          "tests.unit.history.test_changes.TestTransactionInvariants": 3,
+          "tests.unit.history.test_changes.TestAfterSliceVerification": 4,
+          "tests.unit.history.test_changes.TestProgressScope": 1,
+          "tests.unit.history.test_changes": 6,
+          "tests.unit.history.test_cost_details": 10,
+          "tests.unit.history.test_decoding": 175,
+          "tests.unit.history.test_event_batches": 17,
+          "tests.unit.history.test_events.TestRegistryDrivenValidation": 13,
+          "tests.unit.history.test_events.TestOwnershipAndReportImpact": 4,
+          "tests.unit.history.test_events.TestFileRouteReportImpact": 6,
+          "tests.unit.history.test_events.TestStrictChangeBody": 10,
+          "tests.unit.history.test_events.TestEvidenceMembers": 12,
+          "tests.unit.history.test_host_photo_request": 46,
+          "tests.unit.history.test_photo_preparation_format": 4,
+          "tests.unit.history.test_read_coverage": 55,
+          "tests.unit.history.test_replay.TestApply": 5,
+          "tests.unit.history.test_replay.TestRestore": 5,
+          "tests.unit.history.test_replay_continuity": 26,
+          "tests.unit.history.test_report_growth_history": 13,
+          "tests.unit.history.test_report_required_history": 34,
+          "tests.unit.history.test_report_selection": 10,
+          "tests.unit.history.test_row_values": 12,
+          "tests.unit.history.test_snapshot_batch_limit": 9,
+          "tests.unit.history.test_snapshot_object_discovery": 12,
+          "tests.unit.history.test_snapshot_read_scope": 13,
+          "tests.unit.history.test_snapshot_stage_stop": 11,
+          "tests.unit.history.test_snapshot_validation_lifecycle": 3,
+          "tests.unit.history.test_snapshots": 11,
+          "tests.unit.history.test_status_history": 9,
+          "tests.unit.history.test_validators.TestUnchangedStateNeedsNoTransition": 2,
+          "tests.unit.history.test_validators.TestOwnershipResolution": 5,
+          "tests.unit.host_files.test_async_tasks": 15,
+          "tests.unit.host_files.test_file_io": 19,
+          "tests.unit.host_files.test_handoff": 12,
+          "tests.unit.host_files.test_media": 139,
+          "tests.unit.host_files.test_names": 29,
+          "tests.unit.host_files.test_owned_operations": 5,
+          "tests.unit.host_files.test_paths.TestResolveRules": 22,
+          "tests.unit.host_files.test_paths.TestInspectRules": 1,
+          "tests.unit.host_files.test_segment_results": 35,
+          "tests.unit.host_files.test_segments": 17,
+          "tests.unit.host_files.test_task_results": 7,
+          "tests.unit.host_files.test_tasks": 8,
+          "tests.unit.logging_runtime.test_admission.TestAdmissionKind": 13,
+          "tests.unit.logging_runtime.test_admission.TestDropCounters": 4,
+          "tests.unit.logging_runtime.test_copies": 73,
+          "tests.unit.logging_runtime.test_lifecycle.TestCloseSummary": 4,
+          "tests.unit.logging_runtime.test_lifecycle.TestStopMarkerUnderPressure": 2,
+          "tests.unit.logging_runtime.test_marker_temp_cleanup": 35,
+          "tests.unit.logging_runtime.test_ownership": 10,
+          "tests.unit.logging_runtime.test_pending_log.TestPendingLog": 3,
+          "tests.unit.logging_runtime.test_performance": 4,
+          "tests.unit.logging_runtime.test_transaction_timing": 10,
+          "tests.unit.motor.test_decisions": 16,
+          "tests.unit.motor.test_models": 22,
+          "tests.unit.motor.test_notification": 21,
+          "tests.unit.motor.test_service": 16,
+          "tests.unit.operations.test_attempt_inputs": 158,
+          "tests.unit.operations.test_config_numbers": 8,
+          "tests.unit.operations.test_error_diagnostics": 9,
+          "tests.unit.operations.test_owned_calls": 3,
+          "tests.unit.operations.test_preparation_guards": 5,
+          "tests.unit.operations.test_process": 36,
+          "tests.unit.operations.test_queries.TestValidateQueryScope": 10,
+          "tests.unit.operations.test_queries.TestDecideQueryNext": 9,
+          "tests.unit.operations.test_queries.TestResultCheckRound": 6,
+          "tests.unit.operations.test_recovery.TestRecoverAttempt": 8,
+          "tests.unit.operations.test_recovery.TestSettleCancelledCall": 3,
+          "tests.unit.operations.test_responsibility_identity": 64,
+          "tests.unit.operations.test_results": 1,
+          "tests.unit.operations.test_results.TestRemoteExitPartition": 2,
+          "tests.unit.operations.test_results.TestSettlementPartitions": 4,
+          "tests.unit.operations.test_results.TestObservationPartitions": 5,
+          "tests.unit.operations.test_results.TestStatusEffectCombinations": 4,
+          "tests.unit.operations.test_tool_diagnostics": 21,
+          "tests.unit.outputs.test_catalog.TestRegistrationBasics": 8,
+          "tests.unit.outputs.test_catalog.TestExplicitPairing": 5,
+          "tests.unit.outputs.test_catalog": 29,
+          "tests.unit.outputs.test_cleanup_async_database": 42,
+          "tests.unit.outputs.test_cleanup_attempt_config": 22,
+          "tests.unit.outputs.test_cleanup_committed_error_handoff": 36,
+          "tests.unit.outputs.test_cleanup_delete_save_responsibility": 23,
+          "tests.unit.outputs.test_cleanup_query_save_responsibility": 79,
+          "tests.unit.outputs.test_cleanup_recovery.TestDecideCleanupCancel": 14,
+          "tests.unit.outputs.test_cleanup_recovery.TestDecideCleanupEntry": 4,
+          "tests.unit.outputs.test_cleanup_saved_presence": 14,
+          "tests.unit.outputs.test_cleanup_session_work": 12,
+          "tests.unit.outputs.test_copy_complete": 43,
+          "tests.unit.outputs.test_copy_handoff_database": 6,
+          "tests.unit.outputs.test_copy_resume": 42,
+          "tests.unit.outputs.test_copy_segment_diagnostics": 19,
+          "tests.unit.outputs.test_copy_segments": 35,
+          "tests.unit.outputs.test_definitions": 60,
+          "tests.unit.outputs.test_delivery": 33,
+          "tests.unit.outputs.test_device_work.TestDecideDeviceWork": 5,
+          "tests.unit.outputs.test_device_work.TestDecideDeviceWorkParallel": 7,
+          "tests.unit.outputs.test_host_capture_catalog": 4,
+          "tests.unit.outputs.test_host_photo_candidate": 1,
+          "tests.unit.outputs.test_obtain_summary": 27,
+          "tests.unit.outputs.test_original_selection": 42,
+          "tests.unit.outputs.test_qualification": 108,
+          "tests.unit.outputs.test_read_business_database": 17,
+          "tests.unit.outputs.test_read_discovery": 11,
+          "tests.unit.outputs.test_read_error_diagnostics": 24,
+          "tests.unit.outputs.test_read_save_handoff": 75,
+          "tests.unit.outputs.test_read_source_gate": 25,
+          "tests.unit.outputs.test_registration_relation_guard": 42,
+          "tests.unit.outputs.test_registration_source_guard": 50,
+          "tests.unit.outputs.test_segment_copy_reuse": 5,
+          "tests.unit.outputs.test_segment_query_database": 18,
+          "tests.unit.outputs.test_selection_lookup": 42,
+          "tests.unit.outputs.test_sources": 42,
+          "tests.unit.outputs.test_work_file_stop_gate": 5,
+          "tests.unit.outputs.test_work_files": 54,
+          "tests.unit.persistence.test_async_segment_listing": 5,
+          "tests.unit.persistence.test_attempt_identity": 232,
+          "tests.unit.persistence.test_attempt_reads": 13,
+          "tests.unit.persistence.test_business_database": 32,
+          "tests.unit.persistence.test_capture_preparation_upgrade": 29,
+          "tests.unit.persistence.test_commit_recovery.TestPartitions": 8,
+          "tests.unit.persistence.test_current_fact_ports": 23,
+          "tests.unit.persistence.test_directory_switch.TestClassifySwitchEligibility": 9,
+          "tests.unit.persistence.test_directory_switch.TestClassifyCommitObservation": 3,
+          "tests.unit.persistence.test_event_building": 11,
+          "tests.unit.persistence.test_executor_controls": 16,
+          "tests.unit.persistence.test_executor_core.TestCapacityAndPriority": 5,
+          "tests.unit.persistence.test_executor_core.TestAdmissionAndTimeout": 4,
+          "tests.unit.persistence.test_executor_core.TestWithdrawal": 5,
+          "tests.unit.persistence.test_executor_handoff": 52,
+          "tests.unit.persistence.test_executor_identity": 13,
+          "tests.unit.persistence.test_fixed_member_consumption": 40,
+          "tests.unit.persistence.test_flow_context": 26,
+          "tests.unit.persistence.test_native_classification": 5,
+          "tests.unit.persistence.test_operation_fact_reads": 33,
+          "tests.unit.persistence.test_ownership_fact_port": 1,
+          "tests.unit.persistence.test_photo_entry_request": 12,
+          "tests.unit.persistence.test_preparation_format": 31,
+          "tests.unit.persistence.test_preparation_format_gate": 6,
+          "tests.unit.persistence.test_projection_validator_scope": 10,
+          "tests.unit.persistence.test_projection_writes": 3,
+          "tests.unit.persistence.test_report_read_resources": 19,
+          "tests.unit.persistence.test_reporting_reads": 48,
+          "tests.unit.persistence.test_row_facts": 10,
+          "tests.unit.persistence.test_row_history": 30,
+          "tests.unit.persistence.test_row_queries": 4,
+          "tests.unit.persistence.test_saved_file_inputs": 10,
+          "tests.unit.persistence.test_saved_page_fact_port": 2,
+          "tests.unit.persistence.test_saved_transactions": 29,
+          "tests.unit.persistence.test_segment_allocations": 4,
+          "tests.unit.persistence.test_segment_finish_fact_scope": 4,
+          "tests.unit.persistence.test_segment_finite_finish_guards": 19,
+          "tests.unit.persistence.test_segment_preparation_failure": 26,
+          "tests.unit.persistence.test_segment_saved_finish_facts": 54,
+          "tests.unit.persistence.test_shared_save": 15,
+          "tests.unit.persistence.test_snapshot_runtime": 25,
+          "tests.unit.persistence.test_transaction_timing": 29,
+          "tests.unit.persistence.test_verified_conclusion": 5,
+          "tests.unit.reporting.test_ack_sync.TestDecideAck": 5,
+          "tests.unit.reporting.test_ack_sync.TestSyncQualification": 7,
+          "tests.unit.reporting.test_ack_sync": 19,
+          "tests.unit.reporting.test_ack_sync.TestSyncCancel": 2,
+          "tests.unit.reporting.test_communication": 6,
+          "tests.unit.reporting.test_delivery_read_scope": 3,
+          "tests.unit.reporting.test_encoding": 60,
+          "tests.unit.reporting.test_encoding.TestReportStream": 4,
+          "tests.unit.reporting.test_failure_index": 11,
+          "tests.unit.reporting.test_freeze": 38,
+          "tests.unit.reporting.test_generation": 9,
+          "tests.unit.reporting.test_generation_lifecycle": 5,
+          "tests.unit.reporting.test_layered_encoding": 205,
+          "tests.unit.reporting.test_maintenance.TestFailureWaitsForNewTrigger": 4,
+          "tests.unit.reporting.test_maintenance.TestLimits": 2,
+          "tests.unit.reporting.test_management_guard": 6,
+          "tests.unit.reporting.test_messages.TestRoundTrip": 8,
+          "tests.unit.reporting.test_messages.TestWireRejection": 32,
+          "tests.unit.reporting.test_messages.TestCapacityAndTaskIdentity": 4,
+          "tests.unit.reporting.test_projection.TestValidateFrozenReport": 9,
+          "tests.unit.reporting.test_publication": 51,
+          "tests.unit.reporting.test_publication_cancellation": 10,
+          "tests.unit.reporting.test_publication_flow": 65,
+          "tests.unit.reporting.test_read_reuse": 29,
+          "tests.unit.reporting.test_report_growth_scope": 16,
+          "tests.unit.reporting.test_stream_validation": 181,
+          "tests.unit.reporting.test_worker.TestErrorClassification": 5,
+          "tests.unit.reporting.test_worker.TestParentGuard": 1,
+          "tests.unit.reporting.test_worker.TestWorkLock": 2,
+          "tests.unit.reporting.test_worker_job": 6,
+          "tests.unit.reporting.test_worker_late_state": 24,
+          "tests.unit.scheduling.test_capture_scope": 8,
+          "tests.unit.scheduling.test_executors.TestCollectReady": 3,
+          "tests.unit.scheduling.test_executors.TestHandlerRegistry": 3,
+          "tests.unit.scheduling.test_notifications.TestVersionedWake": 9,
+          "tests.unit.scheduling.test_preparation_storage": 24,
+          "tests.unit.scheduling.test_resource_reads": 5,
+          "tests.unit.scheduling.test_rules.TestWindowPhase": 2,
+          "tests.unit.scheduling.test_rules.TestDecideByLaunchFact": 5,
+          "tests.unit.scheduling.test_rules.TestDecideByTime": 4,
+          "tests.unit.scheduling.test_rules.TestExpirationReason": 1,
+          "tests.unit.scheduling.test_rules.TestCandidateOrder": 4,
+          "tests.unit.scheduling.test_rules": 1,
+          "tests.unit.scheduling.test_window_guard": 11,
+          "tests.unit.scheduling.test_window_observation_storage": 5,
+          "tests.unit.session.test_business_database_session": 12,
+          "tests.unit.session.test_clock.TestCheckClock": 4,
+          "tests.unit.session.test_clock.TestEnterExecution": 4,
+          "tests.unit.session.test_completed_work": 3,
+          "tests.unit.session.test_completion_round_handoff": 7,
+          "tests.unit.session.test_device_configuration_error": 2,
+          "tests.unit.session.test_error_diagnostics": 10,
+          "tests.unit.session.test_handoff.TestDecideHandoff": 6,
+          "tests.unit.session.test_handoff": 9,
+          "tests.unit.session.test_local_stop": 25,
+          "tests.unit.session.test_locks": 41,
+          "tests.unit.session.test_report_observation": 8,
+          "tests.unit.session.test_runtime_clock": 1,
+          "tests.unit.session.test_supervision.TestRegisterAndHandoff": 3,
+          "tests.unit.session.test_supervision.TestCancelKeepsActualOwner": 7,
+          "tests.unit.session.test_work.TestWorkDimensions": 7,
+          "tests.unit.session.test_work.TestNonWorkStates": 5,
+          "tests.unit.session.test_work.TestUnknownFacts": 4,
+          "tests.unit.session.test_work": 52,
+          "tests.unit.test_resources": 1
+        },
+        "failures": [
+          {
+            "classname": "tests.unit.outputs.test_read_error_diagnostics",
+            "name": "test_read_result_consumer_keeps_exception_and_read_end_on_original_request[plain-DbOutcomeKind.UNKNOWN-internal]",
+            "message": "TypeError: resume_prepared_internal_reads() missing 1 required keyword-only argument: 'pending_segment_inspection_results'",
+            "details": "apps/camctl/tests/unit/outputs/test_read_error_diagnostics.py:107: in test_read_result_consumer_keeps_exception_and_read_end_on_original_request\n    await media_flow.resume_prepared_internal_reads(database,\nE   TypeError: resume_prepared_internal_reads() missing 1 required keyword-only argument: 'pending_segment_inspection_results'"
+          },
+          {
+            "classname": "tests.unit.outputs.test_read_error_diagnostics",
+            "name": "test_read_result_consumer_keeps_exception_and_read_end_on_original_request[structured-DbOutcomeKind.UNKNOWN-internal]",
+            "message": "TypeError: resume_prepared_internal_reads() missing 1 required keyword-only argument: 'pending_segment_inspection_results'",
+            "details": "apps/camctl/tests/unit/outputs/test_read_error_diagnostics.py:107: in test_read_result_consumer_keeps_exception_and_read_end_on_original_request\n    await media_flow.resume_prepared_internal_reads(database,\nE   TypeError: resume_prepared_internal_reads() missing 1 required keyword-only argument: 'pending_segment_inspection_results'"
+          },
+          {
+            "classname": "tests.unit.outputs.test_read_error_diagnostics",
+            "name": "test_read_result_consumer_keeps_exception_and_read_end_on_original_request[segment-DbOutcomeKind.UNKNOWN-internal]",
+            "message": "TypeError: resume_prepared_internal_reads() missing 1 required keyword-only argument: 'pending_segment_inspection_results'",
+            "details": "apps/camctl/tests/unit/outputs/test_read_error_diagnostics.py:107: in test_read_result_consumer_keeps_exception_and_read_end_on_original_request\n    await media_flow.resume_prepared_internal_reads(database,\nE   TypeError: resume_prepared_internal_reads() missing 1 required keyword-only argument: 'pending_segment_inspection_results'"
+          },
+          {
+            "classname": "tests.unit.outputs.test_read_error_diagnostics",
+            "name": "test_read_result_consumer_keeps_exception_and_read_end_on_original_request[camera-DbOutcomeKind.UNKNOWN-internal]",
+            "message": "TypeError: resume_prepared_internal_reads() missing 1 required keyword-only argument: 'pending_segment_inspection_results'",
+            "details": "apps/camctl/tests/unit/outputs/test_read_error_diagnostics.py:107: in test_read_result_consumer_keeps_exception_and_read_end_on_original_request\n    await media_flow.resume_prepared_internal_reads(database,\nE   TypeError: resume_prepared_internal_reads() missing 1 required keyword-only argument: 'pending_segment_inspection_results'"
+          }
+        ]
+      },
+      "exit_code": 1,
+      "exit_code_source": "协调者 /root 在本轮交接中报告的 exec 终态；没有另行包装回执",
+      "notes": [
+        "本轮发生在 segment_baseline 通知修复之前，随后还适配了 test_read_error_diagnostics 的参数；不能绑定为最终 9fbb734c 生产树验证。",
+        "4 项失败均为旧 fixture 调用 resume_prepared_internal_reads 时漏传 pending_segment_inspection_results；完整结果为 4 failed / 9218 passed / 1 skipped。",
+        "这轮不是全量最终通过。"
+      ],
+      "pytest_summary_lines": [
+        "4 failed, 9218 passed, 1 skipped, 2 warnings in 149.53s (0:02:29)"
+      ]
+    },
+    {
+      "id": "read-fixture-adaptation",
+      "scope": "旧 READ fixture 补齐真实接口参数后的两个直接测试文件",
+      "evidence": {
+        "xml": "evidence/read-unit/junit.xml",
+        "log": "evidence/read-unit/pytest.log",
+        "receipt": "evidence/read-unit/command.json"
+      },
+      "result": {
+        "counts": {
+          "tests": 99,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 99
+        },
+        "xml_suite_attributes": [
+          {
+            "name": "pytest",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "tests": "99",
+            "time": "3.232",
+            "timestamp": "2026-10-26T08:17:43.686853+08:00",
+            "hostname": "1e0518e0c6b4"
+          }
+        ],
+        "case_classes": {
+          "tests.unit.outputs.test_read_error_diagnostics": 24,
+          "tests.unit.outputs.test_read_save_handoff": 75
+        },
+        "failures": []
+      },
+      "exit_code": 0,
+      "exit_code_source": "evidence/read-unit/command.json",
+      "notes": [
+        "snapshot.json 保存准备与适配后的测试文件 SHA；callsite-audit.json 是适配前扫描记录，不能当作最终调用点状态。"
+      ],
+      "recorded_command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/unit/outputs/test_read_error_diagnostics.py",
+        "apps/camctl/tests/unit/outputs/test_read_save_handoff.py",
+        "-q",
+        "--junitxml=/tmp/camctl-quality-repair-evidence/merge-272f-read-unit/junit.xml"
+      ],
+      "pytest_summary_lines": [
+        "99 passed in 3.23s"
+      ]
+    },
+    {
+      "id": "final-merged-combination",
+      "scope": "所有最终源码已解析后在实际合并树执行的 10 个直接相关测试文件",
+      "evidence": {
+        "xml": "evidence/final-combination/camctl-merge-272f-combination.xml",
+        "log": "evidence/final-combination/camctl-merge-272f-combination.log"
+      },
+      "result": {
+        "counts": {
+          "tests": 352,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "passed": 352
+        },
+        "xml_suite_attributes": [
+          {
+            "name": "pytest",
+            "errors": "0",
+            "failures": "0",
+            "skipped": "0",
+            "tests": "352",
+            "time": "13.473",
+            "timestamp": "2026-10-26T08:18:33.514090+08:00",
+            "hostname": "1e0518e0c6b4"
+          }
+        ],
+        "case_classes": {
+          "tests.unit.capture.test_baseline_save_owner": 16,
+          "tests.unit.capture.test_save_owner_handoff": 36,
+          "tests.unit.capture.test_preparation": 77,
+          "tests.unit.capture.test_preparation_save_owner": 42,
+          "tests.unit.outputs.test_read_error_diagnostics": 24,
+          "tests.unit.outputs.test_read_save_handoff": 75,
+          "tests.unit.session.test_error_diagnostics": 10,
+          "tests.unit.session.test_completion_round_handoff": 7,
+          "tests.unit.persistence.test_executor_identity": 13,
+          "tests.unit.persistence.test_executor_handoff": 52
+        },
+        "failures": []
+      },
+      "exit_code": 0,
+      "exit_code_source": "协调者 /root 在本轮交接中报告的 exec 终态；没有另行包装回执",
+      "notes": [
+        "协调者确认：352 项执行时全部源码已经是最终 9fbb734c 内容，执行后才提交该 merge。",
+        "不把 352 项窄组合视为完整单元或完整集成通过。"
+      ],
+      "pytest_summary_lines": [
+        "352 passed in 13.59s"
+      ]
+    },
+    {
+      "id": "preparation-narrow",
+      "scope": "干净上游 272fda66 加 preparation.py 与 test_preparation_save_owner.py 两文件的局部组合",
+      "evidence": {
+        "log": "evidence/preparation/camctl-merge-272f-preparation-unit.log",
+        "context": "evidence/preparation/camctl-merge-272f-preparation-context.json"
+      },
+      "result": {
+        "passed": 119,
+        "failed": 0,
+        "pytest_log_seconds": 9.05
+      },
+      "exit_code": null,
+      "exit_code_source": "原始 log/context 没有采集进程退出码，不补造",
+      "notes": [
+        "结果来自原日志；不代表完整合并树或完整单元。"
+      ]
+    }
+  ],
+  "receipt_source_hash_checks": [
+    {
+      "receipt": "evidence/executor/summary.json",
+      "path": "apps/camctl/src/camctl/persistence/executor.py",
+      "recorded_sha256": "46ba106daff38da6ade772ed14ea625df62c42180777578e0bac5eda4dfb604a",
+      "final_sha256": "46ba106daff38da6ade772ed14ea625df62c42180777578e0bac5eda4dfb604a",
+      "matches_final": true
+    },
+    {
+      "receipt": "evidence/executor/summary.json",
+      "path": "apps/camctl/src/camctl/persistence/business.py",
+      "recorded_sha256": "e44cfdc4854ede80cbf89aa12275da43f46c041a2cc2e70dbfa61fc489140f1f",
+      "final_sha256": "e44cfdc4854ede80cbf89aa12275da43f46c041a2cc2e70dbfa61fc489140f1f",
+      "matches_final": true
+    },
+    {
+      "receipt": "evidence/executor/summary.json",
+      "path": "apps/camctl/src/camctl/persistence/repositories/history.py",
+      "recorded_sha256": "b80a56ea581a59ca21be9de774e3e71dd7b90321873e612a7c9cc0f1bfe036bc",
+      "final_sha256": "b80a56ea581a59ca21be9de774e3e71dd7b90321873e612a7c9cc0f1bfe036bc",
+      "matches_final": true
+    },
+    {
+      "receipt": "evidence/session/handoff.json",
+      "path": "apps/camctl/src/camctl/session/service.py",
+      "recorded_sha256": "110c87883b38553e2dc5398dbada4c09fc7dc5b4992c1161b472eb9249f36f86",
+      "final_sha256": "110c87883b38553e2dc5398dbada4c09fc7dc5b4992c1161b472eb9249f36f86",
+      "matches_final": true
+    },
+    {
+      "receipt": "evidence/session/handoff.json",
+      "path": "apps/camctl/src/camctl/bootstrap/background_flow.py",
+      "recorded_sha256": "9e9982d684e20a7f32fbe6490029626c495c2ab4cee0062b032e64657137854f",
+      "final_sha256": "9e9982d684e20a7f32fbe6490029626c495c2ab4cee0062b032e64657137854f",
+      "matches_final": true
+    },
+    {
+      "receipt": "evidence/session/handoff.json",
+      "path": "apps/camctl/src/camctl/bootstrap/lifecycle.py",
+      "recorded_sha256": "7cdea64d10b1d2572e9ff61be1beb9bffbfb20983ba06e11a74b0a2cc1bdec0a",
+      "final_sha256": "7cdea64d10b1d2572e9ff61be1beb9bffbfb20983ba06e11a74b0a2cc1bdec0a",
+      "matches_final": true
+    },
+    {
+      "receipt": "evidence/capture-core/resolved-files.json",
+      "path": "apps/camctl/src/camctl/capture/baseline.py",
+      "recorded_sha256": "80b371805b4317626fc404070c7637714319f2b7781d5d96469edd945ea1ad7a",
+      "final_sha256": "80b371805b4317626fc404070c7637714319f2b7781d5d96469edd945ea1ad7a",
+      "matches_final": true
+    },
+    {
+      "receipt": "evidence/capture-core/resolved-files.json",
+      "path": "apps/camctl/src/camctl/capture/baseline_reads.py",
+      "recorded_sha256": "a5b4054430644aac325ee491227404d0074ec765f0a18eccbbf12b9ca135e23f",
+      "final_sha256": "a5b4054430644aac325ee491227404d0074ec765f0a18eccbbf12b9ca135e23f",
+      "matches_final": true
+    },
+    {
+      "receipt": "evidence/capture-core/resolved-files.json",
+      "path": "apps/camctl/src/camctl/capture/baseline_saves.py",
+      "recorded_sha256": "fd2cfb1fac9cff53e1d7757b22c39ebd076e2930e8d14189ea348075a3cf02ed",
+      "final_sha256": "fd2cfb1fac9cff53e1d7757b22c39ebd076e2930e8d14189ea348075a3cf02ed",
+      "matches_final": true
+    },
+    {
+      "receipt": "evidence/capture-core/resolved-files.json",
+      "path": "apps/camctl/src/camctl/capture/result_pages.py",
+      "recorded_sha256": "c825447b10c7eadcfa86b748b526baf1ce7e42fe6aa10b4c8aca1eb83ed74fd2",
+      "final_sha256": "c825447b10c7eadcfa86b748b526baf1ce7e42fe6aa10b4c8aca1eb83ed74fd2",
+      "matches_final": true
+    },
+    {
+      "receipt": "evidence/capture-core/resolved-files.json",
+      "path": "apps/camctl/src/camctl/capture/result_scans.py",
+      "recorded_sha256": "d01b3a70dd990a5c5d7a0662022bc68eb31d4cf738fd017283d111e8c6455379",
+      "final_sha256": "d01b3a70dd990a5c5d7a0662022bc68eb31d4cf738fd017283d111e8c6455379",
+      "matches_final": true
+    },
+    {
+      "receipt": "evidence/capture-core/resolved-files.json",
+      "path": "apps/camctl/src/camctl/capture/segment_completion.py",
+      "recorded_sha256": "2b189d97ac9039e5e83a5ad7b14029c683ad895fe60ca78fa60175fedadb750f",
+      "final_sha256": "2b189d97ac9039e5e83a5ad7b14029c683ad895fe60ca78fa60175fedadb750f",
+      "matches_final": true
+    },
+    {
+      "receipt": "evidence/capture-core/consumption-notification/resolved-files.json",
+      "path": "apps/camctl/src/camctl/capture/segment_baseline.py",
+      "recorded_sha256": "0618e817192c62c2c72c01a91262fff9d8a447e759c5a75ed35d9493fd1d571f",
+      "final_sha256": "0618e817192c62c2c72c01a91262fff9d8a447e759c5a75ed35d9493fd1d571f",
+      "matches_final": true
+    },
+    {
+      "receipt": "evidence/capture-core/consumption-notification/resolved-files.json",
+      "path": "apps/camctl/tests/unit/capture/test_baseline_save_owner.py",
+      "recorded_sha256": "39810847864d0cfb9718f6240c3b9d958610b62ff5f7f99375f988c0fad5175a",
+      "final_sha256": "041633a00ddc548a3f5ec85a7ae29dad77515443dc27e1f138f449768504dc25",
+      "matches_final": false
+    },
+    {
+      "receipt": "evidence/capture-read/receipt.json",
+      "path": "apps/camctl/src/camctl/capture/media_flow.py",
+      "recorded_sha256": "f4a07806c8eb3612f23beb877364f994c5b5eaed68cd5c8bd0efc5b9b56065c4",
+      "final_sha256": "f4a07806c8eb3612f23beb877364f994c5b5eaed68cd5c8bd0efc5b9b56065c4",
+      "matches_final": true
+    },
+    {
+      "receipt": "evidence/capture-read/receipt.json",
+      "path": "apps/camctl/src/camctl/outputs/read_attempts.py",
+      "recorded_sha256": "41368b57c6ef541c8f8bf1af936129a84a3043e2080c2eac94fb793feea54fcd",
+      "final_sha256": "41368b57c6ef541c8f8bf1af936129a84a3043e2080c2eac94fb793feea54fcd",
+      "matches_final": true
+    },
+    {
+      "receipt": "evidence/read-unit/snapshot.json",
+      "path": "apps/camctl/tests/unit/outputs/test_read_error_diagnostics.py",
+      "recorded_sha256": "c5cf12255a345feb231ff09cb57304a9f7c093f1a7754b7d2dcc94d411e08366",
+      "final_sha256": "c5cf12255a345feb231ff09cb57304a9f7c093f1a7754b7d2dcc94d411e08366",
+      "matches_final": true
+    }
+  ],
+  "source_hash_check_note": "窄范围原回执属于各自当时的局部源码组合；matches_final=false 记录后续合并/修复差异，不能把早期窄测冒称为最终完整源码验证。",
+  "boundary": {
+    "first_full_unit_final_pass": false,
+    "final_combination_passed": 352,
+    "final_full_suite_result": "本暂存不作结论，由另一代理审计",
+    "running_full_integration_directory_not_processed": "/tmp/camctl-integration-all-final-20261026-u19lkvoe",
+    "counts_are_not_additive": "各轮范围重叠，不能相加为独立测试数量。",
+    "archive_selection": "仅本轮所列目录的日志、XML、JSON 回执及 diff 检查退出码；不复制源码快照、补丁、依赖、DB 世界或全量运行目录。"
+  },
+  "excluded_files": [
+    {
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-executor/executor.diff",
+      "reason": "非本轮必要日志、XML、回执；不归档源码、差异补丁、脚本或字节码"
+    },
+    {
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-executor/executor.py",
+      "reason": "非本轮必要日志、XML、回执；不归档源码、差异补丁、脚本或字节码"
+    },
+    {
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-session/run_narrow.py",
+      "reason": "非本轮必要日志、XML、回执；不归档源码、差异补丁、脚本或字节码"
+    },
+    {
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-capture-core/__pycache__/test_read_consumption_merge.cpython-311-pytest-9.1.1.pyc",
+      "reason": "非本轮必要日志、XML、回执；不归档源码、差异补丁、脚本或字节码"
+    },
+    {
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-capture-core/consumption-notification/fix.patch",
+      "reason": "非本轮必要日志、XML、回执；不归档源码、差异补丁、脚本或字节码"
+    },
+    {
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-capture-core/resolved-vs-upstream.patch",
+      "reason": "非本轮必要日志、XML、回执；不归档源码、差异补丁、脚本或字节码"
+    },
+    {
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-capture-core/test_read_consumption_merge.py",
+      "reason": "非本轮必要日志、XML、回执；不归档源码、差异补丁、脚本或字节码"
+    },
+    {
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-capture-read/media_flow.py.vs-head.diff",
+      "reason": "非本轮必要日志、XML、回执；不归档源码、差异补丁、脚本或字节码"
+    },
+    {
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-capture-read/media_flow.py.vs-upstream.diff",
+      "reason": "非本轮必要日志、XML、回执；不归档源码、差异补丁、脚本或字节码"
+    },
+    {
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-capture-read/read_attempts.py.vs-head.diff",
+      "reason": "非本轮必要日志、XML、回执；不归档源码、差异补丁、脚本或字节码"
+    },
+    {
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-capture-read/read_attempts.py.vs-upstream.diff",
+      "reason": "非本轮必要日志、XML、回执；不归档源码、差异补丁、脚本或字节码"
+    },
+    {
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-read-unit/snapshot-path.txt",
+      "reason": "非本轮必要日志、XML、回执；不归档源码、差异补丁、脚本或字节码"
+    },
+    {
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-read-unit/test_read_error_diagnostics.before.py",
+      "reason": "非本轮必要日志、XML、回执；不归档源码、差异补丁、脚本或字节码"
+    }
+  ]
+}

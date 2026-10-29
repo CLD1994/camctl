@@ -1,0 +1,200 @@
+{
+  "production_baseline": "b8fd1387f856d9a4e4a5384d57fa3bfb9b9f3f39",
+  "measurements": {
+    "baseline128-adapted": {
+      "receipt": {
+        "label": "baseline128-adapted",
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window",
+          "-q",
+          "-s",
+          "--durations=1",
+          "-p",
+          "history_preparation_timing",
+          "--junitxml=/tmp/camctl-quality-repair-evidence/history-preparation/baseline128-adapted.xml"
+        ],
+        "worktree": "/tmp/camctl-quality-repair-lidlmje7/history-preparation",
+        "started_at": "2026-10-25T20:15:03.338106+00:00",
+        "exit_code": 0,
+        "wall_seconds": 133.92745090599055,
+        "ended_at": "2026-10-25T20:17:29.192210+00:00"
+      },
+      "finished_phases": [
+        {
+          "phase": "accept_actions",
+          "count": 3,
+          "request_id": 1,
+          "seconds": 0.3288745260069845,
+          "state": "finished"
+        },
+        {
+          "phase": "finish_outputs",
+          "count": 128,
+          "seconds": 78.49950411000464,
+          "state": "finished"
+        },
+        {
+          "phase": "accept_actions",
+          "count": 4200,
+          "request_id": 2,
+          "seconds": 51.86002668099536,
+          "state": "finished"
+        },
+        {
+          "phase": "accept_actions",
+          "count": 3,
+          "request_id": 3,
+          "seconds": 0.020675375999417156,
+          "state": "finished"
+        },
+        {
+          "phase": "call",
+          "nodeid": "tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window",
+          "state": "finished",
+          "seconds": 131.30749952199403,
+          "preparation_seconds": 130.7090806930064,
+          "checks_seconds": 0.5984188289876329,
+          "failed": false
+        }
+      ]
+    },
+    "optimized4": {
+      "receipt": {
+        "label": "optimized4",
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window",
+          "-q",
+          "-s",
+          "--durations=1",
+          "-p",
+          "history_preparation_timing",
+          "--junitxml=/tmp/camctl-quality-repair-evidence/history-preparation/optimized4.xml"
+        ],
+        "worktree": "/tmp/camctl-quality-repair-lidlmje7/history-preparation",
+        "started_at": "2026-10-25T20:18:13.188576+00:00",
+        "exit_code": 0,
+        "wall_seconds": 65.99657516700972,
+        "ended_at": "2026-10-25T20:19:28.225209+00:00"
+      },
+      "finished_phases": [
+        {
+          "phase": "accept_actions",
+          "count": 3,
+          "request_id": 1,
+          "seconds": 0.31050939099804964,
+          "state": "finished"
+        },
+        {
+          "phase": "finish_outputs",
+          "count": 4,
+          "seconds": 0.39582682099717204,
+          "state": "finished"
+        },
+        {
+          "phase": "accept_actions",
+          "count": 4200,
+          "request_id": 2,
+          "seconds": 61.707287008001,
+          "state": "finished"
+        },
+        {
+          "phase": "accept_actions",
+          "count": 3,
+          "request_id": 3,
+          "seconds": 0.024630098007037304,
+          "state": "finished"
+        },
+        {
+          "phase": "call",
+          "nodeid": "tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window",
+          "state": "finished",
+          "seconds": 63.27237766500912,
+          "preparation_seconds": 62.43825331800326,
+          "checks_seconds": 0.8341243470058544,
+          "failed": false
+        }
+      ]
+    },
+    "optimized4-final": {
+      "receipt": {
+        "label": "optimized4-final",
+        "command": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window",
+          "-q",
+          "-s",
+          "--durations=1",
+          "-p",
+          "history_preparation_timing",
+          "--junitxml=/tmp/camctl-quality-repair-evidence/history-preparation/optimized4-final.xml"
+        ],
+        "worktree": "/tmp/camctl-quality-repair-lidlmje7/history-preparation",
+        "started_at": "2026-10-25T20:21:30.909234+00:00",
+        "exit_code": 0,
+        "wall_seconds": 76.98267768201185,
+        "ended_at": "2026-10-25T20:22:56.924345+00:00"
+      },
+      "finished_phases": [
+        {
+          "phase": "accept_actions",
+          "count": 3,
+          "request_id": 1,
+          "seconds": 0.3049930520064663,
+          "state": "finished"
+        },
+        {
+          "phase": "finish_outputs",
+          "count": 4,
+          "seconds": 0.30921462799597066,
+          "state": "finished"
+        },
+        {
+          "phase": "accept_actions",
+          "count": 4200,
+          "request_id": 2,
+          "seconds": 73.23511534099816,
+          "state": "finished"
+        },
+        {
+          "phase": "accept_actions",
+          "count": 3,
+          "request_id": 3,
+          "seconds": 0.02236997100408189,
+          "state": "finished"
+        },
+        {
+          "phase": "call",
+          "nodeid": "tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window",
+          "state": "finished",
+          "seconds": 74.63229982000485,
+          "preparation_seconds": 73.87169299200468,
+          "checks_seconds": 0.7606068280001637,
+          "failed": false
+        }
+      ]
+    }
+  },
+  "validation": {
+    "capacity_final": "1 passed in 76.35s; exit 0",
+    "witnesses": "5 passed in 5.11s; exit 0",
+    "ast_parse_files": 3,
+    "diff_check_exit": 0
+  },
+  "limits": [
+    "single developer-environment samples with changing concurrent load",
+    "original unadapted fixture failure excluded from timing comparison",
+    "128-photo complete publication extra coverage removed; no equivalent 128-photo successor claimed",
+    "256/2048 member capacity tests unchanged and not rerun",
+    "no production, report or plan files changed"
+  ],
+  "delivery_commit": "1433e4a00eeae489df5ef4358a5cb783436353a0",
+  "worktree_clean": true
+}

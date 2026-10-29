@@ -1,0 +1,2522 @@
+[
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_emergency_error_generation.py::test_emergency_error_report_keeps_actual_target_reason_and_original_action[active-EmergencyOutcome.NOT_ATTEMPTED-emergency_not_attempted-attempts0]",
+    "phase": "call",
+    "error": "TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 67,
+    "trace_start_line": 9,
+    "trace_end_line": 69,
+    "last_location": "apps/camctl/tests/integration/capture/test_capture_contract.py:339: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_emergency_error_generation.py::test_emergency_error_report_keeps_actual_target_reason_and_original_action[active-EmergencyOutcome.UNCONFIRMED-emergency_stop_unconfirmed-attempts1]",
+    "phase": "call",
+    "error": "TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 130,
+    "trace_start_line": 70,
+    "trace_end_line": 132,
+    "last_location": "apps/camctl/tests/integration/capture/test_capture_contract.py:339: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_emergency_error_generation.py::test_emergency_error_report_keeps_actual_target_reason_and_original_action[unknown-EmergencyOutcome.NOT_ATTEMPTED-emergency_not_attempted-attempts0]",
+    "phase": "call",
+    "error": "TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 191,
+    "trace_start_line": 133,
+    "trace_end_line": 193,
+    "last_location": "apps/camctl/tests/integration/capture/test_capture_contract.py:339: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_emergency_error_generation.py::test_emergency_error_report_keeps_actual_target_reason_and_original_action[unknown-EmergencyOutcome.UNCONFIRMED-emergency_stop_unconfirmed-attempts1]",
+    "phase": "call",
+    "error": "TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 254,
+    "trace_start_line": 194,
+    "trace_end_line": 256,
+    "last_location": "apps/camctl/tests/integration/capture/test_capture_contract.py:339: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_emergency_error_generation.py::test_emergency_error_report_keeps_actual_target_reason_and_original_action[ended-EmergencyOutcome.NOT_ATTEMPTED-emergency_not_attempted-attempts0]",
+    "phase": "call",
+    "error": "TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 315,
+    "trace_start_line": 257,
+    "trace_end_line": 317,
+    "last_location": "apps/camctl/tests/integration/capture/test_capture_contract.py:339: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_emergency_error_generation.py::test_emergency_error_report_keeps_actual_target_reason_and_original_action[ended-EmergencyOutcome.UNCONFIRMED-emergency_stop_unconfirmed-attempts1]",
+    "phase": "call",
+    "error": "TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 378,
+    "trace_start_line": 318,
+    "trace_end_line": 380,
+    "last_location": "apps/camctl/tests/integration/capture/test_capture_contract.py:339: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_freeze_reads_current_ack",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 425,
+    "trace_start_line": 381,
+    "trace_end_line": 427,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_freeze_uses_actual_watermark_after_new_submission",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 472,
+    "trace_start_line": 428,
+    "trace_end_line": 474,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_reuse_preserves_original_identity_boundary_and_history",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 519,
+    "trace_start_line": 475,
+    "trace_end_line": 521,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_empty_ordinary_range_skips_without_history[False]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 569,
+    "trace_start_line": 522,
+    "trace_end_line": 571,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_freeze_takes_complete_boundary_excluding_own_transaction",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 616,
+    "trace_start_line": 572,
+    "trace_end_line": 618,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_frozen_report_excludes_later_changes",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 663,
+    "trace_start_line": 619,
+    "trace_end_line": 665,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_scope_combines_ack_with_sync_origin[None-0]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 712,
+    "trace_start_line": 666,
+    "trace_end_line": 714,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_scope_combines_ack_with_sync_origin[1-2]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 761,
+    "trace_start_line": 715,
+    "trace_end_line": 763,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_scope_combines_ack_with_sync_origin[2-4]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 810,
+    "trace_start_line": 764,
+    "trace_end_line": 812,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_all_sync_origins_and_latest_start_are_combined",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 857,
+    "trace_start_line": 813,
+    "trace_end_line": 859,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_pending_sync_action_does_not_expand_report_scope",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 904,
+    "trace_start_line": 860,
+    "trace_end_line": 906,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_wider_registered_report_can_satisfy_later_narrower_scope",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 951,
+    "trace_start_line": 907,
+    "trace_end_line": 953,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_partial_sync_cannot_reference_report_registered_after_its_start",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 998,
+    "trace_start_line": 954,
+    "trace_end_line": 1000,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_reuse_rejects_report_left_endpoint_inside_business_transaction",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 1045,
+    "trace_start_line": 1001,
+    "trace_end_line": 1047,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_shared_readers_reject_same_invalid_left_boundary[cumulative_ack]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 1094,
+    "trace_start_line": 1048,
+    "trace_end_line": 1096,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_shared_readers_reject_same_invalid_left_boundary[ack_input]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 1143,
+    "trace_start_line": 1097,
+    "trace_end_line": 1145,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_shared_readers_reject_same_invalid_left_boundary[sync_origin]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 1192,
+    "trace_start_line": 1146,
+    "trace_end_line": 1194,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_business_boundary_allows_later_management_events_in_same_transaction",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 1239,
+    "trace_start_line": 1195,
+    "trace_end_line": 1241,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_later_sync_start_invalidates_full_coverage_candidate",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 1286,
+    "trace_start_line": 1242,
+    "trace_end_line": 1288,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_concurrent_input_and_ack_are_read_at_one_complete_boundary[True-want0]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 1335,
+    "trace_start_line": 1289,
+    "trace_end_line": 1337,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_concurrent_input_and_ack_are_read_at_one_complete_boundary[False-want1]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 1384,
+    "trace_start_line": 1338,
+    "trace_end_line": 1386,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_old_report_cannot_satisfy_new_sync_even_without_business_changes",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 1431,
+    "trace_start_line": 1387,
+    "trace_end_line": 1433,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_empty_partial_sync_range_still_selects_report_after_start",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 1478,
+    "trace_start_line": 1434,
+    "trace_end_line": 1480,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_ended_sync_does_not_expand_new_scope[2]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 1527,
+    "trace_start_line": 1481,
+    "trace_end_line": 1529,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_ended_sync_does_not_expand_new_scope[3]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 1576,
+    "trace_start_line": 1530,
+    "trace_end_line": 1578,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_unreliable_facts_fail_without_partial_registration[runtime_missing]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 1625,
+    "trace_start_line": 1579,
+    "trace_end_line": 1627,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_unreliable_facts_fail_without_partial_registration[ack_mismatch]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 1674,
+    "trace_start_line": 1628,
+    "trace_end_line": 1676,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_unreliable_facts_fail_without_partial_registration[sync_origin]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 1723,
+    "trace_start_line": 1677,
+    "trace_end_line": 1725,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_unreliable_facts_fail_without_partial_registration[report_boundary]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 1772,
+    "trace_start_line": 1726,
+    "trace_end_line": 1774,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_unreliable_facts_fail_without_partial_registration[report_watermark]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 1821,
+    "trace_start_line": 1775,
+    "trace_end_line": 1823,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_read_or_write_failure_rolls_back_freeze[SELECT id, last_event_id]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 1873,
+    "trace_start_line": 1824,
+    "trace_end_line": 1875,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_read_or_write_failure_rolls_back_freeze[SELECT acknowledged_wm]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 1925,
+    "trace_start_line": 1876,
+    "trace_end_line": 1927,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_read_or_write_failure_rolls_back_freeze[SELECT id, action_id, from_wm]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 1977,
+    "trace_start_line": 1928,
+    "trace_end_line": 1979,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_read_or_write_failure_rolls_back_freeze[SELECT id FROM reports]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 2029,
+    "trace_start_line": 1980,
+    "trace_end_line": 2031,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_read_or_write_failure_rolls_back_freeze[INSERT INTO reports]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 2081,
+    "trace_start_line": 2032,
+    "trace_end_line": 2083,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_read_or_write_failure_rolls_back_freeze[INSERT INTO history_events]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 2133,
+    "trace_start_line": 2084,
+    "trace_end_line": 2135,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_unknown_freeze_commit_is_resolved_by_original_operation_key[False]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 2182,
+    "trace_start_line": 2136,
+    "trace_end_line": 2184,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_unknown_freeze_commit_is_resolved_by_original_operation_key[True]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 2231,
+    "trace_start_line": 2185,
+    "trace_end_line": 2233,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_formal_freeze_guard_rejects_boundary_inside_own_transaction",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 2278,
+    "trace_start_line": 2234,
+    "trace_end_line": 2280,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_original_freeze_key_returns_original_generate_response[none]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 2327,
+    "trace_start_line": 2281,
+    "trace_end_line": 2329,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_original_freeze_key_returns_original_generate_response[submission]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 2376,
+    "trace_start_line": 2330,
+    "trace_end_line": 2378,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_original_freeze_key_returns_original_generate_response[ack]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 2425,
+    "trace_start_line": 2379,
+    "trace_end_line": 2427,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_original_freeze_key_returns_original_generate_response[newer_report]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 2474,
+    "trace_start_line": 2428,
+    "trace_end_line": 2476,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_original_freeze_key_returns_original_generate_response[sync_end]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 2523,
+    "trace_start_line": 2477,
+    "trace_end_line": 2525,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_original_freeze_key_returns_original_generate_response[bytes]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 2572,
+    "trace_start_line": 2526,
+    "trace_end_line": 2574,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_original_freeze_is_resolved_before_current_opportunity",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 2620,
+    "trace_start_line": 2575,
+    "trace_end_line": 2622,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_freeze_rejects_key_owned_by_another_phase[input]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 2669,
+    "trace_start_line": 2623,
+    "trace_end_line": 2671,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_freeze_rejects_key_owned_by_another_phase[prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 2718,
+    "trace_start_line": 2672,
+    "trace_end_line": 2720,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_freeze_rejects_changed_or_invalid_original_time[2]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 2767,
+    "trace_start_line": 2721,
+    "trace_end_line": 2769,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_freeze_rejects_changed_or_invalid_original_time[True]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 2816,
+    "trace_start_line": 2770,
+    "trace_end_line": 2818,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_freeze_rejects_changed_or_invalid_original_time[1.0]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 2865,
+    "trace_start_line": 2819,
+    "trace_end_line": 2867,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_freeze_rejects_unreliable_original_definition[missing]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 2914,
+    "trace_start_line": 2868,
+    "trace_end_line": 2916,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_freeze_rejects_unreliable_original_definition[created]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 2963,
+    "trace_start_line": 2917,
+    "trace_end_line": 2965,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_freeze_rejects_unreliable_original_definition[frozen]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 3012,
+    "trace_start_line": 2966,
+    "trace_end_line": 3014,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_freeze_rejects_unreliable_original_definition[from]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 3061,
+    "trace_start_line": 3015,
+    "trace_end_line": 3063,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_freeze_rejects_unreliable_original_definition[to]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 3110,
+    "trace_start_line": 3064,
+    "trace_end_line": 3112,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_freeze_rejects_unreliable_original_definition[version]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 3159,
+    "trace_start_line": 3113,
+    "trace_end_line": 3161,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_freeze_rejects_unreliable_original_definition[h_member]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 3208,
+    "trace_start_line": 3162,
+    "trace_end_line": 3210,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_freeze_rejects_invalid_or_composite_original_transaction[range]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 3257,
+    "trace_start_line": 3211,
+    "trace_end_line": 3259,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_freeze_rejects_invalid_or_composite_original_transaction[body]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 3306,
+    "trace_start_line": 3260,
+    "trace_end_line": 3308,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_freeze_rejects_invalid_or_composite_original_transaction[missing_member]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 3355,
+    "trace_start_line": 3309,
+    "trace_end_line": 3357,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_freeze_rejects_invalid_or_composite_original_transaction[composite]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 3404,
+    "trace_start_line": 3358,
+    "trace_end_line": 3406,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_original_freeze_rejects_matching_but_invalid_business_range[from_wm]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 3453,
+    "trace_start_line": 3407,
+    "trace_end_line": 3455,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_original_freeze_rejects_matching_but_invalid_business_range[to_wm]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 3502,
+    "trace_start_line": 3456,
+    "trace_end_line": 3504,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_original_freeze_preserves_nonzero_business_boundary",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 3549,
+    "trace_start_line": 3505,
+    "trace_end_line": 3551,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_original_freeze_query_failure_preserves_database[SELECT id FROM history_transactions]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 3600,
+    "trace_start_line": 3552,
+    "trace_end_line": 3602,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_original_freeze_query_failure_preserves_database[SELECT id, transaction_id]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 3651,
+    "trace_start_line": 3603,
+    "trace_end_line": 3653,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_original_freeze_query_failure_preserves_database[SELECT from_wm]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 3702,
+    "trace_start_line": 3654,
+    "trace_end_line": 3704,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_original_freeze_query_failure_preserves_database[SELECT created_event_id]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 3753,
+    "trace_start_line": 3705,
+    "trace_end_line": 3755,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_original_freeze_query_failure_preserves_database[SELECT MAX(change_seq)]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 3804,
+    "trace_start_line": 3756,
+    "trace_end_line": 3806,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_original_freeze_query_failure_preserves_database[SELECT event.id FROM history_events AS event]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 3855,
+    "trace_start_line": 3807,
+    "trace_end_line": 3857,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_unknown_commit_is_resolved_with_same_freeze_key[False]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 3904,
+    "trace_start_line": 3858,
+    "trace_end_line": 3906,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_unknown_commit_is_resolved_with_same_freeze_key[True]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 3953,
+    "trace_start_line": 3907,
+    "trace_end_line": 3955,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_unsaved_readonly_decision_does_not_bind_future_freeze[ReportDecisionKind.REUSE]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 4003,
+    "trace_start_line": 3956,
+    "trace_end_line": 4005,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_unsaved_readonly_decision_does_not_bind_future_freeze[ReportDecisionKind.SKIP]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 4060,
+    "trace_start_line": 4006,
+    "trace_end_line": 4062,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_generation.py::TestGenerateReportFile::test_failed_source_error_rebuilds_at_the_frozen_history_boundary",
+    "phase": "call",
+    "error": "assert 2 == 4",
+    "error_line": 4136,
+    "trace_start_line": 4063,
+    "trace_end_line": 4138,
+    "last_location": "apps/camctl/tests/integration/reporting/test_generation.py:163: AssertionError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_generation.py::TestGenerateReportFile::test_admission_failed_source_flows_through_obtain_and_frozen_report[1]",
+    "phase": "call",
+    "error": "TypeError: ObtainRuntime.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 4222,
+    "trace_start_line": 4139,
+    "trace_end_line": 4224,
+    "last_location": "apps/camctl/tests/integration/reporting/test_generation.py:261: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_generation.py::TestGenerateReportFile::test_admission_failed_source_flows_through_obtain_and_frozen_report[2]",
+    "phase": "call",
+    "error": "TypeError: ObtainRuntime.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 4308,
+    "trace_start_line": 4225,
+    "trace_end_line": 4310,
+    "last_location": "apps/camctl/tests/integration/reporting/test_generation.py:261: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_rebuilt_prepare_key_recovers_unchanged_bytes[none]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 4374,
+    "trace_start_line": 4311,
+    "trace_end_line": 4376,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_rebuilt_prepare_key_recovers_unchanged_bytes[intent]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 4440,
+    "trace_start_line": 4377,
+    "trace_end_line": 4442,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_rebuilt_prepare_key_recovers_unchanged_bytes[publish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 4506,
+    "trace_start_line": 4443,
+    "trace_end_line": 4508,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_rebuilt_prepare_key_recovers_unchanged_bytes[failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 4572,
+    "trace_start_line": 4509,
+    "trace_end_line": 4574,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_rebuilt_prepare_key_recovers_unchanged_bytes[republish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 4638,
+    "trace_start_line": 4575,
+    "trace_end_line": 4640,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_same_error_with_stage_change_is_saved_and_reusable[none]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 4704,
+    "trace_start_line": 4641,
+    "trace_end_line": 4706,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_same_error_with_stage_change_is_saved_and_reusable[prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 4770,
+    "trace_start_line": 4707,
+    "trace_end_line": 4772,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_same_error_with_stage_change_is_saved_and_reusable[publish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 4836,
+    "trace_start_line": 4773,
+    "trace_end_line": 4838,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_management_original_key_rejects_different_or_invalid_time[2-prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 4903,
+    "trace_start_line": 4839,
+    "trace_end_line": 4905,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_management_original_key_rejects_different_or_invalid_time[2-intent]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 4970,
+    "trace_start_line": 4906,
+    "trace_end_line": 4972,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_management_original_key_rejects_different_or_invalid_time[2-publish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 5037,
+    "trace_start_line": 4973,
+    "trace_end_line": 5039,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_management_original_key_rejects_different_or_invalid_time[2-failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 5104,
+    "trace_start_line": 5040,
+    "trace_end_line": 5106,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_management_original_key_rejects_different_or_invalid_time[True-prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 5171,
+    "trace_start_line": 5107,
+    "trace_end_line": 5173,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_management_original_key_rejects_different_or_invalid_time[True-intent]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 5238,
+    "trace_start_line": 5174,
+    "trace_end_line": 5240,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_management_original_key_rejects_different_or_invalid_time[True-publish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 5305,
+    "trace_start_line": 5241,
+    "trace_end_line": 5307,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_management_original_key_rejects_different_or_invalid_time[True-failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 5372,
+    "trace_start_line": 5308,
+    "trace_end_line": 5374,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_management_original_key_rejects_different_or_invalid_time[1.0-prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 5439,
+    "trace_start_line": 5375,
+    "trace_end_line": 5441,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_management_original_key_rejects_different_or_invalid_time[1.0-intent]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 5506,
+    "trace_start_line": 5442,
+    "trace_end_line": 5508,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_management_original_key_rejects_different_or_invalid_time[1.0-publish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 5573,
+    "trace_start_line": 5509,
+    "trace_end_line": 5575,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_management_original_key_rejects_different_or_invalid_time[1.0-failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 5640,
+    "trace_start_line": 5576,
+    "trace_end_line": 5642,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_result_survives_later_publish_and_error[prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 5706,
+    "trace_start_line": 5643,
+    "trace_end_line": 5708,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_result_survives_later_publish_and_error[intent]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 5772,
+    "trace_start_line": 5709,
+    "trace_end_line": 5774,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_result_survives_later_publish_and_error[publish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 5838,
+    "trace_start_line": 5775,
+    "trace_end_line": 5840,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_result_survives_later_publish_and_error[failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 5904,
+    "trace_start_line": 5841,
+    "trace_end_line": 5906,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_intent_reuse_requires_original_first_byte_fact[missing_bytes]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 5970,
+    "trace_start_line": 5907,
+    "trace_end_line": 5972,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_intent_reuse_requires_original_first_byte_fact[different_bytes]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 6036,
+    "trace_start_line": 5973,
+    "trace_end_line": 6038,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_intent_reuse_requires_original_first_byte_fact[bad_body]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 6102,
+    "trace_start_line": 6039,
+    "trace_end_line": 6104,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT l.change_count-prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 6170,
+    "trace_start_line": 6105,
+    "trace_end_line": 6172,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT l.change_count-intent]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 6238,
+    "trace_start_line": 6173,
+    "trace_end_line": 6240,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT l.change_count-publish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 6306,
+    "trace_start_line": 6241,
+    "trace_end_line": 6308,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT l.change_count-failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 6374,
+    "trace_start_line": 6309,
+    "trace_end_line": 6376,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT event_id, change_count FROM entity_event_links-prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 6443,
+    "trace_start_line": 6377,
+    "trace_end_line": 6445,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT event_id, change_count FROM entity_event_links-intent]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 6512,
+    "trace_start_line": 6446,
+    "trace_end_line": 6514,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT event_id, change_count FROM entity_event_links-publish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 6581,
+    "trace_start_line": 6515,
+    "trace_end_line": 6583,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT event_id, change_count FROM entity_event_links-failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 6650,
+    "trace_start_line": 6584,
+    "trace_end_line": 6652,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT link.event_id, txn.operation_key-prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 6718,
+    "trace_start_line": 6653,
+    "trace_end_line": 6720,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT link.event_id, txn.operation_key-intent]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 6786,
+    "trace_start_line": 6721,
+    "trace_end_line": 6788,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT link.event_id, txn.operation_key-publish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 6854,
+    "trace_start_line": 6789,
+    "trace_end_line": 6856,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT link.event_id, txn.operation_key-failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 6922,
+    "trace_start_line": 6857,
+    "trace_end_line": 6924,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key[False-prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 6989,
+    "trace_start_line": 6925,
+    "trace_end_line": 6991,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key[False-failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 7056,
+    "trace_start_line": 6992,
+    "trace_end_line": 7058,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key[True-prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 7123,
+    "trace_start_line": 7059,
+    "trace_end_line": 7125,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key[True-failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 7190,
+    "trace_start_line": 7126,
+    "trace_end_line": 7192,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_failure_before_bytes_does_not_adopt_later_first_bytes",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 7254,
+    "trace_start_line": 7193,
+    "trace_end_line": 7256,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_intent_survives_report_history_crossing_restore_page",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 7318,
+    "trace_start_line": 7257,
+    "trace_end_line": 7320,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_management_wrong_phase_is_rejected_before_current_management[prepare-intent]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 7386,
+    "trace_start_line": 7321,
+    "trace_end_line": 7388,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_management_wrong_phase_is_rejected_before_current_management[intent-publish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 7454,
+    "trace_start_line": 7389,
+    "trace_end_line": 7456,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_management_wrong_phase_is_rejected_before_current_management[publish-failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 7522,
+    "trace_start_line": 7457,
+    "trace_end_line": 7524,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_management_wrong_phase_is_rejected_before_current_management[failure-prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 7590,
+    "trace_start_line": 7525,
+    "trace_end_line": 7592,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_key_rejects_another_report[prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 7659,
+    "trace_start_line": 7593,
+    "trace_end_line": 7661,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_key_rejects_another_report[intent]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 7728,
+    "trace_start_line": 7662,
+    "trace_end_line": 7730,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_key_rejects_another_report[publish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 7797,
+    "trace_start_line": 7731,
+    "trace_end_line": 7799,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_key_rejects_another_report[failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 7866,
+    "trace_start_line": 7800,
+    "trace_end_line": 7868,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_unchanged_fact_in_original_delta_still_rejects_different_input[prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 7932,
+    "trace_start_line": 7869,
+    "trace_end_line": 7934,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_unchanged_fact_in_original_delta_still_rejects_different_input[failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 7998,
+    "trace_start_line": 7935,
+    "trace_end_line": 8000,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_management_reuse_rejects_unreliable_original_or_restore_history[head]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 8064,
+    "trace_start_line": 8001,
+    "trace_end_line": 8066,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_management_reuse_rejects_unreliable_original_or_restore_history[gap]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 8130,
+    "trace_start_line": 8067,
+    "trace_end_line": 8132,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_management_reuse_rejects_unreliable_original_or_restore_history[floor]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 8196,
+    "trace_start_line": 8133,
+    "trace_end_line": 8198,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_management_reuse_rejects_unreliable_original_or_restore_history[value]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 8262,
+    "trace_start_line": 8199,
+    "trace_end_line": 8264,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_management_reuse_rejects_unreliable_original_or_restore_history[before_state]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 8328,
+    "trace_start_line": 8265,
+    "trace_end_line": 8330,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_management_reuse_rejects_unreliable_original_or_restore_history[member]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 8394,
+    "trace_start_line": 8331,
+    "trace_end_line": 8396,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_formal_failure_requires_full_failed_state_and_error[stage]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 8460,
+    "trace_start_line": 8397,
+    "trace_end_line": 8462,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_formal_failure_requires_full_failed_state_and_error[error]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 8526,
+    "trace_start_line": 8463,
+    "trace_end_line": 8528,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publication_flow.py::test_full_chain_publishes_report_file",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 8587,
+    "trace_start_line": 8529,
+    "trace_end_line": 8589,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publication_flow.py::test_publish_after_claimed_deletion_keeps_recorded_fact",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 8648,
+    "trace_start_line": 8590,
+    "trace_end_line": 8650,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publication_flow.py::test_stale_ready_report_is_replaced",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 8709,
+    "trace_start_line": 8651,
+    "trace_end_line": 8711,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publication_flow.py::test_processing_report_is_kept_alongside_new_ready",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 8770,
+    "trace_start_line": 8712,
+    "trace_end_line": 8772,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publication_flow.py::test_unparseable_ready_files_are_not_touched",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 8831,
+    "trace_start_line": 8773,
+    "trace_end_line": 8833,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publication_flow.py::test_recover_decision_from_real_observation",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 8892,
+    "trace_start_line": 8834,
+    "trace_end_line": 8894,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publication_flow.py::test_recovery_saves_publication_for_prepared_report",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 8953,
+    "trace_start_line": 8895,
+    "trace_end_line": 8955,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publication_flow.py::test_recovery_saves_publication_for_publishing_report",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 9014,
+    "trace_start_line": 8956,
+    "trace_end_line": 9016,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publication_flow.py::test_recovery_restores_failed_report_then_publishes",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 9075,
+    "trace_start_line": 9017,
+    "trace_end_line": 9077,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publication_flow.py::test_recovery_rejects_digest_mismatch",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 9136,
+    "trace_start_line": 9078,
+    "trace_end_line": 9138,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publication_flow.py::test_recovery_rejects_report_without_determined_bytes",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 9197,
+    "trace_start_line": 9139,
+    "trace_end_line": 9199,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publication_flow.py::test_staging_residue_is_regenerated_and_published",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 9258,
+    "trace_start_line": 9200,
+    "trace_end_line": 9260,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publication_flow.py::test_republish_reuses_identity_and_settles_sync",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 9319,
+    "trace_start_line": 9261,
+    "trace_end_line": 9321,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publication_flow.py::test_republish_not_needed_without_responsibility",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 9380,
+    "trace_start_line": 9322,
+    "trace_end_line": 9382,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publication_flow.py::test_existing_delivered_report_is_kept",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 9441,
+    "trace_start_line": 9383,
+    "trace_end_line": 9443,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publication_flow.py::test_publication_settles_local_report_and_action_success",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 9502,
+    "trace_start_line": 9444,
+    "trace_end_line": 9504,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::TestPublishFlow::test_bytes_then_publish",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 9564,
+    "trace_start_line": 9505,
+    "trace_end_line": 9566,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::TestPublishFlow::test_publish_without_bytes_rejected",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 9626,
+    "trace_start_line": 9567,
+    "trace_end_line": 9628,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::TestPublishFlow::test_republish_increments_count",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 9688,
+    "trace_start_line": 9629,
+    "trace_end_line": 9690,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::TestPublishFlow::test_changed_bytes_for_same_report_rejected",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 9750,
+    "trace_start_line": 9691,
+    "trace_end_line": 9752,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_preparation_after_failure_uses_actual_error_before_value",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 9811,
+    "trace_start_line": 9753,
+    "trace_end_line": 9813,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_formal_prepare_cannot_replace_bytes_after_failure",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 9872,
+    "trace_start_line": 9814,
+    "trace_end_line": 9874,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_formal_publish_rejects_invalid_success_fact[publication_count]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 9935,
+    "trace_start_line": 9875,
+    "trace_end_line": 9937,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_formal_publish_rejects_invalid_success_fact[last_published_event_id]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 9998,
+    "trace_start_line": 9938,
+    "trace_end_line": 10000,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_same_bytes_preparation_preserves_phase_and_success_facts[registered-2-True]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 10065,
+    "trace_start_line": 10001,
+    "trace_end_line": 10067,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_same_bytes_preparation_preserves_phase_and_success_facts[prepared-2-False]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 10132,
+    "trace_start_line": 10068,
+    "trace_end_line": 10134,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_same_bytes_preparation_preserves_phase_and_success_facts[publishing-3-False]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 10199,
+    "trace_start_line": 10135,
+    "trace_end_line": 10201,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_same_bytes_preparation_preserves_phase_and_success_facts[published-4-False]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 10266,
+    "trace_start_line": 10202,
+    "trace_end_line": 10268,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_same_bytes_preparation_preserves_phase_and_success_facts[failed_empty-2-True]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 10333,
+    "trace_start_line": 10269,
+    "trace_end_line": 10335,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_same_bytes_preparation_preserves_phase_and_success_facts[failed_prepared-2-True]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 10400,
+    "trace_start_line": 10336,
+    "trace_end_line": 10402,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_same_bytes_preparation_preserves_phase_and_success_facts[failed_published-2-True]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 10467,
+    "trace_start_line": 10403,
+    "trace_end_line": 10469,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_different_rebuilt_bytes_never_replace_fixed_bytes[prepared]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 10530,
+    "trace_start_line": 10470,
+    "trace_end_line": 10532,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_different_rebuilt_bytes_never_replace_fixed_bytes[publishing]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 10593,
+    "trace_start_line": 10533,
+    "trace_end_line": 10595,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_different_rebuilt_bytes_never_replace_fixed_bytes[published]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 10656,
+    "trace_start_line": 10596,
+    "trace_end_line": 10658,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_different_rebuilt_bytes_never_replace_fixed_bytes[failed_prepared]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 10719,
+    "trace_start_line": 10659,
+    "trace_end_line": 10721,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_different_rebuilt_bytes_never_replace_fixed_bytes[failed_published]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 10782,
+    "trace_start_line": 10722,
+    "trace_end_line": 10784,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_publish_intent_uses_actual_bytes_and_retains_previous_success[registered-rolled_back]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 10849,
+    "trace_start_line": 10785,
+    "trace_end_line": 10851,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_publish_intent_uses_actual_bytes_and_retains_previous_success[prepared-completed]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 10916,
+    "trace_start_line": 10852,
+    "trace_end_line": 10918,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_publish_intent_uses_actual_bytes_and_retains_previous_success[publishing-completed]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 10983,
+    "trace_start_line": 10919,
+    "trace_end_line": 10985,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_publish_intent_uses_actual_bytes_and_retains_previous_success[published-completed]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 11050,
+    "trace_start_line": 10986,
+    "trace_end_line": 11052,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_publish_intent_uses_actual_bytes_and_retains_previous_success[failed_empty-rolled_back]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 11117,
+    "trace_start_line": 11053,
+    "trace_end_line": 11119,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_publish_intent_uses_actual_bytes_and_retains_previous_success[failed_prepared-completed]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 11184,
+    "trace_start_line": 11120,
+    "trace_end_line": 11186,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_publish_intent_uses_actual_bytes_and_retains_previous_success[failed_published-completed]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 11251,
+    "trace_start_line": 11187,
+    "trace_end_line": 11253,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_publish_intent_and_success_are_separate_history_transactions",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 11312,
+    "trace_start_line": 11254,
+    "trace_end_line": 11314,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_moved_file_without_completed_directory_sync_cannot_record_success[DirectorySyncStage.FAILED]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 11375,
+    "trace_start_line": 11315,
+    "trace_end_line": 11377,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_moved_file_without_completed_directory_sync_cannot_record_success[DirectorySyncStage.NOT_ATTEMPTED]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 11438,
+    "trace_start_line": 11378,
+    "trace_end_line": 11440,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_success_requires_current_publish_intent[registered]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 11501,
+    "trace_start_line": 11441,
+    "trace_end_line": 11503,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_success_requires_current_publish_intent[prepared]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 11564,
+    "trace_start_line": 11504,
+    "trace_end_line": 11566,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_success_requires_current_publish_intent[published]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 11627,
+    "trace_start_line": 11567,
+    "trace_end_line": 11629,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_success_requires_current_publish_intent[failed_empty]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 11690,
+    "trace_start_line": 11630,
+    "trace_end_line": 11692,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_success_requires_current_publish_intent[failed_prepared]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 11753,
+    "trace_start_line": 11693,
+    "trace_end_line": 11755,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_success_requires_current_publish_intent[failed_published]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 11816,
+    "trace_start_line": 11756,
+    "trace_end_line": 11818,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_failed_republication_keeps_previous_success_until_next_publish",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 11877,
+    "trace_start_line": 11819,
+    "trace_end_line": 11879,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_real_handoff_result_can_be_saved_after_receiver_deletes_file",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 11944,
+    "trace_start_line": 11880,
+    "trace_end_line": 11946,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_read_or_write_failure_preserves_all_facts[SELECT * FROM reports-prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 12009,
+    "trace_start_line": 11947,
+    "trace_end_line": 12011,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_read_or_write_failure_preserves_all_facts[SELECT * FROM reports-intent]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 12074,
+    "trace_start_line": 12012,
+    "trace_end_line": 12076,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_read_or_write_failure_preserves_all_facts[SELECT * FROM reports-publish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 12139,
+    "trace_start_line": 12077,
+    "trace_end_line": 12141,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_read_or_write_failure_preserves_all_facts[SELECT * FROM reports-failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 12204,
+    "trace_start_line": 12142,
+    "trace_end_line": 12206,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_read_or_write_failure_preserves_all_facts[SELECT id FROM history_transactions-prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 12269,
+    "trace_start_line": 12207,
+    "trace_end_line": 12271,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_read_or_write_failure_preserves_all_facts[SELECT id FROM history_transactions-intent]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 12334,
+    "trace_start_line": 12272,
+    "trace_end_line": 12336,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_read_or_write_failure_preserves_all_facts[SELECT id FROM history_transactions-publish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 12399,
+    "trace_start_line": 12337,
+    "trace_end_line": 12401,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_read_or_write_failure_preserves_all_facts[SELECT id FROM history_transactions-failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 12464,
+    "trace_start_line": 12402,
+    "trace_end_line": 12466,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_read_or_write_failure_preserves_all_facts[INSERT INTO history_events-prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 12529,
+    "trace_start_line": 12467,
+    "trace_end_line": 12531,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_read_or_write_failure_preserves_all_facts[INSERT INTO history_events-intent]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 12594,
+    "trace_start_line": 12532,
+    "trace_end_line": 12596,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_read_or_write_failure_preserves_all_facts[INSERT INTO history_events-publish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 12659,
+    "trace_start_line": 12597,
+    "trace_end_line": 12661,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_read_or_write_failure_preserves_all_facts[INSERT INTO history_events-failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 12724,
+    "trace_start_line": 12662,
+    "trace_end_line": 12726,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_read_or_write_failure_preserves_all_facts[UPDATE reports-prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 12789,
+    "trace_start_line": 12727,
+    "trace_end_line": 12791,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_read_or_write_failure_preserves_all_facts[UPDATE reports-intent]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 12854,
+    "trace_start_line": 12792,
+    "trace_end_line": 12856,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_read_or_write_failure_preserves_all_facts[UPDATE reports-publish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 12919,
+    "trace_start_line": 12857,
+    "trace_end_line": 12921,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_read_or_write_failure_preserves_all_facts[UPDATE reports-failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 12984,
+    "trace_start_line": 12922,
+    "trace_end_line": 12986,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[False-prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 13048,
+    "trace_start_line": 12987,
+    "trace_end_line": 13050,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[False-intent]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 13112,
+    "trace_start_line": 13051,
+    "trace_end_line": 13114,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[False-publish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 13176,
+    "trace_start_line": 13115,
+    "trace_end_line": 13178,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[False-failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 13240,
+    "trace_start_line": 13179,
+    "trace_end_line": 13242,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[True-prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 13304,
+    "trace_start_line": 13243,
+    "trace_end_line": 13306,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[True-intent]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 13368,
+    "trace_start_line": 13307,
+    "trace_end_line": 13370,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[True-publish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 13432,
+    "trace_start_line": 13371,
+    "trace_end_line": 13434,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[True-failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 13496,
+    "trace_start_line": 13435,
+    "trace_end_line": 13498,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_invalid_fixed_report_basis_prevents_management_updates[prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 13559,
+    "trace_start_line": 13499,
+    "trace_end_line": 13561,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_invalid_fixed_report_basis_prevents_management_updates[intent]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 13622,
+    "trace_start_line": 13562,
+    "trace_end_line": 13624,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_invalid_fixed_report_basis_prevents_management_updates[publish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 13685,
+    "trace_start_line": 13625,
+    "trace_end_line": 13687,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_invalid_fixed_report_basis_prevents_management_updates[failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 13748,
+    "trace_start_line": 13688,
+    "trace_end_line": 13750,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_operation_key_cannot_be_rebound[bytes]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 13811,
+    "trace_start_line": 13751,
+    "trace_end_line": 13813,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_operation_key_cannot_be_rebound[branch]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 13874,
+    "trace_start_line": 13814,
+    "trace_end_line": 13876,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_operation_key_cannot_be_rebound[target]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 13937,
+    "trace_start_line": 13877,
+    "trace_end_line": 13939,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_old_publish_key_returns_original_success_after_later_republication",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 13998,
+    "trace_start_line": 13940,
+    "trace_end_line": 14000,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_key_with_invalid_original_group_is_not_reused[missing_member-prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14066,
+    "trace_start_line": 14001,
+    "trace_end_line": 14068,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_key_with_invalid_original_group_is_not_reused[missing_member-intent]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14134,
+    "trace_start_line": 14069,
+    "trace_end_line": 14136,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_key_with_invalid_original_group_is_not_reused[missing_member-publish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14202,
+    "trace_start_line": 14137,
+    "trace_end_line": 14204,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_key_with_invalid_original_group_is_not_reused[missing_member-failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14270,
+    "trace_start_line": 14205,
+    "trace_end_line": 14272,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_key_with_invalid_original_group_is_not_reused[range-prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14338,
+    "trace_start_line": 14273,
+    "trace_end_line": 14340,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_key_with_invalid_original_group_is_not_reused[range-intent]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14406,
+    "trace_start_line": 14341,
+    "trace_end_line": 14408,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_key_with_invalid_original_group_is_not_reused[range-publish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14474,
+    "trace_start_line": 14409,
+    "trace_end_line": 14476,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_key_with_invalid_original_group_is_not_reused[range-failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14542,
+    "trace_start_line": 14477,
+    "trace_end_line": 14544,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_key_with_invalid_original_group_is_not_reused[body_structure-prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14610,
+    "trace_start_line": 14545,
+    "trace_end_line": 14612,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_key_with_invalid_original_group_is_not_reused[body_structure-intent]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14678,
+    "trace_start_line": 14613,
+    "trace_end_line": 14680,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_key_with_invalid_original_group_is_not_reused[body_structure-publish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14746,
+    "trace_start_line": 14681,
+    "trace_end_line": 14748,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_key_with_invalid_original_group_is_not_reused[body_structure-failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14814,
+    "trace_start_line": 14749,
+    "trace_end_line": 14816,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_history_replays_success_failure_and_recovery",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14883,
+    "trace_start_line": 14817,
+    "trace_end_line": 14885,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_reader_requires_real_previous_publication[reference-prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14947,
+    "trace_start_line": 14886,
+    "trace_end_line": 14949,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_reader_requires_real_previous_publication[reference-intent]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 15011,
+    "trace_start_line": 14950,
+    "trace_end_line": 15013,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_reader_requires_real_previous_publication[reference-publish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 15075,
+    "trace_start_line": 15014,
+    "trace_end_line": 15077,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_reader_requires_real_previous_publication[reference-failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 15139,
+    "trace_start_line": 15078,
+    "trace_end_line": 15141,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_reader_requires_real_previous_publication[count-prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 15203,
+    "trace_start_line": 15142,
+    "trace_end_line": 15205,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_reader_requires_real_previous_publication[count-intent]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 15267,
+    "trace_start_line": 15206,
+    "trace_end_line": 15269,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_reader_requires_real_previous_publication[count-publish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 15331,
+    "trace_start_line": 15270,
+    "trace_end_line": 15333,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_management_reader_requires_real_previous_publication[count-failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 15395,
+    "trace_start_line": 15334,
+    "trace_end_line": 15397,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_failure_json_type_changes_are_distinct_inputs[False-True-1]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 15460,
+    "trace_start_line": 15398,
+    "trace_end_line": 15462,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_failure_json_type_changes_are_distinct_inputs[False-False-0]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 15525,
+    "trace_start_line": 15463,
+    "trace_end_line": 15527,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_failure_json_type_changes_are_distinct_inputs[False-1-True]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 15590,
+    "trace_start_line": 15528,
+    "trace_end_line": 15592,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_failure_json_type_changes_are_distinct_inputs[False-0-False]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 15655,
+    "trace_start_line": 15593,
+    "trace_end_line": 15657,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_failure_json_type_changes_are_distinct_inputs[True-True-1]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 15720,
+    "trace_start_line": 15658,
+    "trace_end_line": 15722,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_failure_json_type_changes_are_distinct_inputs[True-False-0]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 15785,
+    "trace_start_line": 15723,
+    "trace_end_line": 15787,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_failure_json_type_changes_are_distinct_inputs[True-1-True]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 15850,
+    "trace_start_line": 15788,
+    "trace_end_line": 15852,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_failure_json_type_changes_are_distinct_inputs[True-0-False]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 15915,
+    "trace_start_line": 15853,
+    "trace_end_line": 15917,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_equal_report_error_with_new_key_does_not_create_a_new_fact",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 15978,
+    "trace_start_line": 15918,
+    "trace_end_line": 15980,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_non_persistable_formal_error_rolls_back_transaction",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 16039,
+    "trace_start_line": 15981,
+    "trace_end_line": 16041,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_formal_intent_comparison_error_rolls_back_transaction",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 16104,
+    "trace_start_line": 16042,
+    "trace_end_line": 16106,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_reader_cannot_accept_outdated_previous_publication_pair[older-prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 16168,
+    "trace_start_line": 16107,
+    "trace_end_line": 16170,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_reader_cannot_accept_outdated_previous_publication_pair[older-intent]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 16232,
+    "trace_start_line": 16171,
+    "trace_end_line": 16234,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_reader_cannot_accept_outdated_previous_publication_pair[older-publish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 16296,
+    "trace_start_line": 16235,
+    "trace_end_line": 16298,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_reader_cannot_accept_outdated_previous_publication_pair[older-failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 16360,
+    "trace_start_line": 16299,
+    "trace_end_line": 16362,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_reader_cannot_accept_outdated_previous_publication_pair[zero-prepare]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 16424,
+    "trace_start_line": 16363,
+    "trace_end_line": 16426,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_reader_cannot_accept_outdated_previous_publication_pair[zero-intent]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 16488,
+    "trace_start_line": 16427,
+    "trace_end_line": 16490,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_reader_cannot_accept_outdated_previous_publication_pair[zero-publish]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 16552,
+    "trace_start_line": 16491,
+    "trace_end_line": 16554,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_reader_cannot_accept_outdated_previous_publication_pair[zero-failure]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 16616,
+    "trace_start_line": 16555,
+    "trace_end_line": 16618,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_record_segment_error_report.py::test_expired_prepared_source_without_segment_set_reports_selection_failure[record]",
+    "phase": "call",
+    "error": "TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 16682,
+    "trace_start_line": 16619,
+    "trace_end_line": 16684,
+    "last_location": "apps/camctl/tests/integration/capture/test_capture_contract.py:339: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_record_segment_error_report.py::test_expired_prepared_source_without_segment_set_reports_selection_failure[timelapse]",
+    "phase": "call",
+    "error": "TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 16748,
+    "trace_start_line": 16685,
+    "trace_end_line": 16750,
+    "last_location": "apps/camctl/tests/integration/capture/test_capture_contract.py:339: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_record_segment_error_report.py::test_gap_report_preserves_outputs_scope_and_bytes_after_cleanup",
+    "phase": "call",
+    "error": "TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 16804,
+    "trace_start_line": 16751,
+    "trace_end_line": 16806,
+    "last_location": "apps/camctl/tests/integration/capture/test_capture_contract.py:339: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_software_recovery_reports.py::test_legacy_reports_and_recovery_preserve_original_failure_and_frozen_bytes[2]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 16859,
+    "trace_start_line": 16807,
+    "trace_end_line": 16861,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_software_recovery_reports.py::test_legacy_reports_and_recovery_preserve_original_failure_and_frozen_bytes[3]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 16914,
+    "trace_start_line": 16862,
+    "trace_end_line": 16916,
+    "last_location": "apps/camctl/src/camctl/acceptance/service.py:121: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_video_coverage_report.py::test_action6_coverage_and_video_scope_survive_report_history[camera_record]",
+    "phase": "call",
+    "error": "TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 16974,
+    "trace_start_line": 16917,
+    "trace_end_line": 16976,
+    "last_location": "apps/camctl/tests/integration/capture/test_capture_contract.py:339: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/reporting/test_video_coverage_report.py::test_action6_coverage_and_video_scope_survive_report_history[camera_timelapse]",
+    "phase": "call",
+    "error": "TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 17032,
+    "trace_start_line": 16977,
+    "trace_end_line": 17034,
+    "last_location": "apps/camctl/tests/integration/capture/test_capture_contract.py:339: TypeError"
+  }
+]

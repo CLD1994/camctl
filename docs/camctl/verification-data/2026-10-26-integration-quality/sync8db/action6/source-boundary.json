@@ -1,0 +1,293 @@
+[
+  {
+    "path": "apps/camctl/src/camctl/capture/segment_completion.py",
+    "sha256": "075101a847e7263d824980939d3c7241d4e4d58992ec03f348dedabd61e9f9ef",
+    "excerpts": [
+      {
+        "start_line": 42,
+        "lines": [
+          "@dataclass(frozen=True)",
+          "class PendingSegmentWrite:",
+          "    repository: object",
+          "    method: str",
+          "    args: tuple",
+          "    key: str",
+          "",
+          "",
+          "async def resume_segment_writes(database, pending_writes, action_id=None):",
+          "    return await settle_required(_resume_segment_writes(database, pending_writes, action_id))",
+          "",
+          "",
+          "async def _resume_segment_writes(database, pending_writes, action_id):",
+          "    for identity in tuple(pending_writes):",
+          "        if action_id is not None and identity != action_id:",
+          "            continue",
+          "        pending = pending_writes[identity]",
+          "        with measure_performance(\"segment_save\", action_id=identity,",
+          "                                 method=pending.method, resumed=True), db_operation_context(",
+          "                                     action_id=identity, method=pending.method, resumed=True):",
+          "            receipt = await _write_segment_request(database, pending_writes, identity, pending)",
+          "        if receipt.kind is not DbOutcomeKind.COMPLETED:",
+          "            if receipt.kind is DbOutcomeKind.ROLLED_BACK:",
+          "                del pending_writes[identity]",
+          "            raise ConsistencyError(f\"原分段保存尚未可靠完成: {receipt.error}\")",
+          "        del pending_writes[identity]",
+          "",
+          "",
+          "async def _save(runtime, action_id, repository, method, *args):",
+          "    return await settle_required(_save_segment_request(runtime, action_id, repository, method, args))",
+          "",
+          "",
+          "async def _write_segment_request(database, pending_writes, action_id, pending):",
+          "    try:",
+          "        return await database.write(",
+          "            lambda owned: getattr(pending.repository, pending.method)(*pending.args, pending.key, owned),",
+          "            key=pending.key, description=f'分段保存:{pending.method}')",
+          "    except BaseException as error:",
+          "        receipt = db_outcome_for(error)",
+          "        if receipt is not None and receipt.kind in (DbOutcomeKind.COMPLETED, DbOutcomeKind.ROLLED_BACK):",
+          "            pending_writes.pop(action_id, None)",
+          "        raise",
+          "",
+          "",
+          "async def _save_segment_request(runtime, action_id, repository, method, args):",
+          "    if action_id in runtime.pending_segment_writes:",
+          "        raise ConsistencyError(\"须先核实原分段申请，不能替换未决保存\")",
+          "    pending = PendingSegmentWrite(repository, method, args, new_operation_key())",
+          "    runtime.pending_segment_writes[action_id] = pending",
+          "    with measure_performance(\"segment_save\", action_id=action_id,",
+          "                             method=method, resumed=False), db_operation_context(",
+          "                                 action_id=action_id, method=method, resumed=False):",
+          "        receipt = await _write_segment_request(",
+          "            runtime.database, runtime.pending_segment_writes, action_id, pending)",
+          "    if receipt.kind is not DbOutcomeKind.COMPLETED:",
+          "        if receipt.kind is DbOutcomeKind.ROLLED_BACK:",
+          "            del runtime.pending_segment_writes[action_id]",
+          "        raise ConsistencyError(f\"分段保存尚未可靠完成: {receipt.error}\")",
+          "    del runtime.pending_segment_writes[action_id]",
+          "    return receipt.value"
+        ]
+      }
+    ]
+  },
+  {
+    "path": "apps/camctl/src/camctl/bootstrap/lifecycle.py",
+    "sha256": "20a53aec19e67fa132849ecaa5c3ed53082d1f0a60dfd1bd62c12dfb1864440c",
+    "excerpts": [
+      {
+        "start_line": 132,
+        "lines": [
+          "",
+          "async def _resume_read_requests(deps: RuntimeDeps, database) -> None:",
+          "    \"\"\"候选读取前保存原 READ、有限耗尽及拍摄申请，不取得设备资格。\"\"\"",
+          "    from camctl.capture.media_flow import resume_prepared_internal_reads",
+          "",
+          "    await resume_prepared_internal_reads(database,",
+          "        pending_read_results=deps.capture_read_results,",
+          "        pending_read_business=deps.capture_read_business,",
+          "        pending_read_ends=deps.capture_read_ends,",
+          "        continuing_read_tickets=deps.capture_continuing_reads,",
+          "        pending_segment_inspection_results=deps.capture_segment_inspection_results)",
+          "    await _resume_capture_requests(deps, database)",
+          "",
+          "",
+          "async def _resume_capture_requests(deps: RuntimeDeps, database) -> None:",
+          "    \"\"\"核实原拍摄终态及附属收尾，取消入口不取得新的 READ 业务资格。\"\"\"",
+          "    await resume_preparation_saves(database, deps.capture_preparations)",
+          "    from camctl.capture.handlers import (",
+          "        resume_canceled_recording_results, resume_capture_completions, resume_result_check_closes,",
+          "    )",
+          "    from types import SimpleNamespace",
+          "    from camctl.capture.baseline import (",
+          "        PreparationPhase, recover_terminal_baselines, resume_baseline_save,",
+          "        resume_baseline_settlement,",
+          "    )",
+          "    from camctl.capture.result_scans import resume_result_page_saves",
+          "    from camctl.contracts.values import ConsistencyError",
+          "    from camctl.persistence.repositories.capture import CaptureRepository",
+          "",
+          "    runtime = SimpleNamespace(database=database, capture=CaptureRepository(), pending_baselines=deps.capture_baselines,",
+          "                              preparation_cache=deps.capture_preparations,",
+          "                              session_key=deps.session_key,",
+          "                              wall_us=lambda: SystemClock().utc_micros())",
+          "    await recover_terminal_baselines(runtime=runtime)",
+          "    for action_id in tuple(deps.capture_baselines):",
+          "        result = await resume_baseline_save(action_id, runtime=runtime)",
+          "        if result is not None and result.phase is PreparationPhase.PENDING:",
+          "            raise ConsistencyError(f\"原基准保存仍未可靠完成: {result.database_error}\")",
+          "",
+          "    await resume_result_page_saves(database, pending_scans=deps.capture_result_scans, repository=runtime.capture)",
+          "    from camctl.capture.segment_completion import resume_segment_writes",
+          "",
+          "    await resume_segment_writes(database, deps.capture_segment_writes)"
+        ]
+      }
+    ]
+  },
+  {
+    "path": "apps/camctl/src/camctl/persistence/executor.py",
+    "sha256": "433e29eb7d465514f8b15de818b625ee2f2b5a3545d62cf513137d3cc6401273",
+    "excerpts": [
+      {
+        "start_line": 252,
+        "lines": [
+          "    def _submit(self, job: DbJob) -> asyncio.Future:",
+          "        # 日志目标及操作计量属于本次调用，不能沿用worker的空上下文，",
+          "        # 也不能在不同命令的排队条目之间共享可变Context。",
+          "        context = copy_context()",
+          "        execute = job.execute",
+          "        job = replace(job, execute=lambda owned: context.run(execute, owned))",
+          "        result: asyncio.Future = self._loop.create_future()",
+          "        admission: _Admission | None = None",
+          "        with self._lock:",
+          "            if self._closed or self._stopping:",
+          "                raise DbExecutorError(\"执行器已关闭，不再接纳操作\")",
+          "            self._results[job.key] = result",
+          "            if self._core.try_admit(job):",
+          "                self._ensure_thread_locked()",
+          "                self._work_available.notify_all()",
+          "            else:",
+          "                admission = self._core.register_admission(job, result)",
+          "                self._ensure_thread_locked()",
+          "        if admission is not None:"
+        ]
+      },
+      {
+        "start_line": 400,
+        "lines": [
+          "    def _finish(self, job: DbJob, payload: Any) -> None:",
+          "        result = self._results.pop(job.key, None)",
+          "        if result is not None and not result.done():",
+          "            result.set_result(payload)"
+        ]
+      }
+    ]
+  },
+  {
+    "path": "apps/camctl/src/camctl/bootstrap/lifecycle.py",
+    "sha256": "20a53aec19e67fa132849ecaa5c3ed53082d1f0a60dfd1bd62c12dfb1864440c",
+    "excerpts": [
+      {
+        "start_line": 802,
+        "lines": [
+          "        \"cancel\": cancel_flow(",
+          "            ready=ready,",
+          "            processing=processing,",
+          "            start_entries=deps.start_entries,",
+          "            motor_permits=deps.motor_permits,",
+          "            work_files=deps.work_files,",
+          "            resume_media_results=deps.work_files.resume_media_results,",
+          "            resume_file_observations=resume_files,",
+          "            resume_capture_completions=partial(_resume_capture_requests, deps),",
+          "            cleanup_pending=partial(_cleanup_pending_for_action, deps),",
+          "            preparation_pending=deps.capture_preparations.pending,",
+          "        ),",
+          "        \"motor\": motor_flow(writer, deps.motor_permits),",
+          "        # 拍摄推进：按设备声明与进程驱动登记组装运行时，等待配置读",
+          "        # 首次固定的执行定义。",
+          "        \"scheduling\": capture_flow(",
+          "            session_capture_assembly(",
+          "                start_entries=deps.start_entries,",
+          "                devices=deps.config.devices,",
+          "                drivers=drivers,",
+          "                staging=staging,",
+          "                wait_config=execution_wait_config,",
+          "                pending_call_results=deps.capture_call_results,",
+          "                pending_capture_completions=deps.capture_completions,",
+          "                pending_result_closes=deps.capture_result_closes,",
+          "                pending_baselines=deps.capture_baselines,",
+          "                preparation_cache=deps.capture_preparations,",
+          "                session_key=deps.session_key,",
+          "                pending_result_scans=deps.capture_result_scans,",
+          "                pending_segment_writes=deps.capture_segment_writes,",
+          "                pending_segment_inspection_results=deps.capture_segment_inspection_results,",
+          "                pending_file_observations=deps.capture_file_observations,",
+          "                pending_media_results=deps.capture_media_results,",
+          "                pending_read_results=deps.capture_read_results,"
+        ]
+      }
+    ]
+  },
+  {
+    "path": "apps/camctl/src/camctl/bootstrap/flows.py",
+    "sha256": "5a69a71ed3f2cc5f8915cc09391aa0afc97c8b570bb860ea67f67ae4f46446d3",
+    "excerpts": [
+      {
+        "start_line": 235,
+        "lines": [
+          "        for device_id, action_ids in device_ids.items():",
+          "            self._device_candidates[device_id] = tuple(action_ids)",
+          "            self.check_completed()",
+          "            if self._stopping:",
+          "                return",
+          "            owner = self._devices.get(device_id)",
+          "            if owner is None:",
+          "                async def advance(context, device_id=device_id):",
+          "                    candidates = self._device_candidates[device_id]",
+          "                    await self._advance_device(context, device_id, candidates)",
+          "                owner = BackgroundFlow(advance)",
+          "                self._devices[device_id] = owner",
+          "            await owner(context)",
+          "            task = owner.unconsumed_task",
+          "            if task is not None and getattr(context, \"wake\", None) is not None:",
+          "                # 每项任务只登记一次；通知不消费任务及其原结果。"
+        ]
+      },
+      {
+        "start_line": 563,
+        "lines": [
+          "        from camctl.cancellation.models import CancelStartDisposition, FinishCancelAction, StartCancelAction",
+          "        from camctl.cancellation.service import ApplyCancel, CancellationRuntime, apply_cancel",
+          "        from camctl.cancellation.rules import CancellationStatus, summarize_cancel",
+          "        from camctl.cancellation.settlement import TargetSettlement",
+          "        from camctl.persistence.repositories.cancellation import CancellationRepository",
+          "        from camctl.persistence.repositories.outputs import OutputsRepository",
+          "",
+          "        database = context.database",
+          "        if any(identity[0] != database.metadata.instance_id for identity in pending_origin_settlements):",
+          "            raise StateDbFailure(\"原取消收场申请属于另一状态库\")",
+          "        await _resume_actual_file_facts(database, resume_file_observations, resume_media_results,",
+          "                                        resume_capture_completions=resume_capture_completions)",
+          "        repository = CancellationRepository()",
+          "        if start_entries is not None:",
+          "            for request, key in tuple(start_entries.pending_cancels.values()):",
+          "                resumed = await _fix_cancel_request(database, repository, request, key, start_entries)",
+          "                if resumed.kind is not DbOutcomeKind.COMPLETED:",
+          "                    raise StateDbFailure(f\"原入口取消复合申请仍未完成: {resumed.error}\")"
+        ]
+      }
+    ]
+  },
+  {
+    "path": "apps/camctl/src/camctl/bootstrap/background_flow.py",
+    "sha256": "ac9fa0c4e907232a80c550194a2f5e6d48444d2a23ff16f15b10216859e7dc06",
+    "excerpts": [
+      {
+        "start_line": 45,
+        "lines": [
+          "        try:",
+          "            await self._flow(context)",
+          "            return _FlowResult()",
+          "        except BaseException as error:",
+          "            # shield 不传递内部取消异常；把原异常作为结果保存到消费时。",
+          "            return _FlowResult(error)",
+          "",
+          "    async def __call__(self, context):",
+          "        if self._task is not None:",
+          "            if self._task.done():",
+          "                self._consume()",
+          "            return",
+          "        if self._stopping:",
+          "            return",
+          "        self._task = asyncio.create_task(self._run(context))",
+          "        # 只让执行体开始；实际等待及连接生命周期由原流程拥有。",
+          "        await asyncio.sleep(0)",
+          "        if self._task.done():",
+          "            self._consume()",
+          "",
+          "    def check_completed(self):"
+        ]
+      }
+    ]
+  }
+]

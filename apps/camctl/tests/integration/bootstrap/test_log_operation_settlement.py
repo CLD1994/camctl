@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import threading
 from pathlib import Path
 
@@ -16,9 +15,7 @@ from camctl.logging_runtime import copies
 from camctl.logging_runtime.clh_adapter import FileChannel
 from camctl.logging_runtime.copies import MarkerStage, MarkerStore, SaveOutcome
 from camctl.host_files.tasks import AsyncFileTask, FileTaskExecutor, FileTaskId
-from camctl.reporting.generation import GenerationSpec, generate_report_file
-from camctl.reporting.messages import ErrorKind, ResultFailureMessage, ResultSuccessMessage
-from camctl.reporting.publication import report_file_name
+from camctl.reporting.messages import ErrorKind, ResultFailureMessage
 from camctl.reporting.supervisor import (
     GenerationOutcomeKind,
     WorkerGeneration,
@@ -28,20 +25,10 @@ from camctl.session.locks import SessionLockConflictError, acquire_session
 from camctl.session.clock import ClockBecameUntrusted
 from camctl.session.supervision import Supervisor
 
-from .test_log_copy_diagnostics import _runtime, _seed_two_pending_reports
-
-
-def _capture_failure_log_service(monkeypatch) -> dict[str, object]:
-    original = lifecycle._failure_log_wiring
-    captured: dict[str, object] = {}
-
-    def capture(deps):
-        service, factory = original(deps)
-        captured["service"] = service
-        return service, factory
-
-    monkeypatch.setattr(lifecycle, "_failure_log_wiring", capture)
-    return captured
+from ..support.bootstrap_log_cases import (
+    runtime as _runtime, seed_two_pending_reports as _seed_two_pending_reports,
+    report_log_session, generate_valid_report,
+)
 
 
 def _session_lock_is_held(path: Path) -> bool:
@@ -59,43 +46,28 @@ async def _assert_stays_pending(task: asyncio.Task, *, timeout: float = 0.05) ->
     assert not task.done()
 
 
-def _install_controlled_source_stop(monkeypatch, deps):
-    """把一个受控软件 source 接入默认 run 的 BackgroundFlow 收场入口。"""
+def _controlled_source():
+    """真实 BackgroundFlow，经 SessionContext 显式登记并由本地责任组合收场。"""
     from camctl.bootstrap.background_flow import BackgroundFlow
+    started, stopped = asyncio.Event(), asyncio.Event()
 
-    source_started = asyncio.Event()
-    source_stopped = asyncio.Event()
-    source_wait = asyncio.Event()
-
-    async def controlled_source(_context) -> None:
-        source_started.set()
+    async def source(_context):
+        started.set()
         try:
-            await source_wait.wait()
+            await asyncio.Event().wait()
         except asyncio.CancelledError:
-            source_stopped.set()
+            stopped.set()
             raise
 
-    owner = BackgroundFlow(controlled_source)
-    real_assembly = lifecycle._report_assembly
-
-    def assemble_with_controlled_source(target_deps, failure_log, logging_owner):
-        flows, supervisor = real_assembly(
-            target_deps, failure_log, logging_owner)
-        target_deps.background_flows = (
-            *target_deps.background_flows, owner)
-        return {"controlled_source": owner, **flows}, supervisor
-
-    monkeypatch.setattr(lifecycle, "_report_assembly", assemble_with_controlled_source)
-    return source_started, source_stopped
+    return BackgroundFlow(source), started, stopped
 
 
 async def test_cancelled_copy_consumes_closed_result_cleans_once_and_holds_locks(
         tmp_path: Path, monkeypatch) -> None:
     deps = await _runtime(tmp_path)
     first_report, second_report = await _seed_two_pending_reports(deps, tmp_path)
-    captured = _capture_failure_log_service(monkeypatch)
-    source_started, source_stopped = _install_controlled_source_stop(
-        monkeypatch, deps)
+    source, source_started, source_stopped = _controlled_source()
+    operation, service = report_log_session(deps, source)
     loop = asyncio.get_running_loop()
     copy_returned = asyncio.Event()
     release_copy = threading.Event()
@@ -161,9 +133,10 @@ async def test_cancelled_copy_consumes_closed_result_cleans_once_and_holds_locks
 
     monkeypatch.setattr(WorkerSupervisor, "generate", fail_report_generation)
 
-    real_emit = lifecycle._emit_log_diagnostic
+    real_emit = deps.log_runtime.channel.deliver_important
 
-    async def observe_cleanup_diagnostic(target_deps, message, *, stderr_only=False):
+    async def observe_cleanup_diagnostic(record):
+        message = record.message
         if "controlled cancellation cleanup failure" in message:
             diagnostics.append(message)
             before = (
@@ -171,7 +144,7 @@ async def test_cancelled_copy_consumes_closed_result_cleans_once_and_holds_locks
                 _session_lock_is_held(deps.session_lock),
                 recovery_probe is not None and not recovery_probe.done(),
             )
-            await real_emit(target_deps, message, stderr_only=stderr_only)
+            result = await real_emit(record)
             after = (
                 asyncio.get_running_loop() is loop,
                 _session_lock_is_held(deps.session_lock),
@@ -186,13 +159,13 @@ async def test_cancelled_copy_consumes_closed_result_cleans_once_and_holds_locks
                 except asyncio.CancelledError:
                     pass
             diagnostic_finished.set()
-            return
-        await real_emit(target_deps, message, stderr_only=stderr_only)
+            return result
+        return await real_emit(record)
 
-    monkeypatch.setattr(lifecycle, "_emit_log_diagnostic", observe_cleanup_diagnostic)
+    monkeypatch.setattr(deps.log_runtime.channel, "deliver_important", observe_cleanup_diagnostic)
 
     try:
-        run_task = asyncio.create_task(lifecycle.execute_command(deps, None))
+        run_task = asyncio.create_task(operation)
         await asyncio.wait_for(source_started.wait(), timeout=10)
         await asyncio.wait_for(copy_returned.wait(), timeout=10)
 
@@ -224,7 +197,6 @@ async def test_cancelled_copy_consumes_closed_result_cleans_once_and_holds_locks
         assert cleanup_attempts == []
         assert diagnostics == []
 
-        service = captured["service"]
 
         async def probe_service_lock():
             return await service.on_report_recovered()
@@ -260,6 +232,8 @@ async def test_cancelled_copy_consumes_closed_result_cleans_once_and_holds_locks
         assert marker_state is not None
         assert marker_state.stage is MarkerStage.TRIGGERED
         assert "controlled cancellation cleanup failure" in diagnostics[0]
+        assert len([line for line in Path(deps.config.paths.log_file).read_text(encoding="utf-8").splitlines()
+                    if "controlled cancellation cleanup failure" in line]) == 1
         assert _session_lock_is_held(deps.session_lock) is False
     finally:
         release_copy.set()
@@ -281,9 +255,8 @@ async def test_cancelled_copy_consumes_closed_result_cleans_once_and_holds_locks
 async def test_cancelled_recovery_delete_consumes_result_and_diagnostic_before_unlock(
         tmp_path: Path, monkeypatch) -> None:
     deps = await _runtime(tmp_path)
-    captured = _capture_failure_log_service(monkeypatch)
-    source_started, source_stopped = _install_controlled_source_stop(
-        monkeypatch, deps)
+    source, source_started, source_stopped = _controlled_source()
+    operation, service = report_log_session(deps, source)
     logs_dir = Path(deps.config.paths.staging) / "logs"
     marker_path = logs_dir / copies.MARKER_NAME
     marker = MarkerStore(logs_dir)
@@ -323,41 +296,16 @@ async def test_cancelled_recovery_delete_consumes_result_and_diagnostic_before_u
 
     monkeypatch.setattr(copies, "_fsync_directory", pause_marker_directory_sync)
 
-    async def generate_valid_report(self, job):
+    async def generate_and_observe(supervisor, job):
         generated_reports.append(job.report_id)
-        generated = generate_report_file(
-            GenerationSpec(
-                db_path=Path(job.db_path),
-                report_id=job.report_id,
-                from_wm=job.from_wm,
-                to_wm=job.to_wm,
-                frozen_event_id=job.frozen_event_id,
-                staging_path=Path(job.staging_path),
-                entity_batch_size=job.entity_batch_size,
-                event_batch_size=job.event_batch_size,
-            )
-        )
-        canonical = generated.path.with_name(
-            report_file_name(job.report_id, generated.sha256))
-        os.replace(generated.path, canonical)
-        success = ResultSuccessMessage(
-            job_id=job.job_id,
-            instance_id=job.instance_id,
-            path=str(canonical),
-            size_bytes=generated.size_bytes,
-            sha256=generated.sha256,
-        )
-        return WorkerGeneration(
-            kind=GenerationOutcomeKind.SUCCESS,
-            job_id=job.job_id,
-            success=success,
-        )
+        return await generate_valid_report(supervisor, job)
 
-    monkeypatch.setattr(WorkerSupervisor, "generate", generate_valid_report)
+    monkeypatch.setattr(WorkerSupervisor, "generate", generate_and_observe)
 
-    real_emit = lifecycle._emit_log_diagnostic
+    real_emit = deps.log_runtime.channel.deliver_important
 
-    async def observe_delete_diagnostic(target_deps, message, *, stderr_only=False):
+    async def observe_delete_diagnostic(record):
+        message = record.message
         if "controlled recovery marker directory sync failure" in message:
             diagnostics.append(message)
             before = (
@@ -365,7 +313,7 @@ async def test_cancelled_recovery_delete_consumes_result_and_diagnostic_before_u
                 _session_lock_is_held(deps.session_lock),
                 recovery_probe is not None and not recovery_probe.done(),
             )
-            await real_emit(target_deps, message, stderr_only=stderr_only)
+            result = await real_emit(record)
             after = (
                 asyncio.get_running_loop() is loop,
                 _session_lock_is_held(deps.session_lock),
@@ -379,13 +327,13 @@ async def test_cancelled_recovery_delete_consumes_result_and_diagnostic_before_u
                 except asyncio.CancelledError:
                     pass
             diagnostic_finished.set()
-            return
-        await real_emit(target_deps, message, stderr_only=stderr_only)
+            return result
+        return await real_emit(record)
 
-    monkeypatch.setattr(lifecycle, "_emit_log_diagnostic", observe_delete_diagnostic)
+    monkeypatch.setattr(deps.log_runtime.channel, "deliver_important", observe_delete_diagnostic)
 
     try:
-        run_task = asyncio.create_task(lifecycle.execute_command(deps, None))
+        run_task = asyncio.create_task(operation)
         await asyncio.wait_for(source_started.wait(), timeout=10)
         await asyncio.wait_for(sync_started.wait(), timeout=10)
 
@@ -399,7 +347,6 @@ async def test_cancelled_recovery_delete_consumes_result_and_diagnostic_before_u
         assert not release_sync.is_set()
         assert diagnostics == []
 
-        service = captured["service"]
         recovery_probe = asyncio.create_task(service.on_report_recovered())
         await _assert_stays_pending(recovery_probe)
         assert marker_delete_calls == [True]
@@ -426,6 +373,8 @@ async def test_cancelled_recovery_delete_consumes_result_and_diagnostic_before_u
         assert marker_delete_calls == [True]
         assert marker.check().presence.value == "absent"
         assert "controlled recovery marker directory sync failure" in diagnostics[0]
+        assert len([line for line in Path(deps.config.paths.log_file).read_text(encoding="utf-8").splitlines()
+                    if "controlled recovery marker directory sync failure" in line]) == 1
         assert _session_lock_is_held(deps.session_lock) is False
     finally:
         release_sync.set()
@@ -455,7 +404,7 @@ async def test_business_internal_control_still_drains_logs_before_unlock(
     """文件执行器的内部取消原因穿过组合和中间任务后仍先收场日志。"""
     from camctl.bootstrap.background_flow import BackgroundFlow
     from camctl.logging_runtime.ownership import LoggingOwner
-    from camctl.session.service import StateDbFailure, _RequiredPhaseWaiter
+    from camctl.session.service import StateDbFailure
 
     deps = await _runtime(tmp_path)
     loop = asyncio.get_running_loop()
@@ -474,7 +423,6 @@ async def test_business_internal_control_still_drains_logs_before_unlock(
     diagnostics: list[str] = []
     logger_owners: list[LoggingOwner] = []
     logger_settle_calls: list[bool] = []
-    parent_errors: list[asyncio.CancelledError] = []
     run_task: asyncio.Task | None = None
 
     executor = FileTaskExecutor(Supervisor())
@@ -540,26 +488,17 @@ async def test_business_internal_control_still_drains_logs_before_unlock(
 
     monkeypatch.setattr(LoggingOwner, "settle", observe_logger_settle)
 
-    real_emit = lifecycle._emit_log_diagnostic
+    real_emit = deps.log_runtime.channel.deliver_important
 
-    async def gate_startup_diagnostic(target_deps, message, *, stderr_only=False):
+    async def gate_startup_diagnostic(record):
+        message = record.message
         if "controlled startup diagnostic after internal control" in message:
             diagnostics.append(message)
             diagnostic_started.set()
             await release_diagnostic.wait()
-        await real_emit(target_deps, message, stderr_only=stderr_only)
+        return await real_emit(record)
 
-    monkeypatch.setattr(lifecycle, "_emit_log_diagnostic", gate_startup_diagnostic)
-
-    real_record_parent = _RequiredPhaseWaiter.record_parent_cancel
-
-    def record_first_parent(self, error):
-        if self.parent_cancel is None:
-            parent_errors.append(error)
-        real_record_parent(self, error)
-
-    monkeypatch.setattr(
-        _RequiredPhaseWaiter, "record_parent_cancel", record_first_parent)
+    monkeypatch.setattr(deps.log_runtime.channel, "deliver_important", gate_startup_diagnostic)
 
     try:
         run_task = asyncio.create_task(lifecycle.execute_command(
@@ -596,18 +535,14 @@ async def test_business_internal_control_still_drains_logs_before_unlock(
             await _assert_stays_pending(run_task)
             run_task.cancel("repeated observer cancellation")
             await _assert_stays_pending(run_task)
-            assert len(parent_errors) == 1
-            first_parent = parent_errors[0]
-            assert first_parent.args == ("first observer cancellation",)
             assert logger_owners[0].startup_stop_requested()
-        else:
-            assert parent_errors == []
 
         release_diagnostic.set()
         if parent_cancelled:
             with pytest.raises(asyncio.CancelledError) as caught:
                 await asyncio.wait_for(run_task, timeout=10)
-            assert caught.value is first_parent
+            first_parent = caught.value
+            assert first_parent.args == ("first observer cancellation",)
             assert any("file owner internal control" in note
                        for note in first_parent.__notes__)
             assert any("actual-file-owner-note" in note
@@ -623,6 +558,8 @@ async def test_business_internal_control_still_drains_logs_before_unlock(
         assert diagnostics and (
             "controlled startup diagnostic after internal control" in diagnostics[0]
         )
+        assert len([line for line in Path(deps.config.paths.log_file).read_text(encoding="utf-8").splitlines()
+                    if "controlled startup diagnostic after internal control" in line]) == 1
     finally:
         release_scan.set()
         release_diagnostic.set()

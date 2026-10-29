@@ -1,0 +1,620 @@
+{
+  "analysis_head": "fc3104424fd8ce64152cbdd6f1b4899d38e011e1",
+  "scope": "camctl组件16目录；只读分析加一个授权的现有outputs单例阶段采样",
+  "repository": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+  "verification_boundary": [
+    "未修改仓库生产、测试或配置。",
+    "完整目录排名来自48d2ee64冻结四路运行，不是当前fc310442全量计时。",
+    "当前源码只有outputs候选容量单例取得本次阶段数据；其余耗时用于排查优先级。",
+    "所有调用包装时间包含子调用，重叠调用不能相加；历史采样与当前采样负载不同，不计算稳定提速倍数。"
+  ],
+  "historical_aggregate": {
+    "source_commit": "48d2ee64",
+    "csv": "docs/camctl/verification-data/2026-10-25-integration-optimization/final-run-cases.csv",
+    "case_count": 9951,
+    "phase_total_seconds": 3898.998683762242,
+    "directories": {
+      "bootstrap": {
+        "cases": 1366,
+        "setup_seconds": 97.11805975806783,
+        "call_seconds": 862.3990947660641,
+        "teardown_seconds": 6.372307963865751,
+        "total_seconds": 965.8894624879977,
+        "setup_percent": 10.054779923564457,
+        "call_percent": 89.28548537475947,
+        "teardown_percent": 0.6597347016760662
+      },
+      "capture": {
+        "cases": 2127,
+        "setup_seconds": 34.79566390189575,
+        "call_seconds": 745.0490016680415,
+        "teardown_seconds": 4.512006621000182,
+        "total_seconds": 784.3566721909374,
+        "setup_percent": 4.436204234063732,
+        "call_percent": 94.98854642071214,
+        "teardown_percent": 0.575249345224135
+      },
+      "outputs": {
+        "cases": 2516,
+        "setup_seconds": 160.304531861133,
+        "call_seconds": 441.79645752696524,
+        "teardown_seconds": 22.893748579124804,
+        "total_seconds": 624.994737967223,
+        "setup_percent": 25.64894104269082,
+        "call_percent": 70.68802834466977,
+        "teardown_percent": 3.663030612639403
+      },
+      "history": {
+        "cases": 344,
+        "setup_seconds": 29.9643029420331,
+        "call_seconds": 549.4444968929238,
+        "teardown_seconds": 2.507270252070157,
+        "total_seconds": 581.916070087027,
+        "setup_percent": 5.1492482305140435,
+        "call_percent": 94.41988718592235,
+        "teardown_percent": 0.43086458356360363
+      },
+      "persistence": {
+        "cases": 935,
+        "setup_seconds": 12.152378073842556,
+        "call_seconds": 526.8409149881263,
+        "teardown_seconds": 3.3488237819910864,
+        "total_seconds": 542.34211684396,
+        "setup_percent": 2.2407218057414817,
+        "call_percent": 97.1418037850279,
+        "teardown_percent": 0.617474409230621
+      },
+      "cancellation": {
+        "cases": 332,
+        "setup_seconds": 4.065435312957561,
+        "call_seconds": 120.77179219199024,
+        "teardown_seconds": 1.2028861840735772,
+        "total_seconds": 126.04011368902138,
+        "setup_percent": 3.2255090811709395,
+        "call_percent": 95.82012317917321,
+        "teardown_percent": 0.9543677396558502
+      },
+      "acceptance": {
+        "cases": 331,
+        "setup_seconds": 6.128848588108667,
+        "call_seconds": 93.5368619639994,
+        "teardown_seconds": 1.7615027799329255,
+        "total_seconds": 101.42721333204099,
+        "setup_percent": 6.0426076856166135,
+        "call_percent": 92.22067617867894,
+        "teardown_percent": 1.7367161357044445
+      },
+      "reporting": {
+        "cases": 446,
+        "setup_seconds": 14.578352164040552,
+        "call_seconds": 70.28004204502213,
+        "teardown_seconds": 3.2026508070193813,
+        "total_seconds": 88.06104501608206,
+        "setup_percent": 16.554825304853235,
+        "call_percent": 79.8083216389123,
+        "teardown_percent": 3.636853056234457
+      },
+      "operations": {
+        "cases": 314,
+        "setup_seconds": 5.811377614867524,
+        "call_seconds": 13.374534935050178,
+        "teardown_seconds": 1.1762571120925713,
+        "total_seconds": 20.362169662010274,
+        "setup_percent": 28.54007068662147,
+        "call_percent": 65.68325064103098,
+        "teardown_percent": 5.776678672347553
+      },
+      "devices": {
+        "cases": 223,
+        "setup_seconds": 1.1010949380142847,
+        "call_seconds": 16.873677827054053,
+        "teardown_seconds": 0.33747863701864844,
+        "total_seconds": 18.312251402086986,
+        "setup_percent": 6.01288674907989,
+        "call_percent": 92.14420147776595,
+        "teardown_percent": 1.842911773154158
+      },
+      "contracts": {
+        "cases": 442,
+        "setup_seconds": 10.66305672701128,
+        "call_seconds": 6.687295988871483,
+        "teardown_seconds": 0.3626298110393691,
+        "total_seconds": 17.712982526922133,
+        "setup_percent": 60.19910374102384,
+        "call_percent": 37.75364187655804,
+        "teardown_percent": 2.047254382418119
+      },
+      "scheduling": {
+        "cases": 136,
+        "setup_seconds": 4.483952866918116,
+        "call_seconds": 5.442180936013756,
+        "teardown_seconds": 1.1547225509784766,
+        "total_seconds": 11.080856353910349,
+        "setup_percent": 40.46576116236507,
+        "call_percent": 49.11336057608266,
+        "teardown_percent": 10.420878261552266
+      },
+      "session": {
+        "cases": 194,
+        "setup_seconds": 3.4564955130190356,
+        "call_seconds": 6.413567346979107,
+        "teardown_seconds": 0.2264868660204229,
+        "total_seconds": 10.096549726018566,
+        "setup_percent": 34.23442271681909,
+        "call_percent": 63.52236675912662,
+        "teardown_percent": 2.2432105240542883
+      },
+      "host_files": {
+        "cases": 121,
+        "setup_seconds": 0.18764908704906702,
+        "call_seconds": 2.505554506999033,
+        "teardown_seconds": 0.16362493098858977,
+        "total_seconds": 2.85682852503669,
+        "setup_percent": 6.5684406818451615,
+        "call_percent": 87.70405661525851,
+        "teardown_percent": 5.72750270289633
+      },
+      "logging_runtime": {
+        "cases": 112,
+        "setup_seconds": 0.15101848397171125,
+        "call_seconds": 1.8599658549865126,
+        "teardown_seconds": 0.11826648101123283,
+        "total_seconds": 2.1292508199694566,
+        "setup_percent": 7.092564321467658,
+        "call_percent": 87.35306510358386,
+        "teardown_percent": 5.554370574948484
+      },
+      "motor": {
+        "cases": 12,
+        "setup_seconds": 0.6327937229871168,
+        "call_seconds": 0.7508909379976103,
+        "teardown_seconds": 0.03667847101314692,
+        "total_seconds": 1.420363131997874,
+        "setup_percent": 44.551545216259804,
+        "call_percent": 52.86612423834261,
+        "teardown_percent": 2.5823305453975847
+      }
+    }
+  },
+  "current_sample": {
+    "phase": "outside",
+    "pytest_reports": [
+      {
+        "nodeid": "tests/integration/outputs/test_read_discovery.py::test_candidate_capacity_tracks_batch_not_total",
+        "when": "setup",
+        "outcome": "passed",
+        "seconds": 0.13997977299732156
+      },
+      {
+        "nodeid": "tests/integration/outputs/test_read_discovery.py::test_candidate_capacity_tracks_batch_not_total",
+        "when": "call",
+        "outcome": "passed",
+        "seconds": 19.442458673991496
+      },
+      {
+        "nodeid": "tests/integration/outputs/test_read_discovery.py::test_candidate_capacity_tracks_batch_not_total",
+        "when": "teardown",
+        "outcome": "passed",
+        "seconds": 0.018496880002203397
+      }
+    ],
+    "exitstatus": 0,
+    "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+    "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "sqlite": "3.53.1",
+    "camctl_file": "current-outputs/source/apps/camctl/src/camctl/__init__.py",
+    "cwd": "current-outputs/source",
+    "pytest_version": "9.1.1",
+    "notes": [
+      "Wrapper durations are inclusive; do not sum nested work.",
+      "Only one existing test node was executed; no production or test sources were edited."
+    ],
+    "calls": {
+      "OutputsRepository.grant_file": {
+        "setup": {
+          "count": 2,
+          "seconds": 0.06688477800344117,
+          "max_seconds": 0.05599139499827288
+        },
+        "call": {
+          "count": 120,
+          "seconds": 6.774803631080431,
+          "max_seconds": 0.16360614499717485
+        }
+      },
+      "ReadDiscoveryOwner.reads": {
+        "call": {
+          "count": 179,
+          "seconds": 0.19607467798050493,
+          "max_seconds": 0.003178798986482434
+        }
+      },
+      "gc.collect": {
+        "call": {
+          "count": 179,
+          "seconds": 10.390602622093866,
+          "max_seconds": 0.12278733700804878
+        }
+      }
+    },
+    "command_receipt": {
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/outputs/test_read_discovery.py::test_candidate_capacity_tracks_batch_not_total",
+        "-q",
+        "-s",
+        "--durations=0",
+        "-p",
+        "timing_probe",
+        "--basetemp=current-outputs/pytest-tmp"
+      ],
+      "cwd": "current-outputs/source",
+      "head": "fc3104424fd8ce64152cbdd6f1b4899d38e011e1",
+      "started_utc": "2026-10-25T13:28:05.054373+00:00",
+      "environment": {
+        "PYTHONPATH": "current-outputs:current-outputs/source/apps/camctl/src:current-outputs/source/apps/camctl/tests",
+        "PYTHONPYCACHEPREFIX": "current-outputs/pycache",
+        "TMPDIR": "current-outputs/tmp",
+        "CAMCTL_EXTERNAL_PROBE_RESULT": "current-outputs/stage-result.json"
+      },
+      "log": "current-outputs/pytest.log",
+      "exit_code": 0,
+      "wall_seconds": 23.156335025007138,
+      "finished_utc": "2026-10-25T13:28:30.482519+00:00"
+    },
+    "evidence_directory": "current-outputs",
+    "gc_call_percent": 53.44284278198595
+  },
+  "hotspots": [
+    {
+      "id": "outputs-candidate-full-gc",
+      "priority": 1,
+      "status": "当前实测的新测试侧候选",
+      "target": "apps/camctl/tests/integration/outputs/test_read_discovery.py::test_candidate_capacity_tracks_batch_not_total",
+      "historical_seconds": 31.50189551501494,
+      "current_explanation": "当前call19.442459秒中，179次完整GC累计10.390603秒；179次候选读取仅0.196075秒。真实120次grant_file累计6.774804秒，setup另有两次grant_file。此处主要已确认是每页完整GC开销，不能归因于候选SQL。",
+      "actual_preparation": "two_copies建立真实数据库和2个原副本；测试按12→120增量建立120个新动作、选择和副本，每次先真实commit、再调用grant_file。三次扫描已共享该来源。",
+      "counts": {
+        "worlds": 1,
+        "new_grant_file_calls": 120,
+        "fixture_grant_file_calls": 2,
+        "scan_variants": [
+          [
+            12,
+            1
+          ],
+          [
+            120,
+            1
+          ],
+          [
+            120,
+            3
+          ]
+        ],
+        "read_calls": 179,
+        "full_gc_calls": 179
+      },
+      "source_refs": [
+        "apps/camctl/tests/integration/outputs/test_read_discovery.py:270-313",
+        "apps/camctl/src/camctl/outputs/read_discovery.py:158-180",
+        "apps/camctl/src/camctl/outputs/read_discovery.py:183-221",
+        "apps/camctl/src/camctl/outputs/read_discovery.py:326-331"
+      ],
+      "recommendation": "保持每页删除page后弱引用均释放的断言，研究直接检查弱引用而不逐页执行完整GC；仅在明确阶段集中回收。ReadCandidate只含标量，owner只保存继续位置，直接弱引用断言会保留甚至收紧不持有候选的要求。尚未改变或验证该候选方案。",
+      "must_keep": [
+        "真实120次建档、候选总量与两种批量上限1/3。",
+        "每页弱引用释放、owner游标数量、全部候选数量、只读扫描前后数据库dump和实际查询计划。",
+        "不能通过删除弱引用断言、缩小120候选或扩大批量1来提速。"
+      ],
+      "next_narrow_verification": "实施时只复验本node，记录相同179页、候选数量、弱引用和GC计数；与本次相同解释器和环境对照。若直接弱引用断言失败，应定位实际引用，不能改为忽略。",
+      "evidence_paths": [
+        "current-outputs/stage-result.json",
+        "current-outputs/command.json",
+        "current-outputs/pytest.log",
+        "current-outputs/source-identity.json",
+        "current-outputs/timing_probe.py"
+      ]
+    },
+    {
+      "id": "history-capacity-worlds",
+      "priority": 2,
+      "status": "规模必须保留；准备与操作占比尚未在当前源码分开测量",
+      "targets": [
+        "apps/camctl/tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window",
+        "apps/camctl/tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity"
+      ],
+      "historical_seconds": [
+        252.93,
+        139.526
+      ],
+      "actual_preparation": "报告选择单例创建1个真实库，调用_submit_many三次受理3/4200/3个动作，并用_finish_many真实发布128个无关产物，随后才安装查询探针。大历史单例按256/2048分别创建两个库和两个fixture-members.db临时SQLite库，逐128文件真实保存结果页、逐文件保存归属和完成，再提交成员、缺口及评估。",
+      "static_counts": {
+        "report_selection_action_count": 4206,
+        "report_selection_acceptance_transactions": 3,
+        "unrelated_outputs": 128,
+        "large_history_world_sizes": [
+          256,
+          2048
+        ],
+        "large_history_result_pages": 18,
+        "large_history_ownership_and_completion_calls": 4608,
+        "large_history_stage_member_rows": 2304
+      },
+      "source_refs": [
+        "apps/camctl/tests/integration/history/test_report_selection.py:245-259",
+        "apps/camctl/tests/integration/history/test_report_selection.py:303-377",
+        "apps/camctl/tests/integration/history/test_report_selection.py:380-400",
+        "apps/camctl/tests/integration/history/test_record_segment_history.py:522-600",
+        "apps/camctl/tests/integration/history/test_record_segment_history.py:623-664"
+      ],
+      "measured_evidence": "旧紧凑行专项call103.29秒中，两次_large_fixture累计85.905秒；这是调用包装实测，属于旧源码和旧负载。旧采样206/227有效栈包含_large_fixture，仅证明当时窗口准备昂贵。不能把该占比当成当前fc310442占比。4096目标当前无分阶段数据。",
+      "already_changed": "同事务原页证明三页复用与后续通用读取复用均已在当前生产实现中，旧951秒不是当前待省成本。fixture-members.db辅助插入也已经按128条批事务，不能再提逐条自动提交优化。",
+      "recommendation": "优先为4096目标包装_submit_many、_finish_many、open_report_selection和read_page，分别记录准备与读取；对于大历史，包装_large_fixture和open_segment_history/prepare_snapshot。只有证实同一完整只读来源实际被多个消费者重复创建后，才设计完整独立副本复用；当前两个规模各仅一次，不能凭规模大就删准备。",
+      "must_keep": [
+        "4200真实动作跨过默认4096候选容量；真实128个无关产物、溢出后释放、keyset续页、稀疏早/晚水位和索引/VM断言。",
+        "256/2048两个规模、2046缺口、128页边界、批量不超过7、磁盘超过2MiB SQLite缓存、旧事件解码0及Python峰值/VM增长门槛。",
+        "临时夹具库的同步模式可独立处理，但正式状态库真实生产写入及FULL保持。"
+      ],
+      "next_narrow_verification": "4096单例旧253秒，若有180秒上限不应优先；可以选当前大历史单例（旧140秒）做阶段计时，保持全部原规模。",
+      "evidence_paths": [
+        "docs/camctl/verification-data/2026-10-25-integration-optimization/final-run-cases.csv",
+        "docs/camctl/verification-data/2026-10-25-integration-optimization/page-proof-compact3.json",
+        "docs/camctl/verification-data/2026-10-25-integration-timing/native-profile.json",
+        "docs/camctl/verification.md:250-252"
+      ]
+    },
+    {
+      "id": "persistence-real-batch-preparation",
+      "priority": 3,
+      "status": "真实批写和核实门槛保留；等待主代理当前单例阶段结果",
+      "target": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py::test_fixed_batch_write_and_verification_have_bounded_residency",
+      "historical_seconds": 174.063,
+      "actual_preparation": "_ready_world按20/200/400建立3个独立库，底层_world保存7个真实结果页和620个实际文件事实；每个文件分别保存一次归属和完成，共1240次生产保存调用。随后真实保存成员、固定、评估、范围及结束扫描。tracemalloc在_ready_world返回后才开始，因此准备全部藏在call而不在pytest setup。",
+      "static_counts": {
+        "worlds": 3,
+        "sizes": [
+          20,
+          200,
+          400
+        ],
+        "source_files": 620,
+        "result_pages": 7,
+        "ownership_calls": 620,
+        "completion_calls": 620,
+        "finish_transactions": 3,
+        "verify_calls": 3,
+        "write_batch_size": 4
+      },
+      "source_refs": [
+        "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py:58-102",
+        "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py:448-516",
+        "apps/camctl/tests/integration/persistence/test_segment_storage.py:54-90",
+        "apps/camctl/src/camctl/persistence/runtime.py:424-432"
+      ],
+      "measured_evidence": "历史CSV174.063秒是全部三阶段；旧紧凑行专项176.93秒call同样包含3次准备、真实写入和核实。现有档案未给出当前准备/写入/核实分段耗时，不能把174秒全部归为COMMIT或fsync。主代理正在另一个独立副本采样此node，本代理没有重复执行。",
+      "recommendation": "先用现成_ready_world、finish_segment_recording、verify_segment_finish三个边界分段，按N记录SQL/行数及阶段。若准备占主要时间且其他测试消费相同前置事实，可共享只读来源后创建完整独立世界；每个N当前只有一次准备，不存在可直接删除的同N重复。普通/有界提交的129源两模式可另外评估共同基线复制，但每种必须真正提交，不能第二种变成重放。",
+      "must_keep": [
+        "N20/200/400、B4、真实提交和原键核实分别存在。",
+        "写入与核实各自tracemalloc峰值、200→400峰值增量400000字节、fetch上限128、whole_group_checks<=3、唯一索引与VM<80。",
+        "原子可见性、末批/最后守卫回滚、COMMIT回执未知后的实际核实由相邻专用集成保留。",
+        "不能把生产FULL改为OFF或把真实写入替为SQL手填来保留原资源验收名称。"
+      ],
+      "evidence_paths": [
+        "docs/camctl/verification-data/2026-10-25-integration-optimization/final-run-cases.csv",
+        "docs/camctl/verification-data/2026-10-25-integration-optimization/page-proof-compact3.json"
+      ]
+    },
+    {
+      "id": "bootstrap-repeated-runtime-worlds",
+      "priority": 4,
+      "status": "重复次数可静态确认；成本比例尚未量化，安装不是已证实的目录主因",
+      "directory_historical_seconds": 965.8894624879977,
+      "target": "apps/camctl/tests/integration/bootstrap/test_adb_camera_products.py::test_action6_candidates_keep_video_and_require_selected_photo",
+      "target_historical_seconds": 117.545,
+      "actual_preparation": "14个产品分区各建立Deployment，写配置和脚本，执行真实CLI init、submit、run，共14个状态库和42个顶层CLI进程；相机设备通信被替身隔离，真实文件工具和本地Bash仍执行。自然时长通过advance_clock推进，不能把duration_s当成真实睡眠。",
+      "static_counts": {
+        "worlds": 14,
+        "init_processes": 14,
+        "submit_processes": 14,
+        "run_processes": 14,
+        "top_level_cli_processes": 42,
+        "variants": "video×auto/manual各complete；video_raw/video_jpeg×auto/manual各complete/missing_photo/wrong_format"
+      },
+      "source_refs": [
+        "apps/camctl/tests/integration/bootstrap/test_adb_camera_products.py:20-34",
+        "apps/camctl/tests/integration/bootstrap/test_adb_camera_products.py:42-97",
+        "tests/integration/camctl_fixtures.py:73-87",
+        "tests/integration/camctl_fixtures.py:208-243",
+        "tests/integration/camera_demo_fixtures.py:165-182",
+        "tests/integration/camera_demo_fixtures.py:200-208"
+      ],
+      "attribution_limits": "bootstrap总setup97.118秒、call862.399秒；该矩阵117.545秒同时含建库/多进程/真实产物/核实，尚无可分开累计的目录级安装或等待秒数。test_distribution的wheel fixture已是module级；该文件setup总4.773秒、total72.883秒，不能按43实例估算43次安装，更不能把965.889秒统称打包。",
+      "already_changed": "installed_camera_capabilities在551-566按型号只describe一次，安装生成器非法输入不再逐项describe。_create_valid_database在准备连接synchronous=OFF，但正式open_existing恢复FULL，这也已存在。",
+      "recommendation": "先为这14项选一个典型成功或缺照片实例，包Deployment.__init__/camctl/start_camctl及进程收场；若初始化重复显著，再评估只读初始化基线恢复，必须保留目录绑定、每例独立数据库和文件。输入曝光组合可由单元层承接的范围必须先做等价映射，现有schema校验单元不等同于实际任务工厂/产物收尾。",
+      "must_keep": [
+        "视频/RAW/JPEG的必要产物分类、缺照片/错误格式、真实公开受理生效参数、冻结product_rules与最终正式输出文件。",
+        "独立wheel、仓库外安装、能力导出、init/submit实际消费、缺资源/不合规SQLite等发行物边界。",
+        "真实会话等待专项仍使用真实时间；test_timelapse_finish的wait_ms=2000和未来调度不应仅凭相似名字删去，原约4秒多文件合并收益小且尚未做。"
+      ],
+      "unit_layer_candidate_evidence": [
+        "apps/camctl/tests/unit/devices/test_adb_camera_parameters.py:270-294",
+        "apps/camctl/tests/unit/devices/test_adb_camera_parameters.py:447-465"
+      ],
+      "next_narrow_verification": "单个产品实例或整个14项矩阵，不引入新覆盖；把CLI准备与run执行/结果核对分段，保留现有策略与成功预算。",
+      "evidence_paths": [
+        "docs/camctl/verification-data/2026-10-25-integration-optimization/final-run-cases.csv",
+        "docs/camctl/verification-data/2026-10-25-integration-optimization/final-run-files.csv"
+      ]
+    },
+    {
+      "id": "capture-native-terminal-variants",
+      "priority": 5,
+      "status": "现有证据支持目标操作链为主；不优先合并START前缀",
+      "target": "apps/camctl/tests/integration/capture/test_native_segment_completion.py::test_native_empty_tail_uses_original_natural_target_and_retains_per_file_identity",
+      "historical_seconds": 120.056,
+      "actual_preparation": "tail/middle×canceled两态共4个真实consumer_world，每个一个库；每例保存基准，启动一次，取消的两例另作公开取消和STOP，然后输入六个OSV/LRF文件并推进终态。wall/mono手动推进1.2秒，wait_config配置并不产生同长真实sleep。",
+      "static_counts": {
+        "worlds": 4,
+        "result_pages": 4,
+        "result_files": 24,
+        "canceled_worlds": 2,
+        "start_advances": 4,
+        "result_advances": 4
+      },
+      "source_refs": [
+        "apps/camctl/tests/integration/capture/test_native_segment_completion.py:59-138",
+        "apps/camctl/tests/integration/capture/test_native_segment_completion.py:141-185",
+        "apps/camctl/tests/integration/capture/result_consumer_fixtures.py:103-165"
+      ],
+      "measured_evidence": "旧紧凑行tail-False call25.36秒，consumer_world0.377秒，finish_segment_recording18.962秒（均包含子调用）。原栈采样609条定位结果推进，仅3条consumer_world、1条首次START，支持先查结果持久化而不是复制START模板；当前通用读取复用已再优化，不能把18.962当成当前数据。",
+      "already_changed": "完整页证明旧8909次已降为189次，且当前transaction.py/read_reuse.py再次复用小结果；这些生产改进不再是新建议。",
+      "recommendation": "保留四种终态来源分区，先用当前单例包consumer_world、capture_handler返回的async推进函数和finish_segment_recording，避免按旧采样再复制已很短的START前缀。若其他大矩阵准备占比高，再按真实初始事实研究独立快照，不能同库顺序复用已提交状态。",
+      "must_keep": [
+        "尾空与中间空结果不同，取消又覆盖成功/失败来源优先级；四态不能按名字相似删并。",
+        "每文件身份、输出4项、未发布普通scope、无检查副本、结果只读一次、STOP只调用一次。",
+        "首结果页前中断的恢复用例必须关闭并重新打开真实连接，保持原结果未知。"
+      ],
+      "evidence_paths": [
+        "docs/camctl/verification-data/2026-10-25-integration-optimization/page-proof-compact3.json",
+        "docs/camctl/verification-data/2026-10-25-integration-timing/native-profile.json",
+        "docs/camctl/verification-data/2026-10-25-integration-optimization/final-run-cases.csv"
+      ]
+    }
+  ],
+  "remaining_small_source_reuse_candidate": {
+    "status": "静态候选，未计入预期收益",
+    "targets": [
+      "test_failed_segment_source_with_complete_empty_catalog_saves_source_error",
+      "test_failed_segment_source_with_only_formal_photo_keeps_scope_error",
+      "test_failed_segment_explicit_id_keeps_item_not_found_error"
+    ],
+    "historical_cases": 5,
+    "historical_total_seconds": 2.1318395679845707,
+    "finding": "当前五个消费者仍各调用_source(indexes=(),known=False)。可按完整空目录和仅正式照片两种来源建两个世界，空目录世界服务default/preview/explicit三个独立消费者，照片世界服务default/preview。由5次来源准备降到2次，但每个消费者必须独立request/action/selection/operation_key；两个source-error模式分别保留关闭重开后原键核实。",
+    "source_refs": [
+      "apps/camctl/tests/integration/outputs/test_segment_default_scope.py:456-506",
+      "apps/camctl/tests/integration/outputs/test_segment_default_scope.py:509-543",
+      "apps/camctl/tests/integration/outputs/test_segment_default_scope.py:546-573"
+    ],
+    "next_narrow_verification": "先仅包这5例的_source与fix_segment_selection，确认准备占比；再验证各消费者结果、既有消费者状态不变、原错误码分类和冷恢复。两种来源不可混为同一事实分类。"
+  },
+  "directory_attribution": {
+    "bootstrap": {
+      "historical": {
+        "cases": 1366,
+        "setup_seconds": 97.11805975806783,
+        "call_seconds": 862.3990947660641,
+        "teardown_seconds": 6.372307963865751,
+        "total_seconds": 965.8894624879977,
+        "setup_percent": 10.054779923564457,
+        "call_percent": 89.28548537475947,
+        "teardown_percent": 0.6597347016760662
+      },
+      "confirmed_structure": "14产品分区各14库/42顶层CLI；安装fixture按模块共享。",
+      "known_wait_boundary": "test_timelapse_finish真实会话默认wait_ms2000并有未来调度/重试；时间数字仅说明等待参数，缺阶段计时，不能将该文件66.974秒全部算睡眠。",
+      "unresolved": "全目录安装、schema准备、CLI冷启动、实际运行及等待没有统一阶段累计。"
+    },
+    "capture": {
+      "historical": {
+        "cases": 2127,
+        "setup_seconds": 34.79566390189575,
+        "call_seconds": 745.0490016680415,
+        "teardown_seconds": 4.512006621000182,
+        "total_seconds": 784.3566721909374,
+        "setup_percent": 4.436204234063732,
+        "call_percent": 94.98854642071214,
+        "teardown_percent": 0.575249345224135
+      },
+      "confirmed_structure": "最大4态native用例是4真实世界，旧采样准备0.377秒而完成事务18.962秒；其余矩阵也有重复consumer_world，但没有当前累计。",
+      "known_wait_boundary": "native大热点手动推进业务钟，无真实1.2秒等待；结果替身可返回required_wait_ms/observed_wait_ns，数字本身不证明实际睡眠。",
+      "unresolved": "不能将call745.049秒全部解释为驱动等待或建库。"
+    },
+    "outputs": {
+      "historical": {
+        "cases": 2516,
+        "setup_seconds": 160.304531861133,
+        "call_seconds": 441.79645752696524,
+        "teardown_seconds": 22.893748579124804,
+        "total_seconds": 624.994737967223,
+        "setup_percent": 25.64894104269082,
+        "call_percent": 70.68802834466977,
+        "teardown_percent": 3.663030612639403
+      },
+      "confirmed_structure": "三个正常分段来源已共享多个独立消费者；当前容量单例实测179全GC10.391秒/120真实grant6.775秒/179SQL读取0.196秒。",
+      "known_wait_boundary": "组件_source通过受控钟与受约束结果端口推进；跨组件STOP后30秒来源不属于该16目录的这个热点。",
+      "unresolved": "setup160.305秒含大量fixture成本，尚不能给出全目录建库次数或秒数；本次单例比例不能外推全目录。"
+    }
+  },
+  "already_implemented_do_not_count_as_future_savings": [
+    {
+      "change": "outputs默认/预览/显式ID及组/计划范围六次来源准备变三次",
+      "current_refs": [
+        "apps/camctl/tests/integration/outputs/test_segment_default_scope.py:150-220",
+        "apps/camctl/tests/integration/outputs/test_segment_default_scope.py:310-426"
+      ]
+    },
+    {
+      "change": "outputs候选12→120共享来源后扫描B1/B3",
+      "current_refs": [
+        "apps/camctl/tests/integration/outputs/test_read_discovery.py:277-313"
+      ]
+    },
+    {
+      "change": "history两个220成员快照世界合一并串联同S字节核验",
+      "current_refs": [
+        "apps/camctl/tests/integration/history/test_snapshot_fix_round1.py:190-273"
+      ]
+    },
+    {
+      "change": "reporting缺段范围与清理后字节重建共用来源",
+      "current_refs": [
+        "apps/camctl/tests/integration/reporting/test_record_segment_error_report.py"
+      ]
+    },
+    {
+      "change": "取消拒绝矩阵86组输入由86准备改22准备，保留逐项回滚/dump/事务结束",
+      "current_refs": [
+        "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py"
+      ]
+    },
+    {
+      "change": "contracts真实源码只读解析复用、局部重复断言下移",
+      "current_refs": [
+        "apps/camctl/tests/integration/contracts/conftest.py"
+      ]
+    },
+    {
+      "change": "安装样例按型号共享真实describe、wheel fixture模块共享",
+      "current_refs": [
+        "apps/camctl/tests/integration/bootstrap/test_distribution.py:117-143",
+        "apps/camctl/tests/integration/bootstrap/test_distribution.py:550-566"
+      ]
+    },
+    {
+      "change": "测试schema准备连接synchronous=OFF且生产打开恢复FULL；大夹具临时库128条事务",
+      "current_refs": [
+        "apps/camctl/tests/integration/persistence/test_runtime.py:53-82",
+        "apps/camctl/tests/integration/history/test_record_segment_history.py:559-568"
+      ]
+    },
+    {
+      "change": "同事务三页原行证明和当前通用成功读取复用",
+      "current_refs": [
+        "apps/camctl/src/camctl/persistence/page_read_cache.py:19-42",
+        "apps/camctl/src/camctl/persistence/read_reuse.py:18-19",
+        "apps/camctl/src/camctl/persistence/transaction.py:694-731",
+        "apps/camctl/src/camctl/persistence/transaction.py:853-854"
+      ]
+    }
+  ],
+  "unit_layer_assessment": [
+    "应迁移的是独立值域、精确数值和纯状态判断，必须找到等价输入/预期/失败分区的现有单元承接后再删集成实例。",
+    "接受层7项与资源路径1项已下移，不能再列新收益；host_files三项冷导入读真实资源，尚不是纯单元边界，且历史整个目录仅2.857秒。",
+    "bootstrap参数schema单元覆盖曝光/输出合法性，但不能独自替代真实CLI受理、冻结product_rules、错误产品及文件收尾；当前没有足够等价映射授权直接砍14产品实例。",
+    "容量、真实批写、跨页、未知COMMIT、实际worker结束、文件生命周期、冷重开均保留集成见证。"
+  ],
+  "source_drift_note": "六个重点测试文件(test_report_selection, test_segment_transaction_batches, test_read_discovery, test_native_segment_completion, test_adb_camera_products, test_segment_default_scope)相对48d2ee64无提交差异；其生产依赖已大量变化（读取复用、拍摄准备、调度、报告维护），因此旧CSV可以定位结构，不能代表当前绝对耗时。"
+}

@@ -1,0 +1,40 @@
+[
+  {
+    "nodeid": "tests/integration/test_timelapse_time_parameters.py::test_describe_python_browser_and_node_export_agree[dji-action6]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0014506759907817468
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 32.41345230898878
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006697850039927289
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 32.415572769983555
+  },
+  {
+    "nodeid": "tests/integration/test_timelapse_time_parameters.py::test_describe_python_browser_and_node_export_agree[dji-osmo360-ii]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00127983299898915
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 20.721546026994474
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004692310030804947
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 20.723295090996544
+  }
+]

@@ -1,0 +1,13 @@
+{
+  "cwd": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world",
+  "python": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+  "argv": [
+    "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/osmo-builtin-package0/runtime/gap/tools/camctl",
+    "init",
+    "--config",
+    "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/final-osmo-after-handoff-pytest/test_installed_segment_source_3/world/deployment/config.toml"
+  ],
+  "exitcode": 0,
+  "stdout": "",
+  "stderr": ""
+}

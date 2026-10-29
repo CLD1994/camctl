@@ -1,0 +1,124 @@
+diff --git a/apps/camctl/tests/integration/bootstrap/test_result_error_flow.py b/apps/camctl/tests/integration/bootstrap/test_result_error_flow.py
+index 695e89c9..e370942a 100644
+--- a/apps/camctl/tests/integration/bootstrap/test_result_error_flow.py
++++ b/apps/camctl/tests/integration/bootstrap/test_result_error_flow.py
+@@ -2,7 +2,6 @@
+ 
+ import json
+ import multiprocessing
+-from functools import partial
+ from multiprocessing.connection import Connection
+ from pathlib import Path
+ from unittest.mock import create_autospec
+@@ -29,7 +28,7 @@ from camctl.session.service import SessionContext, SessionPaths, _drive_flows
+ 
+ from ..capture.result_consumer_fixtures import ResultCatalog
+ from ..reporting.test_result_error_generation import _exhausted_world, _freeze, _spec
+-from ..reporting.test_result_error_state import _file_bytes, _incomplete_history_reader
++from ..reporting.test_result_error_state import _file_bytes, _incomplete_history_generator
+ 
+ pytestmark = pytest.mark.asyncio
+ 
+@@ -130,10 +129,10 @@ async def test_state_result_stops_following_flow_without_report_failure_write(tm
+         spec = _spec(owned, report, "unused-template.json")
+         activity_id, = owned.connection.execute(
+             "SELECT id FROM device_activities WHERE action_id=?", (action_id,)).fetchone()
+-        reader, supplied = _incomplete_history_reader(spec, report, action_id, activity_id, error)
+-        monkeypatch.setattr(worker, "generate_report_file",
+-                            partial(generation.generate_report_file, repository=reader))
+         rig = _InlineWorker(spec.db_path)
++        generate, supplied = _incomplete_history_generator(
++            report, action_id, activity_id, error, current_job=lambda: rig.jobs[-1])
++        monkeypatch.setattr(worker, "generate_report_file", generate)
+         following_calls = []
+ 
+         async def following(context):
+diff --git a/apps/camctl/tests/integration/reporting/test_result_error_state.py b/apps/camctl/tests/integration/reporting/test_result_error_state.py
+index 83a956f6..bc4c0e95 100644
+--- a/apps/camctl/tests/integration/reporting/test_result_error_state.py
++++ b/apps/camctl/tests/integration/reporting/test_result_error_state.py
+@@ -3,7 +3,6 @@
+ from copy import deepcopy
+ from contextlib import contextmanager
+ from dataclasses import replace
+-from functools import partial
+ from pathlib import Path
+ from unittest.mock import create_autospec
+ 
+@@ -13,8 +12,9 @@ from camctl.persistence.directory_switch import canonical_to_path
+ from camctl.contracts.public_projection import PublicProjectionError
+ from camctl.contracts.values import ConsistencyError
+ from camctl.persistence.repositories.history import HistoryRepository
++from camctl.persistence.runtime import DbConfig
+ from camctl.reporting import generation, worker
+-from camctl.reporting.generation import generate_report_file
++from camctl.reporting.generation import GenerationSpec, generate_report_file
+ from camctl.reporting.messages import ErrorKind, JobMessage, ResultFailureMessage, new_job_id
+ from camctl.reporting.worker import run_job
+ 
+@@ -23,10 +23,12 @@ from .test_result_error_generation import _exhausted_world, _freeze, _spec
+ pytestmark = pytest.mark.asyncio
+ 
+ 
+-def _incomplete_history_reader(spec, report, action_id, activity_id, expected_error):
++def _incomplete_history_reader(
++        spec, report, action_id, activity_id, expected_error, *, repository=None):
+     """只改变同 H 关联行的返回值；分页选择和历史恢复均委托真实仓储。"""
+-    actual = HistoryRepository(spec.db_path)
++    actual = HistoryRepository(spec.db_path) if repository is None else repository
+     reader = create_autospec(HistoryRepository, instance=True, spec_set=True)
++    reader.report_read_scope.side_effect = actual.report_read_scope
+     reader.frozen_registration.side_effect = actual.frozen_registration
+     reader.open_report_selection.side_effect = actual.open_report_selection
+     reader.restore_primary_at_h.side_effect = actual.restore_primary_at_h
+@@ -59,6 +61,34 @@ def _incomplete_history_reader(spec, report, action_id, activity_id, expected_er
+     return reader, supplied
+ 
+ 
++def _incomplete_history_generator(
++        report, action_id, activity_id, expected_error, *, current_job):
++    """核对任务配置，再在 worker 的真实读取资源上改变原关联行。"""
++    supplied = []
++
++    def generate(spec, *, repository):
++        job = current_job()
++        assert isinstance(repository, HistoryRepository)
++        assert repository.path == Path(job.db_path)
++        assert repository._config == DbConfig(busy_timeout_ms=job.busy_timeout_ms)
++        assert repository._instance_id == job.instance_id
++        assert repository._expected_directories == (
++            job.staging_root, job.ready_root, job.processing_root)
++        assert spec == GenerationSpec(
++            db_path=Path(job.db_path), report_id=job.report_id,
++            from_wm=job.from_wm, to_wm=job.to_wm,
++            frozen_event_id=job.frozen_event_id, staging_path=Path(job.staging_path),
++            entity_batch_size=job.entity_batch_size, event_batch_size=job.event_batch_size)
++        reader, observed = _incomplete_history_reader(
++            spec, report, action_id, activity_id, expected_error, repository=repository)
++        try:
++            return generate_report_file(spec, repository=reader)
++        finally:
++            supplied.extend(observed)
++
++    return generate, supplied
++
++
+ def _job(owned, spec):
+     metadata = owned.metadata
+     return JobMessage(
+@@ -127,11 +157,11 @@ async def test_uninterpretable_frozen_error_stops_worker_without_publish(tmp_pat
+         spec = _spec(owned, report, "worker-incomplete-error.json")
+         activity_id, = owned.connection.execute(
+             "SELECT id FROM device_activities WHERE action_id=?", (action_id,)).fetchone()
+-        reader, supplied = _incomplete_history_reader(spec, report, action_id, activity_id, error)
+-        monkeypatch.setattr(worker, "generate_report_file",
+-                            partial(generate_report_file, repository=reader))
+-        before = _snapshot(owned, report, runtime)
+         job = _job(owned, spec)
++        generate, supplied = _incomplete_history_generator(
++            report, action_id, activity_id, error, current_job=lambda: job)
++        monkeypatch.setattr(worker, "generate_report_file", generate)
++        before = _snapshot(owned, report, runtime)
+         try:
+             result = run_job(job)
+             assert isinstance(result, ResultFailureMessage)

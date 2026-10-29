@@ -1,0 +1,486 @@
+[
+  {
+    "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/copy.py",
+    "line": 128,
+    "function": "deepcopy",
+    "primitive_calls": 49526,
+    "calls": 2122609,
+    "self_seconds": 2.3164217970000003,
+    "inclusive_seconds": 4.409509777,
+    "callers": [
+      {
+        "file": "apps/camctl/src/camctl/persistence/read_reuse.py",
+        "line": 73,
+        "function": "reuse_read",
+        "stats": [
+          49526,
+          49526,
+          0.160476327,
+          4.409509777
+        ]
+      },
+      {
+        "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/copy.py",
+        "line": 259,
+        "function": "_reconstruct",
+        "stats": [
+          11342,
+          11342,
+          0.023243446,
+          0.18974317300000001
+        ]
+      },
+      {
+        "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/copy.py",
+        "line": 264,
+        "function": "<genexpr>",
+        "stats": [
+          11342,
+          11342,
+          0.016967997000000002,
+          0.022394153
+        ]
+      },
+      {
+        "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/copy.py",
+        "line": 201,
+        "function": "_deepcopy_list",
+        "stats": [
+          1915,
+          382,
+          0.002642812,
+          0.055012641
+        ]
+      },
+      {
+        "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/copy.py",
+        "line": 227,
+        "function": "_deepcopy_dict",
+        "stats": [
+          2048484,
+          1585230,
+          2.1130912150000003,
+          3.326547444
+        ]
+      }
+    ]
+  },
+  {
+    "file": "apps/camctl/src/camctl/contracts/json_values.py",
+    "line": 64,
+    "function": "_check_surrogates",
+    "primitive_calls": 72123,
+    "calls": 3322859,
+    "self_seconds": 2.49032042,
+    "inclusive_seconds": 3.088077749,
+    "callers": [
+      {
+        "file": "apps/camctl/src/camctl/contracts/json_values.py",
+        "line": 64,
+        "function": "_check_surrogates",
+        "stats": [
+          3250736,
+          280766,
+          2.323985719,
+          2.8948828410000003
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/contracts/json_values.py",
+        "line": 79,
+        "function": "parse_exact_json",
+        "stats": [
+          72123,
+          72123,
+          0.166334701,
+          3.088077749
+        ]
+      }
+    ]
+  },
+  {
+    "file": "apps/camctl/src/camctl/persistence/read_reuse.py",
+    "line": 123,
+    "function": "_retained_size",
+    "primitive_calls": 55876,
+    "calls": 1459304,
+    "self_seconds": 1.9902410000000001,
+    "inclusive_seconds": 4.559845493,
+    "callers": [
+      {
+        "file": "apps/camctl/src/camctl/persistence/read_reuse.py",
+        "line": 73,
+        "function": "reuse_read",
+        "stats": [
+          55876,
+          55876,
+          0.18063156900000002,
+          4.559845493
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/read_reuse.py",
+        "line": 136,
+        "function": "<genexpr>",
+        "stats": [
+          217508,
+          119556,
+          0.373728861,
+          0.8691777540000001
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/read_reuse.py",
+        "line": 131,
+        "function": "<genexpr>",
+        "stats": [
+          1174346,
+          934042,
+          1.4206475250000001,
+          2.8103048100000003
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/read_reuse.py",
+        "line": 140,
+        "function": "<genexpr>",
+        "stats": [
+          11574,
+          11574,
+          0.015233045,
+          0.029704138
+        ]
+      }
+    ]
+  },
+  {
+    "file": "apps/camctl/src/camctl/history/decoding.py",
+    "line": 34,
+    "function": "decode_event_row",
+    "primitive_calls": 12875,
+    "calls": 12875,
+    "self_seconds": 0.198211996,
+    "inclusive_seconds": 6.565412084,
+    "callers": [
+      {
+        "file": "apps/camctl/src/camctl/logging_runtime/transaction_timing.py",
+        "line": 165,
+        "function": "traced",
+        "stats": [
+          12875,
+          12875,
+          0.198211996,
+          6.565412084
+        ]
+      }
+    ]
+  },
+  {
+    "file": "apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 315,
+    "function": "_verify_page_relations",
+    "primitive_calls": 113,
+    "calls": 113,
+    "self_seconds": 0.346989056,
+    "inclusive_seconds": 15.339829881000002,
+    "callers": [
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+        "line": 465,
+        "function": "_load_at_record",
+        "stats": [
+          113,
+          113,
+          0.346989056,
+          15.339829881000002
+        ]
+      }
+    ]
+  },
+  {
+    "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 235,
+    "function": "read_segment_output_candidates",
+    "primitive_calls": 302,
+    "calls": 302,
+    "self_seconds": 0.004835482,
+    "inclusive_seconds": 18.974289855000002,
+    "callers": [
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+        "line": 46,
+        "function": "_candidates",
+        "stats": [
+          302,
+          302,
+          0.004835482,
+          18.974289855000002
+        ]
+      }
+    ]
+  },
+  {
+    "file": "apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 465,
+    "function": "_load_at_record",
+    "primitive_calls": 578,
+    "calls": 578,
+    "self_seconds": 0.047296915,
+    "inclusive_seconds": 18.638916043000002,
+    "callers": [
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+        "line": 458,
+        "function": "_at_record",
+        "stats": [
+          578,
+          578,
+          0.047296915,
+          18.638916043000002
+        ]
+      }
+    ]
+  },
+  {
+    "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 907,
+    "function": "_canonical_events",
+    "primitive_calls": 418,
+    "calls": 418,
+    "self_seconds": 0.014667805,
+    "inclusive_seconds": 17.513707417000003,
+    "callers": [
+      {
+        "file": "~",
+        "line": 0,
+        "function": "<built-in method builtins.next>",
+        "stats": [
+          209,
+          209,
+          0.007720546000000001,
+          8.79142974
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+        "line": 1053,
+        "function": "generate",
+        "stats": [
+          209,
+          209,
+          0.006947259000000001,
+          8.722277677000001
+        ]
+      }
+    ]
+  },
+  {
+    "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 146,
+    "function": "_read_member",
+    "primitive_calls": 3442,
+    "calls": 3442,
+    "self_seconds": 0.12317326,
+    "inclusive_seconds": 24.081370370000002,
+    "callers": [
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+        "line": 219,
+        "function": "segment_output_candidate",
+        "stats": [
+          242,
+          242,
+          0.007058587000000001,
+          1.848600247
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+        "line": 281,
+        "function": "<genexpr>",
+        "stats": [
+          3200,
+          3200,
+          0.116114673,
+          22.232770123
+        ]
+      }
+    ]
+  },
+  {
+    "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 702,
+    "function": "_created_output",
+    "primitive_calls": 456,
+    "calls": 456,
+    "self_seconds": 0.004439773,
+    "inclusive_seconds": 0.039832447,
+    "callers": [
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+        "line": 771,
+        "function": "verify_publication",
+        "stats": [
+          428,
+          428,
+          0.004134141,
+          0.037483957000000005
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/event_reads.py",
+        "line": 387,
+        "function": "segment_created_output",
+        "stats": [
+          14,
+          14,
+          0.00020871100000000001,
+          0.001441749
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+        "line": 940,
+        "function": "created",
+        "stats": [
+          14,
+          14,
+          9.6921e-05,
+          0.0009067410000000001
+        ]
+      }
+    ]
+  },
+  {
+    "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 767,
+    "function": "_load_fixed_file",
+    "primitive_calls": 3742,
+    "calls": 3742,
+    "self_seconds": 0.119644464,
+    "inclusive_seconds": 4.9586257400000004,
+    "callers": [
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+        "line": 764,
+        "function": "<lambda>",
+        "stats": [
+          3742,
+          3742,
+          0.119644464,
+          4.9586257400000004
+        ]
+      }
+    ]
+  },
+  {
+    "file": "apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+    "line": 491,
+    "function": "_at",
+    "primitive_calls": 578,
+    "calls": 578,
+    "self_seconds": 0.003644969,
+    "inclusive_seconds": 18.651518542,
+    "callers": [
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+        "line": 114,
+        "function": "_source",
+        "stats": [
+          16,
+          16,
+          0.000108194,
+          0.980734011
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+        "line": 146,
+        "function": "_read_member",
+        "stats": [
+          562,
+          562,
+          0.0035367750000000002,
+          17.670784531000002
+        ]
+      }
+    ]
+  },
+  {
+    "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+    "line": 758,
+    "function": "_fixed_file",
+    "primitive_calls": 3842,
+    "calls": 3842,
+    "self_seconds": 0.049515844,
+    "inclusive_seconds": 6.190575471000001,
+    "callers": [
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+        "line": 907,
+        "function": "_canonical_events",
+        "stats": [
+          400,
+          400,
+          0.0022579090000000002,
+          0.40929221000000005
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segments.py",
+        "line": 146,
+        "function": "_read_member",
+        "stats": [
+          3442,
+          3442,
+          0.047257935,
+          5.7812832610000005
+        ]
+      }
+    ]
+  },
+  {
+    "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+    "line": 76,
+    "function": "_verify_scope_members",
+    "primitive_calls": 3,
+    "calls": 3,
+    "self_seconds": 0.00038127100000000003,
+    "inclusive_seconds": 1.671048313,
+    "callers": [
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+        "line": 771,
+        "function": "verify_publication",
+        "stats": [
+          1,
+          1,
+          0.000176152,
+          0.7386220400000001
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+        "line": 993,
+        "function": "plan",
+        "stats": [
+          1,
+          1,
+          0.00014066100000000001,
+          0.492314466
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+        "line": 616,
+        "function": "verify_finish_request_event",
+        "stats": [
+          1,
+          1,
+          6.4458e-05,
+          0.440111807
+        ]
+      }
+    ]
+  }
+]

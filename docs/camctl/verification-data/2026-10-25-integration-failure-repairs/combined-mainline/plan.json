@@ -1,0 +1,206 @@
+[
+  {
+    "id": "camctl/history",
+    "scope": "camctl",
+    "path": "apps/camctl/tests/integration/history",
+    "targets": [
+      "apps/camctl/tests/integration/history/test_action6_video_result_history.py::test_action6_fixed_h_survives_obtain_delete_and_inspection_cleanup"
+    ],
+    "estimated_seconds": 1487.6323002960744
+  },
+  {
+    "id": "camctl/bootstrap",
+    "scope": "camctl",
+    "path": "apps/camctl/tests/integration/bootstrap",
+    "targets": [
+      "apps/camctl/tests/integration/bootstrap/test_distribution.py::test_installed_hasselblad_photo_pair_obtain_and_source_reuse[raw]",
+      "apps/camctl/tests/integration/bootstrap/test_distribution.py::test_installed_hasselblad_photo_pair_obtain_and_source_reuse[jpeg]",
+      "apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py::test_installed_device_photo_reclaims_then_downloads_both_sources_twice[raw]",
+      "apps/camctl/tests/integration/bootstrap/test_hasselblad_device_distribution.py::test_installed_device_photo_reclaims_then_downloads_both_sources_twice[jpeg]",
+      "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_result_pages_are_consumed_before_new_listing[partial]",
+      "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_result_pages_are_consumed_before_new_listing[terminal]",
+      "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_unavailable_original_read_keeps_progress_and_uses_own_consumer[missing-False]",
+      "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_unavailable_original_read_keeps_progress_and_uses_own_consumer[mismatch-False]",
+      "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_recovery_requires_boundary_horizon_and_authorization[boundary-UNCONFIRMED_BOUNDARY-read]",
+      "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_recovery_requires_boundary_horizon_and_authorization[horizon-MISSING_HORIZON-read]",
+      "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_recovery_requires_boundary_horizon_and_authorization[authorization-EVIDENCE_UNAVAILABLE-read]",
+      "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_formal_read_recovery_reuses_original_finish_after_real_unknown_commit",
+      "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_new_result_round_has_new_ticket_and_keeps_original_budget_and_pages[none]",
+      "apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_new_result_round_has_new_ticket_and_keeps_original_budget_and_pages[partial]",
+      "apps/camctl/tests/integration/bootstrap/test_osmo_video_mode_completion.py::test_osmo_native_segment_resume_publishes_saved_conclusion_without_device_calls",
+      "apps/camctl/tests/integration/bootstrap/test_result_error_flow.py::test_state_result_stops_following_flow_without_report_failure_write"
+    ],
+    "estimated_seconds": 733.239981505747
+  },
+  {
+    "id": "camctl/capture",
+    "scope": "camctl",
+    "path": "apps/camctl/tests/integration/capture",
+    "targets": [
+      "apps/camctl/tests/integration/capture/test_action6_budget_cold_recovery.py::test_action6_cold_recovery_decodes_saved_budget_and_continues_same_copy"
+    ],
+    "estimated_seconds": 642.2213893147964
+  },
+  {
+    "id": "root/test_camctl_c_module_roundtrip",
+    "scope": "root",
+    "path": "tests/integration/test_camctl_c_module_roundtrip.py",
+    "targets": [
+      "tests/integration/test_camctl_c_module_roundtrip.py::test_capture_obtain_cleanup_roundtrip_via_c_module",
+      "tests/integration/test_camctl_c_module_roundtrip.py::test_auto_preview_roundtrip_via_c_module"
+    ],
+    "estimated_seconds": 192.12057273100072,
+    "historical_failure_observed": true
+  },
+  {
+    "id": "root/test_action6_segmented_recovery_roundtrip",
+    "scope": "root",
+    "path": "tests/integration/test_action6_segmented_recovery_roundtrip.py",
+    "targets": [
+      "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[unknown-prefix]",
+      "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters"
+    ],
+    "estimated_seconds": 107.43371068299894,
+    "historical_failure_observed": true
+  },
+  {
+    "id": "camctl/reporting",
+    "scope": "camctl",
+    "path": "apps/camctl/tests/integration/reporting",
+    "targets": [
+      "apps/camctl/tests/integration/reporting/test_result_error_state.py::test_uninterpretable_frozen_error_stops_worker_without_publish"
+    ],
+    "estimated_seconds": 103.14239218303919
+  },
+  {
+    "id": "root/test_device_capability_declarations",
+    "scope": "root",
+    "path": "tests/integration/test_device_capability_declarations.py",
+    "targets": [
+      "tests/integration/test_device_capability_declarations.py::test_installed_metadata_reaches_parameter_form_and_device_guide",
+      "tests/integration/test_device_capability_declarations.py::test_installed_sources_control_browser_cleanup_across_reload_and_restart"
+    ],
+    "estimated_seconds": 85.05087643700244,
+    "historical_failure_observed": true
+  },
+  {
+    "id": "root/test_hasselblad_photo_roundtrip",
+    "scope": "root",
+    "path": "tests/integration/test_hasselblad_photo_roundtrip.py",
+    "targets": [
+      "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]"
+    ],
+    "estimated_seconds": 66.69664263199593,
+    "historical_failure_observed": false
+  },
+  {
+    "id": "root/test_camctl_output_roundtrip",
+    "scope": "root",
+    "path": "tests/integration/test_camctl_output_roundtrip.py",
+    "targets": [
+      "tests/integration/test_camctl_output_roundtrip.py::test_cross_plan_reference_and_multi_request",
+      "tests/integration/test_camctl_output_roundtrip.py::test_recording_delivery_survives_late_cancel",
+      "tests/integration/test_camctl_output_roundtrip.py::test_repeated_obtain_of_same_output_yields_independent_deliveries",
+      "tests/integration/test_camctl_output_roundtrip.py::test_auto_preview_obtains_registered_preview",
+      "tests/integration/test_camctl_output_roundtrip.py::test_three_capture_kinds_partial_obtain"
+    ],
+    "estimated_seconds": 65.46822007999435,
+    "historical_failure_observed": true
+  },
+  {
+    "id": "root/test_camctl_session_recovery",
+    "scope": "root",
+    "path": "tests/integration/test_camctl_session_recovery.py",
+    "targets": [
+      "tests/integration/test_camctl_session_recovery.py::test_report_failure_preserves_device_work_and_redelivers",
+      "tests/integration/test_camctl_session_recovery.py::test_concurrent_submits_and_duplicate_identity",
+      "tests/integration/test_camctl_session_recovery.py::test_process_restart_resumes_interrupted_work",
+      "tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed"
+    ],
+    "estimated_seconds": 41.68507860900354,
+    "historical_failure_observed": true
+  },
+  {
+    "id": "root/test_camctl_media_roundtrip",
+    "scope": "root",
+    "path": "tests/integration/test_camctl_media_roundtrip.py",
+    "targets": [
+      "tests/integration/test_camctl_media_roundtrip.py::test_excess_recording_repairs_without_probing",
+      "tests/integration/test_camctl_media_roundtrip.py::test_insufficient_timing_checks_repairs_and_delivers"
+    ],
+    "estimated_seconds": 30.222020892997534,
+    "historical_failure_observed": true
+  },
+  {
+    "id": "root/test_camctl_process_recovery",
+    "scope": "root",
+    "path": "tests/integration/test_camctl_process_recovery.py",
+    "targets": [
+      "tests/integration/test_camctl_process_recovery.py::test_next_run_waits_for_old_group_settlement[0]",
+      "tests/integration/test_camctl_process_recovery.py::test_next_run_waits_for_old_group_settlement[7]"
+    ],
+    "estimated_seconds": 14.78916218300219,
+    "historical_failure_observed": true
+  },
+  {
+    "id": "camctl/devices",
+    "scope": "camctl",
+    "path": "apps/camctl/tests/integration/devices",
+    "targets": [
+      "apps/camctl/tests/integration/devices/test_adb_camera_registration.py::test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-action6]",
+      "apps/camctl/tests/integration/devices/test_adb_camera_registration.py::test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-osmo360-ii]"
+    ],
+    "estimated_seconds": 13.731157597954734
+  },
+  {
+    "id": "root/test_video_size_estimate",
+    "scope": "root",
+    "path": "tests/integration/test_video_size_estimate.py",
+    "targets": [
+      "tests/integration/test_video_size_estimate.py::test_record_estimate_stays_out_of_execution_and_report"
+    ],
+    "estimated_seconds": 9.184687971999665,
+    "historical_failure_observed": false
+  },
+  {
+    "id": "root/test_camctl_capture_roundtrip",
+    "scope": "root",
+    "path": "tests/integration/test_camctl_capture_roundtrip.py",
+    "targets": [
+      "tests/integration/test_camctl_capture_roundtrip.py::test_timelapse_recovers_remaining_wait"
+    ],
+    "estimated_seconds": 6.748118077000981,
+    "historical_failure_observed": false
+  },
+  {
+    "id": "root/test_camctl_cancellation_roundtrip",
+    "scope": "root",
+    "path": "tests/integration/test_camctl_cancellation_roundtrip.py",
+    "targets": [
+      "tests/integration/test_camctl_cancellation_roundtrip.py::test_cleanup_unknown_preserves_original_request_result"
+    ],
+    "estimated_seconds": 6.5349627360010345,
+    "historical_failure_observed": true
+  },
+  {
+    "id": "root/test_timelapse_time_parameters",
+    "scope": "root",
+    "path": "tests/integration/test_timelapse_time_parameters.py",
+    "targets": [
+      "tests/integration/test_timelapse_time_parameters.py::test_describe_python_browser_and_node_export_agree[dji-action6]",
+      "tests/integration/test_timelapse_time_parameters.py::test_describe_python_browser_and_node_export_agree[dji-osmo360-ii]"
+    ],
+    "estimated_seconds": 6.0745075899940275,
+    "historical_failure_observed": true
+  },
+  {
+    "id": "root/test_hasselblad_photo_parameters",
+    "scope": "root",
+    "path": "tests/integration/test_hasselblad_photo_parameters.py",
+    "targets": [
+      "tests/integration/test_hasselblad_photo_parameters.py::test_installed_hasselblad_parameter_validation_agrees_across_consumers"
+    ],
+    "estimated_seconds": 4.019398795997404,
+    "historical_failure_observed": true
+  }
+]

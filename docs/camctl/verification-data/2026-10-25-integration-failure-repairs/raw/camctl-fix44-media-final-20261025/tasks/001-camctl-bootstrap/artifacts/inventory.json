@@ -1,0 +1,18 @@
+[
+  "tests/integration/bootstrap/test_adb_camera_dispatch.py::test_multistep_start_rechecks_current_business_qualification[False-canceled-camera_record]",
+  "tests/integration/bootstrap/test_adb_camera_dispatch.py::test_multistep_start_rechecks_current_business_qualification[False-canceled-camera_timelapse]",
+  "tests/integration/bootstrap/test_adb_camera_dispatch.py::test_multistep_start_rechecks_current_business_qualification[False-window_ended-camera_record]",
+  "tests/integration/bootstrap/test_adb_camera_dispatch.py::test_multistep_start_rechecks_current_business_qualification[False-window_ended-camera_timelapse]",
+  "tests/integration/bootstrap/test_adb_camera_dispatch.py::test_multistep_start_rechecks_current_business_qualification[True-canceled-camera_record]",
+  "tests/integration/bootstrap/test_adb_camera_dispatch.py::test_multistep_start_rechecks_current_business_qualification[True-canceled-camera_timelapse]",
+  "tests/integration/bootstrap/test_adb_camera_dispatch.py::test_multistep_start_rechecks_current_business_qualification[True-window_ended-camera_record]",
+  "tests/integration/bootstrap/test_adb_camera_dispatch.py::test_multistep_start_rechecks_current_business_qualification[True-window_ended-camera_timelapse]",
+  "tests/integration/bootstrap/test_adb_camera_dispatch.py::test_restart_dispatch_uses_original_admitted_parameters[30-5400-exposure0-0400002c01181500000000000000000000]",
+  "tests/integration/bootstrap/test_adb_camera_dispatch.py::test_restart_dispatch_uses_original_admitted_parameters[25-6000-exposure1-040000fa00701700000000000000000000]",
+  "tests/integration/bootstrap/test_adb_camera_dispatch.py::test_restart_dispatch_keeps_first_format_after_current_domain_narrows[dji-action6-interval_s-1-1-0400000a002c0100000000000000000000-False]",
+  "tests/integration/bootstrap/test_adb_camera_dispatch.py::test_restart_dispatch_keeps_first_format_after_current_domain_narrows[dji-osmo360-ii-duration_s-2-300-04000014002c01000000000000000000-False]",
+  "tests/integration/bootstrap/test_adb_camera_dispatch.py::test_restart_dispatch_keeps_first_format_after_current_domain_narrows[dji-osmo360-ii-interval_s-1-2-0400000a002c01000000000000000000-True]",
+  "tests/integration/bootstrap/test_adb_camera_dispatch.py::test_restart_with_unresolved_start_keeps_original_attempt_without_dispatch[30-5400-exposure0]",
+  "tests/integration/bootstrap/test_adb_camera_dispatch.py::test_restart_with_unresolved_start_keeps_original_attempt_without_dispatch[25-6000-exposure1]",
+  "tests/integration/bootstrap/test_adb_camera_dispatch.py::test_record_restart_dispatch_uses_original_parameters_after_schema_narrows"
+]

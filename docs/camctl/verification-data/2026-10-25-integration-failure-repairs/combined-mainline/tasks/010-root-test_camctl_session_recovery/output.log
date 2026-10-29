@@ -1,0 +1,10 @@
+....                                                                     [100%]
+============================== slowest durations ===============================
+44.93s call     tests/integration/test_camctl_session_recovery.py::test_report_failure_preserves_device_work_and_redelivers
+33.90s call     tests/integration/test_camctl_session_recovery.py::test_concurrent_submits_and_duplicate_identity
+22.93s call     tests/integration/test_camctl_session_recovery.py::test_process_restart_resumes_interrupted_work
+19.40s call     tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed
+0.01s setup    tests/integration/test_camctl_session_recovery.py::test_report_failure_preserves_device_work_and_redelivers
+
+(7 durations < 0.005s hidden.  Use -vv to show these durations.)
+4 passed in 121.37s (0:02:01)

@@ -14,12 +14,14 @@ from camctl.contracts.schemas import validate_document
 from camctl.contracts.values import new_operation_key
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.evidence import DeviceObservation, EvidenceRegistry
-from camctl.devices.ports import DeviceCallResult
+from camctl.devices.ports import DeviceCallResult, DriverDeclaration
+from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverStatus
 from camctl.history.snapshots import prepare_snapshot
 from camctl.operations.attempts import AttemptConfig, RetryWaitGate
-from camctl.outputs.cleanup_flow import CleanupRuntime, advance_cleanup
+from camctl.outputs.cleanup_flow import advance_cleanup
+from camctl.bootstrap.cleanup_assembly import session_cleanup_assembly
 from camctl.outputs.handoff import DeliveryDirectories
-from camctl.outputs.obtain_flow import ObtainRuntime, advance_obtain
+from camctl.outputs.obtain_flow import advance_obtain
 from camctl.outputs.work_files import (
     WorkFileContext,
     WorkFileLimits,
@@ -53,6 +55,8 @@ from ..capture.test_record_file_completion_wait import _NOW
 from ..outputs.test_segment_default_scope import ObtainCatalog, _obtain
 from ..outputs.test_cleanup_recovery import _EVIDENCE as CLEANUP_EVIDENCE
 from ..reporting.test_generation import _freeze, _spec
+from ..support.outputs import obtain_factory
+from ..support.capture import capture_database
 
 pytestmark = pytest.mark.asyncio
 
@@ -86,13 +90,15 @@ class _StrategyHistory(HistoryRepository):
         self._forced_batch_size = batch_size
 
     def open_segment_history(
-        self, action_id, boundary, *, strategy="auto", batch_size=128
+        self, action_id, boundary, *, strategy="auto", batch_size=128,
+        event_batch_size=256,
     ):
         return super().open_segment_history(
             action_id,
             boundary,
             strategy=self._forced_strategy,
             batch_size=self._forced_batch_size,
+            event_batch_size=event_batch_size,
         )
 
 
@@ -179,7 +185,7 @@ def _generate_at_h(tmp_path, report, *, strategy, batch_size, name):
 
 
 async def test_action6_fixed_h_survives_obtain_delete_and_inspection_cleanup(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, capture_resources
 ):
     owned, capture_runtime, action_id, handler, _tools = await _overrun_recording(
         tmp_path, (Decimal("18"),)
@@ -215,31 +221,31 @@ async def test_action6_fixed_h_survives_obtain_delete_and_inspection_cleanup(
         )
         directories.ready.mkdir(exist_ok=True)
         directories.processing.mkdir(exist_ok=True)
-        executor = FileTaskExecutor(Supervisor())
-        obtain_runtime = ObtainRuntime(
-            owned=owned,
-            devices={},
-            directories=directories,
-            segment_size=4,
-            retry_gate=RetryWaitGate(),
-            monotonic_ns=lambda: 22_000_000_000,
-            occurred_at=lambda: _NOW + 600_000_001,
-            outputs=OutputsRepository(),
-            operations=OperationRepository(),
-            file_executor=executor,
-        )
+        supervisor = Supervisor()
+        executor = FileTaskExecutor(supervisor)
+        database = await capture_database(owned)
+        factory = obtain_factory(devices={}, drivers=DriverRegistry(()),
+            staging=directories.staging, ready=directories.ready, processing=directories.processing,
+            segment_size=4, monotonic_ns=lambda: 22_000_000_000,
+            occurred_at=lambda: _NOW + 600_000_001, file_executor=executor)
+        obtain_runtime = factory(database)
 
-        # 真实 Obtain 编排创建已授权交付，然后在读取前冻结 H。
-        # H 后恢复该 delivery/copy，完成实际读取、摘要和发布。
-        import camctl.outputs.obtain_flow as obtain_flow
-
-        async def pause_after_grant(_runtime, _now):
-            return None
-
-        original_local_reads = obtain_flow._advance_local_reads
-        monkeypatch.setattr(obtain_flow, "_advance_local_reads", pause_after_grant)
-        await advance_obtain(obtain_runtime)
-        monkeypatch.setattr(obtain_flow, "_advance_local_reads", original_local_reads)
+        # 在公开数据库写入边界取得可靠授予后暂停，H 尚无实际读取结果。
+        from camctl.outputs.qualification import FileQualification
+        class GrantSaved(BaseException):
+            pass
+        write = database.write
+        async def pause_after_grant(callback, **options):
+            result = await write(callback, **options)
+            if result.kind is DbOutcomeKind.COMPLETED and isinstance(result.value, FileQualification):
+                raise GrantSaved()
+            return result
+        database.write = pause_after_grant
+        try:
+            with pytest.raises(GrantSaved):
+                await advance_obtain(obtain_runtime)
+        finally:
+            database.write = write
         assert owned.connection.execute(
             "SELECT status FROM actions WHERE id=?", (obtain_action_id,)
         ).fetchone() == (2,)
@@ -362,8 +368,11 @@ async def test_action6_fixed_h_survives_obtain_delete_and_inspection_cleanup(
         assert source_file_at_h["sha256"] is None
         assert inspection_file_at_h["cleanup_state"] != 4
 
-        obtain_runtime.occurred_at = lambda: _NOW + 650_000_000
-        obtain_runtime.monotonic_ns = lambda: 23_000_000_000
+        database = await capture_resources.restart_database(owned)
+        obtain_runtime = obtain_factory(devices={}, drivers=DriverRegistry(()),
+            staging=directories.staging, ready=directories.ready, processing=directories.processing,
+            segment_size=4, monotonic_ns=lambda: 23_000_000_000,
+            occurred_at=lambda: _NOW + 650_000_000, file_executor=executor)(database)
         for _ in range(4):
             await advance_obtain(obtain_runtime)
             if owned.connection.execute(
@@ -397,20 +406,15 @@ async def test_action6_fixed_h_survives_obtain_delete_and_inspection_cleanup(
         delete_action_id, = owned.connection.execute(
             "SELECT MAX(id) FROM actions WHERE type=5"
         ).fetchone()
-        cleanup_runtime = CleanupRuntime(
-            owned=owned,
-            outputs=OutputsRepository(),
-            operations=OperationRepository(),
-            driver=_AbsentDeviceFile(),
-            evidence=CLEANUP_EVIDENCE,
-            binding_of=lambda _item_id: _BINDING,
-            occurred_at=lambda: delete_now + 1,
-            delete_config=AttemptConfig(1, Decimal("10"), Decimal(0)),
-            query_config=AttemptConfig(1, Decimal("10"), Decimal(0)),
-            retry_gate=RetryWaitGate(),
-            delete_supported=True,
-            query_supported=True,
-        )
+        deletion = _AbsentDeviceFile()
+        declaration = DriverDeclaration(False, False, False, False, False, False, True,
+            file_query_supported=True)
+        drivers = DriverRegistry((DriverEntry("camctl-adb", deletion, declaration,
+            CLEANUP_EVIDENCE, DriverStatus.SOFTWARE_CONTRACT_VERIFIED),))
+        cleanup_runtime = await session_cleanup_assembly(
+            devices={"cam-1": {"driver": "camctl-adb"}}, drivers=drivers,
+            max_delete_attempts=1, max_query_attempts=1,
+            staging=staging, file_executor=executor, occurred_at=lambda: delete_now + 1)(database)
         await advance_cleanup(cleanup_runtime)
         assert owned.connection.execute(
             "SELECT status FROM actions WHERE id=?", (delete_action_id,)
@@ -425,7 +429,7 @@ async def test_action6_fixed_h_survives_obtain_delete_and_inspection_cleanup(
             inspection_file_id,
             WorkFileContext(
                 repository=OutputsRepository(),
-                owned=owned,
+                database=database,
                 staging=staging,
                 occurred_at=delete_now + 3,
                 limits=WorkFileLimits(batch_size=16, limit_per_run=16),
@@ -518,4 +522,6 @@ async def test_action6_fixed_h_survives_obtain_delete_and_inspection_cleanup(
         assert source_at_h["presence_state"] != 3
         assert inspection_at_h["cleanup_state"] != 4
     finally:
+        if "supervisor" in locals():
+            assert not (await supervisor.drain_required()).failed
         owned.connection.close()

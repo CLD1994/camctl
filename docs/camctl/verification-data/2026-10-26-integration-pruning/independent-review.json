@@ -1,0 +1,20 @@
+{
+  "reviewer": "/root/review_pruning",
+  "mode": "独立只读评审",
+  "reviewed_commits": [
+    "08325170",
+    "59b6aa25",
+    "6fd11080",
+    "8c1ed827",
+    "11f91c01",
+    "9d73653c",
+    "7ede4e67"
+  ],
+  "conclusion": "未发现删除造成的确定有效覆盖缺口。原输入、断言及失败恢复目标已核对；capture 的完整数据库不变断言和 reporting 的错误非空断言已经合并到保留用例。",
+  "tests_executed_by_reviewer": false,
+  "limits": [
+    "旧页缓存文件仍不能收集。",
+    "保留的拍摄时长矩阵、部分报告测试仍有既有准备接口失配。",
+    "收集及定向通过不能代表整套集成回归通过。"
+  ]
+}

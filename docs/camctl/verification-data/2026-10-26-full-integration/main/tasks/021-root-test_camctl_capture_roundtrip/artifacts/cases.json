@@ -1,0 +1,40 @@
+[
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/021-root-test_camctl_capture_roundtrip/source/tests/integration/test_camctl_capture_roundtrip.py::test_photo_keeps_completed_outputs",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011556560057215393
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 13.893360711008427
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.013414790999377146
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 13.907931158013525
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/021-root-test_camctl_capture_roundtrip/source/tests/integration/test_camctl_capture_roundtrip.py::test_timelapse_recovers_remaining_wait",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013143880059942603
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 8.842007989005651
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.016154965007444844
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 8.85947734201909
+  }
+]

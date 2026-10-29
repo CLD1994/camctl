@@ -2,7 +2,7 @@
 import pytest
 
 from camctl.capture.segment_storage import PublicationKind,ResultSetCreate,SegmentSourceKind
-from camctl.capture.handlers import _begin_check_round
+from .result_page_fixtures import begin_result_check
 from camctl.contracts.values import new_operation_key
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.directory import DirectoryCursor
@@ -24,7 +24,7 @@ async def test_full_member_batch_and_following_page_fix_all_129_actual_sources(t
     from camctl.persistence.repositories.segment_result_members import ResultMembersCommand
     owned,runtime,action_id,_=await consumer_world(tmp_path,'record',catalog=SegmentedCatalog())
     try:
-        ticket=_begin_check_round(runtime,action_id).ticket
+        ticket=begin_result_check(owned,runtime,action_id).ticket
         binding=DeviceBinding('cam-1','camctl-adb')
         entries=[{'identity':f'/DCIM/CAM_001/CAM_20261021090000_{number:04d}_D.OSV',
             'locator':{'path':f'/DCIM/CAM_001/CAM_20261021090000_{number:04d}_D.OSV'},

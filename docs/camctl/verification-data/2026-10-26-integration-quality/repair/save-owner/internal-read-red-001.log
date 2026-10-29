@@ -1,0 +1,129 @@
+FFFF                                                                     [100%]
+=================================== FAILURES ===================================
+_ test_internal_read_recovery_shares_result_and_slot_consumption_before_cancel[result] _
+
+blocked = 'result'
+
+    @pytest.mark.parametrize("blocked", ["result", "slot"])
+    async def test_internal_read_recovery_shares_result_and_slot_consumption_before_cancel(blocked):
+        flow, pending = _flow()
+        flow.database.read.return_value = (None, None)
+        entered, release = asyncio.Event(), asyncio.Event()
+        writes = []
+    
+        async def write(callback, *, key, **kwargs):
+            stage = "result" if key == pending.key else "slot"
+            writes.append(stage)
+            if stage == blocked:
+                entered.set()
+                await release.wait()
+            return DbOutcome(DbOutcomeKind.COMPLETED)
+    
+        flow.database.write.side_effect = write
+        first = asyncio.create_task(_save_internal_read_and_settle(flow, pending))
+        await entered.wait()
+        second = asyncio.create_task(_save_internal_read_and_settle(flow, pending))
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        first.cancel("internal read waiter")
+        await asyncio.sleep(0)
+        assert not first.done()
+        release.set()
+        results = await asyncio.gather(first, second, return_exceptions=True)
+    
+>       assert isinstance(results[0], asyncio.CancelledError) and results[1] is None
+E       AssertionError: assert (True and KeyError((28, 1)) is None)
+E        +  where True = isinstance(CancelledError(''), <class 'asyncio.exceptions.CancelledError'>)
+E        +    where <class 'asyncio.exceptions.CancelledError'> = asyncio.CancelledError
+
+apps/camctl/tests/unit/capture/test_internal_read_save_owner.py:67: AssertionError
+_ test_internal_read_recovery_shares_result_and_slot_consumption_before_cancel[slot] _
+
+blocked = 'slot'
+
+    @pytest.mark.parametrize("blocked", ["result", "slot"])
+    async def test_internal_read_recovery_shares_result_and_slot_consumption_before_cancel(blocked):
+        flow, pending = _flow()
+        flow.database.read.return_value = (None, None)
+        entered, release = asyncio.Event(), asyncio.Event()
+        writes = []
+    
+        async def write(callback, *, key, **kwargs):
+            stage = "result" if key == pending.key else "slot"
+            writes.append(stage)
+            if stage == blocked:
+                entered.set()
+                await release.wait()
+            return DbOutcome(DbOutcomeKind.COMPLETED)
+    
+        flow.database.write.side_effect = write
+        first = asyncio.create_task(_save_internal_read_and_settle(flow, pending))
+        await entered.wait()
+        second = asyncio.create_task(_save_internal_read_and_settle(flow, pending))
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        first.cancel("internal read waiter")
+        await asyncio.sleep(0)
+        assert not first.done()
+        release.set()
+        results = await asyncio.gather(first, second, return_exceptions=True)
+    
+>       assert isinstance(results[0], asyncio.CancelledError) and results[1] is None
+E       AssertionError: assert (True and KeyError((28, 1)) is None)
+E        +  where True = isinstance(CancelledError(''), <class 'asyncio.exceptions.CancelledError'>)
+E        +    where <class 'asyncio.exceptions.CancelledError'> = asyncio.CancelledError
+
+apps/camctl/tests/unit/capture/test_internal_read_save_owner.py:67: AssertionError
+_ test_internal_read_committed_notification_error_applies_required_slot_before_propagation _
+
+    async def test_internal_read_committed_notification_error_applies_required_slot_before_propagation():
+        flow, pending = _flow()
+        flow.database.read.return_value = (None, None)
+        failure = RuntimeError("原读取已提交后的通知失败")
+        _attach_db_outcome(failure, DbOutcome(DbOutcomeKind.COMPLETED))
+        flow.database.write.side_effect = [failure, DbOutcome(DbOutcomeKind.COMPLETED)]
+    
+        with pytest.raises(RuntimeError) as raised:
+            await _save_internal_read_and_settle(flow, pending)
+    
+        assert raised.value is failure
+>       assert not flow.pending_read_results and not flow.pending_read_business
+E       AssertionError: assert (not {(28, 1): PendingReadResult(finish=AttemptFinish(ticket=AttemptTicket(attempt_id=1, operation='read', target_id='9', r...CEEDED: 'succeeded'>, error=None), recovery_max_event_id=None), key='5da754e24e647f1e549f8aa85b97366c', business=None)})
+E        +  where {(28, 1): PendingReadResult(finish=AttemptFinish(ticket=AttemptTicket(attempt_id=1, operation='read', target_id='9', r...CEEDED: 'succeeded'>, error=None), recovery_max_event_id=None), key='5da754e24e647f1e549f8aa85b97366c', business=None)} = namespace(database=<NonCallableMagicMock spec_set='BusinessDatabase' id='139819849394128'>, operations=<NonCallableMag...4e647f1e549f8aa85b97366c', business=None)}, pending_read_business={}, pending_read_ends={}, continuing_read_tickets={}).pending_read_results
+
+apps/camctl/tests/unit/capture/test_internal_read_save_owner.py:83: AssertionError
+_ test_read_business_recovery_shares_original_receipt_callback_and_consumption _
+
+    async def test_read_business_recovery_shares_original_receipt_callback_and_consumption():
+        flow, _pending = _flow()
+        repository = create_autospec(OutputsRepository, instance=True, spec_set=True)
+        request = SlotRequest(9, 123)
+        applied = []
+        entered, release = asyncio.Event(), asyncio.Event()
+    
+        async def write(callback, **kwargs):
+            entered.set()
+            await release.wait()
+            return DbOutcome(DbOutcomeKind.COMPLETED, "released")
+    
+        flow.database.write.side_effect = write
+        first = asyncio.create_task(save_read_business(flow, 9, "release_read_slot", request,
+            repository.release_read_slot, on_completed=applied.append))
+        await entered.wait()
+        second = asyncio.create_task(retry_read_business(flow))
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        release.set()
+        results = await asyncio.gather(first, second, return_exceptions=True)
+    
+>       assert not any(isinstance(value, BaseException) for value in results)
+E       assert not True
+E        +  where True = any(<generator object test_read_business_recovery_shares_original_receipt_callback_and_consumption.<locals>.<genexpr> at 0x7f2a586a6ea0>)
+
+apps/camctl/tests/unit/capture/test_internal_read_save_owner.py:109: AssertionError
+=========================== short test summary info ============================
+FAILED apps/camctl/tests/unit/capture/test_internal_read_save_owner.py::test_internal_read_recovery_shares_result_and_slot_consumption_before_cancel[result]
+FAILED apps/camctl/tests/unit/capture/test_internal_read_save_owner.py::test_internal_read_recovery_shares_result_and_slot_consumption_before_cancel[slot]
+FAILED apps/camctl/tests/unit/capture/test_internal_read_save_owner.py::test_internal_read_committed_notification_error_applies_required_slot_before_propagation
+FAILED apps/camctl/tests/unit/capture/test_internal_read_save_owner.py::test_read_business_recovery_shares_original_receipt_callback_and_consumption
+4 failed in 0.55s

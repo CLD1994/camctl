@@ -1,0 +1,59 @@
+[
+  {
+    "nodeid": "tests/integration/test_camctl_media_roundtrip.py::test_insufficient_timing_checks_repairs_and_delivers",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0021501729934243485
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 21.199501556999166
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004380950122140348
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 21.202089825004805
+  },
+  {
+    "nodeid": "tests/integration/test_camctl_media_roundtrip.py::test_excess_recording_repairs_without_probing",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011056600051233545
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 11.981368512002518
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00047091000305954367
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 11.982945082010701
+  },
+  {
+    "nodeid": "tests/integration/test_camctl_media_roundtrip.py::test_managed_tool_children_stay_in_process_group",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003935529966838658
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.010352404991863295
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008603970054537058
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.011606354994000867
+  }
+]

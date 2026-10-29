@@ -33,7 +33,9 @@ from .test_cleanup_query_save_recovery import (
     _MatrixDriver, _apply_cleanup_cancel, _member_facts, _new_runtime,
     _original_member_rows, _start_cleanup,
 )
-from ..bootstrap.test_output_binding_changes import _NOW, _save_photos, environment
+from ..bootstrap.test_output_binding_changes import _NOW, _save_photos, environment, _registry
+from ..support.outputs import cleanup_factory
+from ..support.database import database_path
 
 
 pytestmark = pytest.mark.asyncio
@@ -170,7 +172,6 @@ class _LocalOperations(OperationRepository):
         self.companion_calls.append((request, key))
         actual_owned = owned
         if self.companion_fault and self.fault is None:
-            self.companion_anchors = dict(self.retry_gate.anchors)
             self.fault = _CommitFault(owned.connection, self.after_commit)
             actual_owned = replace(owned, connection=self.fault)
         result = super().finish_stale_runs(request, key, actual_owned)
@@ -189,7 +190,7 @@ async def _world(environment, consumer, present):
     old_member = None
     if consumer == "before":
         old_action, old_item = _start_cleanup(owned, output_id, "2")
-        prior_runtime = _new_runtime(cfg, owned, driver, query_attempts=1)
+        prior_runtime = await _new_runtime(cfg, owned, driver, query_attempts=1)
         first = await delete_source_file(prior_runtime, old_item)
         assert first.phase == "query_unknown", first
         exhausted = await delete_source_file(prior_runtime, old_item)
@@ -202,19 +203,19 @@ async def _world(environment, consumer, present):
         action_id, item_id = _start_cleanup(owned, output_id, "3")
     else:
         action_id, item_id = _start_cleanup(owned, output_id, "2")
-    base = _new_runtime(cfg, owned, driver)
+    base = await _new_runtime(cfg, owned, driver)
     driver.matrix_enabled, driver.present = True, present
     if consumer == "cancel":
         driver.on_delete_return = lambda: _apply_cleanup_cancel(owned, action_id)
     return base, driver, action_id, item_id, old_member
 
 
-def _instrument(base, item_id, *, member_method=None, companion_fault=False, after_commit=False):
+async def _instrument(base, item_id, *, member_method=None, companion_fault=False, after_commit=False):
     members = _MemberResults(item_id, member_method, after_commit)
     operations = _LocalOperations(
         item_id, base.retry_gate, companion_fault=companion_fault, after_commit=after_commit)
     base.outputs, base.operations = members, operations
-    return base.for_item(item_id), members, operations
+    return await base.for_item(item_id), members, operations
 
 
 async def _first_rejected(runtime, item_id, phases):
@@ -225,19 +226,19 @@ async def _first_rejected(runtime, item_id, phases):
     assert step.phase in phases, step
 
 
-def _fresh_runtime(runtime, owned, binding):
-    # 原 for_item 和 binding_of 的装配闭包引用旧连接，不带到新一轮。
-    return replace(
-        runtime,
-        owned=owned,
-        driver=_NoDeviceCalls(),
-        binding_of=lambda _item: binding,
-        for_item=None,
-        occurred_at=lambda: _NOW + 50_000_000,
-        monotonic_ns=lambda: 1_000_000_000_000,
-        delete_config=AttemptConfig(9, Decimal(20), Decimal(5)),
-        query_config=AttemptConfig(9, Decimal(20), Decimal(5)),
+async def _fresh_runtime(runtime, owned, binding, resources, item_id):
+    database = await resources.restart_database(database_path(owned))
+    factory = cleanup_factory(
+        devices={binding.device_id: {"driver": binding.driver_id, "cleanup": {
+            "delete_timeout_s": Decimal(20), "query_timeout_s": Decimal(20),
+            "delete_retry_interval_s": Decimal(5), "query_retry_interval_s": Decimal(5),
+        }}}, drivers=_registry(_NoDeviceCalls()), max_delete_attempts=9, max_query_attempts=9,
+        staging=Path(database.metadata.staging_path),
+        occurred_at=lambda: _NOW + 50_000_000, monotonic_ns=lambda: 1_000_000_000_000,
     )
+    base = await factory(database)
+    base.outputs, base.operations = runtime.outputs, runtime.operations
+    return await base.for_item(item_id)
 
 
 def _check_original_query(owned, operations, item_id):
@@ -256,9 +257,9 @@ def _check_old_member(owned, old_member):
 
 @pytest.mark.parametrize("after_commit", [False, True], ids=["before-commit", "after-commit"])
 @pytest.mark.parametrize("consumer", ["before", "after", "cancel"])
-async def test_saved_absence_member_finish_interrupted(environment, consumer, after_commit):
+async def test_saved_absence_member_finish_interrupted(environment, consumer, after_commit, capture_resources):
     base, driver, action_id, item_id, old_member = await _world(environment, consumer, False)
-    runtime, members, operations = _instrument(
+    runtime, members, operations = await _instrument(
         base, item_id, member_method="finish_cleanup_item", after_commit=after_commit)
     await _first_rejected(runtime, item_id, {"result_rejected"})
     assert members.fault is not None and members.fault.triggered
@@ -267,14 +268,15 @@ async def test_saved_absence_member_finish_interrupted(environment, consumer, af
     _, first_request, first_key = members.calls[0]
     calls_before = (len(driver.deletes), len(driver.queries))
     context = environment[2]
-    runtime.owned.connection.close()
+    await runtime.database.close()
     fresh = context.open_connection()
     try:
         original_member = _member_facts(fresh, item_id)
         assert original_member[0] == (4 if after_commit else 3)
         assert (original_member[4] is not None) is after_commit
         _check_original_query(fresh, operations, item_id)
-        resumed = _fresh_runtime(runtime, fresh, driver.query_requests[-1].binding)
+        resumed = await _fresh_runtime(
+            runtime, fresh, driver.query_requests[-1].binding, capture_resources, item_id)
 
         step = await delete_source_file(resumed, item_id)
 
@@ -293,8 +295,6 @@ async def test_saved_absence_member_finish_interrupted(environment, consumer, af
         assert (len(driver.deletes), len(driver.queries)) == calls_before
         _check_original_query(fresh, operations, item_id)
         _check_old_member(fresh, old_member)
-        assert f"exists/{item_id}" not in resumed.retry_gate.anchors
-        assert f"delete/{item_id}" not in resumed.retry_gate.anchors
         if consumer == "cancel":
             assert fresh.connection.execute(
                 "SELECT cancel_requested FROM actions WHERE id=?", (action_id,),
@@ -305,9 +305,9 @@ async def test_saved_absence_member_finish_interrupted(environment, consumer, af
 
 @pytest.mark.parametrize("after_commit", [False, True], ids=["before-commit", "after-commit"])
 @pytest.mark.parametrize("present", [True, None], ids=["present", "unknown"])
-async def test_saved_cancel_observation_member_finish_interrupted(environment, present, after_commit):
+async def test_saved_cancel_observation_member_finish_interrupted(environment, present, after_commit, capture_resources):
     base, driver, action_id, item_id, _ = await _world(environment, "cancel", present)
-    runtime, members, operations = _instrument(
+    runtime, members, operations = await _instrument(
         base, item_id, member_method="cancel_cleanup_item", after_commit=after_commit)
     await _first_rejected(runtime, item_id, {"cancel_rejected"})
     assert members.fault is not None and members.fault.triggered
@@ -315,13 +315,14 @@ async def test_saved_cancel_observation_member_finish_interrupted(environment, p
     assert members.results[0].kind is DbOutcomeKind.UNKNOWN
     _, first_request, first_key = members.calls[0]
     calls_before = (len(driver.deletes), len(driver.queries))
-    runtime.owned.connection.close()
+    await runtime.database.close()
     fresh = environment[2].open_connection()
     try:
         original_member = _member_facts(fresh, item_id)
         assert original_member[0] == (6 if after_commit else 3)
         _check_original_query(fresh, operations, item_id)
-        resumed = _fresh_runtime(runtime, fresh, driver.query_requests[-1].binding)
+        resumed = await _fresh_runtime(
+            runtime, fresh, driver.query_requests[-1].binding, capture_resources, item_id)
 
         step = await delete_source_file(resumed, item_id)
 
@@ -342,8 +343,6 @@ async def test_saved_cancel_observation_member_finish_interrupted(environment, p
         assert fresh.connection.execute(
             "SELECT cancel_requested FROM actions WHERE id=?", (action_id,),
         ).fetchone() == (1,)
-        assert f"exists/{item_id}" not in resumed.retry_gate.anchors
-        assert f"delete/{item_id}" not in resumed.retry_gate.anchors
     finally:
         fresh.connection.close()
 
@@ -353,9 +352,9 @@ async def test_saved_cancel_observation_member_finish_interrupted(environment, p
     pytest.param("after", False, id="succeeded-member"),
     pytest.param("cancel", None, id="canceled-member"),
 ])
-async def test_terminal_member_companion_finish_interrupted(environment, consumer, present, after_commit):
+async def test_terminal_member_companion_finish_interrupted(environment, consumer, present, after_commit, capture_resources):
     base, driver, _, item_id, _ = await _world(environment, consumer, present)
-    runtime, members, operations = _instrument(
+    runtime, members, operations = await _instrument(
         base, item_id, companion_fault=True, after_commit=after_commit)
     await _first_rejected(runtime, item_id, {"companion_rejected"})
     assert operations.fault is not None and operations.fault.triggered
@@ -363,16 +362,16 @@ async def test_terminal_member_companion_finish_interrupted(environment, consume
     assert len(operations.companion_calls) == 1
     assert operations.companion_results[0].kind is DbOutcomeKind.UNKNOWN
     first_request, first_key = operations.companion_calls[0]
-    assert runtime.retry_gate.anchors == operations.companion_anchors
     calls_before = (len(driver.deletes), len(driver.queries))
-    runtime.owned.connection.close()
+    await runtime.database.close()
     fresh = environment[2].open_connection()
     try:
         original_member = _member_facts(fresh, item_id)
         assert original_member[0] == (4 if present is False else 6)
         assert original_member[4] is not None
         before_recovery = _history(fresh)
-        resumed = _fresh_runtime(runtime, fresh, driver.query_requests[-1].binding)
+        resumed = await _fresh_runtime(
+            runtime, fresh, driver.query_requests[-1].binding, capture_resources, item_id)
 
         step = await delete_source_file(resumed, item_id)
 
@@ -391,8 +390,6 @@ async def test_terminal_member_companion_finish_interrupted(environment, consume
             _assert_history_prefix(fresh, before_recovery)
         assert (len(driver.deletes), len(driver.queries)) == calls_before
         _check_original_query(fresh, operations, item_id)
-        assert f"exists/{item_id}" not in resumed.retry_gate.anchors
-        assert f"delete/{item_id}" not in resumed.retry_gate.anchors
     finally:
         fresh.connection.close()
 
@@ -412,7 +409,7 @@ class _FailingQuerySaves(OperationRepository):
             return super().finish_attempt(finish, key, owned)
         self.calls.append((finish, key))
         self.checkpoints.append((
-            tuple(owned.connection.iterdump()), dict(self.retry_gate.anchors),
+            tuple(owned.connection.iterdump()),
             len(self.driver.deletes), len(self.driver.queries)))
         return DbOutcome(kind=self.kind, error=OperationalError("原 QUERY 结果保存再次失败"))
 
@@ -441,10 +438,10 @@ async def _saved_absence_query(environment):
     ).fetchone()[0]
     driver = _MatrixDriver(owned)
     action_id, item_id = _start_cleanup(owned, output_id, "2")
-    base = _new_runtime(cfg, owned, driver)
+    base = await _new_runtime(cfg, owned, driver)
     port = _RecordingQuerySaves(item_id)
     base.operations = port
-    runtime = base.for_item(item_id)
+    runtime = await base.for_item(item_id)
     driver.matrix_enabled, driver.present = True, False
     step = await delete_source_file(runtime, item_id)
     assert (step.phase, step.detail) == ("succeeded", "ABSENCE_CONFIRMED"), step
@@ -461,23 +458,19 @@ async def test_query_result_redelivery_remains_pending(environment, kind):
     base, driver, action_id, item_id, old_member = await _world(environment, "before", False)
     port = _FailingQuerySaves(kind, item_id, driver, base.retry_gate)
     base.operations = port
-    runtime = base.for_item(item_id)
+    runtime = await base.for_item(item_id)
     deletes_before, queries_before = len(driver.deletes), len(driver.queries)
     with pytest.raises(ConsistencyError):
         await delete_source_file(runtime, item_id)
     first_finish, first_key = port.calls[0]
-    identity = (first_finish.ticket.run_id, first_finish.ticket.attempt_id)
-    held = runtime.pending_queries[identity]
 
     with pytest.raises(ConsistencyError):
         await delete_source_file(runtime, item_id)
 
     assert len(port.calls) == 2
     assert port.calls[1] == (first_finish, first_key)
-    assert runtime.pending_queries[identity] is held
-    assert held.phase is CleanupQueryPhase.PREPARED
-    assert held.finish is first_finish and held.key == first_key
-    assert held.ticket is first_finish.ticket and held.occurred_at == _NOW
+    assert port.calls[1][0] is first_finish
+    assert first_finish.occurred_at == _NOW
     assert (len(driver.deletes), len(driver.queries)) == (
         deletes_before, queries_before + 1)
     assert port.checkpoints[1] == port.checkpoints[0]

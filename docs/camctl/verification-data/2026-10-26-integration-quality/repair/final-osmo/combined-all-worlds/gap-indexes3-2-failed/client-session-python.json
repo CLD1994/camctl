@@ -1,0 +1,251 @@
+{
+  "schema_version": 1,
+  "session_id": "52970714-6165-49a0-8c27-5f939ec9fde9",
+  "nodeid": "tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[gap-indexes3-2-failed]",
+  "command_prefix": [
+    "node",
+    "--import",
+    "tsx",
+    "/tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/client_driver.ts"
+  ],
+  "phase_timeout_seconds": 120,
+  "startup": {
+    "started_monotonic_ns": 107995926672062,
+    "finished_monotonic_ns": 107997290400428,
+    "elapsed_seconds": 1.363728366,
+    "outcome": "passed"
+  },
+  "commands": [
+    {
+      "id": 1,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/plan-body.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-plan-1.json"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-receipts/001-client-export.json",
+      "started_monotonic_ns": 107997291233011,
+      "finished_monotonic_ns": 107997630723773,
+      "elapsed_seconds": 0.339490762,
+      "outcome": "passed"
+    },
+    {
+      "id": 2,
+      "operation": "import",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/deployment/processing",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-store"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-receipts/002-client-import.json",
+      "started_monotonic_ns": 108007679794270,
+      "finished_monotonic_ns": 108007752201699,
+      "elapsed_seconds": 0.072407429,
+      "outcome": "passed"
+    },
+    {
+      "id": 3,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/plan-body.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-plan-2.json"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-receipts/003-client-export.json",
+      "started_monotonic_ns": 108007753595178,
+      "finished_monotonic_ns": 108008090038613,
+      "elapsed_seconds": 0.336443435,
+      "outcome": "passed"
+    },
+    {
+      "id": 4,
+      "operation": "import",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/deployment/processing",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-store"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-receipts/004-client-import.json",
+      "started_monotonic_ns": 108014188195022,
+      "finished_monotonic_ns": 108014424659115,
+      "elapsed_seconds": 0.236464093,
+      "outcome": "passed"
+    },
+    {
+      "id": 5,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/plan-body.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-plan-3.json"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-receipts/005-client-export.json",
+      "started_monotonic_ns": 108014426492747,
+      "finished_monotonic_ns": 108014570793135,
+      "elapsed_seconds": 0.144300388,
+      "outcome": "passed"
+    },
+    {
+      "id": 6,
+      "operation": "import-media",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/deployment/processing/2.OSV"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-receipts/006-media-2.json",
+      "started_monotonic_ns": 108019012099686,
+      "finished_monotonic_ns": 108019541255497,
+      "elapsed_seconds": 0.529155811,
+      "outcome": "passed"
+    },
+    {
+      "id": 7,
+      "operation": "import-media",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/deployment/processing/1.OSV"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-receipts/007-media-1.json",
+      "started_monotonic_ns": 108019548681799,
+      "finished_monotonic_ns": 108020125724628,
+      "elapsed_seconds": 0.577042829,
+      "outcome": "passed"
+    },
+    {
+      "id": 8,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/plan-body.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-plan-4.json"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-receipts/008-client-export.json",
+      "started_monotonic_ns": 108020127088680,
+      "finished_monotonic_ns": 108020281938331,
+      "elapsed_seconds": 0.154849651,
+      "outcome": "passed"
+    },
+    {
+      "id": 9,
+      "operation": "import",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/deployment/processing",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-store"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-receipts/009-client-import.json",
+      "started_monotonic_ns": 108026754766322,
+      "finished_monotonic_ns": 108026953682184,
+      "elapsed_seconds": 0.198915862,
+      "outcome": "passed"
+    },
+    {
+      "id": 10,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/plan-body.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-plan-5.json"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-receipts/010-client-export.json",
+      "started_monotonic_ns": 108026954869297,
+      "finished_monotonic_ns": 108027003669835,
+      "elapsed_seconds": 0.048800538,
+      "outcome": "passed"
+    },
+    {
+      "id": 11,
+      "operation": "import-media",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/deployment/processing/4.LRF"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-receipts/011-media-4.json",
+      "started_monotonic_ns": 108028429057464,
+      "finished_monotonic_ns": 108028566147138,
+      "elapsed_seconds": 0.137089674,
+      "outcome": "passed"
+    },
+    {
+      "id": 12,
+      "operation": "import-media",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/deployment/processing/3.LRF"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-receipts/012-media-3.json",
+      "started_monotonic_ns": 108028568767791,
+      "finished_monotonic_ns": 108028699191727,
+      "elapsed_seconds": 0.130423936,
+      "outcome": "passed"
+    },
+    {
+      "id": 13,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/plan-body.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-plan-6.json"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-receipts/013-client-export.json",
+      "started_monotonic_ns": 108028700895202,
+      "finished_monotonic_ns": 108028746814640,
+      "elapsed_seconds": 0.045919438,
+      "outcome": "passed"
+    },
+    {
+      "id": 14,
+      "operation": "import",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/deployment/processing",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-store"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-receipts/014-client-import.json",
+      "started_monotonic_ns": 108032090852530,
+      "finished_monotonic_ns": 108032337928079,
+      "elapsed_seconds": 0.247075549,
+      "outcome": "passed"
+    },
+    {
+      "id": 15,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/plan-body.json",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-plan-7.json"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-receipts/015-client-export.json",
+      "started_monotonic_ns": 108032339064634,
+      "finished_monotonic_ns": 108032384511901,
+      "elapsed_seconds": 0.045447267,
+      "outcome": "passed"
+    },
+    {
+      "id": 16,
+      "operation": "import-media",
+      "arguments": [
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-store",
+        "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/deployment/processing/5.OSV"
+      ],
+      "receipt_path": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/test_installed_segment_source_3/world/client-receipts/016-media-5.json",
+      "started_monotonic_ns": 108034229565861,
+      "finished_monotonic_ns": 108034482122132,
+      "elapsed_seconds": 0.252556271,
+      "outcome": "passed"
+    }
+  ],
+  "close": {
+    "started_monotonic_ns": 108036870738437,
+    "finished_monotonic_ns": 108036957095124,
+    "elapsed_seconds": 0.086356687,
+    "outcome": "passed"
+  },
+  "node_pid": 1704012,
+  "owned_processes": [
+    {
+      "pid": 1704012,
+      "ppid": 1697845,
+      "pgid": 1704012,
+      "starttime": "10799592",
+      "state": "S"
+    }
+  ]
+}

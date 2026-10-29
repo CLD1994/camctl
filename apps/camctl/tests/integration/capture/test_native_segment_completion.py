@@ -173,7 +173,7 @@ async def test_native_recovery_before_first_result_page_keeps_result_unknown(tmp
         path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
         owned.connection.close()
         owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-        resumed = _runtime(owned, driver=runtime.driver, check_config=runtime.check_config)
+        resumed = (await _runtime(owned, driver=runtime.driver, check_config=runtime.check_config))
         resumed.wall_us = lambda: wall[0]
         resumed.monotonic_ns = lambda: mono[0]
         resumed.wait_config = runtime.wait_config

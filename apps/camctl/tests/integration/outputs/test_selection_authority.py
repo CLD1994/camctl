@@ -15,7 +15,7 @@ from .test_catalog_integrity import CatalogConnection, selection_database
 from .test_output_family import family_database
 from .test_sources import _NOW, _fixed_resolution
 from .test_selection_lookup import LookupConnection
-from ..operations.test_result_reuse import _FaultConnection
+from ..support.output_storage_cases import WriteFault
 
 
 def _request(connection, mode, ids=()):
@@ -234,7 +234,7 @@ def test_first_fix_write_failure_preserves_retryable_original_state(selection_da
     repository = outputs.OutputsRepository()
     key = new_operation_key()
     before = tuple(owned.connection.iterdump())
-    result = repository.fix_selection(command, key, replace(owned, connection=_FaultConnection(owned.connection, sql)))
+    result = repository.fix_selection(command, key, replace(owned, connection=WriteFault(owned.connection, sql)))
     assert result.kind is DbOutcomeKind.ROLLED_BACK
     assert isinstance(result.error, sqlite3.OperationalError), result.error
     assert tuple(owned.connection.iterdump()) == before

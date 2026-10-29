@@ -1,0 +1,2626 @@
+{
+  "label": "at-5",
+  "elapsed": 5.0003503170009935,
+  "state_db": "/tmp/pytest-of-cld/pytest-128/test_default_obtain_reaches_ca0/state.db",
+  "flows": [
+    {
+      "type": "ReportBackgroundFlow",
+      "id": 140220585457488,
+      "stopping": false,
+      "handoff": false,
+      "required": 0,
+      "task": null
+    },
+    {
+      "type": "CaptureFlow",
+      "id": 140220589785680,
+      "stopping": false,
+      "handoff": null,
+      "required": 0,
+      "task": null
+    },
+    {
+      "type": "BackgroundFlow",
+      "id": 140220588106960,
+      "stopping": false,
+      "handoff": false,
+      "required": 1,
+      "task": {
+        "id": 140220610510272,
+        "name": "Task-6384",
+        "done": true,
+        "cancelled": false,
+        "coro": "<coroutine object BackgroundFlow._run at 0x7f87a60a10e0>",
+        "stack": []
+      }
+    }
+  ],
+  "tasks": [
+    {
+      "id": 140220587649408,
+      "name": "Task-2",
+      "done": false,
+      "cancelled": false,
+      "coro": "<coroutine object test_default_obtain_reaches_candidates_beyond_first_batch at 0x5630548c9880>",
+      "stack": [
+        {
+          "file": "/tmp/camctl-quality-repair-lidlmje7/bootstrap-followup/apps/camctl/tests/integration/bootstrap/test_read_discovery_default.py",
+          "line": 68,
+          "function": "test_default_obtain_reaches_candidates_beyond_first_batch"
+        }
+      ]
+    },
+    {
+      "id": 140220589484992,
+      "name": "camctl-snapshot-maintenance",
+      "done": false,
+      "cancelled": false,
+      "coro": "<coroutine object SnapshotMaintenanceOwner._run at 0x7f87a6098310>",
+      "stack": [
+        {
+          "file": "/tmp/camctl-quality-repair-lidlmje7/bootstrap-followup/apps/camctl/src/camctl/persistence/snapshot_runtime.py",
+          "line": 195,
+          "function": "_run"
+        }
+      ]
+    },
+    {
+      "id": 140220584519488,
+      "name": "Task-42",
+      "done": false,
+      "cancelled": false,
+      "coro": "<coroutine object pytest_runtest_call.<locals>.execute at 0x7f87a6519470>",
+      "stack": [
+        {
+          "file": "/tmp/camctl-quality-repair-evidence/bootstrap-followup/observe_bootstrap.py",
+          "line": 68,
+          "function": "execute"
+        }
+      ]
+    }
+  ],
+  "actual_session_facts": [
+    {
+      "elapsed": 3.444769173001987,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.4533564200100955,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.471852476010099,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.4812366030091653,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.498364662998938,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.5050266760081286,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.5223187020019395,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.5285061450122157,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.5460954529989976,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.551842499000486,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.568960924007115,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.576084261003416,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.5942141380073735,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.5996103990037227,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.618678451006417,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.623595541008399,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.6394701399985934,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.6467547960055526,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.6642945089988643,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.6704181780078216,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.686010661011096,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.6928010070114397,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.7112064600078156,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.71884439700807,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.735482181000407,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.7410018520022277,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.7581372170097893,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.764780598008656,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.782999025002937,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.789147400006186,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.8086432609998155,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.8184440980112413,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.834458616998745,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.8414635160006583,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.859163265005918,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.864332993005519,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.8847241650073556,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.89237736701034,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.912836633011466,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.9246443630108843,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.9403003600018565,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.9471642220014473,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.9643660110014025,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.9696152820106363,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.9873156670073513,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 3.992624805003288,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.01058502199885,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.017618454003241,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.035639038003865,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.042370577008114,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.06077950100007,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.068483438008116,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.087944461003644,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.097614544007229,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.115053879999323,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.122131085008732,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.139488503002212,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.145803450999665,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.163123432997963,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.170362394012045,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.189780398010043,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.198673628998222,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.216297491002479,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.222468550011399,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.239483912999276,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.245780026001739,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.262193834001664,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.268350698010181,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.285560369011364,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.294441832011216,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.310731465011486,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.316774004008039,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.333930933004012,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.339714128000196,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.357805773004657,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.364556667002034,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.382383825999568,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.388849399998435,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.4054382070025895,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.41254121500242,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.430654759009485,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.436617667000974,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.45525732000533,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.462150097009726,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.479697984002996,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.485885827001766,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.505294892005622,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.511976897003478,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.529435157004627,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.535120057000313,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.551848986011464,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.557570821008994,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.57536359000369,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.580342775007011,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.598212065000553,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.606129500010866,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.6220210770115955,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.628095590000157,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.6453265940072015,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.652133431998664,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.67054428299889,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.676788409007713,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.695945193001535,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.7069747610075865,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.725474216000293,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.732901195005979,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.74930961499922,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.755264245002763,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.772072848005337,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.776986666009179,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.794353807010339,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.801263154004118,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.8179319120099535,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.824447232007515,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.841987364998204,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.849694142001681,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.867192579011316,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.874429707007948,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.891803117003292,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.898266768999747,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.914468378003221,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.922291724011302,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.940429127003881,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.946070629011956,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.962846369002364,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.969052972999634,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.985841851012083,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 4.991822103998857,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    }
+  ],
+  "persisted_work_facts": {
+    "unfinished_actions": 0,
+    "required_settlements": 0,
+    "pending_report_changes": false,
+    "report_failed_no_new_changes": false,
+    "residual_device_facts": false,
+    "deferred_work_cleanup": false,
+    "waiting_acknowledgement": true,
+    "snapshot_backlog": false
+  },
+  "rows": {
+    "actions": [
+      [
+        1,
+        1,
+        0,
+        "cam-a",
+        1,
+        "cam-a",
+        1768467600000000,
+        "files",
+        "{\"params\":{\"type\":\"single_shot\"},\"policy\":{\"max_delay_ms\":1000}}",
+        "{\"type\":\"single_shot\"}",
+        "camctl-adb",
+        1000,
+        "{}",
+        3,
+        1,
+        0,
+        null,
+        null,
+        1768467600000000,
+        null,
+        null,
+        null,
+        null,
+        1,
+        41,
+        16
+      ],
+      [
+        2,
+        1,
+        1,
+        "cam-b",
+        1,
+        "cam-b",
+        1768467600000000,
+        "files",
+        "{\"params\":{\"type\":\"single_shot\"},\"policy\":{\"max_delay_ms\":1000}}",
+        "{\"type\":\"single_shot\"}",
+        "camctl-adb",
+        1000,
+        "{}",
+        3,
+        1,
+        0,
+        null,
+        null,
+        1768467600000000,
+        null,
+        null,
+        null,
+        null,
+        2,
+        43,
+        16
+      ],
+      [
+        3,
+        2,
+        0,
+        "取回0",
+        4,
+        null,
+        1768467600000000,
+        null,
+        "{\"params\":{\"source\":{\"plan_instance_id\":\"1\",\"group\":\"files\"}}}",
+        null,
+        null,
+        null,
+        "{\"selection_mode\":1}",
+        3,
+        1,
+        0,
+        null,
+        null,
+        null,
+        null,
+        2,
+        1,
+        null,
+        46,
+        127,
+        12
+      ],
+      [
+        4,
+        2,
+        1,
+        "取回1",
+        4,
+        null,
+        1768467600000000,
+        null,
+        "{\"params\":{\"source\":{\"plan_instance_id\":\"1\",\"group\":\"files\"}}}",
+        null,
+        null,
+        null,
+        "{\"selection_mode\":1}",
+        3,
+        1,
+        0,
+        null,
+        null,
+        null,
+        null,
+        2,
+        1,
+        null,
+        47,
+        166,
+        12
+      ],
+      [
+        5,
+        2,
+        2,
+        "取回2",
+        4,
+        null,
+        1768467600000000,
+        null,
+        "{\"params\":{\"source\":{\"plan_instance_id\":\"1\",\"group\":\"files\"}}}",
+        null,
+        null,
+        null,
+        "{\"selection_mode\":1}",
+        3,
+        1,
+        0,
+        null,
+        null,
+        null,
+        null,
+        2,
+        1,
+        null,
+        48,
+        183,
+        12
+      ]
+    ],
+    "operation_runs": [
+      [
+        1,
+        1,
+        null,
+        1,
+        null,
+        "start/1",
+        1,
+        null,
+        null,
+        null,
+        null,
+        3,
+        1,
+        1,
+        "30",
+        null,
+        0,
+        null
+      ],
+      [
+        2,
+        2,
+        null,
+        1,
+        null,
+        "start/2",
+        2,
+        null,
+        null,
+        null,
+        null,
+        3,
+        1,
+        1,
+        "30",
+        null,
+        0,
+        null
+      ],
+      [
+        3,
+        1,
+        null,
+        7,
+        null,
+        "results/1",
+        1,
+        null,
+        null,
+        null,
+        null,
+        3,
+        1,
+        3,
+        "10",
+        "3",
+        0,
+        null
+      ],
+      [
+        4,
+        2,
+        null,
+        7,
+        null,
+        "results/2",
+        2,
+        null,
+        null,
+        null,
+        null,
+        3,
+        1,
+        3,
+        "10",
+        "3",
+        0,
+        null
+      ],
+      [
+        5,
+        3,
+        1,
+        3,
+        null,
+        "read/1",
+        null,
+        1,
+        null,
+        null,
+        null,
+        3,
+        1,
+        3,
+        "10",
+        "3",
+        0,
+        null
+      ],
+      [
+        6,
+        3,
+        2,
+        3,
+        null,
+        "read/2",
+        null,
+        2,
+        null,
+        null,
+        null,
+        3,
+        1,
+        3,
+        "10",
+        "3",
+        0,
+        null
+      ],
+      [
+        7,
+        4,
+        3,
+        3,
+        null,
+        "read/3",
+        null,
+        3,
+        null,
+        null,
+        null,
+        3,
+        1,
+        3,
+        "10",
+        "3",
+        0,
+        null
+      ],
+      [
+        8,
+        4,
+        4,
+        3,
+        null,
+        "read/4",
+        null,
+        4,
+        null,
+        null,
+        null,
+        3,
+        1,
+        3,
+        "10",
+        "3",
+        0,
+        null
+      ],
+      [
+        9,
+        5,
+        5,
+        3,
+        null,
+        "read/5",
+        null,
+        5,
+        null,
+        null,
+        null,
+        3,
+        1,
+        3,
+        "10",
+        "3",
+        0,
+        null
+      ],
+      [
+        10,
+        5,
+        6,
+        3,
+        null,
+        "read/6",
+        null,
+        6,
+        null,
+        null,
+        null,
+        3,
+        1,
+        3,
+        "10",
+        "3",
+        0,
+        null
+      ]
+    ],
+    "operation_attempts": [
+      [
+        1,
+        1,
+        1,
+        null,
+        2,
+        11,
+        13,
+        null,
+        null,
+        1,
+        "30",
+        null,
+        3,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"operation_returned\",\"version\":1,\"data\":{}}},\"observations\":[{\"type\":\"photo_taken\",\"version\":1,\"data\":{\"activity_id\":\"1\"}}]}",
+        null
+      ],
+      [
+        2,
+        2,
+        1,
+        null,
+        2,
+        12,
+        16,
+        null,
+        null,
+        1,
+        "30",
+        null,
+        3,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"operation_returned\",\"version\":1,\"data\":{}}},\"observations\":[{\"type\":\"photo_taken\",\"version\":1,\"data\":{\"activity_id\":\"2\"}}]}",
+        null
+      ],
+      [
+        3,
+        3,
+        1,
+        null,
+        2,
+        19,
+        33,
+        22,
+        22,
+        3,
+        "10",
+        "3",
+        3,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"results_returned\",\"version\":1,\"data\":{}}},\"observations\":[{\"type\":\"result_files_listed\",\"version\":2,\"data\":{\"activity_id\":\"1\",\"entries\":[{\"identity\":\"photo-1\",\"locator\":{\"path\":\"/DCIM/1\"},\"complete\":true,\"size_bytes\":19,\"kind\":\"photo\",\"original_name\":\"photo-1.jpg\",\"media_type\":\"image/jpeg\",\"paired_identity\":null}],\"cursor\":null,\"next_cursor\":null,\"set_finalized\":true,\"completion_evidence\":null}}]}",
+        null
+      ],
+      [
+        4,
+        4,
+        1,
+        null,
+        2,
+        20,
+        35,
+        25,
+        25,
+        3,
+        "10",
+        "3",
+        3,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"results_returned\",\"version\":1,\"data\":{}}},\"observations\":[{\"type\":\"result_files_listed\",\"version\":2,\"data\":{\"activity_id\":\"2\",\"entries\":[{\"identity\":\"photo-2\",\"locator\":{\"path\":\"/DCIM/2\"},\"complete\":true,\"size_bytes\":19,\"kind\":\"photo\",\"original_name\":\"photo-2.jpg\",\"media_type\":\"image/jpeg\",\"paired_identity\":null}],\"cursor\":null,\"next_cursor\":null,\"set_finalized\":true,\"completion_evidence\":null}}]}",
+        null
+      ],
+      [
+        5,
+        5,
+        1,
+        1,
+        2,
+        64,
+        71,
+        null,
+        null,
+        3,
+        "10",
+        "3",
+        1,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        null
+      ],
+      [
+        6,
+        6,
+        1,
+        1,
+        2,
+        85,
+        92,
+        null,
+        null,
+        3,
+        "10",
+        "3",
+        1,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        null
+      ],
+      [
+        7,
+        7,
+        1,
+        1,
+        2,
+        109,
+        115,
+        null,
+        null,
+        3,
+        "10",
+        "3",
+        1,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        null
+      ],
+      [
+        8,
+        8,
+        1,
+        1,
+        2,
+        129,
+        135,
+        null,
+        null,
+        3,
+        "10",
+        "3",
+        1,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        null
+      ],
+      [
+        9,
+        9,
+        1,
+        1,
+        2,
+        148,
+        154,
+        null,
+        null,
+        3,
+        "10",
+        "3",
+        1,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        null
+      ],
+      [
+        10,
+        10,
+        1,
+        1,
+        2,
+        168,
+        174,
+        null,
+        null,
+        3,
+        "10",
+        "3",
+        1,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        null
+      ]
+    ],
+    "file_copies": [
+      [
+        1,
+        1,
+        null,
+        null,
+        1,
+        null,
+        1,
+        1,
+        0,
+        0,
+        19,
+        null,
+        19,
+        1,
+        null,
+        5,
+        "41e93b838ecdb94cabaeb88c9227020e07e15fb97b6231818bc7c296ef0d265f",
+        null
+      ],
+      [
+        2,
+        2,
+        null,
+        null,
+        2,
+        null,
+        2,
+        1,
+        0,
+        0,
+        19,
+        null,
+        19,
+        1,
+        null,
+        5,
+        "41e93b838ecdb94cabaeb88c9227020e07e15fb97b6231818bc7c296ef0d265f",
+        null
+      ],
+      [
+        3,
+        3,
+        null,
+        null,
+        1,
+        null,
+        3,
+        1,
+        0,
+        0,
+        19,
+        null,
+        19,
+        1,
+        null,
+        5,
+        "41e93b838ecdb94cabaeb88c9227020e07e15fb97b6231818bc7c296ef0d265f",
+        null
+      ],
+      [
+        4,
+        4,
+        null,
+        null,
+        2,
+        null,
+        4,
+        1,
+        0,
+        0,
+        19,
+        null,
+        19,
+        1,
+        null,
+        5,
+        "41e93b838ecdb94cabaeb88c9227020e07e15fb97b6231818bc7c296ef0d265f",
+        null
+      ],
+      [
+        5,
+        5,
+        null,
+        null,
+        1,
+        null,
+        5,
+        1,
+        0,
+        0,
+        19,
+        null,
+        19,
+        1,
+        null,
+        5,
+        "41e93b838ecdb94cabaeb88c9227020e07e15fb97b6231818bc7c296ef0d265f",
+        null
+      ],
+      [
+        6,
+        6,
+        null,
+        null,
+        2,
+        null,
+        6,
+        1,
+        0,
+        0,
+        19,
+        null,
+        19,
+        1,
+        null,
+        5,
+        "41e93b838ecdb94cabaeb88c9227020e07e15fb97b6231818bc7c296ef0d265f",
+        null
+      ]
+    ],
+    "deliveries": [
+      [
+        1,
+        3,
+        1,
+        "1.jpg",
+        "photo-1-双设备-cam-a.jpg",
+        5,
+        105,
+        106,
+        1,
+        null,
+        null,
+        59,
+        106,
+        13
+      ],
+      [
+        2,
+        3,
+        2,
+        "2.jpg",
+        "photo-2-双设备-cam-b.jpg",
+        5,
+        124,
+        125,
+        1,
+        null,
+        null,
+        80,
+        125,
+        13
+      ],
+      [
+        3,
+        4,
+        1,
+        "3.jpg",
+        "photo-1-双设备-cam-a.jpg",
+        5,
+        144,
+        145,
+        1,
+        null,
+        null,
+        101,
+        145,
+        13
+      ],
+      [
+        4,
+        4,
+        2,
+        "4.jpg",
+        "photo-2-双设备-cam-b.jpg",
+        5,
+        163,
+        164,
+        1,
+        null,
+        null,
+        120,
+        164,
+        13
+      ],
+      [
+        5,
+        5,
+        1,
+        "5.jpg",
+        "photo-1-双设备-cam-a.jpg",
+        5,
+        177,
+        178,
+        1,
+        null,
+        null,
+        140,
+        178,
+        13
+      ],
+      [
+        6,
+        5,
+        2,
+        "6.jpg",
+        "photo-2-双设备-cam-b.jpg",
+        5,
+        180,
+        181,
+        1,
+        null,
+        null,
+        159,
+        181,
+        13
+      ]
+    ],
+    "obtain_items": [
+      [
+        1,
+        1,
+        null,
+        1,
+        1,
+        null,
+        null,
+        null,
+        null,
+        3,
+        0,
+        1,
+        null,
+        null
+      ],
+      [
+        2,
+        2,
+        null,
+        2,
+        1,
+        null,
+        null,
+        null,
+        null,
+        3,
+        0,
+        2,
+        null,
+        null
+      ],
+      [
+        3,
+        3,
+        null,
+        1,
+        1,
+        null,
+        null,
+        null,
+        null,
+        3,
+        0,
+        3,
+        null,
+        null
+      ],
+      [
+        4,
+        4,
+        null,
+        2,
+        1,
+        null,
+        null,
+        null,
+        null,
+        3,
+        0,
+        4,
+        null,
+        null
+      ],
+      [
+        5,
+        5,
+        null,
+        1,
+        1,
+        null,
+        null,
+        null,
+        null,
+        3,
+        0,
+        5,
+        null,
+        null
+      ],
+      [
+        6,
+        6,
+        null,
+        2,
+        1,
+        null,
+        null,
+        null,
+        null,
+        3,
+        0,
+        6,
+        null,
+        null
+      ]
+    ],
+    "reports": [
+      [
+        1,
+        50,
+        0,
+        23,
+        1,
+        4,
+        2089,
+        "17a42d3fa8dc39bda52fb43b251895d8b774283e31a046326e84cffc50c935fc",
+        1,
+        187,
+        null,
+        51,
+        187
+      ],
+      [
+        2,
+        187,
+        0,
+        85,
+        1,
+        4,
+        3657,
+        "832b429b3904e52f5300f68633c77204e027e2f907b25ebd730f834a510edc3d",
+        1,
+        191,
+        null,
+        188,
+        191
+      ]
+    ]
+  }
+}

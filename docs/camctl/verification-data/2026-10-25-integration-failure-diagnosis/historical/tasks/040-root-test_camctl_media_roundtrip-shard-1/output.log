@@ -1,0 +1,61 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+________________ test_excess_recording_repairs_without_probing _________________
+
+tmp_path = PosixPath('/tmp/camctl-itopt-final-20261025/tasks/040-root-test_camctl_media_roundtrip-shard-1/tmp/pytest/test_excess_recording_repairs_0')
+
+    @_MEDIA_TOOLS
+    def test_excess_recording_repairs_without_probing(tmp_path: Path) -> None:
+        """可信计时多录的对账链：跨会话对账停止确认录制严格超过门槛后
+        固定多录决定，不取回探测时长直接修复，修复成品由默认取回交付。"""
+        deployment = Deployment(tmp_path, recording_margin_s="0.5")
+        initialized = deployment.camctl(
+            "init", "--config", str(deployment.config_path))
+        assert initialized.exit_code == 0, initialized.stderr
+    
+        source = tmp_path / "source.mp4"
+        _generate_source_video(source)
+        content = source.read_bytes()
+        spec = stub_driver_spec(
+            {"1": [video_file("clip-1", size_bytes=len(content))]},
+            record_duration_s=_TARGET_DURATION_S,
+            device_files={"clip-1": {"path": str(source)}})
+        _submit_record_and_obtain(deployment, spec)
+    
+        # 第一个会话启动录像后中断；等待墙钟越过目标加余量再由正常会
+        # 话对账停止，停止确认时的已录时长严格超过修复门槛。
+>       started_at_us = _start_recording_and_interrupt(deployment, spec)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/integration/test_camctl_media_roundtrip.py:313: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/integration/test_camctl_media_roundtrip.py:169: in _start_recording_and_interrupt
+    rows = _await_row(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+state_db = PosixPath('/tmp/camctl-itopt-final-20261025/tasks/040-root-test_camctl_media_roundtrip-shard-1/tmp/pytest/test_excess_recording_repairs_0/deployment/state.db')
+sql = 'SELECT started_at FROM device_activities WHERE started_at IS NOT NULL'
+params = (), timeout_s = 60.0
+
+    def _await_row(state_db: Path, sql: str, params=(), *,
+                   timeout_s: float = 60.0) -> list[tuple]:
+        """轮询查询直到出现行；同步点，不使用随机 sleep。"""
+        deadline = time.monotonic() + timeout_s
+        while True:
+            rows = _query(state_db, sql, params)
+            if rows:
+                return rows
+>           assert time.monotonic() < deadline, f"等待超时: {sql}"
+E           AssertionError: 等待超时: SELECT started_at FROM device_activities WHERE started_at IS NOT NULL
+E           assert 38119.018498199 < 38119.017612761
+E            +  where 38119.018498199 = <built-in function monotonic>()
+E            +    where <built-in function monotonic> = time.monotonic
+
+tests/integration/test_camctl_media_roundtrip.py:70: AssertionError
+============================== slowest durations ===============================
+62.79s call     tests/integration/test_camctl_media_roundtrip.py::test_excess_recording_repairs_without_probing
+
+(2 durations < 0.005s hidden.  Use -vv to show these durations.)
+=========================== short test summary info ============================
+FAILED tests/integration/test_camctl_media_roundtrip.py::test_excess_recording_repairs_without_probing
+1 failed in 62.88s (0:01:02)

@@ -1,0 +1,230 @@
+[
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/084-root-test_host_wait_failures/source/tests/integration/test_host_wait_failures.py::test_wait_observes_current_run_result_while_host_stays_alive[error]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 16.313173002999974
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.5847723740007496
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00032073901093099266
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 16.898266116011655
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/084-root-test_host_wait_failures/source/tests/integration/test_host_wait_failures.py::test_wait_observes_current_run_result_while_host_stays_alive[abnormal]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008305960072902963
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.4977186519972747
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009744999988470227
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.49952374800341204
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/084-root-test_host_wait_failures/source/tests/integration/test_host_wait_failures.py::test_wait_observes_current_run_result_while_host_stays_alive[success]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002291832002811134
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.13126600300893188
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0067925360053777695
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.14035037101712078
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/084-root-test_host_wait_failures/source/tests/integration/test_host_wait_failures.py::test_wait_observes_current_run_result_while_host_stays_alive[not_started]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008044249989325181
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.4310148869990371
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.005634724002447911
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.43745403600041755
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/084-root-test_host_wait_failures/source/tests/integration/test_host_wait_failures.py::test_wait_observes_current_run_result_while_host_stays_alive[abnormal_once]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009936629940057173
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 5.247835668997141
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.004344133994891308
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 5.253173465986038
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/084-root-test_host_wait_failures/source/tests/integration/test_host_wait_failures.py::test_wait_observes_current_run_result_while_host_stays_alive[not_started_once]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012242749944562092
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 5.160114919999614
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0499678249907447
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 5.211307019984815
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/084-root-test_host_wait_failures/source/tests/integration/test_host_wait_failures.py::test_wait_limits_incompatible_terminal_to_requested_actions[PENDING]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007441390043823048
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.07985399500466883
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007385329954558983
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.08133666700450704
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/084-root-test_host_wait_failures/source/tests/integration/test_host_wait_failures.py::test_wait_limits_incompatible_terminal_to_requested_actions[RUNNING]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012468889908632264
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.07850314299867023
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.000578396997298114
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.08032842898683157
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/084-root-test_host_wait_failures/source/tests/integration/test_host_wait_failures.py::test_wait_limits_incompatible_terminal_to_requested_actions[SUCCEEDED]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001403657006449066
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.05846145100076683
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005592430097749457
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.06042435101699084
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/084-root-test_host_wait_failures/source/tests/integration/test_host_wait_failures.py::test_wait_limits_incompatible_terminal_to_requested_actions[FAILED]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007596909999847412
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.03475900899502449
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004966160049661994
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.03601531599997543
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/084-root-test_host_wait_failures/source/tests/integration/test_host_wait_failures.py::test_wait_limits_incompatible_terminal_to_requested_actions[EXPIRED]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008497669914504513
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.015180949994828552
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.02797493500111159
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.04400565198739059
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/084-root-test_host_wait_failures/source/tests/integration/test_host_wait_failures.py::test_wait_limits_incompatible_terminal_to_requested_actions[CANCELED]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008071890042629093
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.016248158004600555
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007787249924149364
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0178340720012784
+  }
+]

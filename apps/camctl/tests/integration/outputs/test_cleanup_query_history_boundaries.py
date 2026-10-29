@@ -146,17 +146,17 @@ async def test_cleanup_query_frozen_boundary_three_paths_match(environment):
     # 成员 B：仅自己的 QUERY，取消在结果保存后生效（原取消与限制低于 H）。
     await _c1_unknown_delete_terminal(cfg, owned, driver, outputs["cam-b"])
     b_action, b_item = _start_cleanup(owned, outputs["cam-b"], "3")
-    b_runtime = _new_runtime(cfg, owned, driver)
+    b_runtime = await _new_runtime(cfg, owned, driver)
     b_runtime.operations = _CancelQueryPort(owned, b_item, b_action, "after")
     driver.matrix_enabled, driver.present = True, None
-    b_step = await delete_source_file(b_runtime.for_item(b_item), b_item)
+    b_step = await delete_source_file(await b_runtime.for_item(b_item), b_item)
     assert (b_step.phase, b_step.detail) == ("canceled", None), b_step
 
     # 成员 A：删除未知后查询确认缺席；结果事务真实提交后丢失回执。
     a_action, a_item = _start_cleanup(owned, outputs["cam-a"], "5")
     path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
     history = HistoryRepository(path)
-    a_runtime = _new_runtime(cfg, owned, driver)
+    a_runtime = await _new_runtime(cfg, owned, driver)
     a_runtime.operations = _CommittedQueryFault(owned, a_item)
     executor = DbExecutor(
         lambda: open_existing(path, DbOpenMode.EXISTING_RW, DbConfig()),
@@ -170,7 +170,7 @@ async def test_cleanup_query_frozen_boundary_three_paths_match(environment):
                 SnapshotRef(_entity_ref("output"), outputs["cam-a"])))))
         driver.matrix_enabled, driver.present = True, False
         with pytest.raises(ConsistencyError):
-            await delete_source_file(a_runtime.for_item(a_item), a_item)
+            await delete_source_file(await a_runtime.for_item(a_item), a_item)
 
         txn_id, last_event = owned.connection.execute(
             "SELECT id, last_event_id FROM history_transactions"
@@ -181,8 +181,8 @@ async def test_cleanup_query_frozen_boundary_three_paths_match(environment):
             (frozen.last_event_id,)))
         calls_before_resume = (len(driver.deletes), len(driver.queries))
 
-        resumed = _new_runtime(cfg, owned, driver)
-        c_step = await delete_source_file(resumed.for_item(a_item), a_item)
+        resumed = await _new_runtime(cfg, owned, driver)
+        c_step = await delete_source_file(await resumed.for_item(a_item), a_item)
 
         assert (c_step.phase, c_step.detail) == ("succeeded", "ABSENCE_CONFIRMED"), c_step
         assert (len(driver.deletes), len(driver.queries)) == calls_before_resume

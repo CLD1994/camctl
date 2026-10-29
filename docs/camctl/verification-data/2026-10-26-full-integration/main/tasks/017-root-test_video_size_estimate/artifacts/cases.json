@@ -1,0 +1,230 @@
+[
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/tests/integration/test_video_size_estimate.py::test_record_estimate_stays_out_of_execution_and_report",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002390890003880486
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 19.897566411003936
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.01576359498722013
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 19.915720895995037
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/tests/integration/test_video_size_estimate.py::test_timelapse_estimate_uses_same_capture_duration_as_execution",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009081730095203966
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 20.247346420990652
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.014035796004463919
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 20.262290390004637
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/tests/integration/test_video_size_estimate.py::test_valid_unavailable_estimate_does_not_prevent_plan_export[False-params0-not_provided]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0014126500027487054
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 7.163268882999546
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0026037420029751956
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 7.16728527500527
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/tests/integration/test_video_size_estimate.py::test_valid_unavailable_estimate_does_not_prevent_plan_export[True-params1-lookup_missing]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008030900062294677
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 6.74136101800832
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.003252591995988041
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 6.745416700010537
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/tests/integration/test_video_size_estimate.py::test_valid_unavailable_estimate_does_not_prevent_plan_export[True-params2-value_missing]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002043407002929598
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 7.606038816011278
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0034710100007941946
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 7.611553233015002
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/tests/integration/test_video_size_estimate.py::test_exact_frame_constants_survive_describe_and_http[240]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.000997586001176387
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 6.210243383990019
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.005096190987387672
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 6.216337160978583
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/tests/integration/test_video_size_estimate.py::test_exact_frame_constants_survive_describe_and_http[240.0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010709509951993823
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 5.739887503994396
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0036688590043922886
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 5.744627313993988
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/tests/integration/test_video_size_estimate.py::test_exact_frame_constants_survive_describe_and_http[2.4e2]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001067955992766656
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 4.030671197993797
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.004486962003284134
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 4.036226115989848
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/tests/integration/test_video_size_estimate.py::test_invalid_source_fails_cli_and_client_reload_keeps_enabled_definition[{}]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008623530011391267
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 5.43706592801027
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.004291318007744849
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 5.442219599019154
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/tests/integration/test_video_size_estimate.py::test_invalid_source_fails_cli_and_client_reload_keeps_enabled_definition[{\"bitrate_mbps\":0,\"duration\":{\"method\":\"direct\",\"seconds\":{\"source\":\"constant\",\"value\":1}}}]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009786760056158528
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 5.4221265350061
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006610088996239938
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 5.429715300007956
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/tests/integration/test_video_size_estimate.py::test_invalid_source_fails_cli_and_client_reload_keeps_enabled_definition[{\"bitrate_mbps\":130,\"duration\":{\"method\":\"timelapse_frames\",\"frames\":{\"source\":\"constant\",\"value\":1.00000000000000000001},\"playback_fps\":{\"source\":\"constant\",\"value\":30}}}]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0017260049935430288
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 5.594060340998112
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006884086993522942
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 5.602670432985178
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/017-root-test_video_size_estimate/source/tests/integration/test_video_size_estimate.py::test_fractional_frame_parameter_is_not_rounded_by_http_or_plan_export",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008466169965686277
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 10.37602360699384
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0114258040121058
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 10.388296028002515
+  }
+]

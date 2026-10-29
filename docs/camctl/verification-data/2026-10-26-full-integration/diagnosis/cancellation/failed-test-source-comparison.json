@@ -1,0 +1,2214 @@
+[
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_cancellation_contract.py",
+    "qualified_name": "TestEntryMatrix.test_four_entries_match_independent_results",
+    "revisions": {
+      "a7755d81": {
+        "line": 312,
+        "end_line": 335,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "d14440110d23706321a0b9ebe21fb5671fe97c5e5e02b8fab70d7fc0b130e796",
+        "signature": "self, pipeline"
+      },
+      "272fda66": {
+        "line": 312,
+        "end_line": 335,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "d14440110d23706321a0b9ebe21fb5671fe97c5e5e02b8fab70d7fc0b130e796",
+        "signature": "self, pipeline"
+      },
+      "9fbb734c": {
+        "line": 312,
+        "end_line": 335,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "d14440110d23706321a0b9ebe21fb5671fe97c5e5e02b8fab70d7fc0b130e796",
+        "signature": "self, pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_cancellation_contract.py",
+    "qualified_name": "TestEntryMatrix.test_cancel_results_survive_restart",
+    "revisions": {
+      "a7755d81": {
+        "line": 338,
+        "end_line": 380,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "7cbc22c2088689bc8d4eac60c6ab849d24953ee4073991c2f0df7eccccecba9a",
+        "signature": "self, pipeline"
+      },
+      "272fda66": {
+        "line": 338,
+        "end_line": 380,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "7cbc22c2088689bc8d4eac60c6ab849d24953ee4073991c2f0df7eccccecba9a",
+        "signature": "self, pipeline"
+      },
+      "9fbb734c": {
+        "line": 338,
+        "end_line": 380,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "7cbc22c2088689bc8d4eac60c6ab849d24953ee4073991c2f0df7eccccecba9a",
+        "signature": "self, pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_cancellation_contract.py",
+    "qualified_name": "TestEntryMatrix.test_finished_cancel_does_not_wait_for_device",
+    "revisions": {
+      "a7755d81": {
+        "line": 383,
+        "end_line": 392,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "29764544a55970a9e8c7d4bd0eff7bcea9151a8bcc64463f56c262ba32353b4a",
+        "signature": "self, pipeline"
+      },
+      "272fda66": {
+        "line": 383,
+        "end_line": 392,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "29764544a55970a9e8c7d4bd0eff7bcea9151a8bcc64463f56c262ba32353b4a",
+        "signature": "self, pipeline"
+      },
+      "9fbb734c": {
+        "line": 383,
+        "end_line": 392,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "29764544a55970a9e8c7d4bd0eff7bcea9151a8bcc64463f56c262ba32353b4a",
+        "signature": "self, pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_controller_cancel.py",
+    "qualified_name": "TestOriginSettlement.test_c1_canceled_c2_succeeded_a_continues",
+    "revisions": {
+      "a7755d81": {
+        "line": 177,
+        "end_line": 205,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "b75130031401eb785966c8620ffc0ae839b798f8322593c2e76fcc12de52f06b",
+        "signature": "self, pipeline"
+      },
+      "272fda66": {
+        "line": 177,
+        "end_line": 205,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "b75130031401eb785966c8620ffc0ae839b798f8322593c2e76fcc12de52f06b",
+        "signature": "self, pipeline"
+      },
+      "9fbb734c": {
+        "line": 177,
+        "end_line": 205,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "b75130031401eb785966c8620ffc0ae839b798f8322593c2e76fcc12de52f06b",
+        "signature": "self, pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_controller_cancel.py",
+    "qualified_name": "TestOriginSettlement.test_interrupt_boundaries_reenter_idempotently",
+    "revisions": {
+      "a7755d81": {
+        "line": 208,
+        "end_line": 241,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "7190bcc7f31929bd6d0df359d7a9cc29642fdeb7a6b1910d68f2a8382b044770",
+        "signature": "self, pipeline"
+      },
+      "272fda66": {
+        "line": 208,
+        "end_line": 241,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "7190bcc7f31929bd6d0df359d7a9cc29642fdeb7a6b1910d68f2a8382b044770",
+        "signature": "self, pipeline"
+      },
+      "9fbb734c": {
+        "line": 208,
+        "end_line": 241,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "7190bcc7f31929bd6d0df359d7a9cc29642fdeb7a6b1910d68f2a8382b044770",
+        "signature": "self, pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_controller_cancel.py",
+    "qualified_name": "TestOriginSettlement.test_c2_with_both_reuses_original_flow",
+    "revisions": {
+      "a7755d81": {
+        "line": 244,
+        "end_line": 277,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "e0ec185707875bedf4fad516b94c0cfe62166a862677fbecaa3884b0be06b8a8",
+        "signature": "self, pipeline"
+      },
+      "272fda66": {
+        "line": 244,
+        "end_line": 277,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "e0ec185707875bedf4fad516b94c0cfe62166a862677fbecaa3884b0be06b8a8",
+        "signature": "self, pipeline"
+      },
+      "9fbb734c": {
+        "line": 244,
+        "end_line": 277,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "e0ec185707875bedf4fad516b94c0cfe62166a862677fbecaa3884b0be06b8a8",
+        "signature": "self, pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_effects.py",
+    "qualified_name": "TestApplyTransactions.test_terminal_target_succeeds_without_rewriting",
+    "revisions": {
+      "a7755d81": {
+        "line": 266,
+        "end_line": 277,
+        "kind": "FunctionDef",
+        "ast_sha256": "1805d8af576b6e978e79dbfba89585fa28b681e0b2606019f08fe49e918e044f",
+        "signature": "self, pipeline"
+      },
+      "272fda66": {
+        "line": 266,
+        "end_line": 277,
+        "kind": "FunctionDef",
+        "ast_sha256": "1805d8af576b6e978e79dbfba89585fa28b681e0b2606019f08fe49e918e044f",
+        "signature": "self, pipeline"
+      },
+      "9fbb734c": {
+        "line": 266,
+        "end_line": 277,
+        "kind": "FunctionDef",
+        "ast_sha256": "1805d8af576b6e978e79dbfba89585fa28b681e0b2606019f08fe49e918e044f",
+        "signature": "self, pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_effects.py",
+    "qualified_name": "TestFinishCancelAction.test_any_failure_fails_action_with_machine_error",
+    "revisions": {
+      "a7755d81": {
+        "line": 341,
+        "end_line": 359,
+        "kind": "FunctionDef",
+        "ast_sha256": "44163f03b8f8e24ec1bbfd8deb010333803bec35791cc194973dbb69a1306ebb",
+        "signature": "self, pipeline"
+      },
+      "272fda66": {
+        "line": 341,
+        "end_line": 359,
+        "kind": "FunctionDef",
+        "ast_sha256": "44163f03b8f8e24ec1bbfd8deb010333803bec35791cc194973dbb69a1306ebb",
+        "signature": "self, pipeline"
+      },
+      "9fbb734c": {
+        "line": 341,
+        "end_line": 359,
+        "kind": "FunctionDef",
+        "ast_sha256": "44163f03b8f8e24ec1bbfd8deb010333803bec35791cc194973dbb69a1306ebb",
+        "signature": "self, pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_effects.py",
+    "qualified_name": "TestFinishCancelAction.test_all_succeeded_completes_action_and_plan",
+    "revisions": {
+      "a7755d81": {
+        "line": 361,
+        "end_line": 379,
+        "kind": "FunctionDef",
+        "ast_sha256": "30166918d24bc9cfb6b03cc119abe8e3fb0f84c676edcc709ed883772f4d1745",
+        "signature": "self, pipeline"
+      },
+      "272fda66": {
+        "line": 361,
+        "end_line": 379,
+        "kind": "FunctionDef",
+        "ast_sha256": "30166918d24bc9cfb6b03cc119abe8e3fb0f84c676edcc709ed883772f4d1745",
+        "signature": "self, pipeline"
+      },
+      "9fbb734c": {
+        "line": 361,
+        "end_line": 379,
+        "kind": "FunctionDef",
+        "ast_sha256": "30166918d24bc9cfb6b03cc119abe8e3fb0f84c676edcc709ed883772f4d1745",
+        "signature": "self, pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_effects.py",
+    "qualified_name": "TestFinishCancelAction.test_terminal_new_key_recovers_without_new_history",
+    "revisions": {
+      "a7755d81": {
+        "line": 381,
+        "end_line": 402,
+        "kind": "FunctionDef",
+        "ast_sha256": "b716fa8bf70f40aeba8786e65f07078765841ec7c2c3c3a6eb58ee50057f63e3",
+        "signature": "self, pipeline"
+      },
+      "272fda66": {
+        "line": 381,
+        "end_line": 402,
+        "kind": "FunctionDef",
+        "ast_sha256": "b716fa8bf70f40aeba8786e65f07078765841ec7c2c3c3a6eb58ee50057f63e3",
+        "signature": "self, pipeline"
+      },
+      "9fbb734c": {
+        "line": 381,
+        "end_line": 402,
+        "kind": "FunctionDef",
+        "ast_sha256": "b716fa8bf70f40aeba8786e65f07078765841ec7c2c3c3a6eb58ee50057f63e3",
+        "signature": "self, pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_effects.py",
+    "qualified_name": "TestApplyCancelService.test_cancel_mark_is_not_settlement",
+    "revisions": {
+      "a7755d81": {
+        "line": 407,
+        "end_line": 422,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "5d76f12a5d07f396b10df46f9e3eab867af6a0f7d26d1fb02c3e7b932e67908d",
+        "signature": "self, pipeline"
+      },
+      "272fda66": {
+        "line": 407,
+        "end_line": 422,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "5d76f12a5d07f396b10df46f9e3eab867af6a0f7d26d1fb02c3e7b932e67908d",
+        "signature": "self, pipeline"
+      },
+      "9fbb734c": {
+        "line": 407,
+        "end_line": 422,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "5d76f12a5d07f396b10df46f9e3eab867af6a0f7d26d1fb02c3e7b932e67908d",
+        "signature": "self, pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_effects.py",
+    "qualified_name": "TestApplyCancelService.test_failure_does_not_abandon_other_items",
+    "revisions": {
+      "a7755d81": {
+        "line": 425,
+        "end_line": 438,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "5f11bc7df1d2f16d404d4265cfee8c555523ab937d7824ad683594bb9e6371b8",
+        "signature": "self, pipeline"
+      },
+      "272fda66": {
+        "line": 425,
+        "end_line": 438,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "5f11bc7df1d2f16d404d4265cfee8c555523ab937d7824ad683594bb9e6371b8",
+        "signature": "self, pipeline"
+      },
+      "9fbb734c": {
+        "line": 425,
+        "end_line": 438,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "5f11bc7df1d2f16d404d4265cfee8c555523ab937d7824ad683594bb9e6371b8",
+        "signature": "self, pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_effects.py",
+    "qualified_name": "TestApplyCancelService.test_late_result_enables_restart_summary",
+    "revisions": {
+      "a7755d81": {
+        "line": 441,
+        "end_line": 462,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "76b2c3201832ae5f9d4a1457bed6a2f417ccd4dc8a03194a9443206e03c6123d",
+        "signature": "self, pipeline"
+      },
+      "272fda66": {
+        "line": 441,
+        "end_line": 462,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "76b2c3201832ae5f9d4a1457bed6a2f417ccd4dc8a03194a9443206e03c6123d",
+        "signature": "self, pipeline"
+      },
+      "9fbb734c": {
+        "line": 441,
+        "end_line": 462,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "76b2c3201832ae5f9d4a1457bed6a2f417ccd4dc8a03194a9443206e03c6123d",
+        "signature": "self, pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py",
+    "qualified_name": "test_original_source_cannot_disappear_behind_preview_label",
+    "revisions": {
+      "a7755d81": {
+        "line": 77,
+        "end_line": 85,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "83af79e660e8ff63fd8581e77de3c16d127c1a10f8adecea88b76d84729e3b9e",
+        "signature": "tmp_path, monkeypatch, state, kind"
+      },
+      "272fda66": {
+        "line": 77,
+        "end_line": 85,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "83af79e660e8ff63fd8581e77de3c16d127c1a10f8adecea88b76d84729e3b9e",
+        "signature": "tmp_path, monkeypatch, state, kind"
+      },
+      "9fbb734c": {
+        "line": 77,
+        "end_line": 85,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "83af79e660e8ff63fd8581e77de3c16d127c1a10f8adecea88b76d84729e3b9e",
+        "signature": "tmp_path, monkeypatch, state, kind"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py",
+    "qualified_name": "test_complete_model_rejects_omissions_extra_members_and_wrong_effects",
+    "revisions": {
+      "a7755d81": {
+        "line": 103,
+        "end_line": 111,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "df688a90807c3643964e1fae26686d8de4f7399dd4932e17323663b98fa1d618",
+        "signature": "tmp_path, monkeypatch, state, kind, entry_sets"
+      },
+      "272fda66": {
+        "line": 103,
+        "end_line": 111,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "df688a90807c3643964e1fae26686d8de4f7399dd4932e17323663b98fa1d618",
+        "signature": "tmp_path, monkeypatch, state, kind, entry_sets"
+      },
+      "9fbb734c": {
+        "line": 103,
+        "end_line": 111,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "df688a90807c3643964e1fae26686d8de4f7399dd4932e17323663b98fa1d618",
+        "signature": "tmp_path, monkeypatch, state, kind, entry_sets"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py",
+    "qualified_name": "test_original_sql_and_complete_rows_keep_same_start_partition",
+    "revisions": {
+      "a7755d81": {
+        "line": 115,
+        "end_line": 139,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "07ee1e3374f064f20a5e15f08bf1803b73f534ac1ba90f1a09032c76517cd67b",
+        "signature": "tmp_path, monkeypatch, state"
+      },
+      "272fda66": {
+        "line": 115,
+        "end_line": 139,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "07ee1e3374f064f20a5e15f08bf1803b73f534ac1ba90f1a09032c76517cd67b",
+        "signature": "tmp_path, monkeypatch, state"
+      },
+      "9fbb734c": {
+        "line": 115,
+        "end_line": 139,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "07ee1e3374f064f20a5e15f08bf1803b73f534ac1ba90f1a09032c76517cd67b",
+        "signature": "tmp_path, monkeypatch, state"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py",
+    "qualified_name": "test_authoritative_complete_scope_keeps_valid_direct_and_linked_members",
+    "revisions": {
+      "a7755d81": {
+        "line": 144,
+        "end_line": 163,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "b9293bbcf1d262f7cc6f6b01e6ecbc63369d81bf5a703d95dceb12c6618029d4",
+        "signature": "tmp_path, monkeypatch, state, kind"
+      },
+      "272fda66": {
+        "line": 144,
+        "end_line": 163,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "b9293bbcf1d262f7cc6f6b01e6ecbc63369d81bf5a703d95dceb12c6618029d4",
+        "signature": "tmp_path, monkeypatch, state, kind"
+      },
+      "9fbb734c": {
+        "line": 144,
+        "end_line": 163,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "b9293bbcf1d262f7cc6f6b01e6ecbc63369d81bf5a703d95dceb12c6618029d4",
+        "signature": "tmp_path, monkeypatch, state, kind"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py",
+    "qualified_name": "test_complete_scope_requires_authoritative_address_links_and_start_ranges",
+    "revisions": {
+      "a7755d81": {
+        "line": 177,
+        "end_line": 194,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "ad31e37294309b8df88c6c05a270cd1ca304ce7a6fc206450444224949a4c818",
+        "signature": "tmp_path, monkeypatch, kind, missing_ranges"
+      },
+      "272fda66": {
+        "line": 177,
+        "end_line": 194,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "ad31e37294309b8df88c6c05a270cd1ca304ce7a6fc206450444224949a4c818",
+        "signature": "tmp_path, monkeypatch, kind, missing_ranges"
+      },
+      "9fbb734c": {
+        "line": 177,
+        "end_line": 194,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "ad31e37294309b8df88c6c05a270cd1ca304ce7a6fc206450444224949a4c818",
+        "signature": "tmp_path, monkeypatch, kind, missing_ranges"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py",
+    "qualified_name": "test_original_key_keeps_first_direct_decision_after_capture_finishes",
+    "revisions": {
+      "a7755d81": {
+        "line": 197,
+        "end_line": 213,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "4281a36e504d8c29b291578c1b3533752131467322a77a98d3595320227b503d",
+        "signature": "tmp_path, monkeypatch"
+      },
+      "272fda66": {
+        "line": 197,
+        "end_line": 213,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "4281a36e504d8c29b291578c1b3533752131467322a77a98d3595320227b503d",
+        "signature": "tmp_path, monkeypatch"
+      },
+      "9fbb734c": {
+        "line": 197,
+        "end_line": 213,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "4281a36e504d8c29b291578c1b3533752131467322a77a98d3595320227b503d",
+        "signature": "tmp_path, monkeypatch"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py",
+    "qualified_name": "test_original_key_does_not_accept_a_duplicated_member_request",
+    "revisions": {
+      "a7755d81": {
+        "line": 216,
+        "end_line": 228,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "9e162b61c7593585e03c2ad53c6f60fa22ef5c87491f42a2eb0644a81bd56394",
+        "signature": "tmp_path, monkeypatch"
+      },
+      "272fda66": {
+        "line": 216,
+        "end_line": 228,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "9e162b61c7593585e03c2ad53c6f60fa22ef5c87491f42a2eb0644a81bd56394",
+        "signature": "tmp_path, monkeypatch"
+      },
+      "9fbb734c": {
+        "line": 216,
+        "end_line": 228,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "9e162b61c7593585e03c2ad53c6f60fa22ef5c87491f42a2eb0644a81bd56394",
+        "signature": "tmp_path, monkeypatch"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py",
+    "qualified_name": "test_new_origin_reuses_original_hb_cancel_and_preview_scope",
+    "revisions": {
+      "a7755d81": {
+        "line": 232,
+        "end_line": 254,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "f87551d471a78f2b82975bbba7487b67856ac35e68f5fcca1322d306ccb3faaa",
+        "signature": "tmp_path, monkeypatch, state"
+      },
+      "272fda66": {
+        "line": 232,
+        "end_line": 254,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "f87551d471a78f2b82975bbba7487b67856ac35e68f5fcca1322d306ccb3faaa",
+        "signature": "tmp_path, monkeypatch, state"
+      },
+      "9fbb734c": {
+        "line": 232,
+        "end_line": 254,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "f87551d471a78f2b82975bbba7487b67856ac35e68f5fcca1322d306ccb3faaa",
+        "signature": "tmp_path, monkeypatch, state"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py",
+    "qualified_name": "test_each_mixed_camera_keeps_its_original_preview_permission",
+    "revisions": {
+      "a7755d81": {
+        "line": 39,
+        "end_line": 96,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "39aab49da6993d8a6ff1ddde0a0a852911e4404772bbb21264dec15c800a4367",
+        "signature": "tmp_path, generic_state, allowed, add_denied_hb_preview"
+      },
+      "272fda66": {
+        "line": 39,
+        "end_line": 96,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "39aab49da6993d8a6ff1ddde0a0a852911e4404772bbb21264dec15c800a4367",
+        "signature": "tmp_path, generic_state, allowed, add_denied_hb_preview"
+      },
+      "9fbb734c": {
+        "line": 39,
+        "end_line": 96,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "39aab49da6993d8a6ff1ddde0a0a852911e4404772bbb21264dec15c800a4367",
+        "signature": "tmp_path, generic_state, allowed, add_denied_hb_preview"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py",
+    "qualified_name": "test_foreign_residual_keeps_each_mixed_source_preview_scope",
+    "revisions": {
+      "a7755d81": {
+        "line": 103,
+        "end_line": 204,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "cfdcc95f466c424efb80799520c026de1f7e898300acc4e1236537097d489323",
+        "signature": "tmp_path, phase, hb_state, address_kind, surface"
+      },
+      "272fda66": {
+        "line": 103,
+        "end_line": 204,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "cfdcc95f466c424efb80799520c026de1f7e898300acc4e1236537097d489323",
+        "signature": "tmp_path, phase, hb_state, address_kind, surface"
+      },
+      "9fbb734c": {
+        "line": 103,
+        "end_line": 204,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "cfdcc95f466c424efb80799520c026de1f7e898300acc4e1236537097d489323",
+        "signature": "tmp_path, phase, hb_state, address_kind, surface"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py",
+    "qualified_name": "test_direct_fixed_repository_rejects_ineligible_link_source",
+    "revisions": {
+      "a7755d81": {
+        "line": 75,
+        "end_line": 84,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "74616d438c4d7e0bf3f6aeb6b8a1e766775108724f8955750fc3aa167cd5540b",
+        "signature": "tmp_path, monkeypatch, state, effect"
+      },
+      "272fda66": {
+        "line": 75,
+        "end_line": 84,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "74616d438c4d7e0bf3f6aeb6b8a1e766775108724f8955750fc3aa167cd5540b",
+        "signature": "tmp_path, monkeypatch, state, effect"
+      },
+      "9fbb734c": {
+        "line": 75,
+        "end_line": 84,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "74616d438c4d7e0bf3f6aeb6b8a1e766775108724f8955750fc3aa167cd5540b",
+        "signature": "tmp_path, monkeypatch, state, effect"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py",
+    "qualified_name": "test_bare_fixed_event_rejects_ineligible_or_missing_source_facts",
+    "revisions": {
+      "a7755d81": {
+        "line": 89,
+        "end_line": 118,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "c94468cfd795b94748cdfa134a56818444e88b27d146d3490471c26153eae896",
+        "signature": "tmp_path, monkeypatch, state, coverage"
+      },
+      "272fda66": {
+        "line": 89,
+        "end_line": 118,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "c94468cfd795b94748cdfa134a56818444e88b27d146d3490471c26153eae896",
+        "signature": "tmp_path, monkeypatch, state, coverage"
+      },
+      "9fbb734c": {
+        "line": 89,
+        "end_line": 118,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "c94468cfd795b94748cdfa134a56818444e88b27d146d3490471c26153eae896",
+        "signature": "tmp_path, monkeypatch, state, coverage"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py",
+    "qualified_name": "test_fixed_repository_accepts_reliable_original_link_source",
+    "revisions": {
+      "a7755d81": {
+        "line": 153,
+        "end_line": 181,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "56aca756d987f6ea0fe3f41266e82a294ed047079b6432c5da009a3a8a3cae0e",
+        "signature": "tmp_path, monkeypatch, state"
+      },
+      "272fda66": {
+        "line": 153,
+        "end_line": 181,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "56aca756d987f6ea0fe3f41266e82a294ed047079b6432c5da009a3a8a3cae0e",
+        "signature": "tmp_path, monkeypatch, state"
+      },
+      "9fbb734c": {
+        "line": 153,
+        "end_line": 181,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "56aca756d987f6ea0fe3f41266e82a294ed047079b6432c5da009a3a8a3cae0e",
+        "signature": "tmp_path, monkeypatch, state"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py",
+    "qualified_name": "test_direct_preview_and_both_require_original_address_and_valid_link",
+    "revisions": {
+      "a7755d81": {
+        "line": 188,
+        "end_line": 209,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "bcc0a61b771972a1088ccf3aa03bfcbd78364300f2b87b8288ee83b94818a756",
+        "signature": "tmp_path, monkeypatch, address, state, basis, allowed"
+      },
+      "272fda66": {
+        "line": 188,
+        "end_line": 209,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "bcc0a61b771972a1088ccf3aa03bfcbd78364300f2b87b8288ee83b94818a756",
+        "signature": "tmp_path, monkeypatch, address, state, basis, allowed"
+      },
+      "9fbb734c": {
+        "line": 188,
+        "end_line": 209,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "bcc0a61b771972a1088ccf3aa03bfcbd78364300f2b87b8288ee83b94818a756",
+        "signature": "tmp_path, monkeypatch, address, state, basis, allowed"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py",
+    "qualified_name": "test_both_label_cannot_add_an_unaddressed_preview",
+    "revisions": {
+      "a7755d81": {
+        "line": 212,
+        "end_line": 220,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "579d501f1b46b32edcbefdcb76599045079c0cdd752ac7983eb75fe6629935e9",
+        "signature": "tmp_path, monkeypatch"
+      },
+      "272fda66": {
+        "line": 212,
+        "end_line": 220,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "579d501f1b46b32edcbefdcb76599045079c0cdd752ac7983eb75fe6629935e9",
+        "signature": "tmp_path, monkeypatch"
+      },
+      "9fbb734c": {
+        "line": 212,
+        "end_line": 220,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "579d501f1b46b32edcbefdcb76599045079c0cdd752ac7983eb75fe6629935e9",
+        "signature": "tmp_path, monkeypatch"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py",
+    "qualified_name": "test_mixed_composite_sources_keep_each_previews_own_source",
+    "revisions": {
+      "a7755d81": {
+        "line": 225,
+        "end_line": 265,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "bf030258f9ce64fee8d14829447a20dd5e2a4c29d56726c69c8cb5f0f9e4bf9a",
+        "signature": "tmp_path, monkeypatch, include_rejected_preview, source_state"
+      },
+      "272fda66": {
+        "line": 225,
+        "end_line": 265,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "bf030258f9ce64fee8d14829447a20dd5e2a4c29d56726c69c8cb5f0f9e4bf9a",
+        "signature": "tmp_path, monkeypatch, include_rejected_preview, source_state"
+      },
+      "9fbb734c": {
+        "line": 225,
+        "end_line": 265,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "bf030258f9ce64fee8d14829447a20dd5e2a4c29d56726c69c8cb5f0f9e4bf9a",
+        "signature": "tmp_path, monkeypatch, include_rejected_preview, source_state"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py",
+    "qualified_name": "test_independent_guard_accepts_reliable_preceding_original_source",
+    "revisions": {
+      "a7755d81": {
+        "line": 293,
+        "end_line": 301,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "5f4b68c4c7db68cda345b3f340eaa913b89092e6765fd8f62cb8872349fbedbb",
+        "signature": "tmp_path, monkeypatch, state"
+      },
+      "272fda66": {
+        "line": 293,
+        "end_line": 301,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "5f4b68c4c7db68cda345b3f340eaa913b89092e6765fd8f62cb8872349fbedbb",
+        "signature": "tmp_path, monkeypatch, state"
+      },
+      "9fbb734c": {
+        "line": 293,
+        "end_line": 301,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "5f4b68c4c7db68cda345b3f340eaa913b89092e6765fd8f62cb8872349fbedbb",
+        "signature": "tmp_path, monkeypatch, state"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py",
+    "qualified_name": "test_independent_guard_requires_every_original_source_range",
+    "revisions": {
+      "a7755d81": {
+        "line": 306,
+        "end_line": 316,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "9dcee3e29726df7c973458bccec3558d45c6796d689b3b30b201ae5a45730863",
+        "signature": "tmp_path, monkeypatch, missing"
+      },
+      "272fda66": {
+        "line": 306,
+        "end_line": 316,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "9dcee3e29726df7c973458bccec3558d45c6796d689b3b30b201ae5a45730863",
+        "signature": "tmp_path, monkeypatch, missing"
+      },
+      "9fbb734c": {
+        "line": 306,
+        "end_line": 316,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "9dcee3e29726df7c973458bccec3558d45c6796d689b3b30b201ae5a45730863",
+        "signature": "tmp_path, monkeypatch, missing"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py",
+    "qualified_name": "test_independent_guard_rejects_extra_conflicting_or_future_facts",
+    "revisions": {
+      "a7755d81": {
+        "line": 320,
+        "end_line": 346,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "a6ac3376237d1b25d98fdf70a6a8b6950424ac3448eee22034ff6acb852877f9",
+        "signature": "tmp_path, monkeypatch, corruption"
+      },
+      "272fda66": {
+        "line": 320,
+        "end_line": 346,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "a6ac3376237d1b25d98fdf70a6a8b6950424ac3448eee22034ff6acb852877f9",
+        "signature": "tmp_path, monkeypatch, corruption"
+      },
+      "9fbb734c": {
+        "line": 320,
+        "end_line": 346,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "a6ac3376237d1b25d98fdf70a6a8b6950424ac3448eee22034ff6acb852877f9",
+        "signature": "tmp_path, monkeypatch, corruption"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py",
+    "qualified_name": "test_action_direct_preview_remains_independent",
+    "revisions": {
+      "a7755d81": {
+        "line": 349,
+        "end_line": 366,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "0e0e372cbe8177f017e9fcf07e669239c9acdb4e9612016619cead7a6ef8ae59",
+        "signature": "tmp_path, monkeypatch"
+      },
+      "272fda66": {
+        "line": 349,
+        "end_line": 366,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "0e0e372cbe8177f017e9fcf07e669239c9acdb4e9612016619cead7a6ef8ae59",
+        "signature": "tmp_path, monkeypatch"
+      },
+      "9fbb734c": {
+        "line": 349,
+        "end_line": 366,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "0e0e372cbe8177f017e9fcf07e669239c9acdb4e9612016619cead7a6ef8ae59",
+        "signature": "tmp_path, monkeypatch"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py",
+    "qualified_name": "test_no_intent_header_alone_cannot_replace_atomic_source_apply",
+    "revisions": {
+      "a7755d81": {
+        "line": 370,
+        "end_line": 399,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "85eccf6088e1a127eb369e32202981dd1cec15287d04ce2520a9a2d3b4ee9584",
+        "signature": "tmp_path, monkeypatch, actual_transaction"
+      },
+      "272fda66": {
+        "line": 370,
+        "end_line": 399,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "85eccf6088e1a127eb369e32202981dd1cec15287d04ce2520a9a2d3b4ee9584",
+        "signature": "tmp_path, monkeypatch, actual_transaction"
+      },
+      "9fbb734c": {
+        "line": 370,
+        "end_line": 399,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "85eccf6088e1a127eb369e32202981dd1cec15287d04ce2520a9a2d3b4ee9584",
+        "signature": "tmp_path, monkeypatch, actual_transaction"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py",
+    "qualified_name": "test_independent_guard_does_not_classify_partial_source_as_another_driver",
+    "revisions": {
+      "a7755d81": {
+        "line": 403,
+        "end_line": 415,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "28ec92e02e44f3090eac5d0f859e97613e80f79691298aa84e884a0807258375",
+        "signature": "tmp_path, monkeypatch, missing"
+      },
+      "272fda66": {
+        "line": 403,
+        "end_line": 415,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "28ec92e02e44f3090eac5d0f859e97613e80f79691298aa84e884a0807258375",
+        "signature": "tmp_path, monkeypatch, missing"
+      },
+      "9fbb734c": {
+        "line": 403,
+        "end_line": 415,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "28ec92e02e44f3090eac5d0f859e97613e80f79691298aa84e884a0807258375",
+        "signature": "tmp_path, monkeypatch, missing"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py",
+    "qualified_name": "test_no_intent_guard_borrows_exact_same_transaction_source_apply",
+    "revisions": {
+      "a7755d81": {
+        "line": 420,
+        "end_line": 462,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "2b820c5c1602c144d0bbf4cfb1af1878ba31c0dd9e0a7a104c4880adefabde16",
+        "signature": "tmp_path, monkeypatch, fault"
+      },
+      "272fda66": {
+        "line": 420,
+        "end_line": 462,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "2b820c5c1602c144d0bbf4cfb1af1878ba31c0dd9e0a7a104c4880adefabde16",
+        "signature": "tmp_path, monkeypatch, fault"
+      },
+      "9fbb734c": {
+        "line": 420,
+        "end_line": 462,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "2b820c5c1602c144d0bbf4cfb1af1878ba31c0dd9e0a7a104c4880adefabde16",
+        "signature": "tmp_path, monkeypatch, fault"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py",
+    "qualified_name": "test_plan_iteration_merges_only_verified_current_members",
+    "revisions": {
+      "a7755d81": {
+        "line": 466,
+        "end_line": 503,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "20d432f0abb8e91f0ee6b1c0315e787575c1bf2d58bcaac8b35a2824fb1d2cef",
+        "signature": "tmp_path, monkeypatch, change"
+      },
+      "272fda66": {
+        "line": 466,
+        "end_line": 503,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "20d432f0abb8e91f0ee6b1c0315e787575c1bf2d58bcaac8b35a2824fb1d2cef",
+        "signature": "tmp_path, monkeypatch, change"
+      },
+      "9fbb734c": {
+        "line": 466,
+        "end_line": 503,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "20d432f0abb8e91f0ee6b1c0315e787575c1bf2d58bcaac8b35a2824fb1d2cef",
+        "signature": "tmp_path, monkeypatch, change"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py",
+    "qualified_name": "test_real_photo_start_saves_entry_even_when_first_tool_fails",
+    "revisions": {
+      "a7755d81": {
+        "line": 46,
+        "end_line": 56,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "f2f22da236082a4a5b90e5f7447dfeddb57c06fa9f7770646cc2273955e00a55",
+        "signature": "tmp_path"
+      },
+      "272fda66": {
+        "line": 46,
+        "end_line": 56,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "f2f22da236082a4a5b90e5f7447dfeddb57c06fa9f7770646cc2273955e00a55",
+        "signature": "tmp_path"
+      },
+      "9fbb734c": {
+        "line": 46,
+        "end_line": 56,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "f2f22da236082a4a5b90e5f7447dfeddb57c06fa9f7770646cc2273955e00a55",
+        "signature": "tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py",
+    "qualified_name": "test_returned_no_photo_effect_does_not_reopen_start_cancellation",
+    "revisions": {
+      "a7755d81": {
+        "line": 59,
+        "end_line": 68,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "4711caa37d2c0d63c85402bde4409c68b4af9fb70e3d2c64c389e1111dc2b1e8",
+        "signature": "tmp_path, monkeypatch"
+      },
+      "272fda66": {
+        "line": 59,
+        "end_line": 68,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "4711caa37d2c0d63c85402bde4409c68b4af9fb70e3d2c64c389e1111dc2b1e8",
+        "signature": "tmp_path, monkeypatch"
+      },
+      "9fbb734c": {
+        "line": 59,
+        "end_line": 68,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "4711caa37d2c0d63c85402bde4409c68b4af9fb70e3d2c64c389e1111dc2b1e8",
+        "signature": "tmp_path, monkeypatch"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py",
+    "qualified_name": "test_photo_cancel_before_entry_prevents_late_start",
+    "revisions": {
+      "a7755d81": {
+        "line": 85,
+        "end_line": 107,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "dc8e6e419164d94f40462397d50efd2654e8fcac54eabb6839daf69c5a3168cf",
+        "signature": "tmp_path, monkeypatch"
+      },
+      "272fda66": {
+        "line": 85,
+        "end_line": 107,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "dc8e6e419164d94f40462397d50efd2654e8fcac54eabb6839daf69c5a3168cf",
+        "signature": "tmp_path, monkeypatch"
+      },
+      "9fbb734c": {
+        "line": 85,
+        "end_line": 107,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "dc8e6e419164d94f40462397d50efd2654e8fcac54eabb6839daf69c5a3168cf",
+        "signature": "tmp_path, monkeypatch"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py",
+    "qualified_name": "test_entered_start_rejection_finishes_without_waiting_for_photo",
+    "revisions": {
+      "a7755d81": {
+        "line": 110,
+        "end_line": 135,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "cd9d998259eb2c223efe8e3816e590fe2d82dd847bdada431e5920407c97cbca",
+        "signature": "tmp_path"
+      },
+      "272fda66": {
+        "line": 110,
+        "end_line": 135,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "cd9d998259eb2c223efe8e3816e590fe2d82dd847bdada431e5920407c97cbca",
+        "signature": "tmp_path"
+      },
+      "9fbb734c": {
+        "line": 110,
+        "end_line": 135,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "cd9d998259eb2c223efe8e3816e590fe2d82dd847bdada431e5920407c97cbca",
+        "signature": "tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py",
+    "qualified_name": "test_photo_cancel_rejection_respects_preview_addressing",
+    "revisions": {
+      "a7755d81": {
+        "line": 157,
+        "end_line": 189,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "4fd77bcc65f942d8bd40ab0bdacb5b1f995183b372950ca0988dfa573bd9bd47",
+        "signature": "tmp_path, address"
+      },
+      "272fda66": {
+        "line": 157,
+        "end_line": 189,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "4fd77bcc65f942d8bd40ab0bdacb5b1f995183b372950ca0988dfa573bd9bd47",
+        "signature": "tmp_path, address"
+      },
+      "9fbb734c": {
+        "line": 157,
+        "end_line": 189,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "4fd77bcc65f942d8bd40ab0bdacb5b1f995183b372950ca0988dfa573bd9bd47",
+        "signature": "tmp_path, address"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py",
+    "qualified_name": "test_setup_failure_releases_occupancy_without_claiming_activity_started",
+    "revisions": {
+      "a7755d81": {
+        "line": 192,
+        "end_line": 202,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "de0df3eee5918a242e9c6c8d0590377e4c1d18fd2663ca5bf1c97c852aa31d27",
+        "signature": "tmp_path"
+      },
+      "272fda66": {
+        "line": 192,
+        "end_line": 202,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "de0df3eee5918a242e9c6c8d0590377e4c1d18fd2663ca5bf1c97c852aa31d27",
+        "signature": "tmp_path"
+      },
+      "9fbb734c": {
+        "line": 192,
+        "end_line": 202,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "de0df3eee5918a242e9c6c8d0590377e4c1d18fd2663ca5bf1c97c852aa31d27",
+        "signature": "tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py",
+    "qualified_name": "test_driver_entered_with_zero_tools_keeps_entry_and_rejects_cancel",
+    "revisions": {
+      "a7755d81": {
+        "line": 205,
+        "end_line": 225,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "9f33b20be1d49164e1faba26f335954d9878e4df2267723d5f9e59b829292111",
+        "signature": "tmp_path, monkeypatch"
+      },
+      "272fda66": {
+        "line": 205,
+        "end_line": 225,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "9f33b20be1d49164e1faba26f335954d9878e4df2267723d5f9e59b829292111",
+        "signature": "tmp_path, monkeypatch"
+      },
+      "9fbb734c": {
+        "line": 205,
+        "end_line": 225,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "9f33b20be1d49164e1faba26f335954d9878e4df2267723d5f9e59b829292111",
+        "signature": "tmp_path, monkeypatch"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py",
+    "qualified_name": "test_cancel_before_any_start_does_not_fabricate_attempt",
+    "revisions": {
+      "a7755d81": {
+        "line": 228,
+        "end_line": 238,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "69155349f68bd68d37dd144ed523212bac0c31eaeb1c55c3340d5ee25c174b07",
+        "signature": "tmp_path"
+      },
+      "272fda66": {
+        "line": 228,
+        "end_line": 238,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "69155349f68bd68d37dd144ed523212bac0c31eaeb1c55c3340d5ee25c174b07",
+        "signature": "tmp_path"
+      },
+      "9fbb734c": {
+        "line": 228,
+        "end_line": 238,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "69155349f68bd68d37dd144ed523212bac0c31eaeb1c55c3340d5ee25c174b07",
+        "signature": "tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py",
+    "qualified_name": "test_direct_cancel_mode_cannot_bypass_entered_start",
+    "revisions": {
+      "a7755d81": {
+        "line": 242,
+        "end_line": 261,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "cbbb9dcc9f71142ab00254baa0b991f9436f861642adae1ff5e709cca5a35d26",
+        "signature": "tmp_path, mode"
+      },
+      "272fda66": {
+        "line": 242,
+        "end_line": 261,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "cbbb9dcc9f71142ab00254baa0b991f9436f861642adae1ff5e709cca5a35d26",
+        "signature": "tmp_path, mode"
+      },
+      "9fbb734c": {
+        "line": 242,
+        "end_line": 261,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "cbbb9dcc9f71142ab00254baa0b991f9436f861642adae1ff5e709cca5a35d26",
+        "signature": "tmp_path, mode"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py",
+    "qualified_name": "test_preview_both_is_deduplicated_when_source_cancel_is_applied",
+    "revisions": {
+      "a7755d81": {
+        "line": 264,
+        "end_line": 277,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "e81316eeec4db8cfc5e8e3ded2ec1ccf878f17e1741fb10ca090afadae279693",
+        "signature": "tmp_path"
+      },
+      "272fda66": {
+        "line": 264,
+        "end_line": 277,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "e81316eeec4db8cfc5e8e3ded2ec1ccf878f17e1741fb10ca090afadae279693",
+        "signature": "tmp_path"
+      },
+      "9fbb734c": {
+        "line": 264,
+        "end_line": 277,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "e81316eeec4db8cfc5e8e3ded2ec1ccf878f17e1741fb10ca090afadae279693",
+        "signature": "tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py",
+    "qualified_name": "test_original_entry_cancel_transaction_rolls_back_or_reuses_exact_request",
+    "revisions": {
+      "a7755d81": {
+        "line": 281,
+        "end_line": 348,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "274cfea13f7d56f10e16ef2c002a1f55c82a047935a06586eca83f2ec5406fd3",
+        "signature": "tmp_path, monkeypatch, phase"
+      },
+      "272fda66": {
+        "line": 281,
+        "end_line": 348,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "274cfea13f7d56f10e16ef2c002a1f55c82a047935a06586eca83f2ec5406fd3",
+        "signature": "tmp_path, monkeypatch, phase"
+      },
+      "9fbb734c": {
+        "line": 281,
+        "end_line": 348,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "274cfea13f7d56f10e16ef2c002a1f55c82a047935a06586eca83f2ec5406fd3",
+        "signature": "tmp_path, monkeypatch, phase"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py",
+    "qualified_name": "test_atomic_cancel_of_all_pending_photo_sources_completes_original_plan",
+    "revisions": {
+      "a7755d81": {
+        "line": 351,
+        "end_line": 364,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "a1e800d4b0db6cbeff627093d7ce5fbf0fc0ccfde61d8e8a4185e32938c038c2",
+        "signature": "tmp_path"
+      },
+      "272fda66": {
+        "line": 351,
+        "end_line": 364,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "a1e800d4b0db6cbeff627093d7ce5fbf0fc0ccfde61d8e8a4185e32938c038c2",
+        "signature": "tmp_path"
+      },
+      "9fbb734c": {
+        "line": 351,
+        "end_line": 364,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "a1e800d4b0db6cbeff627093d7ce5fbf0fc0ccfde61d8e8a4185e32938c038c2",
+        "signature": "tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py",
+    "qualified_name": "test_cancel_after_actual_relative_focus_rejects_and_keeps_original_limits",
+    "revisions": {
+      "a7755d81": {
+        "line": 368,
+        "end_line": 399,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "5fe70e23779ee18c52c979f523bbd26a0802a1d047473a90b4399f3a40ce11f0",
+        "signature": "tmp_path, monkeypatch, remaining"
+      },
+      "272fda66": {
+        "line": 368,
+        "end_line": 399,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "5fe70e23779ee18c52c979f523bbd26a0802a1d047473a90b4399f3a40ce11f0",
+        "signature": "tmp_path, monkeypatch, remaining"
+      },
+      "9fbb734c": {
+        "line": 368,
+        "end_line": 399,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "5fe70e23779ee18c52c979f523bbd26a0802a1d047473a90b4399f3a40ce11f0",
+        "signature": "tmp_path, monkeypatch, remaining"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py",
+    "qualified_name": "test_cancel_origin_itself_canceled_keeps_already_applied_source_responsibility",
+    "revisions": {
+      "a7755d81": {
+        "line": 402,
+        "end_line": 421,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "5c8619100653c8c1d850a3e7a2d7e4336b7add4e579a5b3d66bc2bf4113d589f",
+        "signature": "tmp_path"
+      },
+      "272fda66": {
+        "line": 402,
+        "end_line": 421,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "5c8619100653c8c1d850a3e7a2d7e4336b7add4e579a5b3d66bc2bf4113d589f",
+        "signature": "tmp_path"
+      },
+      "9fbb734c": {
+        "line": 402,
+        "end_line": 421,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "5c8619100653c8c1d850a3e7a2d7e4336b7add4e579a5b3d66bc2bf4113d589f",
+        "signature": "tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py",
+    "qualified_name": "test_independent_fixed_event_guard_rejects_false_entry_request",
+    "revisions": {
+      "a7755d81": {
+        "line": 425,
+        "end_line": 449,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "08feeacc12f2b57477429371ffb3b79e2c34f8442326849eaa07f0ca7746cb2c",
+        "signature": "tmp_path, monkeypatch, changed"
+      },
+      "272fda66": {
+        "line": 425,
+        "end_line": 449,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "08feeacc12f2b57477429371ffb3b79e2c34f8442326849eaa07f0ca7746cb2c",
+        "signature": "tmp_path, monkeypatch, changed"
+      },
+      "9fbb734c": {
+        "line": 425,
+        "end_line": 449,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "08feeacc12f2b57477429371ffb3b79e2c34f8442326849eaa07f0ca7746cb2c",
+        "signature": "tmp_path, monkeypatch, changed"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py",
+    "qualified_name": "test_unknown_grant_never_authorizes_driver_or_guesses_cancel_success",
+    "revisions": {
+      "a7755d81": {
+        "line": 453,
+        "end_line": 473,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "a753165017b4a32b70c81b0a2357e526fa51f8a4b18f43f51ebcc3b34eb20feb",
+        "signature": "tmp_path, monkeypatch, committed"
+      },
+      "272fda66": {
+        "line": 453,
+        "end_line": 473,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "a753165017b4a32b70c81b0a2357e526fa51f8a4b18f43f51ebcc3b34eb20feb",
+        "signature": "tmp_path, monkeypatch, committed"
+      },
+      "9fbb734c": {
+        "line": 453,
+        "end_line": 473,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "a753165017b4a32b70c81b0a2357e526fa51f8a4b18f43f51ebcc3b34eb20feb",
+        "signature": "tmp_path, monkeypatch, committed"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py",
+    "qualified_name": "test_original_grant_without_ready_session_permit_never_enters_driver",
+    "revisions": {
+      "a7755d81": {
+        "line": 477,
+        "end_line": 494,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "3cb6c0aa2cce5a4e4e51695e544bce58e10c7254be0838cf0b851c11b2d83662",
+        "signature": "tmp_path, monkeypatch, missing"
+      },
+      "272fda66": {
+        "line": 477,
+        "end_line": 494,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "3cb6c0aa2cce5a4e4e51695e544bce58e10c7254be0838cf0b851c11b2d83662",
+        "signature": "tmp_path, monkeypatch, missing"
+      },
+      "9fbb734c": {
+        "line": 477,
+        "end_line": 494,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "3cb6c0aa2cce5a4e4e51695e544bce58e10c7254be0838cf0b851c11b2d83662",
+        "signature": "tmp_path, monkeypatch, missing"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py",
+    "qualified_name": "test_four_entries_share_motor_permission",
+    "revisions": {
+      "a7755d81": {
+        "line": 76,
+        "end_line": 88,
+        "kind": "FunctionDef",
+        "ast_sha256": "2d89cd99708e2a580573fa04fc38356ac0935a1742874da1ca4e822281db2944",
+        "signature": "motor_cancel, target, local"
+      },
+      "272fda66": {
+        "line": 76,
+        "end_line": 88,
+        "kind": "FunctionDef",
+        "ast_sha256": "2d89cd99708e2a580573fa04fc38356ac0935a1742874da1ca4e822281db2944",
+        "signature": "motor_cancel, target, local"
+      },
+      "9fbb734c": {
+        "line": 76,
+        "end_line": 88,
+        "kind": "FunctionDef",
+        "ast_sha256": "2d89cd99708e2a580573fa04fc38356ac0935a1742874da1ca4e822281db2944",
+        "signature": "motor_cancel, target, local"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py",
+    "qualified_name": "test_local_intent_cancel_has_no_persisted_unknown_gap",
+    "revisions": {
+      "a7755d81": {
+        "line": 91,
+        "end_line": 140,
+        "kind": "FunctionDef",
+        "ast_sha256": "47834b262762631723c89beaa08eb2f35ebeb722c3166f9c44302091dc3b7451",
+        "signature": "motor_cancel"
+      },
+      "272fda66": {
+        "line": 91,
+        "end_line": 140,
+        "kind": "FunctionDef",
+        "ast_sha256": "47834b262762631723c89beaa08eb2f35ebeb722c3166f9c44302091dc3b7451",
+        "signature": "motor_cancel"
+      },
+      "9fbb734c": {
+        "line": 91,
+        "end_line": 140,
+        "kind": "FunctionDef",
+        "ast_sha256": "47834b262762631723c89beaa08eb2f35ebeb722c3166f9c44302091dc3b7451",
+        "signature": "motor_cancel"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py",
+    "qualified_name": "test_verify_motor_cancel_operation_preserves_original_result",
+    "revisions": {
+      "a7755d81": {
+        "line": 160,
+        "end_line": 188,
+        "kind": "FunctionDef",
+        "ast_sha256": "f656cbe513477345eab9f878cf2e2e01e53e5ae0ec1fbc98e30f9533345f01e5",
+        "signature": "motor_cancel, stage"
+      },
+      "272fda66": {
+        "line": 160,
+        "end_line": 188,
+        "kind": "FunctionDef",
+        "ast_sha256": "f656cbe513477345eab9f878cf2e2e01e53e5ae0ec1fbc98e30f9533345f01e5",
+        "signature": "motor_cancel, stage"
+      },
+      "9fbb734c": {
+        "line": 160,
+        "end_line": 188,
+        "kind": "FunctionDef",
+        "ast_sha256": "f656cbe513477345eab9f878cf2e2e01e53e5ae0ec1fbc98e30f9533345f01e5",
+        "signature": "motor_cancel, stage"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py",
+    "qualified_name": "test_cancel_unknown_reopens_verifies_and_stops_before_settlement",
+    "revisions": {
+      "a7755d81": {
+        "line": 193,
+        "end_line": 260,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "ea5d5c77db8bb2d1db96789ae6ea097dd8e26f84e0046f6a1bf0c0a79dd1e6d3",
+        "signature": "motor_cancel, monkeypatch, stage"
+      },
+      "272fda66": {
+        "line": 193,
+        "end_line": 260,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "ea5d5c77db8bb2d1db96789ae6ea097dd8e26f84e0046f6a1bf0c0a79dd1e6d3",
+        "signature": "motor_cancel, monkeypatch, stage"
+      },
+      "9fbb734c": {
+        "line": 193,
+        "end_line": 260,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "ea5d5c77db8bb2d1db96789ae6ea097dd8e26f84e0046f6a1bf0c0a79dd1e6d3",
+        "signature": "motor_cancel, monkeypatch, stage"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py",
+    "qualified_name": "test_running_sync_cancel_settles_target_before_member_success",
+    "revisions": {
+      "a7755d81": {
+        "line": 215,
+        "end_line": 235,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "831db5397a83ed73b5b6406b7e6f513eea108bde56d9990f8d4d15ba7b9a65b0",
+        "signature": "environment, published"
+      },
+      "272fda66": {
+        "line": 215,
+        "end_line": 235,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "831db5397a83ed73b5b6406b7e6f513eea108bde56d9990f8d4d15ba7b9a65b0",
+        "signature": "environment, published"
+      },
+      "9fbb734c": {
+        "line": 215,
+        "end_line": 235,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "831db5397a83ed73b5b6406b7e6f513eea108bde56d9990f8d4d15ba7b9a65b0",
+        "signature": "environment, published"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py",
+    "qualified_name": "test_acknowledged_running_sync_can_cancel_without_rewriting_ack",
+    "revisions": {
+      "a7755d81": {
+        "line": 239,
+        "end_line": 256,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "9f4caa25ec010d01bf8977ea648df5841bf8705b878334fc0edaaf33cb110f92",
+        "signature": "environment"
+      },
+      "272fda66": {
+        "line": 239,
+        "end_line": 256,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "9f4caa25ec010d01bf8977ea648df5841bf8705b878334fc0edaaf33cb110f92",
+        "signature": "environment"
+      },
+      "9fbb734c": {
+        "line": 239,
+        "end_line": 256,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "9f4caa25ec010d01bf8977ea648df5841bf8705b878334fc0edaaf33cb110f92",
+        "signature": "environment"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py",
+    "qualified_name": "test_acknowledged_sync_recovers_local_action_success",
+    "revisions": {
+      "a7755d81": {
+        "line": 289,
+        "end_line": 300,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "202ffb9f44ad3deca742429ef8493357cc1bd840ee436bab037535bca2febd64",
+        "signature": "environment"
+      },
+      "272fda66": {
+        "line": 289,
+        "end_line": 300,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "202ffb9f44ad3deca742429ef8493357cc1bd840ee436bab037535bca2febd64",
+        "signature": "environment"
+      },
+      "9fbb734c": {
+        "line": 289,
+        "end_line": 300,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "202ffb9f44ad3deca742429ef8493357cc1bd840ee436bab037535bca2febd64",
+        "signature": "environment"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py",
+    "qualified_name": "test_work_facts_keeps_acknowledged_local_result_pending",
+    "revisions": {
+      "a7755d81": {
+        "line": 304,
+        "end_line": 312,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "d3fe152be4c38fde3466c131d953d9c8c187d22686c21f04722178125b7f14f4",
+        "signature": "environment"
+      },
+      "272fda66": {
+        "line": 304,
+        "end_line": 312,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "d3fe152be4c38fde3466c131d953d9c8c187d22686c21f04722178125b7f14f4",
+        "signature": "environment"
+      },
+      "9fbb734c": {
+        "line": 304,
+        "end_line": 312,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "d3fe152be4c38fde3466c131d953d9c8c187d22686c21f04722178125b7f14f4",
+        "signature": "environment"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py",
+    "qualified_name": "test_report_cancel_original_key_rejects_changed_apply_mode",
+    "revisions": {
+      "a7755d81": {
+        "line": 475,
+        "end_line": 489,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "4fe28b936f147d2fd8797496f120d014e1c16f4f6ddeb3ef0be834b9ce155af8",
+        "signature": "environment, mode"
+      },
+      "272fda66": {
+        "line": 471,
+        "end_line": 485,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "4fe28b936f147d2fd8797496f120d014e1c16f4f6ddeb3ef0be834b9ce155af8",
+        "signature": "environment, mode"
+      },
+      "9fbb734c": {
+        "line": 475,
+        "end_line": 489,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "4fe28b936f147d2fd8797496f120d014e1c16f4f6ddeb3ef0be834b9ce155af8",
+        "signature": "environment, mode"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py",
+    "qualified_name": "test_report_cancel_original_mode_reuses_after_later_facts",
+    "revisions": {
+      "a7755d81": {
+        "line": 494,
+        "end_line": 514,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "757298aff834a1c1a436902ef22c7a6ded529ddb398d39c4d88a7956f25c8467",
+        "signature": "environment, mode"
+      },
+      "272fda66": {
+        "line": 490,
+        "end_line": 510,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "757298aff834a1c1a436902ef22c7a6ded529ddb398d39c4d88a7956f25c8467",
+        "signature": "environment, mode"
+      },
+      "9fbb734c": {
+        "line": 494,
+        "end_line": 514,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "757298aff834a1c1a436902ef22c7a6ded529ddb398d39c4d88a7956f25c8467",
+        "signature": "environment, mode"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py",
+    "qualified_name": "test_target_cancel_recovers_after_origin_stops_waiting",
+    "revisions": {
+      "a7755d81": {
+        "line": 518,
+        "end_line": 549,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "8ab7dfdb95e6a21f81de8025edda2d4fae1bbe4975b8ca925301532702c40a40",
+        "signature": "environment"
+      },
+      "272fda66": {
+        "line": 514,
+        "end_line": 545,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "8ab7dfdb95e6a21f81de8025edda2d4fae1bbe4975b8ca925301532702c40a40",
+        "signature": "environment"
+      },
+      "9fbb734c": {
+        "line": 518,
+        "end_line": 549,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "8ab7dfdb95e6a21f81de8025edda2d4fae1bbe4975b8ca925301532702c40a40",
+        "signature": "environment"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py",
+    "qualified_name": "test_one_sync_cancel_preserves_shared_frozen_report_and_other_success",
+    "revisions": {
+      "a7755d81": {
+        "line": 553,
+        "end_line": 587,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "0df3962bbef6ccffa15d3aafa2b46fdfc9254ff13014495f80a6df16fa5b90e6",
+        "signature": "environment"
+      },
+      "272fda66": {
+        "line": 549,
+        "end_line": 583,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "0df3962bbef6ccffa15d3aafa2b46fdfc9254ff13014495f80a6df16fa5b90e6",
+        "signature": "environment"
+      },
+      "9fbb734c": {
+        "line": 553,
+        "end_line": 587,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "0df3962bbef6ccffa15d3aafa2b46fdfc9254ff13014495f80a6df16fa5b90e6",
+        "signature": "environment"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py",
+    "qualified_name": "test_local_result_save_failure_stops_maintenance",
+    "revisions": {
+      "a7755d81": {
+        "line": 592,
+        "end_line": 605,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "ab7b651017bb5d2806030833318cd340b68c3773b90472adfa56c5dc8b7024f4",
+        "signature": "environment, after_commit"
+      },
+      "272fda66": {
+        "line": 588,
+        "end_line": 601,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "ab7b651017bb5d2806030833318cd340b68c3773b90472adfa56c5dc8b7024f4",
+        "signature": "environment, after_commit"
+      },
+      "9fbb734c": {
+        "line": 592,
+        "end_line": 605,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "ab7b651017bb5d2806030833318cd340b68c3773b90472adfa56c5dc8b7024f4",
+        "signature": "environment, after_commit"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py",
+    "qualified_name": "test_report_state_query_failure_is_fatal_before_following_flow",
+    "revisions": {
+      "a7755d81": {
+        "line": 611,
+        "end_line": 642,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "146a5f2fdd712b2cbfab90b8bf375b9c664f936d4f2b596aee0a1d64f605e797",
+        "signature": "environment, start_actions, prefix"
+      },
+      "272fda66": {
+        "line": 607,
+        "end_line": 638,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "146a5f2fdd712b2cbfab90b8bf375b9c664f936d4f2b596aee0a1d64f605e797",
+        "signature": "environment, start_actions, prefix"
+      },
+      "9fbb734c": {
+        "line": 611,
+        "end_line": 642,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "146a5f2fdd712b2cbfab90b8bf375b9c664f936d4f2b596aee0a1d64f605e797",
+        "signature": "environment, start_actions, prefix"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py",
+    "qualified_name": "test_sync_cancel_history_replays_target_sync_member_and_plan",
+    "revisions": {
+      "a7755d81": {
+        "line": 721,
+        "end_line": 820,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "5bc5bf0c09509867043d971a37c2537dc9c883cf2fc932300a24b8bea7e9ae48",
+        "signature": "environment"
+      },
+      "272fda66": {
+        "line": 717,
+        "end_line": 816,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "5bc5bf0c09509867043d971a37c2537dc9c883cf2fc932300a24b8bea7e9ae48",
+        "signature": "environment"
+      },
+      "9fbb734c": {
+        "line": 721,
+        "end_line": 820,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "5bc5bf0c09509867043d971a37c2537dc9c883cf2fc932300a24b8bea7e9ae48",
+        "signature": "environment"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_target_types.py",
+    "qualified_name": "TestObtainWithdrawal.test_terminal_obtain_still_withdraws_ready",
+    "revisions": {
+      "a7755d81": {
+        "line": 189,
+        "end_line": 199,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "63963ea4fe217890a12eae5deb80f09b0e082858b60af71cc4e6a1fe9c375a82",
+        "signature": "self, environment"
+      },
+      "272fda66": {
+        "line": 189,
+        "end_line": 199,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "63963ea4fe217890a12eae5deb80f09b0e082858b60af71cc4e6a1fe9c375a82",
+        "signature": "self, environment"
+      },
+      "9fbb734c": {
+        "line": 189,
+        "end_line": 199,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "63963ea4fe217890a12eae5deb80f09b0e082858b60af71cc4e6a1fe9c375a82",
+        "signature": "self, environment"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_target_types.py",
+    "qualified_name": "TestObtainWithdrawal.test_processing_delivery_is_not_retractable",
+    "revisions": {
+      "a7755d81": {
+        "line": 201,
+        "end_line": 213,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "4e691a73b3deb5e70beee61e5e4c11d1192d9e7d7552df0fffc6afc4f122a1c6",
+        "signature": "self, environment"
+      },
+      "272fda66": {
+        "line": 201,
+        "end_line": 213,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "4e691a73b3deb5e70beee61e5e4c11d1192d9e7d7552df0fffc6afc4f122a1c6",
+        "signature": "self, environment"
+      },
+      "9fbb734c": {
+        "line": 201,
+        "end_line": 213,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "4e691a73b3deb5e70beee61e5e4c11d1192d9e7d7552df0fffc6afc4f122a1c6",
+        "signature": "self, environment"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_target_types.py",
+    "qualified_name": "TestObtainWithdrawal.test_unknown_position_saves_finite_unconfirmed_result",
+    "revisions": {
+      "a7755d81": {
+        "line": 215,
+        "end_line": 225,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "e85e1c196bcda2c5e52252371a3096c8b8bf371e977cd789fe1c81a6f7a03404",
+        "signature": "self, environment"
+      },
+      "272fda66": {
+        "line": 215,
+        "end_line": 225,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "e85e1c196bcda2c5e52252371a3096c8b8bf371e977cd789fe1c81a6f7a03404",
+        "signature": "self, environment"
+      },
+      "9fbb734c": {
+        "line": 215,
+        "end_line": 225,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "e85e1c196bcda2c5e52252371a3096c8b8bf371e977cd789fe1c81a6f7a03404",
+        "signature": "self, environment"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_target_types.py",
+    "qualified_name": "TestCleanupSettlement.test_deleted_item_does_not_block_others",
+    "revisions": {
+      "a7755d81": {
+        "line": 230,
+        "end_line": 252,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "13c0c7e99472088b2930b5bcbc9c8817f5364c4622a46910e33690f9bb9d55a1",
+        "signature": "self, pipeline"
+      },
+      "272fda66": {
+        "line": 230,
+        "end_line": 252,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "13c0c7e99472088b2930b5bcbc9c8817f5364c4622a46910e33690f9bb9d55a1",
+        "signature": "self, pipeline"
+      },
+      "9fbb734c": {
+        "line": 230,
+        "end_line": 252,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "13c0c7e99472088b2930b5bcbc9c8817f5364c4622a46910e33690f9bb9d55a1",
+        "signature": "self, pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_target_types.py",
+    "qualified_name": "TestCaptureAndReportSettlement.test_running_capture_waits_for_execution_chain",
+    "revisions": {
+      "a7755d81": {
+        "line": 257,
+        "end_line": 262,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "3ee6ee41a2108eea5a14fb7efea4a87631aafa6eb3bd97cabc4e5839cbd0290b",
+        "signature": "self, pipeline"
+      },
+      "272fda66": {
+        "line": 257,
+        "end_line": 262,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "3ee6ee41a2108eea5a14fb7efea4a87631aafa6eb3bd97cabc4e5839cbd0290b",
+        "signature": "self, pipeline"
+      },
+      "9fbb734c": {
+        "line": 257,
+        "end_line": 262,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "3ee6ee41a2108eea5a14fb7efea4a87631aafa6eb3bd97cabc4e5839cbd0290b",
+        "signature": "self, pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_target_types.py",
+    "qualified_name": "TestCaptureAndReportSettlement.test_running_report_without_sync_rejects_settlement",
+    "revisions": {
+      "a7755d81": {
+        "line": 264,
+        "end_line": 273,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "3424ac3577898f67bff4360fc778fde069d0d478498a61c07685c7f8363cddab",
+        "signature": "self, pipeline"
+      },
+      "272fda66": {
+        "line": 264,
+        "end_line": 273,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "3424ac3577898f67bff4360fc778fde069d0d478498a61c07685c7f8363cddab",
+        "signature": "self, pipeline"
+      },
+      "9fbb734c": {
+        "line": 264,
+        "end_line": 273,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "3424ac3577898f67bff4360fc778fde069d0d478498a61c07685c7f8363cddab",
+        "signature": "self, pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_target_types.py",
+    "qualified_name": "TestCancelTaskSettlementDelegation.test_cancel_action_target_delegates_to_origin_settle",
+    "revisions": {
+      "a7755d81": {
+        "line": 278,
+        "end_line": 320,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "893a19affe6e0792cec1d82f7de94f0bb94e842c708894e7772041f9750536d7",
+        "signature": "self, pipeline"
+      },
+      "272fda66": {
+        "line": 278,
+        "end_line": 320,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "893a19affe6e0792cec1d82f7de94f0bb94e842c708894e7772041f9750536d7",
+        "signature": "self, pipeline"
+      },
+      "9fbb734c": {
+        "line": 278,
+        "end_line": 320,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "893a19affe6e0792cec1d82f7de94f0bb94e842c708894e7772041f9750536d7",
+        "signature": "self, pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_unfixed_cancel_origin.py",
+    "qualified_name": "test_real_c2_cancels_running_unfixed_c1_without_touching_its_targets",
+    "revisions": {
+      "a7755d81": {
+        "line": 33,
+        "end_line": 50,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "60efd9390b14f4aa851d2f82f4c1cd96b3142016f7f6cf7360f9c5bb6ea9c2d8",
+        "signature": "tmp_path, monkeypatch"
+      },
+      "272fda66": {
+        "line": 33,
+        "end_line": 50,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "60efd9390b14f4aa851d2f82f4c1cd96b3142016f7f6cf7360f9c5bb6ea9c2d8",
+        "signature": "tmp_path, monkeypatch"
+      },
+      "9fbb734c": {
+        "line": 33,
+        "end_line": 50,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "60efd9390b14f4aa851d2f82f4c1cd96b3142016f7f6cf7360f9c5bb6ea9c2d8",
+        "signature": "tmp_path, monkeypatch"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_unfixed_cancel_origin.py",
+    "qualified_name": "test_finish_itself_rechecks_complete_pending_empty_members",
+    "revisions": {
+      "a7755d81": {
+        "line": 54,
+        "end_line": 82,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "75b702733c4d03280b7a8aa066b69fcff475a1389863514db8201fe33cf9eb1e",
+        "signature": "tmp_path, monkeypatch, fault"
+      },
+      "272fda66": {
+        "line": 54,
+        "end_line": 82,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "75b702733c4d03280b7a8aa066b69fcff475a1389863514db8201fe33cf9eb1e",
+        "signature": "tmp_path, monkeypatch, fault"
+      },
+      "9fbb734c": {
+        "line": 54,
+        "end_line": 82,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "75b702733c4d03280b7a8aa066b69fcff475a1389863514db8201fe33cf9eb1e",
+        "signature": "tmp_path, monkeypatch, fault"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/cancellation/test_unfixed_cancel_origin.py",
+    "qualified_name": "test_empty_finish_reuses_original_key_and_time_after_unknown",
+    "revisions": {
+      "a7755d81": {
+        "line": 86,
+        "end_line": 113,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "3f095ef6e0462d99e8bb08d6b4b2c3a073e57648201506a3f570e4d3c127848a",
+        "signature": "tmp_path, monkeypatch, committed"
+      },
+      "272fda66": {
+        "line": 86,
+        "end_line": 113,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "3f095ef6e0462d99e8bb08d6b4b2c3a073e57648201506a3f570e4d3c127848a",
+        "signature": "tmp_path, monkeypatch, committed"
+      },
+      "9fbb734c": {
+        "line": 86,
+        "end_line": 113,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "3f095ef6e0462d99e8bb08d6b4b2c3a073e57648201506a3f570e4d3c127848a",
+        "signature": "tmp_path, monkeypatch, committed"
+      }
+    },
+    "same_all": true
+  }
+]

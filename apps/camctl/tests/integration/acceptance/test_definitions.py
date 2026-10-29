@@ -207,6 +207,8 @@ async def test_real_history_replay_and_reopened_database_keep_first_facts(enviro
     from camctl.history.validators import ValidatedEvent
     from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
     from .test_acceptance import _owned
+    from ..support.acceptance import accept_source
+    from ..support.database import database_path
 
     connection, context = environment
     catalog = TaskCatalog()
@@ -221,7 +223,7 @@ async def test_real_history_replay_and_reopened_database_keep_first_facts(enviro
         _obtain({"source":{"current_plan":True},"purpose":"manual"}),
         {"name":"cleanup","type":"delete_action_outputs","scheduled_at":"2026-01-15 10:00:00","params":{"source":{"current_plan":True}}},
     ])
-    await accept_input(ParsedInput("removed.json",body), context,new_operation_key(),_owned(environment))
+    await accept_source(ParsedInput("removed.json",body), context, database_path(_owned(environment)))
     repository = HistoryRepository(tmp_path / "state.db")
     boundary = repository.current_boundary()
     scope = ReadScope(order=ReadOrder.ASCENDING, previous_position=None, lower_position=1,
@@ -253,7 +255,7 @@ async def test_real_history_replay_and_reopened_database_keep_first_facts(enviro
     reopened = open_existing(tmp_path / "state.db", DbOpenMode.EXISTING_RW,DbConfig())
     try:
         catalog.duration = Decimal("9.876")
-        reused = await accept_input(ParsedInput("retry.json",{"request_id":"42"}),context,new_operation_key(),reopened)
+        reused = await accept_source(ParsedInput("retry.json",{"request_id":"42"}),context,database_path(reopened))
         assert reused.plan_disposition is PlanDisposition.REUSED
         saved = repository.restore_entity("action", 1, repository.current_boundary())[("actions", 1)]
         assert read_action_spec(saved) == {"target_duration_ms":1234, "video_result_mode":"single_file"}

@@ -113,6 +113,7 @@ async def finalize_pending_action6_inspections(runtime, action_id: int, *, reaso
     from camctl.capture.segment_inspections import (
         InspectionResultSave, SegmentInspectionRepository,
         _inspection_batch_size, settle_terminal_inspection_slots_for_action,
+        save_inspection_result,
     )
     from camctl.contracts.values import new_operation_key
     from camctl.persistence.models import DbOutcomeKind
@@ -125,35 +126,15 @@ async def finalize_pending_action6_inspections(runtime, action_id: int, *, reaso
     repository = SegmentInspectionRepository()
     state = enum_for("segment_inspections.state").UNCONFIRMED
 
-    async def save_result(request, key):
-        from camctl.persistence.business import settle_required
-        from camctl.persistence.models import db_outcome_for
-
-        async def save_and_apply():
-            identity = request.inspection_id
-            pending[identity] = (request, key)
-            try:
-                outcome = await runtime.database.write(
-                    lambda owned: repository.save_result(request, key, owned), key=key,
-                    description="结束分段检查",
-                )
-            except BaseException as error:
-                receipt = db_outcome_for(error)
-                if receipt is not None and receipt.kind in (
-                    DbOutcomeKind.COMPLETED, DbOutcomeKind.ROLLED_BACK,
-                ):
-                    pending.pop(identity, None)
-                raise
-            if outcome.kind is not DbOutcomeKind.UNKNOWN:
-                pending.pop(identity, None)
-            return outcome
-
-        return await settle_required(save_and_apply())
+    async def save_result(request, key, expected=None):
+        return await save_inspection_result(runtime.database, pending, request,
+            key=key, expected=expected, finish_rejected=True)
 
     if pending:
         # UNKNOWN 后数据库可能已经提交终态。先对本动作保存的原申请和键
         # 重送，不能因 PENDING 行查询跳过它而泄漏待核实责任。
-        for inspection_id, (request, key) in tuple(pending.items()):
+        for inspection_id, held in tuple(pending.items()):
+            request, key = held.request, held.key
             owners = await runtime.database.read(lambda owned: owned.connection.execute(
                 "SELECT action_id FROM segment_inspections WHERE id=? LIMIT 2",
                 (inspection_id,),
@@ -164,7 +145,9 @@ async def finalize_pending_action6_inspections(runtime, action_id: int, *, reaso
                 continue
             if request.inspection_id != inspection_id:
                 raise ConsistencyError("Action6 待核实检查申请与保存身份不同")
-            outcome = await save_result(request, key)
+            outcome = await save_result(request, key, held)
+            if outcome is None:
+                continue
             if outcome.kind is DbOutcomeKind.COMPLETED:
                 continue
             if outcome.kind is DbOutcomeKind.UNKNOWN:
@@ -185,7 +168,7 @@ async def finalize_pending_action6_inspections(runtime, action_id: int, *, reaso
         for (inspection_id,) in rows:
             held = pending.get(inspection_id)
             if held is not None:
-                request, key = held
+                request, key = held.request, held.key
             else:
                 inspection = await runtime.database.read(lambda owned: repository.read(inspection_id, owned))
                 metric = inspection.target_json.get("metric")
@@ -203,7 +186,9 @@ async def finalize_pending_action6_inspections(runtime, action_id: int, *, reaso
                     occurred_at=runtime.wall_us(),
                 )
                 key = new_operation_key()
-            outcome = await save_result(request, key)
+            outcome = await save_result(request, key, held)
+            if outcome is None:
+                continue
             if outcome.kind is DbOutcomeKind.COMPLETED:
                 continue
             if outcome.kind is DbOutcomeKind.UNKNOWN:

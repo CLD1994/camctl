@@ -396,6 +396,10 @@ def test_unknown_commit_preserves_atomic_sync_result(sync_environment, tmp_path,
         def in_transaction(self):
             return connection.in_transaction
 
+        @property
+        def total_changes(self):
+            return connection.total_changes
+
         def execute(self, statement, parameters=()):
             if statement == "COMMIT":
                 if commit_reached_database:

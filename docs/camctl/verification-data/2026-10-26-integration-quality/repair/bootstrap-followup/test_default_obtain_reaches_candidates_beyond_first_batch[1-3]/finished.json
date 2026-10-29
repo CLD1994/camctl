@@ -1,0 +1,2800 @@
+{
+  "label": "finished",
+  "elapsed": 30.09303010100848,
+  "state_db": "/tmp/pytest-of-cld/pytest-128/test_default_obtain_reaches_ca0/state.db",
+  "flows": [
+    {
+      "type": "ReportBackgroundFlow",
+      "id": 140220585457488,
+      "stopping": true,
+      "handoff": false,
+      "required": 0,
+      "task": null
+    },
+    {
+      "type": "CaptureFlow",
+      "id": 140220589785680,
+      "stopping": true,
+      "handoff": null,
+      "required": 0,
+      "task": null
+    },
+    {
+      "type": "BackgroundFlow",
+      "id": 140220588106960,
+      "stopping": true,
+      "handoff": false,
+      "required": 0,
+      "task": null
+    }
+  ],
+  "tasks": [
+    {
+      "id": 140220587649408,
+      "name": "Task-2",
+      "done": false,
+      "cancelled": false,
+      "coro": "<coroutine object test_default_obtain_reaches_candidates_beyond_first_batch at 0x5630548c9880>",
+      "stack": [
+        {
+          "file": "/tmp/camctl-quality-repair-lidlmje7/bootstrap-followup/apps/camctl/tests/integration/bootstrap/test_read_discovery_default.py",
+          "line": 68,
+          "function": "test_default_obtain_reaches_candidates_beyond_first_batch"
+        }
+      ]
+    },
+    {
+      "id": 140220584519488,
+      "name": "Task-42",
+      "done": false,
+      "cancelled": false,
+      "coro": "<coroutine object pytest_runtest_call.<locals>.execute at 0x7f87a6519470>",
+      "stack": [
+        {
+          "file": "<frozen runpy>",
+          "line": 198,
+          "function": "_run_module_as_main"
+        },
+        {
+          "file": "<frozen runpy>",
+          "line": 88,
+          "function": "_run_code"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest/__main__.py",
+          "line": 9,
+          "function": "<module>"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/config/__init__.py",
+          "line": 253,
+          "function": "_console_main"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/config/__init__.py",
+          "line": 229,
+          "function": "_main"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_hooks.py",
+          "line": 512,
+          "function": "__call__"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_manager.py",
+          "line": 120,
+          "function": "_hookexec"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_callers.py",
+          "line": 121,
+          "function": "_multicall"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/main.py",
+          "line": 377,
+          "function": "pytest_cmdline_main"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/main.py",
+          "line": 330,
+          "function": "wrap_session"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/main.py",
+          "line": 384,
+          "function": "_main"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_hooks.py",
+          "line": 512,
+          "function": "__call__"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_manager.py",
+          "line": 120,
+          "function": "_hookexec"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_callers.py",
+          "line": 121,
+          "function": "_multicall"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/main.py",
+          "line": 408,
+          "function": "pytest_runtestloop"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_hooks.py",
+          "line": 512,
+          "function": "__call__"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_manager.py",
+          "line": 120,
+          "function": "_hookexec"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_callers.py",
+          "line": 121,
+          "function": "_multicall"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/runner.py",
+          "line": 118,
+          "function": "pytest_runtest_protocol"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/runner.py",
+          "line": 139,
+          "function": "runtestprotocol"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/runner.py",
+          "line": 249,
+          "function": "call_and_report"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/runner.py",
+          "line": 361,
+          "function": "from_call"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/runner.py",
+          "line": 250,
+          "function": "<lambda>"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_hooks.py",
+          "line": 512,
+          "function": "__call__"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_manager.py",
+          "line": 120,
+          "function": "_hookexec"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_callers.py",
+          "line": 121,
+          "function": "_multicall"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/runner.py",
+          "line": 184,
+          "function": "pytest_runtest_call"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest_asyncio/plugin.py",
+          "line": 569,
+          "function": "runtest"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/python.py",
+          "line": 1707,
+          "function": "runtest"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_hooks.py",
+          "line": 512,
+          "function": "__call__"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_manager.py",
+          "line": 120,
+          "function": "_hookexec"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pluggy/_callers.py",
+          "line": 121,
+          "function": "_multicall"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/_pytest/python.py",
+          "line": 167,
+          "function": "pytest_pyfunc_call"
+        },
+        {
+          "file": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest_asyncio/plugin.py",
+          "line": 905,
+          "function": "inner"
+        },
+        {
+          "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/runners.py",
+          "line": 118,
+          "function": "run"
+        },
+        {
+          "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/base_events.py",
+          "line": 641,
+          "function": "run_until_complete"
+        },
+        {
+          "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/base_events.py",
+          "line": 608,
+          "function": "run_forever"
+        },
+        {
+          "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/base_events.py",
+          "line": 1936,
+          "function": "_run_once"
+        },
+        {
+          "file": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/events.py",
+          "line": 84,
+          "function": "_run"
+        },
+        {
+          "file": "/tmp/camctl-quality-repair-evidence/bootstrap-followup/observe_bootstrap.py",
+          "line": 72,
+          "function": "execute"
+        }
+      ]
+    }
+  ],
+  "actual_session_facts": [
+    {
+      "elapsed": 28.356093442998827,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.363789435010403,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.38120205901214,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.389928346005036,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.40943684701051,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.415803443000186,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.434498847011128,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.442317034001462,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.461518645999604,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.46899145100906,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.48633900799905,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.497736973004066,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.515460650000023,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.522000691998983,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.53747168900736,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.544230667001102,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.562605662998976,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.5690933970036,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.586159983999096,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.59284788899822,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.609785672000726,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.617941892007366,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.63539407499775,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.642275726000662,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.660362054011784,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.66712960600853,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.68483676100732,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.694626288997824,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.713036233006278,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.719395633001113,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.736129978002282,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.742701394003234,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.76233624300221,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.77274339500582,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.790466837002896,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.800109673000406,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.817213973001344,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.824201629002346,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.842280705997837,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.848696358007146,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.865418000001227,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.872382105008,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.890297044010367,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.897499401005916,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.914691504003713,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.921757251009694,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.939787823008373,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.94677230200614,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.96455371900811,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.970883754009265,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.989987220003968,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 28.997807578009088,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.02153085700411,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.02709062100621,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.04274767100287,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.048792957008118,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.06745953200152,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.0749092400074,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.09141594200628,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.09909261800931,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.117658426999697,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.12434474400652,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.14314210601151,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.14937627701147,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.168726501011406,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.17593442600628,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.19541008300439,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.20399413999985,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.222152426998946,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.230677208004636,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.249150789008127,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.256591202007257,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.275779438001337,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.282723032010836,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.302171132003423,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.313672267002403,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.333039711011224,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.34071515800315,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.357184567008517,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.36390220699832,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.38240683999902,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.388610050998977,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.407451268998557,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.41584427500493,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.434541560010985,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.443480783011182,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.461391778007965,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.46980238900869,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.489749151005526,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.496514009006205,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.515392874003737,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.52304320600524,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.541596900002332,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.548845172001165,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.56535043400072,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.571450493007433,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.588268827006686,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.59540498199931,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.613760605003336,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.62279268100974,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.641936315005296,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.64962704401114,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.669532318002894,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.678293176999432,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.698949509009253,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.71051042700128,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.73608496101224,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.74498642400431,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.763042614998994,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.770628651007428,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.789314267007285,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.7951370110095,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.81427023500146,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.82332770100038,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.84135042100388,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.84895460100961,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.866590033998364,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.871624810009962,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.89190146200417,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.897242505001486,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.91536768199876,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.923818335999385,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.939891176007222,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.94499337700836,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.960841142004938,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.96665096200013,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.984794322997914,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 2,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    },
+    {
+      "elapsed": 29.99070301100437,
+      "facts": {
+        "unfinished_actions": 0,
+        "required_settlements": 1,
+        "pending_report_changes": false,
+        "report_failed_no_new_changes": false,
+        "residual_device_facts": false,
+        "deferred_work_cleanup": false,
+        "waiting_acknowledgement": true,
+        "snapshot_backlog": false
+      }
+    }
+  ],
+  "persisted_work_facts": {
+    "unfinished_actions": 0,
+    "required_settlements": 0,
+    "pending_report_changes": false,
+    "report_failed_no_new_changes": false,
+    "residual_device_facts": false,
+    "deferred_work_cleanup": false,
+    "waiting_acknowledgement": true,
+    "snapshot_backlog": false
+  },
+  "rows": {
+    "actions": [
+      [
+        1,
+        1,
+        0,
+        "cam-a",
+        1,
+        "cam-a",
+        1768467600000000,
+        "files",
+        "{\"params\":{\"type\":\"single_shot\"},\"policy\":{\"max_delay_ms\":1000}}",
+        "{\"type\":\"single_shot\"}",
+        "camctl-adb",
+        1000,
+        "{}",
+        3,
+        1,
+        0,
+        null,
+        null,
+        1768467600000000,
+        null,
+        null,
+        null,
+        null,
+        1,
+        41,
+        16
+      ],
+      [
+        2,
+        1,
+        1,
+        "cam-b",
+        1,
+        "cam-b",
+        1768467600000000,
+        "files",
+        "{\"params\":{\"type\":\"single_shot\"},\"policy\":{\"max_delay_ms\":1000}}",
+        "{\"type\":\"single_shot\"}",
+        "camctl-adb",
+        1000,
+        "{}",
+        3,
+        1,
+        0,
+        null,
+        null,
+        1768467600000000,
+        null,
+        null,
+        null,
+        null,
+        2,
+        43,
+        16
+      ],
+      [
+        3,
+        2,
+        0,
+        "取回0",
+        4,
+        null,
+        1768467600000000,
+        null,
+        "{\"params\":{\"source\":{\"plan_instance_id\":\"1\",\"group\":\"files\"}}}",
+        null,
+        null,
+        null,
+        "{\"selection_mode\":1}",
+        3,
+        1,
+        0,
+        null,
+        null,
+        null,
+        null,
+        2,
+        1,
+        null,
+        46,
+        127,
+        12
+      ],
+      [
+        4,
+        2,
+        1,
+        "取回1",
+        4,
+        null,
+        1768467600000000,
+        null,
+        "{\"params\":{\"source\":{\"plan_instance_id\":\"1\",\"group\":\"files\"}}}",
+        null,
+        null,
+        null,
+        "{\"selection_mode\":1}",
+        3,
+        1,
+        0,
+        null,
+        null,
+        null,
+        null,
+        2,
+        1,
+        null,
+        47,
+        166,
+        12
+      ],
+      [
+        5,
+        2,
+        2,
+        "取回2",
+        4,
+        null,
+        1768467600000000,
+        null,
+        "{\"params\":{\"source\":{\"plan_instance_id\":\"1\",\"group\":\"files\"}}}",
+        null,
+        null,
+        null,
+        "{\"selection_mode\":1}",
+        3,
+        1,
+        0,
+        null,
+        null,
+        null,
+        null,
+        2,
+        1,
+        null,
+        48,
+        183,
+        12
+      ]
+    ],
+    "operation_runs": [
+      [
+        1,
+        1,
+        null,
+        1,
+        null,
+        "start/1",
+        1,
+        null,
+        null,
+        null,
+        null,
+        3,
+        1,
+        1,
+        "30",
+        null,
+        0,
+        null
+      ],
+      [
+        2,
+        2,
+        null,
+        1,
+        null,
+        "start/2",
+        2,
+        null,
+        null,
+        null,
+        null,
+        3,
+        1,
+        1,
+        "30",
+        null,
+        0,
+        null
+      ],
+      [
+        3,
+        1,
+        null,
+        7,
+        null,
+        "results/1",
+        1,
+        null,
+        null,
+        null,
+        null,
+        3,
+        1,
+        3,
+        "10",
+        "3",
+        0,
+        null
+      ],
+      [
+        4,
+        2,
+        null,
+        7,
+        null,
+        "results/2",
+        2,
+        null,
+        null,
+        null,
+        null,
+        3,
+        1,
+        3,
+        "10",
+        "3",
+        0,
+        null
+      ],
+      [
+        5,
+        3,
+        1,
+        3,
+        null,
+        "read/1",
+        null,
+        1,
+        null,
+        null,
+        null,
+        3,
+        1,
+        3,
+        "10",
+        "3",
+        0,
+        null
+      ],
+      [
+        6,
+        3,
+        2,
+        3,
+        null,
+        "read/2",
+        null,
+        2,
+        null,
+        null,
+        null,
+        3,
+        1,
+        3,
+        "10",
+        "3",
+        0,
+        null
+      ],
+      [
+        7,
+        4,
+        3,
+        3,
+        null,
+        "read/3",
+        null,
+        3,
+        null,
+        null,
+        null,
+        3,
+        1,
+        3,
+        "10",
+        "3",
+        0,
+        null
+      ],
+      [
+        8,
+        4,
+        4,
+        3,
+        null,
+        "read/4",
+        null,
+        4,
+        null,
+        null,
+        null,
+        3,
+        1,
+        3,
+        "10",
+        "3",
+        0,
+        null
+      ],
+      [
+        9,
+        5,
+        5,
+        3,
+        null,
+        "read/5",
+        null,
+        5,
+        null,
+        null,
+        null,
+        3,
+        1,
+        3,
+        "10",
+        "3",
+        0,
+        null
+      ],
+      [
+        10,
+        5,
+        6,
+        3,
+        null,
+        "read/6",
+        null,
+        6,
+        null,
+        null,
+        null,
+        3,
+        1,
+        3,
+        "10",
+        "3",
+        0,
+        null
+      ]
+    ],
+    "operation_attempts": [
+      [
+        1,
+        1,
+        1,
+        null,
+        2,
+        11,
+        13,
+        null,
+        null,
+        1,
+        "30",
+        null,
+        3,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"operation_returned\",\"version\":1,\"data\":{}}},\"observations\":[{\"type\":\"photo_taken\",\"version\":1,\"data\":{\"activity_id\":\"1\"}}]}",
+        null
+      ],
+      [
+        2,
+        2,
+        1,
+        null,
+        2,
+        12,
+        16,
+        null,
+        null,
+        1,
+        "30",
+        null,
+        3,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"operation_returned\",\"version\":1,\"data\":{}}},\"observations\":[{\"type\":\"photo_taken\",\"version\":1,\"data\":{\"activity_id\":\"2\"}}]}",
+        null
+      ],
+      [
+        3,
+        3,
+        1,
+        null,
+        2,
+        19,
+        33,
+        22,
+        22,
+        3,
+        "10",
+        "3",
+        3,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"results_returned\",\"version\":1,\"data\":{}}},\"observations\":[{\"type\":\"result_files_listed\",\"version\":2,\"data\":{\"activity_id\":\"1\",\"entries\":[{\"identity\":\"photo-1\",\"locator\":{\"path\":\"/DCIM/1\"},\"complete\":true,\"size_bytes\":19,\"kind\":\"photo\",\"original_name\":\"photo-1.jpg\",\"media_type\":\"image/jpeg\",\"paired_identity\":null}],\"cursor\":null,\"next_cursor\":null,\"set_finalized\":true,\"completion_evidence\":null}}]}",
+        null
+      ],
+      [
+        4,
+        4,
+        1,
+        null,
+        2,
+        20,
+        35,
+        25,
+        25,
+        3,
+        "10",
+        "3",
+        3,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"results_returned\",\"version\":1,\"data\":{}}},\"observations\":[{\"type\":\"result_files_listed\",\"version\":2,\"data\":{\"activity_id\":\"2\",\"entries\":[{\"identity\":\"photo-2\",\"locator\":{\"path\":\"/DCIM/2\"},\"complete\":true,\"size_bytes\":19,\"kind\":\"photo\",\"original_name\":\"photo-2.jpg\",\"media_type\":\"image/jpeg\",\"paired_identity\":null}],\"cursor\":null,\"next_cursor\":null,\"set_finalized\":true,\"completion_evidence\":null}}]}",
+        null
+      ],
+      [
+        5,
+        5,
+        1,
+        1,
+        2,
+        64,
+        71,
+        null,
+        null,
+        3,
+        "10",
+        "3",
+        1,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        null
+      ],
+      [
+        6,
+        6,
+        1,
+        1,
+        2,
+        85,
+        92,
+        null,
+        null,
+        3,
+        "10",
+        "3",
+        1,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        null
+      ],
+      [
+        7,
+        7,
+        1,
+        1,
+        2,
+        109,
+        115,
+        null,
+        null,
+        3,
+        "10",
+        "3",
+        1,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        null
+      ],
+      [
+        8,
+        8,
+        1,
+        1,
+        2,
+        129,
+        135,
+        null,
+        null,
+        3,
+        "10",
+        "3",
+        1,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        null
+      ],
+      [
+        9,
+        9,
+        1,
+        1,
+        2,
+        148,
+        154,
+        null,
+        null,
+        3,
+        "10",
+        "3",
+        1,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        null
+      ],
+      [
+        10,
+        10,
+        1,
+        1,
+        2,
+        168,
+        174,
+        null,
+        null,
+        3,
+        "10",
+        "3",
+        1,
+        "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        null
+      ]
+    ],
+    "file_copies": [
+      [
+        1,
+        1,
+        null,
+        null,
+        1,
+        null,
+        1,
+        1,
+        0,
+        0,
+        19,
+        null,
+        19,
+        1,
+        null,
+        5,
+        "41e93b838ecdb94cabaeb88c9227020e07e15fb97b6231818bc7c296ef0d265f",
+        null
+      ],
+      [
+        2,
+        2,
+        null,
+        null,
+        2,
+        null,
+        2,
+        1,
+        0,
+        0,
+        19,
+        null,
+        19,
+        1,
+        null,
+        5,
+        "41e93b838ecdb94cabaeb88c9227020e07e15fb97b6231818bc7c296ef0d265f",
+        null
+      ],
+      [
+        3,
+        3,
+        null,
+        null,
+        1,
+        null,
+        3,
+        1,
+        0,
+        0,
+        19,
+        null,
+        19,
+        1,
+        null,
+        5,
+        "41e93b838ecdb94cabaeb88c9227020e07e15fb97b6231818bc7c296ef0d265f",
+        null
+      ],
+      [
+        4,
+        4,
+        null,
+        null,
+        2,
+        null,
+        4,
+        1,
+        0,
+        0,
+        19,
+        null,
+        19,
+        1,
+        null,
+        5,
+        "41e93b838ecdb94cabaeb88c9227020e07e15fb97b6231818bc7c296ef0d265f",
+        null
+      ],
+      [
+        5,
+        5,
+        null,
+        null,
+        1,
+        null,
+        5,
+        1,
+        0,
+        0,
+        19,
+        null,
+        19,
+        1,
+        null,
+        5,
+        "41e93b838ecdb94cabaeb88c9227020e07e15fb97b6231818bc7c296ef0d265f",
+        null
+      ],
+      [
+        6,
+        6,
+        null,
+        null,
+        2,
+        null,
+        6,
+        1,
+        0,
+        0,
+        19,
+        null,
+        19,
+        1,
+        null,
+        5,
+        "41e93b838ecdb94cabaeb88c9227020e07e15fb97b6231818bc7c296ef0d265f",
+        null
+      ]
+    ],
+    "deliveries": [
+      [
+        1,
+        3,
+        1,
+        "1.jpg",
+        "photo-1-双设备-cam-a.jpg",
+        5,
+        105,
+        106,
+        1,
+        null,
+        null,
+        59,
+        106,
+        13
+      ],
+      [
+        2,
+        3,
+        2,
+        "2.jpg",
+        "photo-2-双设备-cam-b.jpg",
+        5,
+        124,
+        125,
+        1,
+        null,
+        null,
+        80,
+        125,
+        13
+      ],
+      [
+        3,
+        4,
+        1,
+        "3.jpg",
+        "photo-1-双设备-cam-a.jpg",
+        5,
+        144,
+        145,
+        1,
+        null,
+        null,
+        101,
+        145,
+        13
+      ],
+      [
+        4,
+        4,
+        2,
+        "4.jpg",
+        "photo-2-双设备-cam-b.jpg",
+        5,
+        163,
+        164,
+        1,
+        null,
+        null,
+        120,
+        164,
+        13
+      ],
+      [
+        5,
+        5,
+        1,
+        "5.jpg",
+        "photo-1-双设备-cam-a.jpg",
+        5,
+        177,
+        178,
+        1,
+        null,
+        null,
+        140,
+        178,
+        13
+      ],
+      [
+        6,
+        5,
+        2,
+        "6.jpg",
+        "photo-2-双设备-cam-b.jpg",
+        5,
+        180,
+        181,
+        1,
+        null,
+        null,
+        159,
+        181,
+        13
+      ]
+    ],
+    "obtain_items": [
+      [
+        1,
+        1,
+        null,
+        1,
+        1,
+        null,
+        null,
+        null,
+        null,
+        3,
+        0,
+        1,
+        null,
+        null
+      ],
+      [
+        2,
+        2,
+        null,
+        2,
+        1,
+        null,
+        null,
+        null,
+        null,
+        3,
+        0,
+        2,
+        null,
+        null
+      ],
+      [
+        3,
+        3,
+        null,
+        1,
+        1,
+        null,
+        null,
+        null,
+        null,
+        3,
+        0,
+        3,
+        null,
+        null
+      ],
+      [
+        4,
+        4,
+        null,
+        2,
+        1,
+        null,
+        null,
+        null,
+        null,
+        3,
+        0,
+        4,
+        null,
+        null
+      ],
+      [
+        5,
+        5,
+        null,
+        1,
+        1,
+        null,
+        null,
+        null,
+        null,
+        3,
+        0,
+        5,
+        null,
+        null
+      ],
+      [
+        6,
+        6,
+        null,
+        2,
+        1,
+        null,
+        null,
+        null,
+        null,
+        3,
+        0,
+        6,
+        null,
+        null
+      ]
+    ],
+    "reports": [
+      [
+        1,
+        50,
+        0,
+        23,
+        1,
+        4,
+        2089,
+        "17a42d3fa8dc39bda52fb43b251895d8b774283e31a046326e84cffc50c935fc",
+        1,
+        187,
+        null,
+        51,
+        187
+      ],
+      [
+        2,
+        187,
+        0,
+        85,
+        1,
+        4,
+        3657,
+        "832b429b3904e52f5300f68633c77204e027e2f907b25ebd730f834a510edc3d",
+        1,
+        191,
+        null,
+        188,
+        191
+      ]
+    ]
+  }
+}

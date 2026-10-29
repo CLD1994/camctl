@@ -1,0 +1,1788 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="141" failures="0" skipped="0" tests="141" time="72.183" timestamp="2026-10-25T16:54:09.988935+08:00" hostname="1e0518e0c6b4"><testcase classname="" name="tests.unit.acceptance.test_definitions" time="0.000"><error message="collection failure">apps/camctl/tests/unit/acceptance/test_definitions.py:8: in &lt;module&gt;
+    from camctl.acceptance import definitions
+apps/camctl/src/camctl/acceptance/definitions.py:6: in &lt;module&gt;
+    from camctl.capture.models import build_capture_spec, validate_capture_spec
+apps/camctl/src/camctl/capture/models.py:36: in &lt;module&gt;
+    from camctl.operations.attempts import AttemptConfig
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.acceptance.test_parent_notification" time="0.000"><error message="collection failure">apps/camctl/tests/unit/acceptance/test_parent_notification.py:13: in &lt;module&gt;
+    from camctl.acceptance.service import AckDisposition, PlanDisposition
+apps/camctl/src/camctl/acceptance/service.py:16: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_application_config" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_application_config.py:13: in &lt;module&gt;
+    from camctl.bootstrap.application import ConfigAdapter
+apps/camctl/src/camctl/bootstrap/application.py:18: in &lt;module&gt;
+    from camctl.persistence.runtime import DirectoryBindingError, configured_directory_binding
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_background_flow" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_background_flow.py:9: in &lt;module&gt;
+    from camctl.bootstrap.flows import CaptureFlow
+apps/camctl/src/camctl/bootstrap/flows.py:29: in &lt;module&gt;
+    from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
+apps/camctl/src/camctl/capture/dispatch.py:14: in &lt;module&gt;
+    from camctl.capture.handlers import CaptureRuntime, HandlerOutcome, capture_handler
+apps/camctl/src/camctl/capture/handlers.py:33: in &lt;module&gt;
+    from camctl.persistence.repositories.finite_cancel import (
+apps/camctl/src/camctl/persistence/repositories/finite_cancel.py:6: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_baseline_scan_shutdown" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_baseline_scan_shutdown.py:10: in &lt;module&gt;
+    from camctl.acceptance.service import CommandMode
+apps/camctl/src/camctl/acceptance/service.py:16: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_capture_execution_config" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_capture_execution_config.py:9: in &lt;module&gt;
+    from camctl.bootstrap.capture_assembly import (DriverResultListing, execution_wait_config,
+apps/camctl/src/camctl/bootstrap/capture_assembly.py:29: in &lt;module&gt;
+    from camctl.capture.handlers import (
+apps/camctl/src/camctl/capture/handlers.py:33: in &lt;module&gt;
+    from camctl.persistence.repositories.finite_cancel import (
+apps/camctl/src/camctl/persistence/repositories/finite_cancel.py:6: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_capture_preparation_init" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_capture_preparation_init.py:12: in &lt;module&gt;
+    from camctl.bootstrap import application
+apps/camctl/src/camctl/bootstrap/application.py:18: in &lt;module&gt;
+    from camctl.persistence.runtime import DirectoryBindingError, configured_directory_binding
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_capture_preparation_session" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_capture_preparation_session.py:6: in &lt;module&gt;
+    from camctl.bootstrap.lifecycle import _initialize_recovery
+apps/camctl/src/camctl/bootstrap/lifecycle.py:27: in &lt;module&gt;
+    from camctl.acceptance.service import CommandMode
+apps/camctl/src/camctl/acceptance/service.py:16: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_capture_recovery_assembly" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_capture_recovery_assembly.py:8: in &lt;module&gt;
+    from camctl.bootstrap.capture_assembly import execution_wait_config, session_capture_assembly
+apps/camctl/src/camctl/bootstrap/capture_assembly.py:29: in &lt;module&gt;
+    from camctl.capture.handlers import (
+apps/camctl/src/camctl/capture/handlers.py:33: in &lt;module&gt;
+    from camctl.persistence.repositories.finite_cancel import (
+apps/camctl/src/camctl/persistence/repositories/finite_cancel.py:6: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_capture_window_progress" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_capture_window_progress.py:12: in &lt;module&gt;
+    from camctl.bootstrap.flows import CaptureFlow
+apps/camctl/src/camctl/bootstrap/flows.py:29: in &lt;module&gt;
+    from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
+apps/camctl/src/camctl/capture/dispatch.py:14: in &lt;module&gt;
+    from camctl.capture.handlers import CaptureRuntime, HandlerOutcome, capture_handler
+apps/camctl/src/camctl/capture/handlers.py:33: in &lt;module&gt;
+    from camctl.persistence.repositories.finite_cancel import (
+apps/camctl/src/camctl/persistence/repositories/finite_cancel.py:6: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_cleanup_background_owner" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_cleanup_background_owner.py:10: in &lt;module&gt;
+    from camctl.bootstrap import cleanup_assembly
+apps/camctl/src/camctl/bootstrap/cleanup_assembly.py:22: in &lt;module&gt;
+    from camctl.bootstrap.capture_assembly import (
+apps/camctl/src/camctl/bootstrap/capture_assembly.py:29: in &lt;module&gt;
+    from camctl.capture.handlers import (
+apps/camctl/src/camctl/capture/handlers.py:33: in &lt;module&gt;
+    from camctl.persistence.repositories.finite_cancel import (
+apps/camctl/src/camctl/persistence/repositories/finite_cancel.py:6: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_cli_recovery_boundary" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_cli_recovery_boundary.py:9: in &lt;module&gt;
+    from camctl.bootstrap import application, lifecycle
+apps/camctl/src/camctl/bootstrap/application.py:18: in &lt;module&gt;
+    from camctl.persistence.runtime import DirectoryBindingError, configured_directory_binding
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_describe" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_describe.py:11: in &lt;module&gt;
+    from camctl.bootstrap.application import EmptyCapabilityCatalog, describe
+apps/camctl/src/camctl/bootstrap/application.py:18: in &lt;module&gt;
+    from camctl.persistence.runtime import DirectoryBindingError, configured_directory_binding
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_output_device_configuration" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_output_device_configuration.py:10: in &lt;module&gt;
+    from camctl.bootstrap.cleanup_assembly import session_cleanup_assembly
+apps/camctl/src/camctl/bootstrap/cleanup_assembly.py:22: in &lt;module&gt;
+    from camctl.bootstrap.capture_assembly import (
+apps/camctl/src/camctl/bootstrap/capture_assembly.py:29: in &lt;module&gt;
+    from camctl.capture.handlers import (
+apps/camctl/src/camctl/capture/handlers.py:33: in &lt;module&gt;
+    from camctl.persistence.repositories.finite_cancel import (
+apps/camctl/src/camctl/persistence/repositories/finite_cancel.py:6: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_preparation_work_facts" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_preparation_work_facts.py:7: in &lt;module&gt;
+    from camctl.bootstrap.application import query_work_facts
+apps/camctl/src/camctl/bootstrap/application.py:18: in &lt;module&gt;
+    from camctl.persistence.runtime import DirectoryBindingError, configured_directory_binding
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_read_execution_config" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_read_execution_config.py:10: in &lt;module&gt;
+    from camctl.bootstrap.capture_assembly import _media_flow_with
+apps/camctl/src/camctl/bootstrap/capture_assembly.py:29: in &lt;module&gt;
+    from camctl.capture.handlers import (
+apps/camctl/src/camctl/capture/handlers.py:33: in &lt;module&gt;
+    from camctl.persistence.repositories.finite_cancel import (
+apps/camctl/src/camctl/persistence/repositories/finite_cancel.py:6: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_recovery_logging" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_recovery_logging.py:5: in &lt;module&gt;
+    from camctl.bootstrap.recovery_logging import recovery_diagnostics_logger
+apps/camctl/src/camctl/bootstrap/recovery_logging.py:6: in &lt;module&gt;
+    from camctl.capture.software_recovery import SoftwareRecoveryDiagnostic
+apps/camctl/src/camctl/capture/software_recovery.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_report_background_progress" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_report_background_progress.py:12: in &lt;module&gt;
+    from camctl.acceptance.service import CommandMode
+apps/camctl/src/camctl/acceptance/service.py:16: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_report_connection_errors" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_report_connection_errors.py:9: in &lt;module&gt;
+    from camctl.bootstrap.flows import report_flow
+apps/camctl/src/camctl/bootstrap/flows.py:29: in &lt;module&gt;
+    from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
+apps/camctl/src/camctl/capture/dispatch.py:14: in &lt;module&gt;
+    from camctl.capture.handlers import CaptureRuntime, HandlerOutcome, capture_handler
+apps/camctl/src/camctl/capture/handlers.py:33: in &lt;module&gt;
+    from camctl.persistence.repositories.finite_cancel import (
+apps/camctl/src/camctl/persistence/repositories/finite_cancel.py:6: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_residual_recovery_boundary" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_residual_recovery_boundary.py:9: in &lt;module&gt;
+    from camctl.acceptance.service import CommandMode
+apps/camctl/src/camctl/acceptance/service.py:16: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_result_candidate_filter" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_result_candidate_filter.py:8: in &lt;module&gt;
+    from camctl.bootstrap import capture_assembly
+apps/camctl/src/camctl/bootstrap/capture_assembly.py:29: in &lt;module&gt;
+    from camctl.capture.handlers import (
+apps/camctl/src/camctl/capture/handlers.py:33: in &lt;module&gt;
+    from camctl.persistence.repositories.finite_cancel import (
+apps/camctl/src/camctl/persistence/repositories/finite_cancel.py:6: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_result_history_performance" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_result_history_performance.py:9: in &lt;module&gt;
+    from camctl.bootstrap.capture_assembly import DriverResultListing
+apps/camctl/src/camctl/bootstrap/capture_assembly.py:29: in &lt;module&gt;
+    from camctl.capture.handlers import (
+apps/camctl/src/camctl/capture/handlers.py:33: in &lt;module&gt;
+    from camctl.persistence.repositories.finite_cancel import (
+apps/camctl/src/camctl/persistence/repositories/finite_cancel.py:6: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_result_listing" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_result_listing.py:16: in &lt;module&gt;
+    from camctl.bootstrap.capture_assembly import (
+apps/camctl/src/camctl/bootstrap/capture_assembly.py:29: in &lt;module&gt;
+    from camctl.capture.handlers import (
+apps/camctl/src/camctl/capture/handlers.py:33: in &lt;module&gt;
+    from camctl.persistence.repositories.finite_cancel import (
+apps/camctl/src/camctl/persistence/repositories/finite_cancel.py:6: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_result_reading_context" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_result_reading_context.py:9: in &lt;module&gt;
+    from camctl.bootstrap.capture_assembly import DriverResultListing
+apps/camctl/src/camctl/bootstrap/capture_assembly.py:29: in &lt;module&gt;
+    from camctl.capture.handlers import (
+apps/camctl/src/camctl/capture/handlers.py:33: in &lt;module&gt;
+    from camctl.persistence.repositories.finite_cancel import (
+apps/camctl/src/camctl/persistence/repositories/finite_cancel.py:6: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_result_round_adapter" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_result_round_adapter.py:9: in &lt;module&gt;
+    from camctl.bootstrap.capture_assembly import DriverResultListing
+apps/camctl/src/camctl/bootstrap/capture_assembly.py:29: in &lt;module&gt;
+    from camctl.capture.handlers import (
+apps/camctl/src/camctl/capture/handlers.py:33: in &lt;module&gt;
+    from camctl.persistence.repositories.finite_cancel import (
+apps/camctl/src/camctl/persistence/repositories/finite_cancel.py:6: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_result_scan_shutdown" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_result_scan_shutdown.py:9: in &lt;module&gt;
+    from camctl.acceptance.service import CommandMode
+apps/camctl/src/camctl/acceptance/service.py:16: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_timelapse_assembly" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_timelapse_assembly.py:6: in &lt;module&gt;
+    from camctl.bootstrap.capture_assembly import execution_wait_config, session_capture_assembly
+apps/camctl/src/camctl/bootstrap/capture_assembly.py:29: in &lt;module&gt;
+    from camctl.capture.handlers import (
+apps/camctl/src/camctl/capture/handlers.py:33: in &lt;module&gt;
+    from camctl.persistence.repositories.finite_cancel import (
+apps/camctl/src/camctl/persistence/repositories/finite_cancel.py:6: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.bootstrap.test_work_file_owner" time="0.000"><error message="collection failure">apps/camctl/tests/unit/bootstrap/test_work_file_owner.py:10: in &lt;module&gt;
+    from camctl.bootstrap.work_file_assembly import WorkFileRuntime
+apps/camctl/src/camctl/bootstrap/work_file_assembly.py:15: in &lt;module&gt;
+    from camctl.outputs.work_files import (
+apps/camctl/src/camctl/outputs/work_files.py:27: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.cancellation.test_capture_preparation_settlement" time="0.000"><error message="collection failure">apps/camctl/tests/unit/cancellation/test_capture_preparation_settlement.py:9: in &lt;module&gt;
+    from camctl.cancellation.settlement import TargetSettlement
+apps/camctl/src/camctl/cancellation/settlement.py:15: in &lt;module&gt;
+    from camctl.cancellation.service import OriginSettle
+apps/camctl/src/camctl/cancellation/service.py:29: in &lt;module&gt;
+    from camctl.cancellation.rules import (
+apps/camctl/src/camctl/cancellation/rules.py:23: in &lt;module&gt;
+    from camctl.persistence.transaction import row_facts
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.cancellation.test_controller_cancel" time="0.000"><error message="collection failure">apps/camctl/tests/unit/cancellation/test_controller_cancel.py:20: in &lt;module&gt;
+    from camctl.cancellation.rules import (
+apps/camctl/src/camctl/cancellation/rules.py:23: in &lt;module&gt;
+    from camctl.persistence.transaction import row_facts
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.cancellation.test_effects" time="0.000"><error message="collection failure">apps/camctl/tests/unit/cancellation/test_effects.py:17: in &lt;module&gt;
+    from camctl.cancellation.rules import summarize_cancel
+apps/camctl/src/camctl/cancellation/rules.py:23: in &lt;module&gt;
+    from camctl.persistence.transaction import row_facts
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.cancellation.test_eligibility" time="0.000"><error message="collection failure">apps/camctl/tests/unit/cancellation/test_eligibility.py:13: in &lt;module&gt;
+    from camctl.cancellation.rules import (
+apps/camctl/src/camctl/cancellation/rules.py:23: in &lt;module&gt;
+    from camctl.persistence.transaction import row_facts
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.cancellation.test_preparation_wait" time="0.000"><error message="collection failure">apps/camctl/tests/unit/cancellation/test_preparation_wait.py:4: in &lt;module&gt;
+    from camctl.persistence.repositories.capture_facts import StartFacts
+apps/camctl/src/camctl/persistence/repositories/capture_facts.py:15: in &lt;module&gt;
+    from camctl.persistence.transaction import event_envelope, row_facts, update_change
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_baseline_failure_input" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_baseline_failure_input.py:4: in &lt;module&gt;
+    from camctl.capture.media import RecordingFailure
+apps/camctl/src/camctl/capture/media.py:47: in &lt;module&gt;
+    from camctl.outputs.work_files import (
+apps/camctl/src/camctl/outputs/work_files.py:27: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_baseline_saves" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_baseline_saves.py:10: in &lt;module&gt;
+    from camctl.capture.baseline_saves import BaselineSaveOwner
+apps/camctl/src/camctl/capture/baseline_saves.py:8: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_baseline_scan" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_baseline_scan.py:9: in &lt;module&gt;
+    from camctl.capture.baseline import PendingBaseline, PreparationPhase, prepare_baseline
+apps/camctl/src/camctl/capture/baseline.py:7: in &lt;module&gt;
+    from camctl.capture.baseline_saves import BaselineSaveOwner
+apps/camctl/src/camctl/capture/baseline_saves.py:8: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_completion_save_responsibility" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_completion_save_responsibility.py:9: in &lt;module&gt;
+    from camctl.capture.handlers import (
+apps/camctl/src/camctl/capture/handlers.py:33: in &lt;module&gt;
+    from camctl.persistence.repositories.finite_cancel import (
+apps/camctl/src/camctl/persistence/repositories/finite_cancel.py:6: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_control_outcome" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_control_outcome.py:7: in &lt;module&gt;
+    from camctl.capture.handlers import _operation_outcome
+apps/camctl/src/camctl/capture/handlers.py:33: in &lt;module&gt;
+    from camctl.persistence.repositories.finite_cancel import (
+apps/camctl/src/camctl/persistence/repositories/finite_cancel.py:6: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_definitions" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_definitions.py:14: in &lt;module&gt;
+    from camctl.capture.models import (
+apps/camctl/src/camctl/capture/models.py:36: in &lt;module&gt;
+    from camctl.operations.attempts import AttemptConfig
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_discard" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_discard.py:13: in &lt;module&gt;
+    from camctl.capture.media import (
+apps/camctl/src/camctl/capture/media.py:47: in &lt;module&gt;
+    from camctl.outputs.work_files import (
+apps/camctl/src/camctl/outputs/work_files.py:27: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_dispatch_failures" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_dispatch_failures.py:9: in &lt;module&gt;
+    from camctl.capture import dispatch
+apps/camctl/src/camctl/capture/dispatch.py:14: in &lt;module&gt;
+    from camctl.capture.handlers import CaptureRuntime, HandlerOutcome, capture_handler
+apps/camctl/src/camctl/capture/handlers.py:33: in &lt;module&gt;
+    from camctl.persistence.repositories.finite_cancel import (
+apps/camctl/src/camctl/persistence/repositories/finite_cancel.py:6: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_emergency_guard" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_emergency_guard.py:21: in &lt;module&gt;
+    from camctl.persistence.repositories import capture as capture_repository
+apps/camctl/src/camctl/persistence/repositories/capture.py:20: in &lt;module&gt;
+    from camctl.capture.models import (
+apps/camctl/src/camctl/capture/models.py:36: in &lt;module&gt;
+    from camctl.operations.attempts import AttemptConfig
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_execution_specs" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_execution_specs.py:7: in &lt;module&gt;
+    from camctl.capture.models import CaptureDefinition, CaptureInput, build_capture_spec, validate_capture_spec
+apps/camctl/src/camctl/capture/models.py:36: in &lt;module&gt;
+    from camctl.operations.attempts import AttemptConfig
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_file_fact_identity" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_file_fact_identity.py:8: in &lt;module&gt;
+    from camctl.capture.files import (
+apps/camctl/src/camctl/capture/files.py:19: in &lt;module&gt;
+    from camctl.persistence.transaction import encode_json_value
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_file_inputs" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_file_inputs.py:9: in &lt;module&gt;
+    from camctl.capture.files import (
+apps/camctl/src/camctl/capture/files.py:19: in &lt;module&gt;
+    from camctl.persistence.transaction import encode_json_value
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_host_photo_selection" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_host_photo_selection.py:5: in &lt;module&gt;
+    from camctl.capture.handlers import _start_call_timeout
+apps/camctl/src/camctl/capture/handlers.py:33: in &lt;module&gt;
+    from camctl.persistence.repositories.finite_cancel import (
+apps/camctl/src/camctl/persistence/repositories/finite_cancel.py:6: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_host_timer_stop_guard" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_host_timer_stop_guard.py:10: in &lt;module&gt;
+    from camctl.persistence.repositories.capture import _activity_guard, _RUN_KIND, _ATTEMPT_STATUS, _ATTEMPT_RESULT_EVENT
+apps/camctl/src/camctl/persistence/repositories/capture.py:20: in &lt;module&gt;
+    from camctl.capture.models import (
+apps/camctl/src/camctl/capture/models.py:36: in &lt;module&gt;
+    from camctl.operations.attempts import AttemptConfig
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_input_copy" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_input_copy.py:16: in &lt;module&gt;
+    from camctl.capture.input_copy import (
+apps/camctl/src/camctl/capture/input_copy.py:19: in &lt;module&gt;
+    from camctl.capture.media import SaveDisposition, SaveReceipt
+apps/camctl/src/camctl/capture/media.py:47: in &lt;module&gt;
+    from camctl.outputs.work_files import (
+apps/camctl/src/camctl/outputs/work_files.py:27: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_media_execution" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_media_execution.py:16: in &lt;module&gt;
+    from camctl.capture.media import (
+apps/camctl/src/camctl/capture/media.py:47: in &lt;module&gt;
+    from camctl.outputs.work_files import (
+apps/camctl/src/camctl/outputs/work_files.py:27: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_media_processing" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_media_processing.py:19: in &lt;module&gt;
+    from camctl.capture.media import (
+apps/camctl/src/camctl/capture/media.py:47: in &lt;module&gt;
+    from camctl.outputs.work_files import (
+apps/camctl/src/camctl/outputs/work_files.py:27: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_media_save_identity" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_media_save_identity.py:9: in &lt;module&gt;
+    from camctl.capture.media import SaveDisposition
+apps/camctl/src/camctl/capture/media.py:47: in &lt;module&gt;
+    from camctl.outputs.work_files import (
+apps/camctl/src/camctl/outputs/work_files.py:27: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_observed_pairings" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_observed_pairings.py:11: in &lt;module&gt;
+    from camctl.capture.handlers import (
+apps/camctl/src/camctl/capture/handlers.py:33: in &lt;module&gt;
+    from camctl.persistence.repositories.finite_cancel import (
+apps/camctl/src/camctl/persistence/repositories/finite_cancel.py:6: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_osv_media" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_osv_media.py:8: in &lt;module&gt;
+    from camctl.capture.media import (CheckContext, CheckExecutionPhase, RepairContext,
+apps/camctl/src/camctl/capture/media.py:47: in &lt;module&gt;
+    from camctl.outputs.work_files import (
+apps/camctl/src/camctl/outputs/work_files.py:27: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_output_promotion" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_output_promotion.py:17: in &lt;module&gt;
+    from camctl.persistence.repositories.capture import register_capture_guards
+apps/camctl/src/camctl/persistence/repositories/capture.py:20: in &lt;module&gt;
+    from camctl.capture.models import (
+apps/camctl/src/camctl/capture/models.py:36: in &lt;module&gt;
+    from camctl.operations.attempts import AttemptConfig
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_preparation" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_preparation.py:11: in &lt;module&gt;
+    from camctl.capture.baseline import BaselinePreparation, PreparationPhase
+apps/camctl/src/camctl/capture/baseline.py:7: in &lt;module&gt;
+    from camctl.capture.baseline_saves import BaselineSaveOwner
+apps/camctl/src/camctl/capture/baseline_saves.py:8: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_preparation_sources" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_preparation_sources.py:8: in &lt;module&gt;
+    from camctl.persistence.repositories.capture_facts import StartFacts
+apps/camctl/src/camctl/persistence/repositories/capture_facts.py:15: in &lt;module&gt;
+    from camctl.persistence.transaction import event_envelope, row_facts, update_change
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_recording_finish" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_recording_finish.py:15: in &lt;module&gt;
+    from camctl.capture.recording import (
+apps/camctl/src/camctl/capture/recording.py:21: in &lt;module&gt;
+    from camctl.operations.attempts import AttemptConfig
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_recording_result" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_recording_result.py:16: in &lt;module&gt;
+    from camctl.capture.media import (
+apps/camctl/src/camctl/capture/media.py:47: in &lt;module&gt;
+    from camctl.outputs.work_files import (
+apps/camctl/src/camctl/outputs/work_files.py:27: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_recording_start" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_recording_start.py:15: in &lt;module&gt;
+    from camctl.capture.recording import (
+apps/camctl/src/camctl/capture/recording.py:21: in &lt;module&gt;
+    from camctl.operations.attempts import AttemptConfig
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_result_error_contract" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_result_error_contract.py:8: in &lt;module&gt;
+    from camctl.capture.models import ResultSetPhase, ResultSetSave
+apps/camctl/src/camctl/capture/models.py:36: in &lt;module&gt;
+    from camctl.operations.attempts import AttemptConfig
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_result_error_guards" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_result_error_guards.py:14: in &lt;module&gt;
+    from camctl.persistence.repositories.capture import register_capture_guards
+apps/camctl/src/camctl/persistence/repositories/capture.py:20: in &lt;module&gt;
+    from camctl.capture.models import (
+apps/camctl/src/camctl/capture/models.py:36: in &lt;module&gt;
+    from camctl.operations.attempts import AttemptConfig
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_result_inputs" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_result_inputs.py:7: in &lt;module&gt;
+    from camctl.capture.models import (
+apps/camctl/src/camctl/capture/models.py:36: in &lt;module&gt;
+    from camctl.operations.attempts import AttemptConfig
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_result_page_saves" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_result_page_saves.py:7: in &lt;module&gt;
+    from camctl.capture import result_pages
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_result_run_close_recovery" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_result_run_close_recovery.py:7: in &lt;module&gt;
+    from camctl.capture.handlers import PendingResultCheckClose, resume_result_check_closes
+apps/camctl/src/camctl/capture/handlers.py:33: in &lt;module&gt;
+    from camctl.persistence.repositories.finite_cancel import (
+apps/camctl/src/camctl/persistence/repositories/finite_cancel.py:6: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_result_scan" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_result_scan.py:10: in &lt;module&gt;
+    from camctl.capture import result_scans
+apps/camctl/src/camctl/capture/result_scans.py:9: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef, ResultPageSave, ResultPageSaveOwner, SavedResultPage
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_segment_error_headers" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_segment_error_headers.py:18: in &lt;module&gt;
+    from camctl.capture.segment_storage import document, decode_enum, encode_enum
+apps/camctl/src/camctl/capture/segment_storage.py:21: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_segment_inspections_metrics" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_segment_inspections_metrics.py:7: in &lt;module&gt;
+    from camctl.capture.segment_inspections import _metric_from_probe
+apps/camctl/src/camctl/capture/segment_inspections.py:11: in &lt;module&gt;
+    from camctl.capture.input_copy import InputContext, InputPhase, InputStep, obtain_recording_input
+apps/camctl/src/camctl/capture/input_copy.py:19: in &lt;module&gt;
+    from camctl.capture.media import SaveDisposition, SaveReceipt
+apps/camctl/src/camctl/capture/media.py:47: in &lt;module&gt;
+    from camctl.outputs.work_files import (
+apps/camctl/src/camctl/outputs/work_files.py:27: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_segment_save_timing" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_segment_save_timing.py:9: in &lt;module&gt;
+    from camctl.capture.segment_completion import PendingSegmentWrite, _save, resume_segment_writes
+apps/camctl/src/camctl/capture/segment_completion.py:5: in &lt;module&gt;
+    from camctl.capture.files import (
+apps/camctl/src/camctl/capture/files.py:19: in &lt;module&gt;
+    from camctl.persistence.transaction import encode_json_value
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_software_recovery_enablement" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_software_recovery_enablement.py:10: in &lt;module&gt;
+    from camctl.capture import software_recovery as recovery
+apps/camctl/src/camctl/capture/software_recovery.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_start_gate" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_start_gate.py:7: in &lt;module&gt;
+    from camctl.capture.handlers import (
+apps/camctl/src/camctl/capture/handlers.py:33: in &lt;module&gt;
+    from camctl.persistence.repositories.finite_cancel import (
+apps/camctl/src/camctl/persistence/repositories/finite_cancel.py:6: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_task_ownership" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_task_ownership.py:6: in &lt;module&gt;
+    from camctl.capture.models import activity_capabilities, build_capture_spec, validate_capture_spec
+apps/camctl/src/camctl/capture/models.py:36: in &lt;module&gt;
+    from camctl.operations.attempts import AttemptConfig
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.capture.test_video_result_contract" time="0.000"><error message="collection failure">apps/camctl/tests/unit/capture/test_video_result_contract.py:7: in &lt;module&gt;
+    from camctl.capture.models import (
+apps/camctl/src/camctl/capture/models.py:36: in &lt;module&gt;
+    from camctl.operations.attempts import AttemptConfig
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.devices.test_action6_record_contract" time="0.000"><error message="collection failure">apps/camctl/tests/unit/devices/test_action6_record_contract.py:8: in &lt;module&gt;
+    from camctl.capture.models import build_capture_spec
+apps/camctl/src/camctl/capture/models.py:36: in &lt;module&gt;
+    from camctl.operations.attempts import AttemptConfig
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.devices.test_hasselblad_file_identity" time="0.000"><error message="collection failure">apps/camctl/tests/unit/devices/test_hasselblad_file_identity.py:7: in &lt;module&gt;
+    from camctl.capture.files import file_identity_key
+apps/camctl/src/camctl/capture/files.py:19: in &lt;module&gt;
+    from camctl.persistence.transaction import encode_json_value
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.history.test_capture_preparation_events" time="0.000"><error message="collection failure">apps/camctl/tests/unit/history/test_capture_preparation_events.py:14: in &lt;module&gt;
+    from camctl.capture.models import activity_capabilities
+apps/camctl/src/camctl/capture/models.py:36: in &lt;module&gt;
+    from camctl.operations.attempts import AttemptConfig
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.history.test_cost_details" time="0.000"><error message="collection failure">apps/camctl/tests/unit/history/test_cost_details.py:18: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.history.test_snapshot_stage_stop" time="0.000"><error message="collection failure">apps/camctl/tests/unit/history/test_snapshot_stage_stop.py:9: in &lt;module&gt;
+    from camctl.history import snapshots
+apps/camctl/src/camctl/history/snapshots.py:25: in &lt;module&gt;
+    from camctl.persistence.transaction import encode_json_value
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.history.test_snapshots" time="0.000"><error message="collection failure">apps/camctl/tests/unit/history/test_snapshots.py:18: in &lt;module&gt;
+    from camctl.history.snapshots import (
+apps/camctl/src/camctl/history/snapshots.py:25: in &lt;module&gt;
+    from camctl.persistence.transaction import encode_json_value
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.logging_runtime.test_marker_temp_cleanup" time="0.000"><error message="collection failure">apps/camctl/tests/unit/logging_runtime/test_marker_temp_cleanup.py:23: in &lt;module&gt;
+    from camctl.session.service import (
+apps/camctl/src/camctl/session/service.py:21: in &lt;module&gt;
+    from camctl.acceptance.notification import notify_acceptance
+apps/camctl/src/camctl/acceptance/notification.py:12: in &lt;module&gt;
+    from camctl.acceptance.service import AcceptanceResult, PlanDisposition
+apps/camctl/src/camctl/acceptance/service.py:16: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.motor.test_service" time="0.000"><error message="collection failure">apps/camctl/tests/unit/motor/test_service.py:14: in &lt;module&gt;
+    from camctl.motor.service import MotorRuntime, advance_motor
+apps/camctl/src/camctl/motor/service.py:14: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.operations.test_attempt_inputs" time="0.000"><error message="collection failure">apps/camctl/tests/unit/operations/test_attempt_inputs.py:10: in &lt;module&gt;
+    from camctl.operations.attempts import (
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.operations.test_config_numbers" time="0.000"><error message="collection failure">apps/camctl/tests/unit/operations/test_config_numbers.py:8: in &lt;module&gt;
+    from camctl.persistence.repositories.operations import _check_config_numbers
+apps/camctl/src/camctl/persistence/repositories/operations.py:13: in &lt;module&gt;
+    from camctl.capture.software_recovery import intent_recovery_locked
+apps/camctl/src/camctl/capture/software_recovery.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.operations.test_preparation_guards" time="0.000"><error message="collection failure">apps/camctl/tests/unit/operations/test_preparation_guards.py:12: in &lt;module&gt;
+    from camctl.persistence.repositories.operations import _attempt_intent_guard, _attempt_result_guard
+apps/camctl/src/camctl/persistence/repositories/operations.py:13: in &lt;module&gt;
+    from camctl.capture.software_recovery import intent_recovery_locked
+apps/camctl/src/camctl/capture/software_recovery.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.operations.test_queries" time="0.000"><error message="collection failure">apps/camctl/tests/unit/operations/test_queries.py:15: in &lt;module&gt;
+    from camctl.operations.attempts import AttemptConfig, QueryPurpose, responsibility_key
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.operations.test_responsibility_identity" time="0.000"><error message="collection failure">apps/camctl/tests/unit/operations/test_responsibility_identity.py:5: in &lt;module&gt;
+    from camctl.operations import attempts
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.outputs.test_cleanup_attempt_config" time="0.000"><error message="collection failure">apps/camctl/tests/unit/outputs/test_cleanup_attempt_config.py:9: in &lt;module&gt;
+    from camctl.operations.attempts import AttemptConfig
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.outputs.test_cleanup_delete_save_responsibility" time="0.000"><error message="collection failure">apps/camctl/tests/unit/outputs/test_cleanup_delete_save_responsibility.py:12: in &lt;module&gt;
+    from camctl.outputs.cleanup_flow import PendingCleanupDelete, _save_delete_return
+apps/camctl/src/camctl/outputs/cleanup_flow.py:28: in &lt;module&gt;
+    from camctl.operations.attempts import (
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.outputs.test_cleanup_query_save_responsibility" time="0.000"><error message="collection failure">apps/camctl/tests/unit/outputs/test_cleanup_query_save_responsibility.py:24: in &lt;module&gt;
+    from camctl.operations.attempts import (
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.outputs.test_cleanup_recovery" time="0.000"><error message="collection failure">apps/camctl/tests/unit/outputs/test_cleanup_recovery.py:13: in &lt;module&gt;
+    from camctl.outputs.cleanup_flow import (
+apps/camctl/src/camctl/outputs/cleanup_flow.py:28: in &lt;module&gt;
+    from camctl.operations.attempts import (
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.outputs.test_cleanup_saved_presence" time="0.000"><error message="collection failure">apps/camctl/tests/unit/outputs/test_cleanup_saved_presence.py:9: in &lt;module&gt;
+    from camctl.outputs.cleanup_results import saved_query_presence
+apps/camctl/src/camctl/outputs/cleanup_results.py:16: in &lt;module&gt;
+    from camctl.persistence.transaction import saved_transaction_events
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.outputs.test_cleanup_session_work" time="0.000"><error message="collection failure">apps/camctl/tests/unit/outputs/test_cleanup_session_work.py:5: in &lt;module&gt;
+    from camctl.bootstrap.cleanup_assembly import cleanup_flow
+apps/camctl/src/camctl/bootstrap/cleanup_assembly.py:22: in &lt;module&gt;
+    from camctl.bootstrap.capture_assembly import (
+apps/camctl/src/camctl/bootstrap/capture_assembly.py:29: in &lt;module&gt;
+    from camctl.capture.handlers import (
+apps/camctl/src/camctl/capture/handlers.py:33: in &lt;module&gt;
+    from camctl.persistence.repositories.finite_cancel import (
+apps/camctl/src/camctl/persistence/repositories/finite_cancel.py:6: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.outputs.test_copy_complete" time="0.000"><error message="collection failure">apps/camctl/tests/unit/outputs/test_copy_complete.py:11: in &lt;module&gt;
+    from camctl.outputs.copy import (
+apps/camctl/src/camctl/outputs/copy.py:39: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.outputs.test_copy_resume" time="0.000"><error message="collection failure">apps/camctl/tests/unit/outputs/test_copy_resume.py:6: in &lt;module&gt;
+    from camctl.outputs.copy import (
+apps/camctl/src/camctl/outputs/copy.py:39: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.outputs.test_copy_segments" time="0.000"><error message="collection failure">apps/camctl/tests/unit/outputs/test_copy_segments.py:14: in &lt;module&gt;
+    from camctl.operations.attempts import (
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.outputs.test_delivery" time="0.000"><error message="collection failure">apps/camctl/tests/unit/outputs/test_delivery.py:13: in &lt;module&gt;
+    from camctl.outputs.handoff import (
+apps/camctl/src/camctl/outputs/handoff.py:31: in &lt;module&gt;
+    from camctl.outputs.copy import CopyTargetRef
+apps/camctl/src/camctl/outputs/copy.py:39: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.outputs.test_host_photo_candidate" time="0.000"><error message="collection failure">apps/camctl/tests/unit/outputs/test_host_photo_candidate.py:7: in &lt;module&gt;
+    from camctl.outputs.obtain_flow import _host_source_candidate
+apps/camctl/src/camctl/outputs/obtain_flow.py:24: in &lt;module&gt;
+    from camctl.capture.files import FileChecksumSave
+apps/camctl/src/camctl/capture/files.py:19: in &lt;module&gt;
+    from camctl.persistence.transaction import encode_json_value
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.outputs.test_registration_relation_guard" time="0.000"><error message="collection failure">apps/camctl/tests/unit/outputs/test_registration_relation_guard.py:10: in &lt;module&gt;
+    from camctl.persistence.transaction import row_change
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.outputs.test_registration_source_guard" time="0.000"><error message="collection failure">apps/camctl/tests/unit/outputs/test_registration_source_guard.py:14: in &lt;module&gt;
+    from camctl.persistence.repositories.capture import FinishCapture, register_capture_guards
+apps/camctl/src/camctl/persistence/repositories/capture.py:20: in &lt;module&gt;
+    from camctl.capture.models import (
+apps/camctl/src/camctl/capture/models.py:36: in &lt;module&gt;
+    from camctl.operations.attempts import AttemptConfig
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.outputs.test_segment_copy_reuse" time="0.000"><error message="collection failure">apps/camctl/tests/unit/outputs/test_segment_copy_reuse.py:8: in &lt;module&gt;
+    from camctl.outputs.read_attempts import run_owned_read
+apps/camctl/src/camctl/outputs/read_attempts.py:9: in &lt;module&gt;
+    from camctl.operations.attempts import (
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.outputs.test_work_files" time="0.000"><error message="collection failure">apps/camctl/tests/unit/outputs/test_work_files.py:12: in &lt;module&gt;
+    from camctl.outputs.work_files import (
+apps/camctl/src/camctl/outputs/work_files.py:27: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.persistence.test_attempt_identity" time="0.000"><error message="collection failure">apps/camctl/tests/unit/persistence/test_attempt_identity.py:15: in &lt;module&gt;
+    from camctl.persistence import row_history, transaction
+apps/camctl/src/camctl/persistence/row_history.py:18: in &lt;module&gt;
+    from camctl.persistence.transaction import read_transaction_range
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.persistence.test_attempt_reads" time="0.000"><error message="collection failure">apps/camctl/tests/unit/persistence/test_attempt_reads.py:14: in &lt;module&gt;
+    from camctl.operations.attempts import (
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.persistence.test_capture_preparation_upgrade" time="0.000"><error message="collection failure">apps/camctl/tests/unit/persistence/test_capture_preparation_upgrade.py:11: in &lt;module&gt;
+    from camctl.persistence import capture_preparation_upgrade as upgrade
+apps/camctl/src/camctl/persistence/capture_preparation_upgrade.py:12: in &lt;module&gt;
+    from camctl.persistence.initialization import _fsync_directory
+apps/camctl/src/camctl/persistence/initialization.py:22: in &lt;module&gt;
+    from camctl.persistence.directory_switch import (
+apps/camctl/src/camctl/persistence/directory_switch.py:18: in &lt;module&gt;
+    from camctl.persistence.runtime import StateDatabaseError
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.persistence.test_common_read_reuse" time="0.000"><error message="collection failure">apps/camctl/tests/unit/persistence/test_common_read_reuse.py:12: in &lt;module&gt;
+    from camctl.persistence import transaction
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.persistence.test_directory_switch" time="0.000"><error message="collection failure">apps/camctl/tests/unit/persistence/test_directory_switch.py:12: in &lt;module&gt;
+    from camctl.persistence.directory_switch import (
+apps/camctl/src/camctl/persistence/directory_switch.py:18: in &lt;module&gt;
+    from camctl.persistence.runtime import StateDatabaseError
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.persistence.test_event_building" time="0.000"><error message="collection failure">apps/camctl/tests/unit/persistence/test_event_building.py:6: in &lt;module&gt;
+    from camctl.persistence.transaction import TransactionError, update_change
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.persistence.test_executor_core" time="0.000"><error message="collection failure">apps/camctl/tests/unit/persistence/test_executor_core.py:15: in &lt;module&gt;
+    from camctl.persistence.executor import QueueCore
+apps/camctl/src/camctl/persistence/executor.py:16: in &lt;module&gt;
+    from camctl.persistence.models import (
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.persistence.test_flow_context" time="0.000"><error message="collection failure">apps/camctl/tests/unit/persistence/test_flow_context.py:10: in &lt;module&gt;
+    from camctl.operations.attempts import AttemptTarget, OperationKind, QueryPurpose
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.persistence.test_native_classification_reuse" time="0.000"><error message="collection failure">apps/camctl/tests/unit/persistence/test_native_classification_reuse.py:9: in &lt;module&gt;
+    from camctl.capture import native_segments
+apps/camctl/src/camctl/capture/native_segments.py:5: in &lt;module&gt;
+    from camctl.capture.media import RecordingFailure
+apps/camctl/src/camctl/capture/media.py:47: in &lt;module&gt;
+    from camctl.outputs.work_files import (
+apps/camctl/src/camctl/outputs/work_files.py:27: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.persistence.test_preparation_format" time="0.000"><error message="collection failure">apps/camctl/tests/unit/persistence/test_preparation_format.py:10: in &lt;module&gt;
+    from camctl.persistence import runtime
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.persistence.test_preparation_format_gate" time="0.000"><error message="collection failure">apps/camctl/tests/unit/persistence/test_preparation_format_gate.py:11: in &lt;module&gt;
+    from camctl.operations.attempts import AttemptConfig, AttemptIntent, AttemptTarget, OperationKind
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.persistence.test_projection_writes" time="0.000"><error message="collection failure">apps/camctl/tests/unit/persistence/test_projection_writes.py:9: in &lt;module&gt;
+    from camctl.persistence import transaction
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.persistence.test_read_reuse" time="0.000"><error message="collection failure">apps/camctl/tests/unit/persistence/test_read_reuse.py:12: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef, SavedResultPage
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.persistence.test_reporting_reads" time="0.000"><error message="collection failure">apps/camctl/tests/unit/persistence/test_reporting_reads.py:15: in &lt;module&gt;
+    from camctl.persistence.transaction import saved_transaction_events
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.persistence.test_result_proof_reuse" time="0.000"><error message="collection failure">apps/camctl/tests/unit/persistence/test_result_proof_reuse.py:10: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.persistence.test_row_facts" time="0.000"><error message="collection failure">apps/camctl/tests/unit/persistence/test_row_facts.py:10: in &lt;module&gt;
+    from camctl.persistence import transaction
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.persistence.test_row_history" time="0.000"><error message="collection failure">apps/camctl/tests/unit/persistence/test_row_history.py:15: in &lt;module&gt;
+    from camctl.persistence.transaction import read_transaction_range
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.persistence.test_row_queries" time="0.000"><error message="collection failure">apps/camctl/tests/unit/persistence/test_row_queries.py:8: in &lt;module&gt;
+    from camctl.persistence.transaction import next_row_id
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.persistence.test_saved_transactions" time="0.000"><error message="collection failure">apps/camctl/tests/unit/persistence/test_saved_transactions.py:11: in &lt;module&gt;
+    from camctl.persistence.transaction import saved_transaction_events
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.persistence.test_segment_allocations" time="0.000"><error message="collection failure">apps/camctl/tests/unit/persistence/test_segment_allocations.py:4: in &lt;module&gt;
+    from camctl.persistence.transaction import TransactionScope,TransactionError
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.persistence.test_segment_finish_read_reuse" time="0.000"><error message="collection failure">apps/camctl/tests/unit/persistence/test_segment_finish_read_reuse.py:8: in &lt;module&gt;
+    from camctl.capture.segment_finish import FinishSegmentRecording
+apps/camctl/src/camctl/capture/segment_finish.py:6: in &lt;module&gt;
+    from camctl.capture.media import RecordingFailure
+apps/camctl/src/camctl/capture/media.py:47: in &lt;module&gt;
+    from camctl.outputs.work_files import (
+apps/camctl/src/camctl/outputs/work_files.py:27: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.persistence.test_segment_preparation_failure" time="0.000"><error message="collection failure">apps/camctl/tests/unit/persistence/test_segment_preparation_failure.py:6: in &lt;module&gt;
+    from camctl.capture.segment_storage import (
+apps/camctl/src/camctl/capture/segment_storage.py:21: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.persistence.test_small_result_proof_reuse" time="0.000"><error message="collection failure">apps/camctl/tests/unit/persistence/test_small_result_proof_reuse.py:11: in &lt;module&gt;
+    from camctl.capture.files import OwnershipFromResultPageSave, PairResultFilesSave, file_identity_key
+apps/camctl/src/camctl/capture/files.py:19: in &lt;module&gt;
+    from camctl.persistence.transaction import encode_json_value
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.persistence.test_transaction_timing" time="0.000"><error message="collection failure">apps/camctl/tests/unit/persistence/test_transaction_timing.py:18: in &lt;module&gt;
+    from camctl.persistence import transaction as tx
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.persistence.test_verified_conclusion_reuse" time="0.000"><error message="collection failure">apps/camctl/tests/unit/persistence/test_verified_conclusion_reuse.py:9: in &lt;module&gt;
+    from camctl.capture.segment_storage import (
+apps/camctl/src/camctl/capture/segment_storage.py:21: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.reporting.test_freeze" time="0.000"><error message="collection failure">apps/camctl/tests/unit/reporting/test_freeze.py:13: in &lt;module&gt;
+    from camctl.reporting.policy import ReportDecisionKind, ReportOpportunity, decide_report
+apps/camctl/src/camctl/reporting/policy.py:17: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.reporting.test_generation" time="0.000"><error message="collection failure">apps/camctl/tests/unit/reporting/test_generation.py:9: in &lt;module&gt;
+    from camctl.reporting.generation import GenerationSpec
+apps/camctl/src/camctl/reporting/generation.py:22: in &lt;module&gt;
+    from camctl.persistence.repositories.history import HistoryRepository
+apps/camctl/src/camctl/persistence/repositories/history.py:31: in &lt;module&gt;
+    from camctl.acceptance.definitions import read_action_spec
+apps/camctl/src/camctl/acceptance/definitions.py:6: in &lt;module&gt;
+    from camctl.capture.models import build_capture_spec, validate_capture_spec
+apps/camctl/src/camctl/capture/models.py:36: in &lt;module&gt;
+    from camctl.operations.attempts import AttemptConfig
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.reporting.test_management_guard" time="0.000"><error message="collection failure">apps/camctl/tests/unit/reporting/test_management_guard.py:15: in &lt;module&gt;
+    from camctl.persistence import row_history, transaction
+apps/camctl/src/camctl/persistence/row_history.py:18: in &lt;module&gt;
+    from camctl.persistence.transaction import read_transaction_range
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.reporting.test_publication" time="0.000"><error message="collection failure">apps/camctl/tests/unit/reporting/test_publication.py:10: in &lt;module&gt;
+    from camctl.reporting.policy import _report_guard
+apps/camctl/src/camctl/reporting/policy.py:17: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.reporting.test_publication_cancellation" time="0.000"><error message="collection failure">apps/camctl/tests/unit/reporting/test_publication_cancellation.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.reporting.test_publication_flow" time="0.000"><error message="collection failure">apps/camctl/tests/unit/reporting/test_publication_flow.py:24: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.reporting.test_worker" time="0.000"><error message="collection failure">apps/camctl/tests/unit/reporting/test_worker.py:15: in &lt;module&gt;
+    from camctl.persistence.runtime import StateDatabaseError
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.reporting.test_worker_late_state" time="0.000"><error message="collection failure">apps/camctl/tests/unit/reporting/test_worker_late_state.py:25: in &lt;module&gt;
+    from camctl.reporting.supervisor import GenerationOutcomeKind, WorkerSupervisor
+apps/camctl/src/camctl/reporting/supervisor.py:38: in &lt;module&gt;
+    from camctl.reporting.worker import worker_main
+apps/camctl/src/camctl/reporting/worker.py:25: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.scheduling.test_preparation_storage" time="0.000"><error message="collection failure">apps/camctl/tests/unit/scheduling/test_preparation_storage.py:8: in &lt;module&gt;
+    from camctl.capture.models import ActivityCapabilities, activity_capabilities
+apps/camctl/src/camctl/capture/models.py:36: in &lt;module&gt;
+    from camctl.operations.attempts import AttemptConfig
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.scheduling.test_window_guard" time="0.000"><error message="collection failure">apps/camctl/tests/unit/scheduling/test_window_guard.py:8: in &lt;module&gt;
+    from camctl.persistence.repositories.scheduling import (
+apps/camctl/src/camctl/persistence/repositories/scheduling.py:32: in &lt;module&gt;
+    from camctl.capture.models import activity_capabilities
+apps/camctl/src/camctl/capture/models.py:36: in &lt;module&gt;
+    from camctl.operations.attempts import AttemptConfig
+apps/camctl/src/camctl/operations/attempts.py:22: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.session.test_clock" time="0.000"><error message="collection failure">apps/camctl/tests/unit/session/test_clock.py:12: in &lt;module&gt;
+    from camctl.session.clock import (
+apps/camctl/src/camctl/session/clock.py:18: in &lt;module&gt;
+    from camctl.persistence.transaction import CommandPlan, commit_operation
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.session.test_completed_work" time="0.000"><error message="collection failure">apps/camctl/tests/unit/session/test_completed_work.py:8: in &lt;module&gt;
+    from camctl.session.service import StateDbFailure, _drive_flows
+apps/camctl/src/camctl/session/service.py:21: in &lt;module&gt;
+    from camctl.acceptance.notification import notify_acceptance
+apps/camctl/src/camctl/acceptance/notification.py:12: in &lt;module&gt;
+    from camctl.acceptance.service import AcceptanceResult, PlanDisposition
+apps/camctl/src/camctl/acceptance/service.py:16: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.session.test_device_configuration_error" time="0.000"><error message="collection failure">apps/camctl/tests/unit/session/test_device_configuration_error.py:8: in &lt;module&gt;
+    from camctl.session.service import _drive_flows, _restricted_session
+apps/camctl/src/camctl/session/service.py:21: in &lt;module&gt;
+    from camctl.acceptance.notification import notify_acceptance
+apps/camctl/src/camctl/acceptance/notification.py:12: in &lt;module&gt;
+    from camctl.acceptance.service import AcceptanceResult, PlanDisposition
+apps/camctl/src/camctl/acceptance/service.py:16: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.session.test_local_stop" time="0.000"><error message="collection failure">apps/camctl/tests/unit/session/test_local_stop.py:10: in &lt;module&gt;
+    from camctl.bootstrap.flows import CaptureFlow
+apps/camctl/src/camctl/bootstrap/flows.py:29: in &lt;module&gt;
+    from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
+apps/camctl/src/camctl/capture/dispatch.py:14: in &lt;module&gt;
+    from camctl.capture.handlers import CaptureRuntime, HandlerOutcome, capture_handler
+apps/camctl/src/camctl/capture/handlers.py:33: in &lt;module&gt;
+    from camctl.persistence.repositories.finite_cancel import (
+apps/camctl/src/camctl/persistence/repositories/finite_cancel.py:6: in &lt;module&gt;
+    from camctl.capture.result_pages import ResultPageRef
+apps/camctl/src/camctl/capture/result_pages.py:12: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.session.test_report_observation" time="0.000"><error message="collection failure">apps/camctl/tests/unit/session/test_report_observation.py:9: in &lt;module&gt;
+    from camctl.session.service import StateDbFailure, _read_report_change_wm
+apps/camctl/src/camctl/session/service.py:21: in &lt;module&gt;
+    from camctl.acceptance.notification import notify_acceptance
+apps/camctl/src/camctl/acceptance/notification.py:12: in &lt;module&gt;
+    from camctl.acceptance.service import AcceptanceResult, PlanDisposition
+apps/camctl/src/camctl/acceptance/service.py:16: in &lt;module&gt;
+    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+apps/camctl/src/camctl/persistence/models.py:16: in &lt;module&gt;
+    from camctl.persistence.runtime import (
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase><testcase classname="" name="tests.unit.session.test_runtime_clock" time="0.000"><error message="collection failure">apps/camctl/tests/unit/session/test_runtime_clock.py:5: in &lt;module&gt;
+    from camctl.session.clock import ClockBecameUntrusted
+apps/camctl/src/camctl/session/clock.py:18: in &lt;module&gt;
+    from camctl.persistence.transaction import CommandPlan, commit_operation
+apps/camctl/src/camctl/persistence/transaction.py:60: in &lt;module&gt;
+    from camctl.persistence.runtime import OwnedConnection
+apps/camctl/src/camctl/persistence/runtime.py:38: in &lt;module&gt;
+    CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
+                                                     ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/enum.py:786: in __getattr__
+    raise AttributeError(name) from None
+E   AttributeError: V4</error></testcase></testsuite></testsuites>

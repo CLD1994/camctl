@@ -372,7 +372,7 @@ async def test_published_marker_scope_and_independent_files_remain_at_same_h(tmp
     owned,runtime,repo,ref,members=await _assessed_world(tmp_path,DefaultScopeState[scope])
     try:
         key=new_operation_key()
-        receipt=commit_operation(_completion_command(ref,members,runtime.wall_us(),key),key,owned)
+        receipt=commit_operation(_completion_command(owned,ref,members,runtime.wall_us(),key),key,owned)
         assert receipt.kind == 'completed', receipt.error
         history=HistoryRepository(owned.connection.execute('PRAGMA database_list').fetchone()[2])
         boundary=history.current_boundary()
@@ -403,7 +403,7 @@ async def test_published_marker_scope_and_independent_files_remain_at_same_h(tmp
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('removed_table',['segment_members','segment_sets','device_activities'])
-async def test_snapshot_rejects_missing_owner_or_required_set_members(tmp_path,removed_table):
+async def test_snapshot_validation_detects_missing_owned_rows_at_responsible_boundary(tmp_path,removed_table):
     from camctl.history.snapshots import prepare_snapshot
     from camctl.contracts.json_values import parse_exact_json
     from camctl.persistence.transaction import encode_json_value
@@ -424,8 +424,20 @@ async def test_snapshot_rejects_missing_owner_or_required_set_members(tmp_path,r
             assert removed
             body=('\n'.join(encode_json_value(row) for row in kept)+'\n').encode()
             owned.connection.execute('UPDATE entity_snapshots SET content=?',(body,))
-            with pytest.raises(ConsistencyError):
-                history.open_segment_history(ref.action_id,boundary,strategy='snapshot',batch_size=2)
+            if removed_table=='device_activities':
+                # 构建完整性按相同S的独立回放验收全部自身成员。
+                with history.open_segment_history(ref.action_id,boundary,strategy='initial',batch_size=2) as initial:
+                    expected={(row.table,row.row_id):dict(row.values) for row in initial.iter_rows()}
+                with history.open_segment_history(ref.action_id,boundary,strategy='snapshot',batch_size=2) as snapshot:
+                    actual={(row.table,row.row_id):dict(row.values) for row in snapshot.iter_rows()}
+                assert expected!=actual
+                missing=set(expected)-set(actual)
+                assert len(missing)==1 and next(iter(missing))[0]=='device_activities'
+                assert all(actual[key]==value for key,value in expected.items() if key in actual)
+            else:
+                with pytest.raises(ConsistencyError):
+                    history.open_segment_history(ref.action_id,boundary,strategy='snapshot',batch_size=2)
+            assert history.current_boundary()==boundary
         finally:prepared.close()
     finally:owned.connection.close()
 
@@ -520,11 +532,24 @@ async def test_connection_failure_cannot_leave_a_new_range_marked_verified(tmp_p
 
 
 async def _large_fixture(tmp_path,count):
+    """正式装配只负责准备；读取与计量前完整关闭其线程和文件责任。"""
+    from ..support.capture import capture_test_session
+    from ..capture.test_capture_contract import _NOW, _PAGE_EVIDENCE, ResultsDouble
+
+    async with capture_test_session() as session:
+        async def runtime_factory(owned, *, driver):
+            return await session.runtime(
+                owned, driver=driver, evidence=_PAGE_EVIDENCE, results=ResultsDouble({}),
+                wall_us=lambda: _NOW, monotonic_ns=lambda: 5_000_000_000)
+        return await _prepare_large_fixture(tmp_path, count, runtime_factory)
+
+
+async def _prepare_large_fixture(tmp_path,count,runtime_factory):
     """从真实P2端口逐页建跨CAM目录的夹具；准备阶段也只持有128项。"""
     import sqlite3
     from itertools import islice
     from camctl.capture.files import OwnershipSave,FileCompletionSave
-    from camctl.capture.handlers import _begin_check_round
+    from ..persistence.result_page_fixtures import begin_result_check
     from camctl.capture.segment_models import (SegmentSetRef,SegmentMemberRole,OwnershipState,
         FileCompletionState,CompletionFacts,EvidenceState,SegmentAccumulator)
     from camctl.capture.segment_storage import SegmentSetCreate,SegmentMemberInput
@@ -536,11 +561,13 @@ async def _large_fixture(tmp_path,count):
     from ..persistence.test_segment_storage import SegmentedCatalog
     from ..capture.result_consumer_fixtures import consumer_world
     from ..capture.test_result_page_history import _actual,_request
-    owned,runtime,action_id,_=await consumer_world(tmp_path,'record',catalog=SegmentedCatalog())
-    stage=sqlite3.connect(tmp_path/'fixture-members.db',isolation_level=None)
-    stage.execute('CREATE TABLE members (id INTEGER PRIMARY KEY,file_id INTEGER,page_event INTEGER,file_event INTEGER)')
+    owned,runtime,action_id,_=await consumer_world(
+        tmp_path,'record',catalog=SegmentedCatalog(),runtime_factory=runtime_factory)
+    stage=None
     try:
-        ticket=_begin_check_round(runtime,action_id).ticket
+        stage=sqlite3.connect(tmp_path/'fixture-members.db',isolation_level=None)
+        stage.execute('CREATE TABLE members (id INTEGER PRIMARY KEY,file_id INTEGER,page_event INTEGER,file_event INTEGER)')
+        ticket=begin_result_check(owned,runtime,action_id).ticket
         previous=None;last_event=None
         for offset in range(0,count,128):
             entries=[]
@@ -571,7 +598,7 @@ async def _large_fixture(tmp_path,count):
         ref=SegmentSetRef(action_id,attempt,last_event,1)
         repo=SegmentRepository()
         _ok(repo.create(SegmentSetCreate(ref,int(ticket.target_id),ticket.run_id,
-            runtime.action(action_id)['execution_spec_json']['target_duration_ms'],runtime.wall_us()),new_operation_key(),owned))
+            (await runtime.action(action_id))['execution_spec_json']['target_duration_ms'],runtime.wall_us()),new_operation_key(),owned))
         previous_id=0
         while True:
             selected=stage.execute('SELECT id,file_id,page_event,file_event FROM members WHERE id>? ORDER BY id LIMIT 128',(previous_id,)).fetchall()
@@ -597,7 +624,8 @@ async def _large_fixture(tmp_path,count):
     except BaseException:
         owned.connection.close()
         raise
-    finally:stage.close()
+    finally:
+        if stage is not None:stage.close()
 
 
 class _MeasuredCursor:
@@ -684,7 +712,7 @@ async def test_current_keeps_h_when_completion_commits_between_candidate_pages(t
             calls+=1
             if calls==4:
                 key=new_operation_key()
-                receipt=commit_operation(_completion_command(ref,members,runtime.wall_us(),key),key,owned)
+                receipt=commit_operation(_completion_command(owned,ref,members,runtime.wall_us(),key),key,owned)
                 assert receipt.kind == 'completed',receipt.error
         monkeypatch.setattr(history,'_read_connection',changing)
         with history.open_segment_history(ref.action_id,boundary,strategy='current',batch_size=1) as handle:

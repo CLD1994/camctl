@@ -1,0 +1,133 @@
+FFFF                                                                     [100%]
+=================================== FAILURES ===================================
+_______ test_segment_recovery_joins_original_submission_and_consumption ________
+
+    async def test_segment_recovery_joins_original_submission_and_consumption():
+        database = _database()
+        state = SimpleNamespace(database=database, pending_segment_writes={})
+        repository = create_autospec(CaptureRepository, instance=True, spec_set=True)
+        entered, release = asyncio.Event(), asyncio.Event()
+    
+        async def write(callback, **kwargs):
+            entered.set()
+            await release.wait()
+            return DbOutcome(DbOutcomeKind.COMPLETED, "saved")
+    
+        database.write.side_effect = write
+        original = asyncio.create_task(segment_completion._save(
+            state, 7, repository, "finish_segment_recording", object()))
+        await entered.wait()
+        recovery = await _join(asyncio.create_task(segment_completion.resume_segment_writes(
+            database, state.pending_segment_writes, 7)))
+        release.set()
+        results = await asyncio.gather(original, recovery, return_exceptions=True)
+    
+>       assert results == ["saved", None]
+E       AssertionError: assert ['saved', KeyError(7)] == ['saved', None]
+E         
+E         At index 1 diff: KeyError(7) != None
+E         Use -v to get more diff
+
+apps/camctl/tests/unit/capture/test_capture_save_coordination.py:55: AssertionError
+_ test_result_page_application_is_shared_through_qualification_and_cursor_update _
+
+    async def test_result_page_application_is_shared_through_qualification_and_cursor_update():
+        from decimal import Decimal
+    
+        request = page_request()
+        pending = PendingResultScan(request.ticket, None, Decimal(10))
+        pending.saves.begin(request)
+        database = _database()
+        # 使用原页解码后的游标对象，回执必须与原输入完整相符。
+        from camctl.capture.result_inputs import page_from_outcome
+        response = ResultPageRef(request.ticket, 1, 10,
+            page_from_outcome(request.ticket, request.outcome.outcome).next_cursor)
+        database.write.return_value = DbOutcome(DbOutcomeKind.COMPLETED, response)
+        database.read.return_value = None
+        runtime = SimpleNamespace(database=database,
+            capture=create_autospec(CaptureRepository, instance=True, spec_set=True))
+        entered, release = asyncio.Event(), asyncio.Event()
+        qualified_pages = []
+    
+        async def qualify(saved):
+            qualified_pages.append(saved)
+            entered.set()
+            await release.wait()
+            return True
+    
+        original = asyncio.create_task(result_scans._accept_saved_page(pending, runtime, qualify))
+        await entered.wait()
+        recovery = await _join(asyncio.create_task(result_scans._accept_saved_page(pending, runtime, qualify)))
+        release.set()
+        results = await asyncio.gather(original, recovery, return_exceptions=True)
+    
+>       assert results == [False, False]
+E       assert [False, Attri... 'response'")] == [False, False]
+E         
+E         At index 1 diff: AttributeError("'NoneType' object has no attribute 'response'") != False
+E         Use -v to get more diff
+
+apps/camctl/tests/unit/capture/test_capture_save_coordination.py:90: AssertionError
+________ test_media_recovery_from_another_adapter_shares_original_phase ________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f03ea6de790>
+
+    async def test_media_recovery_from_another_adapter_shares_original_phase(monkeypatch):
+        database = _database()
+        database.read.return_value = (1,)
+        repository = create_autospec(CaptureRepository, instance=True, spec_set=True)
+        monkeypatch.setattr(media_flow, "CaptureRepository", lambda: repository)
+        pending = {}
+        normal = CaptureProcessingSaves(database, pending)
+        recovery = CaptureProcessingSaves(database, pending)
+        entered, release = asyncio.Event(), asyncio.Event()
+    
+        async def write(callback, **kwargs):
+            entered.set()
+            await release.wait()
+            return DbOutcome(DbOutcomeKind.COMPLETED)
+    
+        database.write.side_effect = write
+        command = media_request(1)
+        first = asyncio.create_task(normal.save_check_result(command))
+        await entered.wait()
+        second = await _join(asyncio.create_task(recovery.save_check_result(command)))
+        release.set()
+        receipts = await asyncio.gather(first, second, return_exceptions=True)
+    
+>       assert all(getattr(receipt, "disposition", None) is SaveDisposition.SAVED for receipt in receipts)
+E       assert False
+E        +  where False = all(<generator object test_media_recovery_from_another_adapter_shares_original_phase.<locals>.<genexpr> at 0x7f03e9f4f3d0>)
+
+apps/camctl/tests/unit/capture/test_capture_save_coordination.py:120: AssertionError
+__ test_inspection_recovery_joins_result_save_and_waiter_cancel_keeps_receipt __
+
+    async def test_inspection_recovery_joins_result_save_and_waiter_cancel_keeps_receipt():
+        database = _database()
+        flow = SimpleNamespace(database=database, pending_segment_inspection_results={})
+        request = InspectionResultSave(3, 4, {"reason": "unknown"}, 5)
+        entered, release = asyncio.Event(), asyncio.Event()
+    
+        async def write(callback, **kwargs):
+            entered.set()
+            await release.wait()
+            return DbOutcome(DbOutcomeKind.COMPLETED)
+    
+        database.write.side_effect = write
+        first = asyncio.create_task(segment_inspections._save_result(flow, request))
+        await entered.wait()
+        second = await _join(asyncio.create_task(segment_inspections._save_result(flow, request)))
+        first.cancel("inspection waiter")
+        await asyncio.sleep(0)
+>       assert not first.done()
+E       AssertionError: assert not True
+E        +  where True = <built-in method done of _asyncio.Task object at 0x7f03ea00bac0>()
+E        +    where <built-in method done of _asyncio.Task object at 0x7f03ea00bac0> = <Task cancelled name='Task-23' coro=<_save_result() done, defined at /tmp/camctl-quality-repair-lidlmje7/save-owner/apps/camctl/src/camctl/capture/segment_inspections.py:129>>.done
+
+apps/camctl/tests/unit/capture/test_capture_save_coordination.py:142: AssertionError
+=========================== short test summary info ============================
+FAILED apps/camctl/tests/unit/capture/test_capture_save_coordination.py::test_segment_recovery_joins_original_submission_and_consumption
+FAILED apps/camctl/tests/unit/capture/test_capture_save_coordination.py::test_result_page_application_is_shared_through_qualification_and_cursor_update
+FAILED apps/camctl/tests/unit/capture/test_capture_save_coordination.py::test_media_recovery_from_another_adapter_shares_original_phase
+FAILED apps/camctl/tests/unit/capture/test_capture_save_coordination.py::test_inspection_recovery_joins_result_save_and_waiter_cancel_keeps_receipt
+4 failed in 1.14s

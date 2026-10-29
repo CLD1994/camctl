@@ -26,8 +26,10 @@ from .test_binding_failure_keeps_timelapse_files import (
     _BindingSaveSpy, _assert_complete_binding_finish, _assert_complete_original_request,
     _assert_original_facts, _public_canceled_world,
 )
-from .test_closed_result_local_boundaries import _ClosedInputFault
-from .test_closed_result_local_consumption import fresh_closed_runtime
+from ..support.binding_cases import (
+    ClosedInputFault as _ClosedInputFault, RecoveryReadFault as _RecoveryReadFault,
+    assert_business_save, binding_case, close_binding_databases, fresh_binding_runtime,
+)
 
 
 pytestmark = pytest.mark.asyncio
@@ -78,9 +80,8 @@ async def test_original_results_read_failure_preserves_binding_finish_responsibi
         assert owned.metadata == world.metadata
         before = tuple(owned.connection.iterdump())
         assert before == world.canceled_dump
-        fault = _ClosedInputFault(owned.connection, world.activity_id)
-        fault_owned = replace(owned, connection=fault)
-        runtime, methods = fresh_closed_runtime(fault_owned, world, binding)
+        fault = _ClosedInputFault(world.activity_id)
+        runtime, methods = await fresh_binding_runtime(owned, world, binding, fault=fault)
         saves = _BindingSaveSpy()
         runtime.capture = saves
         advance = capture_handler(world.handler)
@@ -107,7 +108,8 @@ async def test_original_results_read_failure_preserves_binding_finish_responsibi
 
         (request, key, saved_owned), = saves.calls
         receipt, = saves.receipts
-        assert saved_owned is fault_owned
+        assert_business_save(saved_owned, owned)
+        assert saved_owned.fault_injected
         assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
         assert receipt.value.disposition is FinishDisposition.SAVED
         _assert_complete_original_request(request, world, runtime, binding)
@@ -124,6 +126,7 @@ async def test_original_results_read_failure_preserves_binding_finish_responsibi
         _assert_original_facts(owned, world, methods)
     finally:
         owned.connection.close()
+        await close_binding_databases()
 
 
 async def test_binding_finish_original_key_returns_original_parent_plan_result(
@@ -139,7 +142,7 @@ async def test_binding_finish_original_key_returns_original_parent_plan_result(
         assert (sibling_type, sibling_status) == (7, 1)
         assert owned.connection.execute(
             "SELECT status FROM plans WHERE id=?", (plan_id,)).fetchone() == (2,)
-        runtime, methods = fresh_closed_runtime(owned, world, "missing")
+        runtime, methods = (await fresh_binding_runtime(owned, world, "missing"))
         saves = _BindingSaveSpy()
         runtime.capture = saves
 
@@ -147,7 +150,8 @@ async def test_binding_finish_original_key_returns_original_parent_plan_result(
 
         (request, key, saved_owned), = saves.calls
         receipt, = saves.receipts
-        assert saved_owned is owned and receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+        assert_business_save(saved_owned, owned)
+        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
         first = receipt.value
         assert first.disposition is FinishDisposition.SAVED
         assert (first.action_status, first.plan_status) == (6, 2)
@@ -170,6 +174,7 @@ async def test_binding_finish_original_key_returns_original_parent_plan_result(
         _assert_original_facts(owned, world, methods)
     finally:
         owned.connection.close()
+        await close_binding_databases()
 
     # 现父计划已完成；原键重送必须返回首次完整响应，不用后到的兄弟终态改写原结果。
     reopened = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
@@ -193,38 +198,6 @@ async def test_binding_finish_original_key_returns_original_parent_plan_result(
         reopened.connection.close()
 
 
-class _RecoveryReadFault:
-    """透传真实连接，仅在固定原键或父计划目录读取时返回一次 SQLite 错误。"""
-
-    def __init__(self, connection, statement, parameters):
-        self.connection = connection
-        self.statement = statement
-        self.parameters = parameters
-        self.armed = True
-        self.hits = 0
-        self.rollback_count = 0
-        self.fault_transaction = False
-        self.in_transaction_at_failure = None
-        self.error = sqlite3.OperationalError("绑定原申请恢复读取失败")
-
-    def __getattr__(self, name):
-        return getattr(self.connection, name)
-
-    def execute(self, statement, parameters=()):
-        normalized = " ".join(statement.split())
-        if self.armed and normalized == self.statement and tuple(parameters) == self.parameters:
-            self.armed = False
-            self.hits += 1
-            self.fault_transaction = True
-            self.in_transaction_at_failure = self.connection.in_transaction
-            raise self.error
-        result = self.connection.execute(statement, parameters)
-        if normalized == "ROLLBACK" and self.fault_transaction:
-            self.rollback_count += 1
-            self.fault_transaction = False
-        return result
-
-
 async def _saved_binding_with_completed_parent(tmp_path, monkeypatch):
     """首次响应的父计划仍执行中，随后公开取消兄弟动作使父计划完成。"""
     world = await _public_canceled_world(tmp_path, monkeypatch, "latest_complete")
@@ -236,7 +209,7 @@ async def _saved_binding_with_completed_parent(tmp_path, monkeypatch):
             "SELECT id,type,status FROM actions WHERE plan_id=? AND id!=? ORDER BY id",
             (plan_id, world.action_id)).fetchall()
         assert (sibling_type, sibling_status) == (7, 1)
-        runtime, methods = fresh_closed_runtime(owned, world, "missing")
+        runtime, methods = (await fresh_binding_runtime(owned, world, "missing"))
         saves = _BindingSaveSpy()
         runtime.capture = saves
 
@@ -244,7 +217,8 @@ async def _saved_binding_with_completed_parent(tmp_path, monkeypatch):
 
         (request, key, saved_owned), = saves.calls
         receipt, = saves.receipts
-        assert saved_owned is owned and receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+        assert_business_save(saved_owned, owned)
+        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
         first = receipt.value
         assert first.disposition is FinishDisposition.SAVED
         assert (first.action_status, first.plan_status) == (6, 2)
@@ -261,6 +235,7 @@ async def _saved_binding_with_completed_parent(tmp_path, monkeypatch):
         return world, request, key, first, original_group, plan_id, methods
     finally:
         owned.connection.close()
+        await close_binding_databases()
 
 
 async def _assert_recovery_read_failure(tmp_path, monkeypatch, *, parent_history):
@@ -275,10 +250,10 @@ async def _assert_recovery_read_failure(tmp_path, monkeypatch, *, parent_history
         if parent_history:
             # 限定原 G 末边界的父计划恢复，必须先核对真实 plans 对象的目录头。
             fault = _RecoveryReadFault(owned.connection,
-                "SELECT last_event_id, change_count FROM plans WHERE id = ?", (plan_id,))
+                ("plans", "last_event_id"), (plan_id,))
         else:
             fault = _RecoveryReadFault(owned.connection,
-                "SELECT id FROM history_transactions WHERE operation_key = ?", (str(key),))
+                ("history_transactions", "id"), (str(key),))
         fault_owned = replace(owned, connection=fault)
         repository = CaptureRepository()
 
@@ -311,6 +286,7 @@ async def _assert_recovery_read_failure(tmp_path, monkeypatch, *, parent_history
         _assert_original_facts(owned, world, methods)
     finally:
         owned.connection.close()
+        await close_binding_databases()
 
 
 async def test_binding_original_key_sql_failure_rolls_back_before_response(

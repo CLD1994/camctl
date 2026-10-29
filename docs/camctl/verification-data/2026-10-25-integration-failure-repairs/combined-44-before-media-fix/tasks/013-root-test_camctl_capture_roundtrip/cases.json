@@ -1,0 +1,21 @@
+[
+  {
+    "nodeid": "tests/integration/test_camctl_capture_roundtrip.py::test_timelapse_recovers_remaining_wait",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0025321270077256486
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 9.990809271010221
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007628370076417923
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 9.994104235025588
+  }
+]

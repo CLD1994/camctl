@@ -1,0 +1,6 @@
+{
+  "source_commit": "3fcc19004845b5e96f2af0bce4045db959972174",
+  "observed_time_ns": 1792960889062663567,
+  "source_world": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/test_installed_action6_ordinar2/action6-record",
+  "failure": "inspection copies were not cleaned after all bound obtains reached terminal status; original 180-second timeout"
+}

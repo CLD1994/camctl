@@ -44,7 +44,7 @@ async def _pending(environment, *, second_origin=False):
     target, _contents, runtime = await _published(environment)
     owned = environment[1]
     if second_origin:
-        _accept(owned, "4", [{"name": "第二个撤回请求", "type": "cancel_task",
+        await _accept(owned, "4", [{"name": "第二个撤回请求", "type": "cancel_task",
             "scheduled_at": "2026-01-15 09:00:00",
             "params": {"target": {"action_instance_id": str(target)}}}])
     for (origin,) in owned.connection.execute("SELECT id FROM actions WHERE type=6 ORDER BY id").fetchall():
@@ -171,7 +171,7 @@ async def test_later_cancel_request_joins_original_pending_or_failed_delivery_re
             result = repository.advance_withdrawal(
                 AdvanceWithdrawal(delivery_id, original_choice, _NOW, _error(delivery_id)), new_operation_key(), owned)
             assert result.kind is DbOutcomeKind.COMPLETED, result.error
-    _accept(owned, "4", [{"name": "后到撤回请求", "type": "cancel_task",
+    await _accept(owned, "4", [{"name": "后到撤回请求", "type": "cancel_task",
         "scheduled_at": "2026-01-15 09:00:00",
         "params": {"target": {"action_instance_id": str(target)}}}])
     second = owned.connection.execute("SELECT id FROM actions WHERE type=6 ORDER BY id DESC LIMIT 1").fetchone()[0]
@@ -193,7 +193,7 @@ async def test_later_cancel_request_joins_original_pending_or_failed_delivery_re
 async def test_original_withdrawal_key_excludes_member_created_after_original_boundary_even_if_parent_is_older(environment):
     target, ids, _runtime = await _pending(environment)
     owned, repository = environment[1], OutputsRepository()
-    _accept(owned, "4", [{"name": "先接受后生效的撤回", "type": "cancel_task",
+    await _accept(owned, "4", [{"name": "先接受后生效的撤回", "type": "cancel_task",
         "scheduled_at": "2026-01-15 09:00:00",
         "params": {"target": {"action_instance_id": str(target)}}}])
     second = owned.connection.execute("SELECT id FROM actions WHERE type=6 ORDER BY id DESC LIMIT 1").fetchone()[0]

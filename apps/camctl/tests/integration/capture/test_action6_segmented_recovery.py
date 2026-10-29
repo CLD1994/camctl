@@ -9,11 +9,12 @@ from unittest.mock import create_autospec
 
 import pytest
 
+from ..support.capture import capture_database
+
 from camctl.capture.baseline_models import BaselineFixSave
-from camctl.capture.handlers import _stop_call, capture_handler
+from camctl.capture.handlers import capture_handler
 from camctl.capture.media import MediaPolicy
 from camctl.capture.media_flow import DriverReadSessions, MediaFlow
-from camctl.capture.models import HostTimerStopSave
 from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.contracts.values import new_operation_key
 from camctl.devices.ports import DeviceCallResult, StopDriver
@@ -31,7 +32,7 @@ from camctl.persistence.repositories.segment_selections import (
 from camctl.reporting.generation import generate_report_file
 from ..reporting.test_generation import _freeze, _spec
 
-from .result_consumer_fixtures import consumer_world, returned
+from .result_consumer_fixtures import consumer_world, returned, _prepare_through_handler
 from .test_action6_segmented_normal import (
     Action6NativeCatalog,
     Action6RecordCatalog,
@@ -105,14 +106,14 @@ class _ProbeTools:
         raise AssertionError("Action6 覆盖检查不能启动修复")
 
 
-def _attach_media(runtime, owned, tmp_path: Path, values) -> _ProbeTools:
+async def _attach_media(runtime, owned, tmp_path: Path, values) -> _ProbeTools:
     staging = tmp_path / "staging"
     staging.mkdir(exist_ok=True)
     tools = _ProbeTools(owned, values)
     runtime.media = MediaFlow(
-        owned=owned,
+        database=await capture_database(owned),
         roots=BoundDirectories(staging=staging),
-        sessions=DriverReadSessions(owned, _ReadDriver(_CONTENT), ticket=None),
+        sessions=DriverReadSessions(await capture_database(owned), _ReadDriver(_CONTENT), ticket=None),
         tools=tools,
         policy=MediaPolicy(repair_margin_s=Decimal("2")),
         occurred_at=runtime.wall_us,
@@ -140,14 +141,6 @@ async def _overrun_recording(
         assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
     await capture_handler(handler)(action_id, runtime)
 
-    original_finish = runtime.finish
-
-    def finish_with_elapsed(ticket, actual, **kwargs):
-        if ticket.operation == "stop":
-            kwargs["host_timer_stop"] = HostTimerStopSave(75_000_000_000)
-        return original_finish(ticket, actual, **kwargs)
-
-    runtime.finish = finish_with_elapsed
     runtime.wall_us = lambda: _NOW + 75_000_000
     runtime.monotonic_ns = lambda: 80_000_000_000
     stopper = create_autospec(StopDriver, instance=True)
@@ -155,11 +148,13 @@ async def _overrun_recording(
         returned("stop", "stop_confirmed", activity_id)
     )
     runtime.stopper = stopper
-    stopped = await _stop_call(runtime, runtime.action(action_id), "stop_recording")
-    assert stopped.phase == "confirmed"
+    await _prepare_through_handler(runtime, action_id, handler, "conclude")
+    assert owned.connection.execute(
+        "SELECT control_elapsed_ns FROM device_activities WHERE action_id=?", (action_id,)
+    ).fetchone() == (75_000_000_000,)
     runtime.wall_us = lambda: _NOW + 80_000_000
     runtime.monotonic_ns = lambda: 85_000_000_000
-    tools = _attach_media(runtime, owned, tmp_path, values)
+    tools = (await _attach_media(runtime, owned, tmp_path, values))
     return owned, runtime, action_id, handler, tools
 
 
@@ -272,7 +267,7 @@ async def test_action6_overrun_measures_only_the_prefix_needed_to_reach_target(t
         assert owned.connection.execute(
             "SELECT COUNT(*) FROM segment_scope_members"
         ).fetchone() == (3,)
-        assert runtime.action(action_id)["status"] == 3
+        assert (await runtime.action(action_id))["status"] == 3
     finally:
         owned.connection.close()
 
@@ -313,7 +308,7 @@ async def test_action6_unknown_third_probe_keeps_reliable_control_success_and_tw
         assert owned.connection.execute(
             "SELECT COUNT(*) FROM segment_scope_members"
         ).fetchone() == (2,)
-        assert runtime.action(action_id)["status"] == 3
+        assert (await runtime.action(action_id))["status"] == 3
     finally:
         owned.connection.close()
 
@@ -342,7 +337,7 @@ async def test_action6_complete_short_sequence_reports_confirmed_short(tmp_path)
         assert len(report["checked_output_ids"]) == 3
         assert report["default_scope"]["member_count"] == 3
         assert len(tools.calls) == 3
-        assert runtime.action(action_id)["status"] == 4
+        assert (await runtime.action(action_id))["status"] == 4
     finally:
         owned.connection.close()
 
@@ -477,16 +472,9 @@ async def test_action6_native_recovery_reports_actual_frame_coverage(
             BaselineFixSave(activity_id, 0, 0, _NOW), new_operation_key(), owned
         )
         assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
-        from camctl.capture.handlers import _control_call
 
-        await _control_call(
-            runtime,
-            runtime.action(action_id),
-            "start_timelapse",
-            "timelapse_sent",
-            activity_facts={"sent_at": _NOW},
-        )
-        tools = _attach_media(runtime, owned, tmp_path, values)
+        await capture_handler(handler)(action_id, runtime)
+        tools = (await _attach_media(runtime, owned, tmp_path, values))
         wall, mono = [_NOW], [5_000_000_000]
         runtime.wall_us = lambda: wall[0]
         runtime.monotonic_ns = lambda: mono[0]
@@ -517,7 +505,7 @@ async def test_action6_native_recovery_reports_actual_frame_coverage(
         async def inspect_saved_native_result(
             runtime, requested_action_id, *, canceled=False
         ):
-            action = runtime.action(requested_action_id)
+            action = (await runtime.action(requested_action_id))
             ref = await action6_completion.prepare_action6_segment_set(
                 runtime, action, None, canceled=canceled
             )
@@ -549,7 +537,7 @@ async def test_action6_native_recovery_reports_actual_frame_coverage(
         assert owned.connection.execute(
             "SELECT COUNT(*) FROM segment_scope_members"
         ).fetchone() == (expected_checked_count,)
-        assert runtime.action(action_id)["status"] == action_status
+        assert (await runtime.action(action_id))["status"] == action_status
         driver.list_results.assert_awaited_once()
         report = _reported_coverage(tmp_path, owned, action_id)
         assert report["status"] == expected_status
@@ -578,16 +566,9 @@ async def _native_action6_recovery_with_unknown_video_scope(
         BaselineFixSave(activity_id, 0, 0, _NOW), new_operation_key(), owned
     )
     assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
-    from camctl.capture.handlers import _control_call
 
-    await _control_call(
-        runtime,
-        runtime.action(action_id),
-        "start_timelapse",
-        "timelapse_sent",
-        activity_facts={"sent_at": _NOW},
-    )
-    tools = _attach_media(runtime, owned, tmp_path, probe_values)
+    await capture_handler(handler)(action_id, runtime)
+    tools = (await _attach_media(runtime, owned, tmp_path, probe_values))
     wall, mono = [_NOW], [5_000_000_000]
     runtime.wall_us = lambda: wall[0]
     runtime.monotonic_ns = lambda: mono[0]
@@ -615,7 +596,7 @@ async def _native_action6_recovery_with_unknown_video_scope(
     async def inspect_saved_native_result(
         runtime, requested_action_id, *, canceled=False
     ):
-        action = runtime.action(requested_action_id)
+        action = (await runtime.action(requested_action_id))
         ref = await action6_completion.prepare_action6_segment_set(
             runtime, action, None, canceled=canceled
         )
@@ -629,7 +610,7 @@ async def _native_action6_recovery_with_unknown_video_scope(
     )
     await capture_handler(handler)(action_id, runtime)
     assert driver.list_results.await_count == 1
-    assert runtime.action(action_id)["status"] == 3
+    assert (await runtime.action(action_id))["status"] == 3
     return owned, runtime, action_id, tools
 
 

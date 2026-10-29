@@ -1,0 +1,11 @@
+{
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "/tmp/camctl-integration-replay-20261026-u19lkvoe/collection/root-test_camctl_session_recovery/source/apps/camctl/scripts/sync_resources.py"
+  ],
+  "cwd": "/tmp/camctl-integration-replay-20261026-u19lkvoe/collection/root-test_camctl_session_recovery/source",
+  "started_utc": "2026-10-26T00:48:24.952782+00:00",
+  "pid": 1986539,
+  "exit_code": 0,
+  "finished_utc": "2026-10-26T00:48:25.173403+00:00"
+}

@@ -1,0 +1,97 @@
+{
+  "passed_primary_checks": 122,
+  "passed_runner_subtests": 2,
+  "distinct_check_formula": "86 final controller/entrypoint/launcher + 13 runner + 11 persistence + 12 host observer",
+  "environment_failed_tests": 3,
+  "whole_suite_executed": false,
+  "hard_budget_acceptance_passed": false,
+  "N513_preparation_executed": false,
+  "production_code_config_dependencies_changed": false,
+  "runs": {
+    "infrastructure": {
+      "junit": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "91",
+        "time": "19.783",
+        "timestamp": "2026-10-26T00:12:22.758002+08:00",
+        "hostname": "1e0518e0c6b4"
+      },
+      "command_receipt": "infrastructure.json"
+    },
+    "infrastructure-final": {
+      "junit": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "86",
+        "time": "0.597",
+        "timestamp": "2026-10-26T00:22:27.563283+08:00",
+        "hostname": "1e0518e0c6b4"
+      },
+      "command_receipt": "infrastructure-final.json"
+    },
+    "capacity-functional": {
+      "junit": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "11",
+        "time": "16.695",
+        "timestamp": "2026-10-26T00:13:41.529285+08:00",
+        "hostname": "1e0518e0c6b4"
+      },
+      "command_receipt": "capacity-functional.json"
+    },
+    "host-observer": {
+      "junit": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "12",
+        "time": "23.347",
+        "timestamp": "2026-10-26T00:14:22.765847+08:00",
+        "hostname": "1e0518e0c6b4"
+      },
+      "command_receipt": "host-observer.json"
+    },
+    "budget-root-environment": {
+      "junit": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "2",
+        "skipped": "0",
+        "tests": "2",
+        "time": "0.122",
+        "timestamp": "2026-10-26T00:21:44.852954+08:00",
+        "hostname": "1e0518e0c6b4"
+      },
+      "command_receipt": "budget-root-environment.json"
+    },
+    "capacity-environment": {
+      "junit": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "1",
+        "skipped": "0",
+        "tests": "1",
+        "time": "1.360",
+        "timestamp": "2026-10-26T00:21:50.650334+08:00",
+        "hostname": "1e0518e0c6b4"
+      },
+      "command_receipt": "capacity-environment.json"
+    }
+  },
+  "scope_limits": [
+    "Fake-controlled launcher checks do not verify a real cgroup.",
+    "N5 worker checks do not verify the memory budget.",
+    "N129 validates reads and lookup, not peak memory.",
+    "Real probes and N513 stopped at controller preflight; no memory pressure was started.",
+    "Three later checksum observations do not represent multiple new actions or a long complete session."
+  ]
+}

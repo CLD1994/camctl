@@ -4,7 +4,7 @@ import json
 import pytest
 
 from camctl.acceptance.input import ParsedInput
-from camctl.acceptance.service import CommandMode
+from camctl.acceptance.service import AcceptanceContext, CommandMode
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.acceptance import AcceptanceRepository, ProcessInput
@@ -12,16 +12,19 @@ from camctl.reporting.generation import GenerationSpec, generate_report_file
 from camctl.reporting.policy import ReportingRepository
 from .test_generation import environment
 from .test_freeze import Catalog
+from ..support.acceptance import accept_document
+from ..support.database import business_database, database_path
 
 
-def admit(owned, request="1", occurred_at=2_900_000):
+async def admit(owned, request="1", occurred_at=2_900_000):
     body = {"request_id": request, "created_at": "2026-01-15 08:00:00", "name": "时间",
             "actions": [{"name": "错误动作", "type": "report_status", "scheduled_at": "bad",
                          "params": {"scope": "full"}}]}
-    result = AcceptanceRepository().process_input(
-        ProcessInput(ParsedInput("input.json", body), Catalog(), CommandMode.RUN, occurred_at),
-        new_operation_key(), owned)
-    assert result.kind is DbOutcomeKind.COMPLETED, result.error
+    result = await accept_document(body, AcceptanceContext(
+        mode=CommandMode.RUN, catalog=Catalog(), repository=AcceptanceRepository(),
+        clock=type("Clock", (), {"utc_micros": staticmethod(lambda: occurred_at)})()),
+        database_path(owned))
+    assert result.plan_id is not None
 
 
 def freeze(owned):
@@ -42,13 +45,13 @@ def generate(path, report, **overrides):
 @pytest.mark.asyncio
 async def test_new_report_has_complete_terminal_creation_times(environment):
     owned, path = environment
-    admit(owned)
+    await admit(owned)
     report = freeze(owned)
     payload = generate(path, report)
     plan = json.loads(payload)["plans"][0]
     assert plan["status_history"] == [{"status": "completed", "changed_at": "1970-01-01 00:00:02", "clock_status": "unchecked"}]
     assert plan["actions"][0]["status_history"] == [{"status": "failed", "changed_at": "1970-01-01 00:00:02", "clock_status": "unchecked"}]
-    admit(owned, "2", occurred_at=9_000_000)
+    await admit(owned, "2", occurred_at=9_000_000)
     assert generate(path, report, event_batch_size=1, entity_batch_size=1) == payload
 
 
@@ -77,13 +80,9 @@ async def test_full_history_survives_incremental_window_and_local_completion(env
         PublishResult(PublishStage.MOVED, DirectorySyncStage.SYNCED, True, None), occurred_at=6_000_000))
     completed(AcceptanceRepository().process_input(
         ProcessInput(ParsedInput("ack.json", {"request_id":"1", "last_report_id":str(first.report_id)}), Catalog(), CommandMode.RUN, 7_000_000), new_operation_key(), owned))
-    database = await BusinessDatabase.open(lambda: open_existing(
-        path / "state.db", DbOpenMode.EXISTING_RW, DbConfig()))
-    try:
+    async with business_database(database_path(owned)) as database:
         completed(await DbPublicationSession(
             database, occurred_at=lambda: 9_500_000).settle_local(1, first.report_id))
-    finally:
-        await database.close()
     final = freeze(owned)
     assert final.from_wm == first.to_wm and final.from_wm > 0
     payload = generate(path, final, event_batch_size=1)
@@ -99,7 +98,7 @@ async def test_full_history_survives_incremental_window_and_local_completion(env
 @pytest.mark.asyncio
 async def test_actual_epoch_creation_keeps_zero_time(environment):
     owned, path = environment
-    admit(owned, occurred_at=0)
+    await admit(owned, occurred_at=0)
     report = freeze(owned)
     plan = json.loads(generate(path, report))["plans"][0]
     assert plan["status_history"][0]["changed_at"] == "1970-01-01 00:00:00"
@@ -110,7 +109,7 @@ async def test_actual_epoch_creation_keeps_zero_time(environment):
 async def test_reader_port_keeps_historical_clock_judgment(environment):
     from camctl.persistence.repositories.history import HistoryRepository
     owned, path = environment
-    admit(owned, occurred_at=-1)
+    await admit(owned, occurred_at=-1)
     # 受控历史夹具保留未信任时钟判断；不修改任何状态、身份或事件顺序。
     owned.connection.execute("UPDATE history_events SET clock_status=3")
     report = freeze(owned)
@@ -134,13 +133,19 @@ async def test_reader_port_keeps_historical_clock_judgment(environment):
 async def test_status_query_uses_sparse_index_without_event_body_reads(environment, monkeypatch):
     from camctl.persistence.repositories import history
     owned, path = environment
-    admit(owned)
+    await admit(owned)
     report = freeze(owned)
     repo = history.HistoryRepository(path / "state.db")
+    queries = []
+    actual_open = history.open_existing
+
+    def traced_open(*args, **kwargs):
+        opened = actual_open(*args, **kwargs)
+        opened.connection.set_trace_callback(queries.append)
+        return opened
+
+    monkeypatch.setattr(history, "open_existing", traced_open)
     with repo.report_read_scope():
-        queries = []
-        repo._report_connection.set_trace_callback(queries.append)
-        monkeypatch.setattr(history, "decode_event_row", lambda *args: pytest.fail("状态查询不能解析事件正文"))
         assert repo.status_history("action", 1, report.boundary, 4) == [
             {"status": 4, "changed_at": 2_900_000, "clock_status": 1}]
         repo.status_history("plan", 1, report.boundary, 3)
@@ -157,7 +162,7 @@ async def test_status_history_rejects_wrong_entity_enum_and_broken_chain(environ
     from camctl.contracts.values import ConsistencyError
     from camctl.persistence.repositories.history import HistoryRepository
     owned, path = environment
-    admit(owned)
+    await admit(owned)
     report = freeze(owned)
     repo = HistoryRepository(path / "state.db")
     owned.connection.execute("UPDATE entity_event_links SET after_status=6 WHERE entity_type=4")

@@ -1,0 +1,14 @@
+{
+  "argv": [
+    "/tmp/camctl-fix44-browser-20261025/apps/client/node_modules/.bin/vitest",
+    "run",
+    "tests/integration/browser-camera-parameters.test.ts",
+    "tests/integration/browser-editing.test.ts",
+    "-t",
+    "能力源"
+  ],
+  "cwd": "/tmp/camctl-fix44-browser-20261025/apps/client",
+  "exitcode": 0,
+  "stdout": "\n RUN  v5.0.1 /tmp/camctl-fix44-browser-20261025/apps/client\n\n\n Test Files  2 passed (2)\n      Tests  5 passed | 103 skipped (108)\n   Start at  17:46:16\n   Duration  19.07s (tests 85%, import 12%, transform 3%)\n\n",
+  "stderr": ""
+}

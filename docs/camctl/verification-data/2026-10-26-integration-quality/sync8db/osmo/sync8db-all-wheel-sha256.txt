@@ -1,0 +1,1 @@
+7d7aaeaebf40caa56cb8c1ad0979a4ebb62116e8753c26d239870e914827ad69  camctl-0.1.0-py3-none-any.whl

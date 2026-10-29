@@ -1,0 +1,15 @@
+[
+  {
+    "label": "package-resources",
+    "command": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/011-root-test_real_camera_demo_roundtrip/source/apps/camctl/scripts/sync_resources.py"
+    ],
+    "cwd": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/011-root-test_real_camera_demo_roundtrip/source",
+    "started_utc": "2026-10-26T00:32:13.698607+00:00",
+    "pid": 1949068,
+    "exit_code": 0,
+    "finished_utc": "2026-10-26T00:32:13.760570+00:00",
+    "wall_seconds": 0.06195706500147935
+  }
+]

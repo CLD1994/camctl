@@ -3,9 +3,12 @@
 from dataclasses import replace
 from decimal import Decimal
 import hashlib
+import sqlite3
 from pathlib import Path
 
 import pytest
+
+from ..support.capture import capture_database
 
 from camctl.capture.media import MediaPolicy
 from camctl.capture.media_flow import DriverReadSessions, run_recording_media
@@ -26,7 +29,7 @@ from .test_input_copy import _CONTENT
 from .media_retry_fixtures import media_pipeline as pipeline  # noqa: F401
 from .test_media_flow import ReadDriverDouble, _flow
 from ..bootstrap.test_binding_transactions import _CommitFailure
-from ..operations.test_result_reuse import _FaultConnection
+from ..support.outputs import SqliteOperationFault
 
 
 pytestmark = pytest.mark.asyncio
@@ -68,13 +71,13 @@ class _ActualTools:
 @pytest.mark.parametrize("branch", ["check", "decision", "repair_failed", "repair_complete"])
 @pytest.mark.parametrize("phase", ["projection", "commit_before", "commit_after"])
 async def test_media_actual_result_keeps_original_request_and_key_on_reconstructed_flow(
-        pipeline, monkeypatch, branch, phase):
+        pipeline, monkeypatch, branch, phase, capture_resources):
     register_capture_guards()
     register_operation_guards()
     register_outputs_guards()
     owned, roots, source_id = pipeline
     driver, tools = ReadDriverDouble(_CONTENT), _ActualTools(branch)
-    flow = _flow(pipeline, driver, tools)
+    flow = (await _flow(pipeline, driver, tools))
     method = {"check": "save_check_result", "decision": "save_repair_decision",
               "repair_failed": "save_repair_result", "repair_complete": "complete_repair_output"}[branch]
     original_save = getattr(CaptureRepository, method)
@@ -88,7 +91,7 @@ async def test_media_actual_result_keeps_original_request_and_key_on_reconstruct
         inputs.append((command, key))
         if fault_pending:
             fault_pending = False
-            connection = (_FaultConnection(operation_owned.connection, "UPDATE recording_processing")
+            connection = (SqliteOperationFault(operation_owned.connection, sqlite3.SQLITE_UPDATE, "recording_processing")
                           if phase == "projection" else
                           _CommitFailure(operation_owned.connection, phase == "commit_after"))
             result = original_save(repository, command, key, replace(operation_owned, connection=connection))
@@ -117,8 +120,10 @@ async def test_media_actual_result_keeps_original_request_and_key_on_reconstruct
     owned.connection.close()
     reopened = open_existing(roots.staging.parent / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
     try:
-        current = replace(flow, owned=reopened,
-            sessions=DriverReadSessions(reopened, driver, ticket=None),
+        database = await capture_resources.restart_database(reopened)
+        assert database is not flow.database
+        current = replace(flow, database=database,
+            sessions=DriverReadSessions(database, driver, ticket=None),
             occurred_at=lambda: 1_750_000_200_000_000,
             policy=MediaPolicy(repair_margin_s=Decimal("100")))
         await run_recording_media(current, 1, 1, source_id)

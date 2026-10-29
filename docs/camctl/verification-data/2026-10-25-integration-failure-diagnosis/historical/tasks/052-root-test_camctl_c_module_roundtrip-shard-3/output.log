@@ -1,0 +1,104 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+___________________ test_auto_preview_roundtrip_via_c_module ___________________
+
+tmp_path = PosixPath('/tmp/camctl-itopt-final-20261025/tasks/052-root-test_camctl_c_module_roundtrip-shard-3/tmp/pytest/test_auto_preview_roundtrip_vi0')
+host_demo = '/tmp/camctl-host-build-31bdbd40f3e9455e94429801b9d26f89/host-demo'
+
+    def test_auto_preview_roundtrip_via_c_module(
+            tmp_path: Path, host_demo: str) -> None:
+        """自动取回经 C 模块递交链：驱动按配对关联列举预览、预览登记为
+        正式产物，客户端展开的自动取回选择预览产物交付并领取导入。"""
+        deployment = Deployment(tmp_path)
+        spec = stub_driver_spec(
+            {"1": [photo_file("ap-shot"),
+                   preview_file("ap-preview", "ap-shot")]},
+            device_files={"ap-shot": _PHOTO_CONTENT,
+                          "ap-preview": _PREVIEW_CONTENT},
+            photo_preview_supported=True)
+        _init_with_capabilities(deployment, spec)
+        state_db = deployment.state_db
+    
+        shoot_at = future_schedule(1)
+        body = {
+            "request_id": "0",
+            "created_at": "2026-01-15 08:00:00",
+            "name": "c-module-auto-preview",
+            "actions": [
+                {
+                    "name": "shoot",
+                    "type": "camera_take_photo",
+                    "device_id": "cam-1",
+                    "scheduled_at": shoot_at,
+                    "params": {"type": "single_shot"},
+                    "policy": {"max_delay_ms": 5000},
+                },
+                {
+                    "name": "auto-preview",
+                    "type": "obtain_action_outputs",
+                    "scheduled_at": shoot_at,
+                    "params": {
+                        "source": {"action_name": "shoot"},
+                        "filter": "preview",
+                        "purpose": "auto_preview",
+                    },
+                },
+            ],
+        }
+        plan_path, receipt = deployment.export_plan_with_client(body)
+    
+        demo = HostDemo(deployment, host_demo,
+                        launcher=write_stub_launcher(deployment))
+        failure = demo.watch_failures(
+            request_id=receipt["request_id"],
+            expected_statuses={action["name"]: "SUCCEEDED" for action in body["actions"]},
+        )
+        try:
+            demo.start()
+            demo.submit(plan_path)
+>           wait_for(lambda: query_state(
+                state_db, "SELECT status FROM actions ORDER BY id"
+            ) == [(3,), (3,)] or None,
+                timeout_s=180, message="拍摄与自动取回未全部成功",
+                failure=failure)
+
+tests/integration/test_camctl_c_module_roundtrip.py:334: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+predicate = <function test_auto_preview_roundtrip_via_c_module.<locals>.<lambda> at 0x7f5448621120>
+timeout_s = 180, message = '拍摄与自动取回未全部成功'
+failure = <function HostDemo.watch_failures.<locals>.<lambda> at 0x7f5448620fe0>
+
+    def wait_for(predicate, timeout_s: float, message: str, *, failure=None):
+        """轮询成功条件；调用方可提供本次等待已无法成功的诊断。"""
+        deadline = time.monotonic() + timeout_s
+        next_failure_check = 0.0
+        while True:
+            value = predicate()
+            if value:
+                return value
+            now = time.monotonic()
+            # 负向事实会持续保留，限制日志和状态库诊断的读取频率。
+            if failure is not None and now >= next_failure_check:
+                if reason := failure():
+>                   raise AssertionError(f"{message}: {reason}")
+E                   AssertionError: 拍摄与自动取回未全部成功: 请求 6409151102845835801 的动作已进入不相容终态：[(1, 'shoot', 'EXPIRED', None, None)]
+E                   本次 host 日志：
+E                   call=1 attempt=1 command=run operation=spawn plan=(none) automatic=0 retries=0
+E                   call=2 submit accepted path=/tmp/camctl-itopt-final-20261025/tasks/052-root-test_camctl_c_module_roundtrip-shard-3/tmp/pytest/test_auto_preview_roundtrip_vi0/client-plan-1.json
+E                   call=1 attempt=1 command=run pid=489472 spawned execution=unknown
+E                   call=2 attempt=2 command=submit operation=spawn plan=/tmp/camctl-itopt-final-20261025/tasks/052-root-test_camctl_c_module_roundtrip-shard-3/tmp/pytest/test_auto_preview_roundtrip_vi0/client-plan-1.json automatic=0 retries=0
+E                   call=2 attempt=2 command=submit pid=489473 spawned execution=unknown
+E                   call=2 command=submit pid=489473 stream=exit_observed data=exit record retained; group settlement pending
+E                   call=2 command=submit pid=489473 stream=group_reaped data=all execution stopped; child record reaped
+E                   call=2 command=submit pid=489473 result=success exit_kind=0 exit=0 needs_run=1 overflow=0 io_error=0
+
+tests/integration/_wsl_host_demo.py:94: AssertionError
+============================== slowest durations ===============================
+17.98s setup    tests/integration/test_camctl_c_module_roundtrip.py::test_auto_preview_roundtrip_via_c_module
+10.42s call     tests/integration/test_camctl_c_module_roundtrip.py::test_auto_preview_roundtrip_via_c_module
+
+(1 durations < 0.005s hidden.  Use -vv to show these durations.)
+=========================== short test summary info ============================
+FAILED tests/integration/test_camctl_c_module_roundtrip.py::test_auto_preview_roundtrip_via_c_module
+1 failed in 28.49s

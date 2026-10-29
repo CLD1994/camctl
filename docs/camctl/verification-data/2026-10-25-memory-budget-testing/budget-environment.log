@@ -1,0 +1,36 @@
+FFF                                                                      [100%]
+=================================== FAILURES ===================================
+_______________ test_real_cgroup_finishes_the_whole_process_tree _______________
+tests/integration/test_memory_budget_launcher.py:124: in test_real_cgroup_finishes_the_whole_process_tree
+    memory.ensure_memory_budget_available(budget)
+scripts/camctl_memory.py:261: in ensure_memory_budget_available
+    group = _new_group(config)
+            ^^^^^^^^^^^^^^^^^^
+scripts/camctl_memory.py:216: in _new_group
+    raise BudgetEnvironmentError("cgroup v1 宿主存在交换空间，无法保证全局回收期间不换页")
+E   camctl_memory.BudgetEnvironmentError: cgroup v1 宿主存在交换空间，无法保证全局回收期间不换页
+____ test_real_cgroup_detects_aggregate_child_oom_when_parent_returns_zero _____
+tests/integration/test_memory_budget_launcher.py:152: in test_real_cgroup_detects_aggregate_child_oom_when_parent_returns_zero
+    memory.ensure_memory_budget_available(budget)
+scripts/camctl_memory.py:261: in ensure_memory_budget_available
+    group = _new_group(config)
+            ^^^^^^^^^^^^^^^^^^
+scripts/camctl_memory.py:216: in _new_group
+    raise BudgetEnvironmentError("cgroup v1 宿主存在交换空间，无法保证全局回收期间不换页")
+E   camctl_memory.BudgetEnvironmentError: cgroup v1 宿主存在交换空间，无法保证全局回收期间不换页
+________ test_fixed_batch_write_and_verification_have_bounded_residency ________
+apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py:481: in test_fixed_batch_write_and_verification_have_bounded_residency
+    await _run_fixed_batch_capacity(tmp_path)
+apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py:456: in _run_fixed_batch_capacity
+    backend.ensure_memory_budget_available(budget)
+scripts/camctl_memory.py:261: in ensure_memory_budget_available
+    group = _new_group(config)
+            ^^^^^^^^^^^^^^^^^^
+scripts/camctl_memory.py:216: in _new_group
+    raise BudgetEnvironmentError("cgroup v1 宿主存在交换空间，无法保证全局回收期间不换页")
+E   camctl_memory.BudgetEnvironmentError: cgroup v1 宿主存在交换空间，无法保证全局回收期间不换页
+=========================== short test summary info ============================
+FAILED apps/camctl::test_real_cgroup_finishes_the_whole_process_tree - camctl...
+FAILED apps/camctl::test_real_cgroup_detects_aggregate_child_oom_when_parent_returns_zero
+FAILED apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py::test_fixed_batch_write_and_verification_have_bounded_residency
+3 failed in 0.83s

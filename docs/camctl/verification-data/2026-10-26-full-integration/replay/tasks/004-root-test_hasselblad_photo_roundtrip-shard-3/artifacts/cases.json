@@ -1,0 +1,154 @@
+[
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.000667]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 2.9892279369960306
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 29.948524059000192
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.009222346008755267
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 32.94697434200498
+  },
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_browser_preset_keeps_precise_shutter[0.000333]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.003085354997892864
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 24.40047482200316
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0034932760027004406
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 24.407053453003755
+  },
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000667]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 16.861960787005955
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 83.11169444200641
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.1120625490002567
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 100.08571777801262
+  },
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000667]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0020976739906473085
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 78.96813264500815
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.08899373299209401
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 79.0592240519909
+  },
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000333]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0014965750015107915
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 94.60051016700163
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.08409005300200079
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 94.68609679500514
+  },
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.00025]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008834239997668192
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 58.24244711900246
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.12913228500110563
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 58.372462828003336
+  },
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0021558939915848896
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 57.190068055002484
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.07149570000183303
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 57.2637196489959
+  },
+  {
+    "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_missing_start_result_never_replays",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00123929200344719
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 10.611174366000341
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.03200918500078842
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 10.644422843004577
+  }
+]

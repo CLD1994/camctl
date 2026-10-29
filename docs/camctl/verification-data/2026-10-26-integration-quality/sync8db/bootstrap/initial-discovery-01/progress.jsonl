@@ -1,0 +1,4 @@
+{"monotonic": 105187.310897132, "event": "start", "nodeid": "tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost"}
+{"monotonic": 105187.488089451, "event": "report", "nodeid": "tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost", "phase": "setup", "outcome": "passed", "duration": 0.17651236800884362}
+{"monotonic": 105218.763384235, "event": "report", "nodeid": "tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost", "phase": "call", "outcome": "failed", "duration": 31.057546101001208}
+{"monotonic": 105218.773885522, "event": "report", "nodeid": "tests/integration/bootstrap/test_read_discovery_default.py::test_submit_during_initial_discovery_is_not_lost", "phase": "teardown", "outcome": "passed", "duration": 0.009778010993613862}

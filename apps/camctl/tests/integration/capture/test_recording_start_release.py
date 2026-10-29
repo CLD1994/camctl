@@ -26,7 +26,7 @@ async def test_no_effect_final_start_releases_only_when_all_conditions_hold(tmp_
         driver = StartDriver(_result(no_effect=True, error=ErrorValue(
             "device_start_failed" if permanent else "device_busy",
             "execution" if permanent else "device")))
-        runtime = _configured(owned, driver, maximum=3 if permanent else 1)
+        runtime = (await _configured(owned, driver, maximum=3 if permanent else 1))
         await capture_handler("camera_record")(12, runtime)
         assert owned.connection.execute("SELECT status FROM actions WHERE id=12").fetchone() == (4,)
         assert owned.connection.execute(
@@ -48,7 +48,7 @@ async def test_unknown_start_failure_keeps_occupancy_without_proving_release(tmp
     owned = _world(tmp_path)
     try:
         driver = StartDriver(_result(error=ErrorValue("transport_timeout", "transport")))
-        runtime = _configured(owned, driver)
+        runtime = (await _configured(owned, driver))
         await capture_handler("camera_record")(12, runtime)
         await capture_handler("camera_record")(12, runtime)
         assert owned.connection.execute("SELECT status FROM actions WHERE id=12").fetchone() == (4,)
@@ -63,10 +63,10 @@ async def test_lowered_start_budget_releases_original_no_effect_activity_without
     owned = _world(tmp_path)
     try:
         driver = StartDriver(_result(no_effect=True, error=ErrorValue("device_busy", "device")))
-        original = _configured(owned, driver, maximum=3)
+        original = (await _configured(owned, driver, maximum=3))
         await capture_handler("camera_record")(12, original)
         assert owned.connection.execute("SELECT status FROM actions WHERE id=12").fetchone() == (2,)
-        current = _configured(owned, driver, maximum=1)
+        current = (await _configured(owned, driver, maximum=1))
         await capture_handler("camera_record")(12, current)
         assert owned.connection.execute("SELECT status FROM actions WHERE id=12").fetchone() == (4,)
         assert owned.connection.execute(
@@ -86,7 +86,7 @@ async def test_unresolved_output_preparation_keeps_occupancy_without_any_start(t
         # 门禁派发；可靠 NOT_DISPATCHED 仍不能解除所属输出范围。
         owned.connection.execute(
             "UPDATE device_activities SET ownership_mode=2, baseline_state=2 WHERE action_id=12")
-        runtime = _configured(owned, StartDriver(_result(confirmed=True)))
+        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
         result = runtime.capture.release_occupancy(
             ActivityReleaseSave(12, _NOW), new_operation_key(), owned)
         assert result.kind is DbOutcomeKind.COMPLETED, result.error
@@ -112,7 +112,7 @@ async def test_actual_start_call_keeps_occupancy_until_its_result_arrives(tmp_pa
                 no_effect=True, error=ErrorValue("device_busy", "device")))
 
     try:
-        runtime = _configured(owned, HeldStart())
+        runtime = (await _configured(owned, HeldStart()))
         task = asyncio.create_task(capture_handler("camera_record")(12, runtime))
         await asyncio.wait_for(entered.wait(), 1)
         _cancel(owned, 12)

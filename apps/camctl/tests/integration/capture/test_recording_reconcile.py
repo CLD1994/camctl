@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+from ..support.capture import capture_database, capture_runtime
+
 from camctl.capture.result_inputs import RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT
 
 import json
@@ -93,34 +95,27 @@ class _StopDouble:
         )
 
 
-def _runtime(owned, files, *, stopper, media=None,
+async def _runtime(owned, files, *, stopper, media=None,
              wall_us=lambda: _NOW) -> CaptureRuntime:
-    runtime = CaptureRuntime(
-        owned=owned,
-        scheduling=SchedulingRepository(),
-        operations=OperationRepository(),
-        capture=CaptureRepository(),
-        timelapse=TimelapseRepository(),
+    runtime = (await capture_runtime(
+        owned,
         driver=DriverDouble(),
         results=ResultsDouble(files),
         evidence=_EVIDENCE,
         wall_us=wall_us,
         monotonic_ns=lambda: 5_000_000_000,
-        window_of=lambda action: LaunchWindow(
-            scheduled_at=action["scheduled_at"],
-            window_end=action["scheduled_at"] + action["max_delay_ms"] * 1000),
         wait_config=lambda params: None,
         stopper=stopper,
-    )
+    ))
     runtime.media = media
     return runtime
 
 
-def _media(owned, tools, staging: Path) -> MediaFlow:
+async def _media(owned, tools, staging: Path) -> MediaFlow:
     return MediaFlow(
-        owned=owned,
+        database=await capture_database(owned),
         roots=BoundDirectories(staging=staging),
-        sessions=DriverReadSessions(owned, ReadDriverDouble(_CONTENT), ticket=None),
+        sessions=DriverReadSessions(await capture_database(owned), ReadDriverDouble(_CONTENT), ticket=None),
         tools=tools,
         policy=MediaPolicy(repair_margin_s=Decimal("10")),
         occurred_at=lambda: _NOW + 1_000_000,
@@ -215,8 +210,8 @@ class TestCrossSessionReconciliation:
         owned, staging = _environment(tmp_path, started_at_offset_s=65)
         try:
             stopper = _StopDouble()
-            runtime = _runtime(
-                owned, {1: (_entry("clip-1", size=10),)}, stopper=stopper)
+            runtime = (await _runtime(
+                owned, {1: (_entry("clip-1", size=10),)}, stopper=stopper))
             await capture_handler("camera_record")(1, runtime)
             # 可信计时证明 65 秒已满足目标且未超门槛：立即停止，恢复
             # 控制完成即成功依据。
@@ -243,8 +238,8 @@ class TestCrossSessionReconciliation:
         owned, staging = _environment(tmp_path, started_at_offset_s=30)
         try:
             stopper = _StopDouble()
-            runtime = _runtime(
-                owned, {1: (_entry("clip-1", size=10),)}, stopper=stopper)
+            runtime = (await _runtime(
+                owned, {1: (_entry("clip-1", size=10),)}, stopper=stopper))
             await capture_handler("camera_record")(1, runtime)
             # 尚未满足目标时长：不停止、不定决定，保持执行中等待。
             assert stopper.calls == []
@@ -258,9 +253,9 @@ class TestCrossSessionReconciliation:
             # 剩余时长经过后（新会话、更晚的可信墙钟）对账满足并停止；
             # 恰好达到门槛含等号，不触发修复。
             stopper = _StopDouble()
-            later = _runtime(
+            later = (await _runtime(
                 owned, {1: (_entry("clip-1", size=10),)}, stopper=stopper,
-                wall_us=lambda: _NOW + 40_000_000)
+                wall_us=lambda: _NOW + 40_000_000))
             await capture_handler("camera_record")(1, later)
             assert stopper.calls == ["stop_recording"]
             assert _value(owned, "SELECT status FROM actions WHERE id = 1")[0] == 3
@@ -278,9 +273,9 @@ class TestCrossSessionReconciliation:
         try:
             tools = _RepairTools("200")
             stopper = _StopDouble()
-            runtime = _runtime(
+            runtime = (await _runtime(
                 owned, {1: (_entry("clip-1", size=10),)}, stopper=stopper,
-                media=_media(owned, tools, staging))
+                media=(await _media(owned, tools, staging))))
             await capture_handler("camera_record")(1, runtime)
             # 恢复停止确认的控制耗时 120 秒超过目标加余量（70 秒）：
             # 保存异常多录修复决定，不经检查直接修复，成品与原片同

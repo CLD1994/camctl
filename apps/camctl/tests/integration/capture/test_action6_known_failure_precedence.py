@@ -141,7 +141,7 @@ async def test_video_sequence_and_photo_members_do_not_override_explicit_coverag
         assert decision.confirmed == confirmed
         assert decision.checked_count == checked_count
         assert decision.default_scope.member_count == checked_count
-        assert runtime.action(action_id)["status"] == (
+        assert (await runtime.action(action_id))["status"] == (
             3 if status == "succeeded" else 4
         )
         assert len(tools.calls) == checked_count
@@ -173,7 +173,7 @@ async def test_zero_byte_required_video_fails_without_publishing_that_output(
         assert decision.confirmed == Decimal("18")
         assert decision.checked_count == 1
         assert decision.default_scope.member_count == 1
-        assert runtime.action(action_id)["status"] == 4
+        assert (await runtime.action(action_id))["status"] == 4
         assert len(tools.calls) == 1
 
         prefix_identity = "/DCIM/DJI_001/DJI_20261022100000_0007_D.MP4"
@@ -249,7 +249,7 @@ async def test_parsed_no_video_stream_fails_even_when_control_is_complete(
         _assert_reliable_control_complete(runtime, owned, action_id)
         assert decision.status.value == "failed"
         assert decision.failure_code == "capture_failed"
-        assert runtime.action(action_id)["status"] == 4
+        assert (await runtime.action(action_id))["status"] == 4
         assert decision.default_scope.state.value == "empty"
         assert decision.default_scope.member_count == 0
         assert tools.calls and len(tools.calls) == 1

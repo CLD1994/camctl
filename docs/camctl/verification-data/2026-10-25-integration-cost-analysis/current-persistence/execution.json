@@ -1,0 +1,23 @@
+{
+  "source_head": "fc3104424fd8ce64152cbdd6f1b4899d38e011e1",
+  "source": "/tmp/camctl-timing-current-persistence-k83xjj2w/source",
+  "run": "/tmp/camctl-timing-current-persistence-k83xjj2w",
+  "nodeid": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py::test_fixed_batch_write_and_verification_have_bounded_residency",
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py::test_fixed_batch_write_and_verification_have_bounded_residency",
+    "-q",
+    "-s",
+    "--durations=1",
+    "--basetemp=/tmp/camctl-timing-current-persistence-k83xjj2w/pytest",
+    "-p",
+    "timing_persistence"
+  ],
+  "started_utc": "2026-10-25T13:28:03.401321+00:00",
+  "pid": 1263040,
+  "exit_code": 0,
+  "entry_wall_s": 206.42750760700437,
+  "finished_utc": "2026-10-25T13:31:45.169024+00:00"
+}

@@ -47,6 +47,7 @@ from camctl.persistence.repositories.acceptance import (
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..persistence.test_runtime import _create_valid_database
+from ..support.database import business_database
 
 register_acceptance_guards()
 
@@ -165,15 +166,12 @@ async def _accept(environment, tmp_path: Path) -> None:
     target.write_text(
         __import__("json").dumps(_plan_body(), ensure_ascii=False), encoding="utf-8"
     )
-    from camctl.persistence.runtime import OwnedConnection
-
     read = await read_input(str(target), _Reader())
-    await accept_input(
-        parse_input(read),
-        context,
-        new_operation_key(),
-        OwnedConnection(connection=connection, metadata=None),
-    )
+    async with business_database(tmp_path / "state.db") as database:
+        accepted = await accept_input(
+            parse_input(read), context, new_operation_key(), database)
+    assert accepted.plan_id is not None
+
 
 
 class _Reader:

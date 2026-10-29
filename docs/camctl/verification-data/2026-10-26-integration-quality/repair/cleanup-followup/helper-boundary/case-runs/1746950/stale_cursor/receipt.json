@@ -1,0 +1,25 @@
+{
+  "case": "stale_cursor",
+  "outcome": "passed",
+  "helper_error_type": "AssertionError",
+  "helper_error": "等待超时: Action6 检查副本未完成清理或本轮检查",
+  "helper_error_origin": {
+    "filename": "/tmp/camctl-quality-repair-lidlmje7/osmo-recovery/tests/integration/_wsl_host_demo.py",
+    "line": 98,
+    "function": "wait_for"
+  },
+  "waits": [
+    {
+      "message": "Action6 检查副本未完成清理或本轮检查",
+      "timeout_seconds": 179.0,
+      "at": 1002.0,
+      "finished_at": 1183.0
+    }
+  ],
+  "events": [],
+  "query_count": 180,
+  "stop_count": 0,
+  "start_count": 0,
+  "submit_count": 0,
+  "virtual_elapsed_seconds": 183.0
+}

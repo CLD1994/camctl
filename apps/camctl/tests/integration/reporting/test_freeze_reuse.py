@@ -15,7 +15,7 @@ from camctl.reporting.models import ReportBytes
 from camctl.reporting.policy import ReportingRepository, ReportDecisionKind, record_report_bytes
 
 from .test_freeze import environment, _submit, _ack, _sync
-from ..persistence.test_transactions import FailingConnection
+from ..support.reporting import deny_storage_access
 
 pytestmark = pytest.mark.asyncio
 
@@ -180,20 +180,23 @@ async def test_original_freeze_preserves_nonzero_business_boundary(environment, 
     assert result.value == first.value
 
 
-@pytest.mark.parametrize("prefix", ["SELECT id FROM history_transactions", "SELECT id, transaction_id",
-                                  "SELECT from_wm", "SELECT created_event_id", "SELECT MAX(change_seq)",
-                                  "SELECT event.id FROM history_events AS event"])
-async def test_original_freeze_query_failure_preserves_database(environment, tmp_path, prefix):
+@pytest.mark.parametrize("table,column", [
+    ("history_transactions", "id"), ("history_events", "transaction_id"),
+    ("reports", "from_wm"), ("reports", "created_event_id"),
+    ("history_events", "change_seq"), ("history_events", "id"),
+])
+async def test_original_freeze_query_failure_preserves_database(environment, tmp_path, table, column):
     await _submit(environment, tmp_path, "1")
     _ack(environment, _freeze(environment, new_operation_key()).value.report)
     await _submit(environment, tmp_path, "2")
     key = new_operation_key()
     _freeze(environment, key)
     before = tuple(environment.connection.iterdump())
-    fault = FailingConnection(environment.connection, prefix)
-    result = _freeze(replace(environment, connection=fault), key)
+    with deny_storage_access(environment.connection, sqlite3.SQLITE_READ, table, column) as observed:
+        result = _freeze(environment, key)
+    assert observed
     assert result.kind is DbOutcomeKind.ROLLED_BACK
-    assert isinstance(result.error, sqlite3.OperationalError), result.error
+    assert type(result.error) is sqlite3.DatabaseError, result.error
     assert tuple(environment.connection.iterdump()) == before
 
 

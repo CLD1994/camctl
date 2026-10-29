@@ -1,0 +1,47 @@
+{
+  "commit": "07bb0a46381321b22b8bdc585dd93a94621bd725",
+  "worktree": "/tmp/camctl-full-272f-session-observer",
+  "baseline": "9fbb734c",
+  "file": "apps/camctl/tests/integration/session/test_local_work_observer_control.py",
+  "change": "Four local SimpleNamespace test contexts explicitly declare snapshot_owner=None, matching SessionContext default",
+  "all_original_assertion_nodes_identical": true,
+  "original_assertions": 32,
+  "red_proof": {
+    "cmd": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "/tmp/camctl-full-272f-diagnosis/session-observer-control/reproduce.py"
+    ],
+    "cwd": "/tmp/camctl-full-272f-session-observer",
+    "source": "9fbb734c",
+    "pid": 1982695,
+    "timeout_s": 2,
+    "timed_out": false,
+    "exit_code": 0,
+    "elapsed_s": 0.8809188809973421,
+    "process_reaped": true,
+    "python": "Python 3.11.17"
+  },
+  "green": {
+    "cmd": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "-m",
+      "pytest",
+      "apps/camctl/tests/integration/session/test_local_work_observer_control.py",
+      "-q",
+      "--junitxml=/tmp/camctl-full-272f-diagnosis/session-observer-control/green.xml",
+      "--basetemp=/tmp/camctl-full-272f-diagnosis/session-observer-control/pytest-tmp"
+    ],
+    "cwd": "/tmp/camctl-full-272f-session-observer",
+    "source": "9fbb734c plus only four context fields",
+    "pid": 1983762,
+    "timeout_s": 30,
+    "timed_out": false,
+    "exit_code": 0,
+    "elapsed_s": 1.222557767003309,
+    "process_reaped": true,
+    "python": "Python 3.11.17"
+  },
+  "tests_passed": 33,
+  "production_changes": false,
+  "status_clean": true
+}

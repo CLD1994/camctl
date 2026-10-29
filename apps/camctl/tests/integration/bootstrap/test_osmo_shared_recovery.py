@@ -9,38 +9,33 @@ from types import SimpleNamespace
 
 import pytest
 
-from camctl.bootstrap.capture_assembly import session_capture_assembly
-from camctl.bootstrap.obtain_assembly import session_obtain_assembly
 from camctl.outputs.obtain_flow import advance_obtain
-from camctl.capture.media_flow import run_recording_media
 from camctl.bootstrap.config import ConfigDefaults, load_config
-from camctl.capture.handlers import capture_handler, _stop_call, _begin_check_round
-from camctl.capture.processing import CheckBasis, CheckDecisionChoice, CheckDecisionSave, CheckReason
+from camctl.capture.handlers import capture_handler
 from camctl.capture.result_inputs import RESULT_PAGE_CONTRACT
-from camctl.capture.result_pages import ResultPageSave
-from camctl.operations.validation import validate_outcome
-from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.contracts.enums import enum_for
-from camctl.contracts.values import new_operation_key
 from camctl.devices import definitions_runtime
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.catalog import build_catalog
 from camctl.devices.drivers import runtime as drivers_runtime
 from camctl.devices.drivers.adb_cameras.registration import register_builtin_camera_drivers
-from camctl.operations.attempts import AttemptIntent, AttemptTarget, OperationKind
 from camctl.operations.process import LocalExit, RawToolOutcome
 from camctl.operations.recovery import RecoveryBoundary
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.operations import OperationRepository
-from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+from camctl.persistence.repositories.operations import OperationRepository, register_operation_guards
 
 from ..acceptance.test_acceptance import _plan_body
 from ..acceptance.test_adb_camera_definitions import _params
-from ..capture.test_baseline_history import _fix
-from ..capture.test_cancel_timelapse_exhaustion_files import _apply_public_cancel
-from ..scheduling.test_start_action import owned, _accept_plan, _start, _SCHEDULED
+from ..support.bootstrap_driver_cases import (driver_world_capture, driver_world_obtain,
+    close_driver_world, reopen_driver_database, request_driver_cancel, interrupt_start_grant,
+    interrupt_driver_result, interrupt_stop_grant, recover_through_capture, interrupt_read_intent, record_driver_state)
+from ..scheduling.test_start_action import _accept_plan, _start, _SCHEDULED
+from ..support.bootstrap_driver_cases import driver_owned as owned
 
 pytestmark = pytest.mark.asyncio
+register_operation_guards()
+from camctl.persistence.repositories.timelapse import register_timelapse_guards
+register_timelapse_guards()
 BINDING = DeviceBinding("cam-1", "dji-osmo360-ii")
 OSV_PATH = "/mnt/media_rw/emulated/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV"
 
@@ -53,34 +48,69 @@ class Channel:
         self.calls = []
         self.result_paths = [self.result_path]
         self.forbidden = False
-        self.directory_end = b"END"
         self.metadata_error = False
         self.streams = []
         self.allowed_ticket = None
         self.current_result_ticket = lambda: None
         self.result_tickets = []
+        self.capture_started = False
+        self.read_content = None
 
-    async def run(self, spec, stop):
+    def _record_call(self, spec):
         ticket = self.current_result_ticket()
         assert not self.forbidden or (ticket is not None and ticket == self.allowed_ticket), "旧前台调用不得重放"
         self.calls.append(spec)
+        return ticket
+
+    def _directory_frame(self):
+        return b"\0".join((b"CAMCTL-DIRECTORY/1",
+            *(path.encode() for path in sorted(self.result_paths if self.capture_started else ())), b"END", b""))
+
+    async def run(self, spec, stop):
+        ticket = self._record_call(spec)
         script = shlex.split(spec.argv[5])[2]
         if "CAMCTL-DIRECTORY/1" in script:
             self.result_tickets.append(ticket)
-            paths = sorted(self.result_paths)
-            output = b"\0".join((b"CAMCTL-DIRECTORY/1", *(path.encode() for path in paths),
-                self.directory_end, b""))
-            return RawToolOutcome(LocalExit(exit_code=0), output,
+            return RawToolOutcome(LocalExit(exit_code=0), self._directory_frame(),
                                   None, None, stderr=b"")
+        if "CAMCTL-METADATA/2" in script:
+            lexer = shlex.shlex(script, posix=True, punctuation_chars=";")
+            lexer.whitespace_split = True
+            tokens = list(lexer)
+            start = tokens.index("for") + 3
+            paths = tokens[start:tokens.index(";", start)]
+            assert paths and all(path in self.result_paths for path in paths)
+            records = []
+            for path in paths:
+                records.extend((path.encode(), b"" if self.metadata_error else b"50\n",
+                    b"metadata error" if self.metadata_error else b"",
+                    b"7" if self.metadata_error else b"0"))
+            output = b"\0".join((b"CAMCTL-METADATA/2", *records, b"END", b""))
+            return RawToolOutcome(LocalExit(exit_code=0), output, None, None, stderr=b"")
+        if "sha256sum" in script and self.read_content is not None:
+            import hashlib
+            return RawToolOutcome(LocalExit(exit_code=0), hashlib.sha256(self.read_content).hexdigest().encode() + b"  -\n", None, None, stderr=b"")
         if "stat -c %s" in script:
             return RawToolOutcome(LocalExit(exit_code=7 if self.metadata_error else 0), b"" if self.metadata_error else b"50\n",
                                   None, None, stderr=b"metadata error" if self.metadata_error else b"")
+        if shlex.split(script)[-2:] in (["02", "01"], ["01", "01"]):
+            self.capture_started = True
         return RawToolOutcome(LocalExit(exit_code=0), b"Resp message, len = 1, data:\n 00\n",
                               None, None, stderr=b"")
 
     async def run_stream(self, spec, stop, receive):
+        script = shlex.split(spec.argv[5])[2]
+        if "CAMCTL-DIRECTORY/1" in script:
+            ticket = self._record_call(spec)
+            self.result_tickets.append(ticket)
+            await receive(self._directory_frame())
+            return RawToolOutcome(LocalExit(exit_code=0), b"", None, None, stderr=b"")
         assert not self.forbidden, "原READ不能重开源流"
+        assert script.startswith("dd if="), "源READ必须沿正式文件读取接口调用"
         self.streams.append(spec)
+        if self.read_content is not None:
+            await receive(self.read_content)
+            return RawToolOutcome(LocalExit(exit_code=0), None, None, None, stderr=b"")
         await receive(b"part")
         return RawToolOutcome(LocalExit(exit_code=7), None, None, None, stderr=b"source interrupted")
 
@@ -95,8 +125,8 @@ async def _world(owned, tmp_path, monkeypatch, *, finite=False, binding=BINDING,
             "adb": {"serial": "serial-1"}, "recording": {"start_retry_interval_s": "0"},
             "result_check": {"max_attempts": 1, "retry_interval_s": "0"},
             "copy": {"retry_interval_s": "0"}}}}, ConfigDefaults())
-    from camctl.persistence.initialization import _prepare_directories
-    _prepare_directories(tmp_path / "state.db", Path(cfg.paths.staging), Path(cfg.paths.ready), Path(cfg.paths.processing))
+    for directory in (cfg.paths.staging, cfg.paths.ready, cfg.paths.processing):
+        Path(directory).mkdir(parents=True, exist_ok=True)
     register_builtin_camera_drivers(cfg)
     registry = drivers_runtime.current_registry()
     entry = registry.entry(binding.driver_id)
@@ -111,12 +141,11 @@ async def _world(owned, tmp_path, monkeypatch, *, finite=False, binding=BINDING,
     started = _start(owned, 1, now=_SCHEDULED)
     assert started.kind is DbOutcomeKind.COMPLETED, started.error
     activity_id = started.value.activity_id
-    fixed = _fix(owned, activity_id)
-    assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
     channel = Channel()
     entry.driver.transport = channel
     world = SimpleNamespace(owned=owned, cfg=cfg, registry=registry, entry=entry, channel=channel, binding=binding,
-        kind=kind, activity_id=activity_id, wall=[_SCHEDULED], mono=[0])
+        kind=kind, activity_id=activity_id, wall=[_SCHEDULED], mono=[0],
+        diagnostics=[], obtain_supervisors=[])
     channel.current_result_ticket = lambda: world.owned.connection.execute(
         "SELECT t.run_id,t.attempt_no FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
         " WHERE r.kind=7 AND t.status=1 ORDER BY t.id DESC LIMIT 1").fetchone()
@@ -124,22 +153,19 @@ async def _world(owned, tmp_path, monkeypatch, *, finite=False, binding=BINDING,
     return world
 
 
-def _capture(world, **kwargs):
-    factory = session_capture_assembly(devices=kwargs.pop("devices", world.cfg.devices),
-        drivers=kwargs.pop("drivers", world.registry), staging=Path(world.cfg.paths.staging),
-        wait_config=lambda action: CaptureWaitConfig(action["execution_spec_json"]["target_duration_ms"], 30000, 1000),
-        wall_us=lambda: world.wall[0], monotonic_ns=lambda: world.mono[0],
-        media_enabled=kwargs.pop("media_enabled", False), segment_size=4, **kwargs)
-    return factory(world.owned, world.binding.device_id)
+async def _capture(world, **kwargs):
+    return await driver_world_capture(world, **kwargs)
 
 
-def _reopen(world):
-    path = Path(world.owned.connection.execute("PRAGMA database_list").fetchone()[2])
-    world.owned.connection.close()
-    world.owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
+async def _reopen(world):
+    for supervisor in world.obtain_supervisors:
+        result = await supervisor.drain_required()
+        assert not result.failed, result.failed
+    world.obtain_supervisors.clear()
+    world.owned = await reopen_driver_database(world.owned)
     world.channel.forbidden = True
     world.wall[0] += 1000
-    return world.owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
+    return world.owned.connection.execute('SELECT MAX(id) FROM history_events').fetchone()[0]
 
 
 def _row(world, ticket):
@@ -158,9 +184,9 @@ def _assert_unknown(world, ticket):
 
 async def test_formal_registry_preserves_each_original_operation_and_result_page(owned, tmp_path, monkeypatch):
     world = await _world(owned, tmp_path, monkeypatch)
-    runtime = _capture(world)
+    from camctl.operations.recovery import recovery_registry
     for operation in ("control", "stop", "result", "read"):
-        evidence = runtime.recovery_evidence_for(BINDING, operation)
+        evidence = recovery_registry(world.registry.entry(BINDING.driver_id), operation)
         assert evidence is not None
         template = evidence.contract("adb_foreground_recovery", 1)
         assert template.operation == operation and not template.fields and template.identity_field is None
@@ -168,9 +194,9 @@ async def test_formal_registry_preserves_each_original_operation_and_result_page
             RESULT_PAGE_CONTRACT.type, RESULT_PAGE_CONTRACT.version)
         returned = "result_returned" if operation == "result" else operation + "_returned"
         assert evidence.contract(returned, 1) is world.entry.evidence.contract(returned, 1)
-    assert runtime.recovery_evidence_for(BINDING, "digest") is None
-    assert runtime.recovery_evidence_for(BINDING, "query") is not None
-    assert runtime.recovery_evidence_for(BINDING, "unsupported") is None
+    assert recovery_registry(world.registry.entry(BINDING.driver_id), "digest") is None
+    assert recovery_registry(world.registry.entry(BINDING.driver_id), "query") is not None
+    assert recovery_registry(world.registry.entry(BINDING.driver_id), "unsupported") is None
 
 
 @pytest.mark.parametrize("operation", ["control", "stop"])
@@ -178,30 +204,52 @@ async def test_formal_registry_preserves_each_original_operation_and_result_page
 async def test_original_control_stop_recovery_preserves_activity_and_finite_cancel(
         owned, tmp_path, monkeypatch, operation, finite_cancel):
     world = await _world(owned, tmp_path, monkeypatch, finite=finite_cancel)
-    runtime = _capture(world)
-    if operation == "control":
-        ticket, rejected = runtime.grant(runtime.action(1))
-        assert ticket is not None, rejected
+    runtime = await _capture(world)
+    if operation == 'control':
+        ticket = await interrupt_start_grant(runtime, 1, world.kind, monkeypatch)
+        if finite_cancel:
+            await request_driver_cancel(world.owned, 1, _SCHEDULED + 2,
+                build_catalog(world.cfg, definitions_runtime.current_driver_definitions()))
     else:
         await capture_handler(world.kind)(1, runtime)
         assert world.channel.calls
-        assert world.owned.connection.execute("SELECT sent_at FROM device_activities").fetchone() == (_SCHEDULED,)
-        begun = runtime.operations.begin_attempt(AttemptIntent("stop", 1, OperationKind.STOP,
-            AttemptTarget(activity_id=world.activity_id), None, runtime.stop_config, _SCHEDULED + 1),
-            new_operation_key(), world.owned)
-        assert begun.kind is DbOutcomeKind.COMPLETED, begun.error
-        ticket = begun.value.ticket
-    if finite_cancel:
-        _apply_public_cancel(world.owned, 1, _SCHEDULED + 2)
+        assert world.owned.connection.execute('SELECT sent_at FROM device_activities').fetchone() == (_SCHEDULED,)
+        if finite_cancel:
+            await request_driver_cancel(world.owned, 1, _SCHEDULED + 2,
+                build_catalog(world.cfg, definitions_runtime.current_driver_definitions()))
+        else:
+            world.wall[0] += 11_000_000
+            world.mono[0] += 11_000_000_000
+        ticket = await interrupt_stop_grant(runtime, 1, world.kind, monkeypatch)
     activity = world.owned.connection.execute("SELECT * FROM device_activities").fetchall()
     calls = list(world.channel.calls)
-    horizon = _reopen(world)
+    horizon = await _reopen(world)
     try:
-        resumed = _capture(world, recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
+        factory = await _capture(world, factory_only=True,
+            recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
             recovery_max_event_id=lambda: horizon)
-        assert resumed.pending_start_results == {}
-        assert resumed.recover_attempt(ticket)
+        resumed = await factory(world.owned)
+        assert _row(world, ticket) == (1, None, None)
+        finish, key = await recover_through_capture(world, resumed, ticket, monkeypatch, factory=factory)
         _assert_unknown(world, ticket)
+        assert finish.ticket == ticket
+        from camctl.persistence.repositories.history import HistoryRepository
+        history = HistoryRepository(Path(world.owned.connection.execute('PRAGMA database_list').fetchone()[2]))
+        boundary = history.current_boundary()
+        restored = history.restore_entity('action', 1, boundary)
+        row = world.owned.connection.execute(
+            'SELECT id,status,effect_state,result_json,error_json,result_event_id FROM operation_attempts '
+            'WHERE run_id=? AND attempt_no=?', (ticket.run_id, ticket.attempt_id)).fetchone()
+        historical = restored[('operation_attempts', row[0])]
+        assert historical['run_id'] == ticket.run_id
+        assert historical['attempt_no'] == ticket.attempt_id
+        assert historical['status'] == row[1]
+        assert historical['effect_state'] == row[2]
+        assert historical['result_json'] == json.loads(row[3])
+        assert historical['error_json'] == json.loads(row[4])
+        assert historical['result_event_id'] == row[5]
+        assert world.owned.connection.execute('SELECT occurred_at FROM history_events WHERE id=?',
+            (row[5],)).fetchone() == (finish.occurred_at,)
         assert world.channel.calls == calls
         assert world.owned.connection.execute("SELECT * FROM device_activities").fetchall() == activity
         assert world.owned.connection.execute("SELECT cancel_requested FROM actions WHERE id=1").fetchone() == (int(finite_cancel),)
@@ -210,38 +258,38 @@ async def test_original_control_stop_recovery_preserves_activity_and_finite_canc
             assert world.owned.connection.execute("SELECT status FROM operation_runs WHERE id=?", (ticket.run_id,)).fetchone() == (expected,)
         assert world.owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (0,)
     finally:
-        world.owned.connection.close()
+        await close_driver_world(world)
 
 
-async def _result_attempt(world, *, elapsed_us=11_000_000):
-    runtime = _capture(world)
-    await capture_handler(world.kind)(1, runtime)
-    world.wall[0] += elapsed_us
-    world.mono[0] += elapsed_us * 1000
-    stopped = await _stop_call(runtime, runtime.action(1), "stop_recording")
-    assert stopped.phase == "confirmed", stopped
-    begun = _begin_check_round(runtime, 1)
-    assert begun.ticket is not None
-    return runtime, begun.ticket
+async def _result_attempt(world, monkeypatch, *, elapsed_us=11_000_000, pages='none'):
+    return await interrupt_driver_result(world, monkeypatch, elapsed_us=elapsed_us, pages=pages)
 
 
-async def _save_actual_page(world, runtime, ticket, monkeypatch, page_kind):
-    from ..capture.test_record_file_completion_wait import _stop_context
-    context = {**_stop_context(world.owned, 1), "kind": "record_stop", "file_completion_wait_ms": 30000}
-    world.channel.directory_end = b"MORE" if page_kind == "partial" else b"END"
-    world.channel.metadata_error = page_kind == "terminal_error"
-
-    async def elapsed(seconds):
-        world.mono[0] += int(seconds * 1_000_000_000)
-    monkeypatch.setattr(asyncio, "sleep", elapsed)
-    page = await runtime.results.list_page(ticket, cursor=None, timeout_s=Decimal("40"),
-        output_scope=runtime.action(1)["execution_spec_json"]["output_scope"], completion_context=context,
-        video_result_mode=runtime.action(1)["execution_spec_json"].get("video_result_mode"))
-    saved = runtime.capture.save_result_page(ResultPageSave(ticket, 1, None,
-        validate_outcome(ticket, page.outcome, world.entry.evidence), world.wall[0]),
-        new_operation_key(), world.owned)
-    assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
-    original = runtime.capture.read_result_page(saved.value, world.owned)
+def _saved_actual_page(world, ticket, page_kind):
+    original = world.saved_page
+    if page_kind == 'none':
+        assert original is None
+        return None
+    assert original.ref.ticket == ticket
+    page = original.page
+    if page_kind == 'terminal_error':
+        assert page.outcome.status.name == 'FAILED'
+        assert page.outcome.error.code == 'adb_metadata_failed'
+        assert not page.scan_complete
+    else:
+        assert page.outcome.status.name == 'SUCCEEDED', page.outcome.error
+        assert page.outcome.error is None
+        assert (page.next_cursor is not None) == (page_kind == 'partial')
+        assert page.scan_complete == (page_kind == 'terminal')
+    assert len(page.entries) == 1
+    assert page.entries[0].identity == OSV_PATH
+    assert page.entries[0].size_bytes == (None if page_kind == 'terminal_error' else 50)
+    completion = page.outcome.settlement.evidence.data['file_completion']
+    spec, = world.owned.connection.execute("SELECT execution_spec_json FROM actions WHERE id=1").fetchone()
+    wait_ms = json.loads(spec)["file_completion_wait_ms"]
+    assert completion['required_wait_ms'] == wait_ms
+    assert completion['observed_wait_ns'] == wait_ms * 1_000_000
+    assert completion['completed'] is True
     assert _row(world, ticket) == (1, None, None)
     return original
 
@@ -249,14 +297,14 @@ async def _save_actual_page(world, runtime, ticket, monkeypatch, page_kind):
 @pytest.mark.parametrize("pages", ["none", "partial", "terminal", "terminal_error"])
 async def test_original_result_pages_are_consumed_before_new_listing(owned, tmp_path, monkeypatch, pages):
     world = await _world(owned, tmp_path, monkeypatch)
-    runtime, ticket = await _result_attempt(world)
-    original = None if pages == "none" else await _save_actual_page(world, runtime, ticket, monkeypatch, pages)
+    runtime, ticket = await _result_attempt(world, monkeypatch, pages=pages)
+    original = _saved_actual_page(world, ticket, pages)
     calls = list(world.channel.calls)
-    horizon = _reopen(world)
+    horizon = await _reopen(world)
     try:
-        resumed = _capture(world, recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
+        resumed = await _capture(world, recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
             recovery_max_event_id=lambda: horizon)
-        assert resumed.pending_start_results == resumed.pending_result_scans == {}
+        assert _row(world, ticket) == (1, None, None)
         await capture_handler(world.kind)(1, resumed)
         if pages in ("none", "partial"):
             _assert_unknown(world, ticket)
@@ -289,77 +337,67 @@ async def test_original_result_pages_are_consumed_before_new_listing(owned, tmp_
         assert _row(world, ticket) == saved_attempt
         assert world.owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (3 if pages == "terminal" else 4,)
     finally:
-        world.owned.connection.close()
+        await close_driver_world(world)
 
 
-def _obtain(world, **kwargs):
-    return session_obtain_assembly(devices=kwargs.pop("devices", world.cfg.devices),
-        drivers=kwargs.pop("drivers", world.registry), staging=Path(world.cfg.paths.staging),
-        ready=Path(world.cfg.paths.ready), processing=Path(world.cfg.paths.processing), segment_size=4,
-        occurred_at=lambda: world.wall[0], monotonic_ns=lambda: world.mono[0], **kwargs)(world.owned)
+async def _obtain(world, **kwargs):
+    return await driver_world_obtain(world, **kwargs)
 
 
 async def _pending_read(world, tmp_path, monkeypatch, *, internal):
-    from .test_output_read_recovery import _start_unended_read
-    runtime, result_ticket = await _result_attempt(world, elapsed_us=5_000_000 if internal else 11_000_000)
-    original = await _save_actual_page(world, runtime, result_ticket, monkeypatch, "terminal")
-    from camctl.capture.result_scans import SavedResultEntries
-    # 外部源沿本次实际返回完成；内部源同时复用已保存结果页的正式恢复路径。
+    runtime, result_ticket = await _result_attempt(world, monkeypatch,
+        elapsed_us=5_000_000 if internal else 11_000_000, pages='terminal')
+    original = _saved_actual_page(world, result_ticket, 'terminal')
     if internal:
-        processing_id, = world.owned.connection.execute(
-            "SELECT id FROM recording_processing WHERE action_id=1").fetchone()
-        target_duration_ms = runtime.action(1)["execution_spec_json"]["target_duration_ms"]
-        before, = world.owned.connection.execute(
-            "SELECT check_decision FROM recording_processing WHERE id=?", (processing_id,)).fetchone()
-        assert before == int(enum_for("recording_processing.check_decision").UNDETERMINED)
-        required = runtime.capture.save_check_decision(CheckDecisionSave(
-            processing_id, CheckDecisionChoice.REQUIRED,
-            CheckBasis(CheckReason.INSUFFICIENT_TIMING, target_duration_ms), world.wall[0]),
-            new_operation_key(), world.owned)
-        assert required.kind is DbOutcomeKind.COMPLETED, required.error
-        after, = world.owned.connection.execute(
-            "SELECT check_decision FROM recording_processing WHERE id=?", (processing_id,)).fetchone()
-        assert after == int(enum_for("recording_processing.check_decision").REQUIRED)
-        horizon = world.owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
-        runtime = _capture(world, recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
-            recovery_max_event_id=lambda: horizon)
-    else:
-        runtime.hold_call_result(result_ticket, original.page.outcome, occurred_at=original.occurred_at,
-            returned_ns=world.mono[0], result_listing=SavedResultEntries(runtime.capture, world.owned, original.ref))
-    await capture_handler(world.kind)(1, runtime)
-    source_id = world.owned.connection.execute("SELECT id FROM device_files").fetchone()[0]
+        from camctl.bootstrap.flows import winddown_flow
+        async def same_runtime(database, device_id):
+            return runtime
+        async def elapsed(seconds):
+            world.mono[0] += int(seconds * 1_000_000_000)
+        await winddown_flow(capture_factory=same_runtime, wait_cap_s=Decimal(0), sleep=elapsed)(
+            SimpleNamespace(database=runtime.database,
+                clock=SimpleNamespace(utc_micros=lambda: world.wall[0])))
+        record_driver_state(world, "winddown_saved_required_check_and_source")
+
+    horizon = await _reopen(world)
+    runtime = await _capture(world, media_enabled=internal,
+        recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
+        recovery_max_event_id=lambda: horizon)
+    world.channel.forbidden = False
     if internal:
-        processing_id = world.owned.connection.execute("SELECT id FROM recording_processing WHERE action_id=1").fetchone()[0]
-        from camctl.capture.models import ActivityConcludeSave
-        from camctl.capture.processing import SourceFileSave
-        for save, request in (
-            (runtime.capture.conclude_activity, ActivityConcludeSave(1, world.wall[0])),
-            (runtime.capture.save_source_file, SourceFileSave(processing_id, source_id, world.wall[0])),
-        ):
-            receipt = save(request, new_operation_key(), world.owned)
-            assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-        runtime = _capture(world, media_enabled=True)
-        assert runtime.media is not None
-        await run_recording_media(runtime.media, 1, processing_id, source_id)
+        for step in range(4):
+            await capture_handler(world.kind)(1, runtime)
+            record_driver_state(world, f"normal_media_consumer_step_{step + 1}")
+            if world.owned.connection.execute('SELECT committed_bytes FROM file_copies').fetchone() == (4,):
+                break
+        processing = world.owned.connection.execute('SELECT check_decision,source_device_file_id FROM recording_processing WHERE action_id=1').fetchone()
+        assert processing[0] == int(enum_for('recording_processing.check_decision').REQUIRED)
+        assert processing[1] is not None
     else:
-        assert world.owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (3,)
+        await capture_handler(world.kind)(1, runtime)
+        assert world.owned.connection.execute('SELECT status FROM actions WHERE id=1').fetchone() == (3,)
         catalog = build_catalog(world.cfg, definitions_runtime.current_driver_definitions())
-        body = _plan_body(request_id="73", actions=[{"name": "精确取回OSV", "type": "obtain_action_outputs",
-            "scheduled_at": "2026-01-15 09:00:00", "params": {"source": {"action_instance_id": "1"}, "output_ids": ["1"]}}])
+        body = _plan_body(request_id='73', actions=[{'name': '精确取回OSV', 'type': 'obtain_action_outputs',
+            'scheduled_at': '2026-01-15 09:00:00', 'params': {'source': {'action_instance_id': '1'}, 'output_ids': ['1']}}])
         await _accept_plan(world.owned, tmp_path, body, catalog)
-        await advance_obtain(_obtain(world))
-    copy_id, committed, length = world.owned.connection.execute(
-        "SELECT id,committed_bytes,source_size FROM file_copies").fetchone()
+        runtime = await _obtain(world)
+        await advance_obtain(runtime)
+    source_id, = world.owned.connection.execute('SELECT id FROM device_files').fetchone()
+    copy = world.owned.connection.execute(
+        'SELECT id,committed_bytes,source_size FROM file_copies').fetchone()
+    assert copy is not None, {'stage': '目标READ尚未执行',
+        'facts': record_driver_state(world, 'before_expected_first_read')}
+    copy_id, committed, length = copy
     assert (committed, length) == (4, 50)
     assert len(world.channel.streams) == 1
-    first = world.owned.connection.execute("SELECT t.status FROM operation_attempts t JOIN operation_runs r"
-        " ON r.id=t.run_id WHERE r.copy_id=?", (copy_id,)).fetchone()
+    first = world.owned.connection.execute('SELECT t.status FROM operation_attempts t JOIN operation_runs r'
+        ' ON r.id=t.run_id WHERE r.copy_id=?', (copy_id,)).fetchone()
     assert first == (3,)
-    ticket = _start_unended_read(world.owned, copy_id)
-    assert world.owned.connection.execute("SELECT attempts_used FROM operation_runs WHERE id=?", (ticket.run_id,)).fetchone() == (2,)
-    target = world.owned.connection.execute("SELECT f.relative_path FROM file_copies c JOIN intermediate_files f"
-        " ON f.id=c.target_file_id WHERE c.id=?", (copy_id,)).fetchone()[0]
-    assert (Path(world.cfg.paths.staging) / target).read_bytes() == b"part"
+    ticket = await interrupt_read_intent(world, runtime, monkeypatch, internal=internal)
+    assert world.owned.connection.execute('SELECT attempts_used FROM operation_runs WHERE id=?', (ticket.run_id,)).fetchone() == (2,)
+    target = world.owned.connection.execute('SELECT f.relative_path FROM file_copies c JOIN intermediate_files f'
+        ' ON f.id=c.target_file_id WHERE c.id=?', (copy_id,)).fetchone()[0]
+    assert (Path(world.cfg.paths.staging) / target).read_bytes() == b'part'
     return ticket, source_id, target
 
 
@@ -373,19 +411,19 @@ async def test_unavailable_original_read_keeps_progress_and_uses_own_consumer(
     progress = world.owned.connection.execute("SELECT committed_bytes,source_size,round,recopies_used,source_sha256,target_sha256,verification_state"
         " FROM file_copies WHERE id=?", (int(ticket.target_id),)).fetchone()
     history = world.owned.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall()
-    horizon = _reopen(world)
+    horizon = await _reopen(world)
     devices = {} if change == "missing" else {BINDING.device_id: {"kind": "camera", "driver": "dji-action6", "adb": {"serial": "never"}}}
     try:
         kwargs = dict(devices=devices, recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
             recovery_max_event_id=lambda: horizon)
         if internal:
-            resumed = _capture(world, **kwargs)
+            resumed = await _capture(world, **kwargs)
             await capture_handler(world.kind)(1, resumed)
             assert world.owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (4,)
             assert world.owned.connection.execute("SELECT check_state,json_extract(media_json,'$.error.code')"
                 " FROM recording_processing WHERE action_id=1").fetchone() == (4, "device_binding_unavailable")
         else:
-            resumed = _obtain(world, **kwargs)
+            resumed = await _obtain(world, **kwargs)
             await advance_obtain(resumed)
             assert world.owned.connection.execute("SELECT status,json_extract(error_json,'$.code') FROM deliveries").fetchone() == (6, "device_binding_unavailable")
             assert world.owned.connection.execute("SELECT source_dependency FROM obtain_items").fetchone() == (0,)
@@ -405,7 +443,7 @@ async def test_unavailable_original_read_keeps_progress_and_uses_own_consumer(
         assert len(world.channel.streams) == 1
         assert resumed.last_recovery_diagnostic is None
     finally:
-        world.owned.connection.close()
+        await close_driver_world(world)
 
 
 @pytest.mark.parametrize("consumer", ["capture", "read"])
@@ -416,12 +454,11 @@ async def test_original_recovery_requires_boundary_horizon_and_authorization(
     from camctl.devices.drivers.registry import DriverRegistry
     world = await _world(owned, tmp_path, monkeypatch)
     if consumer == "capture":
-        original = _capture(world)
-        ticket, rejected = original.grant(original.action(1))
-        assert ticket is not None, rejected
+        original = await _capture(world)
+        ticket = await interrupt_start_grant(original, 1, world.kind, monkeypatch)
     else:
         ticket, _, _ = await _pending_read(world, tmp_path, monkeypatch, internal=False)
-    horizon = _reopen(world)
+    horizon = await _reopen(world)
     registry = world.registry
     if missing == "authorization":
         entry = replace(world.entry, declaration=replace(world.entry.declaration,
@@ -434,10 +471,10 @@ async def test_original_recovery_requires_boundary_horizon_and_authorization(
     calls, streams = list(world.channel.calls), list(world.channel.streams)
     try:
         if consumer == "capture":
-            resumed = _capture(world, **kwargs)
-            assert resumed.recover_attempt(ticket) is False
+            resumed = await _capture(world, **kwargs)
+            await capture_handler(world.kind)(1, resumed)
         else:
-            resumed = _obtain(world, devices={}, **kwargs)
+            resumed = await _obtain(world, devices={}, **kwargs)
             await advance_obtain(resumed)
         diagnostic = resumed.last_recovery_diagnostic
         assert diagnostic is not None
@@ -446,7 +483,7 @@ async def test_original_recovery_requires_boundary_horizon_and_authorization(
         assert tuple(world.owned.connection.iterdump()) == before
         assert world.channel.calls == calls and world.channel.streams == streams
     finally:
-        world.owned.connection.close()
+        await close_driver_world(world)
 
 
 async def test_formal_read_recovery_reuses_original_finish_after_real_unknown_commit(
@@ -456,8 +493,8 @@ async def test_formal_read_recovery_reuses_original_finish_after_real_unknown_co
     from ..cancellation.test_report_sync_lifecycle import _fault_owned
     world = await _world(owned, tmp_path, monkeypatch)
     ticket, source_id, target = await _pending_read(world, tmp_path, monkeypatch, internal=False)
-    horizon = _reopen(world)
-    runtime = _obtain(world, devices={}, recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
+    horizon = await _reopen(world)
+    runtime = await _obtain(world, devices={}, recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
         recovery_max_event_id=lambda: horizon)
     finish_attempt = OperationRepository.finish_attempt
     submissions = []
@@ -479,8 +516,8 @@ async def test_formal_read_recovery_reuses_original_finish_after_real_unknown_co
         original = submissions[0]
         assert saved_transaction_events(world.owned.connection, original[1]) is not None
         saved = _row(world, ticket)
-        _reopen(world)
-        runtime.owned = world.owned
+        await _reopen(world)
+        runtime = await _obtain(world, reuse=True)
         world.wall[0] += 5000
         await advance_obtain(runtime)
         assert submissions == [original, original]
@@ -491,26 +528,28 @@ async def test_formal_read_recovery_reuses_original_finish_after_real_unknown_co
         assert world.owned.connection.execute("SELECT committed_bytes,source_size FROM file_copies WHERE id=?", (int(ticket.target_id),)).fetchone() == (4, 50)
         assert (Path(world.cfg.paths.staging) / target).read_bytes() == b"part"
         assert len(world.channel.streams) == 1
-        assert not runtime.pending_read_results
+        assert world.owned.connection.execute(
+            "SELECT COUNT(*) FROM operation_attempts WHERE run_id=? AND status=1",
+            (ticket.run_id,)).fetchone() == (0,)
     finally:
-        world.owned.connection.close()
+        await close_driver_world(world)
 
 
 @pytest.mark.parametrize("pages", ["none", "partial"])
 async def test_new_result_round_has_new_ticket_and_keeps_original_budget_and_pages(
         owned, tmp_path, monkeypatch, pages):
     world = await _world(owned, tmp_path, monkeypatch)
-    runtime, ticket = await _result_attempt(world)
-    original = None if pages == "none" else await _save_actual_page(world, runtime, ticket, monkeypatch, pages)
-    horizon = _reopen(world)
+    runtime, ticket = await _result_attempt(world, monkeypatch, pages=pages)
+    original = _saved_actual_page(world, ticket, pages)
+    horizon = await _reopen(world)
     declaration = world.cfg.devices[BINDING.device_id]
     world.cfg = replace(world.cfg, devices={BINDING.device_id: {**declaration,
         "result_check": {**declaration["result_check"], "max_attempts": 2}}})
-    world.channel.directory_end = b"END"
+    world.channel.result_paths = [OSV_PATH]
     world.channel.allowed_ticket = (ticket.run_id, ticket.attempt_id + 1)
     original_calls = len(world.channel.result_tickets)
     try:
-        resumed = _capture(world, recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
+        resumed = await _capture(world, recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
             recovery_max_event_id=lambda: horizon)
         if pages == "none":
             async def elapsed(seconds):
@@ -527,4 +566,4 @@ async def test_new_result_round_has_new_ticket_and_keeps_original_budget_and_pag
             assert resumed.capture.read_result_page(original.ref, world.owned) == original
         assert world.owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (3,)
     finally:
-        world.owned.connection.close()
+        await close_driver_world(world)

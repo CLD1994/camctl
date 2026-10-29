@@ -1,0 +1,355 @@
+[
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_open_reader_allows_publisher_to_remove_original_path[unlink]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002869807998649776
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005413430044427514
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003086619981331751
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0037198130012257025
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_open_reader_allows_publisher_to_remove_original_path[rename]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012661920045502484
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007066010002745315
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003121860063401982
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.002284979011164978
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_closing_reader_keeps_unwithdrawn_report",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0015863160078879446
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.00032669599750079215
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00022918600006960332
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.00214219800545834
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_open_missing_report_preserves_missing_error",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008258360030595213
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.00031752300856169313
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.000521605004905723
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0016649640165269375
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_reader_exception_closes_file_without_removing_report",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001529366010800004
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006940359889995307
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00034875699202530086
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0025721589918248355
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_failed_handle_handoff_releases_windows_handle",
+    "phases": {
+      "setup": {
+        "outcome": "skipped",
+        "duration_seconds": 0.0002681559999473393
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00045496001257561147
+      }
+    },
+    "outcome": "skipped",
+    "duration_seconds": 0.0007231160125229508
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_failed_file_object_handoff_releases_descriptor",
+    "phases": {
+      "setup": {
+        "outcome": "skipped",
+        "duration_seconds": 0.00044632299977820367
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004425060033099726
+      }
+    },
+    "outcome": "skipped",
+    "duration_seconds": 0.0008888290030881763
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_observer_returns_opened_report_when_publisher_replaces_ready[unlink]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0014822530065430328
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006235820037545636
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003113029961241409
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0024171380064217374
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_observer_returns_opened_report_when_publisher_replaces_ready[rename]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012680330110015348
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.00034908299858216196
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00037119501212146133
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.001988311021705158
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_observer_waits_for_matching_ready_status_without_reading_staging",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010436509910505265
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.00113962400064338
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003672479942906648
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0025505229859845713
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_observer_preserves_invalid_json_error_and_closes_reader[invalid-json]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0016227680025622249
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.00045454499195329845
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00028636799834202975
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.002363680992857553
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_observer_preserves_invalid_json_error_and_closes_reader[utf8-bom]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010737629927461967
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004963570099789649
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009232279990101233
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.002493348001735285
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_observer_preserves_decode_error_and_closes_reader[invalid-utf8]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008695510041434318
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.00048431000323034823
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00030716801120433956
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0016610290185781196
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_observer_preserves_decode_error_and_closes_reader[utf16]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001068715995643288
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004666989989345893
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00035728099464904517
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0018926959892269224
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_observer_preserves_decode_error_and_closes_reader[utf32]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001174954988528043
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004527269920799881
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.000334793992806226
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.001962475973414257
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_reader_keeps_default_text_newline_semantics",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0014184449973981827
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0002973420050693676
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00020095199579373002
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0019167389982612804
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_observer_skips_existing_opening_races[FileNotFoundError]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012595410080393776
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.000282615001196973
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.000280594002106227
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0018227500113425776
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_observer_skips_existing_opening_races[PermissionError]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010998350044246763
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003352510102558881
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0002830500015988946
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.001718136016279459
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/080-root-test_ready_report_observer/source/tests/integration/test_ready_report_observer.py::test_observer_preserves_other_read_errors_and_closes_reader",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008777870098128915
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004720839933725074
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00041493399476166815
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.001764804997947067
+  }
+]

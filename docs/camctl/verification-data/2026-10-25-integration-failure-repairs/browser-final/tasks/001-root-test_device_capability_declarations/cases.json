@@ -1,0 +1,40 @@
+[
+  {
+    "nodeid": "tests/integration/test_device_capability_declarations.py::test_installed_metadata_reaches_parameter_form_and_device_guide",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 4.800259607000044
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 22.911881605003146
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004395130090415478
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 27.71258072501223
+  },
+  {
+    "nodeid": "tests/integration/test_device_capability_declarations.py::test_installed_sources_control_browser_cleanup_across_reload_and_restart",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013443269999697804
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 17.1074279230088
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.002570562995970249
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 17.11134281300474
+  }
+]

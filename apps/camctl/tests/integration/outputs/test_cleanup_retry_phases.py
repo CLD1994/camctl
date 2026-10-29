@@ -1,6 +1,5 @@
 """设备清理按删除核实阶段计时，并在新会话采用本次尝试上限。"""
 
-from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -50,11 +49,12 @@ def _run(owned, responsibility):
     return row
 
 
-def _reopen(owned):
+async def _reopen(owned, resources):
     """关闭原连接，再可靠打开同一状态库并核对部署身份。"""
     metadata = owned.metadata
     path = owned.connection.execute("PRAGMA database_list").fetchone()[2]
     owned.connection.close()
+    await resources.restart_database(Path(path))
     fresh = open_existing(Path(path), DbOpenMode.EXISTING_RW, DbConfig())
     assert fresh.metadata == metadata
     return fresh
@@ -65,7 +65,7 @@ async def test_delete_interval_starts_after_required_query_confirms_presence(pip
     _seed_pending_delete(owned)
     clock = _Clock()
     driver = _FirstQueryTakesFiveSeconds(clock)
-    runtime = _runtime(
+    runtime = await _runtime(
         owned, driver, clock, delete_interval=Decimal("3"),
         query_interval=Decimal("0"))
 
@@ -90,7 +90,7 @@ async def test_new_unknown_delete_checks_immediately_after_prior_known_presence(
     owned = pipeline
     _seed_pending_delete(owned)
     driver = DriverDouble(absent=False, present=True)
-    runtime = _runtime(
+    runtime = await _runtime(
         owned, driver, _Clock(), delete_interval=Decimal("0"),
         query_interval=Decimal("3"))
 
@@ -108,20 +108,20 @@ async def test_new_unknown_delete_checks_immediately_after_prior_known_presence(
 
 
 @pytest.mark.parametrize("operation", ["delete", "query"])
-async def test_higher_current_limit_restarts_original_retry_wait(pipeline, operation):
+async def test_higher_current_limit_restarts_original_retry_wait(pipeline, operation, capture_resources):
     owned = pipeline
     _seed_pending_delete(owned)
     driver = (DriverDouble(absent=False, present=True) if operation == "delete"
               else DriverDouble(absent=False, query_error={"code": "device_error", "stage": "query"}))
-    first = _runtime(
+    first = await _runtime(
         owned, driver, _Clock(), delete_interval=Decimal("0"),
-        query_interval=Decimal("0"))
+        query_interval=Decimal("0"),
+        delete_attempts=1 if operation == "delete" else 3,
+        query_attempts=1 if operation == "query" else 3)
     if operation == "delete":
-        first.delete_config = replace(first.delete_config, max_attempts=1)
         responsibility, phase = "delete/91", "still_present"
         wait_phase = "delete_retry_wait"
     else:
-        first.query_config = replace(first.query_config, max_attempts=1)
         responsibility, phase = "exists/91", "query_unknown"
         wait_phase = "query_retry_wait"
 
@@ -134,21 +134,15 @@ async def test_higher_current_limit_restarts_original_retry_wait(pipeline, opera
     assert original[3:] == (1, 1)
     prefix = _history(owned)
 
-    fresh = _reopen(owned)
+    fresh = await _reopen(owned, capture_resources)
     try:
         clock = _Clock(100_000_000_000)
         resumed_driver = (DriverDouble(absent=False, present=True) if operation == "delete"
                           else DriverDouble(absent=False, query_error={"code": "device_error", "stage": "query"}))
-        second = _runtime(
-            fresh, resumed_driver, clock, delete_interval=Decimal("0"),
-            query_interval=Decimal("0"))
-        if operation == "delete":
-            second.delete_config = replace(
-                second.delete_config, max_attempts=3, retry_interval_s=Decimal("3"))
-        else:
-            second.query_config = replace(
-                second.query_config, max_attempts=3, retry_interval_s=Decimal("3"))
-        assert second.retry_gate.anchors == {}
+        second = await _runtime(
+            fresh, resumed_driver, clock,
+            delete_interval=Decimal("3") if operation == "delete" else Decimal(0),
+            query_interval=Decimal("3") if operation == "query" else Decimal(0))
 
         waiting = await delete_source_file(second, 91)
         assert waiting.phase == wait_phase, waiting
@@ -171,12 +165,12 @@ async def test_higher_current_limit_restarts_original_retry_wait(pipeline, opera
 
 @pytest.mark.parametrize("operation", ["delete", "query"])
 @pytest.mark.parametrize("saved_attempts", [1, 2])
-async def test_lower_current_limit_exhausts_without_retry_wait(pipeline, operation, saved_attempts):
+async def test_lower_current_limit_exhausts_without_retry_wait(pipeline, operation, saved_attempts, capture_resources):
     owned = pipeline
     _seed_pending_delete(owned)
     driver = (DriverDouble(absent=False, present=True) if operation == "delete"
               else DriverDouble(absent=False, query_error={"code": "device_error", "stage": "query"}))
-    first = _runtime(
+    first = await _runtime(
         owned, driver, _Clock(), delete_interval=Decimal("0"),
         query_interval=Decimal("0"))
     phase = "still_present" if operation == "delete" else "query_unknown"
@@ -200,22 +194,18 @@ async def test_lower_current_limit_exhausts_without_retry_wait(pipeline, operati
         (original[0],)).fetchone() == (saved_attempts,)
     prefix = _history(owned)
 
-    fresh = _reopen(owned)
+    fresh = await _reopen(owned, capture_resources)
     try:
         resumed_driver = (DriverDouble(absent=False, present=True) if operation == "delete"
                           else DriverDouble(absent=False, query_error={"code": "device_error", "stage": "query"}))
-        second = _runtime(
+        second = await _runtime(
             fresh, resumed_driver, _Clock(100_000_000_000),
-            delete_interval=Decimal("0"), query_interval=Decimal("0"))
-        if operation == "delete":
-            second.delete_config = replace(
-                second.delete_config, max_attempts=1, retry_interval_s=Decimal("3"))
-            exhausted_reason = "delete_attempts_exhausted"
-        else:
-            second.query_config = replace(
-                second.query_config, max_attempts=1, retry_interval_s=Decimal("3"))
-            exhausted_reason = "file_query_attempts_exhausted"
-        assert second.retry_gate.anchors == {}
+            delete_interval=Decimal("3") if operation == "delete" else Decimal(0),
+            query_interval=Decimal("3") if operation == "query" else Decimal(0),
+            delete_attempts=1 if operation == "delete" else 3,
+            query_attempts=1 if operation == "query" else 3)
+        exhausted_reason = ("delete_attempts_exhausted" if operation == "delete"
+                            else "file_query_attempts_exhausted")
 
         exhausted = await delete_source_file(second, 91)
         assert exhausted.phase == "failed", exhausted
@@ -223,7 +213,6 @@ async def test_lower_current_limit_exhausts_without_retry_wait(pipeline, operati
         assert (resumed_driver.delete_calls, resumed_driver.query_calls) == (0, 0)
         assert _attempts(fresh, responsibility) == saved_attempts
         assert _run(fresh, responsibility)[0] == original[0]
-        assert second.retry_gate.anchors == {}
         assert fresh.connection.execute(
             "SELECT * FROM operation_attempts WHERE run_id=? ORDER BY attempt_no", (original[0],)).fetchall() == attempts
         _assert_history_prefix(fresh, prefix)

@@ -1,0 +1,47 @@
+[
+  {
+    "database": "/tmp/camctl-quality-evidence/history/baseline-history/test_large_growth_crosses_page0/2048/state.db",
+    "counts": {
+      "plans": 1,
+      "actions": 1,
+      "outputs": 0,
+      "device_files": 2048,
+      "history_events": 6229,
+      "history_transactions": 4158,
+      "report_entity_changes": 8,
+      "segment_members": 2048,
+      "segment_gaps": 2046
+    },
+    "journal_mode": "wal"
+  },
+  {
+    "database": "/tmp/camctl-quality-evidence/history/baseline-history/test_large_growth_crosses_page0/256/state.db",
+    "counts": {
+      "plans": 1,
+      "actions": 1,
+      "outputs": 0,
+      "device_files": 256,
+      "history_events": 797,
+      "history_transactions": 532,
+      "report_entity_changes": 8,
+      "segment_members": 256,
+      "segment_gaps": 254
+    },
+    "journal_mode": "wal"
+  },
+  {
+    "database": "/tmp/camctl-quality-evidence/history/baseline-history/test_large_window_releases_ove0/state.db",
+    "counts": {
+      "plans": 3,
+      "actions": 4206,
+      "outputs": 128,
+      "device_files": 128,
+      "history_events": 4864,
+      "history_transactions": 395,
+      "report_entity_changes": 4344,
+      "segment_members": 0,
+      "segment_gaps": 0
+    },
+    "journal_mode": "wal"
+  }
+]

@@ -1,0 +1,32 @@
+{
+  "regular_files": 22229,
+  "shared_inodes": [],
+  "observed_time_ns": 1792959789895706299,
+  "external_interpreter_symlinks_dereferenced_to_private_files": [
+    {
+      "path": "/tmp/camctl-quality-repair-evidence/final-action6/uv-cache/archive-v0/rBkaVHna5k5IMB4b/bin/python3.11",
+      "target": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/bin/python3.11"
+    },
+    {
+      "path": "/tmp/camctl-quality-repair-evidence/final-action6/uv-cache/archive-v0/rBkaVHna5k5IMB4b/bin/python",
+      "target": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/bin/python3.11"
+    },
+    {
+      "path": "/tmp/camctl-quality-repair-evidence/final-action6/uv-cache/archive-v0/rBkaVHna5k5IMB4b/bin/python3",
+      "target": "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/bin/python3.11"
+    },
+    {
+      "path": "/tmp/camctl-quality-repair-evidence/final-action6/uv-cache/archive-v0/jG0VL3yoMTrcKTF1/bin/python",
+      "target": "/home/cld/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/bin/python3.12"
+    },
+    {
+      "path": "/tmp/camctl-quality-repair-evidence/final-action6/uv-cache/archive-v0/jG0VL3yoMTrcKTF1/bin/python3",
+      "target": "/home/cld/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/bin/python3.12"
+    },
+    {
+      "path": "/tmp/camctl-quality-repair-evidence/final-action6/uv-cache/archive-v0/jG0VL3yoMTrcKTF1/bin/python3.12",
+      "target": "/home/cld/.local/share/uv/python/cpython-3.12.15-linux-x86_64-gnu/bin/python3.12"
+    }
+  ],
+  "external_symlinks": []
+}

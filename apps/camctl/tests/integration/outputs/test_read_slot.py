@@ -8,7 +8,8 @@ import pytest
 
 from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import ConsistencyError, new_operation_key
-from camctl.history.validators import EventContext, EventValidationError, validate_event
+from camctl.history.validators import EventValidationError
+from ..support.output_planning import capture_operation, proposal_state, validate_static_event as validate_event
 from camctl.operations.attempts import (
     AttemptConfig, AttemptIntent, AttemptTarget, BeginDisposition, OperationKind,
 )
@@ -465,14 +466,10 @@ def test_file_grant_key_survives_real_slot_changes(read_targets):
 
 
 def _proposal(owned, first: int, direction: str, occurred_at: int = _NOW + 1):
-    owned.connection.execute("BEGIN")
-    try:
-        plan = outputs._SlotChangeCommand(
-            SlotRequest(first, occurred_at), direction, new_operation_key(),
-        ).plan(TransactionScope(owned.connection, 1, 1))
-    finally:
-        owned.connection.rollback()
-    return plan
+    method = (OutputsRepository().grant_read_slot if direction == "grant"
+              else OutputsRepository().release_read_slot)
+    return capture_operation(owned, lambda target: method(
+        SlotRequest(first, occurred_at), new_operation_key(), target))
 
 
 def _guard_case(owned, first: int):
@@ -493,18 +490,14 @@ def test_guard_accepts_real_grant_and_release_events(prepared):
     owned, command, first = prepared
     grant, release = _guard_case(owned, first.copy_id)
     for plan in (grant, release):
-        context = EventContext(
-            TransactionRange(2, 2, 2), dict(plan.owners), deepcopy(plan.state_rows),
-            read_coverage=plan.read_coverage)
+        context = replace(plan, state_rows=deepcopy(plan.state_rows))
         assert validate_event(plan.events[0], context).branch_name == "SLOT"
 
 
 def test_guard_rejects_grant_that_skips_or_changes_binding(prepared):
     owned, command, first = prepared
     grant, _ = _guard_case(owned, first.copy_id)
-    context = EventContext(
-        TransactionRange(2, 2, 2), dict(grant.owners), deepcopy(grant.state_rows),
-        read_coverage=grant.read_coverage)
+    context = replace(grant, state_rows=deepcopy(grant.state_rows))
     event = grant.events[0]
     row = event.rows[0]
     occupied = replace(row, before=replace(row.before, values={"slot_device_id": "cam-1"}))
@@ -522,23 +515,20 @@ def test_guard_rejects_grant_for_host_source_or_finished_run(prepared):
     rows = deepcopy(grant.state_rows)
     copy_id = first.copy_id
     rows["file_copies"][copy_id]["source_device_file_id"] = None
-    context = EventContext(
-        TransactionRange(2, 2, 2), dict(grant.owners), rows, read_coverage=grant.read_coverage)
+    context = replace(grant, state_rows=rows)
     with pytest.raises(EventValidationError):
         validate_event(grant.events[0], context)
 
     run_id = next(iter(grant.state_rows["operation_runs"]))
     terminal = deepcopy(grant.state_rows)
     terminal["operation_runs"][run_id]["status"] = 4
-    context = EventContext(
-        TransactionRange(2, 2, 2), dict(grant.owners), terminal, read_coverage=grant.read_coverage)
+    context = replace(grant, state_rows=terminal)
     with pytest.raises(EventValidationError):
         validate_event(grant.events[0], context)
 
     waiting = deepcopy(grant.state_rows)
     waiting["operation_runs"][run_id]["retry_wait_required"] = 1
-    context = EventContext(
-        TransactionRange(2, 2, 2), dict(grant.owners), waiting, read_coverage=grant.read_coverage)
+    context = replace(grant, state_rows=waiting)
     with pytest.raises(EventValidationError):
         validate_event(grant.events[0], context)
 
@@ -556,16 +546,12 @@ def test_guard_rejects_release_with_active_attempt_or_incomplete_bytes(prepared)
     run_id = next(iter(release.state_rows["operation_runs"]))
     active = deepcopy(release.state_rows)
     active["operation_attempts"][901] = {"id": 901, "run_id": run_id, "status": 1}
-    context = EventContext(
-        TransactionRange(2, 2, 2), dict(release.owners), active,
-        read_coverage=release.read_coverage)
+    context = replace(release, state_rows=active)
     with pytest.raises(EventValidationError):
         validate_event(release.events[0], context)
 
     reading = deepcopy(release.state_rows)
     reading["file_copies"][first.copy_id]["committed_bytes"] = 0
-    context = EventContext(
-        TransactionRange(2, 2, 2), dict(release.owners), reading,
-        read_coverage=release.read_coverage)
+    context = replace(release, state_rows=reading)
     with pytest.raises(EventValidationError):
         validate_event(release.events[0], context)

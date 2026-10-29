@@ -15,8 +15,8 @@ from camctl.persistence.repositories.operations import register_operation_guards
 from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.repositories.timelapse import register_timelapse_guards
 
-from .result_consumer_fixtures import consumer_world
-from .test_result_consumer_saves import _result_port
+from .result_consumer_fixtures import result_driver
+from ..support.result_cases import result_case
 
 pytestmark = pytest.mark.asyncio
 register_capture_guards()
@@ -28,10 +28,11 @@ register_timelapse_guards()
 @pytest.mark.parametrize("consumer", ["photo", "timelapse"])
 @pytest.mark.parametrize("independent_activity", [False, True], ids=["same-id", "independent-activity"])
 async def test_finite_results_exhaustion_saves_complete_activity_error(
-    tmp_path, consumer, independent_activity,
+    tmp_path, result_case, consumer, independent_activity,
 ):
-    owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, consumer, independent_activity=independent_activity)
+    owned, runtime, action_id, handler = await result_case.world(
+        tmp_path, consumer, independent_activity=independent_activity,
+        assembly_options={"check_config": AttemptConfig(2, Decimal("1.25"), Decimal(0))})
     try:
         activity_id, = owned.connection.execute(
             "SELECT id FROM device_activities WHERE action_id=?", (action_id,)).fetchone()
@@ -45,12 +46,11 @@ async def test_finite_results_exhaustion_saves_complete_activity_error(
             settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("results_returned", 1, {})),
             observations=(DeviceObservation("result_files_listed", 1,
                 {"activity_id": str(activity_id), "entries": [entry]}),))
-        driver = _result_port(runtime, actual)
-        runtime.check_config = AttemptConfig(2, Decimal("1.25"), Decimal(0))
+        driver = result_driver(result_case, actual)
         advance = capture_handler(handler)
         for _ in range(2):
             await advance(action_id, runtime)
-            assert runtime.action(action_id)["status"] == 2
+            assert (await runtime.action(action_id))["status"] == 2
         run_id, status, used, retry = owned.connection.execute(
             "SELECT id,status,attempts_used,retry_wait_required FROM operation_runs"
             " WHERE responsibility_key=?", (f"results/{activity_id}",)).fetchone()
@@ -79,7 +79,7 @@ async def test_finite_results_exhaustion_saves_complete_activity_error(
         assert owned.connection.execute(
             "SELECT status,attempts_used,retry_wait_required FROM operation_runs WHERE id=?",
             (run_id,)).fetchone() == (6, 2, 0)
-        assert runtime.action(action_id)["status"] == 4
+        assert (await runtime.action(action_id))["status"] == 4
         expected_error = {"code": "capture_result_unconfirmed",
             "stage": registered_error("capture_result_unconfirmed")["stage"],
             "details": {"activity_id": str(activity_id), "reason": "outputs_unknown"}}

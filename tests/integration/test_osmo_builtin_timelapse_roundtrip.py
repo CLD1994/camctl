@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from camctl_memory_plugin import finalize_receipts, run_test_command
+
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -71,9 +73,9 @@ def _archive_logs(package_root: Path, log_dir: Path) -> Path:
 
 
 def _run(command, *, cwd: Path, env: dict[str, str], log_dir: Path,
-         timeout_s: int = 180):
+         timeout_s: int = 180, camctl: bool = False):
     """记录每个子进程的实际工作目录、Python、argv、输出及退出码。"""
-    completed = subprocess.run(command, cwd=cwd, env=env, capture_output=True,
+    completed = run_test_command(command, camctl=camctl, receipt_root=cwd, cwd=cwd, env=env, capture_output=True,
                                text=True, timeout=timeout_s)
     records = log_dir / "commands"
     records.mkdir(parents=True, exist_ok=True)
@@ -443,7 +445,7 @@ def _action(report: dict, name: str) -> dict:
 
 
 def _describe(command, *, cwd: Path, env: dict[str, str], log_dir: Path) -> dict:
-    completed = _run(command, cwd=cwd, env=env, log_dir=log_dir)
+    completed = _run(command, cwd=cwd, env=env, log_dir=log_dir, camctl=True)
     return json.loads(completed.stdout)
 
 
@@ -629,7 +631,7 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
                                    include_preview)
 
     initialized = _run([str(camctl), "init", "--config", str(deployment.config_path)],
-                       cwd=deployment.root, env=environment, log_dir=package.log_dir)
+                       cwd=deployment.root, env=environment, log_dir=package.log_dir, camctl=True)
     assert initialized.stdout == ""
     described = _describe(
         [str(camctl), "describe", "--config", str(deployment.config_path)],
@@ -1219,6 +1221,9 @@ def test_installed_osmo_capture_recovery_and_available_delivery(
         _assert_adb_process_provenance(package, adb_log)
     finally:
         demo.stop()
-        archive = _archive_logs(package.root, package.log_dir)
-        shutil.copytree(deployment.root,
-            archive / "cases" / f"{action_type}-{preview_suffix}", dirs_exist_ok=True)
+        try:
+            finalize_receipts(deployment.root)
+        finally:
+            archive = _archive_logs(package.root, package.log_dir)
+            shutil.copytree(deployment.root,
+                archive / "cases" / f"{action_type}-{preview_suffix}", dirs_exist_ok=True)

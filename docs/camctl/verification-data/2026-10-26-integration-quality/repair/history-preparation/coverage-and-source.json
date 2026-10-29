@@ -1,0 +1,32 @@
+{
+  "head": "b8fd1387f856d9a4e4a5384d57fa3bfb9b9f3f39",
+  "source_sha256": {
+    "apps/camctl/tests/integration/history/test_report_scope.py": "145b6d0195c3de33dc74c6185dca6acb742e958ee91922785c0252ee27939fc5",
+    "apps/camctl/tests/integration/history/test_report_selection.py": "ad934394c43cf12e6eae8c835c4537cc152a30c573a031eaae80eb1ef13c73c9",
+    "apps/camctl/tests/integration/history/test_restore_paths.py": "fa740d1f30ffe4d12cdc75d755a0ac7938a9636513e919c739da2070cd41fb1d"
+  },
+  "preserved": [
+    "4200 actions cross actual 4096 candidate limit",
+    "3 actions before and after main action set",
+    "all 17-item keyset pages and complete expected action IDs",
+    "parent filtering, two original sparse windows and legal empty pages",
+    "candidate release, bounded cache, weak references and closed connections",
+    "preflight once per entity, SQLite VM ratios and indexed query plans"
+  ],
+  "new": [
+    "4 actual published photo outputs from production capture pipeline",
+    "output ID 4 belongs to source action 1; action ID 4 belongs to plan 2",
+    "output-only window selects outputs 1..4 for action 1, empty outputs and actions for parent 2"
+  ],
+  "removed_extra_scope": "128 ordinary photos complete publication is no longer exercised by this capacity node; no equivalent unchanged 128-photo successor was identified",
+  "successor_nodes": [
+    "test_all_five_targets_keep_pages_parent_filter_and_legal_empty[4096]",
+    "test_all_five_targets_keep_pages_parent_filter_and_legal_empty[0]"
+  ],
+  "measurement": "external lightweight pytest helper wrappers, same for baseline and optimized; no profiler; fixture setup excluded from phase split",
+  "affected_external_consumers_not_run": [
+    "reporting/test_worker.py",
+    "reporting/test_generation.py",
+    "bootstrap/test_directory_switch_history.py"
+  ]
+}

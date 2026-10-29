@@ -938,7 +938,7 @@ async def _run_session(
                         await context.snapshot_owner.discover()
                     except Exception as error:
                         return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)})
-                fatal = await _drive_flows(context)
+                fatal = await _drive_normal_flows(context)
             except ClockBecameUntrusted as clock_error:
                 async def transition_to_restricted() -> SessionOutcome:
                     nonlocal admission_lease
@@ -1357,6 +1357,33 @@ async def _settle_local_work(
         raise errors[0].with_traceback(errors[0].__traceback__)
     raise ExceptionGroup("本地停止及实际收场失败", errors)
 
+
+
+async def _drive_normal_flows(context: SessionContext) -> SessionOutcome | None:
+    """全部原任务交付后先核实退出，保留首次发现和仍需推进的工作。"""
+    local = context.local_work
+    if local is not None:
+        try:
+            pending = local.required_settlements()
+            check = getattr(local, "check_completed", None)
+            if pending and check is not None:
+                check()
+                if local.required_settlements() == 0:
+                    decision = classify_work(await _run_work_facts(context))
+                    if decision.kind is not WorkDecisionKind.NEEDS_DRIVER:
+                        return None
+        except (ClockBecameUntrusted, DirectoryBindingError, DeviceConfigurationError):
+            raise
+        except StateDbFailure as error:
+            return _outcome_error("state_db_error", {
+                "error": str(error), "exception": exception_diagnostic(error),
+            })
+        except Exception as error:
+            return _outcome_error("state_db_error", {
+                "error": f"后台流程异常: {error}",
+                "exception": exception_diagnostic(error),
+            })
+    return await _drive_flows(context)
 
 
 async def _drive_flows(context: SessionContext) -> SessionOutcome | None:

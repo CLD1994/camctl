@@ -1,0 +1,10 @@
+{
+  "repo": "/tmp/camctl-sync8db-tests-ojv22ku3/action6",
+  "head": "70149be69088714b8574900b57efa1b16fe3fa68",
+  "branch": "test/sync8db-action6-ojv22ku3",
+  "status": "",
+  "test_sha256": "5581444d9f290d3cddc332f847632dcbe447008bcef9632aac4aea22fdd58f10",
+  "assert_count": 127,
+  "python": "Python 3.11.17",
+  "node": "v24.22.1"
+}

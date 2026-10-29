@@ -1,0 +1,154 @@
+[
+  {
+    "nodeid": "tmp/camctl-quality-repair-lidlmje7/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-copy-progress]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 31.18344200499996
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 54.997854778004694
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.17789568699663505
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 86.35919247000129
+  },
+  {
+    "nodeid": "tmp/camctl-quality-repair-lidlmje7/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-inspection-saved]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002854422011296265
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 50.240555619995575
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.16124030899663921
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 50.40465035100351
+  },
+  {
+    "nodeid": "tmp/camctl-quality-repair-lidlmje7/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-source-commit-receipt]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0025203749974025413
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 52.765531584009295
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.2193459999980405
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 52.98739795900474
+  },
+  {
+    "nodeid": "tmp/camctl-quality-repair-lidlmje7/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-local-read]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002469366998411715
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 47.34643287799554
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.13420924299862236
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 47.48311148799257
+  },
+  {
+    "nodeid": "tmp/camctl-quality-repair-lidlmje7/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[unknown-prefix]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0015395079972222447
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 40.887725309003145
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.12010954300058074
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 41.00937436000095
+  },
+  {
+    "nodeid": "tmp/camctl-quality-repair-lidlmje7/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[complete-short-sequence]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002078977006021887
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 28.90142271798686
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.07881959099904634
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 28.98232128599193
+  },
+  {
+    "nodeid": "tmp/camctl-quality-repair-lidlmje7/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.001737860991852358
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 22.390766627999255
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.29596802200831007
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 22.688472510999418
+  },
+  {
+    "nodeid": "tmp/camctl-quality-repair-lidlmje7/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_video_modes_freeze_for_both_cameras_and_both_video_actions",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0017719900060910732
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 9.661260895009036
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.01271864700538572
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 9.675751532020513
+  }
+]

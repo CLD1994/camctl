@@ -1,0 +1,74 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.17, pytest-9.1.1, pluggy-1.6.0 -- /tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python
+cachedir: .pytest_cache
+rootdir: /tmp/camctl-fix44-components-20261025/apps/camctl
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, mock-3.16.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 2 items
+
+apps/camctl/tests/integration/acceptance/test_atomicity.py::test_unknown_commit_is_checked_by_original_key_before_retry[False] FAILED [ 50%]
+apps/camctl/tests/integration/acceptance/test_atomicity.py::test_unknown_commit_is_checked_by_original_key_before_retry[True] FAILED [100%]
+
+=================================== FAILURES ===================================
+______ test_unknown_commit_is_checked_by_original_key_before_retry[False] ______
+apps/camctl/tests/integration/acceptance/test_atomicity.py:136: in test_unknown_commit_is_checked_by_original_key_before_retry
+    outcome = _process(_plan_body(), LostCommitResponse(), key)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/acceptance/test_atomicity.py:21: in _process
+    return AcceptanceRepository().process_input(
+apps/camctl/src/camctl/persistence/repositories/acceptance.py:589: in process_input
+    receipt = commit_operation(
+apps/camctl/src/camctl/logging_runtime/transaction_timing.py:108: in traced
+    return function(command, operation_key, owned)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/transaction.py:695: in commit_operation
+    return _commit_operation(command, operation_key, connection)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/transaction.py:855: in _commit_operation
+    context, reads = _bind_event_reads(
+apps/camctl/src/camctl/persistence/transaction.py:227: in _bind_event_reads
+    bind_admission(connection,event,transaction,reads,source_guard_state)
+apps/camctl/src/camctl/persistence/repositories/admission_sources.py:44: in bind
+    or row_facts(db, 'plans', scope.plan_id) is not None
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/transaction.py:1129: in row_facts
+    return reuse_read(connection, key, lambda: _load_row_facts(connection, table, row_id))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/read_reuse.py:86: in reuse_read
+    generation = connection.total_changes
+                 ^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'LostCommitResponse' object has no attribute 'total_changes'
+______ test_unknown_commit_is_checked_by_original_key_before_retry[True] _______
+apps/camctl/tests/integration/acceptance/test_atomicity.py:136: in test_unknown_commit_is_checked_by_original_key_before_retry
+    outcome = _process(_plan_body(), LostCommitResponse(), key)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/acceptance/test_atomicity.py:21: in _process
+    return AcceptanceRepository().process_input(
+apps/camctl/src/camctl/persistence/repositories/acceptance.py:589: in process_input
+    receipt = commit_operation(
+apps/camctl/src/camctl/logging_runtime/transaction_timing.py:108: in traced
+    return function(command, operation_key, owned)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/transaction.py:695: in commit_operation
+    return _commit_operation(command, operation_key, connection)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/transaction.py:855: in _commit_operation
+    context, reads = _bind_event_reads(
+apps/camctl/src/camctl/persistence/transaction.py:227: in _bind_event_reads
+    bind_admission(connection,event,transaction,reads,source_guard_state)
+apps/camctl/src/camctl/persistence/repositories/admission_sources.py:44: in bind
+    or row_facts(db, 'plans', scope.plan_id) is not None
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/transaction.py:1129: in row_facts
+    return reuse_read(connection, key, lambda: _load_row_facts(connection, table, row_id))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/read_reuse.py:86: in reuse_read
+    generation = connection.total_changes
+                 ^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'LostCommitResponse' object has no attribute 'total_changes'
+- generated xml file: /tmp/camctl-fix44-components-evidence-20261025/audit-acceptance-total-changes/junit.xml -
+=========================== short test summary info ============================
+FAILED apps/camctl/tests/integration/acceptance/test_atomicity.py::test_unknown_commit_is_checked_by_original_key_before_retry[False] - AttributeError: 'LostCommitResponse' object has no attribute 'total_changes'
+FAILED apps/camctl/tests/integration/acceptance/test_atomicity.py::test_unknown_commit_is_checked_by_original_key_before_retry[True] - AttributeError: 'LostCommitResponse' object has no attribute 'total_changes'
+============================== 2 failed in 0.88s ===============================

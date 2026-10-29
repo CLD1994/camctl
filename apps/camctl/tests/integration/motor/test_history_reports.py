@@ -81,9 +81,11 @@ def test_group_source_resolution_excludes_motor(owned):
     assert result.failure is ResolveFailure.NOT_OUTPUT_SOURCE
 
 
-def test_partial_write_is_persisted_and_disables_later_actions(owned):
+@pytest.mark.asyncio
+async def test_partial_write_is_persisted_and_disables_later_actions(owned):
     from types import SimpleNamespace
-    from camctl.motor.service import MotorRuntime, advance_motor
+    from camctl.bootstrap.motor_assembly import motor_flow
+    from ..support.database import business_database, database_path
     from camctl.persistence.repositories.motor import MotorRepository, register_motor_guards
     from camctl.persistence.repositories.scheduling import register_window_guard
     from camctl.session.clock import ClockCheckInput
@@ -94,15 +96,15 @@ def test_partial_write_is_persisted_and_disables_later_actions(owned):
     write = Mock(return_value=5)
     close = Mock()
     writer = NotificationWriter(123, pipe_buf=512, write=write, close=close)
-    runtime = MotorRuntime(owned, MotorRepository(), writer,
-                           SimpleNamespace(utc_micros=lambda: NOW),
-                           lambda connection: ClockCheckInput(None, 0, 0, 0), {})
-    advance_motor(1, runtime)
-    advance_motor(2, runtime)
+    repository = MotorRepository()
+    async with business_database(database_path(owned)) as database:
+        await motor_flow(writer, {})(SimpleNamespace(
+            database=database, clock=SimpleNamespace(utc_micros=lambda: NOW),
+            clock_policy=lambda connection: ClockCheckInput(None, 0, 0, 0)))
     write.assert_called_once()
     close.assert_called_once_with(123)
-    first = runtime.repository.read_facts(1, owned)
-    second = runtime.repository.read_facts(2, owned)
+    first = repository.read_facts(1, owned)
+    second = repository.read_facts(2, owned)
     assert first.action['error_code'] == 28
     assert first.action['error_details_json'] == {'reason': 'short_write', 'written_bytes': 5}
     assert first.notification.written_bytes == 5

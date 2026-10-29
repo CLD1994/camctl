@@ -1,18 +1,22 @@
 """权威报告 Schema 与分段错误登记的完整对象接受域对照。"""
 from copy import deepcopy
 from dataclasses import replace
+from functools import lru_cache
 
 import pytest
+from referencing.jsonschema import DRAFT202012
 
 from camctl.contracts.history_values import HistoryBoundary
-from camctl.contracts.schemas import create_validator, validation_errors
-from camctl.contracts.workflow_errors import _public_json_registry
+from camctl.contracts.json_values import parse_exact_json
+from camctl.contracts.schemas import SchemaRuleError, load_schema, schema_registry
+from camctl.contracts.workflow_errors import registered_error, validate_public_json
+from camctl.resources import resource_bytes
 from camctl.reporting.stream_validation import (
     CompletionRequirement, DeferredField, FieldKind, NodeBinding,
     ProjectionDescriptor, ReadEnd, StreamValidationError, derive_stream_plan,
 )
 
-DRAFT = 'https://json-schema.org/draft/2020-12/schema'
+SOURCE_SCOPE_ERROR = 'default_segment_scope_unconfirmed'
 OUTPUTS = ('outputs',)
 DELIVERIES = ('deliveries',)
 SEGMENT_PATHS = (
@@ -22,11 +26,30 @@ SEGMENT_PATHS = (
 )
 
 
+@lru_cache(maxsize=1)
+def _stream_registry():
+    """为本文件的分段错误场景显式组合合法输入，不生成完整错误登记。"""
+    report = load_schema('protocol/status-report.schema.json')
+    workflow = parse_exact_json(resource_bytes('protocol/workflow-codes.json').decode('utf-8'))
+    scope_error = registered_error(SOURCE_SCOPE_ERROR)
+    report['$defs']['error'] = {'allOf': [report['$defs']['error'], {
+        'if': {'properties': {'code': {'const': SOURCE_SCOPE_ERROR}}, 'required': ['code']},
+        'then': {'properties': {
+            'stage': {'const': scope_error['stage']},
+            'details': {'$ref': 'workflow-codes.json#/codes/' + SOURCE_SCOPE_ERROR + '/details_schema'},
+        }},
+    }]}
+    return schema_registry().with_resources([
+        ('status-report.schema.json', DRAFT202012.create_resource(report)),
+        ('workflow-codes.json', DRAFT202012.create_resource(workflow)),
+    ])
+
+
 def _plan(name, fields, completions=()):
     return derive_stream_plan(
         'status-report.schema.json#/$defs/' + name,
         ProjectionDescriptor('/integration/' + name, fields, completions),
-        registry=_public_json_registry(),
+        registry=_stream_registry(),
     )
 
 
@@ -36,11 +59,13 @@ def _binding(plan):
 
 
 def _original_accepts(name, document):
-    validator = create_validator(
-        {'$schema': DRAFT, '$ref': 'status-report.schema.json#/$defs/' + name},
-        registry=_public_json_registry(),
-    )
-    return not validation_errors(validator, document)
+    try:
+        validate_public_json('#/$defs/' + name, document)
+    except SchemaRuleError:
+        raise
+    except ValueError:
+        return False
+    return True
 
 
 def _finish(gate, path):
@@ -184,7 +209,7 @@ def test_shared_obtain_failure_unknown_presence_blocks_vacuous_dependency():
 
 def _source_failure():
     return {'source_action_instance_id': '10', 'error': {
-        'code': 'default_segment_scope_unconfirmed', 'stage': 'output_selection',
+        'code': SOURCE_SCOPE_ERROR, 'stage': 'output_selection',
         'details': {'source_action_instance_id': '10', 'description': '范围未确认', 'gap_count': None,
                     'default_scope': {'state': 'unknown', 'member_count': None, 'output_ids': []},
                     'retained_original_count': 0, 'gaps': [], 'retained_output_ids': []},
@@ -199,7 +224,7 @@ def _source_plan():
 
 
 class _ContractProof:
-    """仅证明 A1 端口的绑定消费；不充当真实 I2 历史生产者。"""
+    """仅证明流式完成端口的绑定消费；不充当真实历史生产者。"""
     def __init__(self, expected):
         self.expected = expected
         self.used = False
@@ -209,6 +234,35 @@ class _ContractProof:
         assert request.plan is self.expected.plan
         assert request == self.expected
         self.used = True
+
+
+@pytest.mark.parametrize('invalid', ['stage', 'required_detail', 'scope_state'])
+def test_registered_source_error_constraints_match_public_json(invalid):
+    from camctl.reporting.stream_validation import CompletionRequest
+
+    document = _source_failure()
+    if invalid == 'stage':
+        document['error']['stage'] = 'capture'
+    elif invalid == 'required_detail':
+        del document['error']['details']['description']
+    else:
+        document['error']['details']['default_scope'].update(state='empty', member_count=0)
+    assert not _original_accepts('obtain_failure', document)
+    plan = _source_plan()
+    header = deepcopy(document)
+    for path in SEGMENT_PATHS:
+        parent = header
+        for name in path[:-1]:
+            parent = parent[name]
+        del parent[path[-1]]
+    gate = plan.begin(_binding(plan), header)
+    for path in SEGMENT_PATHS:
+        gate.open_array(path)
+        _finish(gate, path)
+    gate.supply_completion('segment_expansion', _ContractProof(CompletionRequest(
+        gate.binding, plan.projection.completions[0], tuple((path, 0) for path in SEGMENT_PATHS), plan)))
+    with pytest.raises(StreamValidationError):
+        gate.close_node()
 
 
 def test_real_source_scope_error_requires_three_exhaustions_and_business_proof():
@@ -265,7 +319,7 @@ def test_shared_schema_ordinary_item_and_delivery_failures_close(delivery):
         document['delivery_id'] = '30'
     assert _original_accepts('obtain_failure', document)
     gate = plan.begin(_binding(plan), document)
-    # 无分段详情的合法省略由投影适用性给出；不要求 I2 分段业务凭据。
+    # 无分段详情的合法省略由投影适用性给出，不要求分段来源完整性凭据。
     gate.omit(SEGMENT_PATHS[0])
     gate.omit(SEGMENT_PATHS[1])
     gate.close_node()
@@ -273,10 +327,10 @@ def test_shared_schema_ordinary_item_and_delivery_failures_close(delivery):
 
 def test_real_error_details_failure_result_and_action_require_nested_receipts():
     from camctl.reporting.stream_validation import CompletionRequest
-    shared = _public_json_registry()
+    shared = _stream_registry()
     details_fields = tuple(DeferredField(path[2:], unique_by='segment_expansion' if path != SEGMENT_PATHS[0] else None) for path in SEGMENT_PATHS)
     details_plan = derive_stream_plan(
-        'workflow-codes.json#/codes/default_segment_scope_unconfirmed/details_schema',
+        'workflow-codes.json#/codes/' + SOURCE_SCOPE_ERROR + '/details_schema',
         ProjectionDescriptor('/source_failure/error/details', details_fields,
                              (CompletionRequirement('segment_expansion', (), tuple(path[2:] for path in SEGMENT_PATHS[1:])),)), registry=shared)
     error_plan = _plan('error', (DeferredField(('details',), kind=FieldKind.OBJECT, node=details_plan),))
@@ -295,7 +349,7 @@ def test_real_error_details_failure_result_and_action_require_nested_receipts():
     failure_plan = result.item_plan(('failures',))
     failure = failure_plan.begin(result.child_binding(('failures',), 1), {'source_action_instance_id': '10'})
     error = error_plan.begin(failure.object_binding(('error',)), {
-        'code': 'default_segment_scope_unconfirmed', 'stage': 'output_selection'})
+        'code': SOURCE_SCOPE_ERROR, 'stage': 'output_selection'})
     header = deepcopy(_source_failure()['error']['details'])
     del header['gaps']
     del header['retained_output_ids']
@@ -304,7 +358,7 @@ def test_real_error_details_failure_result_and_action_require_nested_receipts():
     for spec in details_fields:
         details.open_array(spec.path)
         _finish(details, spec.path)
-    # Schema 本身接受有限头；本阶段仍明确要求未来 I2 的真实完整凭据。
+    # 有限头的 Schema 校验不能代替增长数组的来源完整性凭据。
     with pytest.raises(StreamValidationError):
         details.close_node()
     details.supply_completion('segment_expansion', _ContractProof(CompletionRequest(

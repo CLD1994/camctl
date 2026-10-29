@@ -1,0 +1,88 @@
+{
+  "budget_scope": "memory_and_swap",
+  "uid": 1002,
+  "gid": 1002,
+  "requested_limit": "2GiB",
+  "limit_bytes": 2147483648,
+  "cwd": "/tmp/camctl-quality-repair-lidlmje7/action6",
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "camctl_memory_plugin",
+    "-p",
+    "integration_progress",
+    "tests/integration/test_action6_segmented_recovery_roundtrip.py",
+    "-vv",
+    "-x",
+    "--durations=10",
+    "-o",
+    "cache_dir=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/pytest-cache",
+    "--basetemp=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data",
+    "--junitxml=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/result.xml"
+  ],
+  "status": "finished",
+  "started_at": 1792962088.751263,
+  "errors": [],
+  "delegation_path": "/sys/fs/cgroup/memory/camctl-budget-1733015-d05db0ef0e764c6cbaf48a93adcd5ecd",
+  "delegation": {
+    "path": "/sys/fs/cgroup/memory/camctl-budget-1733015-d05db0ef0e764c6cbaf48a93adcd5ecd",
+    "action": "--_delegate",
+    "identity": {
+      "device": 70,
+      "inode": 25563
+    },
+    "version": 1,
+    "ok": true,
+    "exit_code": 0,
+    "stderr": ""
+  },
+  "executed_command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "camctl_memory_plugin",
+    "-p",
+    "integration_progress",
+    "tests/integration/test_action6_segmented_recovery_roundtrip.py",
+    "-vv",
+    "-x",
+    "--durations=10",
+    "-o",
+    "cache_dir=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/pytest-cache",
+    "--basetemp=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data",
+    "--junitxml=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/result.xml",
+    "--camctl-memory-limit",
+    "2GiB",
+    "--camctl-memory-cgroup-root",
+    "/sys/fs/cgroup/memory/camctl-budget-1733015-d05db0ef0e764c6cbaf48a93adcd5ecd"
+  ],
+  "command_pid": 1733021,
+  "command_pgid": 1733021,
+  "command_exit_code": 0,
+  "groups": [
+    {
+      "path": "/sys/fs/cgroup/memory/camctl-budget-1733015-d05db0ef0e764c6cbaf48a93adcd5ecd",
+      "remaining_pids": [],
+      "role": "delegation",
+      "resource": {
+        "memory.limit_in_bytes": "9223372036854771712",
+        "memory.memsw.limit_in_bytes": "9223372036854771712",
+        "memory.max_usage_in_bytes": "399515648",
+        "memory.memsw.max_usage_in_bytes": "399515648",
+        "memory.oom_control": "oom_kill_disable 0\nunder_oom 0\noom_kill 0"
+      }
+    }
+  ],
+  "removal": {
+    "path": "/sys/fs/cgroup/memory/camctl-budget-1733015-d05db0ef0e764c6cbaf48a93adcd5ecd",
+    "action": "--_remove",
+    "ok": true,
+    "exit_code": 0,
+    "stderr": ""
+  },
+  "exit_code": 0,
+  "finished_at": 1792962327.0611308
+}

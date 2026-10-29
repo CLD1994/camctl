@@ -14,15 +14,25 @@ from camctl.capture.baseline_reads import (
 )
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.operations.models import ErrorValue
+from camctl.persistence.models import DbOutcomeKind, db_outcome_for
 
 
 async def consume_read(pending, runtime):
     owner = pending.read_owner
     if owner is None:
         return True
-    result = (await resume_baseline_read_save(
-        owner, capture=runtime.capture, database=runtime.database
-    ))
+    notification_error = None
+    try:
+        result = await resume_baseline_read_save(
+            owner, capture=runtime.capture, database=runtime.database
+        )
+    except BaseException as error:
+        outcome = db_outcome_for(error)
+        if (outcome is None or outcome.kind is not DbOutcomeKind.COMPLETED
+                or owner.result is None):
+            raise
+        result = owner.result
+        notification_error = error
     if owner.wakeup_pending:
         owner.wakeup_pending = False
         pending.wakeup_pending = True
@@ -51,6 +61,8 @@ async def consume_read(pending, runtime):
             {"activity_id": str(pending.activity_id), "reason": "outputs_unknown"},
         )
     pending.read_owner = None
+    if notification_error is not None:
+        raise notification_error
     return True
 
 

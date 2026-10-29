@@ -1,0 +1,9 @@
+[
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_output_roundtrip/source/tests/integration/test_camctl_output_roundtrip.py::test_recording_delivery_survives_late_cancel",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_output_roundtrip/source/tests/integration/test_camctl_output_roundtrip.py::test_auto_preview_obtains_registered_preview",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_output_roundtrip/source/tests/integration/test_camctl_output_roundtrip.py::test_duplicate_auto_preview_fails_at_admission",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_output_roundtrip/source/tests/integration/test_camctl_output_roundtrip.py::test_plan_cancel_before_start_settles_auto_preview",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_output_roundtrip/source/tests/integration/test_camctl_output_roundtrip.py::test_three_capture_kinds_partial_obtain",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_output_roundtrip/source/tests/integration/test_camctl_output_roundtrip.py::test_repeated_obtain_of_same_output_yields_independent_deliveries",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_output_roundtrip/source/tests/integration/test_camctl_output_roundtrip.py::test_cross_plan_reference_and_multi_request"
+]

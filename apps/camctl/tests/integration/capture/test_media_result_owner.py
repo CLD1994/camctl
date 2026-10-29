@@ -14,6 +14,7 @@ from camctl.host_files.media import MediaArtifact, MediaProbe
 from camctl.host_files.models import FileObservation, FileObservationKind
 from camctl.host_files.tasks import AsyncFileTask, FileTaskExecutor, FileTaskId
 from camctl.session.supervision import Supervisor
+from ..support.capture import capture_database
 
 from .test_media_execution import (
     _NOW, _POLICY, _RepositorySaves, _input_ref, _seed_pending_repair, _status,
@@ -57,23 +58,23 @@ class _PausedTools:
 
 
 class _SaveBoundary(_RepositorySaves):
-    def __init__(self, owned, failed):
-        super().__init__(owned)
+    def __init__(self, database, failed):
+        super().__init__(database)
         self.failed = failed
         self.actual_results = []
 
-    def save_check_result(self, command):
+    async def save_check_result(self, command):
         if command.media.phase is not CheckPhase.RUNNING:
             self.actual_results.append(command)
             if self.failed:
                 return SaveReceipt(SaveDisposition.UNKNOWN, error=RuntimeError("original media result commit unknown"))
-        return super().save_check_result(command)
+        return await super().save_check_result(command)
 
-    def save_repair_result(self, command):
+    async def save_repair_result(self, command):
         self.actual_results.append(command)
         if self.failed:
             return SaveReceipt(SaveDisposition.UNKNOWN, error=RuntimeError("original media result commit unknown"))
-        return super().save_repair_result(command)
+        return await super().save_repair_result(command)
 
 
 @pytest.mark.asyncio
@@ -85,7 +86,7 @@ async def test_canceled_media_keeps_actual_result_and_original_save(pipeline, op
         await _seed_pending_repair(owned)
     executor = FileTaskExecutor(Supervisor())
     tools = _PausedTools(executor)
-    saves = _SaveBoundary(owned, save_failed)
+    saves = _SaveBoundary(await capture_database(owned), save_failed)
     if operation == "check":
         call = execute_check(CheckContext(_status(owned), _input_ref(staging), _POLICY,
             tools, saves, _NOW + 30, executor=executor))
@@ -131,9 +132,9 @@ async def test_media_consumer_stops_on_unreliable_actual_business_save(input_pip
 
     original = getattr(CaptureProcessingSaves, save_method)
 
-    def failed(saves, command):
+    async def failed(saves, command):
         if save_method == "save_check_result" and command.phase is CheckPhase.RUNNING:
-            return original(saves, command)
+            return await original(saves, command)
         return SaveReceipt(SaveDisposition.UNKNOWN, error=RuntimeError(f"{save_method} commit unknown"))
 
     monkeypatch.setattr(CaptureProcessingSaves, save_method, failed)
@@ -147,4 +148,4 @@ async def test_media_consumer_stops_on_unreliable_actual_business_save(input_pip
 
     tools = Tools(MediaProbe(Decimal("75"), None))
     with pytest.raises(ConsistencyError, match=f"{save_method} commit unknown"):
-        await run_recording_media(_flow(input_pipeline, ReadDriverDouble(_CONTENT), tools), 1, 1, 11)
+        await run_recording_media((await _flow(input_pipeline, ReadDriverDouble(_CONTENT), tools)), 1, 1, 11)

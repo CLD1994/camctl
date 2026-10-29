@@ -3,6 +3,13 @@ from decimal import Decimal
 from dataclasses import replace
 import asyncio
 
+
+from ..support.capture import capture_database
+from ..support.baseline_cases import baseline_case, baseline_case_for, request_baseline_cancel
+from camctl.acceptance.input import ParsedInput
+from camctl.acceptance.service import AcceptanceContext, CommandMode, accept_input
+from camctl.persistence.repositories.acceptance import AcceptanceRepository
+from types import SimpleNamespace
 import pytest
 
 from camctl.contracts.values import ConsistencyError, new_operation_key
@@ -19,10 +26,10 @@ from camctl.persistence.repositories.capture import CaptureRepository, FinishCap
 from camctl.persistence.repositories.capture import FinishCanceledCapture
 from ..acceptance.test_acceptance import _plan_body
 from ..acceptance.test_adb_camera_definitions import _catalog, _params
-from ..scheduling.test_start_action import _SCHEDULED, _accept_plan, _start, owned
+from ..scheduling.test_start_action import _SCHEDULED, _start, owned
 from .test_baseline_history import _fix
 from .test_baseline_prepare import Directory
-from camctl.capture.handlers import CaptureRuntime, capture_handler
+from camctl.capture.handlers import capture_handler
 from camctl.devices.directory import DirectoryRead
 from camctl.contracts.pages import Page
 from camctl.devices.evidence import DeviceObservation
@@ -35,10 +42,19 @@ pytestmark = pytest.mark.asyncio
 register_operation_guards()
 
 
-async def _prepared(owned, tmp_path, action_type):
+async def _accept_plan(owned, tmp_path, body, catalog):
+    result = await accept_input(ParsedInput(str(tmp_path / "plan.json"), body),
+        AcceptanceContext(CommandMode.RUN, catalog, AcceptanceRepository(),
+            clock=SimpleNamespace(utc_micros=lambda: _SCHEDULED)),
+        new_operation_key(), await capture_database(owned))
+    assert result.plan_id is not None, result
+    return result.plan_id
+
+
+async def _prepared(owned, tmp_path, action_type, *, catalog=None):
     body = _plan_body()
     body["actions"][0].update(type=action_type, params=_params("dji-action6", action_type))
-    await _accept_plan(owned, tmp_path, body, _catalog("dji-action6"))
+    await _accept_plan(owned, tmp_path, body, _catalog("dji-action6") if catalog is None else catalog)
     result = _start(owned, 1, now=_SCHEDULED)
     assert result.kind is DbOutcomeKind.COMPLETED, result.error
     return result.value.activity_id
@@ -106,13 +122,16 @@ async def test_baseline_failure_atomically_preserves_error_and_releases_unstarte
     assert repository.finish_capture(changed, key, owned).kind is DbOutcomeKind.ROLLED_BACK
 
 
-def _runtime(owned, directory, driver):
-    from camctl.bootstrap.capture_assembly import execution_wait_config
-    return CaptureRuntime(owned, SchedulingRepository(), OperationRepository(), CaptureRepository(),
-        TimelapseRepository(), driver, ResultsDouble({}), _PAGE_EVIDENCE,
-        lambda: _SCHEDULED, lambda: 0,
-        lambda a: LaunchWindow(a["scheduled_at"], a["scheduled_at"] + a["max_delay_ms"] * 1000),
-        execution_wait_config, baseline_directory=directory)
+async def _runtime(owned, directory, driver, **options):
+    try:
+        case = baseline_case_for()
+    except RuntimeError:
+        # 既有外部消费者仍经共享正式工厂创建，不从运行对象反取配置。
+        from ..support.capture import capture_runtime
+        return await capture_runtime(owned, driver=driver, driver_id="dji-action6",
+            evidence=_PAGE_EVIDENCE, results=ResultsDouble({}), directory=directory,
+            wall_us=lambda: _SCHEDULED, monotonic_ns=lambda: 0)
+    return await case.runtime(owned, directory=directory, driver=driver, **options)
 
 
 @pytest.mark.parametrize("action_type", ["camera_record", "camera_timelapse"])
@@ -128,7 +147,7 @@ async def test_fixed_baseline_and_intent_precede_dispatch(owned, tmp_path, actio
             name = "start_confirmed" if action_type == "camera_record" else "timelapse_sent"
             return DeviceCallResult((DeviceObservation(name, 1, {"activity_id": "1"}),), None)
     driver = Driver()
-    runtime = _runtime(owned, Directory([lambda r: DirectoryRead(None, None, Page((), None))]), driver)
+    runtime = (await _runtime(owned, Directory([lambda r: DirectoryRead(None, None, Page((), None))]), driver))
     await capture_handler(action_type)(1, runtime)
     assert driver.calls == 1
 
@@ -140,7 +159,7 @@ async def test_baseline_read_failure_consumes_no_start(owned, tmp_path, action_t
     class Driver:
         async def control(self, request):
             pytest.fail("基准读取失败不能派发启动")
-    runtime = _runtime(owned, Directory([lambda r: DirectoryRead(None, error, None)]), Driver())
+    runtime = (await _runtime(owned, Directory([lambda r: DirectoryRead(None, error, None)]), Driver()))
     await capture_handler(action_type)(1, runtime)
     assert owned.connection.execute("SELECT status,error_code FROM actions").fetchone() == (4, 13)
     assert owned.connection.execute("SELECT COUNT(*) FROM operation_attempts").fetchone() == (0,)
@@ -151,11 +170,10 @@ async def test_baseline_read_failure_consumes_no_start(owned, tmp_path, action_t
 async def test_cancel_flag_before_actual_error_preserves_error_and_canceled_result(owned, tmp_path, action_type):
     await _prepared(owned, tmp_path, action_type)
     error = ErrorValue("adb_directory_failed", "device_file_access", {"reason": "actual_after_cancel"})
-    def actual_return(request):
-        owned.connection.execute("UPDATE actions SET cancel_requested=1 WHERE id=1")
-        owned.connection.commit()
+    async def actual_return(request):
+        await request_baseline_cancel(owned, tmp_path, 1, _SCHEDULED)
         return DirectoryRead(None, error, None)
-    runtime = _runtime(owned, Directory([actual_return]), None)
+    runtime = (await _runtime(owned, Directory([actual_return]), None))
     await capture_handler(action_type)(1, runtime)
     assert owned.connection.execute("SELECT status,error_code FROM actions").fetchone() == (6, None)
     import json
@@ -168,20 +186,19 @@ async def test_cancel_flag_before_actual_error_preserves_error_and_canceled_resu
 @pytest.mark.parametrize("device_id,expected", [("cam-1", StartOutcome.REJECTED), ("cam-2", StartOutcome.STARTED)])
 async def test_only_scope_qualified_candidate_creates_preparation(owned, tmp_path, device_id, expected):
     await _prepared(owned, tmp_path, "camera_timelapse")
-    owned.connection.execute("UPDATE actions SET cancel_requested=1 WHERE id=1")
-    owned.connection.commit()
+    await request_baseline_cancel(owned, tmp_path, 1, _SCHEDULED)
     canceled = CaptureRepository().finish_canceled_capture(FinishCanceledCapture(1, _SCHEDULED, unstarted=True), new_operation_key(), owned)
     assert canceled.kind is DbOutcomeKind.COMPLETED, canceled.error
     body = _plan_body(request_id="43")
     body["actions"][0].update(type="camera_record", device_id=device_id, params=_params("dji-action6", "camera_record"))
     await _accept_plan(owned, tmp_path, body, _catalog("dji-action6", device_id=device_id))
-    result = _start(owned, 2, now=_SCHEDULED)
+    result = _start(owned, 3, now=_SCHEDULED)
     assert result.kind is DbOutcomeKind.COMPLETED, result.error
     assert result.value.outcome is expected
     if expected is StartOutcome.REJECTED:
         assert result.value.reason == "device_busy"
-        assert owned.connection.execute("SELECT status FROM actions WHERE id=2").fetchone() == (1,)
-        assert owned.connection.execute("SELECT COUNT(*) FROM device_activities WHERE action_id=2").fetchone() == (0,)
+        assert owned.connection.execute("SELECT status FROM actions WHERE id=3").fetchone() == (1,)
+        assert owned.connection.execute("SELECT COUNT(*) FROM device_activities WHERE action_id=3").fetchone() == (0,)
 
 
 async def test_later_pending_candidate_cannot_take_baseline_scope_first(owned, tmp_path):
@@ -241,8 +258,7 @@ async def test_cancellation_waits_for_actual_preparation_return_before_releasing
             result = super().release_occupancy(request, key, owned)
             assert result.kind is DbOutcomeKind.COMPLETED, result.error
             return DbOutcome(DbOutcomeKind.UNKNOWN, error=OSError("原释放回执未知")) if release_unknown and len(release_calls) == 1 else result
-    runtime = _runtime(owned, HeldDirectory(), Driver())
-    runtime.capture = Repository()
+    runtime = await _runtime(owned, HeldDirectory(), Driver(), capture_repository=Repository())
     handler = capture_handler(action_type)
     original = asyncio.create_task(handler(1, runtime))
     try:
@@ -254,18 +270,19 @@ async def test_cancellation_waits_for_actual_preparation_return_before_releasing
             if original.done():
                 await original
             raise
-        owned.connection.execute("UPDATE actions SET cancel_requested=1 WHERE id=1")
-        owned.connection.commit()
+        await request_baseline_cancel(owned, tmp_path, 1, _SCHEDULED)
         await handler(1, runtime)
         assert owned.connection.execute("SELECT status FROM actions").fetchone() == (6,)
         assert owned.connection.execute("SELECT occupancy_state FROM device_activities").fetchone() == (1,)
-        assert runtime.pending_baselines[1].in_call
+        assert not original.done()
+        assert owned.connection.execute("SELECT dispatch_state FROM device_activities").fetchone() == (1,)
         returned.set()
         if release_unknown:
             with pytest.raises(ConsistencyError):
                 await original
-            runtime.wall_us = lambda: pytest.fail("原释放恢复不得更换事实时刻")
-            runtime.resume_baselines(1)
+            baseline_case_for().clock.wall_error = "原释放恢复不得更换事实时刻"
+            runtime = await baseline_case_for().view()
+            await handler(1, runtime)
             assert len(release_calls) == 2 and release_calls[0] == release_calls[1]
             if read_failed:
                 request, key = release_calls[0]
@@ -278,7 +295,7 @@ async def test_cancellation_waits_for_actual_preparation_return_before_releasing
             import json
             saved = owned.connection.execute("SELECT last_error_json FROM device_activities").fetchone()[0]
             assert json.loads(saved) == {"code": error.code, "stage": error.stage, "details": dict(error.details)}
-        assert runtime.pending_baselines == {}
+        assert owned.connection.execute("SELECT COUNT(*) FROM operation_attempts").fetchone() == (0,)
     finally:
         returned.set()
         if not original.done():
@@ -297,15 +314,17 @@ async def test_unknown_failure_resumes_original_request_before_new_binding_and_c
             return DbOutcome(
                 DbOutcomeKind.UNKNOWN, error=OSError("提交回执未取得")) if len(calls) == 1 else result
     error = ErrorValue("adb_directory_failed", "device_file_access", {"reason": "original"})
-    runtime = _runtime(owned, Directory([lambda r: DirectoryRead(None, error, None)]), None)
-    runtime.capture = Repository()
+    directory = Directory([lambda r: DirectoryRead(None, error, None)])
+    runtime = await _runtime(owned, directory, None, capture_repository=Repository())
     with pytest.raises(ConsistencyError):
         await capture_handler(action_type)(1, runtime)
-    runtime.wall_us = lambda: _SCHEDULED + 100_000_000
-    runtime.binding_check = lambda b: pytest.fail("原失败保存先于新绑定资格")
+    baseline_case_for().clock.wall = _SCHEDULED + 100_000_000
+    baseline_case_for().devices.clear()
+    runtime = await baseline_case_for().view()
     await capture_handler(action_type)(1, runtime)
-    assert calls[0] == calls[1] and len(runtime.baseline_directory.calls) == 1
-    assert runtime.pending_capture_completions == {} and runtime.pending_baselines == {}
+    assert calls[0] == calls[1] and len(directory.calls) == 1
+    assert owned.connection.execute("SELECT status,error_code FROM actions WHERE id=1").fetchone() == (4, 13)
+    assert owned.connection.execute("SELECT COUNT(*) FROM operation_attempts").fetchone() == (0,)
 
 
 @pytest.mark.parametrize("action_type", ["camera_record", "camera_timelapse"])
@@ -320,16 +339,18 @@ async def test_preparation_window_expiry_retains_original_unknown_request(owned,
             return DbOutcome(DbOutcomeKind.UNKNOWN, error=OSError("原过期回执未知")) if len(calls) == 1 else result
     def after_window(request):
         now[0] = _SCHEDULED + 31_000_000
+        baseline_case_for().clock.wall = now[0]
         return DirectoryRead(None, None, Page((), None))
-    runtime = _runtime(owned, Directory([after_window]), None)
-    runtime.wall_us = lambda: now[0]
-    runtime.scheduling = Scheduling()
+    runtime = await _runtime(owned, Directory([after_window]), None, scheduling_repository=Scheduling())
+    baseline_case_for().clock.wall = now[0]
     with pytest.raises(ConsistencyError):
         await capture_handler(action_type)(1, runtime)
     now[0] += 1_000_000
-    runtime.binding_check = lambda b: pytest.fail("原过期申请先于新绑定")
+    baseline_case_for().clock.wall = now[0]
+    baseline_case_for().devices.clear()
+    runtime = await baseline_case_for().view()
     await capture_handler(action_type)(1, runtime)
     assert len(calls) == 2 and calls[0] == calls[1]
-    assert runtime.pending_capture_completions == {}
+    assert owned.connection.execute("SELECT COUNT(*) FROM operation_attempts").fetchone() == (0,)
     assert owned.connection.execute("SELECT status FROM actions").fetchone() == (5,)
     assert owned.connection.execute("SELECT occupancy_state,activity_state FROM device_activities").fetchone() == (2, 1)

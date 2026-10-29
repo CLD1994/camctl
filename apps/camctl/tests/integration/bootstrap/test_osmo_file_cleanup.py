@@ -332,7 +332,7 @@ async def test_old_running_uses_registered_recovery_without_replaying_original_t
 
 async def test_mixed_cleanup_routes_saved_device_host_and_unsupported_source_independently(world):
     delivery = world.owned.connection.execute("SELECT * FROM deliveries").fetchall()
-    _accept(world.owned, "2", [{"name": "混合精确清理", "type": "delete_action_outputs",
+    await _accept(world.owned, "2", [{"name": "混合精确清理", "type": "delete_action_outputs",
         "scheduled_at": "2026-01-15 09:00:00", "params": {"output_ids": ["701", "703", "706"]}}])
     factory = _factory(world)
     for _ in range(3):

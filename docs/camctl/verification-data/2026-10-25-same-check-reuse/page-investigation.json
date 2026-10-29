@@ -1,0 +1,277 @@
+{
+  "scope": "只读调查 _verify_page_relations 内部重复解析与构造；未修改生产/测试/配置，未运行测试或性能测量。",
+  "baseline": "7644b7c6be42a995f3eab629721296e01309d826",
+  "source_sha256": "39df62472286d0eda18ec95c02d58d5b2a946eb95af413c0b0476463e4f05a03",
+  "source": "apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+  "parent_supplied_context": {
+    "kind": "父代理提供的诊断背景，本调查未独立重跑/归档核验",
+    "n": 200,
+    "batch": 4,
+    "write_seconds_without_memory_tracing": 9.292,
+    "at_calls": 578,
+    "complete_proofs": 113,
+    "raw_row_cache_hits_redecoded": 465,
+    "history_decode": 12875,
+    "relation_function_row_facts": 24001
+  },
+  "contract_references": [
+    "AGENTS.md",
+    ".agents/rules/testing.md:49",
+    "docs/architecture/system-foundations.md:90",
+    "docs/camctl/history-storage.md:93",
+    "docs/camctl/database/history-formats.md:273",
+    "docs/camctl/database/history-formats.md:313",
+    "docs/camctl/persistence-runtime.md:302",
+    "docs/camctl/persistence-runtime.md:306",
+    "docs/camctl/persistence-runtime.md:308"
+  ],
+  "reviewed_prototype": "/tmp/camctl-same-check-options-ykdqfnct/candidate-preview.patch（仅page部分；静态复核，非实现验收）",
+  "prototype_review": "A1/A2/A4与直接投影版A3在真实调用路径下未发现不等价；A3直接投影会新建c个二元组，可在首遍append原pair避免。正常样本诊断不能证明全部损坏分区通过。",
+  "key_proofs": [
+    "decode_event_row(decoding.py:35-62) 先严格 parse_exact_json，再 validate_event_structure(:58)，返回才进入本函数局部后续使用。",
+    "CREATE 和 INDEX 都在本函数里解码，之后没有 mutation/await；frozen dataclass 不是深冻结，结论依赖实际数据流没有修改嵌套 Mapping。",
+    "FileObservationSave.__post_init__(capture/files.py:119-128)只校验；file_discovery_row(capture.py:5821-5841)无连接且只构造RowChange；row_change(transaction.py:1066-1073)不写库，不改已读facts。",
+    "row_facts(transaction.py:1126-1129)已走reuse_read；命中时read_reuse.py:89-92整行deepcopy。删除冗余row_facts通常先省键处理/深复制；未开范围或发生淘汰才可能同时少SQL与列恢复。",
+    "_decode(result_pages.py:214-228)已保证file_ids<=128、身份属于原页、身份与ID分别唯一；_verify只由_load_at_record与read_pages在_decode后调用。"
+  ],
+  "recommended_bundle": [
+    "A1",
+    "A2",
+    "A3",
+    "A4"
+  ],
+  "options": [
+    {
+      "id": "A1",
+      "priority": "首批",
+      "name": "每次关系检查只建立一次 identity 到 file_id 的索引",
+      "source_lines": [
+        350,
+        351,
+        378
+      ],
+      "change": "保留 page_entries；将 file_id_by_identity=dict(file_ids) 提前到 CREATE 循环之前，每个 CREATE 使用其 get(identity)。不把原 CREATE identity_key 的严格 JSON 解析替换为从页面猜身份。",
+      "independent_evidence": [
+        "原 APPEND 的唯一身份与 ID 数组",
+        "原 CREATE 的 identity_key、row_id 与原文件观察",
+        "当前 device_files 固定完整身份"
+      ],
+      "error_partitions": [
+        "身份不属于实际差集",
+        "CREATE 的 row_id 不匹配",
+        "坏 identity_key JSON 仍走原解析与异常分类"
+      ],
+      "design_change": false,
+      "bound": {
+        "n_max": 128,
+        "c_max": 128,
+        "dict_constructions_before": "c",
+        "dict_constructions_after": "1（c=0 时也可不建）",
+        "pair_insertions_before": "n*c，最多16384",
+        "pair_insertions_after": "n，最多128"
+      },
+      "validation": "真实新/旧文件混合页、128 文件页；对 CREATE 身份和 row_id 损坏继续拒绝。"
+    },
+    {
+      "id": "A2",
+      "priority": "首批",
+      "name": "在同次函数内复用已经读取的 created_event_id 标量",
+      "source_lines": [
+        353,
+        354,
+        358,
+        388,
+        389
+      ],
+      "change": "第一遍验证完整身份后保存 created_event_by_file[file_id]=facts[\"created_event_id\"]；CREATE 段保留该标量与 create.event_id 的相等检查，移除第二次 row_facts。不保存完整 facts，不共享到函数外。",
+      "independent_evidence": [
+        "当前 device_files 的 created_event_id",
+        "独立解码的原 CREATE event_id",
+        "原 APPEND file_ids"
+      ],
+      "error_partitions": [
+        "文件缺失或身份不匹配",
+        "创建事件超过事务末位",
+        "CREATE 事件与持久创建身份不同",
+        "CREATE 覆盖缺失/额外/顺序错误"
+      ],
+      "design_change": false,
+      "bound": {
+        "row_facts_before": "1+n+c（包含 actions 一次），最多257",
+        "row_facts_after": "1+n，最多129",
+        "saved_calls": "c，最多128；不等价于同量 SQL",
+        "additional_local_values": "最多128个 file_id→created_event_id 标量关联"
+      },
+      "validation": "真实混合新旧文件、全部旧文件但差集非空、零差集、新文件创建事件 ID 错误、原 CREATE ID/时刻损坏；诊断分别计 wrapper、_load_row_facts、SQL。"
+    },
+    {
+      "id": "A3",
+      "priority": "首批",
+      "name": "在第一次文件遍历形成期望 CREATE 顺序，消除平方查找和纯复制",
+      "source_lines": [
+        352,
+        359,
+        362,
+        392,
+        394,
+        396
+      ],
+      "change": "第一遍改为 for pair in file_ids，解包后仍按原条件检查 facts；命中本事务创建时同时 append 三元组到 expected_created、append 原 pair 引用到 expected_create_order。actual_created 直接比较 expected_created，不再建立 expected_created_ids 或右侧三元组副本；保留后续具名顺序检查。",
+      "independent_evidence": [
+        "APPEND 文件顺序",
+        "原 CREATE 前缀的实际顺序",
+        "每个文件的持久创建事件身份"
+      ],
+      "error_partitions": [
+        "缺 CREATE",
+        "多 CREATE",
+        "次序错乱",
+        "复用旧文件混入 CREATE",
+        "CREATE 指向未来事件"
+      ],
+      "design_change": false,
+      "bound": {
+        "membership_scan_before": "O(n*c)；唯一且有序子序列前提下最多8256次 pair 匹配测试",
+        "membership_scan_after": "0次 any 扫描；第一遍已有 O(n)，后续比较 O(c)",
+        "removed_constructed_triples": "2*c（三元组列表纯复制），最多256",
+        "pair_reuse": "期望顺序保存原 pair 引用，避免新建 c 个二元组"
+      },
+      "validation": "混合新旧页与两种 CREATE 顺序，缺/多 CREATE、128页、零差集。"
+    },
+    {
+      "id": "A4",
+      "priority": "首批",
+      "name": "每个局部解码事件只执行一次完整结构校验",
+      "source_lines": [
+        336,
+        366,
+        413,
+        434
+      ],
+      "change": "保留所有 decode_event_row 及其中的 validate_event_structure；仅移除本函数 :366 和 :434 对刚解码且未被改变的 CREATE/INDEX 的第二次结构校验。保留 :367 起的 CREATE 业务关系检查及 :430 起的 INDEX 证据/位置/关系检查。",
+      "independent_evidence": [
+        "完整事务中的每条事件仍完整解析与登记结构校验",
+        "CREATE 行与预期首次发现事实精确相等",
+        "APPEND/INDEX/持久关系互相核对"
+      ],
+      "error_partitions": [
+        "未知类型/版本/分支",
+        "坏枚举、行权限/列集合、重复行",
+        "额外 evidence、坏原始 JSON",
+        "业务身份/时刻/事务位置不符"
+      ],
+      "design_change": false,
+      "bound": {
+        "duplicate_structure_calls_removed": "c+I，最多129（I为非空差集的1，否则0）",
+        "row_structure_visits_removed": "c+n，最多256",
+        "history_decode_calls_removed": "0；该项只减少重复结构校验，不删除 JSON decode"
+      },
+      "validation": "从真实持久页出发损坏 CREATE 与 INDEX 版本/分支/行权限/枚举/重复行/evidence，确认仍被 decode_event_row 拒绝；正常新旧/空页对照。"
+    },
+    {
+      "id": "A5",
+      "priority": "第二批，单独论证",
+      "name": "从已经完整解码的事务中选 APPEND 和 INDEX，减少再次 SQL 与 INDEX 解码",
+      "source_lines": [
+        333,
+        337,
+        343,
+        401,
+        408,
+        413,
+        427,
+        430
+      ],
+      "change": "在完整性与连续性检查后，从 transaction_events 中筛选 (_TYPE,_APPEND) 和 (_TYPE,_INDEX_FILES)，仍在原判断位置分别检查 APPEND 唯一、INDEX 数量/末位/相邻/证据。保留独立 result_page_files 实际 SQL 和全部逐行精确对照。",
+      "independent_evidence": [
+        "完整 history_events 原事务读取",
+        "原传入 APPEND 与完整事务成员相等",
+        "独立 result_page_files 投影读取",
+        "当前 operation_attempts/operation_runs/actions/device_files 事实"
+      ],
+      "error_partitions": [
+        "多个 APPEND",
+        "INDEX 缺失/重复/非紧邻/非末位",
+        "零差集仍有 INDEX 或非规范尾事件",
+        "完整事务不连续/超容量/额外成员",
+        "投影缺/多/同量替换/归属/族字段错误"
+      ],
+      "design_change": false,
+      "bound": {
+        "sql_removed": "每次完整关系检查2次 history_events 筛选 SQL",
+        "history_decode_removed": "非空规范页1个 INDEX 的完整 decode（含 n 行）；空页0",
+        "remaining_capacity": "完整事务仍最多130，读取 LIMIT131 拒绝越界；关系仍128+1检测"
+      },
+      "validation": "除首批验证外须补多个 APPEND/INDEX、INDEX 前后多事件与事务范围损坏的真实页读取对照。未纳入 parent 当前原型 bundle；不将该项节省与A4重复相加为同一 decode。"
+    },
+    {
+      "id": "A6",
+      "priority": "低优先，先看分配证据",
+      "name": "同次检查复用已经核过的 canonical identity_key 编码",
+      "source_lines": [
+        355,
+        384,
+        385
+      ],
+      "change": "第一遍完整身份验证成功后，可仅保留该文件的 canonical identity_key 字符串，CREATE 构造 expected_row 时使用它；原 CREATE identity_key 的严格 JSON 解析继续保留。仍调用权威 file_discovery_row 构造默认文件事实，不另写默认列清单。",
+      "independent_evidence": [
+        "原 CREATE 的真实 identity_key JSON",
+        "APPEND 身份经 action 固定绑定生成的 canonical key",
+        "权威 file_discovery_row 的完整原文件默认事实"
+      ],
+      "error_partitions": [
+        "坏 JSON",
+        "非 canonical 编码",
+        "原 key 与 action 绑定/身份不符",
+        "原行任何字段不符"
+      ],
+      "design_change": false,
+      "bound": {
+        "encodings_removed": "c次 file_identity_key 编码，最多128",
+        "retained_local_references": "新增最多n个完整 key 文本引用；必须测内存，不能推断净收益"
+      },
+      "validation": "需要坏 JSON、重复 JSON 成员、非规范空白编码、相同驱动身份但设备/驱动不同、完整原行差异；成本低且增加局部驻留，排在首批之后。"
+    }
+  ],
+  "bound_notation": {
+    "n": "本页实际差集file_ids个数，0..128",
+    "c": "本事务中真正首次发现且位于APPEND前的CREATE个数，规范页0..n",
+    "I": "n>0为1，n=0为0；完整规范事务事件数c+1+I",
+    "P": "本次诊断完整调用_verify_page_relations的次数"
+  },
+  "aggregate_limits": [
+    "总 row_facts 调用减少 Σc，最多128P，不能仅从24001得到精确减少量。",
+    "总重复结构校验减少 Σ(c+I)，最多129P；这不减少history_decode。",
+    "若P=113，上述松上界分别14464与14577；它们是输入容量上界，并非该样本实际减少次数。",
+    "A5若单独实现，每P次可少2P条筛选SQL，规范非空页可少ΣI个history_decode；不影响465次原页原行命中后的重新解码。"
+  ],
+  "out_of_scope_or_not_recommended": [
+    "不移除decode_event_row内部结构校验；不把未知类型/版本或不合法行当作可接受历史。",
+    "不跨函数调用、提案/独立守卫、事务或连接共享event/facts结果；不改变三份原SQLite行缓存。",
+    "原CREATE的identity_key是外层JSON内的JSON文本；外层decode并未解析该文本。保留:374严格解析，不能称作同一JSON重复解析。",
+    "file_discovery_row/FileObservationSave在每个CREATE只构造一次，且承载权威默认事实/输入校验；不通过复制完整列清单省掉它们。",
+    "SavedResultPage.file_ids本身已是tuple；:351与:422两次tuple(...)通常返回同一tuple，移除重复赋值不是减少128项拷贝的主要机会。",
+    ":398-400 CREATE前缀再扫描被:367逐项约束覆盖，可省一次线性扫描但收益未归因；无需并入首批。",
+    "_family_fields对Action6每条重建suffix集合(:278-282)可后续用单次检查局部解析器研究，避免手写第二份后缀清单；当前没有局部分配证据，不作为首批。",
+    "_decode:196和committed_page_proof:516也可能重复结构校验，但在本函数之外，且有不同输入责任，本报告不建议一并改动。"
+  ],
+  "verification_status": "本调查未执行测试/实验；父代理独立进程原型诊断不属于完整实现验收。",
+  "minimum_meaningful_validation": {
+    "existing_real_integration_nodes": [
+      "apps/camctl/tests/integration/persistence/test_segment_result_page_inputs.py::test_page_difference_indexes_reused_and_new_files_together",
+      "apps/camctl/tests/integration/persistence/test_segment_result_page_inputs.py::test_128_file_page_keeps_existing_page_bound_and_index_event_bound",
+      "apps/camctl/tests/integration/persistence/test_segment_result_page_inputs.py::test_zero_difference_is_not_an_empty_or_final_device_page",
+      "apps/camctl/tests/integration/persistence/test_segment_result_page_inputs.py::test_page_read_rejects_corrupt_relation_without_rebuilding",
+      "apps/camctl/tests/integration/persistence/test_segment_result_page_inputs.py::test_fix1_i3_fresh_original_key_rejects_canonical_group_corruption",
+      "apps/camctl/tests/integration/persistence/test_page_read_cache.py::test_new_page_is_rechecked_until_its_complete_transaction_commits",
+      "apps/camctl/tests/integration/persistence/test_page_read_cache.py::test_committed_page_is_reused_only_inside_one_read_transaction"
+    ],
+    "needed_damage_partitions": [
+      "真实持久CREATE/INDEX版本、分支、枚举、行权限、重复行、evidence损坏（仅依赖末端重复校验不够）",
+      "两条新CREATE顺序反转、缺少/额外CREATE、device_files.created_event_id与原CREATE不符",
+      "n=0但设备页非空、n>0且c=0、混合0<c<n、c=n=128",
+      "A5单独增加多个APPEND/INDEX、尾事件和不连续完整事务；独立关系SQL仍要检查"
+    ],
+    "performance_diagnostic": "同一200输入、同一保存申请/时刻，逐档恢复物理路径/数据库/WAL并关闭上一档连接；原版前后夹住候选，分别记录write/SQL/historydecode/结构校验/row_facts wrapper及loader/返回与历史摘要；无tracemalloc计时，单独测峰值；不把原型样本视作实现验收或目标硬件结论。"
+  }
+}

@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
+import pytest_asyncio
 
-from camctl.acceptance.input import ParsedInput
 from camctl.acceptance.ports import ParameterDefinition
-from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.capture_assembly import session_capture_assembly
 from camctl.bootstrap.flows import cancel_flow, capture_flow
 from camctl.capture.timelapse import CaptureWaitConfig
@@ -21,13 +22,17 @@ from camctl.devices.evidence import DeviceObservation
 from camctl.devices.ports import DeviceCallResult, DriverDeclaration
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.acceptance import (
-    AcceptanceRepository, ProcessInput, register_acceptance_guards,
+    register_acceptance_guards,
 )
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..capture.test_capture_contract import ResultsDouble
 from ..persistence.test_runtime import _create_valid_database
 from .test_obtain_flow import _CAMERA_SCHEMA, _EVIDENCE, _photo_entry
+from ..support.database import business_database
+from ..support.session import (accept_plan, session_config,
+    capture_factory as assembled_capture_factory)
+from camctl.persistence.initialization import initialize_state, InitOutcome
 
 _NOW = int(datetime(2026, 1, 15, 9, tzinfo=timezone.utc).timestamp() * 1_000_000)
 
@@ -56,13 +61,16 @@ class _Driver:
 
     def __init__(self):
         self.calls = []
+        self.files_by_activity = {}
 
     async def control(self, request):
         self.calls.append(request.binding)
+        self.files_by_activity[int(request.ticket.target_id)] = (
+            _photo_entry("photo-" + request.binding.device_id, request.binding.device_id + ".jpg"),)
         return DeviceCallResult(
             observations=(DeviceObservation(
                 type="photo_taken", version=1,
-                data={"activity_id": "1" if request.binding.device_id == "cam-b" else "2"}),),
+                data={"activity_id": request.ticket.target_id}),),
             error=None,
         )
 
@@ -82,8 +90,7 @@ def _registry(driver):
     ))
 
 
-@pytest.fixture
-def environment(tmp_path):
+def _register_guards():
     from camctl.persistence.repositories.capture import register_capture_guards
     from camctl.persistence.repositories.cancellation import register_cancellation_guards
     from camctl.persistence.repositories.operations import register_operation_guards
@@ -104,6 +111,11 @@ def environment(tmp_path):
     register_timelapse_guards()
     register_report_guards()
     register_motor_guards()
+
+
+@pytest.fixture
+def environment(tmp_path):
+    _register_guards()
     path = tmp_path / "state.db"
     _create_valid_database(path)
     owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
@@ -117,20 +129,33 @@ def environment(tmp_path):
         owned.connection.close()
 
 
-def _register(owned, body):
-    outcome = AcceptanceRepository().process_input(
-        ProcessInput(ParsedInput("plan.json", body), _Catalog(), CommandMode.RUN, _NOW),
-        new_operation_key(), owned,
-    )
-    assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+@pytest_asyncio.fixture
+async def functional_environment(tmp_path):
+    _register_guards()
+    config = session_config(tmp_path, devices={device: {
+        "kind": "camera", "driver": "camctl-adb"} for device in ("cam-a", "cam-b")})
+    path = tmp_path / "state.db"
+    assert initialize_state(config, path).outcome is InitOutcome.CREATED
+    owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
+    try:
+        async with business_database(path) as database:
+            yield owned, SimpleNamespace(database=database,
+                clock=SimpleNamespace(utc_micros=lambda: _NOW)), tmp_path
+    finally:
+        owned.connection.close()
 
 
-def _photos(owned, state):
+async def _register(database, home, body):
+    await accept_plan(database, home, _Catalog(), body,
+        SimpleNamespace(utc_micros=lambda: _NOW))
+
+
+async def _photos(database, home, state):
     schedule = {
         "future": "2026-01-15 10:00:00",
         "expired": "2026-01-15 08:00:00",
     }.get(state, "2026-01-15 09:00:00")
-    _register(owned, {
+    await _register(database, home, {
         "request_id": "1", "created_at": "2026-01-15 08:00:00", "name": "双设备",
         "actions": [
             {"name": "正常设备", "type": "camera_take_photo", "device_id": "cam-b",
@@ -141,14 +166,15 @@ def _photos(owned, state):
              "policy": {"max_delay_ms": 1000}},
         ],
     })
-    return {row[0]: row[1] for row in owned.connection.execute("SELECT device_id, id FROM actions")}
+    rows = await database.read(lambda owned: owned.connection.execute(
+        "SELECT device_id, id FROM actions").fetchall())
+    return dict(rows)
 
 
 def _capture(devices, driver, home):
     factory = session_capture_assembly(
         devices=devices, drivers=_registry(driver), staging=home / "staging",
-        results=ResultsDouble({1: (_photo_entry("photo-b", "b.jpg"),),
-                               2: (_photo_entry("photo-a", "a.jpg"),)}),
+        results=ResultsDouble(driver.files_by_activity),
         wall_us=lambda: _NOW, monotonic_ns=lambda: 0,
         wait_config=lambda action: CaptureWaitConfig(target_duration_ms=1000, driver_margin_ms=0),
     )
@@ -158,15 +184,15 @@ def _capture(devices, driver, home):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("change", ["missing", "mismatch"])
 @pytest.mark.parametrize("state", ["due", "future", "expired", "terminal", "canceled"])
-async def test_changed_binding_respects_execution_eligibility(environment, change, state):
-    owned, context, home = environment
-    ids = _photos(owned, state)
+async def test_changed_binding_respects_execution_eligibility(functional_environment, change, state):
+    owned, context, home = functional_environment
+    ids = await _photos(context.database, home, state)
     if state == "terminal":
         original = _capture({key: {"driver": "camctl-adb"} for key in ids}, _Driver(), home)
         await original(context)
         await original.settle()
     if state == "canceled":
-        _register(owned, {
+        await _register(context.database, home, {
             "request_id": "2", "created_at": "2026-01-15 08:00:00", "name": "取消",
             "actions": [{"name": "取消原设备", "type": "cancel_task",
                          "params": {"target": {"action_instance_id": str(ids["cam-a"])}}}],
@@ -208,14 +234,14 @@ async def test_changed_binding_respects_execution_eligibility(environment, chang
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("change", ["missing", "mismatch"])
-async def test_future_action_gains_eligibility_only_at_original_time(environment, change):
+async def test_future_action_gains_eligibility_only_at_original_time(functional_environment, change):
     """未来动作不因绑定异常提前执行或失败；到达原计划时间才取得处理资格。
 
     规格来源：configuration.md「设备绑定异常的影响范围」——未来动作
     仍按原计划时间取得处理资格，不因加载历史记录就提前执行。
     """
-    owned, context, home = environment
-    ids = _photos(owned, "future")
+    owned, context, home = functional_environment
+    ids = await _photos(context.database, home, "future")
     clock = {"now": _NOW}
     context.clock = SimpleNamespace(utc_micros=lambda: clock["now"])
     devices = {"cam-b": {"driver": "camctl-adb"}}
@@ -226,8 +252,7 @@ async def test_future_action_gains_eligibility_only_at_original_time(environment
     def build():
         factory = session_capture_assembly(
             devices=devices, drivers=_registry(driver), staging=home / "staging",
-            results=ResultsDouble({1: (_photo_entry("photo-b", "b.jpg"),),
-                                   2: (_photo_entry("photo-a", "a.jpg"),)}),
+            results=ResultsDouble(driver.files_by_activity),
             wall_us=lambda: clock["now"], monotonic_ns=lambda: 0,
             wait_config=lambda action: CaptureWaitConfig(target_duration_ms=1000, driver_margin_ms=0),
         )
@@ -288,7 +313,7 @@ class _RecoveryDriver:
         return DeviceCallResult(observations=(), error=None)
 
 
-def _recovering_runtime(owned, home, change, driver, results, *,
+def _recovering_runtime(database, home, change, driver, results, *,
                         recovery_boundary=None, recovery_max_event_id=None):
     from ..capture.test_capture_contract import _EVIDENCE as contracts, _NOW as now
     from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
@@ -321,7 +346,105 @@ def _recovering_runtime(owned, home, change, driver, results, *,
             "recovery_max_event_id": lambda: recovery_max_event_id}
            if recovery_boundary is not None else {}),
     )
-    return factory(owned, "cam-1")
+    return factory(database, "cam-1")
+
+
+@asynccontextmanager
+async def _recovery_world(home, kind, *, unsettled=False, canceled=False):
+    """真实受理和调度产生原 START；中断由实际控制端口取消形成。"""
+    from ..capture.test_capture_contract import _NOW as recovery_now, _PAGE_EVIDENCE
+    from .test_recording_stop import _RecordCatalog
+    from .test_timelapse_finish import _TimelapseCatalog
+    from .test_run_dispatch import _Catalog as PhotoCatalog
+    from camctl.operations.models import (AttemptStatus, CallOutcome, EffectState,
+        ErrorValue, EvidenceValue, Settlement, SettlementBasis)
+
+    home.mkdir()
+    config = session_config(home, devices={"cam-1": {"kind": "camera", "driver": "camctl-adb"}})
+    assert initialize_state(config, home / "state.db").outcome is InitOutcome.CREATED
+    catalogs = {"camera_take_photo": (PhotoCatalog(), "single_shot"),
+        "camera_record": (_RecordCatalog(), "video"),
+        "camera_timelapse": (_TimelapseCatalog(stop_supported=True), "timelapse")}
+    catalog, parameter = catalogs[kind]
+    clock = SimpleNamespace(utc_micros=lambda: recovery_now)
+    entered = asyncio.Event()
+
+    class InitialDriver:
+        request = None
+        async def control(self, request):
+            self.request = request
+            entered.set()
+            if unsettled:
+                await asyncio.Future()
+            return DeviceCallResult.from_outcome(CallOutcome(
+                status=AttemptStatus.UNKNOWN, effect=EffectState.UNKNOWN,
+                error=ErrorValue("transport_timeout", "transport"), observations=(),
+                settlement=Settlement(SettlementBasis.OBSERVED,
+                    EvidenceValue("operation_returned", 1, {}))))
+
+    driver = InitialDriver()
+    owned = open_existing(home / "state.db", DbOpenMode.EXISTING_RW, DbConfig())
+    flow = None
+    try:
+        async with business_database(home / "state.db") as database:
+            scheduled = datetime.fromtimestamp(recovery_now / 1_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            await accept_plan(database, home, catalog, {
+                "request_id": "1", "created_at": scheduled, "name": "原调用",
+                "actions": [{"name": "采集", "type": kind, "device_id": "cam-1",
+                    "scheduled_at": scheduled, "params": {"type": parameter},
+                    "policy": {"max_delay_ms": 5000}}]}, clock)
+            action_id, = owned.connection.execute("SELECT id FROM actions").fetchone()
+            factory = assembled_capture_factory(config, driver, ResultsDouble({}), _PAGE_EVIDENCE,
+                wall_us=clock.utc_micros, monotonic_ns=lambda: 0)
+            flow = capture_flow(factory)
+            context = SimpleNamespace(database=database, clock=clock)
+            defer_terminal = kind == "camera_timelapse" and not unsettled
+            if defer_terminal:
+                from camctl.persistence.models import DbOutcome
+                def install_terminal_fault(owned):
+                    owned.connection.execute(
+                        "CREATE TEMP TRIGGER reject_ordinary_terminal BEFORE UPDATE OF status"
+                        " ON actions WHEN OLD.type=3 AND NEW.status IN(3,4,6)"
+                        " BEGIN SELECT RAISE(ABORT, '普通结束尚未保存'); END")
+                    return DbOutcome(DbOutcomeKind.COMPLETED)
+                await database.write(install_terminal_fault, key=new_operation_key())
+            await flow(context)
+            if unsettled:
+                await asyncio.wait_for(entered.wait(), 1)
+                flow.stop_new_work()
+            if defer_terminal:
+                from camctl.session.service import StateDbFailure
+                with pytest.raises(StateDbFailure):
+                    await flow.settle()
+                def remove_terminal_fault(owned):
+                    owned.connection.execute("DROP TRIGGER reject_ordinary_terminal")
+                    return DbOutcome(DbOutcomeKind.COMPLETED)
+                await database.write(remove_terminal_fault, key=new_operation_key())
+                assert owned.connection.execute(
+                    "SELECT status FROM actions WHERE id=?", (action_id,)).fetchone() == (2,)
+            else:
+                await flow.settle()
+            assert entered.is_set() and driver.request.ticket is not None
+            ticket = driver.request.ticket
+            expected_attempt_status = 1 if unsettled else 4
+            assert owned.connection.execute(
+                "SELECT status FROM operation_attempts WHERE run_id=? AND attempt_no=?",
+                (ticket.run_id, ticket.attempt_id)).fetchone() == (expected_attempt_status,)
+            if canceled:
+                await accept_plan(database, home, catalog, {
+                    "request_id": "2", "created_at": scheduled, "name": "取消原调用",
+                    "actions": [{"name": "取消", "type": "cancel_task", "params": {
+                        "target": {"action_instance_id": str(action_id)}}}]}, clock)
+                await cancel_flow(ready=home / "ready", processing=home / "processing")(context)
+                assert owned.connection.execute("SELECT cancel_requested FROM actions WHERE id=?",
+                    (action_id,)).fetchone() == (1,)
+            yield SimpleNamespace(database=database, owned=owned, home=home,
+                action_id=action_id, ticket=ticket)
+    finally:
+        if flow is not None:
+            flow.stop_new_work()
+            await flow.settle()
+        owned.connection.close()
 
 
 @pytest.mark.asyncio
@@ -332,33 +455,11 @@ def _recovering_runtime(owned, home, change, driver, results, *,
     (13, "camera_timelapse", True),
 ])
 async def test_changed_binding_preserves_unknown_capture_effect(
-    environment, change, action_id, kind, canceled,
+    tmp_path, change, action_id, kind, canceled,
 ):
     from camctl.capture.handlers import capture_handler
-    from camctl.operations.models import (
-        AttemptStatus, CallOutcome, EffectState, ErrorValue, EvidenceValue,
-        Settlement, SettlementBasis,
-    )
-    from ..capture.test_capture_contract import _environment, _runtime
-    from ..capture.test_cancel_late_start import _cancel
-
-    _, _, home = environment
-    recovery = home / "recovery"
-    recovery.mkdir()
-    action_type = {"camera_take_photo": 1, "camera_record": 2, "camera_timelapse": 3}[kind]
-    owned = _environment(recovery, ((action_id, action_type),))
-    try:
-        initial = _runtime(owned)
-        ticket, reason = initial.grant(initial.action(action_id))
-        assert ticket is not None, reason
-        initial.finish(ticket, CallOutcome(
-            status=AttemptStatus.UNKNOWN, effect=EffectState.UNKNOWN,
-            error=ErrorValue("transport_timeout", "transport"), observations=(),
-            settlement=Settlement(SettlementBasis.OBSERVED,
-                                  EvidenceValue("operation_returned", 1, {})),
-        ))
-        if canceled:
-            _cancel(owned, action_id)
+    async with _recovery_world(tmp_path / "recovery", kind, canceled=canceled) as world:
+        owned, action_id = world.owned, world.action_id
         activity_before = owned.connection.execute(
             "SELECT activity_state, occupancy_state, dispatch_state, started_at, sent_at"
             " FROM device_activities WHERE action_id = ?", (action_id,),
@@ -366,7 +467,7 @@ async def test_changed_binding_preserves_unknown_capture_effect(
         attempts_before = tuple(owned.connection.execute("SELECT * FROM operation_attempts"))
         driver = _RecoveryDriver()
         results = ResultsDouble({})
-        runtime = _recovering_runtime(owned, recovery, change, driver, results)
+        runtime = await _recovering_runtime(world.database, world.home, change, driver, results)
 
         await capture_handler(kind)(action_id, runtime)
 
@@ -389,7 +490,7 @@ async def test_changed_binding_preserves_unknown_capture_effect(
             from camctl.persistence.repositories.cancellation import CancellationRepository
 
             settled = await TargetSettlement(
-                owned, None, CancellationRepository(), lambda _: "unknown", runtime.wall_us,
+                world.database, None, CancellationRepository(), lambda _: "unknown", runtime.wall_us,
             ).settle(action_id)
             assert settled.complete and settled.failed
         else:
@@ -400,8 +501,6 @@ async def test_changed_binding_preserves_unknown_capture_effect(
         before = tuple(owned.connection.iterdump())
         await capture_handler(kind)(action_id, runtime)
         assert tuple(owned.connection.iterdump()) == before
-    finally:
-        owned.connection.close()
 
 
 @pytest.mark.asyncio
@@ -410,22 +509,13 @@ async def test_changed_binding_preserves_unknown_capture_effect(
     (11, "camera_take_photo"), (12, "camera_record"), (13, "camera_timelapse"),
 ])
 async def test_unsettled_intent_without_recovery_boundary_preserves_responsibility(
-        environment, change, action_id, kind):
+        tmp_path, change, action_id, kind):
     from camctl.capture.handlers import capture_handler
-    from ..capture.test_capture_contract import _environment, _runtime
-
-    _, _, home = environment
-    recovery = home / "unsettled"
-    recovery.mkdir()
-    action_type = {"camera_take_photo": 1, "camera_record": 2, "camera_timelapse": 3}[kind]
-    owned = _environment(recovery, ((action_id, action_type),))
-    try:
-        initial = _runtime(owned)
-        ticket, reason = initial.grant(initial.action(action_id))
-        assert ticket is not None, reason
+    async with _recovery_world(tmp_path / "unsettled", kind, unsettled=True) as world:
+        owned, action_id = world.owned, world.action_id
         driver = _RecoveryDriver()
         results = ResultsDouble({})
-        runtime = _recovering_runtime(owned, recovery, change, driver, results)
+        runtime = await _recovering_runtime(world.database, world.home, change, driver, results)
         before = tuple(owned.connection.iterdump())
 
         await capture_handler(kind)(action_id, runtime)
@@ -433,8 +523,6 @@ async def test_unsettled_intent_without_recovery_boundary_preserves_responsibili
         assert driver.calls == []
         assert results.calls == []
         assert tuple(owned.connection.iterdump()) == before
-    finally:
-        owned.connection.close()
 
 
 @pytest.mark.asyncio
@@ -445,31 +533,21 @@ async def test_unsettled_intent_without_recovery_boundary_preserves_responsibili
     (13, "camera_timelapse", True),
 ])
 async def test_reliable_old_call_boundary_finishes_original_intent_before_binding_failure(
-        environment, change, action_id, kind, canceled):
+        tmp_path, change, action_id, kind, canceled):
     from camctl.capture.handlers import capture_handler
     from camctl.capture.recovery import RecoveryBoundary
     from camctl.contracts.enums import enum_for
-    from ..capture.test_capture_contract import _environment, _runtime
-    from ..capture.test_cancel_late_start import _cancel
 
-    _, _, home = environment
-    recovery = home / "confirmed-boundary"
-    recovery.mkdir()
-    action_type = {"camera_take_photo": 1, "camera_record": 2, "camera_timelapse": 3}[kind]
-    owned = _environment(recovery, ((action_id, action_type),))
-    try:
-        original = _runtime(owned)
-        ticket, reason = original.grant(original.action(action_id))
-        assert ticket is not None, reason
-        if canceled:
-            _cancel(owned, action_id)
+    async with _recovery_world(tmp_path / "confirmed-boundary", kind,
+            unsettled=True, canceled=canceled) as world:
+        owned, action_id, ticket = world.owned, world.action_id, world.ticket
         fixed_h = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
         old_activity = owned.connection.execute(
             "SELECT * FROM device_activities WHERE action_id = ?", (action_id,)).fetchone()
         driver = _RecoveryDriver()
         results = ResultsDouble({})
-        runtime = _recovering_runtime(
-            owned, recovery, change, driver, results,
+        runtime = await _recovering_runtime(
+            world.database, world.home, change, driver, results,
             recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
             recovery_max_event_id=fixed_h)
 
@@ -499,5 +577,3 @@ async def test_reliable_old_call_boundary_finishes_original_intent_before_bindin
             "SELECT * FROM device_activities WHERE action_id = ?", (action_id,)).fetchone() == old_activity
         assert owned.connection.execute(
             "SELECT COUNT(*) FROM operation_attempts WHERE status = 1").fetchone() == (0,)
-    finally:
-        owned.connection.close()

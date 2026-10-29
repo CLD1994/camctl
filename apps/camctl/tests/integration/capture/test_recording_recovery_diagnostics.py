@@ -8,10 +8,10 @@ from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
 from .test_recording_start_runtime import StartDriver, _configured, _result, _world
 
 
-def test_blocked_recovery_emits_original_identity_without_repeating_same_diagnostic(tmp_path):
+async def test_blocked_recovery_emits_original_identity_without_repeating_same_diagnostic(tmp_path):
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result(confirmed=True)))
+        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
         ticket, rejected = runtime.grant(runtime.action(12))
         assert ticket is not None, rejected
         records = []
@@ -29,10 +29,10 @@ def test_blocked_recovery_emits_original_identity_without_repeating_same_diagnos
         owned.connection.close()
 
 
-def test_changed_recovery_block_emits_the_new_reason_without_rewriting_attempt(tmp_path):
+async def test_changed_recovery_block_emits_the_new_reason_without_rewriting_attempt(tmp_path):
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result(confirmed=True)))
+        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
         ticket, rejected = runtime.grant(runtime.action(12))
         assert ticket is not None, rejected
         records = []
@@ -58,11 +58,11 @@ def test_changed_recovery_block_emits_the_new_reason_without_rewriting_attempt(t
     ("evidence", "EVIDENCE_UNAVAILABLE"),
     ("new_intent", "INTENT_OUTSIDE_HORIZON"),
 ])
-def test_recovery_keeps_responsibility_and_exact_blocked_reason(tmp_path, blocked, reason):
+async def test_recovery_keeps_responsibility_and_exact_blocked_reason(tmp_path, blocked, reason):
     owned = _world(tmp_path)
     try:
         driver = StartDriver(_result(confirmed=True))
-        runtime = _configured(owned, driver)
+        runtime = (await _configured(owned, driver))
         initial_horizon = owned.connection.execute(
             "SELECT COALESCE(MAX(id),0) FROM history_events").fetchone()[0]
         ticket, rejected = runtime.grant(runtime.action(12))

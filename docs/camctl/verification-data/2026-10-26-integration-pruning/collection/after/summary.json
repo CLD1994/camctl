@@ -1,0 +1,367 @@
+{
+  "phase": "after",
+  "head": "c65a566a02a410625a2fa63d531cd56527ebcad4",
+  "python": "Python 3.11.17",
+  "started_utc": "2026-10-26T03:32:42.115107+00:00",
+  "groups": [
+    {
+      "target": "apps/camctl/tests/integration/acceptance",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/acceptance",
+        "--collect-only",
+        "--continue-on-collection-errors",
+        "-q",
+        "--rootdir",
+        "/opt/devcontainer/.codex/worktrees/de38/camctl",
+        "-p",
+        "pruning_collection"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 1.0703071189927869,
+      "node_count": 337,
+      "collection_failures": 0,
+      "nodes_sha256": "52c98698403b6b67bcecd93adb03262e22b1d57aca51dcaf65cff28db50053bb"
+    },
+    {
+      "target": "apps/camctl/tests/integration/bootstrap",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/bootstrap",
+        "--collect-only",
+        "--continue-on-collection-errors",
+        "-q",
+        "--rootdir",
+        "/opt/devcontainer/.codex/worktrees/de38/camctl",
+        "-p",
+        "pruning_collection"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 7.041682420007419,
+      "node_count": 1427,
+      "collection_failures": 0,
+      "nodes_sha256": "70fd52cdbbf818e02680d40399b56cf5d6855434ab2874eef337b77d7193b6da"
+    },
+    {
+      "target": "apps/camctl/tests/integration/cancellation",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/cancellation",
+        "--collect-only",
+        "--continue-on-collection-errors",
+        "-q",
+        "--rootdir",
+        "/opt/devcontainer/.codex/worktrees/de38/camctl",
+        "-p",
+        "pruning_collection"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 1.4596448199881706,
+      "node_count": 334,
+      "collection_failures": 0,
+      "nodes_sha256": "558cc919bdf324f7307c643953ddfeeef5f979b3f54f8e4ba07406455b7be232"
+    },
+    {
+      "target": "apps/camctl/tests/integration/capture",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/capture",
+        "--collect-only",
+        "--continue-on-collection-errors",
+        "-q",
+        "--rootdir",
+        "/opt/devcontainer/.codex/worktrees/de38/camctl",
+        "-p",
+        "pruning_collection"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 5.225240389001556,
+      "node_count": 2189,
+      "collection_failures": 0,
+      "nodes_sha256": "aa5c4172c6241c716aeb3aab414ba5a8e8b0192f432aa09065866f7e056da1f8"
+    },
+    {
+      "target": "apps/camctl/tests/integration/contracts",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/contracts",
+        "--collect-only",
+        "--continue-on-collection-errors",
+        "-q",
+        "--rootdir",
+        "/opt/devcontainer/.codex/worktrees/de38/camctl",
+        "-p",
+        "pruning_collection"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 0.340817905991571,
+      "node_count": 440,
+      "collection_failures": 0,
+      "nodes_sha256": "24e3674df0ac947f262262120cb49c4f59bebace941206b7d5d746bef2aca142"
+    },
+    {
+      "target": "apps/camctl/tests/integration/devices",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/devices",
+        "--collect-only",
+        "--continue-on-collection-errors",
+        "-q",
+        "--rootdir",
+        "/opt/devcontainer/.codex/worktrees/de38/camctl",
+        "-p",
+        "pruning_collection"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 1.1377529199817218,
+      "node_count": 223,
+      "collection_failures": 0,
+      "nodes_sha256": "247fe19c0f5f3307681c783bfd372e0a44dcd3d7dcbedf34520b947e6f1e709d"
+    },
+    {
+      "target": "apps/camctl/tests/integration/history",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/history",
+        "--collect-only",
+        "--continue-on-collection-errors",
+        "-q",
+        "--rootdir",
+        "/opt/devcontainer/.codex/worktrees/de38/camctl",
+        "-p",
+        "pruning_collection"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 2.6231421420234255,
+      "node_count": 348,
+      "collection_failures": 0,
+      "nodes_sha256": "efd8d970f00d7438c24d8c2c64e6d3d5ce459046cd9b8bc82af49cb379b05b0b"
+    },
+    {
+      "target": "apps/camctl/tests/integration/host_files",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/host_files",
+        "--collect-only",
+        "--continue-on-collection-errors",
+        "-q",
+        "--rootdir",
+        "/opt/devcontainer/.codex/worktrees/de38/camctl",
+        "-p",
+        "pruning_collection"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 0.715227547014365,
+      "node_count": 128,
+      "collection_failures": 0,
+      "nodes_sha256": "0ade928af25c8ee14265e70e24122de3edc6ab2f4d46d53a5b0ff2e18e1aa71c"
+    },
+    {
+      "target": "apps/camctl/tests/integration/logging_runtime",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/logging_runtime",
+        "--collect-only",
+        "--continue-on-collection-errors",
+        "-q",
+        "--rootdir",
+        "/opt/devcontainer/.codex/worktrees/de38/camctl",
+        "-p",
+        "pruning_collection"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 0.8023922760039568,
+      "node_count": 143,
+      "collection_failures": 0,
+      "nodes_sha256": "d31753656a99c7074c576f2433d725057ba439d3e135e21f504dbd3698ddab9e"
+    },
+    {
+      "target": "apps/camctl/tests/integration/motor",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/motor",
+        "--collect-only",
+        "--continue-on-collection-errors",
+        "-q",
+        "--rootdir",
+        "/opt/devcontainer/.codex/worktrees/de38/camctl",
+        "-p",
+        "pruning_collection"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 0.9868983950000256,
+      "node_count": 24,
+      "collection_failures": 0,
+      "nodes_sha256": "ca68d9a8c8b9fd3ad1c6a79da7790fc8cc93f36e776f2df58c6b3f06fd70dbcb"
+    },
+    {
+      "target": "apps/camctl/tests/integration/operations",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/operations",
+        "--collect-only",
+        "--continue-on-collection-errors",
+        "-q",
+        "--rootdir",
+        "/opt/devcontainer/.codex/worktrees/de38/camctl",
+        "-p",
+        "pruning_collection"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 1.082580615999177,
+      "node_count": 314,
+      "collection_failures": 0,
+      "nodes_sha256": "db6796b7210da1654ceb182fbffdf779c28597d8ba0645670e81ae855d41870d"
+    },
+    {
+      "target": "apps/camctl/tests/integration/outputs",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/outputs",
+        "--collect-only",
+        "--continue-on-collection-errors",
+        "-q",
+        "--rootdir",
+        "/opt/devcontainer/.codex/worktrees/de38/camctl",
+        "-p",
+        "pruning_collection"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 4.4672992510022596,
+      "node_count": 2595,
+      "collection_failures": 0,
+      "nodes_sha256": "c7dd544d07145a42b0dc8409ede48d88702463c63f6ad996f3f46dcc4651fa9f"
+    },
+    {
+      "target": "apps/camctl/tests/integration/persistence",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/persistence",
+        "--collect-only",
+        "--continue-on-collection-errors",
+        "-q",
+        "--rootdir",
+        "/opt/devcontainer/.codex/worktrees/de38/camctl",
+        "-p",
+        "pruning_collection"
+      ],
+      "exit_code": 1,
+      "wall_seconds": 2.1188358729996253,
+      "node_count": 940,
+      "collection_failures": 1,
+      "nodes_sha256": "506663d74126fe500b23c830d7c4a5258ccd3ed6286163607de965ab6599eb39"
+    },
+    {
+      "target": "apps/camctl/tests/integration/reporting",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/reporting",
+        "--collect-only",
+        "--continue-on-collection-errors",
+        "-q",
+        "--rootdir",
+        "/opt/devcontainer/.codex/worktrees/de38/camctl",
+        "-p",
+        "pruning_collection"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 2.4307259939960204,
+      "node_count": 496,
+      "collection_failures": 0,
+      "nodes_sha256": "7bf0badd927cea404912261abbaa90925be88a3ce9e2f04db2190b59d9ea8227"
+    },
+    {
+      "target": "apps/camctl/tests/integration/scheduling",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/scheduling",
+        "--collect-only",
+        "--continue-on-collection-errors",
+        "-q",
+        "--rootdir",
+        "/opt/devcontainer/.codex/worktrees/de38/camctl",
+        "-p",
+        "pruning_collection"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 0.8407641380035784,
+      "node_count": 136,
+      "collection_failures": 0,
+      "nodes_sha256": "2bd35b793fa44450d4d42cc9208b8d8d4c7a1ab63f821f5ddf5102e1f46db4d9"
+    },
+    {
+      "target": "apps/camctl/tests/integration/session",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/session",
+        "--collect-only",
+        "--continue-on-collection-errors",
+        "-q",
+        "--rootdir",
+        "/opt/devcontainer/.codex/worktrees/de38/camctl",
+        "-p",
+        "pruning_collection"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 1.3657171580125578,
+      "node_count": 198,
+      "collection_failures": 0,
+      "nodes_sha256": "5155cca4b02cef4f999a262264223d0634b30c75fa430570769ac5fd9b5fa4a5"
+    },
+    {
+      "target": "tests/integration",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration",
+        "--collect-only",
+        "--continue-on-collection-errors",
+        "-q",
+        "--rootdir",
+        "/opt/devcontainer/.codex/worktrees/de38/camctl",
+        "-p",
+        "pruning_collection"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 1.633037936000619,
+      "node_count": 276,
+      "collection_failures": 0,
+      "nodes_sha256": "b0cf8b32e6b8cc4ec7cc52149a6e12077ac03722e2cb3fe04d36d43c069dfc82"
+    }
+  ],
+  "wall_seconds": 35.35331456101267,
+  "finished_utc": "2026-10-26T03:33:18.438762+00:00"
+}

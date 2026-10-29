@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from camctl_memory_plugin import finalize_receipts, run_test_command
+
 import base64
 from contextlib import closing
 from copy import copy, deepcopy
@@ -90,7 +92,7 @@ class Package:
     logs: Path
 
 
-def run(command, *, cwd, env, logs, timeout=180):
+def run(command, *, cwd, env, logs, timeout=180, camctl=False):
     logs.mkdir(parents=True, exist_ok=True)
     number = len(list(logs.glob("command-*.json"))) + 1
     started = time.time_ns()
@@ -103,7 +105,7 @@ def run(command, *, cwd, env, logs, timeout=180):
     target = logs / f"command-{number:04}.json"
     json_write(target, record)
     try:
-        result = subprocess.run([str(part) for part in command], cwd=cwd, env=env,
+        result = run_test_command([str(part) for part in command], camctl=camctl, receipt_root=cwd, cwd=cwd, env=env,
                                 capture_output=True, text=True, timeout=timeout)
     except BaseException as error:
         json_write(target, {**record, "utc_end_ns": time.time_ns(),
@@ -248,7 +250,6 @@ class World:
         self.env.update(
             {
                 "PATH": str(self.tools) + os.pathsep + self.env["PATH"],
-                "CAMCTL_OSMO_TEST_SINGLE_ORIGINAL": "1",
                 "CAMCTL_OSMO_TEST_ACTION": "camera_record",
                 "CAMCTL_OSMO_TEST_PARAMS": json.dumps(self.params),
                 "CAMCTL_OSMO_TEST_INCLUDE_PREVIEW": "1",
@@ -262,7 +263,7 @@ class World:
             }
         )
         set_frozen(self.clock, utc_us=whole_second_utc_us(), monotonic_ns=time.monotonic_ns())
-        self.command(package.cli, "init", "--config", self.deployment.config_path)
+        self.command(package.cli, "init", "--config", self.deployment.config_path, camctl=True)
         self.install_capabilities()
 
     def __enter__(self):
@@ -270,18 +271,26 @@ class World:
 
     def __exit__(self, *exc):
         self.stop()
-        if self.db.exists():
-            json_write(self.root / "final-db.json", self.snapshot())
-        archive = ARTIFACTS / (self.case_id + "-" + str(os.getpid()))
-        shutil.copytree(self.root, archive, dirs_exist_ok=True)
+        try:
+            finalize_receipts(self.root)
+        finally:
+            if self.db.exists():
+                json_write(self.root / "final-db.json", self.snapshot())
+            archive = ARTIFACTS / (self.case_id + "-" + str(os.getpid()))
+            shutil.copytree(self.root, archive, dirs_exist_ok=True)
 
-    def write_config(self, max_d=3, max_q=3, timeout="10", interval="0", query_timeout="10"):
+    def write_config(self, max_d=3, max_q=3, timeout="10", interval="0", query_timeout="10",
+                     terminate_grace=None):
+        adb_section = ("" if terminate_grace is None else
+                       f'\n[adb]\nterminate_grace_s="{terminate_grace}"\n')
         device_section = f'''
 [devices.osmo]
 kind="camera"
 driver="dji-osmo360-ii"
 [devices.osmo.adb]
 serial="{SERIAL}"
+[devices.osmo.video]
+result_mode="single_file"
 [devices.osmo.recording]
 repair_margin_s="0"
 [devices.osmo.cleanup]
@@ -294,10 +303,10 @@ query_retry_interval_s="0"
 [cleanup]
 max_delete_attempts={max_d}
 max_query_attempts={max_q}
-''' + device_section + self.config_extra)
+''' + adb_section + device_section + self.config_extra)
 
-    def command(self, *args):
-        return run(args, cwd=self.root, env=self.env, logs=self.root / "commands")
+    def command(self, *args, camctl=False):
+        return run(args, cwd=self.root, env=self.env, logs=self.root / "commands", camctl=camctl)
 
     def launcher(self, name, entry):
         target = self.tools / name
@@ -312,7 +321,7 @@ max_query_attempts={max_q}
         return json.loads(output.read_text())
 
     def install_capabilities(self):
-        described = self.command(self.package.cli, "describe", "--config", self.deployment.config_path)
+        described = self.command(self.package.cli, "describe", "--config", self.deployment.config_path, camctl=True)
         store = self.root / "client-store"
         store.mkdir(exist_ok=True)
         (store / "device-capabilities.json").write_text(described.stdout)
@@ -421,7 +430,9 @@ max_query_attempts={max_q}
         (frozen,) = rows(
             self.db, "SELECT execution_spec_json FROM actions WHERE name='capture-osmo'"
         )
-        assert json.loads(frozen["execution_spec_json"]).get("result_policy") is None
+        execution = json.loads(frozen["execution_spec_json"])
+        assert execution["video_result_mode"] == "single_file"
+        assert execution.get("result_policy") is None
         calls = records(self.calls_path)
         starts = [row for row in calls if row.get("kind") == "start"]
         stops = [row for row in calls if row.get("kind") == "stop"]
@@ -512,7 +523,8 @@ max_query_attempts={max_q}
     def calls(self, operation=None):
         return [row for row in records(self.calls_path) if row.get("kind") == "cleanup" and row["stage"] == "entered" and (operation is None or row["operation"] == operation)]
 
-    def manifest_for(self, request, fault=None, query_unknown=False, output_id=None):
+    def manifest_for(self, request, fault=None, query_unknown=False, output_id=None,
+                     hold_cancel=False):
         targets = []
         for source in self.sources.values():
             if source["device_file_id"] and source["action_name"] == "capture-osmo":
@@ -523,15 +535,15 @@ max_query_attempts={max_q}
         json_write(self.manifest, {"root": str(self.remote.resolve()), "case": self.case_id,
             "request_id": request, "targets": targets, "database": str(self.db),
             "fault": fault, "query_unknown": query_unknown, "marker": str(self.marker),
-            "fault_output_id": output_id})
+            "fault_output_id": output_id, "hold_cancel": hold_cancel})
         self.env["CAMCTL_CLEANUP_MANIFEST"] = str(self.manifest)
 
-    def begin_cleanup(self, key="osv", *, fault=None, persistence_fault=None):
+    def begin_cleanup(self, key="osv", *, fault=None, persistence_fault=None, hold_cancel=False):
         self.stop()
         source = self.sources[key]
         plan, receipt = self.export("cleanup-" + key, [self.action("cleanup-" + key,
             "delete_action_outputs", {"output_ids": [str(source["id"])]})])
-        self.manifest_for(receipt["request_id"], fault, output_id=source["id"])
+        self.manifest_for(receipt["request_id"], fault, output_id=source["id"], hold_cancel=hold_cancel)
         if persistence_fault:
             self.env["CAMCTL_CLEANUP_PERSISTENCE_FAULT"] = persistence_fault
             launcher = self.launcher("fault-cli", self.tools / "_cleanup_roundtrip_fault.py")
@@ -613,12 +625,22 @@ max_query_attempts={max_q}
         self.assert_report_ack_and_history()
 
     def publish_copies(self):
-        for key in ("repaired", "osv", "lrf", "hb-original", "hb-preview"):
+        keys = ("repaired", "osv", "lrf", "hb-original", "hb-preview")
+        for key in keys:
             plan, receipt = self.export("obtain-" + key, [self.action("obtain-" + key, "obtain_action_outputs", {"source": {"action_instance_id": str(self.sources[key]["source_action_id"])}, "output_ids": [str(self.sources[key]["id"])]})])
             self.host.submit(plan)
             self.wait_action(receipt["request_id"], "SUCCEEDED")
         self.assert_report_ack_and_history()
-        self.copies = {path.name: path.read_bytes() for path in self.deployment.processing.iterdir() if not path.name.startswith("status-report-")}
+        sources = {self.sources[key]["id"]: key for key in keys}
+        deliveries = rows(self.db, "SELECT output_id,file_name FROM deliveries WHERE output_id IN ("
+                          + ",".join("?" for _ in sources) + ") ORDER BY id", tuple(sources))
+        assert len(deliveries) == len(keys)
+        assert {delivery["output_id"] for delivery in deliveries} == set(sources)
+        self.copies = {}
+        for delivery in deliveries:
+            content = (self.deployment.processing / delivery["file_name"]).read_bytes()
+            assert content == self.path(sources[delivery["output_id"]]).read_bytes()
+            self.copies[delivery["file_name"]] = content
         assert len(self.copies) == 5
 
     def assert_report_ack_and_history(self):

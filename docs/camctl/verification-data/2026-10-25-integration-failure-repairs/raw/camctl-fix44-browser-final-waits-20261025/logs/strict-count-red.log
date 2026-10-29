@@ -1,0 +1,87 @@
+
+ RUN  v5.0.1 /tmp/camctl-fix44-browser-20261025/apps/client
+
+ ❯ tests/integration/metadata-support.test.ts (12 tests | 7 failed | 5 skipped) 236ms
+   × 同 label 的重复控件不能因说明不同被忽略 42ms
+   × 同 label 的重复控件不能因对象不同被忽略 8ms
+   × 同 label 的重复控件不能因控件隐藏被忽略 10ms
+   × 同任务的错误重复说明不能被忽略（） 11ms
+   × 同任务的错误重复说明不能被忽略（style="display:none"） 6ms
+   × 同标题的错误重复字段不能被忽略（） 7ms
+   × 同标题的错误重复字段不能被忽略（style="display:none"） 7ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/integration/metadata-support.test.ts > 同 label 的重复控件不能因说明不同被忽略
+ FAIL  tests/integration/metadata-support.test.ts > 同 label 的重复控件不能因对象不同被忽略
+ FAIL  tests/integration/metadata-support.test.ts > 同 label 的重复控件不能因控件隐藏被忽略
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ tests/integration/metadata-support.test.ts:85:54
+     83| ])("同 label 的重复控件不能因%s被忽略", async (_, duplicate) => {
+     84|   await page.setContent(form() + duplicate());
+     85|   await expect(checkVisibleFields(page, [field], [])).rejects.toThrow(…
+       |                                                      ^
+     86| });
+     87|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  tests/integration/metadata-support.test.ts > 同任务的错误重复说明不能被忽略（）
+ FAIL  tests/integration/metadata-support.test.ts > 同任务的错误重复说明不能被忽略（style="display:none"）
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ tests/integration/metadata-support.test.ts:94:66
+     92|       "</p>", `</p><p class="guide-description" ${hidden}>错误说明</p>`,
+     93|     ));
+     94|     await expect(checkVisibleGuide(page, [task("host", "主机任务")])).reje…
+       |                                                                  ^
+     95|   },
+     96| );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  tests/integration/metadata-support.test.ts > 同标题的错误重复字段不能被忽略（）
+ FAIL  tests/integration/metadata-support.test.ts > 同标题的错误重复字段不能被忽略（style="display:none"）
+AssertionError: promise resolved "undefined" instead of rejecting
+
+- Expected:
+Error {
+  "message": "rejected promise",
+}
+
++ Received:
+undefined
+
+ ❯ tests/integration/metadata-support.test.ts:104:66
+    102|       "</dl>", `<div ${hidden}><dt>曝光</dt><dd>错误说明</dd></div></dl>`,
+    103|     ));
+    104|     await expect(checkVisibleGuide(page, [task("host", "主机任务")])).reje…
+       |                                                                  ^
+    105|   },
+    106| );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  7 failed | 5 skipped (12)
+   Start at  17:55:07
+   Duration  697ms (import 54%, tests 41%, transform 5%)
+

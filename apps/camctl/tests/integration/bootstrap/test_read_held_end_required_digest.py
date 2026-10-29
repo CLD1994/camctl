@@ -9,17 +9,15 @@ import pytest
 
 from camctl.bootstrap.capture_assembly import session_capture_assembly
 from camctl.bootstrap.obtain_assembly import session_obtain_assembly
-from camctl.capture.handlers import capture_handler, _saved_result_listing
+from camctl.capture.handlers import capture_handler
 from camctl.capture.media_flow import RecordingInputCopies, run_recording_media
 from camctl.capture.result_inputs import RESULT_FILES_CONTRACT
 from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError
-from camctl.devices.bindings import check_binding
 from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverStatus
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import DriverDeclaration
-from camctl.host_files.media import MediaProbe
 from camctl.outputs.copy import CopyCompletionError
 from camctl.outputs.obtain_flow import advance_obtain
 from camctl.persistence.models import DbOutcomeKind
@@ -28,7 +26,6 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..cancellation.test_report_sync_lifecycle import _fault_owned
 from ..capture.test_capture_contract import ResultsDouble, _entry
-from ..capture.test_media_flow import ProbeTools
 from .test_media_assembly import _EVIDENCE, _SessionDriver
 from .test_output_binding_changes import _CONTENT, _NOW, _read_registry as _registry, environment
 from .test_read_execution_runtime import ReadRequests, _MEDIA_CONTENT, _SETTINGS, _real_recording_media_flow
@@ -46,7 +43,7 @@ def _source_entry(reader, content, *, internal):
         contracts.extend(_EVIDENCE.contract(name, 1) for name in (
             "operation_returned", "start_confirmed", "stop_returned", "stop_confirmed", "results_returned"))
         declaration = DriverDeclaration(control_supported=True, stop_supported=True, query_supported=False,
-            result_supported=True, read_supported=True, digest_supported=True, delete_supported=False)
+            result_supported=False, read_supported=True, digest_supported=True, delete_supported=False)
     else:
         original = _registry(reader).entry("camctl-adb")
         declaration = replace(original.declaration, digest_supported=True)
@@ -54,13 +51,27 @@ def _source_entry(reader, content, *, internal):
                               DriverStatus.SOFTWARE_CONTRACT_VERIFIED)
 
 
-def _binding_fault(runtime, device_id, change):
-    # 配置和原 READ 参数不变化。仅控制稳定协作者边界返回的当前绑定事实。
-    current = SimpleNamespace(devices={} if change == "missing" else {
-        device_id: {"kind": "camera", "driver": "alternate-camera"}})
-    original = runtime.binding_check
-    runtime.binding_check = lambda saved: check_binding(saved, current) if saved.device_id == device_id else original(saved)
-    return runtime
+def _binding_fault(devices, device_id, change):
+    """当前会话配置声明缺失或切换到另一个已登记驱动。"""
+    if change == "missing":
+        devices.pop(device_id, None)
+    else:
+        devices[device_id] = {"kind": "camera", "driver": "alternate-camera"}
+
+
+def _business_factory(actual, devices, *, internal=False, collections=None):
+    from ..support.capture import capture_database
+
+    async def build(owned):
+        database = await capture_database(owned)
+        return await actual(database, "cam-1") if internal else actual(database)
+
+    async def advance(runtime):
+        from camctl.capture.media_flow import resume_prepared_internal_reads
+        await resume_prepared_internal_reads(runtime.database, **collections)
+        await capture_handler("camera_record")(1, runtime)
+
+    return SimpleNamespace(build=build, devices=devices, advance=advance if internal else advance_obtain)
 
 
 def _drivers(entry):
@@ -84,8 +95,8 @@ def _hold_before_digest(monkeypatch):
 def _held_without_digest(owned, runtime, reader):
     assert len(reader.requests) == 1
     ticket = reader.requests[0][0]
-    held = runtime.pending_read_ends[int(ticket.target_id)]
-    assert held.ticket == ticket and held.end.stopped is True and held.end.error is None
+    ends = [end for actual, end in reader.ends if actual == ticket]
+    assert ends and ends[-1].stopped is True and ends[-1].error is None
     assert owned.connection.execute(
         "SELECT status,result_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
         (ticket.run_id, ticket.attempt_id)).fetchone() == (1, None)
@@ -155,19 +166,22 @@ def _assert_actual_and_binding(owned, ticket, original, driver, reader, completi
         assert owned.connection.execute("SELECT source_dependency FROM obtain_items WHERE delivery_id=?", (delivery_id,)).fetchone() == (0,)
 
 
-async def _advance_binding_and_recover(owned, factory, advance, device, change, monkeypatch, after_commit):
+async def _advance_binding_and_recover(owned, factory, advance, device, change,
+        monkeypatch, after_commit, capture_resources):
     saved = None if after_commit is None else _finish_fault(monkeypatch, after_commit)
+    _binding_fault(factory.devices, device, change)
     if saved is None:
-        await advance(_binding_fault(factory(owned), device, change))
+        await advance(await factory.build(owned))
         return owned, False
     with pytest.raises(ConsistencyError):
-        await advance(_binding_fault(factory(owned), device, change))
+        await advance(await factory.build(owned))
     assert len(saved) == 1
     path = owned.connection.execute("PRAGMA database_list").fetchone()[2]
     owned.connection.close()
+    await capture_resources.restart_database(path)
     reopened = open_existing(Path(path), DbOpenMode.EXISTING_RW, DbConfig())
     try:
-        await advance(_binding_fault(factory(reopened), device, change))
+        await advance(await factory.build(reopened))
         assert len(saved) == 2 and saved[1] == saved[0]
         assert reopened.connection.execute(
             "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?", (str(saved[0][1]),)).fetchone() == (1,)
@@ -180,27 +194,25 @@ async def _advance_binding_and_recover(owned, factory, advance, device, change, 
 _CASES = [("missing", None), ("mismatch", None), ("missing", False), ("missing", True)]
 
 
-async def _advance_internal_runtime(runtime):
-    await capture_handler("camera_record")(1, runtime)
-
-
 @pytest.mark.parametrize("change,after_commit", _CASES)
 async def test_obtain_held_end_missing_required_sha_saves_actual_then_binding_failure(
-        prepared_without_attempt, monkeypatch, change, after_commit):
+        prepared_without_attempt, monkeypatch, change, after_commit, capture_resources):
     cfg, owned, _command = prepared_without_attempt
     reader = ReadRequests(owned, _CONTENT)
     driver, entry = _source_entry(reader, _CONTENT, internal=False)
-    factory = session_obtain_assembly(devices={"cam-a": {**cfg.devices["cam-a"], "copy": _SETTINGS}},
+    devices = {"cam-a": {**cfg.devices["cam-a"], "copy": _SETTINGS}}
+    actual = session_obtain_assembly(devices=devices,
         drivers=_drivers(entry), staging=Path(cfg.paths.staging), ready=Path(cfg.paths.ready),
         processing=Path(cfg.paths.processing), segment_size=4, occurred_at=lambda: _NOW, monotonic_ns=lambda: 0)
-    runtime = factory(owned)
+    factory = _business_factory(actual, devices)
+    runtime = await factory.build(owned)
     completions = _hold_before_digest(monkeypatch)
     with pytest.raises(ConsistencyError):
         await advance_obtain(runtime)
     ticket, state = _held_without_digest(owned, runtime, reader)
     assert driver.calls == []
     recovered, close = await _advance_binding_and_recover(owned, factory, advance_obtain,
-        "cam-a", change, monkeypatch, after_commit)
+        "cam-a", change, monkeypatch, after_commit, capture_resources)
     try:
         _assert_actual_and_binding(recovered, ticket, state, driver, reader, completions, change, internal=False)
         assert list(Path(cfg.paths.ready).iterdir()) == []
@@ -213,22 +225,24 @@ async def _internal_runtime(tmp_path):
     recording, source = await _real_recording_media_flow(tmp_path)
     reader = ReadRequests(recording.owned, _MEDIA_CONTENT)
     driver, entry = _source_entry(reader, _MEDIA_CONTENT, internal=True)
-    factory = session_capture_assembly(devices={"cam-1": {"kind": "camera", "driver": "camctl-adb", "copy": _SETTINGS}},
-        drivers=_drivers(entry), results=ResultsDouble({1: (_entry("video", size=len(_MEDIA_CONTENT)),)}),
+    devices = {"cam-1": {"kind": "camera", "driver": "camctl-adb", "copy": _SETTINGS}}
+    collections = {name: {} for name in (
+        "pending_read_results", "pending_read_business", "pending_read_ends",
+        "continuing_read_tickets", "pending_segment_inspection_results")}
+    actual = session_capture_assembly(devices=devices, **collections,
+        drivers=_drivers(entry), results=recording.runtime_options["results"],
         staging=recording.roots.staging, wall_us=lambda: _NOW, monotonic_ns=lambda: 0, segment_size=4,
+        probe_request=recording.runtime_options["probe_request"],
+        repair_request=recording.runtime_options["repair_request"],
         wait_config=lambda _action: CaptureWaitConfig(target_duration_ms=6000, driver_margin_ms=0))
-    def runtime(owned):
-        result = factory(owned, "cam-1")
-        result.media.tools = ProbeTools(MediaProbe(Decimal("6"), None))
-        return result
-    return recording, source, reader, driver, runtime
+    return recording, source, reader, driver, _business_factory(actual, devices, internal=True, collections=collections)
 
 
 @pytest.mark.parametrize("change,after_commit", _CASES)
 async def test_internal_held_end_missing_required_sha_saves_actual_then_binding_failure(
-        tmp_path, monkeypatch, change, after_commit):
+        tmp_path, monkeypatch, change, after_commit, capture_resources):
     recording, source, reader, driver, factory = await _internal_runtime(tmp_path)
-    runtime = factory(recording.owned)
+    runtime = await factory.build(recording.owned)
     completions = _hold_before_digest(monkeypatch)
     reopened = None
     try:
@@ -237,9 +251,9 @@ async def test_internal_held_end_missing_required_sha_saves_actual_then_binding_
         ticket, state = _held_without_digest(recording.owned, runtime, reader)
         assert driver.calls == []
         reopened, _close = await _advance_binding_and_recover(recording.owned, factory,
-            _advance_internal_runtime, "cam-1", change, monkeypatch, after_commit)
+            factory.advance, "cam-1", change, monkeypatch, after_commit, capture_resources)
         _assert_actual_and_binding(reopened, ticket, state, driver, reader, completions, change, internal=True)
-        assert runtime.media.tools.calls == []
+        assert not recording.tool_log.exists()
     finally:
         (recording.owned if reopened is None else reopened).connection.close()
 
@@ -250,19 +264,23 @@ async def test_obtain_held_end_reliable_sha_continues_local_publication(prepared
     cfg, owned, _command = prepared_without_attempt
     reader = ReadRequests(owned, _CONTENT)
     driver, entry = _source_entry(reader, _CONTENT, internal=False)
-    factory = session_obtain_assembly(devices={"cam-a": {**cfg.devices["cam-a"], "copy": _SETTINGS}},
+    devices = {"cam-a": {**cfg.devices["cam-a"], "copy": _SETTINGS}}
+    actual = session_obtain_assembly(devices=devices,
         drivers=_drivers(entry), staging=Path(cfg.paths.staging), ready=Path(cfg.paths.ready),
         processing=Path(cfg.paths.processing), segment_size=4, occurred_at=lambda: _NOW, monotonic_ns=lambda: 0)
-    runtime = factory(owned)
+    factory = _business_factory(actual, devices)
+    runtime = await factory.build(owned)
     completions = _fail_local_completion_once(monkeypatch, source_checksum_supported=True)
     with pytest.raises(ConsistencyError):
         await advance_obtain(runtime)
     ticket, state = _held_original(owned, runtime, reader, source_checksum_supported=True)
     calls = tuple(driver.calls)
     assert len(calls) == 1
-    await advance_obtain(_binding_fault(factory(owned), "cam-a", change))
+    _binding_fault(factory.devices, "cam-a", change)
+    await advance_obtain(await factory.build(owned))
     _actual_result_saved(owned, reader, ticket, state, completions)
-    await advance_obtain(_binding_fault(factory(owned), "cam-a", change))
+    _binding_fault(factory.devices, "cam-a", change)
+    await advance_obtain(await factory.build(owned))
     assert tuple(driver.calls) == calls
     delivery_id, status, error = owned.connection.execute(
         "SELECT d.id,d.status,d.error_json FROM deliveries d JOIN file_copies c ON c.delivery_id=d.id WHERE c.id=?",
@@ -276,24 +294,31 @@ async def test_internal_held_end_reliable_sha_and_saved_results_continue_local_c
     from .test_read_held_end_binding import _fail_local_completion_once, _held_original, _actual_result_saved
     recording, source, reader, driver, factory = await _internal_runtime(tmp_path)
     try:
-        runtime = factory(recording.owned)
-        # 真实 winddown 已保存原 v1 输入；这里只读取输入，不按返回 phase 改判流程。
+        runtime = await factory.build(recording.owned)
+        # 原结果调用、实际事件和完整原片均已由真实winddown保存。
         queries = tuple(runtime.results.calls)
-        listing = _saved_result_listing(runtime, 1)
-        assert listing.entries and all(entry.complete for entry in listing.entries)
-        assert listing.ticket is not None and listing.outcome is not None and listing.occurred_at == _NOW
-        assert tuple(runtime.results.calls) == queries
         original_results = recording.owned.connection.execute(
-            "SELECT r.status,t.result_event_id,t.result_json FROM operation_runs r JOIN operation_attempts t ON t.run_id=r.id"
+            "SELECT r.status,t.result_event_id,t.result_json,e.occurred_at FROM operation_runs r"
+            " JOIN operation_attempts t ON t.run_id=r.id JOIN history_events e ON e.id=t.result_event_id"
             " WHERE r.kind=7 ORDER BY t.id DESC LIMIT 1").fetchone()
-        assert original_results is not None and original_results[0] == 2 and original_results[1] is not None
+        assert original_results is not None and original_results[0] == 2
+        import json
+        result = json.loads(original_results[2])
+        entries = [entry for observation in result["observations"]
+            if observation["type"] == "result_files_listed"
+            for entry in observation["data"]["entries"]]
+        assert entries and all(entry["complete"] for entry in entries)
+        assert original_results[1] is not None and original_results[3] == _NOW
+        original_results = original_results[:3]
+        assert tuple(runtime.results.calls) == queries
         completions = _fail_local_completion_once(monkeypatch, source_checksum_supported=True)
         with pytest.raises(ConsistencyError):
             await run_recording_media(runtime.media, 1, 1, source)
         ticket, state = _held_original(recording.owned, runtime, reader, source_checksum_supported=True)
         calls = tuple(driver.calls)
         assert len(calls) == 1
-        await capture_handler("camera_record")(1, _binding_fault(factory(recording.owned), "cam-1", change))
+        _binding_fault(factory.devices, "cam-1", change)
+        await capture_handler("camera_record")(1, await factory.build(recording.owned))
         _actual_result_saved(recording.owned, reader, ticket, state, completions)
         assert tuple(driver.calls) == calls
         assert tuple(runtime.results.calls) == queries

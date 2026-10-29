@@ -6,13 +6,12 @@ from decimal import Decimal
 
 import pytest
 
-from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import MAX_OBJECT_ID, new_operation_key
 from camctl.history.reads import ReadCoverage
-from camctl.history.validators import EventContext, EventValidationError, validate_event
+from camctl.history.validators import EventValidationError
+from ..support.output_planning import capture_operation, validate_static_event as validate_event
 from camctl.outputs.sources import SelectionMode
 from camctl.persistence.repositories import outputs
-from camctl.persistence.transaction import TransactionScope
 
 from .test_catalog_integrity import selection_database
 from .test_output_family import family_database
@@ -23,15 +22,9 @@ def _proposal(owned, mode=SelectionMode.DEFAULT):
     requested = (705, 703, 999, 704) if mode is SelectionMode.EXPLICIT_IDS else ()
     _request(owned.connection, mode, requested)
     snapshot = _snapshot(owned.connection, mode, requested)
-    owned.connection.execute("BEGIN")
-    try:
-        plan = outputs._FixSelectionCommand(outputs.FixSelection(61, snapshot, _NOW),
-            new_operation_key()).plan(TransactionScope(owned.connection, 1, 1))
-    finally:
-        owned.connection.rollback()
-    return plan.events[0], EventContext(
-        TransactionRange(2, 2, 2), dict(plan.owners), deepcopy(plan.state_rows),
-        read_coverage=plan.read_coverage)
+    plan = capture_operation(owned, lambda target: outputs.OutputsRepository().fix_selection(
+        outputs.FixSelection(61, snapshot, _NOW), new_operation_key(), target))
+    return plan.events[0], plan
 
 
 def _change_item(event, index=0, **values):

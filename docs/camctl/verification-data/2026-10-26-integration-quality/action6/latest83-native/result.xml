@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="122.686" timestamp="2026-10-26T02:50:56.598593+08:00" hostname="1e0518e0c6b4"><testcase classname="tmp.camctl-quality-action6-20261026.tests.integration.test_action6_segmented_recovery_roundtrip" name="test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters" time="121.879"><failure message="AssertionError: 等待超时: Action6 START 未可靠保存">tmp_path = PosixPath('/tmp/camctl-quality-evidence/action6/latest83-native/data/test_installed_action6_native_0')
+host_demo = '/tmp/camctl-host-build-bc2457b7ae384100978e3386316cb91f/host-demo'
+action6_package = _Package(python=PosixPath('/tmp/camctl-quality-evidence/action6/latest83-native/data/action6-builtin-package0/venv/bin...ery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters (setup)'})
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x7f965441de10&gt;
+client_deployment = &lt;function client_deployment.&lt;locals&gt;.create at 0x7f965487a480&gt;
+
+    @pytest.mark.skipif(os.name != "posix", reason="安装版 POSIX C host 恢复链")
+    def test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters(
+            tmp_path, host_demo, action6_package, monkeypatch, client_deployment,
+    ):
+        package = action6_package
+        scenario = _prepare_installed_action6(
+            tmp_path, package, client_deployment, native=True, include_jpeg=False,
+        )
+        deployment = scenario["deployment"]
+&gt;       demo, source_id = _start_installed_capture(host_demo, package, scenario, monkeypatch)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/tmp/camctl-quality-action6-20261026/tests/integration/test_action6_segmented_recovery_roundtrip.py:1083: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/tmp/camctl-quality-action6-20261026/tests/integration/test_action6_segmented_recovery_roundtrip.py:287: in _start_installed_capture
+    starts = wait_for(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+predicate = &lt;function _start_installed_capture.&lt;locals&gt;.&lt;lambda&gt; at 0x7f96548449a0&gt;
+timeout_s = 90, message = 'Action6 START 未可靠保存'
+failure = &lt;function HostDemo.watch_failures.&lt;locals&gt;.&lt;lambda&gt; at 0x7f9654844900&gt;
+
+    def wait_for(predicate, timeout_s: float, message: str, *, failure=None):
+        """轮询成功条件；调用方可提供本次等待已无法成功的诊断。"""
+        deadline = time.monotonic() + timeout_s
+        next_failure_check = 0.0
+        while True:
+            value = predicate()
+            if value:
+                return value
+            now = time.monotonic()
+            # 负向事实会持续保留，限制日志和状态库诊断的读取频率。
+            if failure is not None and now &gt;= next_failure_check:
+                if reason := failure():
+                    raise AssertionError(f"{message}: {reason}")
+                next_failure_check = now + 0.05
+&gt;           assert time.monotonic() &lt; deadline, f"等待超时: {message}"
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           AssertionError: 等待超时: Action6 START 未可靠保存
+
+/tmp/camctl-quality-action6-20261026/tests/integration/_wsl_host_demo.py:98: AssertionError</failure></testcase></testsuite></testsuites>

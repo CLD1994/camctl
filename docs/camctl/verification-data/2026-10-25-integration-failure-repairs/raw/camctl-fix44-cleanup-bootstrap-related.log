@@ -1,0 +1,1924 @@
+3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]
+3.53.1
+/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/__init__.py
+...FFFFFFFFFFFFFFFFFFFFFFFF                                              [100%]
+=================================== FAILURES ===================================
+_____ test_default_run_keeps_one_budget_across_rounds_and_resumes_next_run _____
+  + Exception Group Traceback (most recent call last):
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_work_file_runtime.py", line 77, in test_default_run_keeps_one_budget_across_rounds_and_resumes_next_run
+  |     cfg = await _history_cleanup(environment)
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_work_file_runtime.py", line 36, in _history_cleanup
+  |     await _save_photos(cfg, owned, context, driver)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py", line 190, in _save_photos
+  |     await capture.settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 180, in settle
+  |     await CombinedLocalWork(tuple(self._devices.values())).settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 192, in settle
+  |     await self._settle(excluded_owner=None)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 215, in _settle
+  |     self._raise_failures(failures)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 274, in _raise_failures
+  |     raise ExceptionGroup("本地实际责任收场失败", list(failures))
+  | ExceptionGroup: 本地实际责任收场失败 (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 46, in _run
+    |     await self._flow(context)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 224, in advance
+    |     await self._advance_device(context, device_id, candidates)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 331, in _advance_device
+    |     raise outcome
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/dispatch.py", line 82, in dispatch_ready
+    |     await handler(descriptor.action_id, runtime)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 3174, in _photo_handler
+    |     listing = await _listing_round(context, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 86, in owned
+    |     raise actual.error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +------------------------------------
+______________ test_submit_keeps_work_files_and_history_position _______________
+  + Exception Group Traceback (most recent call last):
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_work_file_runtime.py", line 102, in test_submit_keeps_work_files_and_history_position
+  |     cfg = await _history_cleanup(environment)
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_work_file_runtime.py", line 36, in _history_cleanup
+  |     await _save_photos(cfg, owned, context, driver)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py", line 190, in _save_photos
+  |     await capture.settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 180, in settle
+  |     await CombinedLocalWork(tuple(self._devices.values())).settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 192, in settle
+  |     await self._settle(excluded_owner=None)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 215, in _settle
+  |     self._raise_failures(failures)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 274, in _raise_failures
+  |     raise ExceptionGroup("本地实际责任收场失败", list(failures))
+  | ExceptionGroup: 本地实际责任收场失败 (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 46, in _run
+    |     await self._flow(context)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 224, in advance
+    |     await self._advance_device(context, device_id, candidates)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 331, in _advance_device
+    |     raise outcome
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/dispatch.py", line 82, in dispatch_ready
+    |     await handler(descriptor.action_id, runtime)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 3174, in _photo_handler
+    |     listing = await _listing_round(context, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 86, in owned
+    |     raise actual.error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +------------------------------------
+____________ test_clock_restricted_run_keeps_ordinary_work_cleanup _____________
+  + Exception Group Traceback (most recent call last):
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_work_file_runtime.py", line 121, in test_clock_restricted_run_keeps_ordinary_work_cleanup
+  |     cfg = await _history_cleanup(environment)
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_work_file_runtime.py", line 36, in _history_cleanup
+  |     await _save_photos(cfg, owned, context, driver)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py", line 190, in _save_photos
+  |     await capture.settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 180, in settle
+  |     await CombinedLocalWork(tuple(self._devices.values())).settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 192, in settle
+  |     await self._settle(excluded_owner=None)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 215, in _settle
+  |     self._raise_failures(failures)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 274, in _raise_failures
+  |     raise ExceptionGroup("本地实际责任收场失败", list(failures))
+  | ExceptionGroup: 本地实际责任收场失败 (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 46, in _run
+    |     await self._flow(context)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 224, in advance
+    |     await self._advance_device(context, device_id, candidates)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 331, in _advance_device
+    |     raise outcome
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/dispatch.py", line 82, in dispatch_ready
+    |     await handler(descriptor.action_id, runtime)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 3174, in _photo_handler
+    |     listing = await _listing_round(context, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 86, in owned
+    |     raise actual.error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +------------------------------------
+______ test_work_file_results_and_cursor_match_three_history_paths[False] ______
+  + Exception Group Traceback (most recent call last):
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_work_file_history.py", line 58, in test_work_file_results_and_cursor_match_three_history_paths
+  |     cfg = await _history_cleanup(environment)
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_work_file_runtime.py", line 36, in _history_cleanup
+  |     await _save_photos(cfg, owned, context, driver)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py", line 190, in _save_photos
+  |     await capture.settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 180, in settle
+  |     await CombinedLocalWork(tuple(self._devices.values())).settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 192, in settle
+  |     await self._settle(excluded_owner=None)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 215, in _settle
+  |     self._raise_failures(failures)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 274, in _raise_failures
+  |     raise ExceptionGroup("本地实际责任收场失败", list(failures))
+  | ExceptionGroup: 本地实际责任收场失败 (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 46, in _run
+    |     await self._flow(context)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 224, in advance
+    |     await self._advance_device(context, device_id, candidates)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 331, in _advance_device
+    |     raise outcome
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/dispatch.py", line 82, in dispatch_ready
+    |     await handler(descriptor.action_id, runtime)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 3174, in _photo_handler
+    |     listing = await _listing_round(context, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 86, in owned
+    |     raise actual.error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +------------------------------------
+______ test_work_file_results_and_cursor_match_three_history_paths[True] _______
+  + Exception Group Traceback (most recent call last):
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_work_file_history.py", line 58, in test_work_file_results_and_cursor_match_three_history_paths
+  |     cfg = await _history_cleanup(environment)
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_work_file_runtime.py", line 36, in _history_cleanup
+  |     await _save_photos(cfg, owned, context, driver)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py", line 190, in _save_photos
+  |     await capture.settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 180, in settle
+  |     await CombinedLocalWork(tuple(self._devices.values())).settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 192, in settle
+  |     await self._settle(excluded_owner=None)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 215, in _settle
+  |     self._raise_failures(failures)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 274, in _raise_failures
+  |     raise ExceptionGroup("本地实际责任收场失败", list(failures))
+  | ExceptionGroup: 本地实际责任收场失败 (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 46, in _run
+    |     await self._flow(context)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 224, in advance
+    |     await self._advance_device(context, device_id, candidates)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 331, in _advance_device
+    |     raise outcome
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/dispatch.py", line 82, in dispatch_ready
+    |     await handler(descriptor.action_id, runtime)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 3174, in _photo_handler
+    |     listing = await _listing_round(context, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 86, in owned
+    |     raise actual.error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +------------------------------------
+_____ test_cancel_origin_adopts_only_its_first_work_file_result[completed] _____
+  + Exception Group Traceback (most recent call last):
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_work_file_first_result.py", line 50, in test_cancel_origin_adopts_only_its_first_work_file_result
+  |     await _save_photos(cfg, owned, context, driver)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py", line 190, in _save_photos
+  |     await capture.settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 180, in settle
+  |     await CombinedLocalWork(tuple(self._devices.values())).settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 192, in settle
+  |     await self._settle(excluded_owner=None)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 215, in _settle
+  |     self._raise_failures(failures)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 274, in _raise_failures
+  |     raise ExceptionGroup("本地实际责任收场失败", list(failures))
+  | ExceptionGroup: 本地实际责任收场失败 (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 46, in _run
+    |     await self._flow(context)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 224, in advance
+    |     await self._advance_device(context, device_id, candidates)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 331, in _advance_device
+    |     raise outcome
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/dispatch.py", line 82, in dispatch_ready
+    |     await handler(descriptor.action_id, runtime)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 3174, in _photo_handler
+    |     listing = await _listing_round(context, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 86, in owned
+    |     raise actual.error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +------------------------------------
+______ test_cancel_origin_adopts_only_its_first_work_file_result[failed] _______
+  + Exception Group Traceback (most recent call last):
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_work_file_first_result.py", line 50, in test_cancel_origin_adopts_only_its_first_work_file_result
+  |     await _save_photos(cfg, owned, context, driver)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py", line 190, in _save_photos
+  |     await capture.settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 180, in settle
+  |     await CombinedLocalWork(tuple(self._devices.values())).settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 192, in settle
+  |     await self._settle(excluded_owner=None)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 215, in _settle
+  |     self._raise_failures(failures)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 274, in _raise_failures
+  |     raise ExceptionGroup("本地实际责任收场失败", list(failures))
+  | ExceptionGroup: 本地实际责任收场失败 (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 46, in _run
+    |     await self._flow(context)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 224, in advance
+    |     await self._advance_device(context, device_id, candidates)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 331, in _advance_device
+    |     raise outcome
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/dispatch.py", line 82, in dispatch_ready
+    |     await handler(descriptor.action_id, runtime)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 3174, in _photo_handler
+    |     listing = await _listing_round(context, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 86, in owned
+    |     raise actual.error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +------------------------------------
+______ test_cancel_origin_adopts_only_its_first_work_file_result[unknown] ______
+  + Exception Group Traceback (most recent call last):
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_work_file_first_result.py", line 50, in test_cancel_origin_adopts_only_its_first_work_file_result
+  |     await _save_photos(cfg, owned, context, driver)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py", line 190, in _save_photos
+  |     await capture.settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 180, in settle
+  |     await CombinedLocalWork(tuple(self._devices.values())).settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 192, in settle
+  |     await self._settle(excluded_owner=None)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 215, in _settle
+  |     self._raise_failures(failures)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 274, in _raise_failures
+  |     raise ExceptionGroup("本地实际责任收场失败", list(failures))
+  | ExceptionGroup: 本地实际责任收场失败 (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 46, in _run
+    |     await self._flow(context)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 224, in advance
+    |     await self._advance_device(context, device_id, candidates)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 331, in _advance_device
+    |     raise outcome
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/dispatch.py", line 82, in dispatch_ready
+    |     await handler(descriptor.action_id, runtime)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 3174, in _photo_handler
+    |     listing = await _listing_round(context, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 86, in owned
+    |     raise actual.error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +------------------------------------
+_______ test_cancel_first_cleanup_does_not_consume_unrelated_old_history _______
+  + Exception Group Traceback (most recent call last):
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_work_file_first_result.py", line 88, in test_cancel_first_cleanup_does_not_consume_unrelated_old_history
+  |     cfg = await _history_cleanup(environment)
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_work_file_runtime.py", line 36, in _history_cleanup
+  |     await _save_photos(cfg, owned, context, driver)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py", line 190, in _save_photos
+  |     await capture.settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 180, in settle
+  |     await CombinedLocalWork(tuple(self._devices.values())).settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 192, in settle
+  |     await self._settle(excluded_owner=None)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 215, in _settle
+  |     self._raise_failures(failures)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 274, in _raise_failures
+  |     raise ExceptionGroup("本地实际责任收场失败", list(failures))
+  | ExceptionGroup: 本地实际责任收场失败 (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 46, in _run
+    |     await self._flow(context)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 224, in advance
+    |     await self._advance_device(context, device_id, candidates)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 331, in _advance_device
+    |     raise outcome
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/dispatch.py", line 82, in dispatch_ready
+    |     await handler(descriptor.action_id, runtime)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 3174, in _photo_handler
+    |     listing = await _listing_round(context, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 86, in owned
+    |     raise actual.error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +------------------------------------
+________ test_cancel_waits_shared_actual_file_owner_before_any_terminal ________
+  + Exception Group Traceback (most recent call last):
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_work_file_first_result.py", line 112, in test_cancel_waits_shared_actual_file_owner_before_any_terminal
+  |     await _save_photos(cfg, owned, context, driver)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py", line 190, in _save_photos
+  |     await capture.settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 180, in settle
+  |     await CombinedLocalWork(tuple(self._devices.values())).settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 192, in settle
+  |     await self._settle(excluded_owner=None)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 215, in _settle
+  |     self._raise_failures(failures)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 274, in _raise_failures
+  |     raise ExceptionGroup("本地实际责任收场失败", list(failures))
+  | ExceptionGroup: 本地实际责任收场失败 (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 46, in _run
+    |     await self._flow(context)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 224, in advance
+    |     await self._advance_device(context, device_id, candidates)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 331, in _advance_device
+    |     raise outcome
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/dispatch.py", line 82, in dispatch_ready
+    |     await handler(descriptor.action_id, runtime)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 3174, in _photo_handler
+    |     listing = await _listing_round(context, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 86, in owned
+    |     raise actual.error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +------------------------------------
+__ test_cancel_of_terminal_obtain_keeps_its_old_history_out_of_first_cleanup ___
+  + Exception Group Traceback (most recent call last):
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_work_file_first_result.py", line 154, in test_cancel_of_terminal_obtain_keeps_its_old_history_out_of_first_cleanup
+  |     cfg = await _history_cleanup(environment)
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_work_file_runtime.py", line 36, in _history_cleanup
+  |     await _save_photos(cfg, owned, context, driver)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py", line 190, in _save_photos
+  |     await capture.settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 180, in settle
+  |     await CombinedLocalWork(tuple(self._devices.values())).settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 192, in settle
+  |     await self._settle(excluded_owner=None)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 215, in _settle
+  |     self._raise_failures(failures)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 274, in _raise_failures
+  |     raise ExceptionGroup("本地实际责任收场失败", list(failures))
+  | ExceptionGroup: 本地实际责任收场失败 (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 46, in _run
+    |     await self._flow(context)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 224, in advance
+    |     await self._advance_device(context, device_id, candidates)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 331, in _advance_device
+    |     raise outcome
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/dispatch.py", line 82, in dispatch_ready
+    |     await handler(descriptor.action_id, runtime)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 3174, in _photo_handler
+    |     listing = await _listing_round(context, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 86, in owned
+    |     raise actual.error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +------------------------------------
+__ test_cancel_obtain_whole_group_recovers_after_database_failure[projection] __
+  + Exception Group Traceback (most recent call last):
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py", line 86, in test_cancel_obtain_whole_group_recovers_after_database_failure
+  |     target = await _partial(environment)
+  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py", line 64, in _partial
+  |     await _save_photos(cfg, owned, context, driver)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py", line 190, in _save_photos
+  |     await capture.settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 180, in settle
+  |     await CombinedLocalWork(tuple(self._devices.values())).settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 192, in settle
+  |     await self._settle(excluded_owner=None)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 215, in _settle
+  |     self._raise_failures(failures)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 274, in _raise_failures
+  |     raise ExceptionGroup("本地实际责任收场失败", list(failures))
+  | ExceptionGroup: 本地实际责任收场失败 (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 46, in _run
+    |     await self._flow(context)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 224, in advance
+    |     await self._advance_device(context, device_id, candidates)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 331, in _advance_device
+    |     raise outcome
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/dispatch.py", line 82, in dispatch_ready
+    |     await handler(descriptor.action_id, runtime)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 3174, in _photo_handler
+    |     listing = await _listing_round(context, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 86, in owned
+    |     raise actual.error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +------------------------------------
+_ test_cancel_obtain_whole_group_recovers_after_database_failure[commit_before] _
+  + Exception Group Traceback (most recent call last):
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py", line 86, in test_cancel_obtain_whole_group_recovers_after_database_failure
+  |     target = await _partial(environment)
+  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py", line 64, in _partial
+  |     await _save_photos(cfg, owned, context, driver)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py", line 190, in _save_photos
+  |     await capture.settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 180, in settle
+  |     await CombinedLocalWork(tuple(self._devices.values())).settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 192, in settle
+  |     await self._settle(excluded_owner=None)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 215, in _settle
+  |     self._raise_failures(failures)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 274, in _raise_failures
+  |     raise ExceptionGroup("本地实际责任收场失败", list(failures))
+  | ExceptionGroup: 本地实际责任收场失败 (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 46, in _run
+    |     await self._flow(context)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 224, in advance
+    |     await self._advance_device(context, device_id, candidates)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 331, in _advance_device
+    |     raise outcome
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/dispatch.py", line 82, in dispatch_ready
+    |     await handler(descriptor.action_id, runtime)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 3174, in _photo_handler
+    |     listing = await _listing_round(context, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 86, in owned
+    |     raise actual.error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +------------------------------------
+_ test_cancel_obtain_whole_group_recovers_after_database_failure[commit_after] _
+  + Exception Group Traceback (most recent call last):
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py", line 86, in test_cancel_obtain_whole_group_recovers_after_database_failure
+  |     target = await _partial(environment)
+  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py", line 64, in _partial
+  |     await _save_photos(cfg, owned, context, driver)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py", line 190, in _save_photos
+  |     await capture.settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 180, in settle
+  |     await CombinedLocalWork(tuple(self._devices.values())).settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 192, in settle
+  |     await self._settle(excluded_owner=None)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 215, in _settle
+  |     self._raise_failures(failures)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 274, in _raise_failures
+  |     raise ExceptionGroup("本地实际责任收场失败", list(failures))
+  | ExceptionGroup: 本地实际责任收场失败 (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 46, in _run
+    |     await self._flow(context)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 224, in advance
+    |     await self._advance_device(context, device_id, candidates)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 331, in _advance_device
+    |     raise outcome
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/dispatch.py", line 82, in dispatch_ready
+    |     await handler(descriptor.action_id, runtime)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 3174, in _photo_handler
+    |     listing = await _listing_round(context, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 86, in owned
+    |     raise actual.error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +------------------------------------
+_______ test_cancel_obtain_original_key_rejects_changed_request[target] ________
+  + Exception Group Traceback (most recent call last):
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py", line 118, in test_cancel_obtain_original_key_rejects_changed_request
+  |     target = await _partial(environment)
+  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py", line 64, in _partial
+  |     await _save_photos(cfg, owned, context, driver)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py", line 190, in _save_photos
+  |     await capture.settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 180, in settle
+  |     await CombinedLocalWork(tuple(self._devices.values())).settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 192, in settle
+  |     await self._settle(excluded_owner=None)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 215, in _settle
+  |     self._raise_failures(failures)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 274, in _raise_failures
+  |     raise ExceptionGroup("本地实际责任收场失败", list(failures))
+  | ExceptionGroup: 本地实际责任收场失败 (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 46, in _run
+    |     await self._flow(context)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 224, in advance
+    |     await self._advance_device(context, device_id, candidates)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 331, in _advance_device
+    |     raise outcome
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/dispatch.py", line 82, in dispatch_ready
+    |     await handler(descriptor.action_id, runtime)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 3174, in _photo_handler
+    |     listing = await _listing_round(context, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 86, in owned
+    |     raise actual.error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +------------------------------------
+________ test_cancel_obtain_original_key_rejects_changed_request[time] _________
+  + Exception Group Traceback (most recent call last):
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py", line 118, in test_cancel_obtain_original_key_rejects_changed_request
+  |     target = await _partial(environment)
+  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py", line 64, in _partial
+  |     await _save_photos(cfg, owned, context, driver)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py", line 190, in _save_photos
+  |     await capture.settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 180, in settle
+  |     await CombinedLocalWork(tuple(self._devices.values())).settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 192, in settle
+  |     await self._settle(excluded_owner=None)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 215, in _settle
+  |     self._raise_failures(failures)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 274, in _raise_failures
+  |     raise ExceptionGroup("本地实际责任收场失败", list(failures))
+  | ExceptionGroup: 本地实际责任收场失败 (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 46, in _run
+    |     await self._flow(context)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 224, in advance
+    |     await self._advance_device(context, device_id, candidates)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 331, in _advance_device
+    |     raise outcome
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/dispatch.py", line 82, in dispatch_ready
+    |     await handler(descriptor.action_id, runtime)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 3174, in _photo_handler
+    |     listing = await _listing_round(context, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 86, in owned
+    |     raise actual.error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +------------------------------------
+_______ test_cancel_obtain_original_key_rejects_changed_request[members] _______
+  + Exception Group Traceback (most recent call last):
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py", line 118, in test_cancel_obtain_original_key_rejects_changed_request
+  |     target = await _partial(environment)
+  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py", line 64, in _partial
+  |     await _save_photos(cfg, owned, context, driver)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py", line 190, in _save_photos
+  |     await capture.settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 180, in settle
+  |     await CombinedLocalWork(tuple(self._devices.values())).settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 192, in settle
+  |     await self._settle(excluded_owner=None)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 215, in _settle
+  |     self._raise_failures(failures)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 274, in _raise_failures
+  |     raise ExceptionGroup("本地实际责任收场失败", list(failures))
+  | ExceptionGroup: 本地实际责任收场失败 (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 46, in _run
+    |     await self._flow(context)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 224, in advance
+    |     await self._advance_device(context, device_id, candidates)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 331, in _advance_device
+    |     raise outcome
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/dispatch.py", line 82, in dispatch_ready
+    |     await handler(descriptor.action_id, runtime)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 3174, in _photo_handler
+    |     listing = await _listing_round(context, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 86, in owned
+    |     raise actual.error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +------------------------------------
+___ test_cancel_obtain_original_key_keeps_group_after_file_lifecycle_changes ___
+  + Exception Group Traceback (most recent call last):
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py", line 133, in test_cancel_obtain_original_key_keeps_group_after_file_lifecycle_changes
+  |     target = await _partial(environment)
+  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py", line 64, in _partial
+  |     await _save_photos(cfg, owned, context, driver)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py", line 190, in _save_photos
+  |     await capture.settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 180, in settle
+  |     await CombinedLocalWork(tuple(self._devices.values())).settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 192, in settle
+  |     await self._settle(excluded_owner=None)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 215, in _settle
+  |     self._raise_failures(failures)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 274, in _raise_failures
+  |     raise ExceptionGroup("本地实际责任收场失败", list(failures))
+  | ExceptionGroup: 本地实际责任收场失败 (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 46, in _run
+    |     await self._flow(context)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 224, in advance
+    |     await self._advance_device(context, device_id, candidates)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 331, in _advance_device
+    |     raise outcome
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/dispatch.py", line 82, in dispatch_ready
+    |     await handler(descriptor.action_id, runtime)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 3174, in _photo_handler
+    |     listing = await _listing_round(context, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 86, in owned
+    |     raise actual.error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +------------------------------------
+______ test_cancel_obtain_original_key_rejects_other_partial_transaction _______
+  + Exception Group Traceback (most recent call last):
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py", line 149, in test_cancel_obtain_original_key_rejects_other_partial_transaction
+  |     target = await _partial(environment)
+  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py", line 64, in _partial
+  |     await _save_photos(cfg, owned, context, driver)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py", line 190, in _save_photos
+  |     await capture.settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 180, in settle
+  |     await CombinedLocalWork(tuple(self._devices.values())).settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 192, in settle
+  |     await self._settle(excluded_owner=None)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 215, in _settle
+  |     self._raise_failures(failures)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 274, in _raise_failures
+  |     raise ExceptionGroup("本地实际责任收场失败", list(failures))
+  | ExceptionGroup: 本地实际责任收场失败 (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 46, in _run
+    |     await self._flow(context)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 224, in advance
+    |     await self._advance_device(context, device_id, candidates)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 331, in _advance_device
+    |     raise outcome
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/dispatch.py", line 82, in dispatch_ready
+    |     await handler(descriptor.action_id, runtime)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 3174, in _photo_handler
+    |     listing = await _listing_round(context, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 86, in owned
+    |     raise actual.error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +------------------------------------
+_____ test_cancel_obtain_unbuilt_items_end_without_new_delivery_or_attempt _____
+  + Exception Group Traceback (most recent call last):
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py", line 166, in test_cancel_obtain_unbuilt_items_end_without_new_delivery_or_attempt
+  |     await _save_photos(cfg, owned, context, driver)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py", line 190, in _save_photos
+  |     await capture.settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 180, in settle
+  |     await CombinedLocalWork(tuple(self._devices.values())).settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 192, in settle
+  |     await self._settle(excluded_owner=None)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 215, in _settle
+  |     self._raise_failures(failures)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 274, in _raise_failures
+  |     raise ExceptionGroup("本地实际责任收场失败", list(failures))
+  | ExceptionGroup: 本地实际责任收场失败 (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 46, in _run
+    |     await self._flow(context)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 224, in advance
+    |     await self._advance_device(context, device_id, candidates)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 331, in _advance_device
+    |     raise outcome
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/dispatch.py", line 82, in dispatch_ready
+    |     await handler(descriptor.action_id, runtime)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 3174, in _photo_handler
+    |     listing = await _listing_round(context, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 86, in owned
+    |     raise actual.error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +------------------------------------
+_ test_cancel_obtain_keeps_original_unfinished_read_and_all_source_protection __
+  + Exception Group Traceback (most recent call last):
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py", line 191, in test_cancel_obtain_keeps_original_unfinished_read_and_all_source_protection
+  |     await _save_photos(cfg, owned, context, driver)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py", line 190, in _save_photos
+  |     await capture.settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 180, in settle
+  |     await CombinedLocalWork(tuple(self._devices.values())).settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 192, in settle
+  |     await self._settle(excluded_owner=None)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 215, in _settle
+  |     self._raise_failures(failures)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 274, in _raise_failures
+  |     raise ExceptionGroup("本地实际责任收场失败", list(failures))
+  | ExceptionGroup: 本地实际责任收场失败 (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 46, in _run
+    |     await self._flow(context)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 224, in advance
+    |     await self._advance_device(context, device_id, candidates)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 331, in _advance_device
+    |     raise outcome
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/dispatch.py", line 82, in dispatch_ready
+    |     await handler(descriptor.action_id, runtime)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 3174, in _photo_handler
+    |     listing = await _listing_round(context, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 86, in owned
+    |     raise actual.error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +------------------------------------
+______ test_cancel_obtain_preserves_actual_publication_boundary[prepared] ______
+  + Exception Group Traceback (most recent call last):
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py", line 227, in test_cancel_obtain_preserves_actual_publication_boundary
+  |     await _save_photos(cfg, owned, context, driver)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py", line 190, in _save_photos
+  |     await capture.settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 180, in settle
+  |     await CombinedLocalWork(tuple(self._devices.values())).settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 192, in settle
+  |     await self._settle(excluded_owner=None)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 215, in _settle
+  |     self._raise_failures(failures)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 274, in _raise_failures
+  |     raise ExceptionGroup("本地实际责任收场失败", list(failures))
+  | ExceptionGroup: 本地实际责任收场失败 (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 46, in _run
+    |     await self._flow(context)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 224, in advance
+    |     await self._advance_device(context, device_id, candidates)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 331, in _advance_device
+    |     raise outcome
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/dispatch.py", line 82, in dispatch_ready
+    |     await handler(descriptor.action_id, runtime)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 3174, in _photo_handler
+    |     listing = await _listing_round(context, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 86, in owned
+    |     raise actual.error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +------------------------------------
+_______ test_cancel_obtain_preserves_actual_publication_boundary[moving] _______
+  + Exception Group Traceback (most recent call last):
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py", line 227, in test_cancel_obtain_preserves_actual_publication_boundary
+  |     await _save_photos(cfg, owned, context, driver)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py", line 190, in _save_photos
+  |     await capture.settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 180, in settle
+  |     await CombinedLocalWork(tuple(self._devices.values())).settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 192, in settle
+  |     await self._settle(excluded_owner=None)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 215, in _settle
+  |     self._raise_failures(failures)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 274, in _raise_failures
+  |     raise ExceptionGroup("本地实际责任收场失败", list(failures))
+  | ExceptionGroup: 本地实际责任收场失败 (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 46, in _run
+    |     await self._flow(context)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 224, in advance
+    |     await self._advance_device(context, device_id, candidates)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 331, in _advance_device
+    |     raise outcome
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/dispatch.py", line 82, in dispatch_ready
+    |     await handler(descriptor.action_id, runtime)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 3174, in _photo_handler
+    |     listing = await _listing_round(context, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 86, in owned
+    |     raise actual.error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +------------------------------------
+_____ test_cancel_obtain_preserves_actual_publication_boundary[published] ______
+  + Exception Group Traceback (most recent call last):
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py", line 227, in test_cancel_obtain_preserves_actual_publication_boundary
+  |     await _save_photos(cfg, owned, context, driver)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py", line 190, in _save_photos
+  |     await capture.settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 180, in settle
+  |     await CombinedLocalWork(tuple(self._devices.values())).settle()
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 192, in settle
+  |     await self._settle(excluded_owner=None)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 215, in _settle
+  |     self._raise_failures(failures)
+  |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 274, in _raise_failures
+  |     raise ExceptionGroup("本地实际责任收场失败", list(failures))
+  | ExceptionGroup: 本地实际责任收场失败 (2 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 46, in _run
+    |     await self._flow(context)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 224, in advance
+    |     await self._advance_device(context, device_id, candidates)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/flows.py", line 331, in _advance_device
+    |     raise outcome
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/dispatch.py", line 82, in dispatch_ready
+    |     await handler(descriptor.action_id, runtime)
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 3174, in _photo_handler
+    |     listing = await _listing_round(context, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 86, in owned
+    |     raise actual.error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 236, in collect
+    |     await owner.settle()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 92, in settle
+    |     self._consume()
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/bootstrap/background_flow.py", line 42, in _consume
+    |     raise error
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/operations/owned_calls.py", line 57, in run
+    |     value = await function(*args, **kwargs)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5197, in _listing_round
+    |     listing = await _listing_round_input(runtime, action_id)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5295, in _listing_round_input
+    |     return await _continue_result_scan(runtime, pending)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/handlers.py", line 5066, in _continue_result_scan
+    |     if not await advance_result_scan(pending, runtime=runtime,
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/capture/result_scans.py", line 117, in advance_result_scan
+    |     page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | TypeError: ResultsDouble.list_page() got an unexpected keyword argument 'reading_context'
+    +------------------------------------
+=========================== short test summary info ============================
+FAILED apps/camctl/tests/integration/bootstrap/test_work_file_runtime.py::test_default_run_keeps_one_budget_across_rounds_and_resumes_next_run
+FAILED apps/camctl/tests/integration/bootstrap/test_work_file_runtime.py::test_submit_keeps_work_files_and_history_position
+FAILED apps/camctl/tests/integration/bootstrap/test_work_file_runtime.py::test_clock_restricted_run_keeps_ordinary_work_cleanup
+FAILED apps/camctl/tests/integration/bootstrap/test_work_file_history.py::test_work_file_results_and_cursor_match_three_history_paths[False]
+FAILED apps/camctl/tests/integration/bootstrap/test_work_file_history.py::test_work_file_results_and_cursor_match_three_history_paths[True]
+FAILED apps/camctl/tests/integration/bootstrap/test_cancel_work_file_first_result.py::test_cancel_origin_adopts_only_its_first_work_file_result[completed]
+FAILED apps/camctl/tests/integration/bootstrap/test_cancel_work_file_first_result.py::test_cancel_origin_adopts_only_its_first_work_file_result[failed]
+FAILED apps/camctl/tests/integration/bootstrap/test_cancel_work_file_first_result.py::test_cancel_origin_adopts_only_its_first_work_file_result[unknown]
+FAILED apps/camctl/tests/integration/bootstrap/test_cancel_work_file_first_result.py::test_cancel_first_cleanup_does_not_consume_unrelated_old_history
+FAILED apps/camctl/tests/integration/bootstrap/test_cancel_work_file_first_result.py::test_cancel_waits_shared_actual_file_owner_before_any_terminal
+FAILED apps/camctl/tests/integration/bootstrap/test_cancel_work_file_first_result.py::test_cancel_of_terminal_obtain_keeps_its_old_history_out_of_first_cleanup
+FAILED apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py::test_cancel_obtain_whole_group_recovers_after_database_failure[projection]
+FAILED apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py::test_cancel_obtain_whole_group_recovers_after_database_failure[commit_before]
+FAILED apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py::test_cancel_obtain_whole_group_recovers_after_database_failure[commit_after]
+FAILED apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py::test_cancel_obtain_original_key_rejects_changed_request[target]
+FAILED apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py::test_cancel_obtain_original_key_rejects_changed_request[time]
+FAILED apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py::test_cancel_obtain_original_key_rejects_changed_request[members]
+FAILED apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py::test_cancel_obtain_original_key_keeps_group_after_file_lifecycle_changes
+FAILED apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py::test_cancel_obtain_original_key_rejects_other_partial_transaction
+FAILED apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py::test_cancel_obtain_unbuilt_items_end_without_new_delivery_or_attempt
+FAILED apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py::test_cancel_obtain_keeps_original_unfinished_read_and_all_source_protection
+FAILED apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py::test_cancel_obtain_preserves_actual_publication_boundary[prepared]
+FAILED apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py::test_cancel_obtain_preserves_actual_publication_boundary[moving]
+FAILED apps/camctl/tests/integration/bootstrap/test_cancel_obtain_settlement_transactions.py::test_cancel_obtain_preserves_actual_publication_boundary[published]
+24 failed, 3 passed in 4.46s

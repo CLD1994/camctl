@@ -87,13 +87,16 @@ def test_authoritative_v3_structure_is_accepted_and_legacy_v2_needs_no_new_table
 
 
 def test_real_sql_comments_preserve_constraints_and_quoted_comment_text():
-    from camctl.persistence.recovery_structure import _tokens
+    from camctl.persistence.recovery_structure import verify_recovery_structure
     sql = create_statement()
     commented = sql.replace("CREATE TABLE", "CREATE /* valid comment */ TABLE").replace("state_json TEXT", "state_json -- valid line comment\n TEXT")
     with sqlite3.connect(":memory:") as first, sqlite3.connect(":memory:") as second:
         first.execute(sql)
         second.execute(commented)
-        actual = second.execute("SELECT sql FROM sqlite_master WHERE name='software_recoveries'").fetchone()[0]
-        expected = first.execute("SELECT sql FROM sqlite_master WHERE name='software_recoveries'").fetchone()[0]
-        assert _tokens(actual) == _tokens(expected)
-    assert _tokens("SELECT '/* quoted */ -- text', \"name/*--*/\" -- dropped\n") == ("select", "'/* quoted */ -- text'", ",", '"name/*--*/"')
+        verify_recovery_structure(first)
+        verify_recovery_structure(second)
+    quoted = sql.replace("= 'object'", "= 'object/* quoted */ -- text'")
+    with sqlite3.connect(":memory:") as connection:
+        connection.execute(quoted)
+        with pytest.raises(ValueError,match='结构约束'):
+            verify_recovery_structure(connection)

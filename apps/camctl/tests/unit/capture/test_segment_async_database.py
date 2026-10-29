@@ -116,7 +116,7 @@ async def test_terminal_inspection_cancel_waits_for_save_and_applies_pending(mon
     entered, release = asyncio.Event(), asyncio.Event()
     async def write(callback, *, key, **kwargs):
         held = state.pending_segment_inspection_results[3]
-        assert held[1] == key
+        assert held.key == key
         entered.set()
         await release.wait()
         return callback(owned)
@@ -161,6 +161,6 @@ async def test_unknown_terminal_inspection_retains_original_request_and_key(monk
     assert not await action6_recovery.finalize_pending_action6_inspections(
         state, 7, reason='source_terminal')
     assert state.pending_segment_inspection_results[3] == original
-    assert state.pending_segment_inspection_results[3][0] is original[0]
+    assert state.pending_segment_inspection_results[3].request is original.request
     calls = repository.save_result.call_args_list
-    assert calls[0].args == calls[1].args == (*original, owned)
+    assert calls[0].args == calls[1].args == (original.request, original.key, owned)

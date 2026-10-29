@@ -5,13 +5,17 @@ from decimal import Decimal
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import create_autospec
 
 import pytest
 import pytest_asyncio
 
+from camctl.bootstrap.capture_assembly import DriverResultListing
 from camctl.capture.handlers import capture_handler
 from camctl.capture.media import RecordingFailure
+from camctl.devices.bindings import DeviceBinding
 from camctl.devices.evidence import DeviceObservation
+from camctl.devices.ports import DeviceCallResult, ResultDriver
 from camctl.operations.attempts import AttemptConfig
 from camctl.operations.models import AttemptStatus, CallOutcome, EffectState, EvidenceValue, Settlement, SettlementBasis
 from camctl.outputs.catalog import FileReference, OutputCatalogFacts, OutputDraft, OutputKind
@@ -20,21 +24,26 @@ from camctl.persistence.repositories.capture import CaptureRepository, FinishDis
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.transaction import saved_transaction_events
 
-from .result_consumer_fixtures import consumer_world
+from .result_consumer_fixtures import RESULT_EVIDENCE
+from ..support.binding_cases import (
+    binding_case, close_binding_databases, fresh_binding_runtime,
+)
+from ..support.result_cases import result_case, result_case_for
 from .test_binding_failure_keeps_timelapse_files import _BindingSaveSpy, _assert_joint_binding_finish
 from .test_cancel_timelapse_exhaustion_files import _apply_public_cancel
 from .test_closed_result_local_consumption import (
-    _ClosedBeforeBusiness, _capture_facts, _rows, _unconfirmed_error, fresh_closed_runtime,
+    _ClosedBeforeBusiness, _capture_facts, _rows, _unconfirmed_error,
 )
-from .test_result_consumer_saves import _result_port
 
 
 pytestmark = pytest.mark.asyncio
 
 
 async def _paired_capture_world(tmp_path, monkeypatch, *, incomplete_a=False):
-    owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, "timelapse", independent_activity=True)
+    case = result_case_for()
+    owned, runtime, action_id, handler = await case.world(
+        tmp_path, "timelapse", independent_activity=True, result_page_contract=False,
+        assembly_options={"check_config": AttemptConfig(1, Decimal("1.25"), Decimal(0))})
     try:
         activity_id, = owned.connection.execute(
             "SELECT id FROM device_activities WHERE action_id=?", (action_id,)).fetchone()
@@ -55,8 +64,10 @@ async def _paired_capture_world(tmp_path, monkeypatch, *, incomplete_a=False):
             settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("results_returned", 1, {})),
             observations=(DeviceObservation("result_files_listed", 1, {
                 "activity_id": str(activity_id), "entries": entries}),))
-        result_driver = _result_port(runtime, actual)
-        runtime.check_config = AttemptConfig(1, Decimal("1.25"), Decimal(0))
+        result_driver = create_autospec(ResultDriver, instance=True)
+        result_driver.list_results.return_value = DeviceCallResult.from_outcome(actual)
+        case.results.delegate = DriverResultListing(
+            result_driver, DeviceBinding("cam-1", "camctl-adb"), RESULT_EVIDENCE)
         advance = capture_handler(handler)
         await advance(action_id, runtime)
         run_id, status, used, retry = owned.connection.execute(
@@ -87,7 +98,7 @@ async def _paired_capture_world(tmp_path, monkeypatch, *, incomplete_a=False):
             receipt = original_close(repository, request, key, save_owned)
             assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
             closed.append((request, key))
-            raise _ClosedBeforeBusiness
+            return replace(receipt, handoff_error=_ClosedBeforeBusiness())
 
         formed_at = runtime.wall_us()
         with monkeypatch.context() as patch:
@@ -111,13 +122,18 @@ async def _paired_capture_world(tmp_path, monkeypatch, *, incomplete_a=False):
         assert world.close_events is not None
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (0,)
     finally:
-        owned.connection.close()
+        try:
+            await case.close()
+        finally:
+            owned.connection.close()
+            await close_binding_databases()
     reopened = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
     try:
-        next_runtime, methods = fresh_closed_runtime(reopened, world, "missing")
+        next_runtime, methods = (await fresh_binding_runtime(reopened, world, "missing"))
         return world, reopened, next_runtime, methods
     except BaseException:
         reopened.connection.close()
+        await close_binding_databases()
         raise
 
 
@@ -181,6 +197,7 @@ async def saved_pair(tmp_path, monkeypatch):
             "SELECT output_id,original_output_id FROM output_origins").fetchall() == [(1, 3)]
         _assert_source_preserved(owned, world, methods)
         world.request, world.key, world.response = request, key, receipt.value
+        await close_binding_databases()
         owned.connection.close()
         reopened = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
         yield world, reopened
@@ -188,6 +205,7 @@ async def saved_pair(tmp_path, monkeypatch):
         owned.connection.close()
         if reopened is not None:
             reopened.connection.close()
+        await close_binding_databases()
 
 
 async def test_preview_first_request_reuses_original_output_id_order(saved_pair):
@@ -307,3 +325,4 @@ async def test_incomplete_original_excludes_its_preview_and_keeps_other_complete
         assert len(saves.calls) == 1
     finally:
         owned.connection.close()
+        await close_binding_databases()

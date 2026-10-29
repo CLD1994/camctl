@@ -1,0 +1,2302 @@
+{
+  "date": "2026-10-25",
+  "scope": "ID19 independent contract, test premise, production discovery and original world read-only audit",
+  "verdict": "confirmed_production_defect_under_legal_schedule",
+  "historical_exact_schedule": "inferred_not_directly_recorded",
+  "strong_assertion_or_illegal_fixture_found": false,
+  "same_run_requirement": {
+    "confirmed": true,
+    "conditions": [
+      "first cleanup responsibility forms in this normal run",
+      "copy no longer needed",
+      "related actual operations stopped",
+      "no actual cleanup check yet for this stable file identity"
+    ],
+    "authority": [
+      "docs/architecture/file-handoff.md:173-195",
+      "docs/superpowers/specs/2026-10-23-video-result-modes-and-segmentation-design.md:172-193",
+      "docs/camctl/database/segments.md:29,61,101-103"
+    ]
+  },
+  "budget_counterexample": {
+    "allowed_in_general": true,
+    "condition": "actual check already performed in this run; later purpose change does not reopen opportunity",
+    "not_applicable_here": "new inputs created after run startup; early _add_owned_files only reads eligibility, does not call clean_one, mutate processed or advance cleanup cursor; no cancellation entry in this node"
+  },
+  "root_cause": {
+    "confirmed_implementation_gap": "waiter terminal discovery follows waiter ownership only; source-owned inspection inputs are not rediscovered",
+    "files": [
+      "apps/camctl/src/camctl/bootstrap/work_file_assembly.py:184-235",
+      "apps/camctl/src/camctl/persistence/repositories/outputs.py:5070-5168",
+      "apps/camctl/src/camctl/outputs/work_files.py:659-696"
+    ]
+  },
+  "per_copy_scope": {
+    "third_inspection_state": "UNCONFIRMED",
+    "third_copy_used_by_bound_deliveries": false,
+    "third_copy_default_scope_member": false,
+    "required_contract": "after original inspection and source commit plus actual operation settlement, clean without waiting for unrelated H waiters",
+    "implementation_mismatch": "_load_work_file_facts applies all_bound_waiters_terminal(source,H) to every inspection copy"
+  },
+  "test_premises": {
+    "ordinary_unknown_prefix_boundary": "none",
+    "ordinary_repository_observer_enabled": false,
+    "ordinary_read_gates_enabled": false,
+    "native_missing_jpeg_repository_observer_enabled": false,
+    "native_missing_jpeg_read_gates_enabled": false,
+    "original_database_business_row_injection_found": false,
+    "clock_changes": "business clock ports only, not persisted outcomes",
+    "media": "real generated H264; independent duration/frame probes; injected third probe exit86 is a legal unknown metric"
+  },
+  "probe": {
+    "program": "/tmp/camctl-contract-cleanup-probe.py",
+    "result": "/tmp/camctl-contract-cleanup-probe.json",
+    "type": "read-only saved original database with real installed production discovery",
+    "conditional_schedule": {
+      "schedule_assumption": "H was consumed while bound waiters were RUNNING; no actual cleanup attempt was made. Same-run inputs were outside initial historical ceiling 0.",
+      "before": {
+        "first_files": [],
+        "processed": {},
+        "discovery_after": 174
+      },
+      "after_waiter_events": {
+        "first_files": [],
+        "processed": {},
+        "discovery_after": 263
+      },
+      "missed_inputs": [
+        1,
+        2,
+        3
+      ],
+      "after_explicit_source_rediscovery": {
+        "first_files": [
+          1,
+          2,
+          3
+        ],
+        "processed": {}
+      }
+    },
+    "limitation": "sets runtime cursor to source H to test an allowed schedule; does not reconstruct original run memory or execute cleanup"
+  },
+  "source_identity": {
+    "checkout_head": "100738f75217afc2a262991172dcfca755988ce7",
+    "diagnostic": "1973dc05c0d517a890b92e5dcfc1ee32da9266dd",
+    "whole_file_sha256": {
+      "apps/camctl/src/camctl/bootstrap/work_file_assembly.py": {
+        "diagnostic": "bc701935fb9ba2370f8f32fd5c4a8b53978a5838a88770146d1148715eda0c34",
+        "checkout": "bc701935fb9ba2370f8f32fd5c4a8b53978a5838a88770146d1148715eda0c34"
+      },
+      "apps/camctl/src/camctl/outputs/work_files.py": {
+        "diagnostic": "d5d1d41e7098fd7cae0ccdea2d8cfb99baaf452fe10444b87c445b991773bca1",
+        "checkout": "d5d1d41e7098fd7cae0ccdea2d8cfb99baaf452fe10444b87c445b991773bca1"
+      },
+      "apps/camctl/src/camctl/outputs/segment_copy_reuse.py": {
+        "diagnostic": "7964ef6910cc627fdadf7f4ac203548102434a23938d8c77c915d0d85983fa62",
+        "checkout": "7964ef6910cc627fdadf7f4ac203548102434a23938d8c77c915d0d85983fa62"
+      },
+      "apps/camctl/src/camctl/persistence/repositories/outputs.py": {
+        "diagnostic": "346bdc55487e34c0142d4438b9b5ecd0502f76622f8ae16809cf52b3df3a0f77",
+        "checkout": "1ca5d5b13b14876884abcdc31754c3210c5b56cbaa271ee701400754eaa56884"
+      },
+      "tests/integration/test_action6_segmented_recovery_roundtrip.py": {
+        "diagnostic": "4b88c1c41acc1d200cb236a65be23262cc13200018f993ae89e53060df25898d",
+        "checkout": "4b88c1c41acc1d200cb236a65be23262cc13200018f993ae89e53060df25898d"
+      }
+    },
+    "selected_function_sha256": {
+      "_load_work_file_facts": {
+        "diagnostic": {
+          "first_line": 5073,
+          "last_line": 5171,
+          "sha256": "3d7585b3689a111053ba68a5a59227e910630fc58db5a6e933542d2bd536ecea"
+        },
+        "checkout": {
+          "first_line": 5070,
+          "last_line": 5168,
+          "sha256": "3d7585b3689a111053ba68a5a59227e910630fc58db5a6e933542d2bd536ecea"
+        }
+      },
+      "_cleanup_candidate_source": {
+        "diagnostic": {
+          "first_line": 6095,
+          "last_line": 6105,
+          "sha256": "d1520b334155ceb22f0cee1d0b5c0cd0ea1b4914a8621724d8a6a0f618fd6fff"
+        },
+        "checkout": {
+          "first_line": 6092,
+          "last_line": 6102,
+          "sha256": "d1520b334155ceb22f0cee1d0b5c0cd0ea1b4914a8621724d8a6a0f618fd6fff"
+        }
+      }
+    },
+    "loaded_package": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl",
+    "loaded_package_sha256": {
+      "apps/camctl/src/camctl/bootstrap/work_file_assembly.py": "bc701935fb9ba2370f8f32fd5c4a8b53978a5838a88770146d1148715eda0c34",
+      "apps/camctl/src/camctl/outputs/work_files.py": "d5d1d41e7098fd7cae0ccdea2d8cfb99baaf452fe10444b87c445b991773bca1",
+      "apps/camctl/src/camctl/outputs/segment_copy_reuse.py": "7964ef6910cc627fdadf7f4ac203548102434a23938d8c77c915d0d85983fa62",
+      "apps/camctl/src/camctl/persistence/repositories/outputs.py": "346bdc55487e34c0142d4438b9b5ecd0502f76622f8ae16809cf52b3df3a0f77"
+    }
+  },
+  "confirmed": [
+    "public contract requires timely first cleanup in same normal run when not already checked",
+    "test input construction is through real init/submit and legal ADB/clock seams",
+    "original historical run ended with three unused REQUIRED/NOT_NEEDED input files and no active file attempts",
+    "real production discovery misses all three after cursor consumed source H",
+    "explicit source rediscovery sees all three immediately",
+    "current passing world includes separate run call5 and completed cleanup",
+    "third unconfirmed out-of-scope copy has no bound consumers"
+  ],
+  "inferred": [
+    "historical failed run consumed source H before waiter terminal; exact runtime state not saved"
+  ],
+  "unresolved": [
+    "precise historical _discovery_after/_first_files/processed values",
+    "post-fix dynamic proof of actual source/target/tool settlement and one-attempt rule"
+  ],
+  "next_minimal_probe": "after authorization, deterministic component integration with source-H consumption gate, two H waiters and same run identity; verify per-copy release, actual deletion and no repeated check",
+  "worlds": {
+    "historical": {
+      "world": "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/test_installed_action6_ordinar1/action6-record",
+      "database": "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/test_installed_action6_ordinar1/action6-record/deployment/state.db",
+      "readonly": true,
+      "actions": [
+        {
+          "id": 1,
+          "name": "capture",
+          "status": 3,
+          "created_event_id": 2,
+          "last_event_id": 174
+        },
+        {
+          "id": 2,
+          "name": "pre-default-a",
+          "status": 3,
+          "created_event_id": 27,
+          "last_event_id": 250
+        },
+        {
+          "id": 3,
+          "name": "pre-default-b",
+          "status": 3,
+          "created_event_id": 41,
+          "last_event_id": 258
+        }
+      ],
+      "publication": {
+        "transaction_id": 130,
+        "event_id": 174
+      },
+      "bound_waiters_at_h": [
+        {
+          "action_id": 2,
+          "selection_id": 1,
+          "action_status_at_h": 2,
+          "selection_status_at_h": 1
+        },
+        {
+          "action_id": 3,
+          "selection_id": 2,
+          "action_status_at_h": 2,
+          "selection_status_at_h": 1
+        }
+      ],
+      "inputs": [
+        {
+          "id": 1,
+          "owner_action_id": 1,
+          "purpose": 2,
+          "relative_path": "recording-inputs/1.mp4",
+          "retention_state": 1,
+          "cleanup_state": 1,
+          "created_event_id": 110,
+          "last_event_id": 119
+        },
+        {
+          "id": 2,
+          "owner_action_id": 1,
+          "purpose": 2,
+          "relative_path": "recording-inputs/2.mp4",
+          "retention_state": 1,
+          "cleanup_state": 1,
+          "created_event_id": 129,
+          "last_event_id": 138
+        },
+        {
+          "id": 3,
+          "owner_action_id": 1,
+          "purpose": 2,
+          "relative_path": "recording-inputs/3.mp4",
+          "retention_state": 1,
+          "cleanup_state": 1,
+          "created_event_id": 145,
+          "last_event_id": 154
+        }
+      ],
+      "inspections": [
+        {
+          "id": 1,
+          "action_id": 1,
+          "member_id": 2,
+          "state": 2,
+          "result_event_id": 126,
+          "result_json": "{\"metric\":{\"metric\":\"duration_s\",\"value\":18.000000,\"reason\":null},\"probe\":{\"duration_s\":18.000000,\"error\":null,\"format_name\":\"mov,mp4,m4a,3gp,3g2,mj2\",\"streams\":[{\"index\":0,\"codec_type\":\"video\",\"codec_name\":\"h264\",\"width\":480,\"height\":360,\"duration_s\":18.000000,\"attached_pic\":false,\"frame_count\":null,\"fps\":10}]},\"tool\":{\"ran\":true,\"error\":null},\"failure\":null}"
+        },
+        {
+          "id": 2,
+          "action_id": 1,
+          "member_id": 4,
+          "state": 2,
+          "result_event_id": 142,
+          "result_json": "{\"metric\":{\"metric\":\"duration_s\",\"value\":27.000000,\"reason\":null},\"probe\":{\"duration_s\":27.000000,\"error\":null,\"format_name\":\"mov,mp4,m4a,3gp,3g2,mj2\",\"streams\":[{\"index\":0,\"codec_type\":\"video\",\"codec_name\":\"h264\",\"width\":480,\"height\":360,\"duration_s\":27.000000,\"attached_pic\":false,\"frame_count\":null,\"fps\":10}]},\"tool\":{\"ran\":true,\"error\":null},\"failure\":null}"
+        },
+        {
+          "id": 3,
+          "action_id": 1,
+          "member_id": 6,
+          "state": 4,
+          "result_event_id": 158,
+          "result_json": "{\"metric\":{\"metric\":\"duration_s\",\"value\":null,\"reason\":\"probe_error\"},\"probe\":{\"duration_s\":null,\"error\":\"tool_failed: exit=86\",\"format_name\":null,\"streams\":[]},\"tool\":{\"ran\":true,\"error\":null},\"failure\":null}"
+        }
+      ],
+      "copies": [
+        {
+          "id": 1,
+          "inspection_id": 1,
+          "delivery_id": null,
+          "source_device_file_id": 2,
+          "source_intermediate_file_id": null,
+          "target_file_id": 1,
+          "committed_bytes": 1571886,
+          "source_size": 1571886,
+          "slot_device_id": null,
+          "verification_state": 3
+        },
+        {
+          "id": 2,
+          "inspection_id": 2,
+          "delivery_id": null,
+          "source_device_file_id": 4,
+          "source_intermediate_file_id": null,
+          "target_file_id": 2,
+          "committed_bytes": 2361415,
+          "source_size": 2361415,
+          "slot_device_id": null,
+          "verification_state": 3
+        },
+        {
+          "id": 3,
+          "inspection_id": 3,
+          "delivery_id": null,
+          "source_device_file_id": 6,
+          "source_intermediate_file_id": null,
+          "target_file_id": 3,
+          "committed_bytes": 1918377,
+          "source_size": 1918377,
+          "slot_device_id": null,
+          "verification_state": 3
+        },
+        {
+          "id": 4,
+          "inspection_id": null,
+          "delivery_id": 1,
+          "source_device_file_id": null,
+          "source_intermediate_file_id": 1,
+          "target_file_id": 4,
+          "committed_bytes": 1571886,
+          "source_size": 1571886,
+          "slot_device_id": null,
+          "verification_state": 3
+        },
+        {
+          "id": 5,
+          "inspection_id": null,
+          "delivery_id": 2,
+          "source_device_file_id": null,
+          "source_intermediate_file_id": 2,
+          "target_file_id": 5,
+          "committed_bytes": 2361415,
+          "source_size": 2361415,
+          "slot_device_id": null,
+          "verification_state": 3
+        },
+        {
+          "id": 6,
+          "inspection_id": null,
+          "delivery_id": 3,
+          "source_device_file_id": null,
+          "source_intermediate_file_id": 1,
+          "target_file_id": 6,
+          "committed_bytes": 1571886,
+          "source_size": 1571886,
+          "slot_device_id": null,
+          "verification_state": 3
+        },
+        {
+          "id": 7,
+          "inspection_id": null,
+          "delivery_id": 4,
+          "source_device_file_id": null,
+          "source_intermediate_file_id": 2,
+          "target_file_id": 7,
+          "committed_bytes": 2361415,
+          "source_size": 2361415,
+          "slot_device_id": null,
+          "verification_state": 3
+        }
+      ],
+      "running_file_attempts": [],
+      "runtime": [
+        {
+          "cleanup_cursor_file_id": null
+        }
+      ],
+      "lifecycle": [
+        {
+          "event_id": 2,
+          "transaction_id": 2,
+          "event_type": 2,
+          "occurred_at": 1792886326000000,
+          "row": {
+            "table": "actions",
+            "id": 1,
+            "before": {
+              "exists": false,
+              "values": {}
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "plan_id": 1,
+                "input_index": 0,
+                "name": "capture",
+                "type": 2,
+                "device_id": "action6",
+                "scheduled_at": 1792886326000000,
+                "group_name": null,
+                "input_fields_json": {
+                  "params": {
+                    "type": "action6_record",
+                    "duration_s": 60,
+                    "exposure": {
+                      "mode": "auto",
+                      "compensation_ev": 0
+                    },
+                    "resolution": "4k30",
+                    "fov": "wide",
+                    "stabilization": "off",
+                    "aperture": "f2.8",
+                    "bitrate": "high"
+                  },
+                  "policy": {
+                    "max_delay_ms": 30000
+                  }
+                },
+                "driver_id": "dji-action6",
+                "max_delay_ms": 30000,
+                "target_selection_state": null,
+                "execution_started": 0,
+                "cancel_requested": 0,
+                "first_window_observed_at": null,
+                "expiration_reason": null,
+                "status": 1,
+                "error_code": null,
+                "error_details_json": null,
+                "effective_params_json": {
+                  "type": "action6_record",
+                  "duration_s": 60,
+                  "exposure": {
+                    "mode": "auto",
+                    "compensation_ev": 0
+                  },
+                  "resolution": "4k30",
+                  "fov": "wide",
+                  "stabilization": "off",
+                  "aperture": "f2.8",
+                  "bitrate": "high"
+                },
+                "execution_spec_json": {
+                  "target_duration_ms": 60000,
+                  "video_result_mode": "segmented",
+                  "ownership_mode": 2,
+                  "output_scope": {
+                    "directories": [
+                      "/mnt/media_rw/emulated/DCIM"
+                    ]
+                  },
+                  "product_rules": [
+                    {
+                      "kind": "video",
+                      "format_id": "mp4",
+                      "min_count": 1,
+                      "exact_count": null,
+                      "require_pairing": false,
+                      "min_size_bytes": 1
+                    }
+                  ],
+                  "file_completion_wait_ms": 5000,
+                  "start_return_meaning": 1,
+                  "startup_margin_ms": 1000,
+                  "result_policy": "action6_video_segments_v1"
+                },
+                "source_resolution_state": null,
+                "resolved_source_plan_id": null
+              }
+            }
+          }
+        },
+        {
+          "event_id": 9,
+          "transaction_id": 8,
+          "event_type": 5,
+          "occurred_at": 1792886326000000,
+          "row": {
+            "table": "actions",
+            "id": 1,
+            "before": {
+              "exists": true,
+              "values": {
+                "status": 1,
+                "execution_started": 0
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "status": 2,
+                "execution_started": 1
+              }
+            }
+          }
+        },
+        {
+          "event_id": 27,
+          "transaction_id": 22,
+          "event_type": 2,
+          "occurred_at": 1792886326000000,
+          "row": {
+            "table": "actions",
+            "id": 2,
+            "before": {
+              "exists": false,
+              "values": {}
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "plan_id": 2,
+                "input_index": 0,
+                "name": "pre-default-a",
+                "type": 4,
+                "device_id": null,
+                "scheduled_at": 1792886326000000,
+                "group_name": null,
+                "input_fields_json": {
+                  "params": {
+                    "source": {
+                      "action_instance_id": "1"
+                    },
+                    "purpose": "manual",
+                    "filter": "default"
+                  }
+                },
+                "driver_id": null,
+                "max_delay_ms": null,
+                "target_selection_state": null,
+                "execution_started": 0,
+                "cancel_requested": 0,
+                "first_window_observed_at": null,
+                "expiration_reason": null,
+                "status": 1,
+                "error_code": null,
+                "error_details_json": null,
+                "effective_params_json": null,
+                "execution_spec_json": {
+                  "selection_mode": 1
+                },
+                "source_resolution_state": 1,
+                "resolved_source_plan_id": null
+              }
+            }
+          }
+        },
+        {
+          "event_id": 33,
+          "transaction_id": 27,
+          "event_type": 5,
+          "occurred_at": 1792886326000000,
+          "row": {
+            "table": "actions",
+            "id": 2,
+            "before": {
+              "exists": true,
+              "values": {
+                "status": 1,
+                "execution_started": 0
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "status": 2,
+                "execution_started": 1
+              }
+            }
+          }
+        },
+        {
+          "event_id": 41,
+          "transaction_id": 33,
+          "event_type": 2,
+          "occurred_at": 1792886326000000,
+          "row": {
+            "table": "actions",
+            "id": 3,
+            "before": {
+              "exists": false,
+              "values": {}
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "plan_id": 3,
+                "input_index": 0,
+                "name": "pre-default-b",
+                "type": 4,
+                "device_id": null,
+                "scheduled_at": 1792886326000000,
+                "group_name": null,
+                "input_fields_json": {
+                  "params": {
+                    "source": {
+                      "action_instance_id": "1"
+                    },
+                    "purpose": "manual",
+                    "filter": "default"
+                  }
+                },
+                "driver_id": null,
+                "max_delay_ms": null,
+                "target_selection_state": null,
+                "execution_started": 0,
+                "cancel_requested": 0,
+                "first_window_observed_at": null,
+                "expiration_reason": null,
+                "status": 1,
+                "error_code": null,
+                "error_details_json": null,
+                "effective_params_json": null,
+                "execution_spec_json": {
+                  "selection_mode": 1
+                },
+                "source_resolution_state": 1,
+                "resolved_source_plan_id": null
+              }
+            }
+          }
+        },
+        {
+          "event_id": 47,
+          "transaction_id": 38,
+          "event_type": 5,
+          "occurred_at": 1792886326000000,
+          "row": {
+            "table": "actions",
+            "id": 3,
+            "before": {
+              "exists": true,
+              "values": {
+                "status": 1,
+                "execution_started": 0
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "status": 2,
+                "execution_started": 1
+              }
+            }
+          }
+        },
+        {
+          "event_id": 110,
+          "transaction_id": 87,
+          "event_type": 26,
+          "occurred_at": 1792886411726234,
+          "row": {
+            "table": "intermediate_files",
+            "id": 1,
+            "before": {
+              "exists": false,
+              "values": {}
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "owner_action_id": 1,
+                "owner_delivery_id": null,
+                "purpose": 2,
+                "relative_path": "recording-inputs/1.mp4",
+                "retention_state": 1,
+                "cleanup_state": 1,
+                "size_bytes": null,
+                "sha256": null,
+                "last_error_json": null
+              }
+            }
+          }
+        },
+        {
+          "event_id": 119,
+          "transaction_id": 94,
+          "event_type": 26,
+          "occurred_at": 1792886411942442,
+          "row": {
+            "table": "intermediate_files",
+            "id": 1,
+            "before": {
+              "exists": true,
+              "values": {
+                "size_bytes": null,
+                "sha256": null
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "size_bytes": 1571886,
+                "sha256": "88ea9af8f3eab27a6dc181ec7cb35a7afddb8e636f1aa2ff7f45eb5931587cdf"
+              }
+            }
+          }
+        },
+        {
+          "event_id": 129,
+          "transaction_id": 103,
+          "event_type": 26,
+          "occurred_at": 1792886412254362,
+          "row": {
+            "table": "intermediate_files",
+            "id": 2,
+            "before": {
+              "exists": false,
+              "values": {}
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "owner_action_id": 1,
+                "owner_delivery_id": null,
+                "purpose": 2,
+                "relative_path": "recording-inputs/2.mp4",
+                "retention_state": 1,
+                "cleanup_state": 1,
+                "size_bytes": null,
+                "sha256": null,
+                "last_error_json": null
+              }
+            }
+          }
+        },
+        {
+          "event_id": 138,
+          "transaction_id": 110,
+          "event_type": 26,
+          "occurred_at": 1792886412445196,
+          "row": {
+            "table": "intermediate_files",
+            "id": 2,
+            "before": {
+              "exists": true,
+              "values": {
+                "size_bytes": null,
+                "sha256": null
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "size_bytes": 2361415,
+                "sha256": "af3bf41d35100c7bcc0d3012090379d28b06be9b29e753420c3c892c7ffebb89"
+              }
+            }
+          }
+        },
+        {
+          "event_id": 145,
+          "transaction_id": 116,
+          "event_type": 26,
+          "occurred_at": 1792886412703187,
+          "row": {
+            "table": "intermediate_files",
+            "id": 3,
+            "before": {
+              "exists": false,
+              "values": {}
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "owner_action_id": 1,
+                "owner_delivery_id": null,
+                "purpose": 2,
+                "relative_path": "recording-inputs/3.mp4",
+                "retention_state": 1,
+                "cleanup_state": 1,
+                "size_bytes": null,
+                "sha256": null,
+                "last_error_json": null
+              }
+            }
+          }
+        },
+        {
+          "event_id": 154,
+          "transaction_id": 123,
+          "event_type": 26,
+          "occurred_at": 1792886412899885,
+          "row": {
+            "table": "intermediate_files",
+            "id": 3,
+            "before": {
+              "exists": true,
+              "values": {
+                "size_bytes": null,
+                "sha256": null
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "size_bytes": 1918377,
+                "sha256": "ab6689f30aaabdc66fd399c5e799688f24a5ca80c4aed4ad36caa1325173ea6a"
+              }
+            }
+          }
+        },
+        {
+          "event_id": 163,
+          "transaction_id": 130,
+          "event_type": 8,
+          "occurred_at": 1792886415663008,
+          "row": {
+            "table": "actions",
+            "id": 1,
+            "before": {
+              "exists": true,
+              "values": {
+                "status": 2
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "status": 3
+              }
+            }
+          }
+        },
+        {
+          "event_id": 250,
+          "transaction_id": 174,
+          "event_type": 8,
+          "occurred_at": 1792886421639786,
+          "row": {
+            "table": "actions",
+            "id": 2,
+            "before": {
+              "exists": true,
+              "values": {
+                "status": 2
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "status": 3
+              }
+            }
+          }
+        },
+        {
+          "event_id": 258,
+          "transaction_id": 179,
+          "event_type": 8,
+          "occurred_at": 1792886421639786,
+          "row": {
+            "table": "actions",
+            "id": 3,
+            "before": {
+              "exists": true,
+              "values": {
+                "status": 2
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "status": 3
+              }
+            }
+          }
+        }
+      ],
+      "file_exists": [
+        {
+          "id": 1,
+          "exists": true
+        },
+        {
+          "id": 2,
+          "exists": true
+        },
+        {
+          "id": 3,
+          "exists": true
+        }
+      ],
+      "run_processes": [
+        {
+          "stage": "started",
+          "pid": 465064,
+          "cwd": "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/action6-builtin-package0",
+          "python": "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/action6-builtin-package0/venv/bin/python",
+          "argv": [
+            "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/test_installed_action6_ordinar1/action6-record/tools/_action6_segmented_entry.py",
+            "run",
+            "--config",
+            "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/test_installed_action6_ordinar1/action6-record/deployment/config.toml",
+            "--host-notification-fd",
+            "4"
+          ],
+          "command": [
+            "run",
+            "--config",
+            "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/test_installed_action6_ordinar1/action6-record/deployment/config.toml",
+            "--host-notification-fd",
+            "4"
+          ],
+          "started_ns": 37632862574507,
+          "import_origins": {
+            "camctl": "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+            "camctl.cli": "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+            "camctl.capture.handlers": "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+            "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+            "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+          }
+        },
+        {
+          "stage": "finished",
+          "pid": 465064,
+          "cwd": "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/action6-builtin-package0",
+          "python": "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/action6-builtin-package0/venv/bin/python",
+          "argv": [
+            "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/test_installed_action6_ordinar1/action6-record/tools/_action6_segmented_entry.py",
+            "run",
+            "--config",
+            "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/test_installed_action6_ordinar1/action6-record/deployment/config.toml",
+            "--host-notification-fd",
+            "4"
+          ],
+          "command": [
+            "run",
+            "--config",
+            "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/test_installed_action6_ordinar1/action6-record/deployment/config.toml",
+            "--host-notification-fd",
+            "4"
+          ],
+          "started_ns": 37632862574507,
+          "import_origins": {
+            "camctl": "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+            "camctl.cli": "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+            "camctl.capture.handlers": "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+            "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+            "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+          },
+          "exitcode": 0,
+          "finished_ns": 37672654746270
+        }
+      ],
+      "module_log": [
+        {
+          "line": 1,
+          "text": "call=1 attempt=1 command=run operation=spawn plan=(none) automatic=0 retries=0"
+        },
+        {
+          "line": 3,
+          "text": "call=1 attempt=1 command=run pid=465064 spawned execution=unknown"
+        },
+        {
+          "line": 8,
+          "text": "call=2 command=submit pid=465065 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+        },
+        {
+          "line": 14,
+          "text": "call=3 command=submit pid=465402 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+        },
+        {
+          "line": 20,
+          "text": "call=4 command=submit pid=465598 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+        },
+        {
+          "line": 26,
+          "text": "call=1 command=run pid=465064 stream=exit_observed data=exit record retained; group settlement pending"
+        },
+        {
+          "line": 27,
+          "text": "call=1 command=run pid=465064 stream=group_reaped data=all execution stopped; child record reaped"
+        },
+        {
+          "line": 28,
+          "text": "call=1 command=run pid=465064 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+        }
+      ],
+      "conditional_discovery_probe": {
+        "schedule_assumption": "H was consumed while bound waiters were RUNNING; no actual cleanup attempt was made. Same-run inputs were outside initial historical ceiling 0.",
+        "before": {
+          "first_files": [],
+          "processed": {},
+          "discovery_after": 174
+        },
+        "after_waiter_events": {
+          "first_files": [],
+          "processed": {},
+          "discovery_after": 263
+        },
+        "missed_inputs": [
+          1,
+          2,
+          3
+        ],
+        "after_explicit_source_rediscovery": {
+          "first_files": [
+            1,
+            2,
+            3
+          ],
+          "processed": {}
+        }
+      },
+      "final_production_classification": [
+        {
+          "file_id": 1,
+          "facts": {
+            "file_id": 1,
+            "purpose": 2,
+            "owner_action_id": 1,
+            "owner_delivery_id": null,
+            "relative_path": "recording-inputs/1.mp4",
+            "retention_state": 1,
+            "cleanup_state": 1,
+            "owner_finished": true,
+            "operations_stopped": true
+          },
+          "decision": "delete"
+        },
+        {
+          "file_id": 2,
+          "facts": {
+            "file_id": 2,
+            "purpose": 2,
+            "owner_action_id": 1,
+            "owner_delivery_id": null,
+            "relative_path": "recording-inputs/2.mp4",
+            "retention_state": 1,
+            "cleanup_state": 1,
+            "owner_finished": true,
+            "operations_stopped": true
+          },
+          "decision": "delete"
+        },
+        {
+          "file_id": 3,
+          "facts": {
+            "file_id": 3,
+            "purpose": 2,
+            "owner_action_id": 1,
+            "owner_delivery_id": null,
+            "relative_path": "recording-inputs/3.mp4",
+            "retention_state": 1,
+            "cleanup_state": 1,
+            "owner_finished": true,
+            "operations_stopped": true
+          },
+          "decision": "delete"
+        }
+      ],
+      "clock_intervals_by_pid": {
+        "465064": {
+          "first_utc_us": 1792886326000000,
+          "last_utc_us": 1792886422844449
+        },
+        "465065": {
+          "first_utc_us": 1792886326000000,
+          "last_utc_us": 1792886326000000
+        },
+        "465402": {
+          "first_utc_us": 1792886326000000,
+          "last_utc_us": 1792886326000000
+        },
+        "465598": {
+          "first_utc_us": 1792886326000000,
+          "last_utc_us": 1792886326000000
+        }
+      }
+    },
+    "current": {
+      "world": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_ordinar0/action6-record",
+      "database": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_ordinar0/action6-record/deployment/state.db",
+      "readonly": true,
+      "actions": [
+        {
+          "id": 1,
+          "name": "capture",
+          "status": 3,
+          "created_event_id": 1,
+          "last_event_id": 175
+        },
+        {
+          "id": 2,
+          "name": "pre-default-a",
+          "status": 3,
+          "created_event_id": 26,
+          "last_event_id": 246
+        },
+        {
+          "id": 3,
+          "name": "pre-default-b",
+          "status": 3,
+          "created_event_id": 40,
+          "last_event_id": 254
+        },
+        {
+          "id": 4,
+          "name": "late-explicit",
+          "status": 3,
+          "created_event_id": 276,
+          "last_event_id": 309
+        },
+        {
+          "id": 5,
+          "name": "ack",
+          "status": 1,
+          "created_event_id": 318,
+          "last_event_id": 318
+        }
+      ],
+      "publication": {
+        "transaction_id": 131,
+        "event_id": 175
+      },
+      "bound_waiters_at_h": [
+        {
+          "action_id": 2,
+          "selection_id": 1,
+          "action_status_at_h": 2,
+          "selection_status_at_h": 1
+        },
+        {
+          "action_id": 3,
+          "selection_id": 2,
+          "action_status_at_h": 2,
+          "selection_status_at_h": 1
+        }
+      ],
+      "inputs": [
+        {
+          "id": 1,
+          "owner_action_id": 1,
+          "purpose": 2,
+          "relative_path": "recording-inputs/1.mp4",
+          "retention_state": 2,
+          "cleanup_state": 4,
+          "created_event_id": 109,
+          "last_event_id": 266
+        },
+        {
+          "id": 2,
+          "owner_action_id": 1,
+          "purpose": 2,
+          "relative_path": "recording-inputs/2.mp4",
+          "retention_state": 2,
+          "cleanup_state": 4,
+          "created_event_id": 128,
+          "last_event_id": 270
+        },
+        {
+          "id": 3,
+          "owner_action_id": 1,
+          "purpose": 2,
+          "relative_path": "recording-inputs/3.mp4",
+          "retention_state": 2,
+          "cleanup_state": 4,
+          "created_event_id": 145,
+          "last_event_id": 274
+        }
+      ],
+      "inspections": [
+        {
+          "id": 1,
+          "action_id": 1,
+          "member_id": 2,
+          "state": 2,
+          "result_event_id": 125,
+          "result_json": "{\"metric\":{\"metric\":\"duration_s\",\"value\":18.000000,\"reason\":null},\"probe\":{\"duration_s\":18.000000,\"error\":null,\"format_name\":\"mov,mp4,m4a,3gp,3g2,mj2\",\"streams\":[{\"index\":0,\"codec_type\":\"video\",\"codec_name\":\"h264\",\"width\":480,\"height\":360,\"duration_s\":18.000000,\"attached_pic\":false,\"frame_count\":null,\"fps\":10}]},\"tool\":{\"ran\":true,\"error\":null},\"failure\":null}"
+        },
+        {
+          "id": 2,
+          "action_id": 1,
+          "member_id": 4,
+          "state": 2,
+          "result_event_id": 142,
+          "result_json": "{\"metric\":{\"metric\":\"duration_s\",\"value\":27.000000,\"reason\":null},\"probe\":{\"duration_s\":27.000000,\"error\":null,\"format_name\":\"mov,mp4,m4a,3gp,3g2,mj2\",\"streams\":[{\"index\":0,\"codec_type\":\"video\",\"codec_name\":\"h264\",\"width\":480,\"height\":360,\"duration_s\":27.000000,\"attached_pic\":false,\"frame_count\":null,\"fps\":10}]},\"tool\":{\"ran\":true,\"error\":null},\"failure\":null}"
+        },
+        {
+          "id": 3,
+          "action_id": 1,
+          "member_id": 6,
+          "state": 4,
+          "result_event_id": 159,
+          "result_json": "{\"metric\":{\"metric\":\"duration_s\",\"value\":null,\"reason\":\"probe_error\"},\"probe\":{\"duration_s\":null,\"error\":\"tool_failed: exit=86\",\"format_name\":null,\"streams\":[]},\"tool\":{\"ran\":true,\"error\":null},\"failure\":null}"
+        }
+      ],
+      "copies": [
+        {
+          "id": 1,
+          "inspection_id": 1,
+          "delivery_id": null,
+          "source_device_file_id": 2,
+          "source_intermediate_file_id": null,
+          "target_file_id": 1,
+          "committed_bytes": 1571886,
+          "source_size": 1571886,
+          "slot_device_id": null,
+          "verification_state": 3
+        },
+        {
+          "id": 2,
+          "inspection_id": 2,
+          "delivery_id": null,
+          "source_device_file_id": 4,
+          "source_intermediate_file_id": null,
+          "target_file_id": 2,
+          "committed_bytes": 2361415,
+          "source_size": 2361415,
+          "slot_device_id": null,
+          "verification_state": 3
+        },
+        {
+          "id": 3,
+          "inspection_id": 3,
+          "delivery_id": null,
+          "source_device_file_id": 6,
+          "source_intermediate_file_id": null,
+          "target_file_id": 3,
+          "committed_bytes": 1918377,
+          "source_size": 1918377,
+          "slot_device_id": null,
+          "verification_state": 3
+        },
+        {
+          "id": 4,
+          "inspection_id": null,
+          "delivery_id": 1,
+          "source_device_file_id": null,
+          "source_intermediate_file_id": 1,
+          "target_file_id": 4,
+          "committed_bytes": 1571886,
+          "source_size": 1571886,
+          "slot_device_id": null,
+          "verification_state": 3
+        },
+        {
+          "id": 5,
+          "inspection_id": null,
+          "delivery_id": 2,
+          "source_device_file_id": null,
+          "source_intermediate_file_id": 2,
+          "target_file_id": 5,
+          "committed_bytes": 2361415,
+          "source_size": 2361415,
+          "slot_device_id": null,
+          "verification_state": 3
+        },
+        {
+          "id": 6,
+          "inspection_id": null,
+          "delivery_id": 3,
+          "source_device_file_id": null,
+          "source_intermediate_file_id": 1,
+          "target_file_id": 6,
+          "committed_bytes": 1571886,
+          "source_size": 1571886,
+          "slot_device_id": null,
+          "verification_state": 3
+        },
+        {
+          "id": 7,
+          "inspection_id": null,
+          "delivery_id": 4,
+          "source_device_file_id": null,
+          "source_intermediate_file_id": 2,
+          "target_file_id": 7,
+          "committed_bytes": 2361415,
+          "source_size": 2361415,
+          "slot_device_id": null,
+          "verification_state": 3
+        },
+        {
+          "id": 8,
+          "inspection_id": null,
+          "delivery_id": 5,
+          "source_device_file_id": 8,
+          "source_intermediate_file_id": null,
+          "target_file_id": 8,
+          "committed_bytes": 3505257,
+          "source_size": 3505257,
+          "slot_device_id": null,
+          "verification_state": 3
+        }
+      ],
+      "running_file_attempts": [],
+      "runtime": [
+        {
+          "cleanup_cursor_file_id": 3
+        }
+      ],
+      "lifecycle": [
+        {
+          "event_id": 1,
+          "transaction_id": 1,
+          "event_type": 2,
+          "occurred_at": 1792908536000000,
+          "row": {
+            "table": "actions",
+            "id": 1,
+            "before": {
+              "exists": false,
+              "values": {}
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "plan_id": 1,
+                "input_index": 0,
+                "name": "capture",
+                "type": 2,
+                "device_id": "action6",
+                "scheduled_at": 1792908536000000,
+                "group_name": null,
+                "input_fields_json": {
+                  "params": {
+                    "type": "action6_record",
+                    "duration_s": 60,
+                    "exposure": {
+                      "mode": "auto",
+                      "compensation_ev": 0
+                    },
+                    "resolution": "4k30",
+                    "fov": "wide",
+                    "stabilization": "off",
+                    "aperture": "f2.8",
+                    "bitrate": "high"
+                  },
+                  "policy": {
+                    "max_delay_ms": 30000
+                  }
+                },
+                "driver_id": "dji-action6",
+                "max_delay_ms": 30000,
+                "target_selection_state": null,
+                "execution_started": 0,
+                "cancel_requested": 0,
+                "first_window_observed_at": null,
+                "expiration_reason": null,
+                "status": 1,
+                "error_code": null,
+                "error_details_json": null,
+                "effective_params_json": {
+                  "type": "action6_record",
+                  "duration_s": 60,
+                  "exposure": {
+                    "mode": "auto",
+                    "compensation_ev": 0
+                  },
+                  "resolution": "4k30",
+                  "fov": "wide",
+                  "stabilization": "off",
+                  "aperture": "f2.8",
+                  "bitrate": "high"
+                },
+                "execution_spec_json": {
+                  "target_duration_ms": 60000,
+                  "video_result_mode": "segmented",
+                  "ownership_mode": 2,
+                  "output_scope": {
+                    "directories": [
+                      "/mnt/media_rw/emulated/DCIM"
+                    ]
+                  },
+                  "product_rules": [
+                    {
+                      "kind": "video",
+                      "format_id": "mp4",
+                      "min_count": 1,
+                      "exact_count": null,
+                      "require_pairing": false,
+                      "min_size_bytes": 1
+                    }
+                  ],
+                  "file_completion_wait_ms": 5000,
+                  "start_return_meaning": 1,
+                  "startup_margin_ms": 1000,
+                  "result_policy": "action6_video_segments_v1"
+                },
+                "source_resolution_state": null,
+                "resolved_source_plan_id": null
+              }
+            }
+          }
+        },
+        {
+          "event_id": 13,
+          "transaction_id": 11,
+          "event_type": 5,
+          "occurred_at": 1792908536000000,
+          "row": {
+            "table": "actions",
+            "id": 1,
+            "before": {
+              "exists": true,
+              "values": {
+                "status": 1,
+                "execution_started": 0
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "status": 2,
+                "execution_started": 1
+              }
+            }
+          }
+        },
+        {
+          "event_id": 26,
+          "transaction_id": 21,
+          "event_type": 2,
+          "occurred_at": 1792908536000000,
+          "row": {
+            "table": "actions",
+            "id": 2,
+            "before": {
+              "exists": false,
+              "values": {}
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "plan_id": 2,
+                "input_index": 0,
+                "name": "pre-default-a",
+                "type": 4,
+                "device_id": null,
+                "scheduled_at": 1792908536000000,
+                "group_name": null,
+                "input_fields_json": {
+                  "params": {
+                    "source": {
+                      "action_instance_id": "1"
+                    },
+                    "purpose": "manual",
+                    "filter": "default"
+                  }
+                },
+                "driver_id": null,
+                "max_delay_ms": null,
+                "target_selection_state": null,
+                "execution_started": 0,
+                "cancel_requested": 0,
+                "first_window_observed_at": null,
+                "expiration_reason": null,
+                "status": 1,
+                "error_code": null,
+                "error_details_json": null,
+                "effective_params_json": null,
+                "execution_spec_json": {
+                  "selection_mode": 1
+                },
+                "source_resolution_state": 1,
+                "resolved_source_plan_id": null
+              }
+            }
+          }
+        },
+        {
+          "event_id": 29,
+          "transaction_id": 23,
+          "event_type": 5,
+          "occurred_at": 1792908536000000,
+          "row": {
+            "table": "actions",
+            "id": 2,
+            "before": {
+              "exists": true,
+              "values": {
+                "status": 1,
+                "execution_started": 0
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "status": 2,
+                "execution_started": 1
+              }
+            }
+          }
+        },
+        {
+          "event_id": 40,
+          "transaction_id": 32,
+          "event_type": 2,
+          "occurred_at": 1792908536000000,
+          "row": {
+            "table": "actions",
+            "id": 3,
+            "before": {
+              "exists": false,
+              "values": {}
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "plan_id": 3,
+                "input_index": 0,
+                "name": "pre-default-b",
+                "type": 4,
+                "device_id": null,
+                "scheduled_at": 1792908536000000,
+                "group_name": null,
+                "input_fields_json": {
+                  "params": {
+                    "source": {
+                      "action_instance_id": "1"
+                    },
+                    "purpose": "manual",
+                    "filter": "default"
+                  }
+                },
+                "driver_id": null,
+                "max_delay_ms": null,
+                "target_selection_state": null,
+                "execution_started": 0,
+                "cancel_requested": 0,
+                "first_window_observed_at": null,
+                "expiration_reason": null,
+                "status": 1,
+                "error_code": null,
+                "error_details_json": null,
+                "effective_params_json": null,
+                "execution_spec_json": {
+                  "selection_mode": 1
+                },
+                "source_resolution_state": 1,
+                "resolved_source_plan_id": null
+              }
+            }
+          }
+        },
+        {
+          "event_id": 43,
+          "transaction_id": 34,
+          "event_type": 5,
+          "occurred_at": 1792908536000000,
+          "row": {
+            "table": "actions",
+            "id": 3,
+            "before": {
+              "exists": true,
+              "values": {
+                "status": 1,
+                "execution_started": 0
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "status": 2,
+                "execution_started": 1
+              }
+            }
+          }
+        },
+        {
+          "event_id": 109,
+          "transaction_id": 86,
+          "event_type": 26,
+          "occurred_at": 1792908622218451,
+          "row": {
+            "table": "intermediate_files",
+            "id": 1,
+            "before": {
+              "exists": false,
+              "values": {}
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "owner_action_id": 1,
+                "owner_delivery_id": null,
+                "purpose": 2,
+                "relative_path": "recording-inputs/1.mp4",
+                "retention_state": 1,
+                "cleanup_state": 1,
+                "size_bytes": null,
+                "sha256": null,
+                "last_error_json": null
+              }
+            }
+          }
+        },
+        {
+          "event_id": 118,
+          "transaction_id": 93,
+          "event_type": 26,
+          "occurred_at": 1792908622584756,
+          "row": {
+            "table": "intermediate_files",
+            "id": 1,
+            "before": {
+              "exists": true,
+              "values": {
+                "size_bytes": null,
+                "sha256": null
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "size_bytes": 1571886,
+                "sha256": "88ea9af8f3eab27a6dc181ec7cb35a7afddb8e636f1aa2ff7f45eb5931587cdf"
+              }
+            }
+          }
+        },
+        {
+          "event_id": 128,
+          "transaction_id": 102,
+          "event_type": 26,
+          "occurred_at": 1792908622918344,
+          "row": {
+            "table": "intermediate_files",
+            "id": 2,
+            "before": {
+              "exists": false,
+              "values": {}
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "owner_action_id": 1,
+                "owner_delivery_id": null,
+                "purpose": 2,
+                "relative_path": "recording-inputs/2.mp4",
+                "retention_state": 1,
+                "cleanup_state": 1,
+                "size_bytes": null,
+                "sha256": null,
+                "last_error_json": null
+              }
+            }
+          }
+        },
+        {
+          "event_id": 137,
+          "transaction_id": 109,
+          "event_type": 26,
+          "occurred_at": 1792908623126181,
+          "row": {
+            "table": "intermediate_files",
+            "id": 2,
+            "before": {
+              "exists": true,
+              "values": {
+                "size_bytes": null,
+                "sha256": null
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "size_bytes": 2361415,
+                "sha256": "af3bf41d35100c7bcc0d3012090379d28b06be9b29e753420c3c892c7ffebb89"
+              }
+            }
+          }
+        },
+        {
+          "event_id": 145,
+          "transaction_id": 116,
+          "event_type": 26,
+          "occurred_at": 1792908623488259,
+          "row": {
+            "table": "intermediate_files",
+            "id": 3,
+            "before": {
+              "exists": false,
+              "values": {}
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "owner_action_id": 1,
+                "owner_delivery_id": null,
+                "purpose": 2,
+                "relative_path": "recording-inputs/3.mp4",
+                "retention_state": 1,
+                "cleanup_state": 1,
+                "size_bytes": null,
+                "sha256": null,
+                "last_error_json": null
+              }
+            }
+          }
+        },
+        {
+          "event_id": 153,
+          "transaction_id": 122,
+          "event_type": 26,
+          "occurred_at": 1792908623748933,
+          "row": {
+            "table": "intermediate_files",
+            "id": 3,
+            "before": {
+              "exists": true,
+              "values": {
+                "size_bytes": null,
+                "sha256": null
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "size_bytes": 1918377,
+                "sha256": "ab6689f30aaabdc66fd399c5e799688f24a5ca80c4aed4ad36caa1325173ea6a"
+              }
+            }
+          }
+        },
+        {
+          "event_id": 164,
+          "transaction_id": 131,
+          "event_type": 8,
+          "occurred_at": 1792908625372814,
+          "row": {
+            "table": "actions",
+            "id": 1,
+            "before": {
+              "exists": true,
+              "values": {
+                "status": 2
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "status": 3
+              }
+            }
+          }
+        },
+        {
+          "event_id": 246,
+          "transaction_id": 170,
+          "event_type": 8,
+          "occurred_at": 1792908628177776,
+          "row": {
+            "table": "actions",
+            "id": 2,
+            "before": {
+              "exists": true,
+              "values": {
+                "status": 2
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "status": 3
+              }
+            }
+          }
+        },
+        {
+          "event_id": 254,
+          "transaction_id": 175,
+          "event_type": 8,
+          "occurred_at": 1792908628177776,
+          "row": {
+            "table": "actions",
+            "id": 3,
+            "before": {
+              "exists": true,
+              "values": {
+                "status": 2
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "status": 3
+              }
+            }
+          }
+        },
+        {
+          "event_id": 264,
+          "transaction_id": 184,
+          "event_type": 26,
+          "occurred_at": 1792908632695363,
+          "row": {
+            "table": "intermediate_files",
+            "id": 1,
+            "before": {
+              "exists": true,
+              "values": {
+                "retention_state": 1,
+                "cleanup_state": 1
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "retention_state": 2,
+                "cleanup_state": 2
+              }
+            }
+          }
+        },
+        {
+          "event_id": 265,
+          "transaction_id": 185,
+          "event_type": 26,
+          "occurred_at": 1792908632695363,
+          "row": {
+            "table": "intermediate_files",
+            "id": 1,
+            "before": {
+              "exists": true,
+              "values": {
+                "cleanup_state": 2
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "cleanup_state": 3
+              }
+            }
+          }
+        },
+        {
+          "event_id": 266,
+          "transaction_id": 186,
+          "event_type": 26,
+          "occurred_at": 1792908632695363,
+          "row": {
+            "table": "intermediate_files",
+            "id": 1,
+            "before": {
+              "exists": true,
+              "values": {
+                "cleanup_state": 3
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "cleanup_state": 4
+              }
+            }
+          }
+        },
+        {
+          "event_id": 268,
+          "transaction_id": 187,
+          "event_type": 26,
+          "occurred_at": 1792908632695363,
+          "row": {
+            "table": "intermediate_files",
+            "id": 2,
+            "before": {
+              "exists": true,
+              "values": {
+                "retention_state": 1,
+                "cleanup_state": 1
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "retention_state": 2,
+                "cleanup_state": 2
+              }
+            }
+          }
+        },
+        {
+          "event_id": 269,
+          "transaction_id": 188,
+          "event_type": 26,
+          "occurred_at": 1792908632695363,
+          "row": {
+            "table": "intermediate_files",
+            "id": 2,
+            "before": {
+              "exists": true,
+              "values": {
+                "cleanup_state": 2
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "cleanup_state": 3
+              }
+            }
+          }
+        },
+        {
+          "event_id": 270,
+          "transaction_id": 189,
+          "event_type": 26,
+          "occurred_at": 1792908632695363,
+          "row": {
+            "table": "intermediate_files",
+            "id": 2,
+            "before": {
+              "exists": true,
+              "values": {
+                "cleanup_state": 3
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "cleanup_state": 4
+              }
+            }
+          }
+        },
+        {
+          "event_id": 272,
+          "transaction_id": 190,
+          "event_type": 26,
+          "occurred_at": 1792908632695363,
+          "row": {
+            "table": "intermediate_files",
+            "id": 3,
+            "before": {
+              "exists": true,
+              "values": {
+                "retention_state": 1,
+                "cleanup_state": 1
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "retention_state": 2,
+                "cleanup_state": 2
+              }
+            }
+          }
+        },
+        {
+          "event_id": 273,
+          "transaction_id": 191,
+          "event_type": 26,
+          "occurred_at": 1792908632695363,
+          "row": {
+            "table": "intermediate_files",
+            "id": 3,
+            "before": {
+              "exists": true,
+              "values": {
+                "cleanup_state": 2
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "cleanup_state": 3
+              }
+            }
+          }
+        },
+        {
+          "event_id": 274,
+          "transaction_id": 192,
+          "event_type": 26,
+          "occurred_at": 1792908632695363,
+          "row": {
+            "table": "intermediate_files",
+            "id": 3,
+            "before": {
+              "exists": true,
+              "values": {
+                "cleanup_state": 3
+              }
+            },
+            "after": {
+              "exists": true,
+              "values": {
+                "cleanup_state": 4
+              }
+            }
+          }
+        }
+      ],
+      "file_exists": [
+        {
+          "id": 1,
+          "exists": false
+        },
+        {
+          "id": 2,
+          "exists": false
+        },
+        {
+          "id": 3,
+          "exists": false
+        }
+      ],
+      "run_processes": [
+        {
+          "stage": "started",
+          "pid": 937299,
+          "cwd": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0",
+          "python": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/bin/python",
+          "argv": [
+            "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_ordinar0/action6-record/tools/_action6_segmented_entry.py",
+            "run",
+            "--config",
+            "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_ordinar0/action6-record/deployment/config.toml",
+            "--host-notification-fd",
+            "4"
+          ],
+          "command": [
+            "run",
+            "--config",
+            "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_ordinar0/action6-record/deployment/config.toml",
+            "--host-notification-fd",
+            "4"
+          ],
+          "started_ns": 59440274554769,
+          "import_origins": {
+            "camctl": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+            "camctl.cli": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+            "camctl.capture.handlers": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+            "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+            "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+          }
+        },
+        {
+          "stage": "finished",
+          "pid": 937299,
+          "cwd": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0",
+          "python": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/bin/python",
+          "argv": [
+            "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_ordinar0/action6-record/tools/_action6_segmented_entry.py",
+            "run",
+            "--config",
+            "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_ordinar0/action6-record/deployment/config.toml",
+            "--host-notification-fd",
+            "4"
+          ],
+          "command": [
+            "run",
+            "--config",
+            "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_ordinar0/action6-record/deployment/config.toml",
+            "--host-notification-fd",
+            "4"
+          ],
+          "started_ns": 59440274554769,
+          "import_origins": {
+            "camctl": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+            "camctl.cli": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+            "camctl.capture.handlers": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+            "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+            "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+          },
+          "exitcode": 0,
+          "finished_ns": 59474941317740
+        },
+        {
+          "stage": "started",
+          "pid": 939091,
+          "cwd": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0",
+          "python": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/bin/python",
+          "argv": [
+            "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_ordinar0/action6-record/tools/_action6_segmented_entry.py",
+            "run",
+            "--config",
+            "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_ordinar0/action6-record/deployment/config.toml",
+            "--host-notification-fd",
+            "4"
+          ],
+          "command": [
+            "run",
+            "--config",
+            "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_ordinar0/action6-record/deployment/config.toml",
+            "--host-notification-fd",
+            "4"
+          ],
+          "started_ns": 59475453262910,
+          "import_origins": {
+            "camctl": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+            "camctl.cli": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+            "camctl.capture.handlers": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+            "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+            "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+          }
+        },
+        {
+          "stage": "finished",
+          "pid": 939091,
+          "cwd": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0",
+          "python": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/bin/python",
+          "argv": [
+            "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_ordinar0/action6-record/tools/_action6_segmented_entry.py",
+            "run",
+            "--config",
+            "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_ordinar0/action6-record/deployment/config.toml",
+            "--host-notification-fd",
+            "4"
+          ],
+          "command": [
+            "run",
+            "--config",
+            "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_ordinar0/action6-record/deployment/config.toml",
+            "--host-notification-fd",
+            "4"
+          ],
+          "started_ns": 59475453262910,
+          "import_origins": {
+            "camctl": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+            "camctl.cli": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+            "camctl.capture.handlers": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+            "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+            "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+          },
+          "exitcode": 0,
+          "finished_ns": 59477565838036
+        },
+        {
+          "stage": "started",
+          "pid": 939701,
+          "cwd": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0",
+          "python": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/bin/python",
+          "argv": [
+            "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_ordinar0/action6-record/tools/_action6_segmented_entry.py",
+            "run",
+            "--config",
+            "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_ordinar0/action6-record/deployment/config.toml",
+            "--host-notification-fd",
+            "4"
+          ],
+          "command": [
+            "run",
+            "--config",
+            "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_ordinar0/action6-record/deployment/config.toml",
+            "--host-notification-fd",
+            "4"
+          ],
+          "started_ns": 59490683264700,
+          "import_origins": {
+            "camctl": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+            "camctl.cli": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+            "camctl.capture.handlers": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+            "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+            "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+          }
+        },
+        {
+          "stage": "finished",
+          "pid": 939701,
+          "cwd": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0",
+          "python": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/bin/python",
+          "argv": [
+            "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_ordinar0/action6-record/tools/_action6_segmented_entry.py",
+            "run",
+            "--config",
+            "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_ordinar0/action6-record/deployment/config.toml",
+            "--host-notification-fd",
+            "4"
+          ],
+          "command": [
+            "run",
+            "--config",
+            "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_ordinar0/action6-record/deployment/config.toml",
+            "--host-notification-fd",
+            "4"
+          ],
+          "started_ns": 59490683264700,
+          "import_origins": {
+            "camctl": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+            "camctl.cli": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+            "camctl.capture.handlers": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+            "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+            "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+          },
+          "exitcode": 0,
+          "finished_ns": 59495105006768
+        }
+      ],
+      "module_log": [
+        {
+          "line": 1,
+          "text": "call=1 attempt=1 command=run operation=spawn plan=(none) automatic=0 retries=0"
+        },
+        {
+          "line": 3,
+          "text": "call=1 attempt=1 command=run pid=937299 spawned execution=unknown"
+        },
+        {
+          "line": 8,
+          "text": "call=2 command=submit pid=937300 result=success exit_kind=0 exit=0 needs_run=1 overflow=0 io_error=0"
+        },
+        {
+          "line": 14,
+          "text": "call=3 command=submit pid=937727 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+        },
+        {
+          "line": 20,
+          "text": "call=4 command=submit pid=938000 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+        },
+        {
+          "line": 26,
+          "text": "call=1 command=run pid=937299 stream=exit_observed data=exit record retained; group settlement pending"
+        },
+        {
+          "line": 27,
+          "text": "call=1 command=run pid=937299 stream=group_reaped data=all execution stopped; child record reaped"
+        },
+        {
+          "line": 28,
+          "text": "call=1 command=run pid=937299 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+        },
+        {
+          "line": 29,
+          "text": "call=5 attempt=5 command=run operation=spawn plan=(none) automatic=0 retries=0"
+        },
+        {
+          "line": 30,
+          "text": "call=5 attempt=5 command=run pid=939091 spawned execution=unknown"
+        },
+        {
+          "line": 31,
+          "text": "call=5 command=run pid=939091 stream=exit_observed data=exit record retained; group settlement pending"
+        },
+        {
+          "line": 32,
+          "text": "call=5 command=run pid=939091 stream=group_reaped data=all execution stopped; child record reaped"
+        },
+        {
+          "line": 33,
+          "text": "call=5 command=run pid=939091 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+        },
+        {
+          "line": 39,
+          "text": "call=6 command=submit pid=939671 result=success exit_kind=0 exit=0 needs_run=1 overflow=0 io_error=0"
+        },
+        {
+          "line": 40,
+          "text": "call=7 attempt=7 command=run operation=spawn plan=(none) automatic=0 retries=0"
+        },
+        {
+          "line": 41,
+          "text": "call=7 attempt=7 command=run pid=939701 spawned execution=unknown"
+        },
+        {
+          "line": 44,
+          "text": "call=7 command=run pid=939701 stream=exit_observed data=exit record retained; group settlement pending"
+        },
+        {
+          "line": 45,
+          "text": "call=7 command=run pid=939701 stream=group_reaped data=all execution stopped; child record reaped"
+        },
+        {
+          "line": 46,
+          "text": "call=7 command=run pid=939701 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0"
+        },
+        {
+          "line": 52,
+          "text": "call=8 command=submit pid=940002 result=success exit_kind=0 exit=0 needs_run=1 overflow=0 io_error=0"
+        },
+        {
+          "line": 53,
+          "text": "call=9 attempt=9 command=run operation=spawn plan=(none) automatic=0 retries=0"
+        },
+        {
+          "line": 54,
+          "text": "call=9 attempt=9 command=run pid=940058 spawned execution=unknown"
+        }
+      ],
+      "clock_intervals_by_pid": {
+        "937300": {
+          "first_utc_us": 1792908536000000,
+          "last_utc_us": 1792908536000000
+        },
+        "937299": {
+          "first_utc_us": 1792908536000000,
+          "last_utc_us": 1792908630423835
+        },
+        "937727": {
+          "first_utc_us": 1792908536000000,
+          "last_utc_us": 1792908536000000
+        },
+        "938000": {
+          "first_utc_us": 1792908536000000,
+          "last_utc_us": 1792908536000000
+        },
+        "939091": {
+          "first_utc_us": 1792908632564352,
+          "last_utc_us": 1792908633253444
+        },
+        "939671": {
+          "first_utc_us": 1792908645850362,
+          "last_utc_us": 1792908645850362
+        },
+        "939701": {
+          "first_utc_us": 1792908647138475,
+          "last_utc_us": 1792908650555463
+        },
+        "940002": {
+          "first_utc_us": 1792908655904775,
+          "last_utc_us": 1792908655904775
+        }
+      }
+    }
+  },
+  "report": "/tmp/camctl-contract-cleanup-audit.md",
+  "repository_modified": false,
+  "original_world_modified": false,
+  "pytest_run": false,
+  "extra_run_started": false,
+  "current_cleanup_run_attribution": {
+    "first_input_release_occurred_at": 1792908632695363,
+    "original_run_pid": 937299,
+    "original_run_last_clock_utc_us": 1792908630423835,
+    "cleanup_run_pid": 939091,
+    "cleanup_run_clock_interval": {
+      "first_utc_us": 1792908632564352,
+      "last_utc_us": 1792908633253444
+    },
+    "confirmed": true
+  }
+}

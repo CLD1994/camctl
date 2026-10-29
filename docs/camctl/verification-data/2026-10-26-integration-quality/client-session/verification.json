@@ -1,0 +1,99 @@
+{
+  "baseline": "0ff20735ec02849cf6a3dfa3436621d1f15026bd",
+  "commit": "aff87d6b979b5970aa49d6e5e0f96697bedb2733",
+  "worktree": "/tmp/camctl-quality-client-session-20261026",
+  "source_status": "",
+  "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+  "node": "v24.22.1",
+  "lock_sha256": "4b2464a1f31bc9e3fd16870678a45a8ef89e83aa6df1f84f9f8fe6db6733c8e1",
+  "files": {
+    "tests/integration/client_driver.ts": "7335ba4eeb24801ea7c5c5e779ec35d0d2243df1bb876cabd2fda0bce3fd833d",
+    "tests/integration/_client_session.py": "e0daded78302ab1ab8ae9dbfa408096ee13afd6a145508c6a2936f7520ca63c2"
+  },
+  "interface": {
+    "constructor": "ClientSession(command, *, cwd, env, root, timeout=180.0)",
+    "call": "call(operation, *original_arguments_including_store, output=unique_receipt_path)",
+    "store": "Session固定root/client-store，TS按每个原签名的store位置核对相同路径。",
+    "timeout": "每个实例独立用于startup、每条call/socket剩余预算、close；Action6/OSMO调用方显式120。",
+    "hb": "原4个省略store的session操作仍由统一入口补固定store；application-photo-export/upload-files沿用browser上下文。"
+  },
+  "checks": [
+    {
+      "command": "TMPDIR=/tmp/camctl-quality-client-session-temp npm ci --offline --no-audit --no-fund",
+      "cwd": "/tmp/camctl-quality-client-session-20261026/apps/client",
+      "exit_code": 0,
+      "log": "npm-ci.log"
+    },
+    {
+      "command": "node apps/client/node_modules/typescript/bin/tsc --noEmit --strict --target ES2023 --module ESNext --moduleResolution Bundler --esModuleInterop --resolveJsonModule --skipLibCheck --types node --typeRoots apps/client/node_modules/@types tests/integration/client_driver.ts",
+      "exit_code": 0,
+      "log": "typecheck.log"
+    },
+    {
+      "command": "npm run build",
+      "cwd": "/tmp/camctl-quality-client-session-20261026/apps/client",
+      "exit_code": 0,
+      "log": "build.log"
+    },
+    {
+      "command": "PYTHONPYCACHEPREFIX=/tmp/camctl-quality-client-session-temp/pycache /workspaces/camctl/apps/camctl/.venv311/bin/python /tmp/camctl-quality-evidence/client-session/smoke.py",
+      "exit_code": 0,
+      "log": "smoke.log",
+      "result": {
+        "passed": true,
+        "wall_seconds": 9.66866671499156,
+        "cases": [
+          "真实共享export/import/import-media与ACK",
+          "单Application/Files且零HTTP/browser",
+          "既有HB省略store的browser-plan-export",
+          "headless/browser/headless明确关闭重建",
+          "原独立三操作",
+          "store不匹配与未知操作的错误回执和进程收场"
+        ],
+        "source_commit": "0ff20735ec02849cf6a3dfa3436621d1f15026bd"
+      }
+    },
+    {
+      "command": "PYTHONPYCACHEPREFIX=/tmp/camctl-quality-client-session-temp/pycache /workspaces/camctl/apps/camctl/.venv311/bin/python /tmp/camctl-quality-evidence/client-session/timeout.py",
+      "exit_code": 0,
+      "log": "timeout.log",
+      "result": [
+        {
+          "phase": "startup",
+          "passed": true,
+          "elapsed_seconds": 0.5103180890000658
+        },
+        {
+          "phase": "call",
+          "passed": true,
+          "elapsed_seconds": 0.562061465010629
+        },
+        {
+          "phase": "close",
+          "passed": true,
+          "elapsed_seconds": 0.5846289650071412
+        }
+      ]
+    }
+  ],
+  "real_headless_observation": {
+    "node_process_starts": 1,
+    "application_starts": 1,
+    "files_starts": 1,
+    "http_server_starts": 0,
+    "browser_starts": 0
+  },
+  "real_mixed_mode_final_observation": {
+    "node_process_starts": 1,
+    "application_starts": 3,
+    "files_starts": 3,
+    "http_server_starts": 1,
+    "browser_starts": 1
+  },
+  "close_status": "closed",
+  "limits": [
+    "未运行Action6/OSMO完整业务世界，生产实现保持本基线。",
+    "最后一次smoke后仅将两个browser变量由any替换为Playwright已有返回类型，并补真实require类型；该类型修改已重新通过strict tsc。",
+    "初次共享依赖环境为Playwright1.64但浏览器缓存1.63，browser启动失败；最终按本工区权威锁安装Playwright1.63后完整窄smoke通过。"
+  ]
+}

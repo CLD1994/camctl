@@ -31,7 +31,7 @@ from camctl.operations.models import (
 )
 from camctl.outputs.cleanup_flow import (
     FinishCleanupAction, FixCleanupTargets, RestrictCleanupItem,
-    StartCleanupAction, _verify_before_delete, delete_source_file,
+    StartCleanupAction, delete_source_file,
 )
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.cancellation import CancellationRepository
@@ -39,39 +39,19 @@ from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 
 from ..bootstrap.test_output_binding_changes import (
-    Driver, _NOW, _accept, _registry, _save_photos, environment,
+    Driver, _NOW, _registry, _save_photos, environment,
 )
+
+from ..support.outputs import prepare_cleanup_member, cleanup_factory
+from ..support.capture import capture_database
 
 pytestmark = pytest.mark.asyncio
 
 
 def _apply_cleanup_cancel(owned, target_action_id: int) -> None:
-    """公开取消事务明确指向当前成员所属动作，不选第一条清理。"""
-    before = {row[0] for row in owned.connection.execute(
-        "SELECT id FROM actions WHERE type=6")}
-    _accept(owned, "4", [{
-        "name": "取消当前清理", "type": "cancel_task",
-        "scheduled_at": "2026-01-15 09:00:00",
-        "params": {"target": {"action_instance_id": str(target_action_id)}},
-    }])
-    origins = {row[0] for row in owned.connection.execute(
-        "SELECT id FROM actions WHERE type=6")} - before
-    assert len(origins) == 1
-    origin = origins.pop()
-    repository = CancellationRepository()
-    started = repository.start_cancel_action(
-        StartCancelAction(origin, _NOW), new_operation_key(), owned)
-    assert started.kind is DbOutcomeKind.COMPLETED, started.error
-    fixed = repository.fix_cancel_targets(FixCancelTargets(
-        origin, FixedCancelSet((FixedTarget(
-            target_action_id, SelectionBasis.DIRECT,
-            CancellationEffect.NOT_APPLIED),)), _NOW),
-        new_operation_key(), owned)
-    assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
-    applied = repository.apply_cancel_target(ApplyCancelTarget(
-        fixed.value.item_ids[0], CancelApplyMode.WITH_STOP, _NOW),
-        new_operation_key(), owned)
-    assert applied.kind is DbOutcomeKind.COMPLETED, applied.error
+    from ..bootstrap.test_output_binding_changes import Catalog
+    from ..support.outputs import prepare_cancel_target
+    prepare_cancel_target(owned, catalog=Catalog(), now=_NOW, action_id=target_action_id)
 
 
 class _MatrixDriver(Driver):
@@ -127,9 +107,9 @@ class _MatrixDriver(Driver):
 class _QueryFinishPort(OperationRepository):
     """仅替换目标 QUERY 的结果保存；其余仓储事务真实执行。"""
 
-    def __init__(self, kind, item_id, driver, retry_gate):
+    def __init__(self, kind, item_id, driver):
         self.kind, self.item_id = kind, item_id
-        self.driver, self.retry_gate = driver, retry_gate
+        self.driver = driver
         self.finishes = []
         self.checkpoint = None
         self.error = OperationalError("原 QUERY 结果保存故障")
@@ -143,7 +123,6 @@ class _QueryFinishPort(OperationRepository):
         assert finish.outcome.outcome is self.driver.last_query_result.outcome
         self.checkpoint = (
             tuple(owned.connection.iterdump()),
-            dict(self.retry_gate.anchors),
             len(self.driver.deletes), len(self.driver.queries),
         )
         if self.kind is not DbOutcomeKind.COMPLETED:
@@ -154,42 +133,21 @@ class _QueryFinishPort(OperationRepository):
         return result
 
 
-def _new_runtime(cfg, owned, driver, *, query_attempts=3):
-    factory = session_cleanup_assembly(
+async def _new_runtime(cfg, owned, driver, *, query_attempts=3):
+    factory = cleanup_factory(
         devices=cfg.devices, drivers=_registry(driver),
         max_delete_attempts=3, max_query_attempts=query_attempts,
         staging=Path(cfg.paths.staging), occurred_at=lambda: _NOW,
         monotonic_ns=lambda: 0,
     )
-    return factory(owned)
+    return await factory(await capture_database(owned))
 
 
 def _start_cleanup(owned, output_id: int, request_id: str):
-    """受理、开始、固定成员和建立可撤销限制均由公开仓储执行。"""
-    previous = {row[0] for row in owned.connection.execute(
-        "SELECT id FROM actions WHERE type=5")}
-    _accept(owned, request_id, [{
-        "name": "清理目标照片", "type": "delete_action_outputs",
-        "scheduled_at": "2026-01-15 09:00:00",
-        "params": {"output_ids": [str(output_id)]},
-    }])
-    created = {row[0] for row in owned.connection.execute(
-        "SELECT id FROM actions WHERE type=5")} - previous
-    assert len(created) == 1
-    action_id = created.pop()
-    repository = OutputsRepository()
-    started = repository.start_cleanup_action(
-        StartCleanupAction(action_id, _NOW), new_operation_key(), owned)
-    assert started.kind is DbOutcomeKind.COMPLETED, started.error
-    fixed = repository.fix_cleanup_targets(
-        FixCleanupTargets(action_id, _NOW), new_operation_key(), owned)
-    assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
-    assert len(fixed.value.item_ids) == 1
-    item_id = fixed.value.item_ids[0]
-    restricted = repository.restrict_cleanup_item(
-        RestrictCleanupItem(item_id, _NOW), new_operation_key(), owned)
-    assert restricted.kind is DbOutcomeKind.COMPLETED, restricted.error
-    return action_id, item_id
+    from ..bootstrap.test_output_binding_changes import Catalog
+    return prepare_cleanup_member(
+        owned, catalog=Catalog(), now=_NOW, output_id=output_id, request_id=request_id,
+    )
 
 
 def _member_facts(owned, item_id):
@@ -227,7 +185,7 @@ async def test_query_save_matrix(environment, consumer, present, kind):
     if consumer == "before":
         # C1 实际删除未知、查询未知，随后自己的查询预算可靠耗尽。
         old_action, old_item = _start_cleanup(owned, output_id, "2")
-        previous_runtime = _new_runtime(cfg, owned, driver, query_attempts=1)
+        previous_runtime = await _new_runtime(cfg, owned, driver, query_attempts=1)
         first = await delete_source_file(previous_runtime, old_item)
         assert first.phase == "query_unknown", first
         exhausted = await delete_source_file(previous_runtime, old_item)
@@ -241,10 +199,10 @@ async def test_query_save_matrix(environment, consumer, present, kind):
     else:
         action_id, item_id = _start_cleanup(owned, output_id, "2")
 
-    base = _new_runtime(cfg, owned, driver)
-    port = _QueryFinishPort(kind, item_id, driver, base.retry_gate)
+    base = await _new_runtime(cfg, owned, driver)
+    port = _QueryFinishPort(kind, item_id, driver)
     base.operations = port
-    runtime = base.for_item(item_id)
+    runtime = await base.for_item(item_id)
     driver.matrix_enabled, driver.present = True, present
     queries_before = len(driver.queries)
     if consumer == "cancel":
@@ -253,23 +211,21 @@ async def test_query_save_matrix(environment, consumer, present, kind):
 
     error, step = None, None
     try:
-        if consumer == "before":
-            # 公开前置已建立 C1 终态及 C2 责任；这里只测删除前消费者。
-            step = await _verify_before_delete(runtime, item_id, action_id, output_id)
-        else:
-            step = await delete_source_file(runtime, item_id)
+        step = await delete_source_file(runtime, item_id)
     except ConsistencyError as caught:
         error = caught
 
-    assert len(driver.queries) == queries_before + 1
-    assert len(port.finishes) == 1
+    expected_queries = 2 if (kind is DbOutcomeKind.COMPLETED and consumer == "before"
+                              and present is True) else 1
+    assert len(driver.queries) == queries_before + expected_queries
+    assert len(port.finishes) == expected_queries
     assert port.checkpoint is not None
     assert owned.connection.execute(
         "SELECT attempts_used FROM operation_runs WHERE responsibility_key=?",
-        (f"exists/{item_id}",)).fetchone() == (1,)
+        (f"exists/{item_id}",)).fetchone() == (expected_queries,)
     assert owned.connection.execute(
         "SELECT COUNT(*) FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id"
-        " WHERE r.responsibility_key=?", (f"exists/{item_id}",)).fetchone() == (1,)
+        " WHERE r.responsibility_key=?", (f"exists/{item_id}",)).fetchone() == (expected_queries,)
     if old_member is not None:
         old_action, old_item, before = old_member
         assert _original_member_rows(owned, old_action, old_item) == before
@@ -277,9 +233,8 @@ async def test_query_save_matrix(environment, consumer, present, kind):
     if kind is not DbOutcomeKind.COMPLETED:
         # checkpoint 在 QUERY 已返回、首次保存前取得：保留此前的意图、
         # 额度、归属及实际 DELETE；其后任何结果、收场、等待变化都禁止。
-        database, anchors, deletes, queries = port.checkpoint
+        database, deletes, queries = port.checkpoint
         assert tuple(owned.connection.iterdump()) == database
-        assert runtime.retry_gate.anchors == anchors
         assert len(driver.deletes) == deletes
         assert len(driver.queries) == queries
         assert isinstance(error, ConsistencyError), step
@@ -321,24 +276,19 @@ async def test_query_save_matrix(environment, consumer, present, kind):
             "SELECT status,retry_wait_required FROM operation_runs"
             " WHERE cleanup_item_id=? ORDER BY id", (item_id,)).fetchall() == (
                 [(3, 0)] if consumer == "before" else [(3, 0), (3, 0)])
-        assert f"exists/{item_id}" not in runtime.retry_gate.anchors
-        assert f"delete/{item_id}" not in runtime.retry_gate.anchors
     elif consumer == "cancel":
         code = "delete_unconfirmed" if present is None else "file_delete_failed"
         assert (step.phase, step.detail) == ("canceled", code)
         assert facts[:4] == (6, 4, None, item_error_id("cleanup_items", code))
         assert facts[4] is not None
     else:
-        if present is True and consumer == "before":
-            assert step is None
-        else:
-            assert step.phase == ("still_present" if present is True else "query_unknown")
+        assert step.phase == ("still_present" if present is True else "query_unknown")
         assert facts[0] == 3 and facts[4] is None
-    # 删除前只消费查询，其他两分区只有在 QUERY 之前的原 DELETE。
+    # 新成员先保存并消费原查询；确认在场后才可执行自己的 DELETE。
     assert owned.connection.execute(
         "SELECT COUNT(*) FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id"
         " WHERE r.responsibility_key=?", (f"delete/{item_id}",)).fetchone() == (
-            0 if consumer == "before" else 1,)
+            int(consumer != "before" or present is True),)
     if consumer == "cancel":
         assert owned.connection.execute(
             "SELECT cancel_requested FROM actions WHERE id=?", (action_id,)).fetchone() == (1,)

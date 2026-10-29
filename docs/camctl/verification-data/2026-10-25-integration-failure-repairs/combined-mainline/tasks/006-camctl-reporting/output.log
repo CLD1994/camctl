@@ -1,0 +1,6 @@
+.                                                                        [100%]
+============================== slowest durations ===============================
+4.50s call     tests/integration/reporting/test_result_error_state.py::test_uninterpretable_frozen_error_stops_worker_without_publish
+
+(2 durations < 0.005s hidden.  Use -vv to show these durations.)
+1 passed in 10.42s

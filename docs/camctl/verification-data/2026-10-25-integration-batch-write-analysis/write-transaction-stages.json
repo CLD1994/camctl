@@ -1,0 +1,181 @@
+[
+  {
+    "stage": "db_transaction",
+    "wall_ns": 28712077290,
+    "cpu_ms": 30881.702,
+    "phases": {
+      "unclassified": {
+        "elapsed_ms": 35.366,
+        "cpu_ms": 37.507,
+        "calls": 0,
+        "sql": {
+          "elapsed_ms": 0.0,
+          "cpu_ms": 0.0
+        }
+      },
+      "begin_write": {
+        "elapsed_ms": 1.222,
+        "cpu_ms": 1.272,
+        "calls": 1,
+        "sql": {
+          "execute_calls": 1,
+          "rows_read": 0,
+          "rows_written": 0,
+          "elapsed_ms": 0.768,
+          "cpu_ms": 0.83
+        }
+      },
+      "read_state": {
+        "elapsed_ms": 13.218,
+        "cpu_ms": 14.209,
+        "calls": 210,
+        "sql": {
+          "execute_calls": 211,
+          "rows_read": 211,
+          "rows_written": 0,
+          "fetch_calls": 211,
+          "elapsed_ms": 5.724,
+          "cpu_ms": 6.158
+        }
+      },
+      "plan": {
+        "elapsed_ms": 2342.932,
+        "cpu_ms": 2533.406,
+        "calls": 1,
+        "sql": {
+          "execute_calls": 9485,
+          "rows_read": 10644,
+          "rows_written": 0,
+          "fetch_calls": 9693,
+          "elapsed_ms": 235.829,
+          "cpu_ms": 250.747
+        }
+      },
+      "final_checks": {
+        "elapsed_ms": 4.327,
+        "cpu_ms": 4.618,
+        "calls": 210,
+        "sql": {
+          "execute_calls": 5,
+          "rows_read": 5,
+          "rows_written": 0,
+          "fetch_calls": 5,
+          "elapsed_ms": 0.121,
+          "cpu_ms": 0.127
+        }
+      },
+      "sql_writes": {
+        "elapsed_ms": 112.325,
+        "cpu_ms": 120.985,
+        "calls": 417,
+        "sql": {
+          "execute_calls": 1272,
+          "rows_read": 18,
+          "rows_written": 1054,
+          "fetch_calls": 218,
+          "elapsed_ms": 45.906,
+          "cpu_ms": 49.478
+        }
+      },
+      "validation_context": {
+        "elapsed_ms": 9150.421,
+        "cpu_ms": 9864.028,
+        "calls": 417,
+        "sql": {
+          "execute_calls": 13546,
+          "rows_read": 24294,
+          "rows_written": 0,
+          "fetch_calls": 19270,
+          "elapsed_ms": 439.649,
+          "cpu_ms": 466.902
+        }
+      },
+      "event_generation": {
+        "elapsed_ms": 8725.25,
+        "cpu_ms": 9407.068,
+        "calls": 210,
+        "sql": {
+          "execute_calls": 12537,
+          "rows_read": 23917,
+          "rows_written": 0,
+          "fetch_calls": 18281,
+          "elapsed_ms": 394.559,
+          "cpu_ms": 418.58
+        }
+      },
+      "report_targets": {
+        "elapsed_ms": 13.469,
+        "cpu_ms": 14.543,
+        "calls": 208,
+        "sql": {
+          "elapsed_ms": 0.0,
+          "cpu_ms": 0.0
+        }
+      },
+      "event_validation": {
+        "elapsed_ms": 8274.074,
+        "cpu_ms": 8844.949,
+        "calls": 208,
+        "sql": {
+          "execute_calls": 22660,
+          "rows_read": 25805,
+          "rows_written": 0,
+          "fetch_calls": 23380,
+          "elapsed_ms": 845.352,
+          "cpu_ms": 891.941
+        }
+      },
+      "change_derivation": {
+        "elapsed_ms": 35.128,
+        "cpu_ms": 37.943,
+        "calls": 416,
+        "sql": {
+          "elapsed_ms": 0.0,
+          "cpu_ms": 0.0
+        }
+      },
+      "commit": {
+        "elapsed_ms": 4.344,
+        "cpu_ms": 1.175,
+        "calls": 1,
+        "sql": {
+          "execute_calls": 1,
+          "rows_read": 0,
+          "rows_written": 0,
+          "elapsed_ms": 4.287,
+          "cpu_ms": 1.116
+        }
+      }
+    },
+    "details": {
+      "history_decode": {
+        "elapsed_ms": 6623.47,
+        "cpu_ms": 7131.976,
+        "calls": 12875
+      },
+      "history_structure_validation": {
+        "elapsed_ms": 3914.712,
+        "cpu_ms": 4216.157,
+        "calls": 25718
+      },
+      "history_event_validation": {
+        "elapsed_ms": 8269.484,
+        "cpu_ms": 8840.088,
+        "calls": 208
+      }
+    },
+    "details_inclusive": true,
+    "sql": {
+      "execute_calls": 59718,
+      "rows_read": 84894,
+      "rows_written": 1054,
+      "fetch_calls": 71058,
+      "elapsed_ms": 1972.195,
+      "cpu_ms": 2085.879
+    },
+    "counts": {
+      "events": 208,
+      "row_changes": 218
+    }
+  }
+]

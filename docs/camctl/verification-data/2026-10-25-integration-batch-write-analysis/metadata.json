@@ -1,0 +1,25 @@
+{
+  "source_head": "98d3b28da5751e1e8c733f2712180cd5e0e119aa",
+  "source": "/tmp/camctl-batch-write-deep-hfrt1dyy/source",
+  "run": "/tmp/camctl-batch-write-deep-hfrt1dyy",
+  "N": 200,
+  "B": 4,
+  "purpose": "冻结同一数据库，分别开关测试SQL探针及tracemalloc；不替代原容量测试",
+  "python": "3.11.17",
+  "sqlite": "3.53.1",
+  "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+  "camctl_file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/src/camctl/__init__.py",
+  "test_file": "/tmp/camctl-batch-write-deep-hfrt1dyy/source/apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py",
+  "test_sha256": "328eae499d90f12750223df7c34725a82b47c983e32017e2219f3a5a83aff24f",
+  "frozen_sha256": "c1d702a1f8bdb74a74970bdf648cdae02eefa7d221c15529cf87296079a7f9f7",
+  "baseline_logical_sha256": "d545b7b70967276e09b556a8959df2f01d7fcc6706fdce17e86348e6dcb3d30b",
+  "result_logical_sha256": "9cd0007a92fb277d1fcca5c5729319308f652a353b20598fec6a8503c5eb4b4a",
+  "database_path": "/tmp/camctl-batch-write-deep-hfrt1dyy/world/state.db",
+  "pragmas": {
+    "journal_mode": "wal",
+    "synchronous": 2,
+    "cache_size": -2000,
+    "wal_autocheckpoint": 1000
+  },
+  "note": "四档同一物理路径恢复同一关闭后WAL数据库、同一请求与操作键；每档结果和完整逻辑数据一致。单次顺序测量，未重置OS缓存。诊断档另带cProfile与SQL/阶段观察，不用于性能对照。"
+}

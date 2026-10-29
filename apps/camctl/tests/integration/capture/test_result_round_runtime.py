@@ -7,17 +7,16 @@ from unittest.mock import create_autospec
 import pytest
 
 from camctl.bootstrap.capture_assembly import DriverResultListing
-from camctl.capture.handlers import ListingPhase, _listing_round
+from camctl.capture.handlers import capture_handler
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.evidence import DeviceObservation, EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import DeviceCallResult, ResultDriver
-from camctl.operations.attempts import AttemptConfig
 from camctl.operations.models import (
     AttemptStatus, CallInfo, CallOutcome, EffectState, ErrorValue, EvidenceValue,
     Settlement, SettlementBasis,
 )
 
-from .result_consumer_fixtures import consumer_world
+from ..support.result_cases import result_case, result_case_for
 
 
 _CONTRACTS = EvidenceRegistry((
@@ -32,7 +31,8 @@ _CONTRACTS = EvidenceRegistry((
 @pytest.mark.asyncio
 @pytest.mark.parametrize("with_files", [False, True])
 async def test_result_consumer_uses_original_activity_ticket_timeout_and_outcome(tmp_path, with_files):
-    owned, runtime, action_id, _handler = await consumer_world(tmp_path, "record", independent_activity=True)
+    owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "record", independent_activity=True, result_page_contract=False,
+        evidence_contracts=(_CONTRACTS.contract("adb_foreground_assumption", 1),))
     try:
         # 先行报告动作使拍摄动作 2 与真实调度分配的活动 1 分别独立。
         assert action_id == 2
@@ -54,11 +54,10 @@ async def test_result_consumer_uses_original_activity_ticket_timeout_and_outcome
             call_info=CallInfo(local_exit_code=7))
         driver = create_autospec(ResultDriver, instance=True)
         driver.list_results.return_value = DeviceCallResult.from_outcome(actual)
-        runtime.evidence = _CONTRACTS
-        runtime.results = DriverResultListing(driver, DeviceBinding("cam-1", "camctl-adb"), _CONTRACTS)
-        runtime.check_config = AttemptConfig(3, Decimal("1.25"), Decimal("2"))
+        result_case_for().results.delegate = DriverResultListing(
+            driver, DeviceBinding("cam-1", "camctl-adb"), _CONTRACTS)
 
-        listing = await _listing_round(runtime, action_id)
+        await capture_handler(handler)(action_id, runtime)
 
         driver.list_results.assert_awaited_once()
         request, _batch = driver.list_results.call_args.args
@@ -70,23 +69,28 @@ async def test_result_consumer_uses_original_activity_ticket_timeout_and_outcome
         assert owned.connection.execute(
             "SELECT action_id,activity_id,attempts_used FROM operation_runs"
             " WHERE responsibility_key='results/1'").fetchone() == (2, 1, 1)
+        status, result_json, error_json = owned.connection.execute(
+            "SELECT a.status,a.result_json,a.error_json FROM operation_attempts a"
+            " JOIN operation_runs r ON r.id=a.run_id WHERE r.responsibility_key='results/1'"
+        ).fetchone()
+        assert status == 3
+        saved = json.loads(result_json)
+        assert saved["settlement"] == {"basis": "assumed", "evidence": {
+            "type": "adb_foreground_assumption", "version": 1,
+            "data": {"terminate_grace_s": 0.25}}}
+        assert saved["call_info"] == {"local_exit": {"exit_code": 7}}
+        assert json.loads(error_json) == {"code": "transport_timeout", "stage": "transport",
+                                         "details": {"received_bytes": 23}}
         if with_files:
-            assert listing.phase is ListingPhase.LISTED
-            assert listing.outcome is actual
-            assert tuple(entry.identity for entry in listing.entries) == ("original",)
-        else:
-            assert listing.phase is ListingPhase.RETRY_WAIT
-            status, result_json, error_json = owned.connection.execute(
-                "SELECT a.status,a.result_json,a.error_json FROM operation_attempts a"
-                " JOIN operation_runs r ON r.id=a.run_id WHERE r.responsibility_key='results/1'"
+            assert saved["observations"] == [{"type": "result_files_listed", "version": 1,
+                "data": actual.observations[0].data}]
+            identity, source, completion, size = owned.connection.execute(
+                "SELECT identity_key,source_action_id,completion_state,size_bytes FROM device_files"
             ).fetchone()
-            assert status == 3
-            saved = json.loads(result_json)
-            assert saved["settlement"] == {"basis": "assumed", "evidence": {
-                "type": "adb_foreground_assumption", "version": 1,
-                "data": {"terminate_grace_s": 0.25}}}
-            assert saved["call_info"] == {"local_exit": {"exit_code": 7}}
-            assert json.loads(error_json) == {"code": "transport_timeout", "stage": "transport",
-                                            "details": {"received_bytes": 23}}
+            assert json.loads(identity) == ["cam-1", "camctl-adb", "original"]
+            assert (source, completion, size) == (action_id, 3, 41)
+        else:
+            assert saved["observations"] == []
+
     finally:
         owned.connection.close()

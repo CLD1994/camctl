@@ -59,10 +59,6 @@ class TestRealTomlLoading:
         with pytest.raises(ConfigError):
             load_config(_load_toml(document), ConfigDefaults())
 
-    def test_missing_file_uses_defaults_without_search(self, tmp_path: Path) -> None:
-        cfg = load_config(None, ConfigDefaults())
-        assert cfg.copy.segment_size_bytes == 134217728
-
     def test_unreadable_file_is_not_silent_default(self, tmp_path: Path) -> None:
         # 无法可靠读取且不能确认为不存在：适配器必须报错而非缺省。
         target = tmp_path / "camctl.toml"

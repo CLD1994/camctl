@@ -1,0 +1,40 @@
+{
+  "diagnostic_log": "/tmp/camctl-quality-repair-evidence/discovery-adaptation/live-referrers.log",
+  "observed_before_assertion": [
+    "ReadCandidate",
+    "page.items tuple",
+    "Page",
+    "ReadReceipt",
+    "completed Future",
+    "Task.task_wakeup argument tuple",
+    "currently executing asyncio.Handle"
+  ],
+  "database_worker_frame": "executor._run waiting with self/owned/job/granted; no result payload or outcome local",
+  "observation_boundary": "删除已消费页后仅await asyncio.sleep(0)一次，让本次交付Handle自然结束，再保留原弱引用和GC断言。没有新增DB读、提前close、轮询或超时等待。",
+  "negative_control": "test_release_observation_detects_page_retained_by_discovery_owner主动让owner保留页，经过同一loop边界和GC后原释放断言仍失败，由pytest.raises确认。",
+  "full_file_result": "30 passed in 10.04s; original 29 instances retained, one negative control added",
+  "capacity": [
+    {
+      "candidates": 14,
+      "batch_size": 1,
+      "max_returned": 1,
+      "retained_after_page": 0,
+      "cursor_count_after_scan": 0
+    },
+    {
+      "candidates": 122,
+      "batch_size": 1,
+      "max_returned": 1,
+      "retained_after_page": 0,
+      "cursor_count_after_scan": 0
+    },
+    {
+      "candidates": 122,
+      "batch_size": 3,
+      "max_returned": 3,
+      "retained_after_page": 0,
+      "cursor_count_after_scan": 0
+    }
+  ],
+  "production_changes": false
+}

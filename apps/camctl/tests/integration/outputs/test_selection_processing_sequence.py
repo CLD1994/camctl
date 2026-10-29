@@ -12,9 +12,11 @@ import pytest
 
 from camctl.contracts.values import new_operation_key
 from camctl.history import validators
+from camctl.history.validators import register_guard
 from camctl.history.validators import EventValidationError
 from camctl.outputs.sources import SelectionMode
 from camctl.persistence.repositories import outputs
+from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.operations import register_operation_guards
 from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.transaction import commit_operation, event_envelope, update_change
@@ -22,7 +24,7 @@ from camctl.persistence.transaction import commit_operation, event_envelope, upd
 from .test_output_family import family_database  # noqa: F401  产物目录夹具
 from .test_selection_event_sequence import _Sequence
 from .test_selection_guard import _NOW, _proposal, selection_database
-from ..operations.test_result_reuse import _FaultConnection
+from ..support.output_planning import storage_fault as _FaultConnection
 
 register_operation_guards()
 register_outputs_guards()
@@ -30,6 +32,16 @@ register_outputs_guards()
 #: RECORDING_PROCESSED.DISCARD 的事件与分支编号（与采集仓储登记一致）。
 _PROCESSED_EVENT = 19
 _DISCARD_REASON = 3
+
+
+@pytest.fixture(autouse=True)
+def restore_formal_guards():
+    """观察 H1 当前事实后，由所属模块恢复正式登记，不保留测试 spy。"""
+    try:
+        yield
+    finally:
+        register_capture_guards()
+        outputs.register_outputs_guards()
 
 
 def _canceled_source_with_completed_discard(owned) -> None:
@@ -66,7 +78,6 @@ def _discard_progress(after: int):
 def test_selection_uses_only_preceding_processing_completion(
     selection_database, monkeypatch, mode, completion_first,
 ):
-    monkeypatch.setattr(validators, "NAMED_GUARDS", dict(validators.NAMED_GUARDS))
     owned = selection_database
     selection, context = _selection_against_pending_discard(owned, mode)
     events = ((_discard_progress(4), selection) if completion_first
@@ -86,8 +97,8 @@ def test_selection_uses_only_preceding_processing_completion(
             current.state_rows["recording_processing"][51]["discard_state"])
         original_processing(event, current)
 
-    monkeypatch.setitem(validators.NAMED_GUARDS, "source_selection", inspect_selection)
-    monkeypatch.setitem(validators.NAMED_GUARDS, "processing", inspect_processing)
+    register_guard("source_selection", inspect_selection)
+    register_guard("processing", inspect_processing)
     before = tuple(owned.connection.iterdump())
     receipt = commit_operation(_Sequence(events, context), new_operation_key(), owned)
     # 选择先被拒绝时收场事件不再验证；否则收场事件总由正式
@@ -114,7 +125,6 @@ def test_selection_uses_only_preceding_processing_completion(
 def test_prior_unfinished_discard_progress_still_blocks_selection(
     selection_database, monkeypatch, mode,
 ):
-    monkeypatch.setattr(validators, "NAMED_GUARDS", dict(validators.NAMED_GUARDS))
     owned = selection_database
     selection, context = _selection_against_pending_discard(owned, mode)
     events = (_discard_progress(3), selection)
@@ -125,7 +135,7 @@ def test_prior_unfinished_discard_progress_still_blocks_selection(
         seen.append(current.state_rows["recording_processing"][51]["discard_state"])
         original(event, current)
 
-    monkeypatch.setitem(validators.NAMED_GUARDS, "source_selection", inspect)
+    register_guard("source_selection", inspect)
     before = tuple(owned.connection.iterdump())
     receipt = commit_operation(_Sequence(events, context), new_operation_key(), owned)
     assert seen == [3], receipt.error
@@ -136,7 +146,6 @@ def test_prior_unfinished_discard_progress_still_blocks_selection(
 
 
 def test_write_failure_rolls_back_processing_and_selection(selection_database, monkeypatch):
-    monkeypatch.setattr(validators, "NAMED_GUARDS", dict(validators.NAMED_GUARDS))
     owned = selection_database
     selection, context = _selection_against_pending_discard(owned, SelectionMode.DEFAULT)
     events = (_discard_progress(4), selection)
@@ -145,5 +154,5 @@ def test_write_failure_rolls_back_processing_and_selection(selection_database, m
         owned, connection=_FaultConnection(owned.connection, "INSERT INTO obtain_items"))
     receipt = commit_operation(_Sequence(events, context), new_operation_key(), target)
     assert receipt.kind == "rolled_back", receipt.error
-    assert isinstance(receipt.error, sqlite3.OperationalError), receipt.error
+    assert type(receipt.error) is sqlite3.DatabaseError, receipt.error
     assert tuple(owned.connection.iterdump()) == before

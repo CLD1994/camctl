@@ -1,0 +1,295 @@
+{
+  "created_utc": "2026-10-27T10:16:11.627467+00:00",
+  "coordinator_head": "e1adc65a515ba99eb90d1da394283cefcce114f9",
+  "meaning": "阶段续增快照；每组源码、已执行范围及生产候选分别识别。仍在执行组的报告只代表归档时点，不替代全范围验证。",
+  "items": [
+    {
+      "source": "/tmp/camctl-refactor-20261026/reporting-contracts/.local/refactor-report.json",
+      "artifact": "reporting-contracts/refactor-report.json.gz",
+      "uncompressed_bytes": 31044,
+      "sha256": "8faa699b13a31c7997aeae60ed812d71ef9f40269c4deb785728b17a63bd89e6",
+      "compressed_sha256": "9ac160c732a5643033a5d7295f9c4ae24e6dbff06a3179ac6c62705a196f616d"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/outputs/.local/outputs-resume-combined-final.json",
+      "artifact": "outputs/outputs-resume-combined-final.json.gz",
+      "uncompressed_bytes": 1037,
+      "sha256": "c17dad2d8b4a04650a280505eeb441e24b0d9667f34e5044ed7eb46a21c91f68",
+      "compressed_sha256": "25bd521800e47409be56d7dd57a31775185f044e190b31b2f9562d7eb5879ba1"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/outputs/.local/outputs-resume-combined-final.log",
+      "artifact": "outputs/outputs-resume-combined-final.log.gz",
+      "uncompressed_bytes": 9534,
+      "sha256": "11b80d0ca967072bd30fa1effd6fca6e38e4c42eda96ef7426cc675a18da11b7",
+      "compressed_sha256": "2850831ff2167564ce9b488d0818dfec59aced98dd75e641290e7038d50a62a4"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/outputs/.local/outputs-resume-combined-final.xml",
+      "artifact": "outputs/outputs-resume-combined-final.xml.gz",
+      "uncompressed_bytes": 32241,
+      "sha256": "cf1114e6f99f21303bc7088506611ee5c5f9704c8e6ada224974552c3cf54189",
+      "compressed_sha256": "ea64a0b8d6cf7a99e05f867dc382701ebb3b3913612c8097fb0e12ce6dd03c88"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/outputs/.local/outputs-resume-report.json",
+      "artifact": "outputs/outputs-resume-report.json.gz",
+      "uncompressed_bytes": 11710,
+      "sha256": "80a5ac7f0fef1e1c65cc3a6e6e21688e955ea0cb0f71749998a5df712a9d0a2b",
+      "compressed_sha256": "bf5fd73f1b33a1a290783a2e0042b21a591371dcd4e13bd87628ad23f5a74c04"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/outputs/.local/read-checksum-fixed-grant-input.json",
+      "artifact": "outputs/read-checksum-fixed-grant-input.json.gz",
+      "uncompressed_bytes": 493,
+      "sha256": "0a5ca1f6f12abf831a32c5116282382638274b8030be13a7c9d5e7e0c95d7413",
+      "compressed_sha256": "8f91f8607801ad93e16ca9b334cf7a6006f852fe90c3027145950350780fe5a5"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/outputs/.local/read-checksum-fixed-grant-input.log",
+      "artifact": "outputs/read-checksum-fixed-grant-input.log.gz",
+      "uncompressed_bytes": 113,
+      "sha256": "73ad6e082a8a22c0836ab22a470d90170e104d90c66067a6b6755b17ad7f5e59",
+      "compressed_sha256": "2e8abb64b79dc1be68193f15fe0ba0ec34869a1201c8ce284a2b2c645690afdf"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/bootstrap/.local/refactor-report.json",
+      "artifact": "bootstrap/refactor-report.json.gz",
+      "uncompressed_bytes": 263733,
+      "sha256": "1c4b643451253017dc40f28431a8e524eeb05dc5cba1a124668a2b9d81011e2c",
+      "compressed_sha256": "e2445eafaacedfc826c9576f781c0795a42575bea32a38ccfbd4311741040dc6"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/bootstrap/.local/verification/bootstrap-all-collection-callback-final.json",
+      "artifact": "bootstrap/verification/bootstrap-all-collection-callback-final.json.gz",
+      "uncompressed_bytes": 1291,
+      "sha256": "bf6ef0e7ff171de69b8d67672c17961cf039779990372127a6e9f7fb70c6e613",
+      "compressed_sha256": "fb7652ffcf3a7380e73f34b6a84a1a8c7cb4e73e79b24f4a5ad8c707bd5c8394"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/bootstrap/.local/verification/bootstrap-all-collection-callback-final.log",
+      "artifact": "bootstrap/verification/bootstrap-all-collection-callback-final.log.gz",
+      "uncompressed_bytes": 202131,
+      "sha256": "0cfbdf69f7bd0c8a0f7ac9652f07e9e50c9f36ce64aa5b25b3e265155a69d1df",
+      "compressed_sha256": "c257a540b956e97b0c42effc96f11c63723bebbf4dc12b8c2c65a3db363357a5"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/bootstrap/.local/verification/bootstrap-all-collection-callback-final.sources.json",
+      "artifact": "bootstrap/verification/bootstrap-all-collection-callback-final.sources.json.gz",
+      "uncompressed_bytes": 180638,
+      "sha256": "0a5a1fa8cb817d8bb761339bf6fc402061f1a1cbe1b182cf158d48e618e7e3bd",
+      "compressed_sha256": "cf14da1eb7fe6dc464fdc33f0b1d9f132e8a933607e161c01249dfc086261cc2"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/bootstrap/.local/verification/recovery-callback-combined-final.json",
+      "artifact": "bootstrap/verification/recovery-callback-combined-final.json.gz",
+      "uncompressed_bytes": 1712,
+      "sha256": "4816107a9bd2a046af7702278b0e22171e9d58a77d7f7467cc77c4b53def86a4",
+      "compressed_sha256": "665afb68953b0c6a8caaf3e01a2e2317eb6922cbe37258adb821491a7956cb83"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/bootstrap/.local/verification/recovery-callback-combined-final.log",
+      "artifact": "bootstrap/verification/recovery-callback-combined-final.log.gz",
+      "uncompressed_bytes": 261,
+      "sha256": "eef9b57b5291e53460483b582aab09868e87c0cad262b7bfc7966b149d69ecdf",
+      "compressed_sha256": "c3c512e92e1f3ad3289a93c7f0684f970bc0f9076006f3e2d0acedb8bc11567a"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/bootstrap/.local/verification/recovery-callback-combined-final.sources.json",
+      "artifact": "bootstrap/verification/recovery-callback-combined-final.sources.json.gz",
+      "uncompressed_bytes": 180638,
+      "sha256": "0a5a1fa8cb817d8bb761339bf6fc402061f1a1cbe1b182cf158d48e618e7e3bd",
+      "compressed_sha256": "cf14da1eb7fe6dc464fdc33f0b1d9f132e8a933607e161c01249dfc086261cc2"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/bootstrap-capture-errors/.local/refactor-report.json",
+      "artifact": "bootstrap-capture-errors/refactor-report.json.gz",
+      "uncompressed_bytes": 27189,
+      "sha256": "d4b311807cecb82ab153c74fc4505e8b1df71f8da7ca735a84d4426eb93caa68",
+      "compressed_sha256": "3b6e903096c6666784d0adc1cf9cab0296d1234368a890f9cb16fc63a1f8356e"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/bootstrap-capture-errors/.local/stage1-full20.json",
+      "artifact": "bootstrap-capture-errors/stage1-full20.json.gz",
+      "uncompressed_bytes": 2040,
+      "sha256": "a404c0399b2022c846ba8580ee2e19f929fab8f6e5feec4e7119bc54a2264a5f",
+      "compressed_sha256": "78f429fc00a90f849e939ae68640b584505aac811df92ad2ea52b108ed66214b"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/bootstrap-capture-errors/.local/stage1-full20.log",
+      "artifact": "bootstrap-capture-errors/stage1-full20.log.gz",
+      "uncompressed_bytes": 99,
+      "sha256": "a7e6d021bc1d300a8bae88b00db9334f54e78c4ae4d1172c2c916e64d2650db8",
+      "compressed_sha256": "1e89e23ed0d4017a952f6a8f04622bc9560480cbb0bdbe6aa77ae6a7575ada37"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/bootstrap-capture-errors/.local/stage1-full20.xml",
+      "artifact": "bootstrap-capture-errors/stage1-full20.xml.gz",
+      "uncompressed_bytes": 4057,
+      "sha256": "c0f5b2e90afd43c6f3a50d804af78892a23d341475383a251b1b6a3ff11501ba",
+      "compressed_sha256": "812e662fe332ea868059131532c25fa5044c9aa3450706b7c19502e8352e2f03"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/bootstrap-drivers/.local/bootstrap-drivers/final-run.json",
+      "artifact": "bootstrap-drivers/bootstrap-drivers/final-run.json.gz",
+      "uncompressed_bytes": 2372,
+      "sha256": "0286561a20f116268b82570e6d40e1f200a7083890a78a6e4d5a544748c0cc11",
+      "compressed_sha256": "30c89525fd63dde0a8ca5819ba03b5619ac38ce072b892de555cd75a3149489f"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/bootstrap-drivers/.local/bootstrap-drivers/final.log",
+      "artifact": "bootstrap-drivers/bootstrap-drivers/final.log.gz",
+      "uncompressed_bytes": 15686,
+      "sha256": "f778018d4549b2585cf83bfc5ee585821e94d4524438f1dac567bf186a729987",
+      "compressed_sha256": "0452b2057c35dc43d11325508c31678c63f71fd088b317cec5b94c3a2427a936"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/bootstrap-drivers/.local/bootstrap-drivers/final.xml",
+      "artifact": "bootstrap-drivers/bootstrap-drivers/final.xml.gz",
+      "uncompressed_bytes": 25239,
+      "sha256": "0705f6962c81f85461873df0f2f02ffe82d5e80f5b37a1d21d0606d1f6167708",
+      "compressed_sha256": "91f73aa1ad5958c79d7b93c9f0068ac27290363169d0fd2f76a6d111ac266577"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/bootstrap-drivers/.local/bootstrap-drivers/stage1-report.json",
+      "artifact": "bootstrap-drivers/bootstrap-drivers/stage1-report.json.gz",
+      "uncompressed_bytes": 18105,
+      "sha256": "5b5f9e5b33d2c3b45c4db11da8bc4a043952a476f207465e45668bbf828803ab",
+      "compressed_sha256": "b0611c485592714b03d43c7903840025cf243ed401f03e59718f5d1bf6753f61"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/output-segments/.local/refactor-report.json",
+      "artifact": "output-segments/refactor-report.json.gz",
+      "uncompressed_bytes": 22007,
+      "sha256": "f5c6b87d170a586199d4b031117474b5d3759bf239eb2ecd8f72059c63da49ae",
+      "compressed_sha256": "289b33df08940d830b9106f828365d0fc411744a900fd1e14c535369e99f0710"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/output-segments/.local/segments-final-owned/receipt.json",
+      "artifact": "output-segments/segments-final-owned/receipt.json.gz",
+      "uncompressed_bytes": 860,
+      "sha256": "f77186032e4a1c257414a33ef6e99b4a972e53b54db8fd71fa5be2565070bf79",
+      "compressed_sha256": "80e7cb333af6d6d0af49b45f7b8c0dc1950f16b019fd6deb7acb023399659dfd"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/capture/.local/refactor-report.json",
+      "artifact": "capture/refactor-report.json.gz",
+      "uncompressed_bytes": 409215,
+      "sha256": "ad7a4361cdb4d93456e34de530895cdd29c98e00773817acb156dac89dde8175",
+      "compressed_sha256": "3a6de5b6bef51b91abbc75b7d7b8c2f9032303c43681f1272ec7c68df7e0074f"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/capture/.local/verification/owner-contract-coverage.json",
+      "artifact": "capture/verification/owner-contract-coverage.json.gz",
+      "uncompressed_bytes": 2002,
+      "sha256": "aa936b62384fb943c089c944d9bab660b07655c7b1915f983a2667acfddfa536",
+      "compressed_sha256": "e43417494b2c1ce1d69c49955e56d2200cd70467a9171d80ae2ea4fbe795abd0"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/capture/.local/verification/result-capture-stage-combined.json",
+      "artifact": "capture/verification/result-capture-stage-combined.json.gz",
+      "uncompressed_bytes": 2114,
+      "sha256": "0ab17d524ae916138a5d42fa2aed476c7e523509e64b45b5e744bf1070a02a46",
+      "compressed_sha256": "e32b2c807733dd07826b02e60b48a042e4d4e5673e246f3d18f79c7e10dff52e"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/capture/.local/verification/result-retries-public-final.json",
+      "artifact": "capture/verification/result-retries-public-final.json.gz",
+      "uncompressed_bytes": 1991,
+      "sha256": "4138f0491e07de0aafc39fc2a9c38503f706851fd99738f33cdee138df37fa73",
+      "compressed_sha256": "52f28c840b93e380d222136662cd29828ee66883034b4c7b92ff466b4a69ce67"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/capture/.local/verification/unit-fresh-import-audit.json",
+      "artifact": "capture/verification/unit-fresh-import-audit.json.gz",
+      "uncompressed_bytes": 827,
+      "sha256": "df3a764a3336ea5eb7a30be96fca6c6621bd2eb0afdbcb846c55145903fdfa22",
+      "compressed_sha256": "6e8b6103a36155854a719782ea109ef7258f3a00535054e8c7c4ca2c5acf1207"
+    },
+    {
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/integration-refactor-20261026/merged-capture-349/results.xml",
+      "artifact": "coordinator/merged-capture-349/results.xml.gz",
+      "uncompressed_bytes": 89199,
+      "sha256": "2ba0878aae844f6cc56e713c524d5c200627a2529cd7e638616958a78ca85f33",
+      "compressed_sha256": "d729a80ece66141a222d825a5f2667619584ff68be80c7a8ba4504cb43f1cda8"
+    },
+    {
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/integration-refactor-20261026/merged-capture-349/source-manifest.json",
+      "artifact": "coordinator/merged-capture-349/source-manifest.json.gz",
+      "uncompressed_bytes": 60520,
+      "sha256": "bdb8e16d69852b196f96fa3ee0f430068f924c854c4f56732a9d27427382fa3e",
+      "compressed_sha256": "d14d5eb879d3f7965aefef6894753db11d924e7080d42fcc3fa8a565514866ec"
+    },
+    {
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/integration-refactor-20261026/merged-capture-349/pytest.log",
+      "artifact": "coordinator/merged-capture-349/pytest.log.gz",
+      "uncompressed_bytes": 24071,
+      "sha256": "a436ffa0db108dd515efb57c9b40deb954ed15bfc2bd4db68dbb823d796a5ee0",
+      "compressed_sha256": "9765280221ce8455bdfa8e75524ee367c3f0eff7aa62091fab3c8f06a2d116d8"
+    },
+    {
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/integration-refactor-20261026/merged-capture-349/receipt.json",
+      "artifact": "coordinator/merged-capture-349/receipt.json.gz",
+      "uncompressed_bytes": 1442,
+      "sha256": "b3200f29661aa85f7ee91a57245a331e332fb032878be806b5c625cc5ed4175d",
+      "compressed_sha256": "22e3c15f031f805f80b698666d871ad5ff5cc6eb641457d45dfd9b610a625ba2"
+    },
+    {
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/integration-refactor-20261026/production-boundary-audit.json",
+      "artifact": "coordinator/production-boundary-audit.json.gz",
+      "uncompressed_bytes": 2519,
+      "sha256": "34388ecc81ad26fae61567b89266783d52d1e934533a71d9162d85ac5eeb4068",
+      "compressed_sha256": "49078e5bf60d4381e2ddacadf8ccbff925ad740791988c3b2ffdd86cfad7fffd"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/reporting-contracts/.local/stream-validation/final-collection.json",
+      "artifact": "reporting-contracts/stream-validation/final-collection.json.gz",
+      "uncompressed_bytes": 1007,
+      "sha256": "fcb1f13043628b88fc52f6eb458ff0d8d460403a9a08fed6e6e1812c90bcef8c",
+      "compressed_sha256": "f3d38d78475b27902719af99f979cc123cafe1b868c300e436bc5eee1b8a6443"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/reporting-contracts/.local/stream-validation/final-collection.log",
+      "artifact": "reporting-contracts/stream-validation/final-collection.log.gz",
+      "uncompressed_bytes": 8423,
+      "sha256": "4cfdf74fad525069c452ba898edc9b04f7371e7b46dd494b388e4cfaa69dc9e4",
+      "compressed_sha256": "5a7d488f43d92a5e3eb0fda074f1d153fd8a5a76f6f0dd2b0a2b452362ba9ca8"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/reporting-contracts/.local/stream-validation/final.json",
+      "artifact": "reporting-contracts/stream-validation/final.json.gz",
+      "uncompressed_bytes": 962,
+      "sha256": "9bdcb7d32a9c8deb27842d39e872b91007399b8f30aecd8908d4885549d74519",
+      "compressed_sha256": "6208749de06d201f3e893714f121c1544975720ee63045eab59df03f808cdc28"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/reporting-contracts/.local/stream-validation/final.log",
+      "artifact": "reporting-contracts/stream-validation/final.log.gz",
+      "uncompressed_bytes": 99,
+      "sha256": "12080db1cae169d5f3b86e9302969caae89eeed94efa0a5c264f937f88c2754c",
+      "compressed_sha256": "2a25491e433244098ccca75a8af3e2fe698b007de368f1705058a691dd4030b2"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/bootstrap-capture-errors/.local/final-resources38.json",
+      "artifact": "bootstrap-capture-errors/final-resources38.json.gz",
+      "uncompressed_bytes": 2558,
+      "sha256": "f9303c1b799f4b15823dde772405fbe897a59ebcc95a070d4b6f549d2b8f4cea",
+      "compressed_sha256": "3081d14b24413652c36421c0ce55346a258cf36355fc332ce2d4646b66dd4424"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/bootstrap-capture-errors/.local/final-resources38.log",
+      "artifact": "bootstrap-capture-errors/final-resources38.log.gz",
+      "uncompressed_bytes": 99,
+      "sha256": "80172d55091ed2d969fe1c04469f8226d49983f214413cf10d30eeacf14b96e9",
+      "compressed_sha256": "082c86bc413515adbd5434e13540e23a71dcf46595f7b1adc6d5d582ee671636"
+    },
+    {
+      "source": "/tmp/camctl-refactor-20261026/bootstrap-capture-errors/.local/final-resources38.xml",
+      "artifact": "bootstrap-capture-errors/final-resources38.xml.gz",
+      "uncompressed_bytes": 6969,
+      "sha256": "28702674135bfa541ce592a9812a34e1c728e4a0f128da68931636d3889626f9",
+      "compressed_sha256": "0371bbb2b93dbc89728b685b49475610d9a623dbbcbbaf644bfc9648d2d7f01c"
+    }
+  ],
+  "updated_utc": "2026-10-27T10:20:25.562268+00:00"
+}

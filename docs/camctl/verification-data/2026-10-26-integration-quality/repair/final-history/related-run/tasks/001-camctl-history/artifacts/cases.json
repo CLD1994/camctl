@@ -1,0 +1,1902 @@
+[
+  {
+    "nodeid": "tests/integration/history/test_report_scope.py::TestSelectReportScope::test_window_selects_targets_and_completes_parents",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.06448192099924199
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.7035114979953505
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.009208453993778676
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.7772018729883712
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_scope.py::TestSelectReportScope::test_scope_ignores_changes_outside_window",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.03531054400082212
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.1560362149903085
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.007786784990457818
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.19913354398158845
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_scope.py::TestSelectReportScope::test_diagnostics_in_window_are_selected",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.04062540798622649
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.026693615000112914
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.007364455013885163
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.07468347800022457
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_scope.py::TestSelectReportScope::test_batch_size_does_not_change_scope",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.05582052099634893
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.16431887699582148
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.008992967996164225
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.22913236598833464
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_scope.py::TestRestoreEntity::test_rows_restore_to_boundary_h",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.035742530002607964
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.20144634100142866
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006612568991840817
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.24380143999587744
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_scope.py::TestRestoreEntity::test_rows_created_after_h_are_excluded",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0336686819937313
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.16042001299501862
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.007346928003244102
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.20143562299199402
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_scope.py::TestRestoreEntity::test_restored_rows_match_h_snapshot",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.03575099800946191
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.1600880350015359
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.005837121992954053
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.20167615500395186
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_selection_pages_preserve_targets_and_necessary_ancestors",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.03370096700382419
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.242097491005552
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006401853010174818
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.282200311019551
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_old_h_excludes_new_targets_and_their_ancestors",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.019072940995101817
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.045963357988512143
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00537119600630831
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.07040749498992227
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_cursor_rejects_different_scope_or_parent_role[instance_id-other-db]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.018182756000896916
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.038651349997962825
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006705858002533205
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.06353996400139295
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_cursor_rejects_different_scope_or_parent_role[boundary-value1]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.038222753995796666
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.035963136004284024
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00737832099548541
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0815642109955661
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_cursor_rejects_different_scope_or_parent_role[from_wm-1]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0369524549896596
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.03836841299198568
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006522133990074508
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.08184300197171979
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_cursor_rejects_different_scope_or_parent_role[to_wm-9999]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.041222337997169234
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.04380250399117358
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006166384991956875
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.09119122698029969
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_cursor_rejects_different_scope_or_parent_role[entity-diagnostic]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.03492672300490085
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0428743439988466
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.010338808002416044
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.08813987500616349
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_cursor_rejects_different_scope_or_parent_role[parent_id-1]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.046337356994627044
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.04835730300692376
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.007316590999835171
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.10201125100138597
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_session_scope_is_readonly_and_exception_exit_releases_candidates[RuntimeError]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.05025181699602399
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.025866644995403476
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.010705843000323512
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.08682430499175098
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_session_scope_is_readonly_and_exception_exit_releases_candidates[CancelledError]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.05907530800323002
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.024672019004356116
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.017563738001626916
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.10131106500921305
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_missing_materialized_target_is_not_silently_omitted",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.02965390899043996
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.026834132004296407
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.005706815994926728
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.062194856989663094
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_delivery_target_only_fills_obtain_ancestors_not_source_entities[4096]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.31857774799573235
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.03641639099805616
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.009318547992734239
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.36431268698652275
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_delivery_target_only_fills_obtain_ancestors_not_source_entities[1]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.428395006005303
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.06619470599980559
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00810938299400732
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.5026990949991159
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_independent_entry_rejects_missing_target_or_any_required_owner[action-plans-1-1-4096]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.43645472900243476
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.19047063600737602
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.007384767988696694
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.6343101329985075
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_independent_entry_rejects_missing_target_or_any_required_owner[action-plans-1-1-0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.26842049599508755
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0793429500045022
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006906540991622023
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.35466998699121177
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_independent_entry_rejects_missing_target_or_any_required_owner[output-actions-1-1-4096]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.22088703099871054
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.07555956899886951
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.005953927000518888
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.30240052699809894
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_independent_entry_rejects_missing_target_or_any_required_owner[output-actions-1-1-0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.24299963099474553
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.06754264900519047
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.007094264990882948
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.31763654499081895
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_independent_entry_rejects_missing_target_or_any_required_owner[output-plans-1-1-4096]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.22141333899344318
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.06746037700213492
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.039675690000876784
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.3285494059964549
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_independent_entry_rejects_missing_target_or_any_required_owner[output-plans-1-1-0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.25882405199809
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.06887305100099184
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006309364995104261
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.3340064679941861
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_independent_entry_rejects_missing_target_or_any_required_owner[delivery-actions-2-2-4096]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.23905477400694508
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.077301694007474
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00799816798826214
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.3243546360026812
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_independent_entry_rejects_missing_target_or_any_required_owner[delivery-actions-2-2-0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.27564890499343164
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.07630445298855193
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00808622399927117
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.36003958198125474
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_independent_entry_rejects_missing_target_or_any_required_owner[delivery-plans-2-2-4096]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.21895895100897178
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.06740965599601623
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006356347003020346
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.29272495400800835
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_independent_entry_rejects_missing_target_or_any_required_owner[delivery-plans-2-2-0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.2179671800113283
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.07393165100074839
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.007282870006747544
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.29918170101882424
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_independent_entry_rejects_missing_target_or_any_required_owner[plan-plans-1-None-4096]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.21130045301106293
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.06373652500042226
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.008764937010710128
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.2838019150221953
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_independent_entry_rejects_missing_target_or_any_required_owner[plan-plans-1-None-0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.23188336500606965
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0637343250127742
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.008043399997404777
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.30366109001624864
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_independent_entry_rejects_missing_target_or_any_required_owner[plan-actions-2-None-4096]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.22892546199727803
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.06534216000000015
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.009012334994622506
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.3032799569919007
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_independent_entry_rejects_missing_target_or_any_required_owner[plan-actions-2-None-0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.21368530100153293
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.07408698499784805
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00565385700610932
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.2934261430054903
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_independent_entry_rejects_missing_target_or_any_required_owner[action-actions-1-1-4096]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.19764006399782375
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.06542974599869922
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.009108354002819397
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.27217816399934236
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_independent_entry_rejects_missing_target_or_any_required_owner[action-actions-1-1-0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.20560643001226708
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.057456709997495636
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.007242993000545539
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.27030613301030826
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_independent_entry_rejects_missing_target_or_any_required_owner[output-outputs-2-1-4096]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.2041912919958122
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.06367089999548625
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.009081714000785723
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.2769439059920842
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_independent_entry_rejects_missing_target_or_any_required_owner[output-outputs-2-1-0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.21056974699604325
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.06115881900768727
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006060245010303333
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.27778881101403385
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_independent_entry_rejects_missing_target_or_any_required_owner[delivery-deliveries-2-2-4096]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.18742749700322747
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.060544189997017384
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.007314304995816201
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.25528599199606106
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_independent_entry_rejects_missing_target_or_any_required_owner[delivery-deliveries-2-2-0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.2143037159985397
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.06256128700624686
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006579000997589901
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.28344400400237646
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_independent_entry_rejects_missing_target_or_any_required_owner[diagnostic-plan_file_diagnostics-2-None-4096]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.19450860600045417
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.06167315399216022
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.007071950007230043
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.26325370999984443
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_independent_entry_rejects_missing_target_or_any_required_owner[diagnostic-plan_file_diagnostics-2-None-0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.1946772319934098
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.05250433999754023
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006623095003305934
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.25380466699425597
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_all_five_targets_keep_pages_parent_filter_and_legal_empty[4096]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.19446797599084675
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.08418135800457094
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006556245003594086
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.2852055789990118
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_all_five_targets_keep_pages_parent_filter_and_legal_empty[0]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.20558706700103357
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.07944375000079162
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00616109199472703
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.29119190899655223
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_late_corruption_is_visible_before_candidate_limit[actions]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.014581654002540745
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.8717271510104183
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006438586002332158
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.8927473910152912
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_late_corruption_is_visible_before_candidate_limit[plans]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.01443471500533633
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.8315297899971483
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006388031993992627
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.8523525369964773
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_delivery_window_does_not_validate_unselected_source_reference_chain",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.19360805900942069
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.025069120994885452
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006374468008289114
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.22505164801259525
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_initialization_rejects_future_or_partial_h",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.01547107900842093
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.120824426994659
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.007548383000539616
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.14384388900361955
+  },
+  {
+    "nodeid": "tests/integration/history/test_report_selection.py::test_read_failure_and_database_replacement_close_bound_session",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.022592484994675033
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.052560750002157874
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.007533857002272271
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.08268709199910518
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_cost_path_reads_only_selected_event_range[current-2-0-True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.1448289520049002
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.033934745006263256
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.009986891993321478
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.18875058900448494
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_cost_path_reads_only_selected_event_range[exact-0-3-True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.1554082710063085
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.033975213998928666
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.007898359006503597
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.19728184401174076
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_cost_path_reads_only_selected_event_range[no_snapshot-1-3-False]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.14160885401361156
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.035566751001169905
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006906712995260023
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.1840823180100415
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_cost_path_reads_only_selected_event_range[forward-1-4-True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.14499551799963228
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.05130311399989296
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006826958997407928
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.20312559099693317
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_cost_path_reads_only_selected_event_range[reverse-4-1-True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.13027767099265475
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.04584095301106572
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006579997992957942
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.1826986219966784
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_cost_path_reads_only_selected_event_range[tie-2-2-True]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.13301178300753236
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.04320467599609401
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00548495800467208
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.18170141700829845
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_reverse_application_runs_after_query_and_transaction_end",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.12903649799409322
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.026037855990580283
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006121590995462611
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.16119594498013612
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_projection_and_range_keep_c_when_commit_occurs_between_pages",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.1436707130051218
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.03180425400205422
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.005416387997684069
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.1808913550048601
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_selected_snapshot_damage_is_not_a_cache_miss[format]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.13858628500020131
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.023967172994161956
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.005860414996277541
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.1684138729906408
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_selected_snapshot_damage_is_not_a_cache_miss[count]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.124531424997258
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.019598330996814184
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00878872800967656
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.15291848400374874
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_selected_snapshot_damage_is_not_a_cache_miss[missing_primary]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.13804602199525107
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.041454687001532875
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.011020215999451466
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.1905209249962354
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_selected_snapshot_damage_is_not_a_cache_miss[duplicate]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.17622702399967238
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.025960405997466296
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00826041799155064
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.21044784798868932
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_selected_snapshot_damage_is_not_a_cache_miss[foreign]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.14389337800093926
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.030661587006761692
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00567256000067573
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.1802275250083767
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_new_snapshot_after_selection_cannot_replace_fixed_s_and_id",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.13368580900714733
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.05801627899927553
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.005311849003192037
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.1970139370096149
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[unknown_enum-exact]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.13597511399711948
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.04325870200409554
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006063612992875278
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.1852974289940903
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[unknown_enum-forward]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.15016415700665675
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.05280751900863834
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.005734435995691456
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.20870611201098654
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[unknown_enum-empty_delta]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.14080994599498808
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.061393372001475655
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.005620978990918957
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.2078242969873827
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[integer_as_text-exact]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.14638893099618144
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.04018207800982054
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006906943002832122
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.1934779520088341
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[integer_as_text-forward]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.13741075398866087
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.044873452992760576
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0061278659995878115
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.18841207298100926
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[integer_as_text-empty_delta]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.14275599000393413
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.049924497987376526
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.005936715999268927
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.19861720399057958
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[integer_as_bool-exact]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.15891524800099432
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.10457600399968214
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.014281053998274729
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.2777723059989512
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[integer_as_bool-forward]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.1598062370030675
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.04423058099928312
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006232497995370068
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.2102693159977207
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[integer_as_bool-empty_delta]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.14147891600441653
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.04913116899842862
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.005923978998907842
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.196534064001753
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[fractional_integer-exact]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.12638914400304202
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.04505090499878861
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0049764840077841654
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.1764165330096148
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[fractional_integer-forward]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.12656109199451748
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.04542665000190027
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.007987766992300749
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.1799755089887185
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[fractional_integer-empty_delta]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.13011196300794836
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.06051290000323206
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.008537319008610211
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.19916218201979063
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[required_null-exact]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.129992021000362
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.04829509100818541
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0061901290027890354
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.18447724101133645
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[required_null-forward]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.13881527999183163
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.04698153400386218
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006375137003487907
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.19217195099918172
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[required_null-empty_delta]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.13303801699657924
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.061130998001317494
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.005683687995770015
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.19985270299366675
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[json_array_in_object-exact]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.14942954300204292
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.04403963299409952
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.004982655998901464
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.1984518319950439
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[json_array_in_object-forward]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.1368393489974551
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.040429958011372946
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.005566816005739383
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.18283612301456742
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[json_array_in_object-empty_delta]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.13418870499299373
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.059012329002143815
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0059779939911095425
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.1991790279862471
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[text_as_integer-exact]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.13547967201157007
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.04074305899848696
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006209305007359944
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.18243203601741698
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[text_as_integer-forward]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.13643867398786824
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.04333232299541123
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.005642981006531045
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.18541397798981052
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[text_as_integer-empty_delta]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.13647565399878658
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.05757580799399875
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006185253005241975
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.2002367149980273
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[complete_without_length-exact]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.1444771600072272
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0528042420046404
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006246677992749028
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.20352808000461664
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[complete_without_length-forward]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.15449067499139346
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.04366622799716424
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0056628290039952844
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.203819731992553
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[complete_without_length-empty_delta]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.14781060499080922
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.05716238799504936
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0058488340000621974
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.21082182698592078
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[integer_outside_sql_range-exact]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.1471767839975655
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.03947414401045535
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00621359700744506
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.19286452501546592
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[integer_outside_sql_range-forward]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.14929596899310127
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.053648337998311035
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.010072842007502913
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.21301714899891522
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_reject_invalid_state[integer_outside_sql_range-empty_delta]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.13696426300157327
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.049658560994430445
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0076204010110814124
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.19424322500708513
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_invalid_s_is_rejected_before_later_event_overwrites_bad_column",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.14621452600113116
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.04647269699489698
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.005841552003403194
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.19852877499943133
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_keep_legal_null_json_and_precise_integer[exact]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.14433965699572582
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.043422176997410133
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0055859390122350305
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.19334777300537098
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_keep_legal_null_json_and_precise_integer[forward]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.15635529499559198
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.059829407997312956
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006494663000921719
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.22267936599382665
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_business_values_keep_legal_null_json_and_precise_integer[empty_delta]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.14397117399494164
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.06088699199608527
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006529680002131499
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.2113878459931584
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_validation_reuses_schema_and_closes_connection[success]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.14014359799330123
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.041996359010227025
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0067441480059642345
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.1888841050094925
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_validation_reuses_schema_and_closes_connection[invalid_row]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.14417409399175085
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.046325203991727903
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.005826704989885911
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.19632600297336467
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_projection_row_validation_rolls_back_and_measures_1000_rows",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.13263824699970428
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.649308153995662
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006578861008165404
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.7885252620035317
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_rejects_duplicate_mutable_unique_key[output]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.19456777500454336
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.02794718499353621
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0070085490006022155
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.2295235089986818
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_rejects_duplicate_mutable_unique_key[delivery]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.2301525520015275
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.038784222007961944
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.007703626004513353
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.2766404000140028
+  },
+  {
+    "nodeid": "tests/integration/history/test_restore_paths.py::test_snapshot_allows_repeated_null_unique_keys",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.2110601790045621
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0309351119940402
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.007084709999617189
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.24908000099821948
+  }
+]

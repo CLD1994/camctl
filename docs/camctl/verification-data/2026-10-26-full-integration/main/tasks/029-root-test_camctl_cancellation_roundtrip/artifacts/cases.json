@@ -1,0 +1,21 @@
+[
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/029-root-test_camctl_cancellation_roundtrip/source/tests/integration/test_camctl_cancellation_roundtrip.py::test_cleanup_unknown_preserves_original_request_result",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0013186629948904738
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 33.43634292700153
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.22274966600525659
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 33.66041125600168
+  }
+]

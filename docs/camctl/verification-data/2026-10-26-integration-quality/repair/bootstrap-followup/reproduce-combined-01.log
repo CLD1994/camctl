@@ -1,0 +1,48 @@
+.........F
+=================================== FAILURES ===================================
+________ test_default_obtain_reaches_candidates_beyond_first_batch[1-3] ________
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/tasks.py:500: in wait_for
+    return fut.result()
+           ^^^^^^^^^^^^
+/tmp/camctl-quality-repair-evidence/bootstrap-followup/observe_bootstrap.py:68: in execute
+    return await original(deps,*args,**kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/bootstrap/lifecycle.py:1185: in execute_command
+    outcome = await run_session(context, source)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/session/service.py:667: in run_session
+    return await _run_session(context, source)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/session/service.py:1166: in _run_session
+    raise original.with_traceback(original.__traceback__)
+apps/camctl/src/camctl/session/service.py:1002: in _run_session
+    outcome = await drive()
+              ^^^^^^^^^^^^^
+apps/camctl/src/camctl/session/service.py:995: in drive
+    await _wait_for_more_work(context, database, observed=observed_wake)
+apps/camctl/src/camctl/session/service.py:1796: in _wait_for_more_work
+    await context.wake.wait_changed(context.wake.snapshot() if observed is None else observed,
+apps/camctl/src/camctl/scheduling/notifications.py:105: in wait_changed
+    await event.wait()
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/locks.py:213: in wait
+    await fut
+E   asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+apps/camctl/tests/integration/bootstrap/test_read_discovery_default.py:68: in test_default_obtain_reaches_candidates_beyond_first_batch
+    outcome = await asyncio.wait_for(execute_command(deps, None, poll_interval_s=0.005), 30)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/tasks.py:502: in wait_for
+    raise exceptions.TimeoutError() from exc
+E   TimeoutError
+============================= slowest 15 durations =============================
+30.72s call     tests/integration/bootstrap/test_read_discovery_default.py::test_default_obtain_reaches_candidates_beyond_first_batch[1-3]
+0.05s setup    tests/integration/bootstrap/test_read_discovery_default.py::test_default_obtain_reaches_candidates_beyond_first_batch[1-3]
+0.01s call     tests/integration/bootstrap/test_read_discovery_default.py::test_read_discovery_default
+0.01s teardown tests/integration/bootstrap/test_read_discovery_default.py::test_default_obtain_reaches_candidates_beyond_first_batch[1-3]
+
+(11 durations < 0.005s hidden.  Use -vv to show these durations.)
+=========================== short test summary info ============================
+FAILED apps/camctl/tests/integration/bootstrap/test_read_discovery_default.py::test_default_obtain_reaches_candidates_beyond_first_batch[1-3]
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+1 failed, 9 passed in 31.70s

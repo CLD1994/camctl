@@ -1,0 +1,2405 @@
+{
+  "task": "S4 业务启动窗口及其后续测试失败（media除外）",
+  "completed_utc": "2026-10-25T08:40:01.260752+00:00",
+  "worktree": "/tmp/camctl-fix44-clock-20261025",
+  "branch": "fix/fail44-clock-20261025",
+  "baseline": "5d20849e53fbfb045d25a2799e268827967196b2",
+  "commits": [
+    "a8361675aa0d8a8ab0b3a733a466e7eb40ca30d6",
+    "8ee2dcd4be09622f48d97dacdf99d8cee0d4959b"
+  ],
+  "head": "8ee2dcd4be09622f48d97dacdf99d8cee0d4959b",
+  "git_status": "",
+  "changed_files": [
+    "tests/integration/_hasselblad_photo_entry.py",
+    "tests/integration/camctl_fixtures.py",
+    "tests/integration/test_camctl_c_module_roundtrip.py",
+    "tests/integration/test_camctl_cancellation_roundtrip.py",
+    "tests/integration/test_camctl_output_roundtrip.py",
+    "tests/integration/test_camctl_session_recovery.py",
+    "tests/integration/test_hasselblad_photo_roundtrip.py"
+  ],
+  "summary": {
+    "original_case_count": 15,
+    "original_passed": 15,
+    "additional_passed": 7,
+    "all_original_cases_passed": true,
+    "production_files_changed": false,
+    "whole_suite_rerun": false,
+    "max_concurrent_heavy_slots": 2
+  },
+  "original_cases": [
+    {
+      "diagnosis_id": 17,
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+      "outcome": "passed",
+      "run": "id17-complete",
+      "case": {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 18.36227181198774
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 46.72210420999909
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.000854768994031474
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 65.08523079098086
+      },
+      "output_log": "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/output.log",
+      "command": [
+        "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start",
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_middle_event_as_boundary",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest"
+      ]
+    },
+    {
+      "diagnosis_id": 18,
+      "nodeid": "tests/integration/test_camctl_c_module_roundtrip.py::test_capture_obtain_cleanup_roundtrip_via_c_module",
+      "outcome": "passed",
+      "run": "green",
+      "case": {
+        "nodeid": "tests/integration/test_camctl_c_module_roundtrip.py::test_capture_obtain_cleanup_roundtrip_via_c_module",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 30.504692486996646
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 42.74238825899374
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.002341471001273021
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 73.24942221699166
+      },
+      "output_log": "/tmp/camctl-fix44-clock-green/tasks/001-root-test_camctl_c_module_roundtrip/artifacts/output.log",
+      "command": [
+        "/tmp/camctl-fix44-clock-green/tasks/001-root-test_camctl_c_module_roundtrip/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_camctl_c_module_roundtrip.py::test_capture_obtain_cleanup_roundtrip_via_c_module",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-fix44-clock-green/tasks/001-root-test_camctl_c_module_roundtrip/tmp/pytest"
+      ]
+    },
+    {
+      "diagnosis_id": 22,
+      "nodeid": "tests/integration/test_video_size_estimate.py::test_record_estimate_stays_out_of_execution_and_report",
+      "outcome": "passed",
+      "run": "acceptance",
+      "case": {
+        "nodeid": "tests/integration/test_video_size_estimate.py::test_record_estimate_stays_out_of_execution_and_report",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.001224032006575726
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 16.664774721997674
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.0005350410065148026
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 16.666533795010764
+      },
+      "output_log": "/tmp/camctl-fix44-clock-acceptance/tasks/004-root-test_video_size_estimate/artifacts/output.log",
+      "command": [
+        "/tmp/camctl-fix44-clock-acceptance/tasks/004-root-test_video_size_estimate/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_video_size_estimate.py::test_record_estimate_stays_out_of_execution_and_report",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-fix44-clock-acceptance/tasks/004-root-test_video_size_estimate/tmp/pytest"
+      ]
+    },
+    {
+      "diagnosis_id": 23,
+      "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_cross_plan_reference_and_multi_request",
+      "outcome": "passed",
+      "run": "acceptance",
+      "case": {
+        "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_cross_plan_reference_and_multi_request",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.000888067006599158
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 34.490919910997036
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.0003645060060080141
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 34.49217248400964
+      },
+      "output_log": "/tmp/camctl-fix44-clock-acceptance/tasks/002-root-test_camctl_output_roundtrip/artifacts/output.log",
+      "command": [
+        "/tmp/camctl-fix44-clock-acceptance/tasks/002-root-test_camctl_output_roundtrip/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_camctl_output_roundtrip.py::test_cross_plan_reference_and_multi_request",
+        "tests/integration/test_camctl_output_roundtrip.py::test_recording_delivery_survives_late_cancel",
+        "tests/integration/test_camctl_output_roundtrip.py::test_repeated_obtain_of_same_output_yields_independent_deliveries",
+        "tests/integration/test_camctl_output_roundtrip.py::test_auto_preview_obtains_registered_preview",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-fix44-clock-acceptance/tasks/002-root-test_camctl_output_roundtrip/tmp/pytest"
+      ]
+    },
+    {
+      "diagnosis_id": 24,
+      "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_recording_delivery_survives_late_cancel",
+      "outcome": "passed",
+      "run": "acceptance",
+      "case": {
+        "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_recording_delivery_survives_late_cancel",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.0007550239970441908
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 18.71371467100107
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.005403299001045525
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 18.71987299399916
+      },
+      "output_log": "/tmp/camctl-fix44-clock-acceptance/tasks/002-root-test_camctl_output_roundtrip/artifacts/output.log",
+      "command": [
+        "/tmp/camctl-fix44-clock-acceptance/tasks/002-root-test_camctl_output_roundtrip/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_camctl_output_roundtrip.py::test_cross_plan_reference_and_multi_request",
+        "tests/integration/test_camctl_output_roundtrip.py::test_recording_delivery_survives_late_cancel",
+        "tests/integration/test_camctl_output_roundtrip.py::test_repeated_obtain_of_same_output_yields_independent_deliveries",
+        "tests/integration/test_camctl_output_roundtrip.py::test_auto_preview_obtains_registered_preview",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-fix44-clock-acceptance/tasks/002-root-test_camctl_output_roundtrip/tmp/pytest"
+      ]
+    },
+    {
+      "diagnosis_id": 25,
+      "nodeid": "tests/integration/test_camctl_session_recovery.py::test_report_failure_preserves_device_work_and_redelivers",
+      "outcome": "passed",
+      "run": "acceptance",
+      "case": {
+        "nodeid": "tests/integration/test_camctl_session_recovery.py::test_report_failure_preserves_device_work_and_redelivers",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.0010471869900356978
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 15.14108691198635
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.00027420099650043994
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 15.142408299972885
+      },
+      "output_log": "/tmp/camctl-fix44-clock-acceptance/tasks/003-root-test_camctl_session_recovery/artifacts/output.log",
+      "command": [
+        "/tmp/camctl-fix44-clock-acceptance/tasks/003-root-test_camctl_session_recovery/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_camctl_session_recovery.py::test_report_failure_preserves_device_work_and_redelivers",
+        "tests/integration/test_camctl_session_recovery.py::test_process_restart_resumes_interrupted_work",
+        "tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed",
+        "tests/integration/test_camctl_session_recovery.py::test_future_action_waits_and_past_window_expires",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-fix44-clock-acceptance/tasks/003-root-test_camctl_session_recovery/tmp/pytest"
+      ]
+    },
+    {
+      "diagnosis_id": 26,
+      "nodeid": "tests/integration/test_camctl_session_recovery.py::test_concurrent_submits_and_duplicate_identity",
+      "outcome": "passed",
+      "run": "green",
+      "case": {
+        "nodeid": "tests/integration/test_camctl_session_recovery.py::test_concurrent_submits_and_duplicate_identity",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.0022824740008218214
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 38.46707268099999
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.002398404001723975
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 38.471753559002536
+      },
+      "output_log": "/tmp/camctl-fix44-clock-green/tasks/003-root-test_camctl_session_recovery/artifacts/output.log",
+      "command": [
+        "/tmp/camctl-fix44-clock-green/tasks/003-root-test_camctl_session_recovery/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_camctl_session_recovery.py::test_concurrent_submits_and_duplicate_identity",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-fix44-clock-green/tasks/003-root-test_camctl_session_recovery/tmp/pytest"
+      ]
+    },
+    {
+      "diagnosis_id": 27,
+      "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_repeated_obtain_of_same_output_yields_independent_deliveries",
+      "outcome": "passed",
+      "run": "acceptance",
+      "case": {
+        "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_repeated_obtain_of_same_output_yields_independent_deliveries",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.0006807980098528787
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 8.9843644759967
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.00044797000009566545
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 8.985493244006648
+      },
+      "output_log": "/tmp/camctl-fix44-clock-acceptance/tasks/002-root-test_camctl_output_roundtrip/artifacts/output.log",
+      "command": [
+        "/tmp/camctl-fix44-clock-acceptance/tasks/002-root-test_camctl_output_roundtrip/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_camctl_output_roundtrip.py::test_cross_plan_reference_and_multi_request",
+        "tests/integration/test_camctl_output_roundtrip.py::test_recording_delivery_survives_late_cancel",
+        "tests/integration/test_camctl_output_roundtrip.py::test_repeated_obtain_of_same_output_yields_independent_deliveries",
+        "tests/integration/test_camctl_output_roundtrip.py::test_auto_preview_obtains_registered_preview",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-fix44-clock-acceptance/tasks/002-root-test_camctl_output_roundtrip/tmp/pytest"
+      ]
+    },
+    {
+      "diagnosis_id": 28,
+      "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_auto_preview_obtains_registered_preview",
+      "outcome": "passed",
+      "run": "acceptance",
+      "case": {
+        "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_auto_preview_obtains_registered_preview",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.0006196019967319444
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 10.892686602994218
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.000704727994161658
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 10.894010932985111
+      },
+      "output_log": "/tmp/camctl-fix44-clock-acceptance/tasks/002-root-test_camctl_output_roundtrip/artifacts/output.log",
+      "command": [
+        "/tmp/camctl-fix44-clock-acceptance/tasks/002-root-test_camctl_output_roundtrip/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_camctl_output_roundtrip.py::test_cross_plan_reference_and_multi_request",
+        "tests/integration/test_camctl_output_roundtrip.py::test_recording_delivery_survives_late_cancel",
+        "tests/integration/test_camctl_output_roundtrip.py::test_repeated_obtain_of_same_output_yields_independent_deliveries",
+        "tests/integration/test_camctl_output_roundtrip.py::test_auto_preview_obtains_registered_preview",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-fix44-clock-acceptance/tasks/002-root-test_camctl_output_roundtrip/tmp/pytest"
+      ]
+    },
+    {
+      "diagnosis_id": 29,
+      "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_three_capture_kinds_partial_obtain",
+      "outcome": "passed",
+      "run": "green",
+      "case": {
+        "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_three_capture_kinds_partial_obtain",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.0015676040056860074
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 28.765963183992426
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.003721045999554917
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 28.771251833997667
+      },
+      "output_log": "/tmp/camctl-fix44-clock-green/tasks/002-root-test_camctl_output_roundtrip/artifacts/output.log",
+      "command": [
+        "/tmp/camctl-fix44-clock-green/tasks/002-root-test_camctl_output_roundtrip/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_camctl_output_roundtrip.py::test_three_capture_kinds_partial_obtain",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-fix44-clock-green/tasks/002-root-test_camctl_output_roundtrip/tmp/pytest"
+      ]
+    },
+    {
+      "diagnosis_id": 34,
+      "nodeid": "tests/integration/test_camctl_capture_roundtrip.py::test_timelapse_recovers_remaining_wait",
+      "outcome": "passed",
+      "run": "acceptance",
+      "case": {
+        "nodeid": "tests/integration/test_camctl_capture_roundtrip.py::test_timelapse_recovers_remaining_wait",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.0013298869889695197
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 9.766462088999106
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.00029494499904103577
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 9.768086920987116
+      },
+      "output_log": "/tmp/camctl-fix44-clock-acceptance/tasks/006-root-test_camctl_capture_roundtrip/artifacts/output.log",
+      "command": [
+        "/tmp/camctl-fix44-clock-acceptance/tasks/006-root-test_camctl_capture_roundtrip/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_camctl_capture_roundtrip.py::test_timelapse_recovers_remaining_wait",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-fix44-clock-acceptance/tasks/006-root-test_camctl_capture_roundtrip/tmp/pytest"
+      ]
+    },
+    {
+      "diagnosis_id": 35,
+      "nodeid": "tests/integration/test_camctl_session_recovery.py::test_process_restart_resumes_interrupted_work",
+      "outcome": "passed",
+      "run": "acceptance",
+      "case": {
+        "nodeid": "tests/integration/test_camctl_session_recovery.py::test_process_restart_resumes_interrupted_work",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.0007488989940611646
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 15.34996509499615
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.0003483780019450933
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 15.351062371992157
+      },
+      "output_log": "/tmp/camctl-fix44-clock-acceptance/tasks/003-root-test_camctl_session_recovery/artifacts/output.log",
+      "command": [
+        "/tmp/camctl-fix44-clock-acceptance/tasks/003-root-test_camctl_session_recovery/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_camctl_session_recovery.py::test_report_failure_preserves_device_work_and_redelivers",
+        "tests/integration/test_camctl_session_recovery.py::test_process_restart_resumes_interrupted_work",
+        "tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed",
+        "tests/integration/test_camctl_session_recovery.py::test_future_action_waits_and_past_window_expires",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-fix44-clock-acceptance/tasks/003-root-test_camctl_session_recovery/tmp/pytest"
+      ]
+    },
+    {
+      "diagnosis_id": 37,
+      "nodeid": "tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed",
+      "outcome": "passed",
+      "run": "acceptance",
+      "case": {
+        "nodeid": "tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.0008291529957205057
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 12.015803524991497
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.000707250990672037
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 12.01733992897789
+      },
+      "output_log": "/tmp/camctl-fix44-clock-acceptance/tasks/003-root-test_camctl_session_recovery/artifacts/output.log",
+      "command": [
+        "/tmp/camctl-fix44-clock-acceptance/tasks/003-root-test_camctl_session_recovery/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_camctl_session_recovery.py::test_report_failure_preserves_device_work_and_redelivers",
+        "tests/integration/test_camctl_session_recovery.py::test_process_restart_resumes_interrupted_work",
+        "tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed",
+        "tests/integration/test_camctl_session_recovery.py::test_future_action_waits_and_past_window_expires",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-fix44-clock-acceptance/tasks/003-root-test_camctl_session_recovery/tmp/pytest"
+      ]
+    },
+    {
+      "diagnosis_id": 38,
+      "nodeid": "tests/integration/test_camctl_c_module_roundtrip.py::test_auto_preview_roundtrip_via_c_module",
+      "outcome": "passed",
+      "run": "acceptance",
+      "case": {
+        "nodeid": "tests/integration/test_camctl_c_module_roundtrip.py::test_auto_preview_roundtrip_via_c_module",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 11.106306804998894
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 13.126537310003187
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.002322989996173419
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 24.235167104998254
+      },
+      "output_log": "/tmp/camctl-fix44-clock-acceptance/tasks/005-root-test_camctl_c_module_roundtrip/artifacts/output.log",
+      "command": [
+        "/tmp/camctl-fix44-clock-acceptance/tasks/005-root-test_camctl_c_module_roundtrip/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_camctl_c_module_roundtrip.py::test_auto_preview_roundtrip_via_c_module",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-fix44-clock-acceptance/tasks/005-root-test_camctl_c_module_roundtrip/tmp/pytest"
+      ]
+    },
+    {
+      "diagnosis_id": 40,
+      "nodeid": "tests/integration/test_camctl_cancellation_roundtrip.py::test_cleanup_unknown_preserves_original_request_result",
+      "outcome": "passed",
+      "run": "id40-green",
+      "case": {
+        "nodeid": "tests/integration/test_camctl_cancellation_roundtrip.py::test_cleanup_unknown_preserves_original_request_result",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.0014794700109632686
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 23.459839585993905
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.000416963011957705
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 23.461736019016826
+      },
+      "output_log": "/tmp/camctl-fix44-clock-id40-green/tasks/001-root-test_camctl_cancellation_roundtrip/artifacts/output.log",
+      "command": [
+        "/tmp/camctl-fix44-clock-id40-green/tasks/001-root-test_camctl_cancellation_roundtrip/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_camctl_cancellation_roundtrip.py::test_cleanup_unknown_preserves_original_request_result",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-fix44-clock-id40-green/tasks/001-root-test_camctl_cancellation_roundtrip/tmp/pytest"
+      ]
+    }
+  ],
+  "additional_cases": [
+    {
+      "nodeid": "tests/integration/test_camctl_session_recovery.py::test_future_action_waits_and_past_window_expires",
+      "run": "acceptance",
+      "case": {
+        "nodeid": "tests/integration/test_camctl_session_recovery.py::test_future_action_waits_and_past_window_expires",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.0018694070022320375
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 21.374909217993263
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.002085510001052171
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 21.378864134996547
+      },
+      "output_log": "/tmp/camctl-fix44-clock-acceptance/tasks/003-root-test_camctl_session_recovery/artifacts/output.log",
+      "command": [
+        "/tmp/camctl-fix44-clock-acceptance/tasks/003-root-test_camctl_session_recovery/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_camctl_session_recovery.py::test_report_failure_preserves_device_work_and_redelivers",
+        "tests/integration/test_camctl_session_recovery.py::test_process_restart_resumes_interrupted_work",
+        "tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed",
+        "tests/integration/test_camctl_session_recovery.py::test_future_action_waits_and_past_window_expires",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-fix44-clock-acceptance/tasks/003-root-test_camctl_session_recovery/tmp/pytest"
+      ]
+    },
+    {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[missing-photo]",
+      "run": "id17-complete",
+      "case": {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[missing-photo]",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.0007061910000629723
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 0.1191821929969592
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.0004578079970087856
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 0.12034619199403096
+      },
+      "output_log": "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/output.log",
+      "command": [
+        "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start",
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_middle_event_as_boundary",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest"
+      ]
+    },
+    {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[missing-entered]",
+      "run": "id17-complete",
+      "case": {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[missing-entered]",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.0010322680027456954
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 0.001518642995506525
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.0002853699988918379
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 0.0028362809971440583
+      },
+      "output_log": "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/output.log",
+      "command": [
+        "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start",
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_middle_event_as_boundary",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest"
+      ]
+    },
+    {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-activity]",
+      "run": "id17-complete",
+      "case": {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-activity]",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.00035969501186627895
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 0.0015524659975199029
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.00043544400250539184
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 0.0023476050118915737
+      },
+      "output_log": "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/output.log",
+      "command": [
+        "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start",
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_middle_event_as_boundary",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest"
+      ]
+    },
+    {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-role]",
+      "run": "id17-complete",
+      "case": {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-role]",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.0003800669946940616
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 0.0016983290115604177
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.000355510986992158
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 0.0024339069932466373
+      },
+      "output_log": "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/output.log",
+      "command": [
+        "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start",
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_middle_event_as_boundary",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest"
+      ]
+    },
+    {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-sha]",
+      "run": "id17-complete",
+      "case": {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-sha]",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.0006092800031183288
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 0.0014315150037873536
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.0005307090032147244
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 0.0025715040101204067
+      },
+      "output_log": "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/output.log",
+      "command": [
+        "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start",
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_middle_event_as_boundary",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest"
+      ]
+    },
+    {
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_middle_event_as_boundary",
+      "run": "id17-complete",
+      "case": {
+        "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_middle_event_as_boundary",
+        "phases": {
+          "setup": {
+            "outcome": "passed",
+            "duration_seconds": 0.0010746049956651405
+          },
+          "call": {
+            "outcome": "passed",
+            "duration_seconds": 0.002879610998206772
+          },
+          "teardown": {
+            "outcome": "passed",
+            "duration_seconds": 0.00047889100096654147
+          }
+        },
+        "outcome": "passed",
+        "duration_seconds": 0.004433106994838454
+      },
+      "output_log": "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/output.log",
+      "command": [
+        "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/source/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start",
+        "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_middle_event_as_boundary",
+        "-q",
+        "--durations=0",
+        "-p",
+        "integration_progress",
+        "--basetemp",
+        "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest"
+      ]
+    }
+  ],
+  "startup_facts": [
+    {
+      "case": "ID18",
+      "database": "/tmp/camctl-fix44-clock-green/tasks/001-root-test_camctl_c_module_roundtrip/tmp/pytest/test_capture_obtain_cleanup_rocurrent/deployment/state.db",
+      "rows": [
+        {
+          "name": "拍照",
+          "status": 3,
+          "scheduled_at": 1792916870000000,
+          "first_window_observed_at": 1792916870000000,
+          "sent_at": 1792916870000000,
+          "started_at": 1792916870000000
+        },
+        {
+          "name": "拍录",
+          "status": 3,
+          "scheduled_at": 1792916870000000,
+          "first_window_observed_at": 1792916870000000,
+          "sent_at": 1792916870000000,
+          "started_at": 1792916870000000
+        },
+        {
+          "name": "延时",
+          "status": 3,
+          "scheduled_at": 1792916870000000,
+          "first_window_observed_at": 1792916870000000,
+          "sent_at": 1792916871000000,
+          "started_at": null
+        }
+      ]
+    },
+    {
+      "case": "ID29",
+      "database": "/tmp/camctl-fix44-clock-green/tasks/002-root-test_camctl_output_roundtrip/tmp/pytest/test_three_capture_kinds_particurrent/deployment/state.db",
+      "rows": [
+        {
+          "name": "拍照",
+          "status": 3,
+          "scheduled_at": 1792916838000000,
+          "first_window_observed_at": 1792916838000000,
+          "sent_at": 1792916838000000,
+          "started_at": 1792916838000000
+        },
+        {
+          "name": "拍录",
+          "status": 3,
+          "scheduled_at": 1792916838000000,
+          "first_window_observed_at": 1792916838000000,
+          "sent_at": 1792916838000000,
+          "started_at": 1792916838000000
+        },
+        {
+          "name": "延时",
+          "status": 3,
+          "scheduled_at": 1792916838000000,
+          "first_window_observed_at": 1792916838000000,
+          "sent_at": 1792916839000000,
+          "started_at": null
+        }
+      ]
+    },
+    {
+      "case": "ID26",
+      "database": "/tmp/camctl-fix44-clock-green/tasks/003-root-test_camctl_session_recovery/tmp/pytest/test_concurrent_submits_and_du0/deployment/state.db",
+      "rows": [
+        {
+          "name": "shoot-b",
+          "status": 3,
+          "scheduled_at": 1792916871000000,
+          "first_window_observed_at": 1792916871000000,
+          "sent_at": 1792916871000000,
+          "started_at": 1792916871000000
+        },
+        {
+          "name": "shoot-a",
+          "status": 3,
+          "scheduled_at": 1792916871000000,
+          "first_window_observed_at": 1792916871000000,
+          "sent_at": 1792916871000000,
+          "started_at": 1792916871000000
+        }
+      ]
+    },
+    {
+      "case": "ID40",
+      "database": "/tmp/camctl-fix44-clock-id40-green/tasks/001-root-test_camctl_cancellation_roundtrip/tmp/pytest/test_cleanup_unknown_preserves0/deployment/state.db",
+      "rows": [
+        {
+          "name": "shoot",
+          "status": 3,
+          "scheduled_at": 1792917089000000,
+          "first_window_observed_at": 1792917089000000,
+          "sent_at": 1792917089000000,
+          "started_at": 1792917089000000
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "ID18/26/29/40修改前均重现启动窗口耗尽，未增加max_delay_ms；原业务断言完整保留。",
+    "ID18/29在真实录像START保存后，按原一秒目标成对推进UTC和单调钟；延时START保存后恢复连续计时。",
+    "ID40启动成功后暴露替身字符串错误与Mapping契约不符；改用结构化device_error后首次删除失败、独立查询、预算耗尽、第二清理、报告和ACK均通过。",
+    "ID17首次被共享Playwright1.64.1/缺失Chromium1248阻断；通过只读复制S5的Playwright1.63.0/Chromium1243依赖解决。",
+    "ID17继而暴露观察器仍把设置步骤要求放入START；现分别完整核验PREPARE_CAPTURE与START的步骤、原结果字节、票据及历史回放，完整业务通过。",
+    "未来等待与过期专项保持真实时钟并通过。父测试与C host超时仍使用真实单调钟。",
+    "15个原身份的通过证据来自多次独立定向运行；不是单一统一源码的全量回归。每次源码身份及环境由runs明确记录。"
+  ],
+  "hasselblad_review": {
+    "agent": "hb_observer_review",
+    "result": "无发现；只读审查，未运行测试"
+  },
+  "replay": {
+    "path": "/tmp/camctl-fix44-clock-id17-replay/result.json",
+    "exit_code": 0,
+    "scope": "在失败世界只读回放中验证更新观察器可完整读取准备与START事实"
+  },
+  "runs": [
+    {
+      "name": "red",
+      "summary": "/tmp/camctl-fix44-clock-red/summary.json",
+      "runner_log": "/tmp/camctl-fix44-clock-red.log",
+      "status": "finished",
+      "exit_code": 1,
+      "source": {
+        "root": "/tmp/camctl-fix44-clock-20261025",
+        "head": "5d20849e53fbfb045d25a2799e268827967196b2",
+        "status": "",
+        "snapshot_sha256": "2c921030e32a793cd6cba502f2888ffa6e3218063e0eae352ebae3ae64ed3cfb"
+      },
+      "versions": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "version": [
+          3,
+          11
+        ],
+        "sqlite": "3.53.1",
+        "pytest": "9.1.1",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+        "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+        "node": "v24.22.1",
+        "git": "git version 2.43.0"
+      },
+      "jobs": 1,
+      "wall_seconds": 79.11101630600751,
+      "tasks": [
+        {
+          "id": "root/test_camctl_c_module_roundtrip",
+          "status": "failed",
+          "exit_code": 1,
+          "command": [
+            "/tmp/camctl-fix44-clock-red/tasks/001-root-test_camctl_c_module_roundtrip/source/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "tests/integration/test_camctl_c_module_roundtrip.py::test_capture_obtain_cleanup_roundtrip_via_c_module",
+            "-q",
+            "--durations=0",
+            "-p",
+            "integration_progress",
+            "--basetemp",
+            "/tmp/camctl-fix44-clock-red/tasks/001-root-test_camctl_c_module_roundtrip/tmp/pytest"
+          ],
+          "cwd": "/tmp/camctl-fix44-clock-red/tasks/001-root-test_camctl_c_module_roundtrip/source",
+          "environment": {
+            "PYTHONPATH": "/tmp/camctl-fix44-clock-red/control:/tmp/camctl-fix44-clock-red/tasks/001-root-test_camctl_c_module_roundtrip/source/apps/camctl/src",
+            "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-clock-red/workers/0/python-cache",
+            "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-clock-red/workers/0/project-env",
+            "UV_CACHE_DIR": "/tmp/camctl-fix44-clock-red/workers/0/uv-cache",
+            "UV_OFFLINE": "1",
+            "TMPDIR": "/tmp/camctl-fix44-clock-red/tasks/001-root-test_camctl_c_module_roundtrip/tmp"
+          },
+          "wall_seconds": 38.370316351007205,
+          "artifacts": "/tmp/camctl-fix44-clock-red/tasks/001-root-test_camctl_c_module_roundtrip/artifacts",
+          "output_log": "/tmp/camctl-fix44-clock-red/tasks/001-root-test_camctl_c_module_roundtrip/artifacts/output.log",
+          "command_record": "/tmp/camctl-fix44-clock-red/tasks/001-root-test_camctl_c_module_roundtrip/artifacts/command.json",
+          "cases": [
+            {
+              "nodeid": "tests/integration/test_camctl_c_module_roundtrip.py::test_capture_obtain_cleanup_roundtrip_via_c_module",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 12.871426486002747
+                },
+                "call": {
+                  "outcome": "failed",
+                  "duration_seconds": 10.950789176000399
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0013291899958858266
+                }
+              },
+              "outcome": "failed",
+              "duration_seconds": 23.82354485199903
+            }
+          ]
+        },
+        {
+          "id": "root/test_camctl_output_roundtrip",
+          "status": "failed",
+          "exit_code": 1,
+          "command": [
+            "/tmp/camctl-fix44-clock-red/tasks/002-root-test_camctl_output_roundtrip/source/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "tests/integration/test_camctl_output_roundtrip.py::test_three_capture_kinds_partial_obtain",
+            "-q",
+            "--durations=0",
+            "-p",
+            "integration_progress",
+            "--basetemp",
+            "/tmp/camctl-fix44-clock-red/tasks/002-root-test_camctl_output_roundtrip/tmp/pytest"
+          ],
+          "cwd": "/tmp/camctl-fix44-clock-red/tasks/002-root-test_camctl_output_roundtrip/source",
+          "environment": {
+            "PYTHONPATH": "/tmp/camctl-fix44-clock-red/control:/tmp/camctl-fix44-clock-red/tasks/002-root-test_camctl_output_roundtrip/source/apps/camctl/src",
+            "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-clock-red/workers/0/python-cache",
+            "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-clock-red/workers/0/project-env",
+            "UV_CACHE_DIR": "/tmp/camctl-fix44-clock-red/workers/0/uv-cache",
+            "UV_OFFLINE": "1",
+            "TMPDIR": "/tmp/camctl-fix44-clock-red/tasks/002-root-test_camctl_output_roundtrip/tmp"
+          },
+          "wall_seconds": 13.727779337001266,
+          "artifacts": "/tmp/camctl-fix44-clock-red/tasks/002-root-test_camctl_output_roundtrip/artifacts",
+          "output_log": "/tmp/camctl-fix44-clock-red/tasks/002-root-test_camctl_output_roundtrip/artifacts/output.log",
+          "command_record": "/tmp/camctl-fix44-clock-red/tasks/002-root-test_camctl_output_roundtrip/artifacts/command.json",
+          "cases": [
+            {
+              "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_three_capture_kinds_partial_obtain",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.001555309005198069
+                },
+                "call": {
+                  "outcome": "failed",
+                  "duration_seconds": 11.490522939013317
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0008825749973766506
+                }
+              },
+              "outcome": "failed",
+              "duration_seconds": 11.492960823015892
+            }
+          ]
+        },
+        {
+          "id": "root/test_camctl_session_recovery",
+          "status": "failed",
+          "exit_code": 1,
+          "command": [
+            "/tmp/camctl-fix44-clock-red/tasks/003-root-test_camctl_session_recovery/source/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "tests/integration/test_camctl_session_recovery.py::test_concurrent_submits_and_duplicate_identity",
+            "-q",
+            "--durations=0",
+            "-p",
+            "integration_progress",
+            "--basetemp",
+            "/tmp/camctl-fix44-clock-red/tasks/003-root-test_camctl_session_recovery/tmp/pytest"
+          ],
+          "cwd": "/tmp/camctl-fix44-clock-red/tasks/003-root-test_camctl_session_recovery/source",
+          "environment": {
+            "PYTHONPATH": "/tmp/camctl-fix44-clock-red/control:/tmp/camctl-fix44-clock-red/tasks/003-root-test_camctl_session_recovery/source/apps/camctl/src",
+            "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-clock-red/workers/0/python-cache",
+            "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-clock-red/workers/0/project-env",
+            "UV_CACHE_DIR": "/tmp/camctl-fix44-clock-red/workers/0/uv-cache",
+            "UV_OFFLINE": "1",
+            "TMPDIR": "/tmp/camctl-fix44-clock-red/tasks/003-root-test_camctl_session_recovery/tmp"
+          },
+          "wall_seconds": 15.419754921997082,
+          "artifacts": "/tmp/camctl-fix44-clock-red/tasks/003-root-test_camctl_session_recovery/artifacts",
+          "output_log": "/tmp/camctl-fix44-clock-red/tasks/003-root-test_camctl_session_recovery/artifacts/output.log",
+          "command_record": "/tmp/camctl-fix44-clock-red/tasks/003-root-test_camctl_session_recovery/artifacts/command.json",
+          "cases": [
+            {
+              "nodeid": "tests/integration/test_camctl_session_recovery.py::test_concurrent_submits_and_duplicate_identity",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0025496330054011196
+                },
+                "call": {
+                  "outcome": "failed",
+                  "duration_seconds": 14.179606823992799
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.00028910899709444493
+                }
+              },
+              "outcome": "failed",
+              "duration_seconds": 14.182445565995295
+            }
+          ]
+        },
+        {
+          "id": "root/test_camctl_cancellation_roundtrip",
+          "status": "failed",
+          "exit_code": 1,
+          "command": [
+            "/tmp/camctl-fix44-clock-red/tasks/004-root-test_camctl_cancellation_roundtrip/source/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "tests/integration/test_camctl_cancellation_roundtrip.py::test_cleanup_unknown_preserves_original_request_result",
+            "-q",
+            "--durations=0",
+            "-p",
+            "integration_progress",
+            "--basetemp",
+            "/tmp/camctl-fix44-clock-red/tasks/004-root-test_camctl_cancellation_roundtrip/tmp/pytest"
+          ],
+          "cwd": "/tmp/camctl-fix44-clock-red/tasks/004-root-test_camctl_cancellation_roundtrip/source",
+          "environment": {
+            "PYTHONPATH": "/tmp/camctl-fix44-clock-red/control:/tmp/camctl-fix44-clock-red/tasks/004-root-test_camctl_cancellation_roundtrip/source/apps/camctl/src",
+            "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-clock-red/workers/0/python-cache",
+            "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-clock-red/workers/0/project-env",
+            "UV_CACHE_DIR": "/tmp/camctl-fix44-clock-red/workers/0/uv-cache",
+            "UV_OFFLINE": "1",
+            "TMPDIR": "/tmp/camctl-fix44-clock-red/tasks/004-root-test_camctl_cancellation_roundtrip/tmp"
+          },
+          "wall_seconds": 10.125832862991956,
+          "artifacts": "/tmp/camctl-fix44-clock-red/tasks/004-root-test_camctl_cancellation_roundtrip/artifacts",
+          "output_log": "/tmp/camctl-fix44-clock-red/tasks/004-root-test_camctl_cancellation_roundtrip/artifacts/output.log",
+          "command_record": "/tmp/camctl-fix44-clock-red/tasks/004-root-test_camctl_cancellation_roundtrip/artifacts/command.json",
+          "cases": [
+            {
+              "nodeid": "tests/integration/test_camctl_cancellation_roundtrip.py::test_cleanup_unknown_preserves_original_request_result",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.001714843005174771
+                },
+                "call": {
+                  "outcome": "failed",
+                  "duration_seconds": 9.276561081002
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0011022300022887066
+                }
+              },
+              "outcome": "failed",
+              "duration_seconds": 9.279378154009464
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "green",
+      "summary": "/tmp/camctl-fix44-clock-green/summary.json",
+      "runner_log": "/tmp/camctl-fix44-clock-green.log",
+      "status": "finished",
+      "exit_code": 1,
+      "source": {
+        "root": "/tmp/camctl-fix44-clock-20261025",
+        "head": "5d20849e53fbfb045d25a2799e268827967196b2",
+        "status": "M tests/integration/test_camctl_c_module_roundtrip.py\n M tests/integration/test_camctl_cancellation_roundtrip.py\n M tests/integration/test_camctl_output_roundtrip.py\n M tests/integration/test_camctl_session_recovery.py",
+        "snapshot_sha256": "4cc083be2ff195b059d1dfedb436687a044273a2a9e78137fb018153057e3868"
+      },
+      "versions": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "version": [
+          3,
+          11
+        ],
+        "sqlite": "3.53.1",
+        "pytest": "9.1.1",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+        "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+        "node": "v24.22.1",
+        "git": "git version 2.43.0"
+      },
+      "jobs": 2,
+      "wall_seconds": 115.0241346690018,
+      "tasks": [
+        {
+          "id": "root/test_camctl_c_module_roundtrip",
+          "status": "passed",
+          "exit_code": 0,
+          "command": [
+            "/tmp/camctl-fix44-clock-green/tasks/001-root-test_camctl_c_module_roundtrip/source/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "tests/integration/test_camctl_c_module_roundtrip.py::test_capture_obtain_cleanup_roundtrip_via_c_module",
+            "-q",
+            "--durations=0",
+            "-p",
+            "integration_progress",
+            "--basetemp",
+            "/tmp/camctl-fix44-clock-green/tasks/001-root-test_camctl_c_module_roundtrip/tmp/pytest"
+          ],
+          "cwd": "/tmp/camctl-fix44-clock-green/tasks/001-root-test_camctl_c_module_roundtrip/source",
+          "environment": {
+            "PYTHONPATH": "/tmp/camctl-fix44-clock-green/control:/tmp/camctl-fix44-clock-green/tasks/001-root-test_camctl_c_module_roundtrip/source/apps/camctl/src",
+            "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-clock-green/workers/0/python-cache",
+            "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-clock-green/workers/0/project-env",
+            "UV_CACHE_DIR": "/tmp/camctl-fix44-clock-green/workers/0/uv-cache",
+            "UV_OFFLINE": "1",
+            "TMPDIR": "/tmp/camctl-fix44-clock-green/tasks/001-root-test_camctl_c_module_roundtrip/tmp"
+          },
+          "wall_seconds": 97.00083893099509,
+          "artifacts": "/tmp/camctl-fix44-clock-green/tasks/001-root-test_camctl_c_module_roundtrip/artifacts",
+          "output_log": "/tmp/camctl-fix44-clock-green/tasks/001-root-test_camctl_c_module_roundtrip/artifacts/output.log",
+          "command_record": "/tmp/camctl-fix44-clock-green/tasks/001-root-test_camctl_c_module_roundtrip/artifacts/command.json",
+          "cases": [
+            {
+              "nodeid": "tests/integration/test_camctl_c_module_roundtrip.py::test_capture_obtain_cleanup_roundtrip_via_c_module",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 30.504692486996646
+                },
+                "call": {
+                  "outcome": "passed",
+                  "duration_seconds": 42.74238825899374
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.002341471001273021
+                }
+              },
+              "outcome": "passed",
+              "duration_seconds": 73.24942221699166
+            }
+          ]
+        },
+        {
+          "id": "root/test_camctl_output_roundtrip",
+          "status": "passed",
+          "exit_code": 0,
+          "command": [
+            "/tmp/camctl-fix44-clock-green/tasks/002-root-test_camctl_output_roundtrip/source/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "tests/integration/test_camctl_output_roundtrip.py::test_three_capture_kinds_partial_obtain",
+            "-q",
+            "--durations=0",
+            "-p",
+            "integration_progress",
+            "--basetemp",
+            "/tmp/camctl-fix44-clock-green/tasks/002-root-test_camctl_output_roundtrip/tmp/pytest"
+          ],
+          "cwd": "/tmp/camctl-fix44-clock-green/tasks/002-root-test_camctl_output_roundtrip/source",
+          "environment": {
+            "PYTHONPATH": "/tmp/camctl-fix44-clock-green/control:/tmp/camctl-fix44-clock-green/tasks/002-root-test_camctl_output_roundtrip/source/apps/camctl/src",
+            "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-clock-green/workers/1/python-cache",
+            "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-clock-green/workers/1/project-env",
+            "UV_CACHE_DIR": "/tmp/camctl-fix44-clock-green/workers/1/uv-cache",
+            "UV_OFFLINE": "1",
+            "TMPDIR": "/tmp/camctl-fix44-clock-green/tasks/002-root-test_camctl_output_roundtrip/tmp"
+          },
+          "wall_seconds": 53.00182030299038,
+          "artifacts": "/tmp/camctl-fix44-clock-green/tasks/002-root-test_camctl_output_roundtrip/artifacts",
+          "output_log": "/tmp/camctl-fix44-clock-green/tasks/002-root-test_camctl_output_roundtrip/artifacts/output.log",
+          "command_record": "/tmp/camctl-fix44-clock-green/tasks/002-root-test_camctl_output_roundtrip/artifacts/command.json",
+          "cases": [
+            {
+              "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_three_capture_kinds_partial_obtain",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0015676040056860074
+                },
+                "call": {
+                  "outcome": "passed",
+                  "duration_seconds": 28.765963183992426
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.003721045999554917
+                }
+              },
+              "outcome": "passed",
+              "duration_seconds": 28.771251833997667
+            }
+          ]
+        },
+        {
+          "id": "root/test_camctl_session_recovery",
+          "status": "passed",
+          "exit_code": 0,
+          "command": [
+            "/tmp/camctl-fix44-clock-green/tasks/003-root-test_camctl_session_recovery/source/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "tests/integration/test_camctl_session_recovery.py::test_concurrent_submits_and_duplicate_identity",
+            "-q",
+            "--durations=0",
+            "-p",
+            "integration_progress",
+            "--basetemp",
+            "/tmp/camctl-fix44-clock-green/tasks/003-root-test_camctl_session_recovery/tmp/pytest"
+          ],
+          "cwd": "/tmp/camctl-fix44-clock-green/tasks/003-root-test_camctl_session_recovery/source",
+          "environment": {
+            "PYTHONPATH": "/tmp/camctl-fix44-clock-green/control:/tmp/camctl-fix44-clock-green/tasks/003-root-test_camctl_session_recovery/source/apps/camctl/src",
+            "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-clock-green/workers/1/python-cache",
+            "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-clock-green/workers/1/project-env",
+            "UV_CACHE_DIR": "/tmp/camctl-fix44-clock-green/workers/1/uv-cache",
+            "UV_OFFLINE": "1",
+            "TMPDIR": "/tmp/camctl-fix44-clock-green/tasks/003-root-test_camctl_session_recovery/tmp"
+          },
+          "wall_seconds": 40.51126311699045,
+          "artifacts": "/tmp/camctl-fix44-clock-green/tasks/003-root-test_camctl_session_recovery/artifacts",
+          "output_log": "/tmp/camctl-fix44-clock-green/tasks/003-root-test_camctl_session_recovery/artifacts/output.log",
+          "command_record": "/tmp/camctl-fix44-clock-green/tasks/003-root-test_camctl_session_recovery/artifacts/command.json",
+          "cases": [
+            {
+              "nodeid": "tests/integration/test_camctl_session_recovery.py::test_concurrent_submits_and_duplicate_identity",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0022824740008218214
+                },
+                "call": {
+                  "outcome": "passed",
+                  "duration_seconds": 38.46707268099999
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.002398404001723975
+                }
+              },
+              "outcome": "passed",
+              "duration_seconds": 38.471753559002536
+            }
+          ]
+        },
+        {
+          "id": "root/test_camctl_cancellation_roundtrip",
+          "status": "failed",
+          "exit_code": 1,
+          "command": [
+            "/tmp/camctl-fix44-clock-green/tasks/004-root-test_camctl_cancellation_roundtrip/source/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "tests/integration/test_camctl_cancellation_roundtrip.py::test_cleanup_unknown_preserves_original_request_result",
+            "-q",
+            "--durations=0",
+            "-p",
+            "integration_progress",
+            "--basetemp",
+            "/tmp/camctl-fix44-clock-green/tasks/004-root-test_camctl_cancellation_roundtrip/tmp/pytest"
+          ],
+          "cwd": "/tmp/camctl-fix44-clock-green/tasks/004-root-test_camctl_cancellation_roundtrip/source",
+          "environment": {
+            "PYTHONPATH": "/tmp/camctl-fix44-clock-green/control:/tmp/camctl-fix44-clock-green/tasks/004-root-test_camctl_cancellation_roundtrip/source/apps/camctl/src",
+            "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-clock-green/workers/1/python-cache",
+            "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-clock-green/workers/1/project-env",
+            "UV_CACHE_DIR": "/tmp/camctl-fix44-clock-green/workers/1/uv-cache",
+            "UV_OFFLINE": "1",
+            "TMPDIR": "/tmp/camctl-fix44-clock-green/tasks/004-root-test_camctl_cancellation_roundtrip/tmp"
+          },
+          "wall_seconds": 12.855516604002332,
+          "artifacts": "/tmp/camctl-fix44-clock-green/tasks/004-root-test_camctl_cancellation_roundtrip/artifacts",
+          "output_log": "/tmp/camctl-fix44-clock-green/tasks/004-root-test_camctl_cancellation_roundtrip/artifacts/output.log",
+          "command_record": "/tmp/camctl-fix44-clock-green/tasks/004-root-test_camctl_cancellation_roundtrip/artifacts/command.json",
+          "cases": [
+            {
+              "nodeid": "tests/integration/test_camctl_cancellation_roundtrip.py::test_cleanup_unknown_preserves_original_request_result",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0028805670008296147
+                },
+                "call": {
+                  "outcome": "failed",
+                  "duration_seconds": 11.182111412010272
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.006128558990894817
+                }
+              },
+              "outcome": "failed",
+              "duration_seconds": 11.191120538001996
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "id40-trace",
+      "summary": "/tmp/camctl-fix44-clock-id40-trace/summary.json",
+      "runner_log": "/tmp/camctl-fix44-clock-id40-trace.log",
+      "status": "finished",
+      "exit_code": 1,
+      "source": {
+        "root": "/tmp/camctl-fix44-clock-20261025",
+        "head": "5d20849e53fbfb045d25a2799e268827967196b2",
+        "status": "M tests/integration/test_camctl_c_module_roundtrip.py\n M tests/integration/test_camctl_cancellation_roundtrip.py\n M tests/integration/test_camctl_output_roundtrip.py\n M tests/integration/test_camctl_session_recovery.py",
+        "snapshot_sha256": "eb7bbe4dd6d439dd287c3a1f7392b0d6f0f33a6c7383accf9ca625fa5b834fef"
+      },
+      "versions": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "version": [
+          3,
+          11
+        ],
+        "sqlite": "3.53.1",
+        "pytest": "9.1.1",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+        "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+        "node": "v24.22.1",
+        "git": "git version 2.43.0"
+      },
+      "jobs": 1,
+      "wall_seconds": 30.601741067002877,
+      "tasks": [
+        {
+          "id": "root/test_camctl_cancellation_roundtrip",
+          "status": "failed",
+          "exit_code": 1,
+          "command": [
+            "/tmp/camctl-fix44-clock-id40-trace/tasks/001-root-test_camctl_cancellation_roundtrip/source/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "tests/integration/test_camctl_cancellation_roundtrip.py::test_cleanup_unknown_preserves_original_request_result",
+            "-q",
+            "--durations=0",
+            "-p",
+            "integration_progress",
+            "--basetemp",
+            "/tmp/camctl-fix44-clock-id40-trace/tasks/001-root-test_camctl_cancellation_roundtrip/tmp/pytest"
+          ],
+          "cwd": "/tmp/camctl-fix44-clock-id40-trace/tasks/001-root-test_camctl_cancellation_roundtrip/source",
+          "environment": {
+            "PYTHONPATH": "/tmp/camctl-fix44-clock-id40-trace/control:/tmp/camctl-fix44-clock-id40-trace/tasks/001-root-test_camctl_cancellation_roundtrip/source/apps/camctl/src",
+            "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-clock-id40-trace/workers/0/python-cache",
+            "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-clock-id40-trace/workers/0/project-env",
+            "UV_CACHE_DIR": "/tmp/camctl-fix44-clock-id40-trace/workers/0/uv-cache",
+            "UV_OFFLINE": "1",
+            "TMPDIR": "/tmp/camctl-fix44-clock-id40-trace/tasks/001-root-test_camctl_cancellation_roundtrip/tmp"
+          },
+          "wall_seconds": 28.766889540987904,
+          "artifacts": "/tmp/camctl-fix44-clock-id40-trace/tasks/001-root-test_camctl_cancellation_roundtrip/artifacts",
+          "output_log": "/tmp/camctl-fix44-clock-id40-trace/tasks/001-root-test_camctl_cancellation_roundtrip/artifacts/output.log",
+          "command_record": "/tmp/camctl-fix44-clock-id40-trace/tasks/001-root-test_camctl_cancellation_roundtrip/artifacts/command.json",
+          "cases": [
+            {
+              "nodeid": "tests/integration/test_camctl_cancellation_roundtrip.py::test_cleanup_unknown_preserves_original_request_result",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0018014630040852353
+                },
+                "call": {
+                  "outcome": "failed",
+                  "duration_seconds": 15.843727369996486
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.006901846005348489
+                }
+              },
+              "outcome": "failed",
+              "duration_seconds": 15.85243067900592
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "id40-green",
+      "summary": "/tmp/camctl-fix44-clock-id40-green/summary.json",
+      "runner_log": "/tmp/camctl-fix44-clock-id40-green.log",
+      "status": "finished",
+      "exit_code": 0,
+      "source": {
+        "root": "/tmp/camctl-fix44-clock-20261025",
+        "head": "5d20849e53fbfb045d25a2799e268827967196b2",
+        "status": "M tests/integration/camctl_fixtures.py\n M tests/integration/test_camctl_c_module_roundtrip.py\n M tests/integration/test_camctl_cancellation_roundtrip.py\n M tests/integration/test_camctl_output_roundtrip.py\n M tests/integration/test_camctl_session_recovery.py",
+        "snapshot_sha256": "d2c15bf89df437ead9aea159677e8028aa24188badee330422340ccb152a55ac"
+      },
+      "versions": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "version": [
+          3,
+          11
+        ],
+        "sqlite": "3.53.1",
+        "pytest": "9.1.1",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+        "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+        "node": "v24.22.1",
+        "git": "git version 2.43.0"
+      },
+      "jobs": 1,
+      "wall_seconds": 34.79591148800682,
+      "tasks": [
+        {
+          "id": "root/test_camctl_cancellation_roundtrip",
+          "status": "passed",
+          "exit_code": 0,
+          "command": [
+            "/tmp/camctl-fix44-clock-id40-green/tasks/001-root-test_camctl_cancellation_roundtrip/source/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "tests/integration/test_camctl_cancellation_roundtrip.py::test_cleanup_unknown_preserves_original_request_result",
+            "-q",
+            "--durations=0",
+            "-p",
+            "integration_progress",
+            "--basetemp",
+            "/tmp/camctl-fix44-clock-id40-green/tasks/001-root-test_camctl_cancellation_roundtrip/tmp/pytest"
+          ],
+          "cwd": "/tmp/camctl-fix44-clock-id40-green/tasks/001-root-test_camctl_cancellation_roundtrip/source",
+          "environment": {
+            "PYTHONPATH": "/tmp/camctl-fix44-clock-id40-green/control:/tmp/camctl-fix44-clock-id40-green/tasks/001-root-test_camctl_cancellation_roundtrip/source/apps/camctl/src",
+            "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-clock-id40-green/workers/0/python-cache",
+            "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-clock-id40-green/workers/0/project-env",
+            "UV_CACHE_DIR": "/tmp/camctl-fix44-clock-id40-green/workers/0/uv-cache",
+            "UV_OFFLINE": "1",
+            "TMPDIR": "/tmp/camctl-fix44-clock-id40-green/tasks/001-root-test_camctl_cancellation_roundtrip/tmp"
+          },
+          "wall_seconds": 33.533801284997026,
+          "artifacts": "/tmp/camctl-fix44-clock-id40-green/tasks/001-root-test_camctl_cancellation_roundtrip/artifacts",
+          "output_log": "/tmp/camctl-fix44-clock-id40-green/tasks/001-root-test_camctl_cancellation_roundtrip/artifacts/output.log",
+          "command_record": "/tmp/camctl-fix44-clock-id40-green/tasks/001-root-test_camctl_cancellation_roundtrip/artifacts/command.json",
+          "cases": [
+            {
+              "nodeid": "tests/integration/test_camctl_cancellation_roundtrip.py::test_cleanup_unknown_preserves_original_request_result",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0014794700109632686
+                },
+                "call": {
+                  "outcome": "passed",
+                  "duration_seconds": 23.459839585993905
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.000416963011957705
+                }
+              },
+              "outcome": "passed",
+              "duration_seconds": 23.461736019016826
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "acceptance",
+      "summary": "/tmp/camctl-fix44-clock-acceptance/summary.json",
+      "runner_log": "/tmp/camctl-fix44-clock-acceptance.log",
+      "status": "finished",
+      "exit_code": 1,
+      "source": {
+        "root": "/tmp/camctl-fix44-clock-20261025",
+        "head": "5d20849e53fbfb045d25a2799e268827967196b2",
+        "status": "M tests/integration/test_camctl_c_module_roundtrip.py\n M tests/integration/test_camctl_cancellation_roundtrip.py\n M tests/integration/test_camctl_output_roundtrip.py\n M tests/integration/test_camctl_session_recovery.py",
+        "snapshot_sha256": "eb7bbe4dd6d439dd287c3a1f7392b0d6f0f33a6c7383accf9ca625fa5b834fef"
+      },
+      "versions": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "version": [
+          3,
+          11
+        ],
+        "sqlite": "3.53.1",
+        "pytest": "9.1.1",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+        "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+        "node": "v24.22.1",
+        "git": "git version 2.43.0"
+      },
+      "jobs": 1,
+      "wall_seconds": 258.18049682800483,
+      "tasks": [
+        {
+          "id": "root/test_hasselblad_photo_roundtrip",
+          "status": "failed",
+          "exit_code": 1,
+          "command": [
+            "/tmp/camctl-fix44-clock-acceptance/tasks/001-root-test_hasselblad_photo_roundtrip/source/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+            "-q",
+            "--durations=0",
+            "-p",
+            "integration_progress",
+            "--basetemp",
+            "/tmp/camctl-fix44-clock-acceptance/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest"
+          ],
+          "cwd": "/tmp/camctl-fix44-clock-acceptance/tasks/001-root-test_hasselblad_photo_roundtrip/source",
+          "environment": {
+            "PYTHONPATH": "/tmp/camctl-fix44-clock-acceptance/control:/tmp/camctl-fix44-clock-acceptance/tasks/001-root-test_hasselblad_photo_roundtrip/source/apps/camctl/src",
+            "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-clock-acceptance/workers/0/python-cache",
+            "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-clock-acceptance/workers/0/project-env",
+            "UV_CACHE_DIR": "/tmp/camctl-fix44-clock-acceptance/workers/0/uv-cache",
+            "UV_OFFLINE": "1",
+            "TMPDIR": "/tmp/camctl-fix44-clock-acceptance/tasks/001-root-test_hasselblad_photo_roundtrip/tmp",
+            "CAMCTL_HB_TEST_CLIENT_ROOT": "/tmp/camctl-fix44-clock-acceptance/tasks/001-root-test_hasselblad_photo_roundtrip/client-candidate"
+          },
+          "wall_seconds": 63.598365782003384,
+          "artifacts": "/tmp/camctl-fix44-clock-acceptance/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts",
+          "output_log": "/tmp/camctl-fix44-clock-acceptance/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/output.log",
+          "command_record": "/tmp/camctl-fix44-clock-acceptance/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/command.json",
+          "cases": [
+            {
+              "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 19.0599823280063
+                },
+                "call": {
+                  "outcome": "failed",
+                  "duration_seconds": 3.6588250289933058
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0004963670071447268
+                }
+              },
+              "outcome": "failed",
+              "duration_seconds": 22.71930372400675
+            }
+          ]
+        },
+        {
+          "id": "root/test_camctl_output_roundtrip",
+          "status": "passed",
+          "exit_code": 0,
+          "command": [
+            "/tmp/camctl-fix44-clock-acceptance/tasks/002-root-test_camctl_output_roundtrip/source/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "tests/integration/test_camctl_output_roundtrip.py::test_cross_plan_reference_and_multi_request",
+            "tests/integration/test_camctl_output_roundtrip.py::test_recording_delivery_survives_late_cancel",
+            "tests/integration/test_camctl_output_roundtrip.py::test_repeated_obtain_of_same_output_yields_independent_deliveries",
+            "tests/integration/test_camctl_output_roundtrip.py::test_auto_preview_obtains_registered_preview",
+            "-q",
+            "--durations=0",
+            "-p",
+            "integration_progress",
+            "--basetemp",
+            "/tmp/camctl-fix44-clock-acceptance/tasks/002-root-test_camctl_output_roundtrip/tmp/pytest"
+          ],
+          "cwd": "/tmp/camctl-fix44-clock-acceptance/tasks/002-root-test_camctl_output_roundtrip/source",
+          "environment": {
+            "PYTHONPATH": "/tmp/camctl-fix44-clock-acceptance/control:/tmp/camctl-fix44-clock-acceptance/tasks/002-root-test_camctl_output_roundtrip/source/apps/camctl/src",
+            "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-clock-acceptance/workers/0/python-cache",
+            "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-clock-acceptance/workers/0/project-env",
+            "UV_CACHE_DIR": "/tmp/camctl-fix44-clock-acceptance/workers/0/uv-cache",
+            "UV_OFFLINE": "1",
+            "TMPDIR": "/tmp/camctl-fix44-clock-acceptance/tasks/002-root-test_camctl_output_roundtrip/tmp"
+          },
+          "wall_seconds": 74.38408177900419,
+          "artifacts": "/tmp/camctl-fix44-clock-acceptance/tasks/002-root-test_camctl_output_roundtrip/artifacts",
+          "output_log": "/tmp/camctl-fix44-clock-acceptance/tasks/002-root-test_camctl_output_roundtrip/artifacts/output.log",
+          "command_record": "/tmp/camctl-fix44-clock-acceptance/tasks/002-root-test_camctl_output_roundtrip/artifacts/command.json",
+          "cases": [
+            {
+              "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_cross_plan_reference_and_multi_request",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.000888067006599158
+                },
+                "call": {
+                  "outcome": "passed",
+                  "duration_seconds": 34.490919910997036
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0003645060060080141
+                }
+              },
+              "outcome": "passed",
+              "duration_seconds": 34.49217248400964
+            },
+            {
+              "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_recording_delivery_survives_late_cancel",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0007550239970441908
+                },
+                "call": {
+                  "outcome": "passed",
+                  "duration_seconds": 18.71371467100107
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.005403299001045525
+                }
+              },
+              "outcome": "passed",
+              "duration_seconds": 18.71987299399916
+            },
+            {
+              "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_repeated_obtain_of_same_output_yields_independent_deliveries",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0006807980098528787
+                },
+                "call": {
+                  "outcome": "passed",
+                  "duration_seconds": 8.9843644759967
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.00044797000009566545
+                }
+              },
+              "outcome": "passed",
+              "duration_seconds": 8.985493244006648
+            },
+            {
+              "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_auto_preview_obtains_registered_preview",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0006196019967319444
+                },
+                "call": {
+                  "outcome": "passed",
+                  "duration_seconds": 10.892686602994218
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.000704727994161658
+                }
+              },
+              "outcome": "passed",
+              "duration_seconds": 10.894010932985111
+            }
+          ]
+        },
+        {
+          "id": "root/test_camctl_session_recovery",
+          "status": "passed",
+          "exit_code": 0,
+          "command": [
+            "/tmp/camctl-fix44-clock-acceptance/tasks/003-root-test_camctl_session_recovery/source/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "tests/integration/test_camctl_session_recovery.py::test_report_failure_preserves_device_work_and_redelivers",
+            "tests/integration/test_camctl_session_recovery.py::test_process_restart_resumes_interrupted_work",
+            "tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed",
+            "tests/integration/test_camctl_session_recovery.py::test_future_action_waits_and_past_window_expires",
+            "-q",
+            "--durations=0",
+            "-p",
+            "integration_progress",
+            "--basetemp",
+            "/tmp/camctl-fix44-clock-acceptance/tasks/003-root-test_camctl_session_recovery/tmp/pytest"
+          ],
+          "cwd": "/tmp/camctl-fix44-clock-acceptance/tasks/003-root-test_camctl_session_recovery/source",
+          "environment": {
+            "PYTHONPATH": "/tmp/camctl-fix44-clock-acceptance/control:/tmp/camctl-fix44-clock-acceptance/tasks/003-root-test_camctl_session_recovery/source/apps/camctl/src",
+            "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-clock-acceptance/workers/0/python-cache",
+            "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-clock-acceptance/workers/0/project-env",
+            "UV_CACHE_DIR": "/tmp/camctl-fix44-clock-acceptance/workers/0/uv-cache",
+            "UV_OFFLINE": "1",
+            "TMPDIR": "/tmp/camctl-fix44-clock-acceptance/tasks/003-root-test_camctl_session_recovery/tmp"
+          },
+          "wall_seconds": 64.97812932399393,
+          "artifacts": "/tmp/camctl-fix44-clock-acceptance/tasks/003-root-test_camctl_session_recovery/artifacts",
+          "output_log": "/tmp/camctl-fix44-clock-acceptance/tasks/003-root-test_camctl_session_recovery/artifacts/output.log",
+          "command_record": "/tmp/camctl-fix44-clock-acceptance/tasks/003-root-test_camctl_session_recovery/artifacts/command.json",
+          "cases": [
+            {
+              "nodeid": "tests/integration/test_camctl_session_recovery.py::test_report_failure_preserves_device_work_and_redelivers",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0010471869900356978
+                },
+                "call": {
+                  "outcome": "passed",
+                  "duration_seconds": 15.14108691198635
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.00027420099650043994
+                }
+              },
+              "outcome": "passed",
+              "duration_seconds": 15.142408299972885
+            },
+            {
+              "nodeid": "tests/integration/test_camctl_session_recovery.py::test_process_restart_resumes_interrupted_work",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0007488989940611646
+                },
+                "call": {
+                  "outcome": "passed",
+                  "duration_seconds": 15.34996509499615
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0003483780019450933
+                }
+              },
+              "outcome": "passed",
+              "duration_seconds": 15.351062371992157
+            },
+            {
+              "nodeid": "tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0008291529957205057
+                },
+                "call": {
+                  "outcome": "passed",
+                  "duration_seconds": 12.015803524991497
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.000707250990672037
+                }
+              },
+              "outcome": "passed",
+              "duration_seconds": 12.01733992897789
+            },
+            {
+              "nodeid": "tests/integration/test_camctl_session_recovery.py::test_future_action_waits_and_past_window_expires",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0018694070022320375
+                },
+                "call": {
+                  "outcome": "passed",
+                  "duration_seconds": 21.374909217993263
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.002085510001052171
+                }
+              },
+              "outcome": "passed",
+              "duration_seconds": 21.378864134996547
+            }
+          ]
+        },
+        {
+          "id": "root/test_video_size_estimate",
+          "status": "passed",
+          "exit_code": 0,
+          "command": [
+            "/tmp/camctl-fix44-clock-acceptance/tasks/004-root-test_video_size_estimate/source/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "tests/integration/test_video_size_estimate.py::test_record_estimate_stays_out_of_execution_and_report",
+            "-q",
+            "--durations=0",
+            "-p",
+            "integration_progress",
+            "--basetemp",
+            "/tmp/camctl-fix44-clock-acceptance/tasks/004-root-test_video_size_estimate/tmp/pytest"
+          ],
+          "cwd": "/tmp/camctl-fix44-clock-acceptance/tasks/004-root-test_video_size_estimate/source",
+          "environment": {
+            "PYTHONPATH": "/tmp/camctl-fix44-clock-acceptance/control:/tmp/camctl-fix44-clock-acceptance/tasks/004-root-test_video_size_estimate/source/apps/camctl/src",
+            "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-clock-acceptance/workers/0/python-cache",
+            "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-clock-acceptance/workers/0/project-env",
+            "UV_CACHE_DIR": "/tmp/camctl-fix44-clock-acceptance/workers/0/uv-cache",
+            "UV_OFFLINE": "1",
+            "TMPDIR": "/tmp/camctl-fix44-clock-acceptance/tasks/004-root-test_video_size_estimate/tmp"
+          },
+          "wall_seconds": 18.14465860200289,
+          "artifacts": "/tmp/camctl-fix44-clock-acceptance/tasks/004-root-test_video_size_estimate/artifacts",
+          "output_log": "/tmp/camctl-fix44-clock-acceptance/tasks/004-root-test_video_size_estimate/artifacts/output.log",
+          "command_record": "/tmp/camctl-fix44-clock-acceptance/tasks/004-root-test_video_size_estimate/artifacts/command.json",
+          "cases": [
+            {
+              "nodeid": "tests/integration/test_video_size_estimate.py::test_record_estimate_stays_out_of_execution_and_report",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.001224032006575726
+                },
+                "call": {
+                  "outcome": "passed",
+                  "duration_seconds": 16.664774721997674
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0005350410065148026
+                }
+              },
+              "outcome": "passed",
+              "duration_seconds": 16.666533795010764
+            }
+          ]
+        },
+        {
+          "id": "root/test_camctl_c_module_roundtrip",
+          "status": "passed",
+          "exit_code": 0,
+          "command": [
+            "/tmp/camctl-fix44-clock-acceptance/tasks/005-root-test_camctl_c_module_roundtrip/source/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "tests/integration/test_camctl_c_module_roundtrip.py::test_auto_preview_roundtrip_via_c_module",
+            "-q",
+            "--durations=0",
+            "-p",
+            "integration_progress",
+            "--basetemp",
+            "/tmp/camctl-fix44-clock-acceptance/tasks/005-root-test_camctl_c_module_roundtrip/tmp/pytest"
+          ],
+          "cwd": "/tmp/camctl-fix44-clock-acceptance/tasks/005-root-test_camctl_c_module_roundtrip/source",
+          "environment": {
+            "PYTHONPATH": "/tmp/camctl-fix44-clock-acceptance/control:/tmp/camctl-fix44-clock-acceptance/tasks/005-root-test_camctl_c_module_roundtrip/source/apps/camctl/src",
+            "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-clock-acceptance/workers/0/python-cache",
+            "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-clock-acceptance/workers/0/project-env",
+            "UV_CACHE_DIR": "/tmp/camctl-fix44-clock-acceptance/workers/0/uv-cache",
+            "UV_OFFLINE": "1",
+            "TMPDIR": "/tmp/camctl-fix44-clock-acceptance/tasks/005-root-test_camctl_c_module_roundtrip/tmp"
+          },
+          "wall_seconds": 25.203531264996855,
+          "artifacts": "/tmp/camctl-fix44-clock-acceptance/tasks/005-root-test_camctl_c_module_roundtrip/artifacts",
+          "output_log": "/tmp/camctl-fix44-clock-acceptance/tasks/005-root-test_camctl_c_module_roundtrip/artifacts/output.log",
+          "command_record": "/tmp/camctl-fix44-clock-acceptance/tasks/005-root-test_camctl_c_module_roundtrip/artifacts/command.json",
+          "cases": [
+            {
+              "nodeid": "tests/integration/test_camctl_c_module_roundtrip.py::test_auto_preview_roundtrip_via_c_module",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 11.106306804998894
+                },
+                "call": {
+                  "outcome": "passed",
+                  "duration_seconds": 13.126537310003187
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.002322989996173419
+                }
+              },
+              "outcome": "passed",
+              "duration_seconds": 24.235167104998254
+            }
+          ]
+        },
+        {
+          "id": "root/test_camctl_capture_roundtrip",
+          "status": "passed",
+          "exit_code": 0,
+          "command": [
+            "/tmp/camctl-fix44-clock-acceptance/tasks/006-root-test_camctl_capture_roundtrip/source/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "tests/integration/test_camctl_capture_roundtrip.py::test_timelapse_recovers_remaining_wait",
+            "-q",
+            "--durations=0",
+            "-p",
+            "integration_progress",
+            "--basetemp",
+            "/tmp/camctl-fix44-clock-acceptance/tasks/006-root-test_camctl_capture_roundtrip/tmp/pytest"
+          ],
+          "cwd": "/tmp/camctl-fix44-clock-acceptance/tasks/006-root-test_camctl_capture_roundtrip/source",
+          "environment": {
+            "PYTHONPATH": "/tmp/camctl-fix44-clock-acceptance/control:/tmp/camctl-fix44-clock-acceptance/tasks/006-root-test_camctl_capture_roundtrip/source/apps/camctl/src",
+            "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-clock-acceptance/workers/0/python-cache",
+            "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-clock-acceptance/workers/0/project-env",
+            "UV_CACHE_DIR": "/tmp/camctl-fix44-clock-acceptance/workers/0/uv-cache",
+            "UV_OFFLINE": "1",
+            "TMPDIR": "/tmp/camctl-fix44-clock-acceptance/tasks/006-root-test_camctl_capture_roundtrip/tmp"
+          },
+          "wall_seconds": 10.854738471010933,
+          "artifacts": "/tmp/camctl-fix44-clock-acceptance/tasks/006-root-test_camctl_capture_roundtrip/artifacts",
+          "output_log": "/tmp/camctl-fix44-clock-acceptance/tasks/006-root-test_camctl_capture_roundtrip/artifacts/output.log",
+          "command_record": "/tmp/camctl-fix44-clock-acceptance/tasks/006-root-test_camctl_capture_roundtrip/artifacts/command.json",
+          "cases": [
+            {
+              "nodeid": "tests/integration/test_camctl_capture_roundtrip.py::test_timelapse_recovers_remaining_wait",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0013298869889695197
+                },
+                "call": {
+                  "outcome": "passed",
+                  "duration_seconds": 9.766462088999106
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.00029494499904103577
+                }
+              },
+              "outcome": "passed",
+              "duration_seconds": 9.768086920987116
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "id17-green",
+      "summary": "/tmp/camctl-fix44-clock-id17-green/summary.json",
+      "runner_log": "/tmp/camctl-fix44-clock-id17-green.log",
+      "status": "finished",
+      "exit_code": 1,
+      "source": {
+        "root": "/tmp/camctl-fix44-clock-20261025",
+        "head": "a8361675aa0d8a8ab0b3a733a466e7eb40ca30d6",
+        "status": "",
+        "snapshot_sha256": "d2c15bf89df437ead9aea159677e8028aa24188badee330422340ccb152a55ac"
+      },
+      "versions": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "version": [
+          3,
+          11
+        ],
+        "sqlite": "3.53.1",
+        "pytest": "9.1.1",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+        "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+        "node": "v24.22.1",
+        "git": "git version 2.43.0"
+      },
+      "jobs": 1,
+      "wall_seconds": 44.29059875200619,
+      "tasks": [
+        {
+          "id": "root/test_hasselblad_photo_roundtrip",
+          "status": "failed",
+          "exit_code": 1,
+          "command": [
+            "/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/source/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+            "-q",
+            "--durations=0",
+            "-p",
+            "integration_progress",
+            "--basetemp",
+            "/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest"
+          ],
+          "cwd": "/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/source",
+          "environment": {
+            "PYTHONPATH": "/tmp/camctl-fix44-clock-id17-green/control:/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/source/apps/camctl/src",
+            "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-clock-id17-green/workers/0/python-cache",
+            "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-clock-id17-green/workers/0/project-env",
+            "UV_CACHE_DIR": "/tmp/camctl-fix44-clock-id17-green/workers/0/uv-cache",
+            "UV_OFFLINE": "1",
+            "TMPDIR": "/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/tmp",
+            "CAMCTL_HB_TEST_CLIENT_ROOT": "/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/client-candidate"
+          },
+          "wall_seconds": 43.281363812988275,
+          "artifacts": "/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts",
+          "output_log": "/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/output.log",
+          "command_record": "/tmp/camctl-fix44-clock-id17-green/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/command.json",
+          "cases": [
+            {
+              "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 14.711830579995876
+                },
+                "call": {
+                  "outcome": "failed",
+                  "duration_seconds": 11.85211763100233
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0007711610087426379
+                }
+              },
+              "outcome": "failed",
+              "duration_seconds": 26.564719372006948
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "id17-complete",
+      "summary": "/tmp/camctl-fix44-clock-id17-complete/summary.json",
+      "runner_log": "/tmp/camctl-fix44-clock-id17-complete.log",
+      "status": "finished",
+      "exit_code": 0,
+      "source": {
+        "root": "/tmp/camctl-fix44-clock-20261025",
+        "head": "a8361675aa0d8a8ab0b3a733a466e7eb40ca30d6",
+        "status": "M tests/integration/_hasselblad_photo_entry.py\n M tests/integration/test_hasselblad_photo_roundtrip.py",
+        "snapshot_sha256": "08011d3b10303cb2ca6ad0bb859b48091aff45bf914d334e4b06c954332b4d1f"
+      },
+      "versions": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "version": [
+          3,
+          11
+        ],
+        "sqlite": "3.53.1",
+        "pytest": "9.1.1",
+        "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+        "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+        "node": "v24.22.1",
+        "git": "git version 2.43.0"
+      },
+      "jobs": 1,
+      "wall_seconds": 88.98112090599898,
+      "tasks": [
+        {
+          "id": "root/test_hasselblad_photo_roundtrip",
+          "status": "passed",
+          "exit_code": 0,
+          "command": [
+            "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/source/apps/camctl/.venv311/bin/python",
+            "-m",
+            "pytest",
+            "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+            "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start",
+            "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_middle_event_as_boundary",
+            "-q",
+            "--durations=0",
+            "-p",
+            "integration_progress",
+            "--basetemp",
+            "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/tmp/pytest"
+          ],
+          "cwd": "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/source",
+          "environment": {
+            "PYTHONPATH": "/tmp/camctl-fix44-clock-id17-complete/control:/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/source/apps/camctl/src",
+            "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-clock-id17-complete/workers/0/python-cache",
+            "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+            "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-clock-id17-complete/workers/0/project-env",
+            "UV_CACHE_DIR": "/tmp/camctl-fix44-clock-id17-complete/workers/0/uv-cache",
+            "UV_OFFLINE": "1",
+            "TMPDIR": "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/tmp",
+            "CAMCTL_HB_TEST_CLIENT_ROOT": "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/client-candidate"
+          },
+          "wall_seconds": 84.84591771499254,
+          "artifacts": "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts",
+          "output_log": "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/output.log",
+          "command_record": "/tmp/camctl-fix44-clock-id17-complete/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/command.json",
+          "cases": [
+            {
+              "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 18.36227181198774
+                },
+                "call": {
+                  "outcome": "passed",
+                  "duration_seconds": 46.72210420999909
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.000854768994031474
+                }
+              },
+              "outcome": "passed",
+              "duration_seconds": 65.08523079098086
+            },
+            {
+              "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[missing-photo]",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0007061910000629723
+                },
+                "call": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.1191821929969592
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0004578079970087856
+                }
+              },
+              "outcome": "passed",
+              "duration_seconds": 0.12034619199403096
+            },
+            {
+              "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[missing-entered]",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0010322680027456954
+                },
+                "call": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.001518642995506525
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0002853699988918379
+                }
+              },
+              "outcome": "passed",
+              "duration_seconds": 0.0028362809971440583
+            },
+            {
+              "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-activity]",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.00035969501186627895
+                },
+                "call": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0015524659975199029
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.00043544400250539184
+                }
+              },
+              "outcome": "passed",
+              "duration_seconds": 0.0023476050118915737
+            },
+            {
+              "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-role]",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0003800669946940616
+                },
+                "call": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0016983290115604177
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.000355510986992158
+                }
+              },
+              "outcome": "passed",
+              "duration_seconds": 0.0024339069932466373
+            },
+            {
+              "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_incomplete_start[wrong-sha]",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0006092800031183288
+                },
+                "call": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0014315150037873536
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0005307090032147244
+                }
+              },
+              "outcome": "passed",
+              "duration_seconds": 0.0025715040101204067
+            },
+            {
+              "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_hasselblad_history_observer_rejects_middle_event_as_boundary",
+              "phases": {
+                "setup": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.0010746049956651405
+                },
+                "call": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.002879610998206772
+                },
+                "teardown": {
+                  "outcome": "passed",
+                  "duration_seconds": 0.00047889100096654147
+                }
+              },
+              "outcome": "passed",
+              "duration_seconds": 0.004433106994838454
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

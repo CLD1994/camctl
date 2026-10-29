@@ -1,0 +1,82 @@
+[
+  {
+    "scenario": "normal-indexes0-2-succeeded",
+    "state_backup": "/tmp/camctl-quality-repair-evidence/final-osmo/combined-all-raw/worlds/normal-indexes0-2-succeeded/state.db",
+    "counts": {
+      "recording_processing": 1,
+      "segment_inspections": 0,
+      "file_copies": 5,
+      "deliveries": 5
+    }
+  },
+  {
+    "scenario": "overrun-indexes1-3-succeeded",
+    "state_backup": "/tmp/camctl-quality-repair-evidence/final-osmo/combined-all-raw/worlds/overrun-indexes1-3-succeeded/state.db",
+    "counts": {
+      "recording_processing": 1,
+      "segment_inspections": 0,
+      "file_copies": 7,
+      "deliveries": 7
+    }
+  },
+  {
+    "scenario": "short-set-indexes2-2-succeeded",
+    "state_backup": "/tmp/camctl-quality-repair-evidence/final-osmo/combined-all-raw/worlds/short-set-indexes2-2-succeeded/state.db",
+    "counts": {
+      "recording_processing": 1,
+      "segment_inspections": 0,
+      "file_copies": 5,
+      "deliveries": 5
+    }
+  },
+  {
+    "scenario": "gap-indexes3-2-failed",
+    "state_backup": "/tmp/camctl-quality-repair-evidence/final-osmo/combined-all-raw/worlds/gap-indexes3-2-failed/state.db",
+    "counts": {
+      "recording_processing": 1,
+      "segment_inspections": 0,
+      "file_copies": 5,
+      "deliveries": 5
+    }
+  },
+  {
+    "scenario": "zero-gap-indexes4-2-failed",
+    "state_backup": "/tmp/camctl-quality-repair-evidence/final-osmo/combined-all-raw/worlds/zero-gap-indexes4-2-failed/state.db",
+    "counts": {
+      "recording_processing": 1,
+      "segment_inspections": 0,
+      "file_copies": 5,
+      "deliveries": 5
+    }
+  },
+  {
+    "scenario": "empty-indexes5-0-failed",
+    "state_backup": "/tmp/camctl-quality-repair-evidence/final-osmo/combined-all-raw/worlds/empty-indexes5-0-failed/state.db",
+    "counts": {
+      "recording_processing": 1,
+      "segment_inspections": 0,
+      "file_copies": 1,
+      "deliveries": 1
+    }
+  },
+  {
+    "scenario": "unknown-indexes6-0-failed",
+    "state_backup": "/tmp/camctl-quality-repair-evidence/final-osmo/combined-all-raw/worlds/unknown-indexes6-0-failed/state.db",
+    "counts": {
+      "recording_processing": 1,
+      "segment_inspections": 0,
+      "file_copies": 1,
+      "deliveries": 1
+    }
+  },
+  {
+    "scenario": "native-tail-indexes7-2-succeeded",
+    "state_backup": "/tmp/camctl-quality-repair-evidence/final-osmo/combined-all-raw/worlds/native-tail-indexes7-2-succeeded/state.db",
+    "counts": {
+      "recording_processing": 0,
+      "segment_inspections": 0,
+      "file_copies": 5,
+      "deliveries": 5
+    }
+  }
+]

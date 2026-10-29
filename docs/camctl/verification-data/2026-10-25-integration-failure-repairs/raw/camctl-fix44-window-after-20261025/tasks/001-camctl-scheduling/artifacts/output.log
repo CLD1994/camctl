@@ -1,0 +1,57 @@
+.....................                                                    [100%]
+============================== slowest durations ===============================
+0.87s call     tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_unstarted_expiration_replays_and_reverses_compound_history
+0.36s call     tests/integration/scheduling/test_window_expiration.py::TestWindowObservation::test_in_window_check_saves_first_observation
+0.05s call     tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_known_no_effect_expires_original_start_atomically
+0.04s call     tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_unstarted_expiration_recovers_atomic_transaction[rollback]
+0.04s call     tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_unstarted_expiration_recovers_atomic_transaction[commit_before]
+0.04s call     tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_last_expired_action_completes_plan
+0.03s call     tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_granted_intent_is_not_expired_by_window
+0.03s call     tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_unstarted_expiration_recovers_atomic_transaction[commit_after]
+0.03s setup    tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_last_expired_action_completes_plan
+0.03s call     tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_running_without_attempt_expires_and_releases
+0.03s setup    tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_unstarted_scope_restriction_keeps_occupancy
+0.03s call     tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_unstarted_scope_restriction_keeps_occupancy
+0.02s setup    tests/integration/scheduling/test_window_expiration.py::TestWindowObservation::test_same_key_replay_restores_observed
+0.02s setup    tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_expire_same_key_replay_restores_result
+0.02s setup    tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_unstarted_expiration_recovers_atomic_transaction[commit_before]
+0.02s setup    tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_window_end_is_inclusive_for_expiration
+0.02s call     tests/integration/scheduling/test_window_expiration.py::TestWindowObservation::test_same_key_replay_restores_observed
+0.02s setup    tests/integration/scheduling/test_window_expiration.py::TestWindowObservation::test_after_window_rejects_observation
+0.02s setup    tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_unstarted_expiration_recovers_atomic_transaction[commit_after]
+0.02s call     tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_expire_same_key_replay_restores_result
+0.02s setup    tests/integration/scheduling/test_window_expiration.py::TestWindowObservation::test_in_window_check_saves_first_observation
+0.02s setup    tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_running_missing_activity_is_not_unstarted
+0.02s setup    tests/integration/scheduling/test_window_expiration.py::TestWindowObservation::test_window_end_is_inclusive_for_observation
+0.02s setup    tests/integration/scheduling/test_window_expiration.py::TestWindowObservation::test_second_observation_keeps_first_time
+0.02s setup    tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_expire_without_observation_is_window_missed
+0.02s call     tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_expire_with_persisted_observation_is_window_exhausted
+0.02s setup    tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_in_window_rejects_expiration
+0.02s call     tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_running_missing_activity_is_not_unstarted
+0.02s setup    tests/integration/scheduling/test_window_expiration.py::TestWindowObservation::test_before_start_rejects_observation
+0.02s setup    tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_running_without_attempt_expires_and_releases
+0.02s setup    tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_granted_intent_is_not_expired_by_window
+0.02s setup    tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_expire_with_persisted_observation_is_window_exhausted
+0.02s setup    tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_known_no_effect_expires_original_start_atomically
+0.02s call     tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_in_window_rejects_expiration
+0.02s call     tests/integration/scheduling/test_window_expiration.py::TestWindowObservation::test_second_observation_keeps_first_time
+0.02s call     tests/integration/scheduling/test_window_expiration.py::TestWindowObservation::test_window_end_is_inclusive_for_observation
+0.01s call     tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_expire_without_observation_is_window_missed
+0.01s setup    tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_unstarted_expiration_replays_and_reverses_compound_history
+0.01s setup    tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_unstarted_expiration_recovers_atomic_transaction[rollback]
+0.01s call     tests/integration/scheduling/test_window_expiration.py::TestWindowObservation::test_after_window_rejects_observation
+0.01s call     tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_window_end_is_inclusive_for_expiration
+0.01s call     tests/integration/scheduling/test_window_expiration.py::TestWindowObservation::test_before_start_rejects_observation
+0.01s teardown tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_known_no_effect_expires_original_start_atomically
+0.01s teardown tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_expire_same_key_replay_restores_result
+0.01s teardown tests/integration/scheduling/test_window_expiration.py::TestWindowObservation::test_second_observation_keeps_first_time
+0.01s teardown tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_unstarted_expiration_recovers_atomic_transaction[commit_before]
+0.01s teardown tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_unstarted_expiration_replays_and_reverses_compound_history
+0.01s teardown tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_granted_intent_is_not_expired_by_window
+0.01s teardown tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_running_missing_activity_is_not_unstarted
+0.01s teardown tests/integration/scheduling/test_window_expiration.py::TestWindowObservation::test_in_window_check_saves_first_observation
+0.01s teardown tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_window_end_is_inclusive_for_expiration
+0.01s teardown tests/integration/scheduling/test_window_expiration.py::TestWindowObservation::test_after_window_rejects_observation
+
+(11 durations < 0.005s hidden.  Use -vv to show these durations.)
+21 passed in 3.38s

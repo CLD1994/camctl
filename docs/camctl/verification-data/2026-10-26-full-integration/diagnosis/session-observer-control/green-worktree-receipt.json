@@ -1,0 +1,19 @@
+{
+  "cmd": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "apps/camctl/tests/integration/session/test_local_work_observer_control.py",
+    "-q",
+    "--junitxml=/tmp/camctl-full-272f-diagnosis/session-observer-control/green-worktree.xml",
+    "--basetemp=/tmp/camctl-full-272f-diagnosis/session-observer-control/pytest-worktree-tmp"
+  ],
+  "cwd": "/tmp/camctl-full-272f-session-observer",
+  "module_file": "/tmp/camctl-full-272f-session-observer/apps/camctl/src/camctl/session/service.py",
+  "PYTHONPATH": "/tmp/camctl-full-272f-session-observer/apps/camctl/src:/tmp/camctl-full-272f-session-observer/apps/camctl/tests",
+  "exit_code": 0,
+  "elapsed_s": 1.2974502020078944,
+  "python": "Python 3.11.17",
+  "source": "07bb0a46381321b22b8bdc585dd93a94621bd725",
+  "process_reaped": true
+}

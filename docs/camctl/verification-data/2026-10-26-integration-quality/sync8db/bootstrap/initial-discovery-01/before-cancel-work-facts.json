@@ -1,0 +1,16 @@
+{
+  "work_facts": {
+    "unfinished_actions": 0,
+    "required_settlements": 0,
+    "pending_report_changes": false,
+    "report_failed_no_new_changes": false,
+    "residual_device_facts": false,
+    "deferred_work_cleanup": false,
+    "waiting_acknowledgement": true,
+    "snapshot_backlog": false
+  },
+  "decision": {
+    "kind": "WorkDecisionKind.CAN_EXIT_SUCCESS"
+  },
+  "note": "只读查询正式测次取消前备份；不包含原进程内的本地实际任务计数。"
+}

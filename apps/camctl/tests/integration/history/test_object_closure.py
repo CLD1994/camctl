@@ -32,7 +32,6 @@ from camctl.persistence.repositories.motor import MotorRepository, register_moto
 from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.transaction import row_facts
-from camctl.reporting.generation import _plan_facts
 
 from ..persistence.test_motor_transactions import NOW, _admit, _body, owned
 
@@ -262,7 +261,11 @@ def test_cancel_report_dependency_uses_same_h_without_selecting_cross_plan_targe
     boundary = _fix_members(world)
     _finish_target(world)
     subtree = PlanSubtree(2, {"action": {2: {"output": {}, "delivery": {}}}})
-    facts = _plan_facts(world.history, subtree, boundary)
+    facts = {}
+    for entity, identity in (('plan',2),('action',2)):
+        for (table,row_id), values in world.history.restore_entity(entity,identity,boundary).items():
+            facts.setdefault(table,{})[row_id]=values
+    facts.setdefault('actions',{})[1]=world.history.restore_primary_at_h('action',1,boundary)
     assert facts["actions"][1]["status"] == 1  # H 时目标仍未开始。
     assert ("motor_notifications" not in facts
             or not facts["motor_notifications"])  # 发送意图在 H 后建立。

@@ -1,0 +1,78 @@
+[
+  {
+    "nodeid": "tests/integration/test_camctl_session_recovery.py::test_report_failure_preserves_device_work_and_redelivers",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.007023628000752069
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 44.92541844000516
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0020883109973510727
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 44.93453037900326
+  },
+  {
+    "nodeid": "tests/integration/test_camctl_session_recovery.py::test_concurrent_submits_and_duplicate_identity",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.003504962005536072
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 33.900753345005796
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006767330050934106
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 33.904935040016426
+  },
+  {
+    "nodeid": "tests/integration/test_camctl_session_recovery.py::test_process_restart_resumes_interrupted_work",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0023036890052026138
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 22.929320174996974
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.001402210007654503
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 22.93302607400983
+  },
+  {
+    "nodeid": "tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0028110090061090887
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 19.39590748299088
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0010228570026811212
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 19.39974134899967
+  }
+]

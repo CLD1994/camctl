@@ -55,7 +55,7 @@ def test_wait_observes_current_run_result_while_host_stays_alive(tmp_path, host_
         encoding="utf-8",
     )
     host.chmod(0o700)
-    demo = HostDemo(deployment, str(host), launcher=str(launcher))
+    demo = HostDemo(deployment, str(host), launcher=str(launcher), launcher_is_camctl=False)
     # 复用同一部署目录时，前一个 host 的失败不能污染新 host。
     demo.log_path.write_text("call=1 command=run pid=99 result=error exit=1\n", encoding="utf-8")
     check_failure = demo.watch_failures()

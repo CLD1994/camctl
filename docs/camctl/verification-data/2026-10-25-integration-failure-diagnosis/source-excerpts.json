@@ -1,0 +1,191 @@
+[
+  {
+    "source_path": "/tmp/camctl-itopt-final-20261025/tasks/003-camctl-bootstrap/source/docs/camctl/database/enum-registry.json",
+    "sha256": "717140e203ea72e208d71e8f4d2aec3f4ec74a2fc2131ecbd149f284d688bd23",
+    "start_line": 119,
+    "end_line": 140,
+    "text": "119:         \"CANCELED\": 6\n120:       }\n121:     },\n122:     \"database_metadata.format_version\": {\n123:       \"contract\": \"reports-runtime.md#单份状态字段\",\n124:       \"members\": {\n125:         \"V1\": 1,\n126:         \"V2\": 2,\n127:         \"V3\": 3\n128:       }\n129:     },\n130:     \"deliveries.status\": {\n131:       \"contract\": \"file-fields.md#普通交付\",\n132:       \"members\": {\n133:         \"PENDING\": 1,\n134:         \"PREPARING\": 2,\n135:         \"PREPARED\": 3,\n136:         \"PUBLISHING\": 4,\n137:         \"PUBLISHED\": 5,\n138:         \"FAILED\": 6,\n139:         \"CANCELED\": 7,\n140:         \"WITHDRAWN\": 8"
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/docs/camctl/database/enum-registry.json",
+    "sha256": "0e404ce3ab7657be981a9ac499e16fb155d34a60c6b028c6e36c688689f9314d",
+    "start_line": 119,
+    "end_line": 140,
+    "text": "119:         \"CANCELED\": 6\n120:       }\n121:     },\n122:     \"database_metadata.format_version\": {\n123:       \"contract\": \"reports-runtime.md#单份状态字段\",\n124:       \"members\": {\n125:         \"V1\": 1,\n126:         \"V2\": 2,\n127:         \"V3\": 3,\n128:         \"V4\": 4,\n129:         \"V5\": 5\n130:       }\n131:     },\n132:     \"deliveries.status\": {\n133:       \"contract\": \"file-fields.md#普通交付\",\n134:       \"members\": {\n135:         \"PENDING\": 1,\n136:         \"PREPARING\": 2,\n137:         \"PREPARED\": 3,\n138:         \"PUBLISHING\": 4,\n139:         \"PUBLISHED\": 5,\n140:         \"FAILED\": 6,"
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/docs/architecture/initialization.md",
+    "sha256": "f707259179e7e34f3097ad216610c41719b304eb0d2165101ed449de1fbf3f40",
+    "start_line": 42,
+    "end_line": 63,
+    "text": "42: \n43: 初始化不预建[故障标记文件](log-failure-marker.md#跨-run-的独立状态文件)，该文件在首次报告失败时创建，其存在表示一轮故障持续。重复 `init` 保留已有标记及内容，不将环境初始化视为报告处理已恢复。\n44: \n45: 首次创建的状态库包含当前格式所需的完整结构、可验证的 camctl 数据库标识及初始状态；当前格式直接取[统一枚举登记](../camctl/database/enum-registry.json)中编号最大的受支持格式。初始库没有计划、动作、产物、交付或报告记录，业务变化水位和累计确认水位均为 0；后续身份和序列按各自分配规则首次产生。建立空库本身不生成业务报告。\n46: \n47: `database_metadata` 的唯一一条记录与完整结构一起建立，保存 camctl 数据库标识、首次初始化生成的数据库实例身份、整体格式版本及三处交接目录的规范绝对路径，具体职责见[数据库元信息](../camctl/database/reports-runtime.md#数据库元信息)。分别初始化的状态库具有不同实例身份；重启和重复 `init` 保留已有身份。已有库的元信息或目录绑定缺失、无效时，按校验失败处理，不补建记录。\n48: \n49: `runtime_state` 的唯一一条记录与完整初始状态一起建立，累计确认水位为 0，可信历史时间下界表达为尚无依据，中间文件清理继续位置表达为尚未检查，具体职责见[全局运行状态](../camctl/database/reports-runtime.md#全局运行状态)。初始化不将未经校验的墙钟读数保存为可信下界。已有库缺失该记录时属于状态库无效，不通过重复初始化补建或恢复为初始值。\n50: \n51: 历史起点以 0 表示，不为初始化插入虚构事件或事务记录；第一条真实事件的 `event_seq` 为 1。序号范围、分配及失败语义见[序号分配与初始化边界](../camctl/history-storage.md#序号分配范围与初始化边界)。只有完整有效的初始化结果能够提供该起点，缺失或无效数据库不能被解释为历史位置 0。\n52: \n53: `database_metadata.format_version` 的成员由统一枚举登记定义；本程序仍可打开格式 1，并保留其旧功能。格式 1 不允许受理新的主机照片 fixedspec，也不允许准备或补写主机照片文件事实；这些请求在历史提交或设备调用之前以不受支持格式回滚。运行时还核对两个已知结构约束，拒绝格式 2 元信息仍配旧 purpose 检查的数据库。整体格式与事件版本的关系见[数据库格式检查](../camctl/persistence-runtime.md#数据库整体格式检查与显式升级)。普通 `init` 只验证既有库，不改变已有整体格式。\n54: \n55: 两个显式格式升级选项分别执行，不能合并，也不能与目录绑定切换合并。`init --upgrade-software-recovery` 将 V2 升级为 V3，沿用其一致备份和事务式增加恢复表的路径。`init --upgrade-capture-preparation` 将 V3 或 V4 升级为当前 V5；V1/V2 须先满足各自已有升级条件，已经为 V5 时只核验。照片的独立准备要求 V5，录像与延时摄影继续以 V4 为最低准备格式。目标库不存在时，任一选项仍按首次部署规则创建当前格式。\n56: \n57: 拍摄准备升级沿用初始化的稳定会话锁和原目录绑定。入口先以 SQLite backup 保存带唯一标识的一致备份，再在同一状态库目录的独立准备文件中执行权威结构 SQL，分批复制原表的全部可写列；生成列由目标结构计算并一并核对。整体格式改为当前目标版本，实例身份、目录绑定、业务历史、水位、产物及配置保持原值。逐表数量和内容、外键及 SQLite 完整性全部核对后，准备文件与备份完成落盘；原连接完成 WAL 检查点并实际关闭，确认辅助文件已结束，再原子替换正式库并同步父目录。提交或发布结果未知时只重新打开核实实际结果，不重发本次复制或替换。失败保留可诊断的原库状态及已有备份；再次执行按实际格式判定。\n58: \n59: 状态库的判定以实际文件及其可验证内容为依据，文件名或扩展名不能代替数据库校验。\n60: \n61: | 目标状态库情况 | `init` 的处理 |\n62: | --- | --- |\n63: | 可靠确认不存在，执行首次部署初始化 | 创建完整的初始状态库，并完成必要目录准备 |"
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/persistence/initialization.py",
+    "sha256": "d7b57717bd4bd158c2fbd2a2bf14a0c8f1f2c1470cb582863eb63904a82156ec",
+    "start_line": 135,
+    "end_line": 156,
+    "text": "135:         connection.execute(\n136:             \"INSERT INTO database_metadata (id, application_id, instance_id, format_version,\"\n137:             \" staging_path, ready_path, processing_path) VALUES (1, 'camctl', ?, ?, ?, ?, ?)\",\n138:             (uuid.uuid4().hex, CURRENT_FORMAT_VERSION, staging, ready, processing),\n139:         )\n140:         initial = runtime_state_values()\n141:         columns = \", \".join(initial)\n142:         parameters = \", \".join(\"?\" for _ in initial)\n143:         connection.execute(\n144:             f\"INSERT INTO runtime_state ({columns}) VALUES ({parameters})\",\n145:             tuple(initial.values()),\n146:         )\n147:         connection.execute(\"COMMIT\")\n148:     finally:\n149:         connection.close()\n150:     # Windows 的 FlushFileBuffers 需要写句柄；Linux 上 O_RDWR 同样可用。\n151:     descriptor = os.open(target, os.O_RDWR)\n152:     try:\n153:         os.fsync(descriptor)\n154:     finally:\n155:         os.close(descriptor)\n156: "
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/bootstrap/test_distribution.py",
+    "sha256": "33403526313ead839e44ffa01f06fb4b5ef8c12ae495d9a2931af8c057f1bd52",
+    "start_line": 71,
+    "end_line": 92,
+    "text": "71: def _clean_environment() -> dict[str, str]:\n72:     \"\"\"运行环境：不继承任何指向源码仓库的 Python 查找路径。\"\"\"\n73:     environment = os.environ.copy()\n74:     for name in (\"PYTHONPATH\", \"PYTHONHOME\"):\n75:         environment.pop(name, None)\n76:     return environment\n77: \n78: \n79: @dataclass(frozen=True)\n80: class _Installed:\n81:     \"\"\"仓库之外的安装环境：解释器、部署目录与状态库路径。\"\"\"\n82: \n83:     python: Path\n84:     deploy: Path\n85:     state_db: Path\n86:     config: Path\n87:     ready: Path\n88:     wheel: Path\n89:     requirements: Path\n90: \n91:     def cli(self, *args: str, driver: dict | None = None,\n92:             timeout_s: float = 180.0) -> subprocess.CompletedProcess:"
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/bootstrap/test_distribution.py",
+    "sha256": "33403526313ead839e44ffa01f06fb4b5ef8c12ae495d9a2931af8c057f1bd52",
+    "start_line": 279,
+    "end_line": 300,
+    "text": "279:         for command in expected_commands:\n280:             if len(command) == 3 and command[0] == \"set\":\n281:                 set_values.setdefault(command[1], set()).add(command[2])\n282:     return \"#!\" + str(installed_python or sys.executable) + \"\\n\" + textwrap.dedent(\n283:         f\"\"\"\\\n284:         import json\n285:         import pathlib\n286:         import os\n287:         import sys\n288:         import camctl\n289:         from camctl.host_files.photo_formats import CAPTURE_FORMATS, CaptureFormat\n290: \n291:         CALL_LOG = pathlib.Path({str(call_log)!r})\n292:         SETTINGS_STATE = pathlib.Path(__file__).with_suffix(\".settings.json\")\n293:         CAPTURE_STATE = pathlib.Path(__file__).with_suffix(\".capture.json\")\n294:         COMMAND_STATE = pathlib.Path(__file__).with_suffix(\".commands.json\")\n295:         SET_VALUES = {set_values!r}\n296:         EXPECTED_COMMANDS = {expected_commands!r}\n297:         PROVENANCE_LOG = {str(provenance_log) if provenance_log is not None else None!r}\n298:         SERIAL = {serial!r}\n299:         RAW = bytes.fromhex({_HASSELBLAD_ORIGINAL_BYTES.hex()!r})\n300:         JPEG = bytes.fromhex({(jpeg_original_bytes if jpeg_original_bytes is not None else _HASSELBLAD_JPEG_ORIGINAL_BYTES).hex()!r})"
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/capture/test_action6_budget_cold_recovery.py",
+    "sha256": "89d838fcdd7a29e17ad4096fdea243de9df1647b39911f2a7582ad2e5bd2e40a",
+    "start_line": 30,
+    "end_line": 51,
+    "text": "30: pytestmark = pytest.mark.asyncio\n31: \n32: \n33: class _OffsetReadDriver(_ReadDriver):\n34:     def __init__(self, content, *, fail_after=None):\n35:         super().__init__(content, fail_after=fail_after)\n36:         self.offsets = []\n37: \n38:     async def open_read(self, source, offset, ticket, *, idle_timeout_s):\n39:         self.offsets.append(offset)\n40:         return await super().open_read(\n41:             source, offset, ticket, idle_timeout_s=idle_timeout_s\n42:         )\n43: \n44: \n45: def _cold_runtime(runtime, owned, driver, *, now):\n46:     tools = runtime.media.tools\n47:     tools.owned = owned\n48:     monotonic_ns = lambda: 100_000_000_000\n49:     media = replace(\n50:         runtime.media,\n51:         owned=owned,"
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/capture/test_segment_inspections.py",
+    "sha256": "74feea9f14ff4c3ed1eadc62f4dfbec0ba3a209dd0f2b4be52b2ed629e767853",
+    "start_line": 93,
+    "end_line": 114,
+    "text": "93:     async def open_read(self, source, offset, ticket, *, idle_timeout_s):\n94:         from camctl.devices.read_session import ReadSession\n95: \n96:         self.offsets.append(offset)\n97:         stream = _Stream(self.content[offset:], fail_after=self.fail_after)\n98:         self.streams.append(stream)\n99:         session = ReadSession(source, offset, stream, idle_timeout_s)\n100:         original_read_chunk = session.read_chunk\n101: \n102:         def read_chunk(limit: int):\n103:             self.chunk_calls.append(limit)\n104:             return original_read_chunk(limit)\n105: \n106:         session.read_chunk = read_chunk\n107:         return session\n108: \n109: \n110: class _SegmentTools:\n111:     def __init__(self) -> None:\n112:         self.requests: list[bool] = []\n113:         self.probe = MediaProbe(\n114:             duration_s=Decimal(\"1.5\"),"
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/capture/test_action6_budget_cold_recovery.py",
+    "sha256": "89d838fcdd7a29e17ad4096fdea243de9df1647b39911f2a7582ad2e5bd2e40a",
+    "start_line": 136,
+    "end_line": 157,
+    "text": "136:         ).fetchall()\n137:         assert budget_rows == [(3, \"10\", \"3\")]\n138: \n139:         owned.connection.close()\n140:         reopened = open_existing(\n141:             Path(_config(tmp_path).paths.state_db),\n142:             DbOpenMode.EXISTING_RW,\n143:             DbConfig(),\n144:         )\n145:         active_owned = reopened\n146:         resumed_driver = _OffsetReadDriver(_CONTENT)\n147:         runtime = _cold_runtime(\n148:             runtime, reopened, resumed_driver, now=_NOW + 90_000_000\n149:         )\n150: \n151:         original_save = SegmentInspectionRepository.save_result\n152: \n153:         def commit_then_report_unknown(repository, request, key, connection):\n154:             outcome = original_save(repository, request, key, connection)\n155:             assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error\n156:             return DbOutcome(\n157:                 kind=DbOutcomeKind.UNKNOWN,"
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/acceptance/test_acceptance.py",
+    "sha256": "8086603912911deee47559ec5d5773a166cadc90312492dc8e412a297434a9b6",
+    "start_line": 89,
+    "end_line": 110,
+    "text": "89:         repository=AcceptanceRepository(),\n90:         clock=type(\"Clock\", (), {\"utc_micros\": staticmethod(lambda: _NOW)})(),\n91:     )\n92:     yield owned.connection, context\n93:     owned.connection.close()\n94: \n95: \n96: def _write_input(tmp_path: Path, body: dict) -> Path:\n97:     import json\n98: \n99:     target = tmp_path / \"plan.json\"\n100:     target.write_text(json.dumps(body, ensure_ascii=False), encoding=\"utf-8\")\n101:     return target\n102: \n103: \n104: def _plan_body(*, request_id: str = \"42\", ack: str | None = None, actions=None) -> dict:\n105:     body = {\n106:         \"request_id\": request_id,\n107:         \"created_at\": \"2026-01-15 08:00:00\",\n108:         \"name\": \"plan\",\n109:         \"actions\": actions\n110:         if actions is not None"
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/tests/integration/acceptance/test_acceptance.py",
+    "sha256": "8086603912911deee47559ec5d5773a166cadc90312492dc8e412a297434a9b6",
+    "start_line": 135,
+    "end_line": 156,
+    "text": "135:     from camctl.persistence.runtime import OwnedConnection\n136: \n137:     connection, _ = environment\n138:     return OwnedConnection(connection=connection, metadata=None)\n139: \n140: \n141: async def _seed_report(environment, tmp_path: Path, report_id: int) -> None:\n142:     \"\"\"以真实输入变化及冻结分配所需报告身份。\"\"\"\n143:     await _accept(environment, tmp_path, _plan_body(request_id=str(900 + report_id)))\n144:     _freeze_reports(environment, report_id)\n145: \n146: \n147: def _freeze_reports(environment, report_id: int) -> None:\n148:     from camctl.reporting.policy import (\n149:         ReportingRepository, register_report_guards,\n150:     )\n151:     from .test_atomicity import _process\n152: \n153:     register_report_guards()\n154:     connection, _ = environment\n155:     previous = connection.execute(\"SELECT MAX(id) FROM reports\").fetchone()[0] or 0\n156:     for expected_id in range(previous + 1, report_id + 1):"
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/persistence/runtime.py",
+    "sha256": "10510315acc47c435b81484510d0b3f35d0ed5d001977432cd877042da3c90ea",
+    "start_line": 108,
+    "end_line": 129,
+    "text": "108: \n109: \n110: @dataclass(frozen=True)\n111: class OwnedConnection:\n112:     \"\"\"由创建线程持有的状态库连接及其核验过的元信息。\"\"\"\n113: \n114:     connection: sqlite3.Connection\n115:     metadata: DatabaseMetadata\n116: \n117: \n118: @lru_cache(maxsize=1)\n119: def _runtime_conditions() -> dict[str, Any]:\n120:     return json.loads(resource_bytes(_RUNTIME_RESOURCE))\n121: \n122: \n123: def check_sqlite_runtime(version: Any) -> bool:\n124:     \"\"\"按权威运行条件判断 SQLite 版本是否允许。\n125: \n126:     达到主线最低版本，或精确匹配回移修复清单，才通过；\n127:     版本信息缺失、类型或分量非法时检查失败。\n128:     \"\"\"\n129:     if isinstance(version, bool) or not isinstance(version, tuple):"
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/persistence/runtime.py",
+    "sha256": "10510315acc47c435b81484510d0b3f35d0ed5d001977432cd877042da3c90ea",
+    "start_line": 438,
+    "end_line": 441,
+    "text": "438:     except sqlite3.Error as error:\n439:         connection.close()\n440:         raise DatabaseInvalidError(f\"状态库校验失败: {error}\") from error\n441:     return OwnedConnection(connection=connection, metadata=metadata)"
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/bootstrap/lifecycle.py",
+    "sha256": "1d47d996ae0fca06f22e2b62cc48ea98c7ecbbff0a5a2c0c5edc1329732e401d",
+    "start_line": 619,
+    "end_line": 640,
+    "text": "619: \n620:     begin_builtin_camera_session()\n621:     begin_builtin_hasselblad_session()\n622:     if owned.metadata.format_version >= 3:\n623:         from camctl.devices.drivers.runtime import current_registry\n624:         from camctl.devices.drivers.adb_cameras.driver import AdbCameraDriver\n625:         with closing(owned.connection.execute(\"SELECT DISTINCT a.device_id,a.driver_id FROM software_recoveries r\"\n626:                 \" JOIN device_activities d ON d.id=r.activity_id JOIN actions a ON a.id=r.action_id\"\n627:                 \" WHERE d.occupancy_state=1\")) as recoveries:\n628:             for device_id, driver_id in recoveries:\n629:                 entry = current_registry().entry(driver_id)\n630:                 if entry is not None and isinstance(entry.driver, AdbCameraDriver):\n631:                     entry.driver.hold_recovery(device_id)\n632: \n633:     with closing(owned.connection.execute(\n634:             \"SELECT COALESCE(MAX(id), 0) FROM history_events\")) as cursor:\n635:         deps.recovery_max_event_id = int(cursor.fetchone()[0])\n636:     if deps.work_files is not None:\n637:         deps.work_files.initialize(owned)\n638: \n639: \n640: def _clock_policy_factory(config: ConfigSnapshot) -> Callable[[Any], ClockCheckInput]:"
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/docs/architecture/camera-parameters.md",
+    "sha256": "59e391b160ea3fe3fc212fee448a8c6731a1039786bfcfe2dfb17aa3dbd28f04",
+    "start_line": 97,
+    "end_line": 118,
+    "text": "97: \n98: Action6 与 OSMO 360 II 在每台相机、本次执行会话的首次拍摄准备时，先请求跳过时间设置并关闭自动休眠。Action6 还关闭两路屏幕实时画面，适用于未连接主屏幕和前置屏幕的设备；OSMO 360 II 继续请求仅充电。具体命令由[相机会话设置](../hardware/camera-control-handoff.md#相机会话设置)登记。\n99: \n100: 设置取得可靠接受结果后，同会话后续拍摄准备复用记录；新会话清空内存记录，并在需要拍摄时执行设置。普通录像与原生延时共用这些准备步骤，设置在动作自身的拍摄参数及 START 之前执行。文件访问与恢复 STOP 沿各自原操作执行。工具即使退出 0，stdout 明确报告服务不存在或服务查找失败时，设置仍为未确认，不缓存接受结果，也不继续 START。本地命令被接受不表示相机实际状态已独立读回；通用调用、期限与失败规则见[驱动执行边界](camera-capabilities.md#驱动执行与产物边界)。\n101: \n102: ### OSMO 360 II 的可选参数\n103: \n104: 普通录像的参数对象包含 `type`、`duration_s`、`bitrate` 和 `exposure`；原生延时另有 `interval_s`。这些字段均必填，`exposure` 只包含必填的 `mode`，允许 `manual` 或 `auto`。录像时长按上文规则填写，延时的采集间隔、时长域及严格大小关系见[时间参数定义](../hardware/camera-control-handoff.md#间隔与采集时长限制)。\n105: \n106: 两种拍摄模式的 `bitrate` 均允许 `standard` 和 `high`，标称值与命令由[官方交接资料](../hardware/camera-control-handoff.md#曝光码率与录像触发)说明。每个动作显式保存所选档位；驱动在每次拍摄准备时发送对应设置，相邻动作选择相同档位也分别发送。\n107: \n108: 手动曝光请求固定 ISO 800、1/60 秒快门和 5200 K 白平衡；普通录像自动曝光请求固定 EV 0 和 5200 K 白平衡，延时自动曝光沿用该模式的相机自动设置。画面为全景 8K／30 fps，普通录像请求 D-Log M。延时固定输出视频。上述固定值在任务或分支说明中展示，Schema 接受的用户调整字段以本节首段为准。\n109: \n110: 除[相机会话准备](#相机会话准备)外，普通录像的固定画面格式命令在本会话首次普通录像准备时发送，并按相同规则复用可靠接受记录。\n111: \n112: 视频大小估算继续使用独立的固定假定参考值，任务说明与估算元数据一致；该参考值不随本节码率档位切换，也不代表设备实际平均码率。\n113: \n114: ### Action6 的光圈要求\n115: \n116: Action6 每次普通录像准备在曝光设置后发送 D-Log M 命令 `42 3d`，再按原命令顺序设置视角、防抖、所选光圈和所选码率。\n117: \n118: Action6 普通录像的 `aperture` 是必填字段，适用于 `manual` 和 `auto` 两种曝光方式。Schema 和 `camctl describe` 从同一驱动定义导出此规则；新请求缺少字段、提交 `null`、其他类型或未知枚举值时，在派发设备命令前拒绝。合法值为 `f2.8` 和 `f4.0`，分别发送完整命令 `0x26 1801` 和 `0x26 9001`。"
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/docs/superpowers/specs/2026-10-23-video-result-modes-and-segmentation-design.md",
+    "sha256": "caf482b529f424da04c3c904230b5db6e65fe25e9a290c27c3c18f7380a843d0",
+    "start_line": 169,
+    "end_line": 190,
+    "text": "169: \n170: 来源失败本身不禁止取回，已发布非空前缀可按实际文件成功交付。默认或预览选择中，来源已失败、适用处理结束且完整正式产物目录为空时，优先使用来源级 `source_action_failed`；不以分段范围未确认掩盖这一事实。已有产物和显式 ID 的处理保持原规则，完整分类见[来源失败错误设计](2026-10-24-source-action-failed-design.md)。每个取回仍创建独立 delivery 和交付文件；同一请求重送继续原身份。清理遵守原请求范围，不以默认范围代替全部保留产物。\n171: \n172: ## 检查副本与等待取回的复用\n173: \n174: 本节用于已经产生检查副本的分段策略。检查副本归来源后处理，不构成正式产物、普通 delivery 或主机正式源；设备原片的正式源身份保持。\n175: \n176: 来源结果提交时，在同一事务固定当时已经等待该来源的正式取回集合及可复用副本关联。截点采用数据库提交，不依赖墙钟、报告到达或之后的等待者查询。只有完整准备、可靠校验并准确对应所选原片的副本可复用。\n177: \n178: 已绑定取回满足自身选择和可用性规则后，把副本内容拷到自己独立的交付文件，再核对大小、摘要及发布。副本关联不绕过显式清理或产物读取限制。截点之后的新取回继续读设备原片，不因副本尚在就加入原复用集合。\n179: \n180: 实际使用前副本不能可靠确认为有效时，按原文件操作规则核实或读取同一设备原片；沿原产物、delivery 和累计预算处理，不改变范围或重开来源评价。预览仍取实际预览文件，不用视频检查副本冒充。\n181: \n182: | 文件与使用责任 | 保留或清理 |\n183: | --- | --- |\n184: | 来源检查或提交仍未可靠完成 | 保留所需副本及原申请，先继续或核实来源责任。 |\n185: | 来源已可靠提交，仍有已绑定取回需要该完整副本且尚未结束 | 保留，直到相关取回结束。 |\n186: | 来源已可靠提交，相关取回均结束，读取、写入和工具实际收场 | 清理检查副本并保存结果。 |\n187: | 来源已可靠提交，完整副本无绑定取回需要，且原责任已结束 | 操作收场后清理，不为未来请求保留缓存。 |\n188: | 来源已可靠提交，部分副本的原检查责任已结束 | 操作收场后清理，不再续传已经结束的检查。 |\n189: | 提交、归属或使用责任是否结束仍未知 | 先核实，不根据路径或文件存在性删除。 |\n190: "
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/docs/architecture/file-handoff.md",
+    "sha256": "0c0e780b455116d1fa16857b3da0f9dccd0ae420dba39f24621a9ccf993e4938",
+    "start_line": 166,
+    "end_line": 187,
+    "text": "166: \n167: 其他交付继续独立处理，取回动作按[部分成功](obtaining-outputs.md#部分成功)汇总。客户端需要再次取回时提交新请求；只有正式源产物仍可用时，才能准备新的独立交付。原交付副本准备完成后，源产物可能已经按显式清理请求删除，恢复不能假定源文件仍然存在。\n168: \n169: ## 中间文件清理的运行预算\n170: \n171: 取回废弃副本与录像检查、修复留下的无用中间文件共用本节预算。是否允许删除仍分别由[取回中间文件](obtaining-outputs.md#取回中间文件的保留与清理)及[录像内部中间文件](camera-recovery.md#内部中间文件的保留与清理)的生命周期确定。正式产物、状态报告、日志副本及故障标记不使用本节的历史清理额度。\n172: \n173: 同一中间文件在一次正常 `run` 中最多进行一次检查和清理尝试。一次尝试包含必要的记录核实、文件状态检查、符合条件时的删除及结果保存，不是只能调用一次文件接口。文件查询或删除失败后，保存错误与未完成责任，本次不循环重试；读取记录或保存结果发生数据库错误时，继续按会话错误规则处理。\n174: \n175: | 本地配置 | 默认值 | 含义 |\n176: | --- | --- | --- |\n177: | `cleanup.work_file_batch_size` | 32 | 每批从数据库取得的历史待清理记录上限 |\n178: | `cleanup.work_file_limit_per_run` | 128 | 一次正常运行最多检查的历史待清理记录数 |\n179: \n180: 两项均为大于等于 1 的整数，布尔值不是合法值，可分别调整；使用本次运行的生效配置，不固化到原动作。实际批量还受本次剩余额度限制，批量配置大于每次运行上限时也不能多处理。单文件每次运行最多一次是固定规则，不因批量或上限改变而增加重试。\n181: \n182: 正常 `run` 开始安排清理时，从数据库确定此前已经保存的待清理责任范围，并固定该范围的登记上界。本次历史检查只覆盖这个上界之前的记录，不在运行期间不断把新记录加入历史扫描。按稳定的登记顺序和文件身份分批读取，从上次可靠保存的位置之后继续；到达范围末尾后可回到开头，但本次最多检查这个范围一轮，或者达到本次记录数上限时结束，以先到者为准。已经完成的清理记录不再作为候选；候选选择不能靠扫描 `staging` 后把所有文件当作垃圾。\n183: \n184: 已检查但尚不能安全删除的记录也占用本次历史处理额度，包含归属或操作状态无法确认、文件仍被使用等情况。检查所得的实际结果及继续位置可靠保存后再向后推进；删除失败的记录仍保留清理责任，但不留在队首阻止后续记录取得机会。下一次正常运行继续上述顺序，最终再次检查尚未完成的旧记录。\n185: \n186: | 文件或运行状态 | 预算与处理 |\n187: | --- | --- |"
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/docs/architecture/camera-capture.md",
+    "sha256": "022abdc39d930d97484cf7e45d5fd3a56742c8d72cd4ffab20a263dfa0f1d226",
+    "start_line": 74,
+    "end_line": 95,
+    "text": "74: | 设备状态查询 | 不提供拍摄状态查询，不因能力缺失创建查询调用或查询预算。 |\n75: | 结果范围 | 固定为设备内部 `/mnt/media_rw/emulated/DCIM`。 |\n76: \n77: 产物要求按用户选择的输出类型冻结。每个必需文件至少为 1 字节；格式后缀匹配不区分大小写。\n78: \n79: | `outputs` | 必需原片 |\n80: | --- | --- |\n81: | `video` | 至少一个非空 MP4 视频（`format_id=mp4`，后缀 `.mp4`）。 |\n82: | `video_raw` | 至少一个非空 MP4 视频，以及至少一张非空 DNG 照片（`format_id=dng`，后缀 `.dng`）。 |\n83: | `video_jpeg` | 至少一个非空 MP4 视频，以及至少一张非空 JPEG 照片（`format_id=jpeg`，后缀 `.jpg`）。 |\n84: \n85: 以上数量是最低要求，不限定确切文件数；按间隔和时长相除不能推导所需照片数。能够可靠归属本次任务的其他实际照片可以登记，但不能代替所选输出要求的格式。文件归属、大小及集合完成仍分别按本专题的通用规则核实。该软件任务合同不宣称 Action6 当前固件、STOP 命令或媒体结果已经通过真实设备验收。\n86: \n87: Action6 结果读取使用同一格式映射识别实际 MP4 视频、DNG 照片和 JPEG 照片，后缀比较不区分大小写。读取器返回页内所有这些格式的实际文件事实，不读取本地当前参数来猜测用户所选类别；首次受理时冻结的产物规则负责判定哪些格式为必需。零字节大小按实际值保留，额外照片也保持其原有格式。历史文件由既有基准差集及结果登记边界排除，读取器不按文件名或时间推断新旧。\n88: \n89: 结果主扫描将每页读取限制为 `min(batch, 32)`，保持设备返回的主页顺序和游标。配对 LRF 时，读取器另行进行有界目录扫描；该扫描只提供候选文件身份，不替换主页或保存完整目录。读取器只在目录和文件 stem 的 UTF-8 原字节完全一致时，把 LRF 与唯一 MP4 配对；照片不能充当视频原片。配对的 LRF 仍在主扫描首次观察到它的结果页返回，因此其身份可先于或后于 MP4 页保存。\n90: \n91: 缺少、零字节或身份模糊的 LRF，以及配对扫描或 LRF 元数据读取失败，只形成可选诊断，不使有效必要原片失效。若结果主页已经观察到 MP4，而同一轮配对扫描随后确认该身份消失，读取器保留已取得的主页并返回结果冲突，不沿用一个可能已过期的配对。主目录读取错误不作为空结果返回；MP4、DNG 或 JPEG 必要元数据读取失败时，读取器保留真实部分页和原始错误，不把未读文件伪装成完整文件。\n92: \n93: #### 跨页配对与可靠前页历史\n94: \n95: 结果扫描继续页只能消费同一完整 `AttemptTicket` 下已经可靠保存的前页。正式适配器首次建立或恢复本次读取依据时逐页核验前页历史：页号连续，首末页引用和保存范围完整，页间设备游标连续，设备绑定及结果目录范围与当前请求相同，前页没有调用错误，且末页的 `next_cursor` 与当前输入游标完全相同。同一读取拥有者继续时，沿已经核实的末页引用增量核对新增的可靠页，不反复读取完整前页链；拥有者或尝试更换后重新核对。首页必须没有已保存页；发现已有页时不能重开首页。缺页、错误页、范围或票据不符、游标不符、历史读取失败及保存回执未确定都作为本地一致性错误处理，不派发下一次设备调用。"
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/persistence/repositories/outputs.py",
+    "sha256": "346bdc55487e34c0142d4438b9b5ecd0502f76622f8ae16809cf52b3df3a0f77",
+    "start_line": 5094,
+    "end_line": 5115,
+    "text": "5094:         if action is None:\n5095:             raise ConsistencyError(\n5096:                 f\"中间文件的归属动作缺失: {file['owner_action_id']}\")\n5097:         owner_finished = action[\"status\"] in _WorkFileMixin._TERMINAL_ACTIONS\n5098:         if file[\"purpose\"] == int(_PURPOSE.RECORDING_INPUT):\n5099:             with closing(connection.execute(\n5100:                 \"SELECT inspection_id FROM file_copies\"\n5101:                 \" WHERE target_file_id=? AND inspection_id IS NOT NULL\",\n5102:                 (file_id,),\n5103:             )) as cursor:\n5104:                 inspection_rows = cursor.fetchall()\n5105:             if len(inspection_rows) > 1:\n5106:                 raise ConsistencyError(\n5107:                     f\"检查副本输入对应多个检查责任: {file_id}\")\n5108:             if inspection_rows:\n5109:                 inspection_id = inspection_rows[0][0]\n5110:                 inspection = row_facts(\n5111:                     connection, \"segment_inspections\", inspection_id)\n5112:                 if inspection is None:\n5113:                     raise ConsistencyError(\n5114:                         f\"检查副本责任缺失: {inspection_id}\")\n5115:                 member = row_facts("
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/bootstrap/work_file_assembly.py",
+    "sha256": "bc701935fb9ba2370f8f32fd5c4a8b53978a5838a88770146d1148715eda0c34",
+    "start_line": 215,
+    "end_line": 236,
+    "text": "215:                             self._add_owned_files(owned, \"owner_delivery_id\", row.row_id)\n216:                 self._discovery_after = event.event_id\n217: \n218:     def _add_owned_files(self, owned, column: str, identity: int) -> None:\n219:         \"\"\"沿变更对象关联分批读取文件，不以对象末事件推断用途。\"\"\"\n220:         after = 0\n221:         while True:\n222:             with closing(owned.connection.execute(\n223:                 f\"SELECT id FROM intermediate_files WHERE {column} = ?\"\n224:                 \" AND retention_state IN (?, ?) AND id > ? ORDER BY id LIMIT ?\",\n225:                 (identity, int(_RETENTION.REQUIRED), int(_RETENTION.RELEASABLE),\n226:                  after, self.limits.batch_size),\n227:             )) as cursor:\n228:                 batch = cursor.fetchall()\n229:             if not batch:\n230:                 break\n231:             for (file_id,) in batch:\n232:                 facts = self.repository.load_work_file_state(file_id, owned)\n233:                 if facts.owner_finished:\n234:                     self._first_files.add(int(file_id))\n235:                 after = int(file_id)\n236: "
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/bootstrap/work_file_assembly.py",
+    "sha256": "bc701935fb9ba2370f8f32fd5c4a8b53978a5838a88770146d1148715eda0c34",
+    "start_line": 207,
+    "end_line": 228,
+    "text": "207:                             self._first_files.add(row.row_id)\n208:                         elif not row.before.exists:\n209:                             self._add_owned_files(owned, \"id\", row.row_id)\n210:                     elif row.table == \"actions\" and after.get(\"status\") in _TERMINAL_ACTIONS:\n211:                         if before.get(\"status\") != after[\"status\"]:\n212:                             self._add_owned_files(owned, \"owner_action_id\", row.row_id)\n213:                     elif row.table == \"deliveries\" and after.get(\"status\") in _TERMINAL_DELIVERIES:\n214:                         if before.get(\"status\") != after[\"status\"]:\n215:                             self._add_owned_files(owned, \"owner_delivery_id\", row.row_id)\n216:                 self._discovery_after = event.event_id\n217: \n218:     def _add_owned_files(self, owned, column: str, identity: int) -> None:\n219:         \"\"\"沿变更对象关联分批读取文件，不以对象末事件推断用途。\"\"\"\n220:         after = 0\n221:         while True:\n222:             with closing(owned.connection.execute(\n223:                 f\"SELECT id FROM intermediate_files WHERE {column} = ?\"\n224:                 \" AND retention_state IN (?, ?) AND id > ? ORDER BY id LIMIT ?\",\n225:                 (identity, int(_RETENTION.REQUIRED), int(_RETENTION.RELEASABLE),\n226:                  after, self.limits.batch_size),\n227:             )) as cursor:\n228:                 batch = cursor.fetchall()"
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/capture/segment_inspections.py",
+    "sha256": "7423ce94a99f8e1ea22cc42f30d8bcb3f396920fe61e19effb94b2f504e99cae",
+    "start_line": 387,
+    "end_line": 408,
+    "text": "387:     else:\n388:         ticket = None\n389: \n390:     from camctl.outputs.read_attempts import hold_read_end\n391:     sessions = read_flow.sessions if ticket is None else read_flow.sessions.for_attempt(\n392:         ticket, idle_timeout_s=config.timeout_s)\n393:     context: InputContext\n394:     context = InputContext(\n395:         action_id=request.action_id, processing_id=None,\n396:         source_device_file_id=source_file_id, target_extension=(Path(original_name).suffix[1:].lower()\n397:             if original_name and Path(original_name).suffix else None),\n398:         config=config, segment_size=read_flow.segment_size,\n399:         staging=read_flow.roots.staging, copies=copies, sessions=sessions,\n400:         occurred_at=read_flow.occurred_at(), digest=(read_flow.digest_for(source_file_id)\n401:             if read_flow.digest_for is not None else read_flow.digest),\n402:         read_end=(read_flow.pending_read_ends[ticket.target_id].end\n403:             if ticket is not None and ticket.target_id in read_flow.pending_read_ends else None),\n404:         on_read_end=(None if ticket is None else lambda end, complete:\n405:             hold_read_end(read_flow, ticket, end, complete,\n406:                 resume=lambda current, held: _resume_local_internal_end(\n407:                     current, held, read_flow, context), evidence=read_flow.evidence)),\n408:         on_read_start=(None if ticket is None else"
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/bootstrap/lifecycle.py",
+    "sha256": "1d47d996ae0fca06f22e2b62cc48ea98c7ecbbff0a5a2c0c5edc1329732e401d",
+    "start_line": 178,
+    "end_line": 199,
+    "text": "178:         pending_capture_completions=deps.capture_completions,\n179:         retry_gate=deps.capture_retry_gate)\n180:     for action_id in tuple(deps.capture_baselines):\n181:         result = resume_baseline_settlement(action_id, runtime=runtime)\n182:         if result is not None and result.phase is PreparationPhase.PENDING:\n183:             raise ConsistencyError(f\"原准备收场仍未可靠保存: {result.database_error}\")\n184: \n185: \n186: def _resume_normal_read_requests(deps: RuntimeDeps, owned: OwnedConnection) -> None:\n187:     \"\"\"普通与残留入口先核原申请，再处理实际完成且必要摘要绑定失效的读取。\"\"\"\n188:     from camctl.capture.media_flow import resume_binding_internal_read_ends\n189:     from camctl.devices.bindings import check_binding\n190: \n191:     _resume_read_requests(deps, owned)\n192:     resume_binding_internal_read_ends(owned,\n193:         pending_read_results=deps.capture_read_results,\n194:         pending_read_business=deps.capture_read_business,\n195:         pending_read_ends=deps.capture_read_ends,\n196:         continuing_read_tickets=deps.capture_continuing_reads,\n197:         binding_check=lambda saved: check_binding(saved, deps.config),\n198:         occurred_at=SystemClock().utc_micros)\n199: "
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/capture/media_flow.py",
+    "sha256": "22fa44e45cb65b94a28848c83268b0731fd4686ae0a8a31172d9fdb7937c2441",
+    "start_line": 699,
+    "end_line": 720,
+    "text": "699:     retry_read_business(scope)\n700: \n701: \n702: def resume_binding_internal_read_ends(\n703:     owned: OwnedConnection, *, pending_read_results: dict,\n704:     pending_read_business: dict, pending_read_ends: dict,\n705:     continuing_read_tickets: dict, binding_check: Callable, occurred_at: Callable,\n706: ) -> None:\n707:     \"\"\"普通与残留入口保存已实际读完、却缺必要源摘要的绑定失败。\"\"\"\n708:     from camctl.capture.media import RecordingFailure\n709:     from camctl.contracts.enums import enum_for\n710:     from camctl.devices.bindings import DeviceBinding, binding_failure_details\n711:     from camctl.outputs.copy import SourceChecksumSupport\n712:     from camctl.outputs.read_attempts import PendingReadBusiness, held_binding_read_result\n713:     from camctl.persistence.repositories.capture import FinishBindingFailure\n714: \n715:     # 原完整申请的核实由 prepared 前置负责；失败传播后不会到达本分类。\n716:     if pending_read_results or pending_read_business:\n717:         return\n718:     action_status = enum_for(\"actions.status\")\n719:     run_status = enum_for(\"operation_runs.status\")\n720:     run_kind = enum_for(\"operation_runs.kind\")"
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/tests/integration/test_camctl_media_roundtrip.py",
+    "sha256": "f509d41b53f09b60eacddd496656195b11d8612228c1d45e574b1d3b33f10f31",
+    "start_line": 350,
+    "end_line": 371,
+    "text": "350:     assert repair_state == 5\n351:     basis = json.loads(repair_basis)\n352:     assert basis[\"reason\"] == 2\n353:     assert Decimal(str(basis[\"actual_duration_s\"])) > Decimal(\"3.5\")\n354:     # 门槛秒数与判定使用的实际比较门槛一致：目标加余量，不只余量。\n355:     assert Decimal(str(basis[\"threshold_s\"])) == Decimal(\"3.5\")\n356:     _assert_repaired_delivery(deployment)\n357: \n358:     report = _ready_report(deployment)\n359:     statuses = {\n360:         action[\"name\"]: action[\"status\"]\n361:         for plan in report[\"plans\"] for action in plan[\"actions\"]}\n362:     assert statuses == {\"拍录\": \"succeeded\", \"取回\": \"succeeded\"}\n363: \n364: \n365: @pytest.mark.skipif(\n366:     os.name != \"posix\", reason=\"进程组归属以真实 POSIX 进程验证\")\n367: def test_managed_tool_children_stay_in_process_group() -> None:\n368:     \"\"\"受管工具经统一启动边界启动：后代留在调用方的进程组，不建立\n369:     新会话也不脱离；组终止可以覆盖工具进程（R-10 软件层事实）。\"\"\"\n370:     from camctl.operations.process import ToolSpec, execute_tool\n371: "
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/docs/camctl/database/operation-fields.md",
+    "sha256": "f3ce8d0864e159b233e2aa9cedf64217ac90ff41e9825890cfc7180503cf4724",
+    "start_line": 695,
+    "end_line": 716,
+    "text": "695: -|-|-\n696: 原探测缺失、工具失败，或必要字段未知，且没有已确认的原输入错误|保持无法核实，不将未知改成损坏，也不撤销独立可靠的控制完成依据|无法完成必要双流验证时保存修复失败，不发布成品\n697: 原探测已可靠确认必要主视频缺失，或必要视频／音频流不足目标|保留具体流问题；任何检查决定和阶段都不能用控制完成覆盖已知原输入失败|保留原探测，停止修复派发并沿实际阶段收场；未执行检查不改写为检查完成\n698: 原输入合格，但修复输出缺流、时长不足、编码／尺寸变化或工具失败|只说明修复失败，不据此推断原片损坏|保留原片，保存实际修复失败，不发布不合格成品\n699: \n700: \n701: `repair_state` 为 `UNDETERMINED`、`NOT_NEEDED`、`PENDING`、`RUNNING`、`SUCCEEDED`、`FAILED`、`CANCELED`。除 `UNDETERMINED` 外均必填 `repair_basis_json`，保存 `reason`（`BELOW_THRESHOLD` 表示未达到多录门槛，`THRESHOLD_REACHED` 表示达到门槛，`NO_USABLE_INPUT` 表示没有可用输入，`CANCELED` 表示取消停止处理）、`target_duration_ms`、实际比较门槛时使用的 `threshold_s`（原因为 `BELOW_THRESHOLD` 或 `THRESHOLD_REACHED` 时必填，其他原因不适用时省略），以及实际已知的 `actual_duration_s` 或原始 `control_elapsed_ns`；秒数采用精确 JSON 数值。原始控制耗时、按原冻结启动余量派生的录制时长下界和实际媒体时长分别表达；下界不是 `actual_duration_s`，该字段只保存媒体探测取得的实际时长，原始控制耗时也不能复制到其中。控制时间证据不能确定是否达到异常多录门槛时，检查决定采用 `INSUFFICIENT_TIMING`，等待实际媒体检查。已经决定后不因本地门槛变化重算。`SUCCEEDED` 必填 `repair_output_file_id`，`FAILED` 必填 `repair_error_json`，不需要修复时不能用成功修复冒充。\n702: \n703: `discard_state` 是取消或过期后处理产生文件的收场进度：`NOT_NEEDED`、`PENDING`、`RUNNING`、`COMPLETED`、`FAILED`、`UNKNOWN`。`FAILED`、`UNKNOWN` 必填 `discard_error_json`。它跟踪所属录像的处理结果；实际中间文件逐份保留和删除由文件表负责。原片检查、修复及取消后处理不在动作终态后重新启动；剩余文件清理责任仍可独立推进。\n704: \n705: ## 查询与事务不变量\n706: \n707: 流程按责任唯一键恢复，尝试通过 `(run_id, attempt_no)` 分页，设备活动通过动作唯一键取得。`operations_activity` 定位同一活动的正常停止、后续收场及应急事实；`operations_delivery` 取得交付自身的读取历史。未释放占用使用 `activities_occupancy` 结合原动作的设备绑定查询，不能只查询非终态动作。录像启动机会按[当前归属条件](recording-start.md#启动机会的推导与唯一性)查询；独立查询尚为 `RUNNING` 的尝试并关联其流程，即使流程已经结束也须完成适用收场。\n708: \n709: 业务接口保证：流程引用目标与所属动作、交付一致；新尝试编号连续且额度同时增加；读取轮次与拷贝一致；能力及固定任务定义一致；等待依据完整；释放占用有实际证据；媒体、修复和正式登记遵守各自阶段。SQL 负责引用、唯一性、范围和可表达的行内组合。外部调用在意图提交之后、结果事务之前进行，不能在 SQLite 事务内等待设备或工具。\n710: \n711: ## 普通尝试结束结果的保存边界\n712: \n713: 清理项 C1 删除产物 O 时，先可靠提交尝试身份、调用意图和额度，再派发删除。正常等待超时后，执行流程保留超时及已取得的证据，记录运行诊断并继续收场；数据库中的尝试保持 `RUNNING`，C1 保持 `DELETING`。调用完成适用收场后，业务层共同保存尝试结束结果、实际已知效果及收场依据，再按取消、执行资格和预算决定后续核实或结束。\n714: \n715: 普通操作尝试的成功、失败或结果未知等结束结果，只在该尝试负责的调用完成适用收场后提交。结束结果已可靠保存，表示本次调用已经满足收场条件；业务效果仍按操作契约单独解释。`RUNNING` 表示该尝试尚未保存结束结果，覆盖已提交意图、实际调用、超时后收场以及收场完成但结果尚未提交等阶段，不证明设备仍在执行或正常等待期限尚未到达。\n716: "
+  },
+  {
+    "source_path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/capture/handlers.py",
+    "sha256": "85dc2681641be442c0b9a4a67d2e8a19ec0e02d9c1e15ff793cadf5e35b0b6bd",
+    "start_line": 3618,
+    "end_line": 3639,
+    "text": "3618:         new_operation_key(), runtime.owned)\n3619:     assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error\n3620: \n3621: \n3622: def _save_excess_decisions(\n3623:     runtime: CaptureRuntime, processing_id: int, target_duration_ms: int,\n3624:     control: RecoveredControlDecision) -> None:\n3625:     \"\"\"异常多录：无需检查但达到修复门槛，两决定一次固定。\"\"\"\n3626:     elapsed = control.control_elapsed_ns\n3627:     receipt = runtime.capture.save_check_decision(\n3628:         CheckDecisionSave(\n3629:             processing_id=processing_id,\n3630:             decision=CheckDecisionChoice.NOT_NEEDED,\n3631:             basis=CheckBasis(\n3632:                 reason=CheckReason.EXCESS_DURATION_CHECK,\n3633:                 target_duration_ms=target_duration_ms,\n3634:                 control_elapsed_ns=elapsed),\n3635:             occurred_at=runtime.wall_us()),\n3636:         new_operation_key(), runtime.owned)\n3637:     assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error\n3638:     repair = runtime.capture.save_repair_decision(\n3639:         RepairDecisionSave("
+  }
+]

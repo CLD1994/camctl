@@ -1,0 +1,34 @@
+{
+  "test_head": "f9ba88c8608e51ced26feb8bc0490b505c837688",
+  "production_commit": "b4cdff6b0a1c3aaa3547785c7fa5519b823c0adc",
+  "production_tracked_files_equal": true,
+  "test_diff_paths": [
+    "apps/camctl/tests/integration/outputs/test_read_discovery.py"
+  ],
+  "target_source_equal_previous_run": true,
+  "previous_test_head": "0315f5aafb9c87c8d73647ef9bb7e5a19316eea2",
+  "scope": "selection.json原2历史容量目标",
+  "candidate_actions": 4200,
+  "unrelated_outputs": 4,
+  "before_after_actions": [
+    3,
+    3
+  ],
+  "member_datasets": [
+    256,
+    2048
+  ],
+  "preparation_batch": 128,
+  "read_batch": 7,
+  "disk_cache_kib": 2048,
+  "snapshot_max_chunk": 65536,
+  "memory_budget_cli": "2GiB",
+  "resource_claim": "保留节点原有进程内容量与增长断言，不将其记作整进程预算验收",
+  "driver": "/tmp/camctl-quality-repair-evidence/final-history-after-handoff/run_history.py",
+  "repository_runner": "scripts/run-integration.py",
+  "receipt_only_arguments": [
+    "--junitxml",
+    "-o junit_logging=system-out",
+    "-o junit_log_passing_tests=true"
+  ]
+}

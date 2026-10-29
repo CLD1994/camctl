@@ -14,15 +14,13 @@ import time
 
 import pytest
 
-from camctl.acceptance.input import ParsedInput
-from camctl.acceptance.service import CommandMode
-from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
+from camctl.acceptance.service import AcceptanceContext, CommandMode
 from camctl.contracts.schemas import validate_document
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.contracts.workflow_errors import item_error_id, registered_error
-from camctl.operations.attempts import RetryWaitGate
-from camctl.outputs.handoff import DeliveryDirectories
-from camctl.outputs.obtain_flow import ObtainRuntime, advance_obtain
+from camctl.outputs.obtain_flow import advance_obtain
+from camctl.bootstrap.obtain_assembly import session_obtain_assembly
+from camctl.devices.drivers.registry import DriverRegistry
 from camctl.outputs.sources import (
     ResolutionState,
     SelectionMode,
@@ -30,7 +28,7 @@ from camctl.outputs.sources import (
     read_source_spec,
     select_outputs,
 )
-from camctl.persistence.repositories.acceptance import AcceptanceRepository, ProcessInput
+from camctl.persistence.repositories.acceptance import AcceptanceRepository
 from camctl.persistence.repositories.outputs import (
     FinishObtain,
     FixSelection,
@@ -39,8 +37,6 @@ from camctl.persistence.repositories.outputs import (
     StartObtainAction,
     load_selection_facts,
 )
-from camctl.persistence.repositories.operations import OperationRepository
-from camctl.persistence.repositories.scheduling import SchedulingRepository, StartActionRequest
 from camctl.persistence.transaction import encode_json_value, row_facts
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
@@ -55,13 +51,14 @@ from camctl.reporting.policy import (
 from ..capture.test_capture_contract import ResultsDouble
 from ..history.test_report_scope import (
     _Catalog,
-    _finish_action,
     _past_schedule,
-    _runtime,
     _submit,
     _submit_diagnostic,
 )
 from ..persistence.test_runtime import _create_valid_database
+from ..support.acceptance import accept_document
+from ..support.database import business_database, database_path
+from ..support.reporting import complete_photo as _finish_action
 
 register_report_guards()
 register_sync_guard()
@@ -130,35 +127,18 @@ async def _save_failed_source_obtain(owned):
             },
         ],
     }
-    accepted = AcceptanceRepository().process_input(
-        ProcessInput(
-            ParsedInput("source-action-failed.json", body),
-            _CaptureAndObtainCatalog(),
-            CommandMode.RUN,
-            now,
-        ),
-        new_operation_key(),
-        owned,
-    )
-    assert accepted.kind is DbOutcomeKind.COMPLETED, accepted.error
-    assert accepted.value.plan_id is not None, accepted.value
+    accepted = await accept_document(body, AcceptanceContext(
+        mode=CommandMode.RUN, catalog=_CaptureAndObtainCatalog(), repository=AcceptanceRepository(),
+        clock=type("Clock", (), {"utc_micros": staticmethod(lambda: now)})()),
+        database_path(owned), input_path=database_path(owned).parent / "source-action-failed.json")
+    assert accepted.plan_id is not None, accepted
     actions = owned.connection.execute(
         "SELECT id,name FROM actions WHERE plan_id=? ORDER BY id",
-        (accepted.value.plan_id,),
+        (accepted.plan_id,),
     ).fetchall()
     source_id = next(identity for identity, name in actions if name == "failed shoot")
     obtain_id = next(identity for identity, name in actions if name == "obtain failed source")
-    started_capture = SchedulingRepository().start_action(
-        StartActionRequest(
-            action_id=source_id, trusted_wall_now=now, occurred_at=now
-        ),
-        new_operation_key(),
-        owned,
-    )
-    assert started_capture.kind is DbOutcomeKind.COMPLETED, started_capture.error
-    runtime = _runtime(owned)
-    runtime.results = ResultsDouble({1: ()})
-    await dispatch_ready(runtime, ready_capture_actions(owned.connection, now))
+    await _finish_action(owned, action_id=source_id, results=ResultsDouble({1: ()}))
     source = row_facts(owned.connection, "actions", source_id)
     assert source["status"] == 4
     assert source["error_code"] is not None
@@ -237,20 +217,13 @@ async def _save_admission_failed_source_obtain(owned, tmp_path, mode):
             },
         ],
     }
-    accepted = AcceptanceRepository().process_input(
-        ProcessInput(
-            ParsedInput("failed-admission-source.json", body),
-            _CaptureAndObtainCatalog(),
-            CommandMode.RUN,
-            now,
-        ),
-        new_operation_key(),
-        owned,
-    )
-    assert accepted.kind is DbOutcomeKind.COMPLETED, accepted.error
+    accepted = await accept_document(body, AcceptanceContext(
+        mode=CommandMode.RUN, catalog=_CaptureAndObtainCatalog(), repository=AcceptanceRepository(),
+        clock=type("Clock", (), {"utc_micros": staticmethod(lambda: now)})()),
+        database_path(owned), input_path=database_path(owned).parent / "failed-admission-source.json")
     actions = owned.connection.execute(
         "SELECT id,name FROM actions WHERE plan_id=? ORDER BY id",
-        (accepted.value.plan_id,),
+        (accepted.plan_id,),
     ).fetchall()
     source_id = next(identity for identity, name in actions if name == "failed admission")
     obtain_id = next(identity for identity, name in actions if name == "obtain admission failure")
@@ -258,20 +231,12 @@ async def _save_admission_failed_source_obtain(owned, tmp_path, mode):
     assert source["status"] == 4
     assert source["execution_spec_json"] is None
 
-    runtime = ObtainRuntime(
-        owned=owned,
-        devices={},
-        directories=DeliveryDirectories(
-            tmp_path / "staging", tmp_path / "ready", tmp_path / "processing"
-        ),
-        segment_size=1024,
-        retry_gate=RetryWaitGate(),
-        monotonic_ns=time.monotonic_ns,
-        occurred_at=lambda: now,
-        outputs=OutputsRepository(),
-        operations=OperationRepository(),
-    )
-    await advance_obtain(runtime)
+    factory = session_obtain_assembly(
+        devices={}, drivers=DriverRegistry(()), staging=tmp_path / "staging",
+        ready=tmp_path / "ready", processing=tmp_path / "processing",
+        segment_size=1024, monotonic_ns=time.monotonic_ns, occurred_at=lambda: now)
+    async with business_database(database_path(owned)) as database:
+        await advance_obtain(factory(database))
     return source_id, obtain_id, source["error_code"]
 
 

@@ -213,10 +213,45 @@ class WorkFileRuntime:
                     elif row.table == "actions" and after.get("status") in _TERMINAL_ACTIONS:
                         if before.get("status") != after["status"]:
                             await self._add_owned_files(database, "owner_action_id", row.row_id)
+                            await self._add_source_files(database, row.row_id)
                     elif row.table == "deliveries" and after.get("status") in _TERMINAL_DELIVERIES:
                         if before.get("status") != after["status"]:
                             await self._add_owned_files(database, "owner_delivery_id", row.row_id)
                 self._discovery_after = event.event_id
+
+    async def _add_source_files(self, database, action_id: int) -> None:
+        """取回结束后，沿其原来源依赖重新核对检查副本的用途。"""
+        from camctl.outputs.segment_copy_reuse import selection_is_bound_at_publication
+
+        after = 0
+        while True:
+            def read_page(owned):
+                with closing(owned.connection.execute(
+                    "SELECT d.id,d.depends_on_action_id,s.published_event_id,o.id"
+                    " FROM action_dependencies d"
+                    " JOIN segment_sets s ON s.action_id=d.depends_on_action_id"
+                    " JOIN obtain_source_selections o ON o.dependency_id=d.id"
+                    " WHERE d.action_id=? AND s.published_event_id IS NOT NULL AND d.id>?"
+                    " ORDER BY d.id LIMIT ?",
+                    (action_id, after, self.limits.batch_size),
+                )) as cursor:
+                    rows = cursor.fetchall()
+                result = []
+                for dependency_id, source_id, published_event_id, selection_id in rows:
+                    _boundary, bound = selection_is_bound_at_publication(
+                        source_action_id=source_id, obtain_action_id=action_id,
+                        selection_id=selection_id, published_event_id=published_event_id,
+                        owned=owned)
+                    result.append((int(dependency_id), int(source_id), bound))
+                return tuple(result)
+
+            batch = await database.read(read_page, description="取回终态来源依赖页读取")
+            if not batch:
+                return
+            for _dependency_id, source_id, bound in batch:
+                if bound:
+                    await self._add_owned_files(database, "owner_action_id", source_id)
+            after = int(batch[-1][0])
 
     async def _add_owned_files(self, database, column: str, identity: int) -> None:
         """沿变更对象关联分批读取文件，在主协程登记首次责任。"""

@@ -1,0 +1,5 @@
+[
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_media_roundtrip/source/tests/integration/test_camctl_media_roundtrip.py::test_insufficient_timing_checks_repairs_and_delivers",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_media_roundtrip/source/tests/integration/test_camctl_media_roundtrip.py::test_excess_recording_repairs_without_probing",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_media_roundtrip/source/tests/integration/test_camctl_media_roundtrip.py::test_managed_tool_children_stay_in_process_group"
+]

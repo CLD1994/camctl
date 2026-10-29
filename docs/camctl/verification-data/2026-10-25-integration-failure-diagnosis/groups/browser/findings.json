@@ -1,0 +1,572 @@
+{
+  "generated_utc": "2026-10-25T06:20:29.404762+00:00",
+  "scope": "仅诊断原44失败中的21、41、42、43、44；本代理及其子代理未启动测试或浏览器，未修改项目文件。",
+  "historical_source": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+  "current_fixed_source": "1973dc05c0d517a890b92e5dcfc1ee32da9266dd",
+  "current_runner": "/tmp/camctl-44-diagnostic-current-20261025",
+  "current_summary": {
+    "failed": [
+      21,
+      41,
+      43,
+      44
+    ],
+    "passed": [
+      42
+    ]
+  },
+  "shared_root_cause": "client_build 调用 pnpm run build 时，pnpm 在构建脚本前按 pnpm-lock.yaml 自动安装并将该执行槽的 @playwright/test 从预置 npm/package-lock 的 1.63.0 切换为 1.64.1；新版本需要 Chromium headless shell 1248，但现有缓存只有1243。安装还产生 ERR_PNPM_IGNORED_BUILDS，构建继续且最终退出0，因此准备阶段被视为通过，随后真实 chromium.launch 才导致用例失败。",
+  "dependency_timeline_evidence": "/tmp/camctl-diag-browser-dependency-timeline.txt",
+  "source_comparison_evidence": "/tmp/camctl-diag-browser-source-evidence.json",
+  "parameter_detail_evidence": "/tmp/camctl-diag-hb-timelapse-trace.json",
+  "cases": [
+    {
+      "diagnosis_id": 21,
+      "nodeid": "tests/integration/test_device_capability_declarations.py::test_installed_metadata_reaches_parameter_form_and_device_guide",
+      "classification": "测试准备改变执行槽依赖，随后浏览器修订缺失；非生产能力断言失败",
+      "root_cause": "client_build 调用 pnpm run build 时，pnpm 在构建脚本前按 pnpm-lock.yaml 自动安装并将该执行槽的 @playwright/test 从预置 npm/package-lock 的 1.63.0 切换为 1.64.1；新版本需要 Chromium headless shell 1248，但现有缓存只有1243。安装还产生 ERR_PNPM_IGNORED_BUILDS，构建继续且最终退出0，因此准备阶段被视为通过，随后真实 chromium.launch 才导致用例失败。",
+      "historical_result": "failed",
+      "current_result": "failed",
+      "current_reproduced": true,
+      "contract_basis": [
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/scripts/README.md",
+          "lines": [
+            16,
+            16
+          ],
+          "claim": "依赖按npm ci/package-lock预先准备，并须与Chromium一致。"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/client/running.md",
+          "lines": [
+            104,
+            104
+          ],
+          "claim": "浏览器集成测试须安装配套Chromium。"
+        }
+      ],
+      "evidence": [
+        {
+          "path": "/tmp/camctl-diag-browser-dependency-timeline.txt",
+          "lines": [
+            13,
+            55
+          ],
+          "claim": "中央pnpm run build自动安装1.64.1、安装出错后仍继续构建且exit0。"
+        },
+        {
+          "path": "/tmp/camctl-diag-browser-dependency-timeline.txt",
+          "lines": [
+            57,
+            99
+          ],
+          "claim": "历史同一构建自动安装1.64.1。"
+        },
+        {
+          "path": "/tmp/camctl-diag-browser-source-evidence.json",
+          "claim": "入口文件与客户端源码对比、能力文件与命令交接。"
+        },
+        {
+          "path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/005-root-test_device_capability_declarations/artifacts/cases.json",
+          "claim": "中央setup passed、call failed、teardown passed。"
+        },
+        {
+          "path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/005-root-test_device_capability_declarations/artifacts/output.log",
+          "lines": [
+            43,
+            121
+          ],
+          "claim": "实际首错位于suite beforeAll，全部108 skipped，afterAll次生错误。"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/tests/integration/test_device_capability_declarations.py",
+          "lines": [
+            242,
+            249
+          ],
+          "claim": "导出JSON和环境变量传递。"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/client/tests/integration/capability-fixtures.ts",
+          "lines": [
+            144,
+            150
+          ],
+          "claim": "绝对路径注入读取。"
+        }
+      ],
+      "suggestion": "沿 scripts/README.md 已规定的 npm ci/package-lock 入口准备独立客户端依赖与匹配 Chromium；构建测试网页时保持这份既定依赖，避免 client_build 的构建命令隐式改用另一锁文件安装。核对并消除两份锁文件对同一依赖的不同权威。修复范围是测试准备与依赖管理；本次没有发现需修改能力业务实现的证据。",
+      "unresolved_information": [
+        "浏览器未启动，网页元数据、表单、重载和清理入口的真实行为仍未被本轮验证；应在匹配依赖后执行原身份，不能把本次启动失败计作这些合同通过。"
+      ],
+      "trigger": "根测试完成安装wheel和网页构建，安装版describe退出0，将 installed-capabilities.json 的绝对路径通过 CAMCTL_TEST_CAPABILITIES_FILE 交给两个Vitest文件，并用 -t 能力源 选择五个网页用例。",
+      "first_test_error": "browser-camera-parameters.test.ts:21 与 browser-editing.test.ts:26 的 beforeAll 在 chromium.launch({headless:true}) 报 executable missing；108个注册用例均skipped，五个能力源用例正文未执行。",
+      "secondary_error": "两个 afterAll 无条件 await browser.close()，browser未赋值，额外产生 undefined.close；这是启动失败的次生清理错误。",
+      "handoff": {
+        "capability_file": "/tmp/camctl-44-diagnostic-current-20261025/tasks/005-root-test_device_capability_declarations/tmp/pytest/test_installed_metadata_reache0/installed-capabilities.json",
+        "describe_command": "/tmp/camctl-44-diagnostic-current-20261025/tasks/005-root-test_device_capability_declarations/tmp/pytest/device-declarations-installed0/commands/007.json",
+        "browser_command": "/tmp/camctl-44-diagnostic-current-20261025/tasks/005-root-test_device_capability_declarations/tmp/pytest/device-declarations-installed0/commands/008.json",
+        "observable_values": "Action6普通录像required含aperture/bitrate；Action6延时required含interval_s/duration_s/outputs/exposure且preview=true；hb-device删除false、hb-host删除true；实际测试尚未读取这些字段。"
+      },
+      "source_drift": "入口、两个Vitest文件、capability-fixtures及package/两锁文件与历史字节相同；客户端src全树字节相同。安装版能力JSON仅Action6延时与OSMO录像的description发生30→3秒说明变化，Schema、设备删除声明和预览值未变化。",
+      "acceptance": [
+        "按既定依赖与其匹配浏览器执行原pytest身份，五个 -t 能力源 用例实际执行并通过；验证原文件经绝对路径进入clientTestCapabilitiesText，而不是合成夹具。",
+        "核对安装版元数据驱动表单/指南、Action6必填aperture/bitrate、仅模式曝光保存、延时三输出实际导出及不改草稿。",
+        "如独立处理次生清理噪声，浏览器启动失败时只报告原启动错误，已成功启动时仍实际关闭浏览器；不能以关闭守卫掩盖缺浏览器。"
+      ],
+      "historical": {
+        "outcome": "failed",
+        "evidence": "/tmp/camctl-itopt-final-20261025/tasks/024-root-test_device_capability_declarations-shard-1/artifacts/output.log:L3-L128",
+        "first_actual_error": "chromium.launch 缺少 chromium_headless_shell-1248"
+      },
+      "responsibility_boundary": "测试准备、依赖锁文件及浏览器缓存；能力生成、网页业务行为未因本次启动错误得到失败证据。"
+    },
+    {
+      "diagnosis_id": 41,
+      "nodeid": "tests/integration/test_device_capability_declarations.py::test_installed_sources_control_browser_cleanup_across_reload_and_restart",
+      "classification": "测试准备改变执行槽依赖，随后浏览器修订缺失；非生产能力断言失败",
+      "root_cause": "client_build 调用 pnpm run build 时，pnpm 在构建脚本前按 pnpm-lock.yaml 自动安装并将该执行槽的 @playwright/test 从预置 npm/package-lock 的 1.63.0 切换为 1.64.1；新版本需要 Chromium headless shell 1248，但现有缓存只有1243。安装还产生 ERR_PNPM_IGNORED_BUILDS，构建继续且最终退出0，因此准备阶段被视为通过，随后真实 chromium.launch 才导致用例失败。",
+      "historical_result": "failed",
+      "current_result": "failed",
+      "current_reproduced": true,
+      "contract_basis": [
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/scripts/README.md",
+          "lines": [
+            16,
+            16
+          ],
+          "claim": "依赖按npm ci/package-lock预先准备，并须与Chromium一致。"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/client/running.md",
+          "lines": [
+            104,
+            104
+          ],
+          "claim": "浏览器集成测试须安装配套Chromium。"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/architecture/camera-capabilities.md",
+          "lines": [
+            49,
+            51
+          ],
+          "claim": "HOST/DEVICE来源决定有效delete_supported，切换不改已受理历史。"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/architecture/client-deployment.md",
+          "lines": [
+            68,
+            109
+          ],
+          "claim": "成功整体启用、失败保留此前目录，重启重新读当前文件，草稿原请求保留。"
+        }
+      ],
+      "evidence": [
+        {
+          "path": "/tmp/camctl-diag-browser-dependency-timeline.txt",
+          "lines": [
+            13,
+            55
+          ],
+          "claim": "中央pnpm run build自动安装1.64.1、安装出错后仍继续构建且exit0。"
+        },
+        {
+          "path": "/tmp/camctl-diag-browser-dependency-timeline.txt",
+          "lines": [
+            57,
+            99
+          ],
+          "claim": "历史同一构建自动安装1.64.1。"
+        },
+        {
+          "path": "/tmp/camctl-diag-browser-source-evidence.json",
+          "claim": "入口文件与客户端源码对比、能力文件与命令交接。"
+        },
+        {
+          "path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/005-root-test_device_capability_declarations/artifacts/cases.json",
+          "claim": "中央setup passed、call failed、teardown passed。"
+        },
+        {
+          "path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/005-root-test_device_capability_declarations/artifacts/output.log",
+          "lines": [
+            134,
+            188
+          ],
+          "claim": "current/changed成功生成后helper在启动浏览器处失败。"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/tests/integration/device_capability_browser.ts",
+          "lines": [
+            123,
+            167
+          ],
+          "claim": "保存输入/关闭seeded后启动浏览器，页面检查在其后。"
+        }
+      ],
+      "suggestion": "沿 scripts/README.md 已规定的 npm ci/package-lock 入口准备独立客户端依赖与匹配 Chromium；构建测试网页时保持这份既定依赖，避免 client_build 的构建命令隐式改用另一锁文件安装。核对并消除两份锁文件对同一依赖的不同权威。修复范围是测试准备与依赖管理；本次没有发现需修改能力业务实现的证据。",
+      "unresolved_information": [
+        "浏览器未启动，网页元数据、表单、重载和清理入口的真实行为仍未被本轮验证；应在匹配依赖后执行原身份，不能把本次启动失败计作这些合同通过。"
+      ],
+      "trigger": "根测试分别以Hasselblad HOST和DEVICE配置生成current.json、changed.json，二者describe均退出0；Node脚本先初始化客户端库、应用报告并保存草稿和原请求，随后启动浏览器。",
+      "first_test_error": "device_capability_browser.ts:131 的 chromium.launch({headless:true}) 报缺1248，尚未调用start()/inspect()/reload()，visibility.json未产生。",
+      "handoff": {
+        "current_capability_file": "/tmp/camctl-44-diagnostic-current-20261025/tasks/005-root-test_device_capability_declarations/tmp/pytest/test_installed_sources_control0/current.json",
+        "changed_capability_file": "/tmp/camctl-44-diagnostic-current-20261025/tasks/005-root-test_device_capability_declarations/tmp/pytest/test_installed_sources_control0/changed.json",
+        "browser_command": "/tmp/camctl-44-diagnostic-current-20261025/tasks/005-root-test_device_capability_declarations/tmp/pytest/device-declarations-installed0/commands/011.json",
+        "observable_values": {
+          "initial": {
+            "action6": true,
+            "osmo": true,
+            "hb-host": true,
+            "hb-device": false,
+            "future-host": true,
+            "future-device": false,
+            "future-delete": true
+          },
+          "source_switch": {
+            "device_id": "hb-host",
+            "from": true,
+            "to": false,
+            "other_fields_equal": true
+          },
+          "receipt_exists": false
+        }
+      },
+      "source_drift": "Python测试和browser helper与历史字节相同；当前current→changed只有hb-host.delete_supported true→false。历史→当前目录只有两处任务description的30→3秒变化；Schema/删除声明/preview值无变化，未发现配置交接漂移。",
+      "acceptance": [
+        "匹配依赖后执行原pytest身份，脚本生成8项均为true的visibility.json；实际覆盖初始目录、源切换、非法/重复键重载保留、恢复、失败启动、有效空目录、草稿及原请求不变。",
+        "对hb-device的原片/预览隐藏删除入口，修复成品保留；混合来源计划级入口与其他可删除设备保持；源切换后指南及入口随当前目录重算。"
+      ],
+      "historical": {
+        "outcome": "failed",
+        "evidence": "/tmp/camctl-itopt-final-20261025/tasks/059-root-test_device_capability_declarations-shard-4/artifacts/output.log:L3-L70",
+        "first_actual_error": "chromium.launch 缺少 chromium_headless_shell-1248"
+      },
+      "responsibility_boundary": "测试准备、依赖锁文件及浏览器缓存；能力生成、网页业务行为未因本次启动错误得到失败证据。"
+    },
+    {
+      "nodeid": "tests/integration/test_hasselblad_photo_parameters.py::test_installed_hasselblad_parameter_validation_agrees_across_consumers",
+      "trigger": "validate-parameters 先启用能力说明并创建Vite/客户端状态，再执行默认headless Chromium启动。",
+      "root_cause": "能力测试 client_build 执行 pnpm run build；日志证明该环境在运行脚本前按 pnpm-lock.yaml 重装为 Playwright 1.64.1，与文档及 package-lock.json 要求的1.63.0不同。1.64.1要求Chromium/headless1248，但全局缓存只有1243。runner同槽后续任务复用已改变依赖，参数接缝在 chromium.launch 阶段失败。",
+      "classification": "历史环境依赖漂移；当前已通过",
+      "product_parameter_defect_confirmed": false,
+      "historical": {
+        "outcome": "failed",
+        "worker": 3,
+        "source_digest": "9c173dc0b7f843b99aa12fc17abf463b8de43911f610f2526f01e6bbe00e8818",
+        "evidence": "/tmp/camctl-itopt-final-20261025/tasks/064-root-test_hasselblad_photo_parameters-shard-1/artifacts/output.log",
+        "lines": "30-51",
+        "first_actual_error": "browserType.launch: Executable does not exist: chromium_headless_shell-1248",
+        "before_failure": "安装wheel/init/describe及参数输入已保存；尚未启动浏览器，未执行56项客户端/安装版逐项受理。",
+        "input_path": "/tmp/camctl-itopt-final-20261025/tasks/064-root-test_hasselblad_photo_parameters-shard-1/tmp/pytest/test_installed_hasselblad_para0/hasselblad-parameter-cases.json",
+        "receipt_exists": false
+      },
+      "current": {
+        "outcome": "passed",
+        "evidence": "/tmp/camctl-44-diagnostic-current-20261025/tasks/013-root-test_hasselblad_photo_parameters/artifacts/output.log",
+        "lines": "1-9",
+        "task_number": 13,
+        "worker": 0,
+        "playwright": "1.63.0",
+        "browser_revision": "1243",
+        "explanation": "该槽未执行能力client_build；Hasselblad测试自身不运行npm ci/pnpm安装，直接复用runner从指定npm依赖源复制的1.63.0依赖。完整56项消费者及安装版受理已通过。",
+        "call_seconds": 83.26
+      },
+      "parameter_handoff": {
+        "input_path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/013-root-test_hasselblad_photo_parameters/tmp/pytest/test_installed_hasselblad_para0/hasselblad-parameter-cases.json",
+        "action_type": "camera_take_photo",
+        "device_id": "hb-host",
+        "case_count": 56,
+        "valid_count": 18,
+        "invalid_count": 38,
+        "receipt_path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/013-root-test_hasselblad_photo_parameters/tmp/pytest/test_installed_hasselblad_para0/client-receipt.json",
+        "receipt_exists": true,
+        "all_consumers_match_expected_and_exact_input": true,
+        "installed_acceptance_status_error_count": [
+          [
+            1,
+            null,
+            18
+          ],
+          [
+            4,
+            1,
+            38
+          ]
+        ]
+      },
+      "contract_basis": [
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/architecture/camera-capabilities.md",
+          "lines": "91-123",
+          "claim": "驱动Schema同源；Python、浏览器、Node三处校验一致且不得改写输入。"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md",
+          "lines": "55-57,91-119,323-330",
+          "claim": "Hasselblad封闭互斥对象、显式字段、精确数字及三处校验一致。"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/timelapse_parameters.py",
+          "lines": "3-47",
+          "claim": "时间域按型号派生；duration_s严格大于interval_s。"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/tests/integration/README.md",
+          "lines": "57-67",
+          "claim": "Hasselblad和延时时间测试的真实消费者与前提。"
+        }
+      ],
+      "fix_recommendations": [
+        {
+          "problem": "两份客户端锁文件解析不同版本且构建入口混用，触发脚本前重装并改变同槽依赖。",
+          "change": "依当前文档以 package-lock.json 作为唯一客户端依赖权威；将 tests/integration/test_device_capability_declarations.py:119 构建入口统一为 npm run build，并消除对不同 pnpm 锁清单的消费。审计 tests/integration 及相关部署/runner入口的包管理命令。",
+          "scope": "测试准备、锁文件及其说明；无需修改拍摄参数生产语义。",
+          "acceptance": "从独立 npm ci 目录准备依赖；实际记录 @playwright/test→playwright→core 均1.63.0及浏览器1243；先运行能力测试再在同槽运行三个身份，依赖身份前后相同、五项相关浏览器身份通过。不得用跳过浏览器或删掉参数断言代替。"
+        }
+      ],
+      "unresolved": [],
+      "diagnosis_id": 42,
+      "current_result": "passed",
+      "current_reproduced": false,
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/064-root-test_hasselblad_photo_parameters-shard-1/artifacts/output.log",
+          "lines": "30-51",
+          "claim": "历史首错：浏览器启动缺1248。"
+        },
+        {
+          "path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/013-root-test_hasselblad_photo_parameters/artifacts/output.log",
+          "lines": "1-9",
+          "claim": "中央当前身份结果。"
+        },
+        {
+          "path": "/tmp/camctl-diag-browser-dependency-timeline.txt",
+          "lines": [
+            4,
+            55
+          ],
+          "claim": "导致依赖改变的构建命令及同槽先后。"
+        },
+        {
+          "path": "/tmp/camctl-diag-hb-timelapse-trace.json",
+          "claim": "目标实际解析链、输入数量、当前HB逐消费者凭据及源码比较。"
+        }
+      ],
+      "suggestion": "使用一个权威锁文件准备独立客户端依赖，并准备该实际Playwright版本对应的Chromium缓存。网页构建继续消费这份依赖，避免构建脚本前隐式安装另一锁定版本；复核能力构建先运行、参数用例后运行时依赖身份保持一致。此次仅诊断，未安装或改代码。",
+      "responsibility_boundary": "测试准备和依赖版本的一致性；没有已确认的拍摄参数生产语义缺陷。",
+      "unresolved_information": []
+    },
+    {
+      "nodeid": "tests/integration/test_timelapse_time_parameters.py::test_describe_python_browser_and_node_export_agree[dji-action6]",
+      "trigger": "validate-parameters 先启用能力说明并创建Vite/客户端状态，再执行默认headless Chromium启动。",
+      "root_cause": "能力测试 client_build 执行 pnpm run build；日志证明该环境在运行脚本前按 pnpm-lock.yaml 重装为 Playwright 1.64.1，与文档及 package-lock.json 要求的1.63.0不同。1.64.1要求Chromium/headless1248，但全局缓存只有1243。runner同槽后续任务复用已改变依赖，参数接缝在 chromium.launch 阶段失败。",
+      "classification": "测试准备改变同槽依赖导致的环境失败；当前重现",
+      "product_parameter_defect_confirmed": false,
+      "historical": {
+        "outcome": "failed",
+        "worker": 3,
+        "source_digest": "9c173dc0b7f843b99aa12fc17abf463b8de43911f610f2526f01e6bbe00e8818",
+        "evidence": "/tmp/camctl-itopt-final-20261025/tasks/065-root-test_timelapse_time_parameters-shard-1/artifacts/output.log",
+        "lines": "39-73",
+        "first_actual_error": "browserType.launch: Executable does not exist: chromium_headless_shell-1248",
+        "before_failure": "候选describe/schema比对、全部Python精确校验及合法对数134或126已完成；未进入浏览器/Node导出逐项比较。",
+        "input_path": "/tmp/camctl-itopt-final-20261025/tasks/065-root-test_timelapse_time_parameters-shard-1/tmp/pytest/test_describe_python_browser_a0/parameter-cases.json",
+        "receipt_exists": false
+      },
+      "current": {
+        "outcome": "failed",
+        "evidence": "/tmp/camctl-44-diagnostic-current-20261025/tasks/012-root-test_timelapse_time_parameters/artifacts/output.log",
+        "lines": "58-73",
+        "task_number": 12,
+        "worker": 1,
+        "playwright": "1.64.1",
+        "browser_revision": "1248",
+        "explanation": "同槽较早task005的pnpm构建重装后复用依赖；启动缺1248，未生成参数比较凭据。",
+        "call_seconds": 10.65
+      },
+      "parameter_handoff": {
+        "input_path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/012-root-test_timelapse_time_parameters/tmp/pytest/test_describe_python_browser_a0/parameter-cases.json",
+        "action_type": "camera_timelapse",
+        "device_id": "camera",
+        "case_count": 182,
+        "valid_count": 144,
+        "invalid_count": 38,
+        "receipt_path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/012-root-test_timelapse_time_parameters/tmp/pytest/test_describe_python_browser_a0/parameter-receipt.json",
+        "receipt_exists": false
+      },
+      "contract_basis": [
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/architecture/camera-capabilities.md",
+          "lines": "91-123",
+          "claim": "驱动Schema同源；Python、浏览器、Node三处校验一致且不得改写输入。"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md",
+          "lines": "55-57,91-119,323-330",
+          "claim": "Hasselblad封闭互斥对象、显式字段、精确数字及三处校验一致。"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/timelapse_parameters.py",
+          "lines": "3-47",
+          "claim": "时间域按型号派生；duration_s严格大于interval_s。"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/tests/integration/README.md",
+          "lines": "57-67",
+          "claim": "Hasselblad和延时时间测试的真实消费者与前提。"
+        }
+      ],
+      "fix_recommendations": [
+        {
+          "problem": "两份客户端锁文件解析不同版本且构建入口混用，触发脚本前重装并改变同槽依赖。",
+          "change": "依当前文档以 package-lock.json 作为唯一客户端依赖权威；将 tests/integration/test_device_capability_declarations.py:119 构建入口统一为 npm run build，并消除对不同 pnpm 锁清单的消费。审计 tests/integration 及相关部署/runner入口的包管理命令。",
+          "scope": "测试准备、锁文件及其说明；无需修改拍摄参数生产语义。",
+          "acceptance": "从独立 npm ci 目录准备依赖；实际记录 @playwright/test→playwright→core 均1.63.0及浏览器1243；先运行能力测试再在同槽运行三个身份，依赖身份前后相同、五项相关浏览器身份通过。不得用跳过浏览器或删掉参数断言代替。"
+        }
+      ],
+      "unresolved": [
+        "两个延时身份在匹配依赖下的浏览器/Node导出、受理取消和报告导入仍未执行完成；环境修复后须按原覆盖重跑。"
+      ],
+      "diagnosis_id": 43,
+      "current_result": "failed",
+      "current_reproduced": true,
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/065-root-test_timelapse_time_parameters-shard-1/artifacts/output.log",
+          "lines": "39-73",
+          "claim": "历史首错：浏览器启动缺1248。"
+        },
+        {
+          "path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/012-root-test_timelapse_time_parameters/artifacts/output.log",
+          "lines": "58-73",
+          "claim": "中央当前身份结果。"
+        },
+        {
+          "path": "/tmp/camctl-diag-browser-dependency-timeline.txt",
+          "lines": [
+            4,
+            55
+          ],
+          "claim": "导致依赖改变的构建命令及同槽先后。"
+        },
+        {
+          "path": "/tmp/camctl-diag-hb-timelapse-trace.json",
+          "claim": "目标实际解析链、输入数量、当前HB逐消费者凭据及源码比较。"
+        }
+      ],
+      "suggestion": "使用一个权威锁文件准备独立客户端依赖，并准备该实际Playwright版本对应的Chromium缓存。网页构建继续消费这份依赖，避免构建脚本前隐式安装另一锁定版本；复核能力构建先运行、参数用例后运行时依赖身份保持一致。此次仅诊断，未安装或改代码。",
+      "responsibility_boundary": "测试准备和依赖版本的一致性；没有已确认的拍摄参数生产语义缺陷。",
+      "unresolved_information": [
+        "两个延时身份在匹配依赖下的浏览器/Node导出、受理取消和报告导入仍未执行完成；环境修复后须按原覆盖重跑。"
+      ]
+    },
+    {
+      "nodeid": "tests/integration/test_timelapse_time_parameters.py::test_describe_python_browser_and_node_export_agree[dji-osmo360-ii]",
+      "trigger": "validate-parameters 先启用能力说明并创建Vite/客户端状态，再执行默认headless Chromium启动。",
+      "root_cause": "能力测试 client_build 执行 pnpm run build；日志证明该环境在运行脚本前按 pnpm-lock.yaml 重装为 Playwright 1.64.1，与文档及 package-lock.json 要求的1.63.0不同。1.64.1要求Chromium/headless1248，但全局缓存只有1243。runner同槽后续任务复用已改变依赖，参数接缝在 chromium.launch 阶段失败。",
+      "classification": "测试准备改变同槽依赖导致的环境失败；当前重现",
+      "product_parameter_defect_confirmed": false,
+      "historical": {
+        "outcome": "failed",
+        "worker": 3,
+        "source_digest": "9c173dc0b7f843b99aa12fc17abf463b8de43911f610f2526f01e6bbe00e8818",
+        "evidence": "/tmp/camctl-itopt-final-20261025/tasks/067-root-test_timelapse_time_parameters-shard-2/artifacts/output.log",
+        "lines": "39-73",
+        "first_actual_error": "browserType.launch: Executable does not exist: chromium_headless_shell-1248",
+        "before_failure": "候选describe/schema比对、全部Python精确校验及合法对数134或126已完成；未进入浏览器/Node导出逐项比较。",
+        "input_path": "/tmp/camctl-itopt-final-20261025/tasks/067-root-test_timelapse_time_parameters-shard-2/tmp/pytest/test_describe_python_browser_a0/parameter-cases.json",
+        "receipt_exists": false
+      },
+      "current": {
+        "outcome": "failed",
+        "evidence": "/tmp/camctl-44-diagnostic-current-20261025/tasks/012-root-test_timelapse_time_parameters/artifacts/output.log",
+        "lines": "129-144",
+        "task_number": 12,
+        "worker": 1,
+        "playwright": "1.64.1",
+        "browser_revision": "1248",
+        "explanation": "同槽较早task005的pnpm构建重装后复用依赖；启动缺1248，未生成参数比较凭据。",
+        "call_seconds": 7.37
+      },
+      "parameter_handoff": {
+        "input_path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/012-root-test_timelapse_time_parameters/tmp/pytest/test_describe_python_browser_a1/parameter-cases.json",
+        "action_type": "camera_timelapse",
+        "device_id": "camera",
+        "case_count": 183,
+        "valid_count": 133,
+        "invalid_count": 50,
+        "receipt_path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/012-root-test_timelapse_time_parameters/tmp/pytest/test_describe_python_browser_a1/parameter-receipt.json",
+        "receipt_exists": false
+      },
+      "contract_basis": [
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/architecture/camera-capabilities.md",
+          "lines": "91-123",
+          "claim": "驱动Schema同源；Python、浏览器、Node三处校验一致且不得改写输入。"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md",
+          "lines": "55-57,91-119,323-330",
+          "claim": "Hasselblad封闭互斥对象、显式字段、精确数字及三处校验一致。"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/devices/drivers/adb_cameras/timelapse_parameters.py",
+          "lines": "3-47",
+          "claim": "时间域按型号派生；duration_s严格大于interval_s。"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/tests/integration/README.md",
+          "lines": "57-67",
+          "claim": "Hasselblad和延时时间测试的真实消费者与前提。"
+        }
+      ],
+      "fix_recommendations": [
+        {
+          "problem": "两份客户端锁文件解析不同版本且构建入口混用，触发脚本前重装并改变同槽依赖。",
+          "change": "依当前文档以 package-lock.json 作为唯一客户端依赖权威；将 tests/integration/test_device_capability_declarations.py:119 构建入口统一为 npm run build，并消除对不同 pnpm 锁清单的消费。审计 tests/integration 及相关部署/runner入口的包管理命令。",
+          "scope": "测试准备、锁文件及其说明；无需修改拍摄参数生产语义。",
+          "acceptance": "从独立 npm ci 目录准备依赖；实际记录 @playwright/test→playwright→core 均1.63.0及浏览器1243；先运行能力测试再在同槽运行三个身份，依赖身份前后相同、五项相关浏览器身份通过。不得用跳过浏览器或删掉参数断言代替。"
+        }
+      ],
+      "unresolved": [
+        "两个延时身份在匹配依赖下的浏览器/Node导出、受理取消和报告导入仍未执行完成；环境修复后须按原覆盖重跑。"
+      ],
+      "diagnosis_id": 44,
+      "current_result": "failed",
+      "current_reproduced": true,
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/067-root-test_timelapse_time_parameters-shard-2/artifacts/output.log",
+          "lines": "39-73",
+          "claim": "历史首错：浏览器启动缺1248。"
+        },
+        {
+          "path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/012-root-test_timelapse_time_parameters/artifacts/output.log",
+          "lines": "129-144",
+          "claim": "中央当前身份结果。"
+        },
+        {
+          "path": "/tmp/camctl-diag-browser-dependency-timeline.txt",
+          "lines": [
+            4,
+            55
+          ],
+          "claim": "导致依赖改变的构建命令及同槽先后。"
+        },
+        {
+          "path": "/tmp/camctl-diag-hb-timelapse-trace.json",
+          "claim": "目标实际解析链、输入数量、当前HB逐消费者凭据及源码比较。"
+        }
+      ],
+      "suggestion": "使用一个权威锁文件准备独立客户端依赖，并准备该实际Playwright版本对应的Chromium缓存。网页构建继续消费这份依赖，避免构建脚本前隐式安装另一锁定版本；复核能力构建先运行、参数用例后运行时依赖身份保持一致。此次仅诊断，未安装或改代码。",
+      "responsibility_boundary": "测试准备和依赖版本的一致性；没有已确认的拍摄参数生产语义缺陷。",
+      "unresolved_information": [
+        "两个延时身份在匹配依赖下的浏览器/Node导出、受理取消和报告导入仍未执行完成；环境修复后须按原覆盖重跑。"
+      ]
+    }
+  ]
+}

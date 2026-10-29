@@ -1,0 +1,8 @@
+{
+  "worktree": "/tmp/camctl-quality-repair-lidlmje7/history-preparation",
+  "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+  "sqlite": "3.53.1",
+  "head": "b8fd1387f856d9a4e4a5384d57fa3bfb9b9f3f39",
+  "test_sha256": "437f9bd333ddfffde260f01d005d5e7b491a7dd6d53c63469063764fd86429cb",
+  "measurement": "same external pytest helper timing for original and changed single node; fixture setup excluded from preparation/check split"
+}

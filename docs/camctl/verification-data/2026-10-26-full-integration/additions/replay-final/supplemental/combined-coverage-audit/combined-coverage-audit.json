@@ -1,0 +1,497 @@
+{
+  "audited_at": "2026-10-26T01:14:47.725846+00:00",
+  "interpretation": "Two frozen test snapshots with identical four production scope trees; outcomes retain source identity. This is coverage reconciliation, not a single-source all-pass claim.",
+  "versions": [
+    {
+      "source_head": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+      "snapshot_sha256": "cf4f504b7648bb5004fd20e1d66bfb57ab6a2956a33b6203724b6f0262591950",
+      "snapshot_files_unchanged": true,
+      "runner_status": "finished",
+      "runner_exit_code": 1,
+      "task_states": {
+        "failed": 61,
+        "passed": 24
+      },
+      "pytest_inventory_count": 10213,
+      "pytest_cases_count": 9096,
+      "pytest_outcomes": {
+        "failed": 4292,
+        "passed": 4798,
+        "skipped": 5,
+        "null": 1
+      },
+      "phase_counts": {
+        "setup": 9096,
+        "call": 8916,
+        "teardown": 9095
+      },
+      "subchecks_from_events": {
+        "passed": 342
+      },
+      "node_counts": {
+        "tests": 118,
+        "pass": 118,
+        "fail": 0,
+        "skipped": 0
+      },
+      "run": "main",
+      "root": "/tmp/camctl-integration-all-final-20261026-u19lkvoe",
+      "coverage_audit": "/tmp/camctl-full-272f-audit/coverage-audit.json",
+      "resource_audit": "/tmp/camctl-full-272f-audit/resource-audit.json"
+    },
+    {
+      "source_head": "354e38f95de04508a00d64d53bd17e213915548d",
+      "snapshot_sha256": "768f6bb2b8a7b25d6c8b4c1a7f2bb2db0017fe26664711b4f949f185d6a68aae",
+      "snapshot_files_unchanged": true,
+      "runner_status": "finished",
+      "runner_exit_code": 1,
+      "task_states": {
+        "failed": 9,
+        "passed": 30
+      },
+      "pytest_inventory_count": 1220,
+      "pytest_cases_count": 1220,
+      "pytest_outcomes": {
+        "failed": 794,
+        "passed": 426
+      },
+      "phase_counts": {
+        "setup": 1220,
+        "call": 1137,
+        "teardown": 1220
+      },
+      "subchecks_from_events": {},
+      "node_counts": {},
+      "run": "replay",
+      "root": "/tmp/camctl-integration-replay-20261026-u19lkvoe",
+      "coverage_audit": "/tmp/camctl-full-272f-audit/replay/coverage-audit.json",
+      "resource_audit": "/tmp/camctl-full-272f-audit/replay/resource-audit.json"
+    }
+  ],
+  "expected_collectable_unique_pytest_nodes": 10312,
+  "recorded_unique_pytest_nodes": 10312,
+  "complete_unique_pytest_nodes": 10312,
+  "expected_without_any_case": [],
+  "expected_without_complete_phases": [],
+  "unexpected_recorded_nodes": [],
+  "recorded_case_occurrences": 10316,
+  "complete_case_occurrences": 10315,
+  "latest_complete_or_partial_outcomes": {
+    "failed": 5083,
+    "passed": 5224,
+    "skipped": 5
+  },
+  "repeated_nodes": {
+    "apps/camctl/tests/integration/capture/test_result_page_history.py::test_page_and_first_discovery_fault_reuses_original_key_after_reopen[projection]": [
+      {
+        "run": "main",
+        "source_head": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+        "outcome": "failed",
+        "complete_phases": true
+      },
+      {
+        "run": "replay",
+        "source_head": "354e38f95de04508a00d64d53bd17e213915548d",
+        "outcome": "passed",
+        "complete_phases": true
+      }
+    ],
+    "apps/camctl/tests/integration/capture/test_result_page_history.py::test_page_and_first_discovery_fault_reuses_original_key_after_reopen[commit_before]": [
+      {
+        "run": "main",
+        "source_head": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+        "outcome": "failed",
+        "complete_phases": true
+      },
+      {
+        "run": "replay",
+        "source_head": "354e38f95de04508a00d64d53bd17e213915548d",
+        "outcome": "passed",
+        "complete_phases": true
+      }
+    ],
+    "apps/camctl/tests/integration/capture/test_result_page_history.py::test_page_and_first_discovery_fault_reuses_original_key_after_reopen[commit_after]": [
+      {
+        "run": "main",
+        "source_head": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+        "outcome": "failed",
+        "complete_phases": true
+      },
+      {
+        "run": "replay",
+        "source_head": "354e38f95de04508a00d64d53bd17e213915548d",
+        "outcome": "passed",
+        "complete_phases": true
+      }
+    ],
+    "apps/camctl/tests/integration/session/test_local_work_observer_control.py::test_helper_observer_and_real_typed_control_keep_first_identity[single-stop-False-False]": [
+      {
+        "run": "main",
+        "source_head": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+        "outcome": null,
+        "complete_phases": false
+      },
+      {
+        "run": "replay",
+        "source_head": "354e38f95de04508a00d64d53bd17e213915548d",
+        "outcome": "passed",
+        "complete_phases": true
+      }
+    ]
+  },
+  "partial_cases": {
+    "apps/camctl/tests/integration/session/test_local_work_observer_control.py::test_helper_observer_and_real_typed_control_keep_first_identity[single-stop-False-False]": [
+      {
+        "run": "main",
+        "source_head": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+        "outcome": null,
+        "complete_phases": false
+      }
+    ]
+  },
+  "session_completed_in_main": 12,
+  "session_remaining_for_replay": 182,
+  "original_completed_session_repeated_in_replay": [],
+  "remaining_session_absent_from_replay_inventory": [],
+  "remaining_session_incomplete_after_replay": [],
+  "capture_three_repair_histories": {
+    "apps/camctl/tests/integration/capture/test_result_page_history.py::test_page_and_first_discovery_fault_reuses_original_key_after_reopen[projection]": [
+      {
+        "run": "main",
+        "source_head": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+        "outcome": "failed",
+        "complete_phases": true,
+        "case": {
+          "nodeid": "tests/integration/capture/test_result_page_history.py::test_page_and_first_discovery_fault_reuses_original_key_after_reopen[projection]",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.0033045289892470464
+            },
+            "call": {
+              "outcome": "failed",
+              "duration_seconds": 0.18601521699747536
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.0013631140027428046
+            }
+          },
+          "outcome": "failed",
+          "duration_seconds": 0.19068285998946521
+        }
+      },
+      {
+        "run": "replay",
+        "source_head": "354e38f95de04508a00d64d53bd17e213915548d",
+        "outcome": "passed",
+        "complete_phases": true,
+        "case": {
+          "nodeid": "tests/integration/capture/test_result_page_history.py::test_page_and_first_discovery_fault_reuses_original_key_after_reopen[projection]",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.004849247008678503
+            },
+            "call": {
+              "outcome": "passed",
+              "duration_seconds": 1.2844016870076302
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.00369881400547456
+            }
+          },
+          "outcome": "passed",
+          "duration_seconds": 1.2929497480217833
+        }
+      }
+    ],
+    "apps/camctl/tests/integration/capture/test_result_page_history.py::test_page_and_first_discovery_fault_reuses_original_key_after_reopen[commit_before]": [
+      {
+        "run": "main",
+        "source_head": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+        "outcome": "failed",
+        "complete_phases": true,
+        "case": {
+          "nodeid": "tests/integration/capture/test_result_page_history.py::test_page_and_first_discovery_fault_reuses_original_key_after_reopen[commit_before]",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.003013645007740706
+            },
+            "call": {
+              "outcome": "failed",
+              "duration_seconds": 0.14303574500081595
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.0022955040039960295
+            }
+          },
+          "outcome": "failed",
+          "duration_seconds": 0.14834489401255269
+        }
+      },
+      {
+        "run": "replay",
+        "source_head": "354e38f95de04508a00d64d53bd17e213915548d",
+        "outcome": "passed",
+        "complete_phases": true,
+        "case": {
+          "nodeid": "tests/integration/capture/test_result_page_history.py::test_page_and_first_discovery_fault_reuses_original_key_after_reopen[commit_before]",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.002968843007693067
+            },
+            "call": {
+              "outcome": "passed",
+              "duration_seconds": 0.6955242600088241
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.009038016010890715
+            }
+          },
+          "outcome": "passed",
+          "duration_seconds": 0.7075311190274078
+        }
+      }
+    ],
+    "apps/camctl/tests/integration/capture/test_result_page_history.py::test_page_and_first_discovery_fault_reuses_original_key_after_reopen[commit_after]": [
+      {
+        "run": "main",
+        "source_head": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+        "outcome": "failed",
+        "complete_phases": true,
+        "case": {
+          "nodeid": "tests/integration/capture/test_result_page_history.py::test_page_and_first_discovery_fault_reuses_original_key_after_reopen[commit_after]",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.003256593001424335
+            },
+            "call": {
+              "outcome": "failed",
+              "duration_seconds": 0.16956705700431485
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.00156612200953532
+            }
+          },
+          "outcome": "failed",
+          "duration_seconds": 0.1743897720152745
+        }
+      },
+      {
+        "run": "replay",
+        "source_head": "354e38f95de04508a00d64d53bd17e213915548d",
+        "outcome": "passed",
+        "complete_phases": true,
+        "case": {
+          "nodeid": "tests/integration/capture/test_result_page_history.py::test_page_and_first_discovery_fault_reuses_original_key_after_reopen[commit_after]",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.0029860699869459495
+            },
+            "call": {
+              "outcome": "passed",
+              "duration_seconds": 0.8984402979986044
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.0024847010063240305
+            }
+          },
+          "outcome": "passed",
+          "duration_seconds": 0.9039110689918743
+        }
+      }
+    ]
+  },
+  "hb_full_12": {
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.00025]": [
+      {
+        "run": "replay",
+        "source_head": "354e38f95de04508a00d64d53bd17e213915548d",
+        "outcome": "passed",
+        "complete_phases": true
+      }
+    ],
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]": [
+      {
+        "run": "replay",
+        "source_head": "354e38f95de04508a00d64d53bd17e213915548d",
+        "outcome": "passed",
+        "complete_phases": true
+      }
+    ],
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000667]": [
+      {
+        "run": "replay",
+        "source_head": "354e38f95de04508a00d64d53bd17e213915548d",
+        "outcome": "passed",
+        "complete_phases": true
+      }
+    ],
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.00025]": [
+      {
+        "run": "replay",
+        "source_head": "354e38f95de04508a00d64d53bd17e213915548d",
+        "outcome": "passed",
+        "complete_phases": true
+      }
+    ],
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.000333]": [
+      {
+        "run": "replay",
+        "source_head": "354e38f95de04508a00d64d53bd17e213915548d",
+        "outcome": "passed",
+        "complete_phases": true
+      }
+    ],
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-host-0.000667]": [
+      {
+        "run": "replay",
+        "source_head": "354e38f95de04508a00d64d53bd17e213915548d",
+        "outcome": "passed",
+        "complete_phases": true
+      }
+    ],
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.00025]": [
+      {
+        "run": "replay",
+        "source_head": "354e38f95de04508a00d64d53bd17e213915548d",
+        "outcome": "passed",
+        "complete_phases": true
+      }
+    ],
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000333]": [
+      {
+        "run": "replay",
+        "source_head": "354e38f95de04508a00d64d53bd17e213915548d",
+        "outcome": "passed",
+        "complete_phases": true
+      }
+    ],
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-device-0.000667]": [
+      {
+        "run": "replay",
+        "source_head": "354e38f95de04508a00d64d53bd17e213915548d",
+        "outcome": "passed",
+        "complete_phases": true
+      }
+    ],
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.00025]": [
+      {
+        "run": "replay",
+        "source_head": "354e38f95de04508a00d64d53bd17e213915548d",
+        "outcome": "passed",
+        "complete_phases": true
+      }
+    ],
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000333]": [
+      {
+        "run": "replay",
+        "source_head": "354e38f95de04508a00d64d53bd17e213915548d",
+        "outcome": "passed",
+        "complete_phases": true
+      }
+    ],
+    "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[raw-host-0.000667]": [
+      {
+        "run": "replay",
+        "source_head": "354e38f95de04508a00d64d53bd17e213915548d",
+        "outcome": "passed",
+        "complete_phases": true
+      }
+    ]
+  },
+  "hb_full_12_replay_passed": true,
+  "capacity_checks": {
+    "test_large_growth_crosses_page_and_disk_cache_capacity": {
+      "apps/camctl/tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity": [
+        {
+          "run": "main",
+          "source_head": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+          "outcome": "passed",
+          "complete_phases": true
+        }
+      ]
+    },
+    "test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window": {
+      "apps/camctl/tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window": [
+        {
+          "run": "main",
+          "source_head": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+          "outcome": "passed",
+          "complete_phases": true
+        }
+      ]
+    },
+    "test_member_growth_restore_cost": {
+      "apps/camctl/tests/integration/history/test_restore_growth.py::test_member_growth_restore_cost": [
+        {
+          "run": "main",
+          "source_head": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+          "outcome": "passed",
+          "complete_phases": true
+        }
+      ]
+    },
+    "test_event_growth_restore_pages_cost": {
+      "apps/camctl/tests/integration/history/test_restore_growth.py::test_event_growth_restore_pages_cost": [
+        {
+          "run": "main",
+          "source_head": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+          "outcome": "passed",
+          "complete_phases": true
+        }
+      ]
+    },
+    "test_unrelated_growth_keeps_target_restore_stable": {
+      "apps/camctl/tests/integration/history/test_restore_growth.py::test_unrelated_growth_keeps_target_restore_stable": [
+        {
+          "run": "main",
+          "source_head": "9fbb734ca18e56934ba32942009e9ea46eccd089",
+          "outcome": "passed",
+          "complete_phases": true
+        }
+      ]
+    },
+    "test_fixed_batch_write_and_verification_have_bounded_residency": {
+      "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py::test_fixed_batch_write_and_verification_have_bounded_residency": [
+        {
+          "run": "replay",
+          "source_head": "354e38f95de04508a00d64d53bd17e213915548d",
+          "outcome": "failed",
+          "complete_phases": true
+        }
+      ]
+    },
+    "test_fixed_batch_reads_and_output_identity_lookup_keep_their_bounds": {
+      "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py::test_fixed_batch_reads_and_output_identity_lookup_keep_their_bounds": [
+        {
+          "run": "replay",
+          "source_head": "354e38f95de04508a00d64d53bd17e213915548d",
+          "outcome": "failed",
+          "complete_phases": true
+        }
+      ]
+    }
+  },
+  "uncollected_obsolete_files": [
+    {
+      "path": "apps/camctl/tests/integration/persistence/test_page_read_cache.py",
+      "reason": "Imports removed camctl.persistence.page_read_cache; original main collection failed; replay excluded this obsolete file.",
+      "unknown_test_count": true
+    }
+  ],
+  "interruption_receipt": "/tmp/camctl-full-272f-session-interrupt.json",
+  "production_identity_receipt": "/tmp/camctl-full-272f-audit/production-identity.json",
+  "third_batch_separate_narrow_audit": "/tmp/camctl-full-272f-audit/final-narrow-audit.json",
+  "third_batch_is_excluded_from_frozen_production_counts": true
+}

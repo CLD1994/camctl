@@ -1,0 +1,25 @@
+{
+  "recorded_utc": "2026-10-25T16:16:54.136057+00:00",
+  "kernel": "5.15.167.4-microsoft-standard-WSL2",
+  "platform": "Linux-5.15.167.4-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+  "uid": 1002,
+  "effective_capabilities": "0000000000000000",
+  "devcontainer": "true",
+  "memory_controller": "v1",
+  "host_swap": {
+    "SwapTotal": "4194304 kB",
+    "SwapFree": "1351364 kB"
+  },
+  "controller_root": "/sys/fs/cgroup/memory",
+  "root_mode": "0o755",
+  "root_owner_uid": 0,
+  "root_writable": false,
+  "membership_writable": false,
+  "hierarchical_accounting": "1",
+  "memory_mounts": [
+    "2100 2095 0:70 /docker/1e0518e0c6b44b6d1a573b3a835437e163b3a28963810d9aa57aecab9f918201 /sys/fs/cgroup/memory rw,nosuid,nodev,noexec,relatime master:36 - cgroup cgroup rw,memory"
+  ],
+  "acceptance_passed": false,
+  "business_or_pressure_started": false,
+  "shared_limits_or_swap_changed": false
+}

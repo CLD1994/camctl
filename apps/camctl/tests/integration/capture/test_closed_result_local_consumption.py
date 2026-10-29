@@ -1,5 +1,6 @@
 """可靠 CLOSED 输入在新会话中只用本地事实登记产物与业务终态。"""
 
+from dataclasses import replace
 from decimal import Decimal
 import json
 from pathlib import Path
@@ -8,12 +9,13 @@ from unittest.mock import create_autospec
 
 import pytest
 
-from camctl.bootstrap.capture_assembly import session_capture_assembly
-from camctl.capture.handlers import _conclude_activity, _stop_call, capture_handler
+from camctl.bootstrap.capture_assembly import DriverResultListing
+from camctl.capture.handlers import capture_handler
 from camctl.capture.models import ResultSetPhase
 from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.contracts.workflow_errors import registered_error
 from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverStatus
+from camctl.devices.bindings import DeviceBinding
 from camctl.devices.evidence import DeviceObservation
 from camctl.devices.ports import (
     ControlDriver, DeleteDriver, DeviceCallResult, DigestDriver, DriverDeclaration,
@@ -31,9 +33,10 @@ from camctl.persistence.repositories.timelapse import register_timelapse_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.transaction import saved_transaction_events
 
-from .result_consumer_fixtures import RESULT_EVIDENCE, consumer_world, returned
-from .test_cancel_timelapse_exhaustion_files import _apply_public_cancel
-from .test_result_consumer_saves import _actual, _result_port
+from .result_consumer_fixtures import RESULT_EVIDENCE, consumer_world, returned, _prepare_through_handler
+from ..support.capture import capture_factory, capture_test_session
+from ..support.result_cases import ResultCase
+from .test_result_consumer_saves import _actual
 
 
 pytestmark = pytest.mark.asyncio
@@ -68,15 +71,35 @@ def _unconfirmed_error(activity_id):
 
 
 async def closed_consumer_world(tmp_path, monkeypatch, *, consumer, history):
+    """原会话资源实际关闭后交付完整CLOSED历史给下一会话。"""
+    async with capture_test_session() as session:
+        case = ResultCase(session)
+        try:
+            world = await _prepare_closed_world(tmp_path, monkeypatch,
+                consumer=consumer, history=history, case=case)
+        except BaseException as original:
+            try:
+                await case.close()
+            except BaseException as closing:
+                raise BaseExceptionGroup('CLOSED准备与文件收场均失败', [original, closing])
+            raise
+        else:
+            await case.close()
+            return world
+
+
+async def _prepare_closed_world(tmp_path, monkeypatch, *, consumer, history, case):
     """公开建立 CLOSED 前置并关闭 Owned；返回路径、原申请及可靠事实。
 
     consumer 为 photo/timelapse/canceled_timelapse，history 为本文件两种历史。
     返回值不含可复用的旧 runtime；设备替身仅用于核原调用次数。
     """
     assert consumer in _CONSUMERS and history in _HISTORIES
-    owned, runtime, action_id, handler = await consumer_world(
+    used = 2 if history == "prior_complete_latest_failed" else 1
+    owned, runtime, action_id, handler = await case.world(
         tmp_path, "photo" if consumer == "photo" else "timelapse",
-        independent_activity=True)
+        independent_activity=True, result_page_contract=False,
+        assembly_options={'check_config': AttemptConfig(used, Decimal('1.25'), Decimal(0))})
     try:
         activity_id, = owned.connection.execute(
             "SELECT id FROM device_activities WHERE action_id=?", (action_id,)).fetchone()
@@ -90,9 +113,10 @@ async def closed_consumer_world(tmp_path, monkeypatch, *, consumer, history):
             settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("results_returned", 1, {})),
             observations=(DeviceObservation("result_files_listed", 1, {
                 "activity_id": str(activity_id), "entries": [entry]}),))
-        result_driver = _result_port(runtime, actual)
-        used = 2 if history == "prior_complete_latest_failed" else 1
-        runtime.check_config = AttemptConfig(used, Decimal("1.25"), Decimal(0))
+        result_driver = create_autospec(ResultDriver, instance=True)
+        result_driver.list_results.return_value = DeviceCallResult.from_outcome(actual)
+        case.results.delegate = DriverResultListing(result_driver,
+            DeviceBinding('cam-1', 'camctl-adb'), RESULT_EVIDENCE)
         advance = capture_handler(handler)
         await advance(action_id, runtime)
         run_id, status, attempts_used, retry = owned.connection.execute(
@@ -136,9 +160,9 @@ async def closed_consumer_world(tmp_path, monkeypatch, *, consumer, history):
             inputs.append((request, key))
             receipt = original_close(repository, request, key, current)
             assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-            raise _ClosedBeforeBusiness
+            return replace(receipt, handoff_error=_ClosedBeforeBusiness())
 
-        formed_at = runtime.wall_us()
+        formed_at = case.clock.wall
         with monkeypatch.context() as patch:
             patch.setattr(CaptureRepository, "close_result_check_unconfirmed", close)
             with pytest.raises(_ClosedBeforeBusiness):
@@ -161,15 +185,12 @@ async def closed_consumer_world(tmp_path, monkeypatch, *, consumer, history):
             supported, = owned.connection.execute(
                 "SELECT stop_supported FROM device_activities WHERE id=?", (activity_id,)).fetchone()
             assert supported == 1
-            _apply_public_cancel(owned, action_id, formed_at + 10)
-            runtime.wall_us = lambda: formed_at + 20
-            stop_driver = create_autospec(StopDriver, instance=True)
-            stop_driver.stop.return_value = DeviceCallResult.from_outcome(
-                returned("stop", "stop_confirmed", activity_id))
-            runtime.stopper = stop_driver
-            stopped = await _stop_call(runtime, runtime.action(action_id), "stop_timelapse")
-            assert stopped.phase == "confirmed", stopped
-            _conclude_activity(runtime, action_id)
+            from .test_natural_wait_time_eligibility import _request_cancel
+            case.clock.wall = formed_at + 10
+            await _request_cancel(runtime, action_id, [case.clock.wall])
+            case.clock.wall = formed_at + 20
+            stop_driver = case.stopper
+            await _prepare_through_handler(runtime, action_id, handler, "release")
             assert owned.connection.execute(
                 "SELECT activity_state,occupancy_state FROM device_activities WHERE id=?",
                 (activity_id,)).fetchone() == (3, 2)
@@ -193,7 +214,7 @@ async def closed_consumer_world(tmp_path, monkeypatch, *, consumer, history):
             close_events=close_events, formed_at=formed_at, capture_facts=facts,
             attempts=_rows(owned, "operation_attempts"), runs=_rows(owned, "operation_runs"),
             files=_rows(owned, "device_files"), events=_rows(owned, "history_events"),
-            transactions=_rows(owned, "history_transactions"), control_driver=runtime.driver,
+            transactions=_rows(owned, "history_transactions"), control_driver=case.driver,
             result_driver=result_driver, stop_driver=stop_driver,
             expected_output=(action_id, 1, file_id, name, media_type, 41))
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (0,)
@@ -202,7 +223,7 @@ async def closed_consumer_world(tmp_path, monkeypatch, *, consumer, history):
         owned.connection.close()
 
 
-def fresh_closed_runtime(owned, world, binding):
+async def fresh_closed_runtime(owned, world, binding, *, factory_state=None, runtime_options=None, result_supported=True):
     """实际工厂按本次合法配置装配全新的空会话。"""
     ports = tuple(create_autospec(protocol, instance=True) for protocol in (
         ControlDriver, StopDriver, StateQueryDriver, ResultDriver,
@@ -211,7 +232,7 @@ def fresh_closed_runtime(owned, world, binding):
                ports[4].open_read, ports[5].digest, ports[6].delete)
     for method in methods:
         method.side_effect = AssertionError("CLOSED 本地收尾不得发出新的设备调用")
-    declaration = DriverDeclaration(True, True, True, True, True, True, False)
+    declaration = DriverDeclaration(True, True, True, result_supported, True, True, False)
     driver = SimpleNamespace(declaration=declaration, control=methods[0], stop=methods[1],
         query_state=methods[2], list_results=methods[3], open_read=methods[4],
         digest=methods[5], delete=methods[6])
@@ -219,20 +240,15 @@ def fresh_closed_runtime(owned, world, binding):
         DriverStatus.SOFTWARE_CONTRACT_VERIFIED) for driver_id in ("camctl-adb", "alternate-camera")))
     devices = {} if binding == "missing" else {"cam-1": {
         "driver": "alternate-camera" if binding == "mismatch" else "camctl-adb"}}
-    anchors = {}
-    factory = session_capture_assembly(devices=devices, drivers=registry,
-        staging=world.path.parent / "staging", media_enabled=False,
+    options = dict(driver=driver, evidence=RESULT_EVIDENCE,
+        devices=devices, drivers=registry, staging=world.path.parent / "staging", media_enabled=False,
         wall_us=lambda: world.formed_at + 5_000_000, monotonic_ns=lambda: 99_000_000_000,
-        wait_config=lambda action: CaptureWaitConfig(target_duration_ms=600_000, driver_margin_ms=0),
-        recording_anchors=anchors)
-    runtime = factory(owned, "cam-1")
-    assert runtime is not None
-    assert runtime.pending_start_results == runtime.pending_capture_completions == runtime.pending_result_closes == {}
-    assert runtime.pending_file_observations == runtime.pending_media_results == {}
-    assert runtime.pending_read_results == runtime.pending_read_business == runtime.pending_read_ends == {}
-    assert runtime.continuing_read_tickets == {}
-    assert runtime.listing_cache in (None, {})
-    assert runtime.timelapse_deadlines == runtime.retry_gate.anchors == anchors == {}
+        wait_config=lambda action: CaptureWaitConfig(target_duration_ms=600_000, driver_margin_ms=0))
+    options.update({} if runtime_options is None else runtime_options)
+    factory = await capture_factory(owned, **options)
+    if factory_state is not None:
+        factory_state.update(factory=factory, options=options)
+    runtime = await factory(owned)
     return runtime, methods
 
 
@@ -284,7 +300,7 @@ async def test_closed_unconfirmed_keeps_files_without_device_access(
     owned = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         assert owned.metadata == world.metadata
-        runtime, methods = fresh_closed_runtime(owned, world, binding)
+        runtime, methods = await fresh_closed_runtime(owned, world, binding)
         _assert_preserved(owned, world, methods)
         await capture_handler(world.handler)(world.action_id, runtime)
         _assert_local_finish(owned, world, methods)
@@ -300,7 +316,7 @@ async def test_closed_terminal_reentry_does_not_append_outputs(
     world = await closed_consumer_world(tmp_path, monkeypatch, consumer=consumer, history=history)
     owned = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
     try:
-        runtime, methods = fresh_closed_runtime(owned, world, binding)
+        runtime, methods = await fresh_closed_runtime(owned, world, binding)
         advance = capture_handler(world.handler)
         await advance(world.action_id, runtime)
         _assert_local_finish(owned, world, methods)

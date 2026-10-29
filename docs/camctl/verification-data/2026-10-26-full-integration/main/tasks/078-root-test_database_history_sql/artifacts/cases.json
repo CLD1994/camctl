@@ -1,0 +1,515 @@
+[
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseRuntimeRequirements::test_missing_or_malformed_version_is_rejected",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.014712777992826886
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.01720890098658856
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.001276480994420126
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.03319815997383557
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseRuntimeRequirements::test_version_boundaries_use_numeric_comparison_and_exact_backports",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012058140127919614
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.008133730996632949
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.000563335997867398
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.009902881007292308
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseStructure::test_canceled_cleanup_only_records_actual_delete_error",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0018577659939182922
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.02810354500252288
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00035086501156911254
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.030312176008010283
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseStructure::test_cleanup_complete_state_matrix",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00038640999991912395
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.14623758199741133
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00035746699722949415
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.14698145899455994
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseStructure::test_cleanup_final_result_requires_existing_event",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00031943600333761424
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.010795063004479744
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004036249883938581
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.011518123996211216
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseStructure::test_cleanup_success_accepts_registered_basis_values",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004499680071603507
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.012254371991730295
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.004027659000712447
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.016731998999603093
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseStructure::test_cleanup_unknown_target_keeps_request_without_file_reference",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006746400031261146
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.00825326300400775
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0016877659945748746
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.010615669001708739
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseStructure::test_dependency_and_selection_identity",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.003473842007224448
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0119034100061981
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.003977015003329143
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.01935426701675169
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseStructure::test_dependency_requires_real_source_at_commit",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00037164300738368183
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.009082959004445001
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00029978901147842407
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.009754391023307107
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseStructure::test_directory_binding_requires_three_distinct_absolute_paths",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005393079918576404
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.02069906900578644
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003923420008504763
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.021630718998494558
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseStructure::test_expiration_keeps_start_attempts_and_limits_residual_stop",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007400329923257232
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.013969968000310473
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003839609998976812
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.015093961992533877
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseStructure::test_file_candidate_indexes_keep_old_and_cleaned_records",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009840579878073186
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.013369512991630472
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00040565599920228124
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.014759226978640072
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseStructure::test_file_history_and_affected_output_have_separate_directories",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005481469997903332
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0121037180069834
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00039543000457342714
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.01304729501134716
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseStructure::test_file_history_metadata_requires_valid_order_and_events",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.000799091998487711
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.013122682998073287
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00046167300024535507
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.014383447996806353
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseStructure::test_frozen_report_range_excludes_later_commits_and_keeps_large_ids",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00039088800258468837
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.008911557000828907
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00044416300079319626
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.009746608004206792
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseStructure::test_history_report_and_snapshot_type_scopes",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005522869905689731
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.028177269996376708
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00027471799694467336
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.029004274983890355
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseStructure::test_missing_transaction_end_rejects_commit_and_rolls_back_group",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003882349992636591
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.00823359700734727
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003217960038455203
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.00894362801045645
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseStructure::test_multiple_final_results_may_share_event",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00044254599197302014
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.009820649996981956
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00045227700320538133
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.010715472992160358
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseStructure::test_obtain_source_dependency_requires_permanent_delivery",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005427629948826507
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.013760110989096574
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00040271699253935367
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.014705590976518579
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseStructure::test_one_cleanup_holder_per_output",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004900630010524765
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.008006436997675337
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00029540299146901816
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.008791902990196832
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseStructure::test_one_read_flow_per_copy_and_one_flow_per_cleanup_kind",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00037839601282030344
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0092119500041008
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00031022599432617426
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.009900572011247277
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseStructure::test_output_cleanup_availability_and_error_matrix",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005269980028970167
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.05504186799225863
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003927029902115464
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.055961568985367194
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseStructure::test_report_probe_and_cursor_use_covering_indexes_with_or_without_statistics",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003788840112974867
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.19706442300230265
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003172569995513186
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.19776056401315145
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseStructure::test_report_target_rejects_event_sequence_mismatch_at_commit",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004736849950859323
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.013051720001385547
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0002539080014685169
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.013779312997939996
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseStructure::test_report_targets_share_event_but_not_duplicate_object",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003280429955339059
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.010965286986902356
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00030296799377538264
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.011596297976211645
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseStructure::test_snapshot_candidates_use_type_identifier_then_exact_integer_id",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004944739921484143
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.010131289003766142
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005054849898442626
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.011131247985758819
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/tests/integration/test_database_history_sql.py::DatabaseStructure::test_sync_can_reference_transaction_end_inserted_later",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006776309892302379
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.011651698994683102
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004622589913196862
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.012791588975233026
+  }
+]

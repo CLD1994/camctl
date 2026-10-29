@@ -3,15 +3,15 @@ from decimal import Decimal
 
 import pytest
 
-from camctl.capture.media import MediaPolicy
-from camctl.capture.media_flow import DriverReadSessions, MediaFlow, load_processing_status, run_recording_media
+from camctl.capture.media_flow import load_processing_status, run_recording_media
 from camctl.host_files.media import MediaProbe, MediaStream
 from camctl.host_files.tasks import AsyncFileTask, FileTaskExecutor, FileTaskId
 from camctl.session.supervision import Supervisor
 
 from .media_retry_fixtures import media_pipeline as pipeline
-from .test_input_copy import _CONTENT
-from .test_media_flow import ReadDriverDouble, _Digest
+from ..support.capture_media_cases import (
+    ScriptTools, assembled_media, handler_runtime as assembled_handler, reopen_media, media_case, media_cases,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -28,29 +28,14 @@ class _Owner:
         await task.pending.wait()
 
 
-class Tools:
+class Tools(ScriptTools):
     def __init__(self, executor):
-        self.executor, self.probes, self.repairs = executor, [], []
-
-    async def probe(self, input):
-        async def body(_control):
-            self.probes.append(input.file_id)
-            return source_probe()
-        return await self.executor.run_async_file_task(AsyncFileTask(
-            FileTaskId('source-probe'), (input.file_id,), 'probe', '原输入事实', body), _Owner())
-
-    async def repair(self, input, output, **kwargs):
-        self.repairs.append(output.file_id)
-        raise AssertionError('准备阶段不得启动修复')
+        super().__init__(source_probe())
+        self.executor = executor
 
 
-def media_flow(pipeline, executor, tools):
-    owned, roots, _source = pipeline
-    return MediaFlow(owned=owned, roots=roots,
-        sessions=DriverReadSessions(owned, ReadDriverDouble(_CONTENT), ticket=None),
-        tools=tools, policy=MediaPolicy(Decimal('2')),
-        occurred_at=lambda: 1_750_000_100_000_000,
-        digest_supported=True, digest=_Digest(_CONTENT), file_executor=executor)
+async def media_flow(pipeline, executor, tools):
+    return await assembled_media(pipeline, executor, tools)
 
 
 @pytest.mark.parametrize('pipeline', ['osv'], indirect=True)
@@ -58,7 +43,7 @@ async def test_pending_osv_returns_prepared_after_releasing_input_owner(pipeline
     owned, _roots, source_id = pipeline
     executor = FileTaskExecutor(Supervisor())
     tools = Tools(executor)
-    step = await run_recording_media(media_flow(pipeline, executor, tools), 1, 1, source_id,
+    step = await run_recording_media(await media_flow(pipeline, executor, tools), 1, 1, source_id,
         target_extension='osv')
     assert step.phase.value == 'prepared'
     status = load_processing_status(owned, 1)
@@ -74,75 +59,28 @@ class ObservedExecutor(FileTaskExecutor):
     def __init__(self):
         super().__init__(Supervisor())
         self.events = []
+        self.results = []
 
-    def _admit(self, task):
-        state = super()._admit(task)
-        self.events.append(('admit', task.stage, task.file_ids, task.task_id))
-        return state
-
-    def _release_identity(self, state):
-        super()._release_identity(state)
-        self.events.append(("delivered", state.task.stage, self.unfinished_files(), state.task.task_id))
-
-    def _finish(self, state, result):
-        super()._finish(state, result)
-        self.events.append(('finish', state.task.stage, self.unfinished_files(), state.task.task_id))
-
-
-class ControlledTools(Tools):
-    def __init__(self, executor, *, probe=None, result='success', probe_ran=True):
-        super().__init__(executor)
-        self.source = source_probe() if probe is None else probe
-        self.result, self.probe_ran = result, probe_ran
-        self.gate = None
-        self.started = None
-        self.controls = []
-
-    async def probe(self, input):
+    async def run_async_file_task(self, task, owner):
         from dataclasses import replace
-        from camctl.host_files.models import FilePurpose
-        from camctl.host_files.tasks import FileTaskResult
-        async def body(control):
-            self.controls.append(control)
-            self.probes.append(input.file_id)
-            if self.gate is not None and input.purpose is FilePurpose.RECORDING_INPUT:
-                self.started.set()
-                await self.gate.wait()
-            if input.purpose is FilePurpose.REPAIR_OUTPUT:
-                if self.result == 'output_probe_failed':
-                    return MediaProbe(None, 'tool_failed: actual output probe')
-                return replace(self.source, duration_s=Decimal('60'), streams=tuple(
-                    replace(s, duration_s=Decimal('60')) for s in self.source.streams))
-            return self.source
-        if not self.probe_ran:
-            return FileTaskResult(FileTaskId('not-run'), ran=False)
-        return await self.executor.run_async_file_task(AsyncFileTask(
-            FileTaskId('actual-probe'), (input.file_id,), 'probe', '原媒体事实', body), _Owner())
+        async def actual(control):
+            self.events.append(('admit', task.stage, task.file_ids, task.task_id))
+            return await task.body(control)
+        if task.stage == 'media_probe' and getattr(self, 'prevent_probe', False):
+            from camctl.host_files.tasks import FileTaskResult
+            return FileTaskResult(task.task_id, ran=False)
+        result = await super().run_async_file_task(replace(task, body=actual), owner)
+        self.results.append((task.stage, result))
+        self.events.append(('finish', task.stage, self.unfinished_files(), task.task_id))
+        self.events.append(('delivered', task.stage, self.unfinished_files(), task.task_id))
+        return result
 
-    async def repair(self, input, output, **kwargs):
-        import hashlib
-        from pathlib import Path
-        from camctl.host_files.io import HashResult
-        from camctl.host_files.media import MediaArtifact
-        from camctl.host_files.models import FileObservation, FileObservationKind
-        async def body(control):
-            self.controls.append(control)
-            self.repairs.append(output.file_id)
-            if self.gate is not None:
-                self.started.set()
-                await self.gate.wait()
-            path = Path(output.root) / output.relative_path
-            if self.result == 'failed':
-                return MediaArtifact('tool_failed: actual repair result',
-                    FileObservation(FileObservationKind.MISSING, path))
-            content = b'original repaired bytes'
-            path.write_bytes(content)
-            return MediaArtifact(None, FileObservation(FileObservationKind.VALID_OBJECT,
-                path, True, size_bytes=len(content)),
-                HashResult(hashlib.sha256(content).hexdigest(), len(content), None),
-                postprocessing_stopped=True)
-        return await self.executor.run_async_file_task(AsyncFileTask(
-            FileTaskId('actual-repair'), (input.file_id, output.file_id), 'repair', '原成品事实', body), _Owner())
+
+class ControlledTools(ScriptTools):
+    def __init__(self, executor, *, probe=None, result='success', probe_ran=True):
+        super().__init__(source_probe() if probe is None else probe, result=result)
+        self.executor, self.probe_ran = executor, probe_ran
+        executor.prevent_probe = not probe_ran
 
 
 @pytest.mark.parametrize('pipeline', ['osv-timing', 'osv'], indirect=True)
@@ -151,7 +89,7 @@ async def test_two_stages_reuse_saved_probe_and_output_with_complete_ownership(p
     owned, _roots, source_id = pipeline
     executor = ObservedExecutor()
     tools = ControlledTools(executor, result=result)
-    flow = media_flow(pipeline, executor, tools)
+    flow = await media_flow(pipeline, executor, tools)
     first = await run_recording_media(flow, 1, 1, source_id, target_extension='osv')
     assert first.phase.value == 'prepared'
     input_id, = tools.probes
@@ -185,12 +123,12 @@ async def test_two_stages_reuse_saved_probe_and_output_with_complete_ownership(p
 async def test_prepare_preserves_unusable_or_missing_actual_probe(pipeline, fact):
     from dataclasses import replace
     probe = source_probe()
-    if fact == 'tool_failed': probe = MediaProbe(None, 'tool_failed: actual source probe')
-    if fact == 'missing_duration': probe = replace(probe, duration_s=None)
+    if fact == 'tool_failed': probe = MediaProbe(None, 'tool_failed: exit=1')
+    if fact == 'missing_duration': probe = replace(probe, duration_s=None, error='missing_duration: 缺少时长字段')
     if fact == 'missing_video': probe = replace(probe, streams=probe.streams[:1])
     executor = ObservedExecutor()
     tools = ControlledTools(executor, probe=probe, probe_ran=fact != 'not_run')
-    flow = media_flow(pipeline, executor, tools)
+    flow = await media_flow(pipeline, executor, tools)
     first = await run_recording_media(flow, 1, 1, pipeline[2], target_extension='osv')
     if fact == 'not_run':
         assert first.phase.value == 'tool_not_completed'
@@ -213,17 +151,15 @@ async def test_original_stage_request_recovers_on_new_connection_without_repeati
         pipeline, monkeypatch, stage, result, fault):
     from dataclasses import replace
     from pathlib import Path
-    from camctl.capture.media_flow import resume_media_saves
     from camctl.contracts.values import ConsistencyError
     from camctl.persistence.models import DbOutcomeKind
     from camctl.persistence.repositories.capture import CaptureRepository
     from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
     from ..bootstrap.test_binding_transactions import _CommitFailure
-    from ..operations.test_result_reuse import _FaultConnection
     owned, roots, source_id = pipeline
     executor = ObservedExecutor()
     tools = ControlledTools(executor, result=result)
-    flow = media_flow(pipeline, executor, tools)
+    flow = await media_flow(pipeline, executor, tools)
     if stage != 'start_repair_output':
         prepared = await run_recording_media(flow, 1, 1, source_id, target_extension='osv')
         assert prepared.phase.value == 'prepared'
@@ -236,7 +172,7 @@ async def test_original_stage_request_recovers_on_new_connection_without_repeati
         if len(requests) == 1:
             assert executor.unfinished_files() == expected_files
         if len(requests) == 1:
-            connection = (_FaultConnection(current.connection, 'UPDATE recording_processing')
+            connection = (__import__('integration.support.output_planning', fromlist=['storage_fault']).storage_fault(current.connection, 'UPDATE recording_processing')
                 if fault == 'rollback' else _CommitFailure(current.connection, fault == 'commit_after'))
             current = replace(current, connection=connection)
         outcome = original(repo, command, key, current)
@@ -245,29 +181,29 @@ async def test_original_stage_request_recovers_on_new_connection_without_repeati
     monkeypatch.setattr(CaptureRepository, stage, save)
     with pytest.raises(ConsistencyError):
         await run_recording_media(flow, 1, 1, source_id, target_extension='osv')
-    assert len(requests) == 1 and len(flow.pending_media_results) == 1
+    assert len(requests) == 1
     assert outcomes[0].kind is (DbOutcomeKind.ROLLED_BACK if fault == 'rollback' else DbOutcomeKind.UNKNOWN)
-    held, = flow.pending_media_results.values()
-    assert (held.command, held.key) == requests[0]
-    assert len(held.file_ids) == (1 if stage == "start_repair_output" else 2)
     probes, repairs = list(tools.probes), list(tools.repairs)
     path = Path(owned.connection.execute('PRAGMA database_list').fetchone()[2])
     owned.connection.close()
     reopened = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         # 保存恢复入口先完成原申请；当前时刻不会参与重算原命令。
-        await resume_media_saves(reopened, flow.pending_media_results, executor)
+        flow = await reopen_media(flow, reopened)
+        media_case(flow).wall[0] = 1_750_000_200_000_000
+        await media_case(flow).resume_saves()
+        saved_calls = len(requests)
+        await media_case(flow).resume_saves()
+        assert len(requests) == saved_calls
         assert requests == [requests[0], requests[0]]
         assert outcomes[1].kind is DbOutcomeKind.COMPLETED, outcomes[1].error
         if fault == 'commit_after': assert outcomes[1].value.disposition.value == 'already'
         assert tools.probes == probes and tools.repairs == repairs
-        assert not flow.pending_media_results
         status = load_processing_status(reopened, 1)
         assert status.source_probe == source_probe()
         assert reopened.connection.execute('SELECT COUNT(*) FROM intermediate_files WHERE purpose=4').fetchone() == (1,)
         if stage == 'start_repair_output':
-            flow = replace(flow, owned=reopened, sessions=DriverReadSessions(reopened,
-                ReadDriverDouble(_CONTENT), ticket=None), occurred_at=lambda: 1_750_000_200_000_000)
+            media_case(flow).wall[0] = 1_750_000_200_000_000
             done = await run_recording_media(flow, 1, 1, source_id, target_extension='osv')
             assert done.phase.value == 'succeeded'
             assert tools.probes.count(probes[0]) == 1 and len(tools.repairs) == 1
@@ -283,7 +219,7 @@ async def test_registered_output_survives_real_external_file_conflict(pipeline):
     owned, _roots, source_id = pipeline
     executor = ObservedExecutor()
     tools = ControlledTools(executor)
-    flow = media_flow(pipeline, executor, tools)
+    flow = await media_flow(pipeline, executor, tools)
     first = await run_recording_media(flow, 1, 1, source_id, target_extension='osv')
     input_id = tools.probes[0]
     started, release = asyncio.Event(), asyncio.Event()
@@ -312,45 +248,53 @@ class GatedExecutor(ObservedExecutor):
         super().__init__()
         self.phase, self.reached, self.release = phase, asyncio.Event(), asyncio.Event()
 
-    async def _execute_async(self, state):
-        if state.task.stage != 'media_repair_prepare':
-            return await super()._execute_async(state)
-        if self.phase == 'queued':
+    async def run_async_file_task(self, task, owner):
+        if task.stage != 'media_repair_prepare':
+            return await super().run_async_file_task(task, owner)
+        if self.phase == 'before_prepare_dispatch':
             self.reached.set()
             await self.release.wait()
-        result = await super()._execute_async(state)
-        if self.phase == 'finished':
+        result = await super().run_async_file_task(task, owner)
+        if self.phase == 'prepared_result_before_return':
             self.reached.set()
             await self.release.wait()
         return result
 
 
 @pytest.mark.parametrize('pipeline', ['osv-timing'], indirect=True)
-@pytest.mark.parametrize('phase', ['queued', 'probe', 'finished'])
-async def test_waiter_cancel_keeps_started_prepare_result_and_never_dispatches_repair(pipeline, phase):
+@pytest.mark.parametrize('phase', ['before_prepare_dispatch', 'probe_result_before_save', 'prepared_result_before_return'])
+async def test_waiter_cancel_preserves_preparation_results_and_blocks_repair(pipeline, phase, monkeypatch):
     import asyncio
     executor = GatedExecutor(phase)
     tools = ControlledTools(executor)
-    if phase == 'probe':
-        tools.gate, tools.started = asyncio.Event(), asyncio.Event()
-        reached, release = tools.started, tools.gate
+    if phase == 'probe_result_before_save':
+        from ..support.capture_media_cases import MediaSaveGate
+        saved = MediaSaveGate(monkeypatch, 'start_repair_output')
+        reached, release = saved.reached, saved.release
     else:
         reached, release = executor.reached, executor.release
-    flow = media_flow(pipeline, executor, tools)
+    flow = await media_flow(pipeline, executor, tools)
     running = asyncio.create_task(run_recording_media(flow, 1, 1, pipeline[2], target_extension='osv'))
     try:
         await asyncio.wait_for(reached.wait(), 2)
+        if phase == 'probe_result_before_save':
+            request, _key = saved.requests[0]
+            actual = request.source_probe.tool_diagnostics.outcome
+            assert actual.error is None and actual.exit.exit_code == 0
         running.cancel()
         # 让取消到达原等待边界；不以 sleep 时长制造时序。
         for _ in range(5): await asyncio.sleep(0)
-        if phase == 'probe':
+        if phase == 'probe_result_before_save':
             assert not running.done() and executor.unfinished_files()
         release.set()
         with pytest.raises(asyncio.CancelledError): await running
         status = load_processing_status(pipeline[0], 1)
-        assert status.repair_state == (3 if phase == 'queued' else 4)
-        assert status.source_probe == (None if phase == 'queued' else source_probe())
-        assert len(tools.probes) == (0 if phase == 'queued' else 1)
+        if phase == 'probe_result_before_save':
+            from ..support.capture_media_cases import write_tool_evidence
+            write_tool_evidence(pipeline[1].staging.parent, executor)
+        assert status.repair_state == (3 if phase == 'before_prepare_dispatch' else 4)
+        assert status.source_probe == (None if phase == 'before_prepare_dispatch' else source_probe())
+        assert len(tools.probes) == (0 if phase == 'before_prepare_dispatch' else 1)
         assert tools.repairs == [] and executor.unfinished_files() == ()
         assert pipeline[0].connection.execute('SELECT cancel_requested FROM actions WHERE id=1').fetchone() == (0,)
         settled = await executor.drain_required()
@@ -360,16 +304,8 @@ async def test_waiter_cancel_keeps_started_prepare_result_and_never_dispatches_r
         await asyncio.gather(running, return_exceptions=True)
 
 
-def handler_runtime(pipeline, flow):
-    from dataclasses import replace
-    from .media_retry_fixtures import _EVIDENCE, original_recording_entry
-    from .test_capture_contract import ResultsDouble, _runtime
-    entry = replace(original_recording_entry(), original_name='original.OSV',
-        locator={'path': '/DCIM/original.OSV'}, format_id='osv')
-    runtime = _runtime(pipeline[0], results=ResultsDouble({1: (entry,)}), listing_cache={})
-    runtime.evidence = _EVIDENCE
-    runtime.media, runtime.file_executor = flow, flow.file_executor
-    return runtime
+async def handler_runtime(pipeline, flow):
+    return assembled_handler(flow)
 
 
 def business_cancel(owned):
@@ -401,8 +337,8 @@ async def test_real_handler_continues_prepared_stage_without_new_request(pipelin
     owned = pipeline[0]
     executor = ObservedExecutor()
     tools = ControlledTools(executor)
-    flow = media_flow(pipeline, executor, tools)
-    runtime = handler_runtime(pipeline, flow)
+    flow = await media_flow(pipeline, executor, tools)
+    runtime = (await handler_runtime(pipeline, flow))
     advance = capture_handler('camera_record')
     await advance(1, runtime)
     assert owned.connection.execute('SELECT status FROM actions WHERE id=1').fetchone() == (2,)
@@ -429,8 +365,8 @@ async def test_business_cancel_keeps_actual_stage_result_and_blocks_new_content(
     work = WorkFileRuntime(staging=roots.staging, limits=WorkFileLimits(100, 100))
     executor = work.executor
     tools = ControlledTools(executor)
-    flow = media_flow(pipeline, executor, tools)
-    runtime = handler_runtime(pipeline, flow)
+    flow = await media_flow(pipeline, executor, tools)
+    runtime = (await handler_runtime(pipeline, flow))
     advance = capture_handler('camera_record')
     if phase in ('between', 'repair'):
         await advance(1, runtime)
@@ -462,7 +398,7 @@ async def test_business_cancel_keeps_actual_stage_result_and_blocks_new_content(
     await advance(1, runtime)
     assert (len(tools.probes), len(tools.repairs)) == before
     file_ids = tuple(r[0] for r in owned.connection.execute('SELECT id FROM intermediate_files'))
-    outcome = await work.first_cleanup(file_ids, owned=owned, occurred_at=1_750_000_200_000_000)
+    outcome = await work.first_cleanup(file_ids, database=flow.database, occurred_at=1_750_000_200_000_000)
     assert outcome.complete
     assert all(not (roots.staging / r[0]).exists() for r in owned.connection.execute('SELECT relative_path FROM intermediate_files'))
     work.stop_new_work()
@@ -472,27 +408,12 @@ async def test_business_cancel_keeps_actual_stage_result_and_blocks_new_content(
 @pytest.mark.parametrize('pipeline', ['osv-timing'], indirect=True)
 async def test_real_host_tools_share_executor_through_original_business_saves(pipeline, tmp_path):
     import hashlib
-    from camctl.bootstrap.capture_assembly import HostMediaTools
     from camctl.capture.media_facts import saved_output_probe
-    from camctl.host_files.media import ProbeRequest, RepairRequest
-    from ..host_files.test_media import _tool
     owned, roots, source_id = pipeline
     executor = ObservedExecutor()
-    probe = _tool(tmp_path, 'shared-probe', '''import json, sys
-seconds = '60' if '/derived/' in sys.argv[-1] else '75'
-print(json.dumps({'format': {'duration': seconds, 'format_name': 'mov,mp4,m4a,3gp,3g2,mj2'},
-    'streams': [{'index': i, 'codec_type': 'video', 'codec_name': 'h264',
-        'width': 64, 'height': 64, 'duration': seconds, 'disposition': {'attached_pic': 0}}
-        for i in range(2)]}))
-''')
-    repair = _tool(tmp_path, 'shared-repair', '''import pathlib, sys
-assert sys.argv.count('-map') == 2
-assert sys.argv[sys.argv.index('-f') + 1] == 'mp4'
-pathlib.Path(sys.argv[-1]).write_bytes(b'original managed tool bytes')
-''')
-    tools = HostMediaTools(roots, executor, _Owner(),
-        probe_request=ProbeRequest(ffprobe=probe), repair_request=RepairRequest(ffmpeg=repair))
-    flow = media_flow(pipeline, executor, tools)
+    tools = ControlledTools(executor)
+    tools.content = b'original managed tool bytes'
+    flow = await media_flow(pipeline, executor, tools)
     first = await run_recording_media(flow, 1, 1, source_id, target_extension='osv')
     assert first.phase.value == 'prepared'
     original = load_processing_status(owned, 1)
@@ -515,7 +436,6 @@ pathlib.Path(sys.argv[-1]).write_bytes(b'original managed tool bytes')
 @pytest.mark.parametrize('canceled', [False, True])
 @pytest.mark.parametrize('fault', ['rollback', 'commit_before', 'commit_after'])
 async def test_pending_start_is_saved_before_current_terminal_or_cancel_decision(pipeline, monkeypatch, canceled, fault):
-    from camctl.capture.media_flow import resume_media_saves
     from camctl.contracts.values import ConsistencyError
     from camctl.persistence.models import DbOutcome, DbOutcomeKind
     from camctl.persistence.repositories.capture import CaptureRepository
@@ -523,16 +443,15 @@ async def test_pending_start_is_saved_before_current_terminal_or_cancel_decision
     owned = pipeline[0]
     executor = ObservedExecutor()
     tools = ControlledTools(executor)
-    flow = media_flow(pipeline, executor, tools)
+    flow = await media_flow(pipeline, executor, tools)
     original = CaptureRepository.start_repair_output
     requests = []
     def unknown(repo, command, key, current):
         requests.append((command, key))
         from dataclasses import replace
         from ..bootstrap.test_binding_transactions import _CommitFailure
-        from ..operations.test_result_reuse import _FaultConnection
         if len(requests) == 1:
-            connection = (_FaultConnection(current.connection, 'UPDATE recording_processing')
+            connection = (__import__('integration.support.output_planning', fromlist=['storage_fault']).storage_fault(current.connection, 'UPDATE recording_processing')
                 if fault == 'rollback' else _CommitFailure(current.connection, fault == 'commit_after'))
             current = replace(current, connection=connection)
         return original(repo, command, key, current)
@@ -546,19 +465,18 @@ async def test_pending_start_is_saved_before_current_terminal_or_cancel_decision
     owned.connection.close()
     owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
     pipeline = (owned, pipeline[1], pipeline[2])
-    flow = replace(flow, owned=owned,
-        sessions=DriverReadSessions(owned, ReadDriverDouble(_CONTENT), ticket=None))
+    flow = await reopen_media(flow, owned)
     try:
         business_cancel(owned)
         if not canceled:
             # 原可靠取消事务先终结动作；本地 START 保存责任仍独立存在。
-            await capture_handler('camera_record')(1, handler_runtime(pipeline, flow))
+            await capture_handler('camera_record')(1, (await handler_runtime(pipeline, flow)))
             assert owned.connection.execute('SELECT status FROM actions WHERE id=1').fetchone() == (6,)
         before_tools = list(tools.probes)
-        await resume_media_saves(owned, flow.pending_media_results, executor)
+        await media_case(flow).resume_saves()
         assert requests == [requests[0], requests[0]]
-        assert not flow.pending_media_results and tools.probes == before_tools and tools.repairs == []
-        await capture_handler('camera_record')(1, handler_runtime(pipeline, flow))
+        assert tools.probes == before_tools and tools.repairs == []
+        await capture_handler('camera_record')(1, (await handler_runtime(pipeline, flow)))
         assert owned.connection.execute('SELECT status FROM actions WHERE id=1').fetchone() == (6,)
         assert owned.connection.execute('SELECT COUNT(*) FROM outputs').fetchone() == (0,)
     finally:
@@ -568,13 +486,12 @@ async def test_pending_start_is_saved_before_current_terminal_or_cancel_decision
 @pytest.mark.parametrize('pipeline', ['osv-timing'], indirect=True)
 async def test_waiter_cancel_during_prepare_preserves_original_pending_start_diagnostic(pipeline, monkeypatch):
     import asyncio
-    from camctl.capture.media_flow import resume_media_saves
     from camctl.persistence.models import DbOutcome, DbOutcomeKind
     from camctl.persistence.repositories.capture import CaptureRepository
     executor = ObservedExecutor()
     tools = ControlledTools(executor)
     tools.gate, tools.started = asyncio.Event(), asyncio.Event()
-    flow = media_flow(pipeline, executor, tools)
+    flow = await media_flow(pipeline, executor, tools)
     original = CaptureRepository.start_repair_output
     calls = []
     def unknown(repo, command, key, owned):
@@ -591,9 +508,8 @@ async def test_waiter_cancel_during_prepare_preserves_original_pending_start_dia
         tools.gate.set()
         with pytest.raises(asyncio.CancelledError) as caught: await running
         assert any('original start save unknown' in n for n in getattr(caught.value, '__notes__', ()))
-        assert len(flow.pending_media_results) == 1
         assert len(tools.probes) == 1 and tools.repairs == []
-        await resume_media_saves(pipeline[0], flow.pending_media_results, executor)
+        await media_case(flow).resume_saves()
         assert calls == [calls[0], calls[0]]
         assert executor.unfinished_files() == ()
     finally:
@@ -603,23 +519,32 @@ async def test_waiter_cancel_during_prepare_preserves_original_pending_start_dia
 
 @pytest.mark.parametrize('pipeline', ['osv-timing'], indirect=True)
 @pytest.mark.parametrize('result', ['success', 'failed', 'output_probe_failed'])
-async def test_waiter_cancel_in_full_repair_keeps_actual_result_without_business_cancel(pipeline, result):
+async def test_waiter_cancel_keeps_obtained_repair_result_without_business_cancel(pipeline, result, monkeypatch):
     import asyncio
     owned, _roots, source_id = pipeline
     executor = ObservedExecutor()
     tools = ControlledTools(executor, result=result)
-    flow = media_flow(pipeline, executor, tools)
+    flow = await media_flow(pipeline, executor, tools)
     prepared = await run_recording_media(flow, 1, 1, source_id, target_extension='osv')
-    tools.gate, tools.started = asyncio.Event(), asyncio.Event()
+    from ..support.capture_media_cases import MediaSaveGate
+    saved = MediaSaveGate(monkeypatch,
+        'complete_repair_output' if result == 'success' else 'save_repair_result')
     running = asyncio.create_task(run_recording_media(flow, 1, 1, source_id, target_extension='osv'))
     try:
-        await asyncio.wait_for(tools.started.wait(), 2)
+        await asyncio.wait_for(saved.reached.wait(), 2)
         assert executor.unfinished_files() == (tools.probes[0], prepared.output_file.file_id)
+        request, _key = saved.requests[0]
+        tool = (request.output_probe.tool_diagnostics if result == 'success' else
+            request.artifact.tool_diagnostics if result == 'failed' else request.failure_probe.tool_diagnostics)
+        assert tool.outcome.error is None
+        assert tool.outcome.exit.exit_code == (0 if result == 'success' else 1)
         running.cancel()
         for _ in range(5): await asyncio.sleep(0)
         assert not running.done()
-        tools.gate.set()
+        saved.release.set()
         with pytest.raises(asyncio.CancelledError): await running
+        from ..support.capture_media_cases import write_tool_evidence
+        write_tool_evidence(pipeline[1].staging.parent, executor)
         assert load_processing_status(owned, 1).repair_state == (5 if result == 'success' else 6)
         assert owned.connection.execute('SELECT cancel_requested FROM actions WHERE id=1').fetchone() == (0,)
         assert tools.repairs == [prepared.output_file.file_id]
@@ -627,6 +552,64 @@ async def test_waiter_cancel_in_full_repair_keeps_actual_result_without_business
         counts = len(tools.probes), len(tools.repairs)
         await run_recording_media(flow, 1, 1, source_id, target_extension='osv')
         assert counts == (len(tools.probes), len(tools.repairs))
+    finally:
+        saved.release.set()
+        await asyncio.gather(running, return_exceptions=True)
+
+
+@pytest.mark.parametrize('pipeline', ['osv-timing'], indirect=True)
+@pytest.mark.parametrize('stage', ['probe', 'repair'])
+async def test_actual_inflight_tool_stop_preserves_cancelled_failure_after_exit_zero(pipeline, stage):
+    import asyncio
+    import json
+    from camctl.host_files.media import MediaArtifact
+    from ..support.capture_media_cases import write_tool_evidence
+    owned, roots, source_id = pipeline
+    executor = ObservedExecutor()
+    tools = ControlledTools(executor)
+    flow = await media_flow(pipeline, executor, tools)
+    if stage == 'repair':
+        prepared = await run_recording_media(flow, 1, 1, source_id, target_extension='osv')
+        assert prepared.phase.value == 'prepared'
+    tools.gate, tools.started = asyncio.Event(), asyncio.Event()
+    running = asyncio.create_task(run_recording_media(flow, 1, 1, source_id, target_extension='osv'))
+    try:
+        await asyncio.wait_for(tools.started.wait(), 2)
+        running.cancel()
+        async def stopped():
+            while not (tools.directory / 'stop-observed').exists():
+                await asyncio.sleep(.005)
+        await asyncio.wait_for(stopped(), 2)
+        assert executor.unfinished_files()
+        tools.gate.set()
+        with pytest.raises(asyncio.CancelledError):
+            await running
+        actual = [result.value for _kind, result in executor.results
+            if isinstance(result.value, MediaProbe if stage == 'probe' else MediaArtifact)][-1]
+        raw = actual.tool_diagnostics.outcome
+        assert raw.error == 'cancelled' and raw.exit.exit_code == 0
+        if stage == 'probe':
+            document = json.loads(raw.output)
+            assert document['format']['duration'] == '75'
+            assert len(document['streams']) == 2
+            assert actual.duration_s is None and actual.streams == ()
+            assert actual.error.startswith('tool_failed: cancelled;')
+            assert load_processing_status(owned, 1).source_probe.error.startswith('tool_failed: cancelled;')
+            failed = await run_recording_media(flow, 1, 1, source_id, target_extension='osv')
+            assert failed.phase.value == 'failed_saved'
+            assert tools.repairs == []
+        else:
+            assert actual.tool_error.startswith('tool_failed: cancelled;')
+            assert actual.observation.size_bytes == len(tools.content)
+            assert actual.observation.path.read_bytes() == tools.content
+            assert len(tools.repairs) == 1
+        assert load_processing_status(owned, 1).repair_state == 6
+        assert owned.connection.execute('SELECT cancel_requested FROM actions WHERE id=1').fetchone() == (0,)
+        assert executor.unfinished_files() == ()
+        before = (tools.probes, tools.repairs)
+        await run_recording_media(flow, 1, 1, source_id, target_extension='osv')
+        assert (tools.probes, tools.repairs) == before
+        write_tool_evidence(roots.staging.parent, executor)
     finally:
         tools.gate.set()
         await asyncio.gather(running, return_exceptions=True)

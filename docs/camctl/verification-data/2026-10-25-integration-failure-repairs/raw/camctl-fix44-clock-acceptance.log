@@ -1,0 +1,31 @@
+证据目录 /tmp/camctl-fix44-clock-acceptance
+进度 root/test_hasselblad_photo_roundtrip pid=- preparing
+进度 root/test_hasselblad_photo_roundtrip pid=1047531 hasselblad-client-build
+启动 root/test_hasselblad_photo_roundtrip pid=1048238 cwd=/tmp/camctl-fix44-clock-acceptance/tasks/001-root-test_hasselblad_photo_roundtrip/source
+进度 root/test_hasselblad_photo_roundtrip pid=1048238 tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]
+进度 root/test_hasselblad_photo_roundtrip pid=1048238 tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]
+结束 root/test_hasselblad_photo_roundtrip status=failed exit=1 seconds=63.598
+启动 root/test_camctl_output_roundtrip pid=1049371 cwd=/tmp/camctl-fix44-clock-acceptance/tasks/002-root-test_camctl_output_roundtrip/source
+进度 root/test_camctl_output_roundtrip pid=1049371 tests/integration/test_camctl_output_roundtrip.py::test_cross_plan_reference_and_multi_request
+进度 root/test_camctl_output_roundtrip pid=1049371 tests/integration/test_camctl_output_roundtrip.py::test_cross_plan_reference_and_multi_request
+进度 root/test_camctl_output_roundtrip pid=1049371 tests/integration/test_camctl_output_roundtrip.py::test_recording_delivery_survives_late_cancel
+进度 root/test_camctl_output_roundtrip pid=1049371 tests/integration/test_camctl_output_roundtrip.py::test_repeated_obtain_of_same_output_yields_independent_deliveries
+进度 root/test_camctl_output_roundtrip pid=1049371 tests/integration/test_camctl_output_roundtrip.py::test_auto_preview_obtains_registered_preview
+结束 root/test_camctl_output_roundtrip status=passed exit=0 seconds=74.384
+启动 root/test_camctl_session_recovery pid=1051516 cwd=/tmp/camctl-fix44-clock-acceptance/tasks/003-root-test_camctl_session_recovery/source
+进度 root/test_camctl_session_recovery pid=1051516 tests/integration/test_camctl_session_recovery.py::test_report_failure_preserves_device_work_and_redelivers
+进度 root/test_camctl_session_recovery pid=1051516 tests/integration/test_camctl_session_recovery.py::test_process_restart_resumes_interrupted_work
+进度 root/test_camctl_session_recovery pid=1051516 tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed
+进度 root/test_camctl_session_recovery pid=1051516 tests/integration/test_camctl_session_recovery.py::test_future_action_waits_and_past_window_expires
+结束 root/test_camctl_session_recovery status=passed exit=0 seconds=64.978
+启动 root/test_video_size_estimate pid=1053589 cwd=/tmp/camctl-fix44-clock-acceptance/tasks/004-root-test_video_size_estimate/source
+进度 root/test_video_size_estimate pid=1053589 tests/integration/test_video_size_estimate.py::test_record_estimate_stays_out_of_execution_and_report
+结束 root/test_video_size_estimate status=passed exit=0 seconds=18.145
+启动 root/test_camctl_c_module_roundtrip pid=1054477 cwd=/tmp/camctl-fix44-clock-acceptance/tasks/005-root-test_camctl_c_module_roundtrip/source
+进度 root/test_camctl_c_module_roundtrip pid=1054477 tests/integration/test_camctl_c_module_roundtrip.py::test_auto_preview_roundtrip_via_c_module
+进度 root/test_camctl_c_module_roundtrip pid=1054477 tests/integration/test_camctl_c_module_roundtrip.py::test_auto_preview_roundtrip_via_c_module
+结束 root/test_camctl_c_module_roundtrip status=passed exit=0 seconds=25.204
+启动 root/test_camctl_capture_roundtrip pid=1055682 cwd=/tmp/camctl-fix44-clock-acceptance/tasks/006-root-test_camctl_capture_roundtrip/source
+进度 root/test_camctl_capture_roundtrip pid=1055682 tests/integration/test_camctl_capture_roundtrip.py::test_timelapse_recovers_remaining_wait
+结束 root/test_camctl_capture_roundtrip status=passed exit=0 seconds=10.855
+汇总 /tmp/camctl-fix44-clock-acceptance/summary.json exit=1

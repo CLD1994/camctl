@@ -29,7 +29,7 @@ async def _pending_last_read(environment):
     cfg, owned, context, driver = environment
     await _save_photos(cfg, owned, context, driver)
     source_action = owned.connection.execute("SELECT id FROM actions WHERE device_id='cam-a'").fetchone()[0]
-    _accept(owned, "2", [{"name": "取回", "type": "obtain_action_outputs",
+    await _accept(owned, "2", [{"name": "取回", "type": "obtain_action_outputs",
         "scheduled_at": "2026-01-15 09:00:00",
         "params": {"source": {"action_instance_id": str(source_action)}}}])
     devices = {key: dict(value, copy={"max_read_attempts": 2, "retry_interval_s": 0})

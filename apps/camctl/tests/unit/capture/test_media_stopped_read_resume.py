@@ -45,7 +45,8 @@ async def test_default_resume_uses_original_stopped_read_after_cancel_fact_query
         return callback(owned)
     database.write.side_effect = write
     await resume_prepared_internal_reads(database, pending_read_results=pending_results,
-        pending_read_business={}, pending_read_ends={}, continuing_read_tickets=continuing)
+        pending_read_business={}, pending_read_ends={}, continuing_read_tickets=continuing,
+        pending_segment_inspection_results={})
     assert not pending_results
     if canceled:
         finish, key, _ = operations.finish_attempt.call_args.args

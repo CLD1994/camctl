@@ -18,9 +18,9 @@ from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
-from .result_consumer_fixtures import consumer_world
+from .result_consumer_fixtures import result_driver
+from ..support.result_cases import result_case
 from .test_record_media_result_settlement import _TrackedCommitFailure
-from .test_result_consumer_saves import _result_port
 
 pytestmark = pytest.mark.asyncio
 
@@ -32,10 +32,11 @@ class _SavedBeforeBusiness(Exception):
 @pytest.mark.parametrize("consumer", ["photo", "timelapse"])
 @pytest.mark.parametrize("after", [False, True], ids=["commit-before", "commit-after"])
 async def test_exhaustion_unknown_replays_original_request_time_before_business(
-    tmp_path, monkeypatch, consumer, after,
+    tmp_path, result_case, monkeypatch, consumer, after,
 ):
-    owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, consumer, independent_activity=True)
+    owned, runtime, action_id, handler = await result_case.world(
+        tmp_path, consumer, independent_activity=True,
+        assembly_options={"check_config": AttemptConfig(1, Decimal("1.25"), Decimal(0))})
     reopened = None
     try:
         activity_id, = owned.connection.execute(
@@ -47,8 +48,7 @@ async def test_exhaustion_unknown_replays_original_request_time_before_business(
                 "activity_id": str(activity_id), "entries": [{"identity": "auxiliary",
                     "kind": "other", "complete": True, "size_bytes": 41,
                     "locator": {"path": "/DCIM/auxiliary"}}]}),))
-        driver = _result_port(runtime, actual)
-        runtime.check_config = AttemptConfig(1, Decimal("1.25"), Decimal(0))
+        driver = result_driver(result_case, actual)
         advance = capture_handler(handler)
         await advance(action_id, runtime)
         run_id, = owned.connection.execute(
@@ -62,8 +62,8 @@ async def test_exhaustion_unknown_replays_original_request_time_before_business(
         original_history = owned.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall()
         database_path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
         metadata = owned.metadata
-        formed_at = runtime.wall_us() + 1_000_000
-        runtime.wall_us = lambda: formed_at
+        formed_at = result_case.clock.wall + 1_000_000
+        result_case.clock.wall = formed_at
         original_save = CaptureRepository.close_result_check_unconfirmed
         original_finish = CaptureRepository.finish_capture
         inputs, outcomes, proxies, business = [], [], [], []
@@ -77,7 +77,7 @@ async def test_exhaustion_unknown_replays_original_request_time_before_business(
             outcome = original_save(repository, request, key, current)
             outcomes.append(outcome)
             if len(inputs) > 1 and outcome.kind is DbOutcomeKind.COMPLETED:
-                raise _SavedBeforeBusiness
+                return replace(outcome, handoff_error=_SavedBeforeBusiness())
             return outcome
 
         def finish(repository, request, key, current):
@@ -86,7 +86,7 @@ async def test_exhaustion_unknown_replays_original_request_time_before_business(
 
         monkeypatch.setattr(CaptureRepository, "close_result_check_unconfirmed", save)
         monkeypatch.setattr(CaptureRepository, "finish_capture", finish)
-        with pytest.raises((AssertionError, ConsistencyError)):
+        with pytest.raises(ConsistencyError):
             await advance(action_id, runtime)
         assert len(inputs) == len(outcomes) == len(proxies) == 1
         assert proxies[0].commit_calls == 1 and outcomes[0].kind is DbOutcomeKind.UNKNOWN
@@ -107,6 +107,7 @@ async def test_exhaustion_unknown_replays_original_request_time_before_business(
         owned.connection.close()
         reopened = open_existing(database_path, DbOpenMode.EXISTING_RW, DbConfig())
         assert reopened.metadata == metadata
+        resumed = await result_case.reopen(reopened)
         transaction = reopened.connection.execute(
             "SELECT id FROM history_transactions WHERE operation_key=?", (str(original_key),)).fetchone()
         assert (transaction is not None) is after
@@ -118,9 +119,9 @@ async def test_exhaustion_unknown_replays_original_request_time_before_business(
         assert reopened.connection.execute("SELECT * FROM device_files ORDER BY id").fetchall() == original_files
         assert reopened.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall()[:len(original_history)] == original_history
 
-        # replace 保留全部原同会话集合；不构造不存在的结果类型或复制 raw 输入。
-        # 普通资格可以读取当前钟；完整原申请仍须保持 T1，不能用这个新时刻重形成。
-        resumed = replace(runtime, owned=reopened, wall_us=lambda: formed_at + 5_000_000)
+        # 原生产工厂保留保存责任；旧文件任务及 worker 已实际结束。
+        # 当前钟允许推进，完整原申请仍须保留原 key 与形成时刻。
+        result_case.clock.wall = formed_at + 5_000_000
         with pytest.raises(_SavedBeforeBusiness):
             await advance(action_id, resumed)
 
@@ -128,7 +129,7 @@ async def test_exhaustion_unknown_replays_original_request_time_before_business(
         assert outcomes[-1].kind is DbOutcomeKind.COMPLETED
         assert business == []
         assert driver.list_results.await_count == 1
-        runtime.driver.control.assert_awaited_once()
+        result_case.driver.control.assert_awaited_once()
         assert reopened.connection.execute(
             "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?", (str(original_key),)).fetchone() == (1,)
         assert reopened.connection.execute("SELECT * FROM operation_attempts ORDER BY id").fetchall() == original_attempts

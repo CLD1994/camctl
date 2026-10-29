@@ -1,0 +1,38 @@
+{
+  "checked_at_utc": "2026-10-25T19:51:02Z",
+  "known_pids_source": "launcher command_pid; installed-cli-processes.jsonl; host module.log pid fields; recorded client pid",
+  "known_pids": [
+    1643509,
+    1644432,
+    1644484,
+    1644507,
+    1644516,
+    1644595,
+    1644596,
+    1644894,
+    1644895
+  ],
+  "known_pids_still_exist": [],
+  "runtime_owned_processes": [],
+  "delegation_path_exists": false,
+  "git_head": "70149be69088714b8574900b57efa1b16fe3fa68",
+  "git_status": "",
+  "tracked_diff_empty": true,
+  "client_node_pid": 1644507,
+  "client_owned_processes": [
+    {
+      "pid": 1644507,
+      "ppid": 1643509,
+      "pgid": 1644507,
+      "starttime": "10524884",
+      "state": "S"
+    },
+    {
+      "pid": 1644516,
+      "ppid": 1644507,
+      "pgid": 1644507,
+      "starttime": "10524897",
+      "state": "S"
+    }
+  ]
+}

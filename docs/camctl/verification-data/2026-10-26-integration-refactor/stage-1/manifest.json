@@ -1,0 +1,49 @@
+{
+  "recorded_at": "2026-10-26T04:59:14.195660+00:00",
+  "coordinator_head": "81da5bcc2e2330623e1caa0ccf23595d9885ecff",
+  "scope": "S13阶段快照，模块迁移和组合回归尚未完成",
+  "reports": [
+    {
+      "group": "control",
+      "path": "control.json.gz",
+      "worktree_head": "1dc69fdafd0229bf959504748c15a080387beffa",
+      "meaning": "执行组阶段映射及运行记录；未由协调者逐项复核为最终完成"
+    },
+    {
+      "group": "capture",
+      "path": "capture.json.gz",
+      "worktree_head": "839ccfaf431a74435abda5453d9635a691a794a1",
+      "meaning": "执行组阶段映射及运行记录；未由协调者逐项复核为最终完成"
+    },
+    {
+      "group": "bootstrap",
+      "path": "bootstrap.json.gz",
+      "worktree_head": "32d2277a5575d3ef3373fb70e4648ba94996bd9e",
+      "meaning": "执行组阶段映射及运行记录；未由协调者逐项复核为最终完成"
+    },
+    {
+      "group": "outputs",
+      "path": "outputs.json.gz",
+      "worktree_head": "5374cb1f06e6a279020dc468ebba331103343497",
+      "meaning": "执行组阶段映射及运行记录；未由协调者逐项复核为最终完成"
+    },
+    {
+      "group": "reporting",
+      "path": "reporting.json.gz",
+      "worktree_head": "9dce180cd6518ca9e40b0657c8d498e274d23e91",
+      "meaning": "执行组阶段映射及运行记录；未由协调者逐项复核为最终完成"
+    },
+    {
+      "group": "storage-adapters",
+      "path": "storage-adapters.json.gz",
+      "worktree_head": "f13308109d10b50e948b8a060806b21b3a521de9",
+      "meaning": "执行组阶段映射及运行记录；未由协调者逐项复核为最终完成"
+    },
+    {
+      "group": "cross-component",
+      "path": "cross-component.json.gz",
+      "worktree_head": "b3eb65fbaa84c7bb0e8e5ac49bbc26f8d86cdfe8",
+      "meaning": "执行组阶段映射及运行记录；未由协调者逐项复核为最终完成"
+    }
+  ]
+}

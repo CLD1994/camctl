@@ -250,7 +250,7 @@ async def test_cleanup_stop_retains_started_host_result_and_original_pending(
     cfg, owned, context, driver, work_files = host_environment
     await _save_photos(cfg, owned, context, driver)
     output_id, target = _seed_repaired_file(cfg, owned)
-    _accept_cleanup(owned, output_id)
+    await _accept_cleanup(owned, output_id)
     loop = asyncio.get_running_loop()
     entered, release = asyncio.Event(), threading.Event()
     operations, results, saves, opened = [], [], [], []

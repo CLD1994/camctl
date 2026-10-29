@@ -16,7 +16,6 @@ from camctl.operations.models import ErrorValue
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from .test_capture_contract import _runtime
 from pathlib import Path
 from camctl.history.decoding import decode_event_row
 from camctl.history.events import event_type_name, branch_of
@@ -26,7 +25,8 @@ from camctl.contracts.history_values import INITIAL_BOUNDARY
 from camctl.history.snapshots import SnapshotRef, prepare_snapshot
 from camctl.persistence.executor import DbExecutor
 from camctl.persistence.repositories.history import HistoryRepository, SqliteSnapshotStore
-from .result_consumer_fixtures import RESULT_EVIDENCE, ResultCatalog, consumer_world
+from .result_consumer_fixtures import RESULT_EVIDENCE, ResultCatalog
+from ..support.result_cases import result_case, result_case_for
 from .test_result_page_history import _BINDING, _CURSOR, _actual, _entry
 
 pytestmark = pytest.mark.asyncio
@@ -70,16 +70,21 @@ def device_pages(runtime, *, completion_page=1, case="video"):
                     "data": {"activity_id": request.ticket.target_id}}}),))
         return DeviceCallResult.from_outcome(outcome)
     driver.list_results.side_effect = read
-    runtime.results = DriverResultListing(driver, _BINDING, _EVIDENCE)
-    runtime.evidence = _EVIDENCE
+    try:
+        case_support = result_case_for()
+    except RuntimeError:
+        runtime.results = DriverResultListing(driver, _BINDING, _EVIDENCE)
+        runtime.evidence = _EVIDENCE
+    else:
+        case_support.results.delegate = DriverResultListing(driver, _BINDING, _EVIDENCE)
     return driver
 
 
 @pytest.mark.parametrize("completion_page", [1, 2])
 @pytest.mark.parametrize("case", ["video", "empty", "wrong_kind"])
 async def test_device_completion_ends_original_activity_and_preserves_output_result(tmp_path, completion_page, case):
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, "timelapse",
-        independent_activity=True, catalog=DeviceCompletionCatalog())
+    owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "timelapse",
+        independent_activity=True, catalog=DeviceCompletionCatalog(), prepare_start_only=True, evidence_contracts=(_COMPLETION,))
     driver = device_pages(runtime, completion_page=completion_page, case=case)
     try:
         await capture_handler(handler)(action_id, runtime)
@@ -101,7 +106,7 @@ async def test_device_completion_ends_original_activity_and_preserves_output_res
 
 
 async def test_complete_file_set_without_device_completion_remains_unconfirmed(tmp_path):
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, "timelapse", catalog=DeviceCompletionCatalog())
+    owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "timelapse", catalog=DeviceCompletionCatalog(), prepare_start_only=True, evidence_contracts=(_COMPLETION,))
     device_pages(runtime, completion_page=None)
     try:
         await capture_handler(handler)(action_id, runtime)
@@ -120,7 +125,7 @@ async def test_device_completion_is_retained_while_product_format_remains_unknow
                 definition.task_factory(params), product_rules=({"kind": "video",
                     "format_id": "mp4", "min_count": 1, "exact_count": None,
                     "require_pairing": False},)))
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, "timelapse", catalog=FormatCatalog())
+    owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "timelapse", catalog=FormatCatalog(), prepare_start_only=True, evidence_contracts=(_COMPLETION,))
     device_pages(runtime, case="unknown_format")
     try:
         await capture_handler(handler)(action_id, runtime)
@@ -132,7 +137,7 @@ async def test_device_completion_is_retained_while_product_format_remains_unknow
 
 
 async def test_device_completion_remains_reliable_after_later_round_omits_it(tmp_path):
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, "timelapse", catalog=DeviceCompletionCatalog())
+    owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "timelapse", catalog=DeviceCompletionCatalog(), prepare_start_only=True, evidence_contracts=(_COMPLETION,))
     driver = device_pages(runtime)
     # 完成观察可靠，但第一轮末页的集合尚未确定。
     original = driver.list_results.side_effect
@@ -146,7 +151,7 @@ async def test_device_completion_remains_reliable_after_later_round_omits_it(tmp
     try:
         await capture_handler(handler)(action_id, runtime)
         assert owned.connection.execute("SELECT activity_state,completion_basis FROM device_activities").fetchone() == (3, 1)
-        runtime.monotonic_ns = lambda: 10_000_000_000
+        result_case_for().clock.monotonic = 10_000_000_000
         second = device_pages(runtime, completion_page=None)
         await capture_handler(handler)(action_id, runtime)
         assert owned.connection.execute("SELECT status FROM actions").fetchone() == (3,)
@@ -157,7 +162,7 @@ async def test_device_completion_remains_reliable_after_later_round_omits_it(tmp
 
 
 async def test_device_completion_is_kept_even_when_directory_read_returns_error(tmp_path):
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, "timelapse", catalog=DeviceCompletionCatalog())
+    owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "timelapse", catalog=DeviceCompletionCatalog(), prepare_start_only=True, evidence_contracts=(_COMPLETION,))
     driver = device_pages(runtime, case="read_error")
     try:
         await capture_handler(handler)(action_id, runtime)
@@ -181,7 +186,7 @@ async def test_unknown_result_end_save_reopens_original_complete_request(tmp_pat
                     completion_page=completion_page)
                 assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
             return DbOutcome(DbOutcomeKind.UNKNOWN, error=ConsistencyError("结论提交回执未知"))
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, "timelapse", catalog=DeviceCompletionCatalog())
+    owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "timelapse", catalog=DeviceCompletionCatalog(), prepare_start_only=True, evidence_contracts=(_COMPLETION,))
     driver = device_pages(runtime)
     repository = UnknownConclusion()
     runtime.capture = repository
@@ -191,27 +196,23 @@ async def test_unknown_result_end_save_reopens_original_complete_request(tmp_pat
             await capture_handler(handler)(action_id, runtime)
         assert len(repository.requests) == 2 and repository.requests[0] == repository.requests[1]
         assert owned.connection.execute("SELECT activity_state,completion_basis FROM device_activities").fetchone() == ((3, 2) if committed else (1, 1))
-        pending, = runtime.pending_start_results.values()
-        assert pending.completion_page is not None and pending.result_set is not None
+        finish, result_set, key, completion_page = repository.requests[0]
+        assert completion_page is not None and result_set is not None
         if committed:
-            changed = replace(pending.result_set, evidence={
-                **pending.result_set.evidence, "observation": {"changed": True}})
-            rejected = CaptureRepository().finish_result_check(pending.finish, changed,
-                pending.key, owned, completion_page=pending.completion_page)
+            changed = replace(result_set, evidence={
+                **result_set.evidence, "observation": {"changed": True}})
+            rejected = CaptureRepository().finish_result_check(finish, changed,
+                key, owned, completion_page=completion_page)
             assert rejected.kind is DbOutcomeKind.ROLLED_BACK
-            rejected = CaptureRepository().finish_result_check(pending.finish,
-                pending.result_set, pending.key, owned, completion_page=None)
+            rejected = CaptureRepository().finish_result_check(finish,
+                result_set, key, owned, completion_page=None)
             assert rejected.kind is DbOutcomeKind.ROLLED_BACK
         owned.connection.close()
         owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-        resumed = _runtime(owned)
-        resumed.pending_start_results = runtime.pending_start_results
-        resumed.evidence = runtime.evidence
-        resumed.wall_us = lambda: 1_750_001_000_000_000
-        resumed.resume_start_results(action_id)
-        assert not resumed.pending_start_results
-        assert owned.connection.execute("SELECT activity_state,completion_basis FROM device_activities").fetchone() == (3, 2)
+        resumed = await result_case_for().reopen(owned)
+        result_case_for().clock.wall = 1_750_001_000_000_000
         await capture_handler(handler)(action_id, resumed)
+        assert owned.connection.execute("SELECT activity_state,completion_basis FROM device_activities").fetchone() == (3, 2)
         assert owned.connection.execute("SELECT status FROM actions").fetchone() == (3,)
         assert driver.list_results.await_count == 2
     finally:
@@ -219,7 +220,7 @@ async def test_unknown_result_end_save_reopens_original_complete_request(tmp_pat
 
 
 async def test_device_completion_history_restores_same_activity_in_three_paths(tmp_path):
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, "timelapse", catalog=DeviceCompletionCatalog())
+    owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "timelapse", catalog=DeviceCompletionCatalog(), prepare_start_only=True, evidence_contracts=(_COMPLETION,))
     path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
     history = HistoryRepository(path)
     executor = DbExecutor(lambda: open_existing(path, DbOpenMode.EXISTING_RW, DbConfig()),

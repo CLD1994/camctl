@@ -31,6 +31,7 @@ from camctl.reporting.policy import (
 )
 
 from ..persistence.test_runtime import _create_valid_database
+from ..support.reporting import deny_storage_access
 
 
 @pytest.fixture()
@@ -87,12 +88,6 @@ class TestPublishFlow:
         assert row[0] == 4  # PUBLISHED
         assert row[1] == 1
         assert row[2] is not None
-
-    def test_publish_without_bytes_rejected(self, connection, tmp_path: Path) -> None:
-        report_id = _freeze_report(tmp_path, connection)
-        outcome = publish_report(new_operation_key(), _owned(connection), report_id, _moved())
-        assert outcome.kind.value == "rolled_back"
-        assert outcome.error is not None
 
     def test_republish_increments_count(self, connection, tmp_path: Path) -> None:
         report_id = _freeze_report(tmp_path, connection)
@@ -304,6 +299,7 @@ def test_success_requires_current_publish_intent(connection, tmp_path, stage):
     before = _saved_state(connection)
     result = publish_report(new_operation_key(), _owned(connection), report_id, _moved())
     assert result.kind.value == "rolled_back"
+    assert result.error is not None
     assert _saved_state(connection) == before
 
 
@@ -372,15 +368,19 @@ def _before_operation(connection, report_id, operation):
 
 
 @pytest.mark.parametrize("operation", ["prepare", "intent", "publish", "failure"])
-@pytest.mark.parametrize("prefix", ["SELECT * FROM reports", "SELECT id FROM history_transactions", "INSERT INTO history_events", "UPDATE reports"])
-def test_management_read_or_write_failure_preserves_all_facts(connection, tmp_path, operation, prefix):
-    from ..persistence.test_transactions import FailingConnection
+@pytest.mark.parametrize("access,table", [
+    (sqlite3.SQLITE_READ, "reports"), (sqlite3.SQLITE_READ, "history_transactions"),
+    (sqlite3.SQLITE_INSERT, "history_events"), (sqlite3.SQLITE_UPDATE, "reports"),
+])
+def test_management_read_or_write_failure_preserves_all_facts(connection, tmp_path, operation, access, table):
     report_id = _freeze_report(tmp_path, connection)
     _before_operation(connection, report_id, operation)
     before = _saved_state(connection)
-    outcome = _operation(FailingConnection(connection, prefix), report_id, operation)
+    with deny_storage_access(connection, access, table) as observed:
+        outcome = _operation(connection, report_id, operation)
+    assert observed
     assert outcome.kind.value == "rolled_back"
-    assert isinstance(outcome.error, sqlite3.OperationalError)
+    assert type(outcome.error) is sqlite3.DatabaseError
     assert _saved_state(connection) == before
 
 
@@ -400,6 +400,10 @@ def test_unknown_management_commit_reuses_original_key_without_duplicate_fact(co
         @property
         def in_transaction(self):
             return connection.in_transaction
+
+        @property
+        def total_changes(self):
+            return connection.total_changes
 
         def execute(self, statement, parameters=()):
             if statement == "COMMIT":

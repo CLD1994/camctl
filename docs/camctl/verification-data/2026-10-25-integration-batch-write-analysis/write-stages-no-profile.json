@@ -1,0 +1,207 @@
+{
+  "source_head": "98d3b28da5751e1e8c733f2712180cd5e0e119aa",
+  "N": 200,
+  "B": 4,
+  "stages": [
+    {
+      "stage": "db_transaction",
+      "wall_ns": 9291693995,
+      "cpu_ms": 9968.356,
+      "phases": {
+        "unclassified": {
+          "elapsed_ms": 11.462,
+          "cpu_ms": 12.096,
+          "calls": 0,
+          "sql": {
+            "elapsed_ms": 0.0,
+            "cpu_ms": 0.0
+          }
+        },
+        "begin_write": {
+          "elapsed_ms": 0.029,
+          "cpu_ms": 0.031,
+          "calls": 1,
+          "sql": {
+            "execute_calls": 1,
+            "rows_read": 0,
+            "rows_written": 0,
+            "elapsed_ms": 0.01,
+            "cpu_ms": 0.011
+          }
+        },
+        "read_state": {
+          "elapsed_ms": 5.303,
+          "cpu_ms": 5.684,
+          "calls": 210,
+          "sql": {
+            "execute_calls": 211,
+            "rows_read": 211,
+            "rows_written": 0,
+            "fetch_calls": 211,
+            "elapsed_ms": 2.128,
+            "cpu_ms": 2.271
+          }
+        },
+        "plan": {
+          "elapsed_ms": 741.845,
+          "cpu_ms": 794.604,
+          "calls": 1,
+          "sql": {
+            "execute_calls": 9485,
+            "rows_read": 10644,
+            "rows_written": 0,
+            "fetch_calls": 9693,
+            "elapsed_ms": 84.554,
+            "cpu_ms": 89.787
+          }
+        },
+        "final_checks": {
+          "elapsed_ms": 1.807,
+          "cpu_ms": 1.922,
+          "calls": 210,
+          "sql": {
+            "execute_calls": 5,
+            "rows_read": 5,
+            "rows_written": 0,
+            "fetch_calls": 5,
+            "elapsed_ms": 0.084,
+            "cpu_ms": 0.087
+          }
+        },
+        "sql_writes": {
+          "elapsed_ms": 51.897,
+          "cpu_ms": 55.702,
+          "calls": 417,
+          "sql": {
+            "execute_calls": 1272,
+            "rows_read": 18,
+            "rows_written": 1054,
+            "fetch_calls": 218,
+            "elapsed_ms": 25.606,
+            "cpu_ms": 27.514
+          }
+        },
+        "validation_context": {
+          "elapsed_ms": 3341.15,
+          "cpu_ms": 3586.666,
+          "calls": 417,
+          "sql": {
+            "execute_calls": 13546,
+            "rows_read": 24294,
+            "rows_written": 0,
+            "fetch_calls": 19270,
+            "elapsed_ms": 208.808,
+            "cpu_ms": 221.499
+          }
+        },
+        "event_generation": {
+          "elapsed_ms": 3090.054,
+          "cpu_ms": 3317.126,
+          "calls": 210,
+          "sql": {
+            "execute_calls": 12537,
+            "rows_read": 23917,
+            "rows_written": 0,
+            "fetch_calls": 18281,
+            "elapsed_ms": 177.717,
+            "cpu_ms": 188.795
+          }
+        },
+        "report_targets": {
+          "elapsed_ms": 7.569,
+          "cpu_ms": 8.126,
+          "calls": 208,
+          "sql": {
+            "elapsed_ms": 0.0,
+            "cpu_ms": 0.0
+          }
+        },
+        "event_validation": {
+          "elapsed_ms": 2021.598,
+          "cpu_ms": 2170.07,
+          "calls": 208,
+          "sql": {
+            "execute_calls": 22660,
+            "rows_read": 25805,
+            "rows_written": 0,
+            "fetch_calls": 23380,
+            "elapsed_ms": 188.149,
+            "cpu_ms": 199.778
+          }
+        },
+        "change_derivation": {
+          "elapsed_ms": 14.183,
+          "cpu_ms": 15.257,
+          "calls": 416,
+          "sql": {
+            "elapsed_ms": 0.0,
+            "cpu_ms": 0.0
+          }
+        },
+        "commit": {
+          "elapsed_ms": 4.795,
+          "cpu_ms": 1.073,
+          "calls": 1,
+          "sql": {
+            "execute_calls": 1,
+            "rows_read": 0,
+            "rows_written": 0,
+            "elapsed_ms": 4.767,
+            "cpu_ms": 1.044
+          }
+        }
+      },
+      "details": {
+        "history_decode": {
+          "elapsed_ms": 2393.895,
+          "cpu_ms": 2569.427,
+          "calls": 12875
+        },
+        "history_structure_validation": {
+          "elapsed_ms": 1692.539,
+          "cpu_ms": 1815.594,
+          "calls": 25718
+        },
+        "history_event_validation": {
+          "elapsed_ms": 2019.83,
+          "cpu_ms": 2168.211,
+          "calls": 208
+        }
+      },
+      "details_inclusive": true,
+      "sql": {
+        "execute_calls": 59718,
+        "rows_read": 84894,
+        "rows_written": 1054,
+        "fetch_calls": 71058,
+        "elapsed_ms": 691.824,
+        "cpu_ms": 730.787
+      },
+      "counts": {
+        "events": 208,
+        "row_changes": 218
+      }
+    }
+  ],
+  "result": {
+    "ref": {
+      "action_id": 1,
+      "scan_id": 3,
+      "final_page_event_id": 220,
+      "version": 1
+    },
+    "action_status": 3,
+    "plan_status": 3,
+    "boundary": {
+      "txn_id": 420,
+      "last_event_id": 836
+    },
+    "output_count": 200,
+    "original_count": 200,
+    "preview_count": 0,
+    "scope_count": 14
+  },
+  "after_logical_sha256": "9cd0007a92fb277d1fcca5c5729319308f652a353b20598fec6a8503c5eb4b4a",
+  "verify_wall_s_without_stage_observation": 0.8240717040025629,
+  "note": "只有现有事务阶段与SQL计量，无cProfile、无tracemalloc、无原测试MeasuredConnection。该观察本身仍有开销。"
+}

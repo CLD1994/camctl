@@ -5,17 +5,26 @@ from dataclasses import replace
 
 import pytest
 
+from camctl.history.validators import EventValidationError
+
 from camctl.contracts.values import ConsistencyError
 from camctl.history.reads import ProductReadScope
 from camctl.history.validators import ValidatedEvent
 from camctl.persistence.event_reads import SqlEventReads
-from camctl.persistence.repositories.outputs import _BoundedProductReads
-from camctl.outputs.competition import has_product_predecessor
-from camctl.persistence.transaction import event_envelope, row_change, row_facts, update_change
+from camctl.persistence.repositories.outputs import OutputsRepository
+from ..support.output_planning import capture_operation, EventSequence
+from ..support.output_storage_cases import QueryProbe, grant_candidate
+from camctl.persistence.transaction import (
+    event_envelope,
+    row_change,
+    row_facts,
+    update_change,
+    commit_operation,
+)
+from camctl.contracts.values import new_operation_key
 
 from .test_product_competition import competition_database  # noqa: F401
 from .test_qualification import qualification_environment, _NOW  # noqa: F401
-from ..operations.test_result_reuse import _FaultConnection
 
 
 def _scope():
@@ -45,23 +54,38 @@ def test_current_fact_port_query_error_is_not_empty(competition_database):
     connection = competition_database.connection
     connection.execute("BEGIN")
     try:
-        fault = _FaultConnection(connection, "SELECT id FROM actions")
+        fault = QueryProbe(
+            connection,
+            lambda columns, reads, parameters: columns == {"id"}
+            and ("actions", "status") in reads,
+            failure="execute",
+        )
         with pytest.raises(sqlite3.OperationalError):
             tuple(SqlEventReads(fault, _scope()).actions())
     finally:
         connection.rollback()
 
 
-@pytest.mark.parametrize("field,value", [("action_id", 91), ("output_id", 702), ("occurred_at", _NOW + 1)])
+@pytest.mark.parametrize(
+    "field,value", [("action_id", 91), ("output_id", 702), ("occurred_at", _NOW + 1)]
+)
 def test_product_guard_rejects_wrong_read_scope(competition_database, field, value):
-    connection = competition_database.connection
-    connection.execute("BEGIN")
-    try:
-        reads = _BoundedProductReads(SqlEventReads(connection, replace(_scope(), **{field: value})))
-        with pytest.raises(ConsistencyError):
-            has_product_predecessor(reads, 31, 701, _NOW)
-    finally:
-        connection.rollback()
+    owned = competition_database
+    request = grant_candidate(owned, occurred_at=_NOW)
+    proposal = capture_operation(
+        owned,
+        lambda actual: OutputsRepository().grant_file(
+            request, new_operation_key(), actual
+        ),
+    )
+    proposal = replace(proposal, product_read_scope=replace(_scope(), **{field: value}))
+    before = tuple(owned.connection.iterdump())
+    result = commit_operation(
+        EventSequence(proposal.events, proposal), new_operation_key(), owned
+    )
+    assert result.kind == "rolled_back"
+    assert isinstance(result.error, EventValidationError), result.error
+    assert tuple(owned.connection.iterdump()) == before
 
 
 def test_current_fact_port_folds_only_validated_prefix_in_bounded_pages(competition_database):

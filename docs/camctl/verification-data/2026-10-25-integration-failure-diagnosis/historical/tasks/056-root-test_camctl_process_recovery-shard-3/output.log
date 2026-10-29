@@ -1,0 +1,45 @@
+F..                                                                      [100%]
+=================================== FAILURES ===================================
+_______________ test_next_run_waits_for_old_group_settlement[7] ________________
+
+session_factory = <function session_factory.<locals>.create at 0x7fb0eba0ba60>
+exit_code = 7
+
+    @pytest.mark.parametrize("exit_code", [0, 7])
+    def test_next_run_waits_for_old_group_settlement(session_factory, exit_code):
+        session = session_factory(exit_code=exit_code)
+        assert session.old["pgid"] == session.old["pid"]
+        assert session.tool["pgid"] == session.old["pgid"] != session.proc.pid
+        session.submit()
+        assert session.command("block-kill") == "kill-blocked"
+        session.exit_first()
+        session.until(lambda: "group_kill_sent" in session.logs(), "终止请求")
+        assert not stopped(session.tool["pid"])
+        session.assert_held()
+        assert session.command("kill-and-hold") == "kill-enabled"
+        session.until(lambda: stopped(session.tool["pid"]), "真实 SIGKILL 终止工具")
+        session.assert_held()  # 工具已停止但核验未完成，仍不能放行或回收。
+        assert session.command("resume-scan") == "scan-enabled"
+        session.until(lambda: len(session.calls("run")) == 2, "最终回收后启动下一 run")
+        assert snapshot(session.old["pid"]) is None
+        lines = session.logs().splitlines()
+        reaped = next(i for i, line in enumerate(lines) if
+                      f"pid={session.old['pid']} stream=group_reaped" in line)
+>       next_spawn = next(i for i, line in enumerate(lines) if
+                          "call=3 command=run operation=spawn" in line)
+E       StopIteration
+
+tests/integration/test_camctl_process_recovery.py:239: StopIteration
+============================== slowest durations ===============================
+19.57s setup    tests/integration/test_camctl_process_recovery.py::test_next_run_waits_for_old_group_settlement[7]
+5.01s call     tests/integration/test_camctl_process_recovery.py::test_original_group_does_not_kill_parallel_submit_or_other_groups[grouped]
+4.22s call     tests/integration/test_camctl_process_recovery.py::test_next_run_waits_for_old_group_settlement[7]
+3.04s call     tests/integration/test_camctl_process_recovery.py::test_early_reap_never_signals_stale_group_or_starts_run
+0.01s teardown tests/integration/test_camctl_process_recovery.py::test_early_reap_never_signals_stale_group_or_starts_run
+0.01s teardown tests/integration/test_camctl_process_recovery.py::test_next_run_waits_for_old_group_settlement[7]
+0.01s teardown tests/integration/test_camctl_process_recovery.py::test_original_group_does_not_kill_parallel_submit_or_other_groups[grouped]
+
+(2 durations < 0.005s hidden.  Use -vv to show these durations.)
+=========================== short test summary info ============================
+FAILED tests/integration/test_camctl_process_recovery.py::test_next_run_waits_for_old_group_settlement[7]
+1 failed, 2 passed in 31.99s

@@ -45,7 +45,7 @@ async def test_snapshot_acceptance_compares_write_once_values_with_independent_r
         from camctl.persistence.transaction import commit_operation
         owned,runtime,repo,ref,members=await _assessed_world(tmp_path,DefaultScopeState.NONEMPTY)
         key=new_operation_key()
-        result=commit_operation(_completion_command(ref,members,runtime.wall_us(),key),key,owned)
+        result=commit_operation(_completion_command(owned,ref,members,runtime.wall_us(),key),key,owned)
         assert result.kind == 'completed',result.error
         history=HistoryRepository(owned.connection.execute('PRAGMA database_list').fetchone()[2])
     else:
@@ -130,7 +130,7 @@ async def test_snapshot_acceptance_compares_publication_at_s_with_independent_re
         try:
             await _save(history,prepared)
             key=new_operation_key()
-            result=commit_operation(_completion_command(ref,members,runtime.wall_us(),key),key,owned)
+            result=commit_operation(_completion_command(owned,ref,members,runtime.wall_us(),key),key,owned)
             assert result.kind=='completed',result.error
             marker=repo.read_set(ref,owned)['published_event_id']
             outputs=dict(owned.connection.execute('SELECT id,output_id FROM segment_scope_members'))
@@ -631,103 +631,168 @@ async def test_restore_keeps_original_s_when_business_commits_between_source_pag
 @pytest.mark.asyncio
 async def test_cancel_after_job_end_before_delivery_still_receives_original_result(tmp_path,monkeypatch):
     from camctl.history.snapshots import MaintenanceContext,MaintenanceState,SnapshotRef,maintain_snapshots
-    from camctl.persistence.repositories import history as module
+    from camctl.persistence.models import DbJob,DbJobKind,DbPriority
     owned,_,_,ref,history=await _fixture(tmp_path)
+    boundary=history.current_boundary()
     store,executor=await _snapshot_store(history)
     async def candidates(*_):return (SnapshotRef(1,ref.action_id),)
     monkeypatch.setattr(store,'snapshot_candidates',candidates)
-    loop=asyncio.get_running_loop();delayed=asyncio.Event();ended=asyncio.Event();held=[];paths=[]
-    original_save=module._save_one_snapshot
-    def save(connection,item):paths.append(item.path);return original_save(connection,item)
-    monkeypatch.setattr(module,'_save_one_snapshot',save)
-    original_finish=executor._finish
-    def finish(job,payload):
-        if job.description=='快照保存':held.append((job,payload));delayed.set()
-        else:original_finish(job,payload)
-    monkeypatch.setattr(executor,'_finish',finish)
-    original_complete=executor._core.complete
-    def complete(key):
-        original_complete(key)
-        if held and key==held[0][0].key:loop.call_soon_threadsafe(ended.set)
-        elif paths:loop.call_soon_threadsafe(ended.set)
-    monkeypatch.setattr(executor._core,'complete',complete)
+    loop=asyncio.get_running_loop();delayed=asyncio.Event();held=[];paths=[];keys=[];receipts=[]
+    original_save=store.save_snapshots
+    async def save(prepared):
+        paths.extend(item.path for item in prepared)
+        return await original_save(prepared)
+    monkeypatch.setattr(store,'save_snapshots',save)
+    original_submit=executor.submit_write
+    def submit(job):
+        keys.append(job.key)
+        result=original_submit(job);receipts.append(result)
+        return result
+    monkeypatch.setattr(executor,'submit_write',submit)
+    original_schedule=loop.call_soon_threadsafe
+    def schedule(callback,*args,**kwargs):
+        # 在公开事件循环的线程交付边界保留原回执，不替换执行器结果。
+        if args and isinstance(args[0],DbJob) and args[0].key in keys:
+            held.append((callback,args,kwargs))
+            return original_schedule(delayed.set)
+        return original_schedule(callback,*args,**kwargs)
+    monkeypatch.setattr(loop,'call_soon_threadsafe',schedule)
+    def deliver():
+        for callback,args,kwargs in held:
+            original_schedule(callback,*args,**kwargs)
+        held.clear()
     task=asyncio.create_task(maintain_snapshots(MaintenanceContext(store=store,state=MaintenanceState(),threshold=1,batch_size=2)))
     try:
-        await asyncio.wait_for(delayed.wait(),60);await asyncio.wait_for(ended.wait(),60)
+        await asyncio.wait_for(delayed.wait(),60)
+        # 同一真实工作线程已执行后续读取，证明保存及COMMIT已实际结束。
+        later=executor.submit_read(DbJob(new_operation_key(),'confirm saved snapshot',DbJobKind.READ,DbPriority.BUSINESS,
+            lambda actual:actual.connection.execute('SELECT COUNT(*) FROM entity_snapshots').fetchone()[0]))
+        assert (await later).value==1
+        assert receipts and not receipts[0].done()
         task.cancel()
         delivered=loop.create_future();loop.call_soon(delivered.set_result,None);await delivered
         assert paths[0].exists() and not task.done()
-        original_finish(*held[0])
+        deliver()
         with pytest.raises(asyncio.CancelledError):await task
-        assert not paths[0].exists() and not executor._results
+        assert receipts[0].done() and receipts[0].result().kind.value=='completed'
+        assert not paths[0].exists()
         assert owned.connection.execute('SELECT COUNT(*) FROM entity_snapshots').fetchone()[0]==1
+        assert history.current_boundary()==boundary
     finally:
-        if held and not task.done():original_finish(*held[0])
+        deliver()
         if not task.done():
             try:await task
             except asyncio.CancelledError:pass
         await executor.close();owned.connection.close()
 
 
-def test_unframed_snapshot_body_has_fixed_decoder_residency():
+async def _stream_snapshot(tmp_path):
+    owned,_,_,ref,history=await _fixture(tmp_path)
+    boundary=history.current_boundary()
+    with history.open_segment_history(ref.action_id,boundary) as handle:
+        prepared=prepare_snapshot(handle)
+    try:
+        await _save(history,prepared)
+        content=prepared.path.read_bytes()
+    finally:
+        prepared.close()
+    with history.open_segment_history(ref.action_id,boundary,strategy='snapshot'):
+        pass
+    return owned,ref,history,boundary,content
+
+
+def _replace_snapshot_body(owned,content):
+    owned.connection.execute('UPDATE entity_snapshots SET content=?',(content,))
+
+
+@pytest.mark.asyncio
+async def test_unframed_snapshot_body_has_fixed_decoder_residency(tmp_path):
     import gc,tracemalloc
-    from camctl.history.snapshot_stream import _records
-    from camctl.history.snapshots import SnapshotMaintenanceError
-    chunk=b'x'*65536;evidence=[]
-    for count in (4,64):
-        gc.collect();tracemalloc.start()
-        try:
-            with pytest.raises(SnapshotMaintenanceError):
-                for _ in _records(chunk for _ in range(count)):pytest.fail('unframed body produced a record')
-            peak=tracemalloc.get_traced_memory()[1]
-        finally:tracemalloc.stop()
-        evidence.append((count*len(chunk),peak))
-    print('UNFRAMED_RESIDENCY',evidence)
-    assert evidence[-1][1]<512000
-    assert evidence[-1][1]<evidence[0][1]+200000
+    owned,ref,history,boundary,content=await _stream_snapshot(tmp_path)
+    header=content.split(b'\n',1)[0]+b'\n';chunk=b'x'*65536;evidence=[]
+    try:
+        for count in (4,64):
+            _replace_snapshot_body(owned,header+chunk*count)
+            gc.collect();tracemalloc.start()
+            try:
+                with pytest.raises(ConsistencyError) as raised:
+                    history.open_segment_history(ref.action_id,boundary,strategy='snapshot')
+                assert '结尾换行' in str(raised.value.__cause__)
+                peak=tracemalloc.get_traced_memory()[1]
+            finally:tracemalloc.stop()
+            evidence.append((count*len(chunk),peak))
+        print('UNFRAMED_RESIDENCY',evidence)
+        assert evidence[-1][1]<512000
+        assert evidence[-1][1]<evidence[0][1]+200000
+    finally:owned.connection.close()
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize('bad',[b'{"x":1,"\\u0078":2}\n',b'{"x":"\\ud800"}\n',b'{"x":01}\n',b'{"x":NaN}\n',b'{"x":"\xf0\x9f\n',b'{"x":1}\n{"y":'])
-def test_framed_snapshot_keeps_exact_json_and_utf8_rejection(bad):
-    from camctl.history.snapshot_stream import _records
-    from camctl.history.snapshots import SnapshotMaintenanceError
-    with pytest.raises(SnapshotMaintenanceError):
-        for _ in _records(bytes((byte,)) for byte in bad):pass
+async def test_framed_snapshot_keeps_exact_json_and_utf8_rejection(tmp_path,bad):
+    owned,ref,history,boundary,content=await _stream_snapshot(tmp_path)
+    try:
+        # 合法前缀来自真实保存，末分区保留合法行之后的截断值。
+        invalid=bad.split(b'\n',1)[1] if bad.startswith(b'{"x":1}\n') else bad
+        _replace_snapshot_body(owned,content+invalid)
+        with pytest.raises(ConsistencyError) as raised:
+            history.open_segment_history(ref.action_id,boundary,strategy='snapshot')
+        from camctl.history.snapshots import SnapshotMaintenanceError
+        assert isinstance(raised.value.__cause__,SnapshotMaintenanceError)
+    finally:owned.connection.close()
 
 
-def test_snapshot_accepts_necessary_large_row_and_split_exact_values():
+def _large_snapshot_record(content):
+    from decimal import Decimal
+    from camctl.history.snapshots import CHUNK_BYTES
+    records=[parse_exact_json(line) for line in content.decode().splitlines()]
+    action=next(record for record in records if record.get('table')=='actions')
+    probe={'a_padding':'','emoji':'😀','exact':Decimal('1.234567890123456789'),'n':9007199254740993,'text':'x'*(8*65536)}
+    action['row']['effective_params_json']={**action['row']['effective_params_json'],'stream_probe':probe}
+    def encode():return b''.join((encode_json_value(record)+'\n').encode() for record in records)
+    first=encode();offset=first.index('😀'.encode())
+    probe['a_padding']='p'*((CHUNK_BYTES-1-offset)%CHUNK_BYTES)
+    body=encode()
+    assert body.index('😀'.encode())%CHUNK_BYTES==CHUNK_BYTES-1
+    return body
+
+
+@pytest.mark.asyncio
+async def test_snapshot_accepts_necessary_large_row_and_split_exact_values(tmp_path):
     import tracemalloc
     from decimal import Decimal
-    from camctl.history.snapshot_stream import _records
-    def chunks():
-        yield b'{"text":"'
-        for _ in range(8):yield b'x'*65536
-        yield b'","emoji":"\xf0';yield b'\x9f\x98';yield b'\x80","exact":1.234567890123456789,"n":9007199254740993}\n'
-    tracemalloc.start()
+    owned,ref,history,boundary,content=await _stream_snapshot(tmp_path)
     try:
-        rows=_records(chunks());row=next(rows)
-        assert len(row['text'])==8*65536 and row['text'].startswith('x') and row['text'].endswith('x')
-        assert row['emoji']=='😀' and row['exact']==Decimal('1.234567890123456789')
-        assert row['n']==9007199254740993
-        with pytest.raises(StopIteration):next(rows)
-        print('NECESSARY_SINGLE_ROW',8*65536,tracemalloc.get_traced_memory()[1])
-    finally:tracemalloc.stop()
+        _replace_snapshot_body(owned,_large_snapshot_record(content))
+        tracemalloc.start()
+        try:
+            with history.open_segment_history(ref.action_id,boundary,strategy='snapshot') as handle:
+                row=handle.primary()['effective_params_json']['stream_probe']
+                assert len(row['text'])==8*65536 and row['text'].startswith('x') and row['text'].endswith('x')
+                assert row['emoji']=='😀' and row['exact']==Decimal('1.234567890123456789')
+                assert row['n']==9007199254740993
+            print('NECESSARY_SINGLE_ROW',8*65536,tracemalloc.get_traced_memory()[1])
+        finally:tracemalloc.stop()
+    finally:owned.connection.close()
 
 
-def test_framed_invalid_large_row_is_rejected_as_one_record():
+@pytest.mark.asyncio
+async def test_framed_invalid_large_row_is_rejected_as_one_record(tmp_path):
     import tracemalloc
-    from camctl.history.snapshot_stream import _records
-    from camctl.history.snapshots import SnapshotMaintenanceError
-    def chunks():
-        yield b'{"text":"'
-        for _ in range(8):yield b'x'*65536
-        yield b'"!}\n'
-    tracemalloc.start()
+    owned,ref,history,boundary,content=await _stream_snapshot(tmp_path)
     try:
-        with pytest.raises(SnapshotMaintenanceError):
-            for _ in _records(chunks()):pytest.fail('invalid row produced a value')
-        print('INVALID_FRAMED_SINGLE_ROW',8*65536,tracemalloc.get_traced_memory()[1])
-    finally:tracemalloc.stop()
+        records=_large_snapshot_record(content).splitlines(keepends=True)
+        index=next(index for index,record in enumerate(records) if b'stream_probe' in record)
+        records[index]=records[index][:-2]+b'!}\n'
+        _replace_snapshot_body(owned,b''.join(records))
+        tracemalloc.start()
+        try:
+            with pytest.raises(ConsistencyError) as raised:
+                history.open_segment_history(ref.action_id,boundary,strategy='snapshot')
+            assert '增量解码' in str(raised.value.__cause__)
+            print('INVALID_FRAMED_SINGLE_ROW',8*65536,tracemalloc.get_traced_memory()[1])
+        finally:tracemalloc.stop()
+    finally:owned.connection.close()
 
 
 @pytest.mark.parametrize('failure',['write','read','truncate','header'])

@@ -1,0 +1,113 @@
+{
+  "reviewed_at": 1792961339.1059928,
+  "tested_commit": "3fcc19004845b5e96f2af0bce4045db959972174",
+  "reviewed_later_commit": "d3399254a6183a31615343ae829a856364f56d97",
+  "media_fix_commit": "d5bcf2724a5f9f3d50f8f9444714543a48006e62",
+  "changed_production_paths": [
+    "apps/camctl/src/camctl/capture/media_flow.py"
+  ],
+  "changed_integration_or_dependency_inputs": [],
+  "media_fix_behavior": "Each CaptureProcessingSaves caller remembers a reliable RepairOutputFile in its own file_ids after joining the shared START receipt, including actual COMPLETED notification errors. Other save stages do not add output scope.",
+  "actual_dispatch": "handlers.advance_recording returns into OSMO360II_RECORD_SEGMENTS_V1 segment_completion before the single original media flow; native timelapse uses the segmented result chain.",
+  "actual_database_rows": [
+    {
+      "scenario": "empty-indexes5-0-failed",
+      "processing": [
+        {
+          "id": 1,
+          "source_device_file_id": null,
+          "check_state": 1,
+          "repair_state": 1,
+          "repair_output_file_id": null
+        }
+      ],
+      "repair_output_file_count": 0
+    },
+    {
+      "scenario": "gap-indexes3-2-failed",
+      "processing": [
+        {
+          "id": 1,
+          "source_device_file_id": null,
+          "check_state": 1,
+          "repair_state": 1,
+          "repair_output_file_id": null
+        }
+      ],
+      "repair_output_file_count": 0
+    },
+    {
+      "scenario": "native-tail-indexes7-2-succeeded",
+      "processing": [],
+      "repair_output_file_count": 0
+    },
+    {
+      "scenario": "normal-indexes0-2-succeeded",
+      "processing": [
+        {
+          "id": 1,
+          "source_device_file_id": null,
+          "check_state": 1,
+          "repair_state": 1,
+          "repair_output_file_id": null
+        }
+      ],
+      "repair_output_file_count": 0
+    },
+    {
+      "scenario": "overrun-indexes1-3-succeeded",
+      "processing": [
+        {
+          "id": 1,
+          "source_device_file_id": null,
+          "check_state": 1,
+          "repair_state": 1,
+          "repair_output_file_id": null
+        }
+      ],
+      "repair_output_file_count": 0
+    },
+    {
+      "scenario": "short-set-indexes2-2-succeeded",
+      "processing": [
+        {
+          "id": 1,
+          "source_device_file_id": null,
+          "check_state": 1,
+          "repair_state": 1,
+          "repair_output_file_id": null
+        }
+      ],
+      "repair_output_file_count": 0
+    },
+    {
+      "scenario": "unknown-indexes6-0-failed",
+      "processing": [
+        {
+          "id": 1,
+          "source_device_file_id": null,
+          "check_state": 1,
+          "repair_state": 1,
+          "repair_output_file_id": null
+        }
+      ],
+      "repair_output_file_count": 0
+    },
+    {
+      "scenario": "zero-gap-indexes4-2-failed",
+      "processing": [
+        {
+          "id": 1,
+          "source_device_file_id": null,
+          "check_state": 1,
+          "repair_state": 1,
+          "repair_output_file_id": null
+        }
+      ],
+      "repair_output_file_count": 0
+    }
+  ],
+  "actual_no_media_start_output": true,
+  "assessment": "The media START output-protection branch changed by d5bcf272 was not exercised by the original eight OSMO scenarios. No integration test or lock input changed through d3399254. The 8-passed installed-chain evidence remains attributable to 3fcc1900 and no additional OSMO rerun is necessary for these later changes.",
+  "scope_limit": "Does not assess later KEEP-cache or background-session production follow-ups; those require their own read-only review."
+}

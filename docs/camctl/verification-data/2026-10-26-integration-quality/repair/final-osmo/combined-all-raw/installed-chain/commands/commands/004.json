@@ -1,0 +1,17 @@
+{
+  "cwd": "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/osmo-builtin-package0",
+  "python": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+  "argv": [
+    "uv",
+    "pip",
+    "install",
+    "--python",
+    "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/osmo-builtin-package0/venv/bin/python",
+    "--require-hashes",
+    "-r",
+    "/tmp/camctl-quality-final-osmo-runtime-lidlmje7/combined-all-pytest/osmo-builtin-package0/requirements.txt"
+  ],
+  "exitcode": 0,
+  "stdout": "",
+  "stderr": "Using Python 3.11.17 environment at: venv\nResolved 9 packages in 302ms\nInstalled 9 packages in 15ms\n + attrs==26.1.0\n + concurrent-log-handler==0.9.29\n + janus==2.0.0\n + jsonschema==4.26.0\n + jsonschema-specifications==2025.9.1\n + portalocker==4.4.0\n + referencing==0.37.0\n + rpds-py==2026.6.3\n + typing-extensions==4.16.0\n"
+}

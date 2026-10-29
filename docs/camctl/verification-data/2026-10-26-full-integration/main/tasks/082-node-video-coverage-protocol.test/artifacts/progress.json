@@ -1,0 +1,10 @@
+{
+  "status": "finished",
+  "exit_code": 0,
+  "outcomes": {
+    "tests": 3,
+    "pass": 3,
+    "fail": 0,
+    "skipped": 0
+  }
+}

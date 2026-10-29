@@ -1,0 +1,18 @@
+证据目录 /tmp/camctl-quality-repair-evidence/final-history/primary-run
+进度 camctl/history pid=- preparing
+启动 camctl/history pid=1702909 cwd=/tmp/camctl-quality-repair-evidence/final-history/primary-run/tasks/001-camctl-history/source
+进度 camctl/history pid=1702909 tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window
+进度 camctl/history pid=1702909 tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window
+进度 camctl/history pid=1702909 tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window
+进度 camctl/history pid=1702909 tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window
+进度 camctl/history pid=1702909 tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window
+进度 camctl/history pid=1702909 tests/integration/history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window
+进度 camctl/history pid=1702909 tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity
+进度 camctl/history pid=1702909 tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity
+进度 camctl/history pid=1702909 tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity
+进度 camctl/history pid=1702909 tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity
+进度 camctl/history pid=1702909 tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity
+进度 camctl/history pid=1702909 tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity
+进度 camctl/history pid=1702909 tests/integration/history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity
+结束 camctl/history status=passed exit=0 seconds=220.961
+汇总 /tmp/camctl-quality-repair-evidence/final-history/primary-run/summary.json exit=0

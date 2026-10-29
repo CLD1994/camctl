@@ -1,0 +1,18 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.17, pytest-9.1.1, pluggy-1.6.0 -- /tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python
+cachedir: .pytest_cache
+rootdir: /tmp/camctl-fix44-components-20261025/apps/camctl
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, mock-3.16.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 6 items
+
+apps/camctl/tests/integration/session/test_submit_boundary.py::test_submit_unknown_commit_does_not_return_handoff_success[False] PASSED [ 16%]
+apps/camctl/tests/integration/session/test_submit_boundary.py::test_submit_unknown_commit_does_not_return_handoff_success[True] PASSED [ 33%]
+apps/camctl/tests/integration/session/test_submit_boundary.py::test_submit_before_close_keeps_acceptor_responsible PASSED [ 50%]
+apps/camctl/tests/integration/session/test_submit_boundary.py::test_close_before_submit_requests_later_run PASSED [ 66%]
+apps/camctl/tests/integration/session/test_submit_boundary.py::test_close_transaction_failure_keeps_released_admission_closed[False] PASSED [ 83%]
+apps/camctl/tests/integration/session/test_submit_boundary.py::test_close_transaction_failure_keeps_released_admission_closed[True] PASSED [100%]
+
+- generated xml file: /tmp/camctl-fix44-components-evidence-20261025/repaired-session-total-changes/junit.xml -
+============================== 6 passed in 1.37s ===============================

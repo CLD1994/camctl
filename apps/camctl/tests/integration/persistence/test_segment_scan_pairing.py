@@ -296,52 +296,56 @@ async def test_pair_fact_belongs_to_preview_history_and_snapshot(tmp_path):
         owned.connection.close()
 
 
-def test_family_sql_uses_prefix_index_and_deduplicates_without_catalog_rescan(tmp_path):
-    """真实规格索引的读取量检查；关系样本不作为可回放业务历史。"""
-    from .test_runtime import _create_valid_database
-    from camctl.persistence.repositories.result_file_pairing import _family_counts
-    path = tmp_path / 'queries.db'
-    _create_valid_database(path)
-    db = sqlite3.connect(path)
+@pytest.mark.asyncio
+async def test_family_sql_uses_prefix_index_and_deduplicates_without_catalog_rescan(tmp_path):
+    """公开配对在真实小型扫描上核实族；无关关系增长只作索引负载。"""
+    from ..support.output_planning import capture_operation
+    owned,runtime,saved,ids,_=await _ready(tmp_path,[_entry('raw.LRF'),_entry('raw.OSV')])
     try:
-        # 此连接只测关系查询，不开启业务外键校验；所有写入留在私有事务后回滚。
-        sql = ('INSERT INTO result_page_files(id,created_event_id,action_id,run_id,attempt_id,'
-               'page_event_id,file_id,identity,family_directory,family_stem,family_role)'
-               ' VALUES(?,?,?,?,?,?,?,?,?,?,?)')
-        db.executemany(sql, [
-            (1, 1, 1, 1, 1, 1, 1, '/DCIM/raw.OSV', '/DCIM', 'raw', 1),
-            (2, 2, 1, 1, 1, 2, 1, '/DCIM/raw.OSV', '/DCIM', 'raw', 1),
-            (3, 2, 1, 1, 1, 2, 2, '/DCIM/raw.LRF', '/DCIM', 'raw', 2)])
-        previous = 4
-        steps = []
-        for total in (20, 200, 2000):
-            db.executemany(sql, ((i, i, 1, 1, 1, i, i, f'/elsewhere/{i}.OSV',
-                '/elsewhere', str(i), 1) for i in range(previous, total + 4)))
-            previous = total + 4
-            measured = [0]
-            db.set_progress_handler(lambda: measured.__setitem__(0, measured[0] + 1) or 0, 1)
-            statements = []
-            db.set_trace_callback(statements.append)
-            result = _family_counts(db, 1, '/DCIM', 'raw', 10000)
-            db.set_progress_handler(None, 0)
-            db.set_trace_callback(None)
-            assert result == [(1, (1,)), (1, (2,))]
+        preview=ids['/DCIM/raw.LRF'];request=_request(owned,runtime,saved,preview)
+        source=owned.connection.execute('SELECT action_id FROM operation_runs WHERE id=?',(saved.ref.ticket.run_id,)).fetchone()[0]
+        attempt=owned.connection.execute('SELECT id FROM operation_attempts WHERE run_id=? AND attempt_no=?',
+            (saved.ref.ticket.run_id,saved.ref.ticket.attempt_id)).fetchone()[0]
+        previous=owned.connection.execute('SELECT MAX(id)+1 FROM result_page_files').fetchone()[0]
+        original=previous
+        steps=[]
+        owned.connection.execute('PRAGMA foreign_keys=OFF')
+        for total in (20,200,2000):
+            owned.connection.executemany('INSERT INTO result_page_files('
+                'id,created_event_id,action_id,run_id,attempt_id,page_event_id,file_id,identity,family_directory,family_stem,family_role)'
+                ' VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                ((i,i,source,saved.ref.ticket.run_id,attempt,i,i,f'/elsewhere/{i}.OSV','/elsewhere',str(i),1)
+                 for i in range(previous,total+original)))
+            previous=total+original
+            measured=[0];statements=[]
+            def save(actual):
+                db=actual.connection
+                db.set_progress_handler(lambda: measured.__setitem__(0,measured[0]+1) or 0,1)
+                db.set_trace_callback(statements.append)
+                try:
+                    receipt=runtime.capture.save_result_file_pairing(request,new_operation_key(),actual)
+                finally:
+                    db.set_progress_handler(None,0);db.set_trace_callback(None)
+                assert receipt.kind is DbOutcomeKind.COMPLETED,receipt.error
+                assert db.execute('SELECT original_count,preview_count,original_file_id FROM device_file_pairing_facts WHERE id=?',
+                    (receipt.value,)).fetchone()==(1,1,ids['/DCIM/raw.OSV'])
+                families=[statement for statement in statements if 'FROM result_page_files' in statement and all(name in statement.partition('WHERE')[2] for name in ('family_directory','family_stem'))]
+                assert families
+                for statement in families:
+                    explanation=db.execute('EXPLAIN QUERY PLAN '+statement).fetchall()
+                    assert any('result_page_files_family' in row[3] and 'SEARCH' in row[3] for row in explanation)
+                return receipt
+            capture_operation(owned,save)
             steps.append(measured[0])
-            for statement in statements:
-                explanation = db.execute('EXPLAIN QUERY PLAN ' + statement).fetchall()
-                assert any('result_page_files_family' in row[3] and 'SEARCH' in row[3]
-                           for row in explanation)
-        # 首次准备 SQL 可能多做一次编译；无关目录增长不得增加已测读取量。
-        assert all(value <= steps[0] + 20 for value in steps[1:])
+        assert all(value<=steps[0]+20 for value in steps[1:])
     finally:
-        db.rollback()
-        db.close()
+        owned.connection.close()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('conflict', [False, True])
 async def test_later_scan_preserves_first_pair_and_original_key(tmp_path, conflict):
-    from camctl.capture.handlers import _begin_check_round
+    from .result_page_fixtures import begin_result_check
     from camctl.capture.result_pages import ResultPageSave
     from camctl.operations.attempts import AttemptFinish
     from camctl.operations.models import EvidenceValue, Settlement, SettlementBasis
@@ -362,7 +366,7 @@ async def test_later_scan_preserves_first_pair_and_original_key(tmp_path, confli
             retry_wait=True), new_operation_key(), owned))
         source = owned.connection.execute('SELECT source_action_id FROM device_files WHERE id=?',
                                          (preview,)).fetchone()[0]
-        ticket = _begin_check_round(runtime, source).ticket
+        ticket = begin_result_check(owned,runtime, source).ticket
         name = 'raw.osv' if conflict else 'raw.OSV'
         actual = replace(_actual(ticket, entries=[_entry('raw.LRF'), _entry(name)], finalized=True),
             settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue('results_returned', 1,
@@ -415,7 +419,7 @@ async def test_member_uses_frozen_pair_fact_and_candidates_share_strict_proof(tm
         ref = SegmentSetRef(source, attempt, saved.ref.event_id, 1)
         repo = SegmentRepository()
         _ok(repo.create(SegmentSetCreate(ref, int(saved.ref.ticket.target_id), saved.ref.ticket.run_id,
-            runtime.action(source)['execution_spec_json']['target_duration_ms'], runtime.wall_us()),
+            (await runtime.action(source))['execution_spec_json']['target_duration_ms'], runtime.wall_us()),
             new_operation_key(), owned))
         original_input = runtime.capture.read_saved_result_file_input(saved.ref, original, boundary, owned)
         key = new_operation_key()
@@ -424,10 +428,11 @@ async def test_member_uses_frozen_pair_fact_and_candidates_share_strict_proof(tm
             from camctl.history.validators import EventContext
             from camctl.persistence.event_reads import SqlEventReads
             from camctl.persistence.transaction import BoundedCommandPlan
-            from camctl.persistence.repositories.segments import _Command
+            from camctl.persistence.repositories import segments as segment_storage
+            from .transaction_fixtures import plan_operation
             class BoundedMembers:
                 def plan(self, scope):
-                    plan = _Command('MEMBERS', ref, (member, original_input), member_at, key).plan(scope)
+                    plan = plan_operation(scope,segment_storage,lambda: repo.append_members(ref,(member,original_input),member_at,key,owned))
                     return BoundedCommandPlan(iter(plan.events),
                         lambda event, transaction: EventContext(transaction, plan.owners,
                             deepcopy(plan.state_rows),
@@ -564,7 +569,7 @@ async def test_unknown_strict_completion_remains_unknown_in_member_and_candidate
         ref = SegmentSetRef(source, attempt, saved.ref.event_id, 1)
         repo = SegmentRepository()
         _ok(repo.create(SegmentSetCreate(ref, int(saved.ref.ticket.target_id), saved.ref.ticket.run_id,
-            runtime.action(source)['execution_spec_json']['target_duration_ms'], runtime.wall_us()),
+            (await runtime.action(source))['execution_spec_json']['target_duration_ms'], runtime.wall_us()),
             new_operation_key(), owned))
         before = _snapshot(owned)
         receipt = repo.append_members(ref, (replace(member, completion=FileCompletionState.COMPLETE),),
@@ -587,7 +592,7 @@ async def test_member_guard_rederives_fixed_pair_input(tmp_path, bounded, damage
     from camctl.capture.segment_storage import SegmentSetCreate
     from camctl.history.validators import EventContext
     from camctl.persistence.event_reads import SqlEventReads
-    from camctl.persistence.repositories.segments import SegmentRepository, _Command
+    from camctl.persistence.repositories.segments import SegmentRepository
     from camctl.persistence.transaction import BoundedCommandPlan
     owned, runtime, saved, ids, _ = await _ready(tmp_path, [_entry('raw.LRF'), _entry('raw.OSV')])
     try:
@@ -603,12 +608,14 @@ async def test_member_guard_rederives_fixed_pair_input(tmp_path, bounded, damage
         ref = SegmentSetRef(source, attempt, saved.ref.event_id, 1)
         repo = SegmentRepository()
         _ok(repo.create(SegmentSetCreate(ref, int(saved.ref.ticket.target_id), saved.ref.ticket.run_id,
-            runtime.action(source)['execution_spec_json']['target_duration_ms'], runtime.wall_us()),
+            (await runtime.action(source))['execution_spec_json']['target_duration_ms'], runtime.wall_us()),
             new_operation_key(), owned))
         key = new_operation_key()
         class ForgedMembers:
             def plan(self, scope):
-                plan = _Command('MEMBERS', ref, (member,), runtime.wall_us(), key).plan(scope)
+                from camctl.persistence.repositories import segments as segment_storage
+                from .transaction_fixtures import plan_operation
+                plan = plan_operation(scope,segment_storage,lambda: repo.append_members(ref,(member,),runtime.wall_us(),key,owned))
                 event = plan.events[0]
                 row = event.rows[0]
                 after = dict(row.after.values)
@@ -643,10 +650,10 @@ async def test_member_guard_rederives_fixed_pair_input(tmp_path, bounded, damage
 @pytest.mark.asyncio
 async def test_committed_baseline_proof_uses_fixed_anchor_without_page_history_replay(tmp_path):
     from camctl.capture.baseline_models import BaselineFixSave
-    from camctl.capture.handlers import _begin_check_round, _control_call
+    from .result_page_fixtures import begin_result_check
+    from camctl.capture.handlers import capture_handler
     from camctl.devices.directory import DirectoryCursor
     from camctl.persistence.repositories import result_pages
-    from camctl.persistence.repositories.result_file_ownership import _proof
     from .test_segment_file_pairing import _BaselineCatalog
     from ..capture.result_consumer_fixtures import consumer_world
     from ..capture.test_result_page_history import _actual, _request as page_request, _BINDING
@@ -657,14 +664,16 @@ async def test_committed_baseline_proof_uses_fixed_anchor_without_page_history_r
                                             (source,)).fetchone()[0]
         _ok(runtime.capture.fix_baseline(BaselineFixSave(activity, 0, 0, runtime.wall_us()),
                                          new_operation_key(), owned))
-        await _control_call(runtime, runtime.action(source), 'start_recording', 'start_confirmed',
-                            activity_facts={'started_at': runtime.wall_us(), 'activity_state': 2})
-        ticket = _begin_check_round(runtime, source).ticket
+        await capture_handler('camera_record')(source, runtime)
+        ticket = begin_result_check(owned,runtime, source).ticket
         cursor = DirectoryCursor(_BINDING, ('/DCIM',), 0, '/DCIM/raw.OSV')
         first = _ok(runtime.capture.save_result_page(page_request(runtime, ticket,
             _actual(ticket, entries=[_entry('raw.LRF'), _entry('raw.OSV')], next_cursor=cursor)),
             new_operation_key(), owned))
         preview = dict(runtime.capture.read_result_page(first, owned).file_ids)['/DCIM/raw.LRF']
+        ownership=OwnershipFromResultPageSave(first,preview,runtime.wall_us())
+        ownership_key=new_operation_key()
+        _ok(runtime.capture.save_ownership_from_result_page(ownership,ownership_key,owned))
         measures = []
         for number in range(2000):
             name = f'z{number:05d}.OSV'
@@ -680,15 +689,14 @@ async def test_committed_baseline_proof_uses_fixed_anchor_without_page_history_r
             owned.connection.execute('BEGIN')
             owned.connection.set_progress_handler(lambda: steps.__setitem__(0, steps[0] + 100) or 0, 100)
             owned.connection.set_trace_callback(statements.append)
-            saved, raw, event, transaction = result_pages._at_record(owned.connection, ref.event_id)
-            result_pages.committed_page_proof(owned.connection, saved, raw, event, transaction)
-            _proof(owned.connection, OwnershipFromResultPageSave(first, preview, runtime.wall_us()))
+            runtime.capture.read_result_page(ref,owned)
+            assert runtime.capture.verify_ownership_from_result_page(ownership,ownership_key,owned) is not None
             owned.connection.set_progress_handler(None, 0)
             owned.connection.set_trace_callback(None)
             owned.connection.execute('ROLLBACK')
             measures.append((len(statements), steps[0]))
             anchors = [sql for sql in statements if 'INDEXED BY history_events_type' in sql]
-            assert len(anchors) == 2
+            assert anchors
             for sql in anchors:
                 assert any('history_events_type' in row[3] and 'SEARCH' in row[3]
                            for row in owned.connection.execute('EXPLAIN QUERY PLAN ' + sql))

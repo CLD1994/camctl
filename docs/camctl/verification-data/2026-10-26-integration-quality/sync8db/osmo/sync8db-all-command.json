@@ -1,0 +1,42 @@
+{
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "scripts/run-memory-budget.py",
+    "--evidence-dir",
+    "/tmp/camctl-sync8db-evidence/osmo/sync8db-all-budget",
+    "--",
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "camctl_memory_plugin",
+    "-p",
+    "osmo_timing",
+    "-p",
+    "integration_progress",
+    "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py",
+    "-q",
+    "--junitxml",
+    "/tmp/camctl-sync8db-evidence/osmo/sync8db-all.xml",
+    "--basetemp",
+    "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/sync8db-all-pytest",
+    "--durations=10",
+    "-x"
+  ],
+  "cwd": "/tmp/camctl-sync8db-tests-ojv22ku3/osmo",
+  "git_head": "70149be69088714b8574900b57efa1b16fe3fa68",
+  "git_status": "",
+  "test_sha256": "e295d5a5288f9db125ea3504b7ddc2213480255dc32783d163814d393b3be435",
+  "python": "Python 3.11.17",
+  "concurrent_load": "Other quality agents may run isolated workspaces concurrently; single diagnostic sample only.",
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-sync8db-tests-ojv22ku3/osmo/apps/camctl/src:/tmp/camctl-sync8db-tests-ojv22ku3/osmo/apps/camctl/tests:/tmp/camctl-sync8db-tests-ojv22ku3/osmo/scripts:/tmp/camctl-sync8db-tests-ojv22ku3/osmo/tests/integration:/tmp/camctl-sync8db-evidence/osmo",
+    "TMPDIR": "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/tmp",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/pycache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "OSMO_TIMING_FILE": "/tmp/camctl-sync8db-evidence/osmo/sync8db-all-stages.json",
+    "CAMCTL_INTEGRATION_PROGRESS": "/tmp/camctl-sync8db-evidence/osmo/sync8db-all-progress",
+    "UV_CACHE_DIR": "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/uv-cache",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/uv-project"
+  }
+}

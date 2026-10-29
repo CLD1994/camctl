@@ -1,0 +1,401 @@
+[
+  {
+    "nodeid": "tests/integration/scheduling/test_window_expiration.py::TestWindowObservation::test_in_window_check_saves_first_observation",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.08364427799824625
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.9299374809925212
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.010947475006105378
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 1.0245292339968728
+  },
+  {
+    "nodeid": "tests/integration/scheduling/test_window_expiration.py::TestWindowObservation::test_window_end_is_inclusive_for_observation",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.044118498990428634
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.026381540999864228
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00737254400155507
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.07787258399184793
+  },
+  {
+    "nodeid": "tests/integration/scheduling/test_window_expiration.py::TestWindowObservation::test_second_observation_keeps_first_time",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.029342830006498843
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.025132958005997352
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.008876810999936424
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.06335259901243262
+  },
+  {
+    "nodeid": "tests/integration/scheduling/test_window_expiration.py::TestWindowObservation::test_before_start_rejects_observation",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0505999070010148
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.03142567900067661
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.006574539002031088
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0886001250037225
+  },
+  {
+    "nodeid": "tests/integration/scheduling/test_window_expiration.py::TestWindowObservation::test_after_window_rejects_observation",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.02819921799527947
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.02395296200120356
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0070664080121787265
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.059218588008661754
+  },
+  {
+    "nodeid": "tests/integration/scheduling/test_window_expiration.py::TestWindowObservation::test_same_key_replay_restores_observed",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.025199633004376665
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.02577214800112415
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0061875700048403814
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0571593510103412
+  },
+  {
+    "nodeid": "tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_unstarted_expiration_recovers_atomic_transaction[rollback]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.03689795799436979
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.09539752200362273
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.010566340992227197
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.1428618209902197
+  },
+  {
+    "nodeid": "tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_unstarted_expiration_recovers_atomic_transaction[commit_before]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.03849853599967901
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.043157326988875866
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.009126883000135422
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.0907827459886903
+  },
+  {
+    "nodeid": "tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_unstarted_expiration_recovers_atomic_transaction[commit_after]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0345249980018707
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.04340408300049603
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.012492238005506806
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.09042131900787354
+  },
+  {
+    "nodeid": "tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_unstarted_expiration_replays_and_reverses_compound_history",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.045351544991717674
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 1.4439010450005298
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.011590039008297026
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 1.5008426290005445
+  },
+  {
+    "nodeid": "tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_unstarted_scope_restriction_keeps_occupancy",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.029166324995458126
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.03254895699501503
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.008603763999417424
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.07031904598989058
+  },
+  {
+    "nodeid": "tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_running_missing_activity_is_not_unstarted",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.03568767700926401
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.03258352000557352
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.008881885005393997
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.07715308202023152
+  },
+  {
+    "nodeid": "tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_known_no_effect_expires_original_start_atomically",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.03155187801166903
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.1045193400059361
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.014569838996976614
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.15064105701458175
+  },
+  {
+    "nodeid": "tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_expire_without_observation_is_window_missed",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.04754495600354858
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.02849132900882978
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.010434939991682768
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.08647122500406113
+  },
+  {
+    "nodeid": "tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_expire_with_persisted_observation_is_window_exhausted",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.045168875993113033
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.03699423899524845
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.010190278990194201
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.09235339397855569
+  },
+  {
+    "nodeid": "tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_window_end_is_inclusive_for_expiration",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.03607223399740178
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.023602307992405258
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.008920976993977092
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.06859551898378413
+  },
+  {
+    "nodeid": "tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_in_window_rejects_expiration",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.031959244995960034
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.021561019006185234
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.007968030011397786
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.061488294013543054
+  },
+  {
+    "nodeid": "tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_running_without_attempt_expires_and_releases",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.02327906600839924
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.033671658995444886
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00909736099129077
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0660480859951349
+  },
+  {
+    "nodeid": "tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_granted_intent_is_not_expired_by_window",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.02952664099575486
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.03683815700060222
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.008602372006862424
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.07496717000321951
+  },
+  {
+    "nodeid": "tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_last_expired_action_completes_plan",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.01855484199768398
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.04066584499378223
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0094941870047478
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.06871487399621401
+  },
+  {
+    "nodeid": "tests/integration/scheduling/test_window_expiration.py::TestPendingExpiration::test_expire_same_key_replay_restores_result",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.03335002899984829
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.027897142004803754
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.009295922995079309
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.07054309399973135
+  }
+]

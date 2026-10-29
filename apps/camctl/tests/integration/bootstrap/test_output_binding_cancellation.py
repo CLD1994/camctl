@@ -31,10 +31,10 @@ from .test_output_binding_changes import (
 pytestmark = pytest.mark.asyncio
 
 
-def _apply_cleanup_cancel(owned):
+async def _apply_cleanup_cancel(owned):
     """受理真实取消请求，固定现有清理目标并可靠施加取消。"""
     target = owned.connection.execute("SELECT id FROM actions WHERE type=5").fetchone()[0]
-    _accept(owned, "3", [{"name": "取消清理", "type": "cancel_task",
+    await _accept(owned, "3", [{"name": "取消清理", "type": "cancel_task",
                           "scheduled_at": "2026-01-15 09:00:00",
                           "params": {"target": {"action_instance_id": str(target)}}}])
     origin = owned.connection.execute("SELECT id FROM actions WHERE type=6").fetchone()[0]
@@ -55,7 +55,7 @@ def _apply_cleanup_cancel(owned):
 async def test_canceled_cleanup_error_fails_actual_cancel_origin(environment, code):
     cfg, owned, context, driver = environment
     output_id = await _pending_cleanup(environment, confirmed_present=code == "file_delete_failed")
-    target, origin, cancel_item_id = _apply_cleanup_cancel(owned)
+    target, origin, cancel_item_id = await _apply_cleanup_cancel(owned)
     cleanup_item_id = owned.connection.execute("SELECT id FROM cleanup_items").fetchone()[0]
     saved = OutputsRepository().cancel_cleanup_item(CancelCleanupItem(
         cleanup_item_id, _NOW, code, {"output_id": str(output_id)}), new_operation_key(), owned)
@@ -87,7 +87,7 @@ async def test_canceled_cleanup_error_fails_actual_cancel_origin(environment, co
 async def test_canceled_cleanup_preserves_saved_unknown_results_after_binding_change(environment, change):
     cfg, owned, context, driver = environment
     output_id = await _pending_cleanup(environment)
-    target, _origin, _cancel_item = _apply_cleanup_cancel(owned)
+    target, _origin, _cancel_item = await _apply_cleanup_cancel(owned)
     item_id = owned.connection.execute("SELECT id FROM cleanup_items").fetchone()[0]
     attempts = tuple(owned.connection.execute(
         "SELECT * FROM operation_attempts WHERE run_id IN"
@@ -185,7 +185,7 @@ async def test_canceled_cleanup_preserves_saved_unknown_results_after_binding_ch
 async def test_cleanup_cancel_original_key_rejects_changed_adopted_input(environment, change):
     _cfg, owned, _context, _driver = environment
     output_id = await _pending_cleanup(environment)
-    _apply_cleanup_cancel(owned)
+    await _apply_cleanup_cancel(owned)
     item_id = owned.connection.execute("SELECT id FROM cleanup_items").fetchone()[0]
     command = CancelCleanupItem(item_id, _NOW, "delete_unconfirmed", {"output_id": str(output_id)})
     repository, key = OutputsRepository(), new_operation_key()
@@ -211,7 +211,7 @@ async def test_cleanup_cancel_original_key_rejects_changed_adopted_input(environ
 async def test_cleanup_cancel_rejects_detail_for_other_original_output(environment):
     _cfg, owned, _context, _driver = environment
     output_id = await _pending_cleanup(environment)
-    _apply_cleanup_cancel(owned)
+    await _apply_cleanup_cancel(owned)
     item_id = owned.connection.execute("SELECT id FROM cleanup_items").fetchone()[0]
     before = tuple(owned.connection.iterdump())
 
@@ -225,7 +225,7 @@ async def test_cleanup_cancel_rejects_detail_for_other_original_output(environme
 async def test_single_item_cancel_cannot_reuse_original_composite_binding_key(environment):
     cfg, owned, _context, _driver = environment
     output_id = await _pending_cleanup(environment)
-    _apply_cleanup_cancel(owned)
+    await _apply_cleanup_cancel(owned)
     item_id, source_id = owned.connection.execute(
         "SELECT c.id,o.device_file_id FROM cleanup_items c JOIN outputs o ON o.id=c.output_id").fetchone()
     keys = tuple(row[0] for row in owned.connection.execute(

@@ -80,11 +80,11 @@ def test_installed_action6_timelapse_restores_natural_deadline_obtains_and_delet
     clock_log = deployment.root / "clock-reads.jsonl"
     for command in ("init", "describe"):
         result = _run([str(camctl), command, "--config", str(deployment.config_path)],
-            cwd=deployment.root, env=environment, log_dir=package.log_dir)
+            cwd=deployment.root, env=environment, log_dir=package.log_dir, camctl=True)
     described = json.loads(result.stdout)
     source_env = dict(package.environment, PYTHONPATH=str(REPO / "apps/camctl/src"))
     source = _run([str(REPO / "apps/camctl/.venv311/bin/python"), "-m", "camctl", "describe",
-        "--config", str(deployment.config_path)], cwd=deployment.root, env=source_env, log_dir=package.log_dir)
+        "--config", str(deployment.config_path)], cwd=deployment.root, env=source_env, log_dir=package.log_dir, camctl=True)
     assert json.loads(source.stdout) == described
     device = described["devices"][0]
     assert device["delete_supported"] is True

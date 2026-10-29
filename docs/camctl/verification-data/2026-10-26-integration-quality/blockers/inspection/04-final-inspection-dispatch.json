@@ -1,0 +1,19 @@
+{
+  "cwd": "/tmp/camctl-failure-repair-20261026-4f5dfpqh/inspection",
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "apps/camctl/tests/integration/bootstrap/test_inspection_read_dispatch.py",
+    "-q",
+    "--tb=short",
+    "-W",
+    "error::RuntimeWarning"
+  ],
+  "python": "3.11.17",
+  "source_head": "1e697c89b311fdc4de032ae7dd25ba22252ce5ae",
+  "exit_code": 0,
+  "elapsed_seconds": 11.958100554998964,
+  "log": "/tmp/camctl-failure-repair-evidence/inspection/04-final-inspection-dispatch.log",
+  "tool_session_id": 5592
+}

@@ -1,0 +1,27 @@
+{
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "apps/camctl/tests/unit/persistence/test_report_read_resources.py",
+    "apps/camctl/tests/unit/history/test_status_history.py",
+    "apps/camctl/tests/unit/persistence/test_executor_identity.py",
+    "apps/camctl/tests/unit/history/test_snapshot_object_discovery.py",
+    "-q",
+    "--tb=short",
+    "--junitxml=/tmp/camctl-quality-repair-evidence/latest-merge-review/history-seams.xml"
+  ],
+  "cwd": "/tmp/camctl-quality-repair-lidlmje7/latest-merge-review",
+  "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+  "sqlite": "3.53.1",
+  "pythonpath": "/tmp/camctl-quality-repair-lidlmje7/latest-merge-review/apps/camctl/src:/tmp/camctl-quality-repair-lidlmje7/latest-merge-review/apps/camctl/tests:/tmp/camctl-quality-repair-evidence/latest-merge-review",
+  "source_commit": "d896d4b28194258cb5da71b160d5ef22d642d48e",
+  "start_utc": "2026-10-25T21:17:17.755299+00:00",
+  "end_utc": "2026-10-25T21:17:19.880485+00:00",
+  "elapsed_s": 2.12506863901217,
+  "pid": 1756674,
+  "exit_code": 0,
+  "process_reaped": true,
+  "remaining_process_group": [],
+  "log": "/tmp/camctl-quality-repair-evidence/latest-merge-review/history-seams.log"
+}

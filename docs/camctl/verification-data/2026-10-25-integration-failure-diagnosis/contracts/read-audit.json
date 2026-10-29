@@ -1,0 +1,378 @@
+{
+  "date": "2026-10-25",
+  "diagnosis_id": 20,
+  "classification": "已确认的生产责任分派接缝缺陷；并有字段说明遗漏同步",
+  "conclusion": "合法inspection的HeldReadEnd可被普通/残留调度看到；消费者先用processing专属JOIN解释全部共享队列成员，在状态、摘要和绑定检查之前抛出ConsistencyError。",
+  "contract": [
+    {
+      "path": "docs/architecture/file-copy.md",
+      "lines": [
+        244,
+        270
+      ],
+      "fact": "先保存clean ReadEnd再本地校验；内部检查/修复按实际结束和绑定分类处理。"
+    },
+    {
+      "path": "docs/camctl/database/segments.md",
+      "lines": [
+        27,
+        29
+      ],
+      "fact": "每段独立inspection及inspection_id唯一输入copy。"
+    },
+    {
+      "path": "docs/camctl/database/outputs-files.md",
+      "lines": [
+        84,
+        92
+      ],
+      "fact": "inspection独立归属，不与recording_processing共用输入槽。"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-10-23-video-result-modes-and-action6-segmentation.md",
+      "lines": [
+        234,
+        240
+      ],
+      "fact": "计划明确delivery/processing/inspection三种唯一归属。"
+    },
+    {
+      "path": "docs/camctl/database/schema/files.sql",
+      "lines": [
+        128,
+        145
+      ],
+      "fact": "结构三选一约束。"
+    },
+    {
+      "path": "apps/camctl/src/camctl/persistence/repositories/outputs.py",
+      "lines": [
+        6733,
+        6761
+      ],
+      "fact": "独立守卫核对三选一及inspection/member/source。"
+    }
+  ],
+  "documentation_conflict": {
+    "path": "docs/camctl/database/file-fields.md",
+    "lines": [
+      150,
+      174
+    ],
+    "conflict": "仍写delivery/processing二选一并遗漏inspection查找。",
+    "assessment": "根据正式分段合同、实施计划、专门存储说明、SQL与独立守卫的一致三种责任证据，判为字段页漏同步；不据此重新设计或自行修改契约。"
+  },
+  "production_flow": [
+    {
+      "path": "apps/camctl/src/camctl/capture/segment_inspections.py",
+      "lines": [
+        322,
+        329
+      ],
+      "fact": "正式创建processing_id=None/inspection_id有值的输入。"
+    },
+    {
+      "path": "apps/camctl/src/camctl/capture/segment_inspections.py",
+      "lines": [
+        394,
+        418
+      ],
+      "fact": "保存到共享pending_read_ends并保留原context续接。"
+    },
+    {
+      "path": "apps/camctl/src/camctl/capture/input_copy.py",
+      "lines": [
+        252,
+        285
+      ],
+      "fact": "持有实际End后再await完整性处理。"
+    },
+    {
+      "path": "apps/camctl/src/camctl/outputs/copy.py",
+      "lines": [
+        1032,
+        1041
+      ],
+      "fact": "主机hash和源摘要提供合法让出。"
+    },
+    {
+      "path": "apps/camctl/src/camctl/bootstrap/flows.py",
+      "lines": [
+        181,
+        210
+      ],
+      "fact": "普通轮次在后台任务未完时仍先运行事实恢复。"
+    },
+    {
+      "path": "apps/camctl/src/camctl/capture/residual.py",
+      "lines": [
+        623,
+        626
+      ],
+      "fact": "残留候选筛选前运行相同事实恢复。"
+    },
+    {
+      "path": "apps/camctl/src/camctl/capture/media_flow.py",
+      "lines": [
+        715,
+        758
+      ],
+      "fact": "对所有End先JOIN recording_processing；无行立即抛错，binding_check在后。"
+    }
+  ],
+  "test_preconditions": {
+    "native_outputs": "video_jpeg",
+    "required_jpeg_absent": true,
+    "missing_jpeg_with_retained_video_is_explicitly_allowed": true,
+    "observer_stage": null,
+    "database_business_injection_enabled": false,
+    "fake_ffprobe_result": false,
+    "actual_ffprobe_records": 3,
+    "all_real_tool": true,
+    "all_returncode_zero": true,
+    "media_frames": [
+      60,
+      60,
+      45,
+      20
+    ],
+    "target_frames": 151,
+    "confirmed_frames": 165,
+    "clock": "同对业务UTC/单调钟在真实START和等待者形成后推进330秒；父进程/host/故障门保留真实超时。",
+    "limits": [
+      "软件合成样本不证明真实相机分辨率、LRF编码、画质或固件行为。"
+    ]
+  },
+  "runtime_log": {
+    "path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_native_0/action6-native/module.log",
+    "first_run_error_lines": [
+      21,
+      24
+    ],
+    "first_run_pid": 940340,
+    "first_run_exit": 1,
+    "reason": "state_db_error",
+    "error": "原文件事实未可靠保存: 原内部读取结束缺少处理、源观察者与动作归属",
+    "later_run_lines": [
+      27,
+      38
+    ],
+    "later_run_pid": 940981,
+    "later_run_exit": 0
+  },
+  "probe": {
+    "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+    "sqlite": "3.53.1",
+    "source": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/source",
+    "database": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_native_0/action6-native/deployment/state.db",
+    "scope": "Read-only branch probe. HeldReadEnd markers are constructed through production hold_read_end from real saved copy/ticket identities, not recovered original in-memory objects. Final database already contains terminal source/read results. This proves the unconditional query exclusion before status/binding checks; it is not a replay of original runtime interleaving.",
+    "query_only": 1,
+    "foreign_key_check": [],
+    "copies": [
+      {
+        "copy_id": 1,
+        "delivery_id": null,
+        "processing_id": null,
+        "inspection_id": 1,
+        "source_device_file_id": 2,
+        "committed_bytes": 79552,
+        "source_size": 79552,
+        "source_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392",
+        "target_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392",
+        "verification_state": 3,
+        "action_id": 1,
+        "set_id": 1,
+        "member_id": 2,
+        "inspection_source": 2,
+        "member_set": 1,
+        "member_source": 2,
+        "source_action_id": 1,
+        "observer_action_id": 1,
+        "device_id": "action6",
+        "driver_id": "dji-action6",
+        "action_status": 4,
+        "observer_device": "action6",
+        "observer_driver": "dji-action6",
+        "run_id": 4,
+        "responsibility_key": "read/1",
+        "kind": 3,
+        "run_status": 3,
+        "attempts_used": 1,
+        "attempt_no": 1,
+        "attempt_status": 2,
+        "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        "finish_at": 1792908940436176
+      },
+      {
+        "copy_id": 2,
+        "delivery_id": null,
+        "processing_id": null,
+        "inspection_id": 2,
+        "source_device_file_id": 4,
+        "committed_bytes": 79552,
+        "source_size": 79552,
+        "source_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392",
+        "target_sha256": "315fda458566a5b542f6b3bfd7700825519649a2a48cb08b1d9b7c3bd0ae4392",
+        "verification_state": 3,
+        "action_id": 1,
+        "set_id": 1,
+        "member_id": 4,
+        "inspection_source": 4,
+        "member_set": 1,
+        "member_source": 4,
+        "source_action_id": 1,
+        "observer_action_id": 1,
+        "device_id": "action6",
+        "driver_id": "dji-action6",
+        "action_status": 4,
+        "observer_device": "action6",
+        "observer_driver": "dji-action6",
+        "run_id": 5,
+        "responsibility_key": "read/2",
+        "kind": 3,
+        "run_status": 3,
+        "attempts_used": 1,
+        "attempt_no": 1,
+        "attempt_status": 2,
+        "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        "finish_at": 1792908940836449
+      },
+      {
+        "copy_id": 3,
+        "delivery_id": null,
+        "processing_id": null,
+        "inspection_id": 3,
+        "source_device_file_id": 6,
+        "committed_bytes": 61038,
+        "source_size": 61038,
+        "source_sha256": "34bac877a5d5d6b50644f3a0cfe6f635e2006cd5d0110701a6a4980f6071a015",
+        "target_sha256": "34bac877a5d5d6b50644f3a0cfe6f635e2006cd5d0110701a6a4980f6071a015",
+        "verification_state": 3,
+        "action_id": 1,
+        "set_id": 1,
+        "member_id": 6,
+        "inspection_source": 6,
+        "member_set": 1,
+        "member_source": 6,
+        "source_action_id": 1,
+        "observer_action_id": 1,
+        "device_id": "action6",
+        "driver_id": "dji-action6",
+        "action_status": 4,
+        "observer_device": "action6",
+        "observer_driver": "dji-action6",
+        "run_id": 6,
+        "responsibility_key": "read/3",
+        "kind": 3,
+        "run_status": 3,
+        "attempts_used": 1,
+        "attempt_no": 1,
+        "attempt_status": 2,
+        "result_json": "{\"format_version\":1,\"settlement\":{\"basis\":\"observed\",\"evidence\":{\"type\":\"read_returned\",\"version\":1,\"data\":{}}},\"observations\":[]}",
+        "finish_at": 1792908941221929
+      }
+    ],
+    "branch_probes": [
+      {
+        "copy_id": 1,
+        "binding_check_calls": 0,
+        "database_changes": 0,
+        "outcome": {
+          "class": "ConsistencyError",
+          "message": "原内部读取结束缺少处理、源观察者与动作归属"
+        }
+      },
+      {
+        "copy_id": 2,
+        "binding_check_calls": 0,
+        "database_changes": 0,
+        "outcome": {
+          "class": "ConsistencyError",
+          "message": "原内部读取结束缺少处理、源观察者与动作归属"
+        }
+      },
+      {
+        "copy_id": 3,
+        "binding_check_calls": 0,
+        "database_changes": 0,
+        "outcome": {
+          "class": "ConsistencyError",
+          "message": "原内部读取结束缺少处理、源观察者与动作归属"
+        }
+      }
+    ],
+    "traced_statements": [
+      "SELECT a.id,a.device_id,a.driver_id,a.status,a.cancel_requested,r.id,r.status,r.kind,c.delivery_id,f.source_action_id,ob.device_id,ob.driver_id FROM file_copies c JOIN recording_processing p ON p.id=c.processing_id JOIN actions a ON a.id=p.action_id JOIN operation_runs r ON r.copy_id=c.id JOIN device_files f ON f.id=c.source_device_file_id JOIN actions ob ON ob.id=f.observer_action_id WHERE c.id=1",
+      "SELECT a.id,a.device_id,a.driver_id,a.status,a.cancel_requested,r.id,r.status,r.kind,c.delivery_id,f.source_action_id,ob.device_id,ob.driver_id FROM file_copies c JOIN recording_processing p ON p.id=c.processing_id JOIN actions a ON a.id=p.action_id JOIN operation_runs r ON r.copy_id=c.id JOIN device_files f ON f.id=c.source_device_file_id JOIN actions ob ON ob.id=f.observer_action_id WHERE c.id=2",
+      "SELECT a.id,a.device_id,a.driver_id,a.status,a.cancel_requested,r.id,r.status,r.kind,c.delivery_id,f.source_action_id,ob.device_id,ob.driver_id FROM file_copies c JOIN recording_processing p ON p.id=c.processing_id JOIN actions a ON a.id=p.action_id JOIN operation_runs r ON r.copy_id=c.id JOIN device_files f ON f.id=c.source_device_file_id JOIN actions ob ON ob.id=f.observer_action_id WHERE c.id=3"
+    ],
+    "source_identity": [
+      {
+        "file": "apps/camctl/src/camctl/capture/media_flow.py",
+        "sha256": {
+          "diagnostic": "22fa44e45cb65b94a28848c83268b0731fd4686ae0a8a31172d9fdb7937c2441",
+          "executed_snapshot": "22fa44e45cb65b94a28848c83268b0731fd4686ae0a8a31172d9fdb7937c2441",
+          "workspace": "22fa44e45cb65b94a28848c83268b0731fd4686ae0a8a31172d9fdb7937c2441"
+        },
+        "all_equal": true
+      },
+      {
+        "file": "apps/camctl/src/camctl/capture/segment_inspections.py",
+        "sha256": {
+          "diagnostic": "7423ce94a99f8e1ea22cc42f30d8bcb3f396920fe61e19effb94b2f504e99cae",
+          "executed_snapshot": "7423ce94a99f8e1ea22cc42f30d8bcb3f396920fe61e19effb94b2f504e99cae",
+          "workspace": "7423ce94a99f8e1ea22cc42f30d8bcb3f396920fe61e19effb94b2f504e99cae"
+        },
+        "all_equal": true
+      },
+      {
+        "file": "apps/camctl/src/camctl/outputs/read_attempts.py",
+        "sha256": {
+          "diagnostic": "7b2df962b01769572db4e7748f1c5cf772e266c7921f7847f715a6e4901fd93b",
+          "executed_snapshot": "7b2df962b01769572db4e7748f1c5cf772e266c7921f7847f715a6e4901fd93b",
+          "workspace": "7b2df962b01769572db4e7748f1c5cf772e266c7921f7847f715a6e4901fd93b"
+        },
+        "all_equal": true
+      },
+      {
+        "file": "docs/camctl/database/schema/files.sql",
+        "sha256": {
+          "diagnostic": "930e05079767bd821e5ecc6559d74b58422703fa3a47bc383ee7cb493527c74d",
+          "executed_snapshot": "930e05079767bd821e5ecc6559d74b58422703fa3a47bc383ee7cb493527c74d",
+          "workspace": "930e05079767bd821e5ecc6559d74b58422703fa3a47bc383ee7cb493527c74d"
+        },
+        "all_equal": true
+      }
+    ],
+    "total_changes": 0,
+    "in_transaction": false
+  },
+  "repair_ownership": "拍摄侧共享实际结束事实与普通/残留恢复消费者的责任分派，并同步file-fields漏项。",
+  "implementation_options": [
+    "公共入口按真实唯一责任完整分类。",
+    "保留processing专属入口，但仅分派其责任；合法inspection必须继续由适用正式拥有者处理，包括已有绑定分类。"
+  ],
+  "acceptance": [
+    "确定性暂停真实inspection clean End，普通/残留入口均不误报；不新开READ/重读或提前媒体。",
+    "保持processing路径并拒绝实际交叉归属/损坏。",
+    "原ticket/key/时刻/预算及未知提交语义保持；覆盖已有结果、终态、取消、绑定、摘要、重拷、实际收场。",
+    "原native用例仍缺JPEG失败、151/165前3段与双取回成功，首run不再有意外state_db_error。",
+    "ID19清理依赖另行独立验证，最后再核完整客户端/ACK。"
+  ],
+  "unresolved": [
+    "未记录原失败瞬间具体copy_id；不能从最终DB或第三份READ临近run1收场指认。",
+    "原日志无确切普通/残留调用栈；两个入口均可达。",
+    "无法由现有材料精确区分主机hash/源摘要哪个await构成原交错。",
+    "只读探针使用最终DB和新构造Held，不是原进程重放。",
+    "真实设备和目标硬件行为不在本审计证据范围。"
+  ],
+  "artifacts": [
+    "/tmp/camctl-contract-read-audit.md",
+    "/tmp/camctl-contract-read-audit.json",
+    "/tmp/camctl-contract-read-probe.py",
+    "/tmp/camctl-contract-read-probe.json"
+  ],
+  "workspace_mutations": false,
+  "pytest_run": false,
+  "device_run": false
+}

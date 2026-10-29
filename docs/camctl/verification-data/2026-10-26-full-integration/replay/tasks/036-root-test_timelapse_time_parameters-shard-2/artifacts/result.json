@@ -1,0 +1,83 @@
+{
+  "id": "root/test_timelapse_time_parameters/shard-2",
+  "scope": "root",
+  "path": "tests/integration/test_timelapse_time_parameters.py",
+  "targets": [
+    "tests/integration/test_timelapse_time_parameters.py::test_describe_python_browser_and_node_export_agree[dji-osmo360-ii]"
+  ],
+  "estimated_seconds": 2.950322981996578,
+  "historical_failure_observed": true,
+  "parent_id": "root/test_timelapse_time_parameters",
+  "shard": 2,
+  "shards": 3,
+  "collection": "/tmp/camctl-integration-replay-20261026-u19lkvoe/collection/root-test_timelapse_time_parameters/artifacts",
+  "collected_nodes": 3,
+  "status": "passed",
+  "number": 36,
+  "worker": 0,
+  "artifacts": "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/036-root-test_timelapse_time_parameters-shard-2/artifacts",
+  "cwd": "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/036-root-test_timelapse_time_parameters-shard-2/source",
+  "started_utc": "2026-10-26T01:10:58.103551+00:00",
+  "command": [
+    "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/036-root-test_timelapse_time_parameters-shard-2/source/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "--rootdir=/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/036-root-test_timelapse_time_parameters-shard-2/source",
+    "tests/integration/test_timelapse_time_parameters.py::test_describe_python_browser_and_node_export_agree[dji-osmo360-ii]",
+    "-q",
+    "--durations=0",
+    "-p",
+    "integration_progress",
+    "--basetemp",
+    "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/036-root-test_timelapse_time_parameters-shard-2/tmp/pytest",
+    "-p",
+    "camctl_memory_plugin",
+    "--camctl-memory-limit",
+    "2GiB",
+    "--camctl-memory-cgroup-root",
+    "/sys/fs/cgroup/memory/camctl-budget-1985550-348d6ec12f114ac4930fa9a30d807340"
+  ],
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-integration-replay-20261026-u19lkvoe/control:/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/036-root-test_timelapse_time_parameters-shard-2/source/apps/camctl/src",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-integration-replay-20261026-u19lkvoe/workers/0/python-cache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-integration-replay-20261026-u19lkvoe/workers/0/project-env",
+    "UV_CACHE_DIR": "/tmp/camctl-integration-replay-20261026-u19lkvoe/workers/0/uv-cache",
+    "UV_OFFLINE": "1",
+    "TMPDIR": "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/036-root-test_timelapse_time_parameters-shard-2/tmp"
+  },
+  "preparations": [
+    {
+      "label": "package-resources",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/036-root-test_timelapse_time_parameters-shard-2/source/apps/camctl/scripts/sync_resources.py"
+      ],
+      "cwd": "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/036-root-test_timelapse_time_parameters-shard-2/source",
+      "started_utc": "2026-10-26T01:10:58.834406+00:00",
+      "pid": 2054745,
+      "exit_code": 0,
+      "finished_utc": "2026-10-26T01:10:58.879739+00:00",
+      "wall_seconds": 0.04532773399841972
+    }
+  ],
+  "preparation": "package-resources",
+  "preparation_pid": 2054745,
+  "pid": 2054749,
+  "execution_started_utc": "2026-10-26T01:10:58.880873+00:00",
+  "progress": {
+    "status": "finished",
+    "exit_code": 0,
+    "collected": 1,
+    "outcomes": {
+      "passed": 1
+    },
+    "subchecks": {},
+    "elapsed_seconds": 24.749589806990116,
+    "utc": "2026-10-26T01:11:24.028190+00:00",
+    "pid": 2054749
+  },
+  "exit_code": 0,
+  "finished_utc": "2026-10-26T01:11:24.187606+00:00",
+  "wall_seconds": 25.922261811996577
+}

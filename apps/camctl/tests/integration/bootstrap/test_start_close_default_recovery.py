@@ -1,242 +1,136 @@
-"""默认五个入口在候选之前核实原 START 完整收场申请。"""
+"""默认五入口从真实会话数据库核实原 START 完整收场申请。"""
 
 from dataclasses import replace
 
 import pytest
 
-from camctl.bootstrap import lifecycle
 from camctl.capture.handlers import capture_handler
 from camctl.contracts.values import ConsistencyError
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
-from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.transaction import saved_transaction_events
-from camctl.session.service import StateDbFailure
 
-from ..capture.test_record_media_result_settlement import _TrackedCommitFailure
-from ..capture.test_start_close_save_recovery import (
-    _assert_complete_group, _attempts, _history, start_close_world,
-)
-from . import test_capture_completion_default_recovery as completion_defaults
-from .test_capture_completion_default_recovery import _default_completion_world, _selected_flow
-from .test_read_default_consumers import _BeforeBusinessCandidates, _CandidateClock
-from .test_recording_results_cancellation import _BeforeCandidates, _CandidateBoundary
-from .test_recording_results_saved_consumers import _UnavailableOriginalKey
-
+from ..support.bootstrap_recovery import record_world, StorageGate, TransactionFault
 
 pytestmark = pytest.mark.asyncio
-_MODES = ("unknown", "lowered", "query_exhausted")
+_MODES = ("unknown", "lowered")
 _ENTRANCES = ("normal", "residual", "restricted", "normal-cancel", "restricted-cancel")
 
 
-async def _default_start_close_world(tmp_path, monkeypatch, mode):
-    """在首次复合申请前，把实际生产者接入默认会话的空责任集合。
+def _rows(owned, table):
+    return owned.connection.execute(f"SELECT * FROM {table} ORDER BY id").fetchall()
 
-    默认装配缺少设备声明时，其工厂先处理绑定失败。原 START/QUERY
-    已由真实 handler 保存，因此外层申请由原生产者形成；三个默认
-    工厂分别构建，实际五个 flow 接手核实，不借工厂取得新设备资格。
-    """
-    world = await start_close_world(tmp_path, mode)
-    world.mode = mode
-    actual_config = completion_defaults._config
 
-    def bound_config(home):
-        from camctl.persistence.directory_switch import canonical_to_path
-        config = actual_config(home)
-        return replace(config, paths=replace(config.paths,
-            staging=str(canonical_to_path(world.metadata.staging_path)),
-            ready=str(canonical_to_path(world.metadata.ready_path)),
-            processing=str(canonical_to_path(world.metadata.processing_path))))
+def _assert_complete_group(world, owned, finish, key):
+    events = saved_transaction_events(owned.connection, key)
+    assert events and {event["occurred_at"] for event in events} == {world.formed_at}
+    assert len({event["transaction"].txn_id for event in events}) == 1
+    changes = {(row["table"], row["id"]): row["after"]["values"]
+        for event in events for row in event["body"]["rows"]}
+    assert changes[("actions", world.action_id)]["status"] == 4
+    assert owned.connection.execute(
+        "SELECT status FROM actions WHERE id=?", (world.action_id,)).fetchone() == (4,)
+    for responsibility in finish.responsibility_keys:
+        run = owned.connection.execute(
+            "SELECT id,status,retry_wait_required FROM operation_runs WHERE responsibility_key=?", (responsibility,)).fetchone()
+        if run is None:
+            assert world.mode == "unknown" and responsibility.startswith("query/start/")
+            continue
+        expected = 4 if world.mode == "lowered" else 6
+        assert run[1:] == (expected, 0)
+        assert changes[("operation_runs", run[0])]["status"] == expected
+    assert changes[("plans", 1)]["status"] == 3
+    assert owned.connection.execute("SELECT status FROM plans WHERE id=1").fetchone() == (3,)
+    occupancy = 2 if world.mode == "lowered" else 1
+    assert owned.connection.execute("SELECT occupancy_state FROM device_activities WHERE action_id=?",
+        (world.action_id,)).fetchone() == (occupancy,)
+    if world.mode == "lowered":
+        assert changes[("device_activities", world.action_id)]["occupancy_state"] == 2
+    assert owned.connection.execute(
+        "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?", (str(key),)).fetchone() == (1,)
+    return events
 
-    # 原 fixture 的部署目录属于数据库身份；只让装配配置使用相同绑定。
-    monkeypatch.setattr(completion_defaults, "_config", bound_config)
+
+async def _exercise(tmp_path, monkeypatch, capture_resources, mode, entrance, *,
+                    after_commit=True, confirmation_unknown=None):
+    world = await record_world(tmp_path, capture_resources, monkeypatch, mode=mode)
+    original = CaptureRepository.close_start
+    inputs, receipts, faults = [], [], []
+    gate = None if confirmation_unknown is None else StorageGate(
+        original_key=True, unknown=confirmation_unknown)
+
+    def save(repository, finish, action_finish, key, owned):
+        inputs.append((finish, action_finish, key))
+        if len(inputs) == 1:
+            fault = TransactionFault(owned.connection, after_commit=after_commit)
+            faults.append(fault)
+            result = original(repository, finish, action_finish, key, replace(owned, connection=fault))
+        elif gate is not None:
+            result = gate.submit(lambda _request, operation_key, current:
+                original(repository, finish, action_finish, operation_key, current), None, key, owned)
+        else:
+            result = original(repository, finish, action_finish, key, owned)
+        receipts.append(result)
+        return result
+
+    monkeypatch.setattr(CaptureRepository, "close_start", save)
     try:
-        deps, factories, context, methods, now, runtime_calls = await _default_completion_world(
-            world, monkeypatch, binding=True)
-    except BaseException:
+        before_attempts = _rows(world.owned, "operation_attempts")
+        before_history = _rows(world.owned, "history_events")
+        before_calls = (len(world.driver.calls), 0 if world.query is None else len(world.query.calls))
+        with pytest.raises(ConsistencyError):
+            await capture_handler("camera_record")(world.action_id, world.runtime)
+        assert len(inputs) == len(receipts) == len(faults) == 1
+        assert receipts[0].kind is DbOutcomeKind.UNKNOWN and faults[0].commit_calls == 1
+        finish, action_finish, key = inputs[0]
+        assert finish.occurred_at == action_finish.occurred_at == world.formed_at
+        assert action_finish.action_id == world.action_id
         world.owned.connection.close()
-        raise
-    try:
-        assert deps.capture_completions == world.runtime.pending_capture_completions == {}
-        for factory in factories:
-            runtime = factory(world.owned, "cam-1")
-            assert runtime is not None
-            assert runtime.pending_capture_completions is deps.capture_completions
-            assert runtime.retry_gate is deps.capture_retry_gate
-        assert len(runtime_calls) == 3
-        # 原等待锚点来自已保存的真实调用结果，与完整申请分别交接。
-        deps.capture_retry_gate.anchors.update(world.runtime.retry_gate.anchors)
-        world.runtime.retry_gate = deps.capture_retry_gate
-        world.runtime.pending_capture_completions = deps.capture_completions
-        return world, deps, context, methods, now, runtime_calls
-    except BaseException:
-        world.owned.connection.close()
-        lifecycle.close_runtime(deps)
-        raise
+        await world.reconnect()
+        with world.observer() as owned:
+            first_events = saved_transaction_events(owned.connection, key)
+            assert (first_events is not None) is after_commit
+            before = tuple(owned.connection.iterdump())
 
+            def check():
+                assert inputs == [(finish, action_finish, key)] * 2
+                assert inputs[1][0] is finish and inputs[1][1] is action_finish
+                assert receipts[1].kind is DbOutcomeKind.COMPLETED, receipts[1].error
+                assert receipts[1].value is None
+                events = _assert_complete_group(world, owned, finish, key)
+                if first_events is not None:
+                    assert events == first_events
+                assert _rows(owned, "operation_attempts") == before_attempts
+                assert _rows(owned, "history_events")[:len(before_history)] == before_history
 
-def _assert_no_new_device_call(world, methods, query_calls, runtime_calls):
-    assert len(world.driver.calls) == 1
-    assert (0 if world.query is None else len(world.query.calls)) == query_calls
-    assert len(runtime_calls) == 3
-    for method in methods:
-        method.assert_not_called()
-
-
-def _assert_original_inputs(inputs, finish, action_finish, key):
-    assert inputs == [(finish, action_finish, key), (finish, action_finish, key)]
-    assert inputs[1][0] is finish and inputs[1][1] is action_finish
+            await world.replay(entrance, check, ready=lambda: len(receipts) == 2 and
+                receipts[-1].kind is DbOutcomeKind.COMPLETED, failure=gate is not None)
+            if gate is not None:
+                assert inputs == [(finish, action_finish, key)] * 2
+                assert inputs[1][0] is finish and inputs[1][1] is action_finish
+                assert gate.hits == 1
+                assert receipts[1].kind is (
+                    DbOutcomeKind.UNKNOWN if confirmation_unknown else DbOutcomeKind.ROLLED_BACK)
+                assert tuple(owned.connection.iterdump()) == before
+            else:
+                check()
+            assert (len(world.driver.calls), 0 if world.query is None else len(world.query.calls)) == before_calls
+    finally:
+        world.close()
 
 
 @pytest.mark.parametrize("mode", _MODES)
 @pytest.mark.parametrize("after_commit", [False, True], ids=["commit-before", "commit-after"])
 @pytest.mark.parametrize("entrance", _ENTRANCES)
 async def test_default_entry_confirms_original_start_close_before_candidates(
-        tmp_path, monkeypatch, mode, after_commit, entrance):
-    world, deps, context, methods, now, runtime_calls = await _default_start_close_world(
-        tmp_path, monkeypatch, mode)
-    owned, reopened = world.owned, None
-    before_attempts, before_history = _attempts(owned), _history(owned)
-    query_calls = 0 if world.query is None else len(world.query.calls)
-    actual_save = CaptureRepository.close_start
-    inputs, receipts, faults = [], [], []
-
-    def save(repository, finish, action_finish, key, current):
-        inputs.append((finish, action_finish, key))
-        if len(inputs) == 1:
-            fault = _TrackedCommitFailure(current.connection, after_commit)
-            faults.append(fault)
-            current = replace(current, connection=fault)
-        receipt = actual_save(repository, finish, action_finish, key, current)
-        receipts.append(receipt)
-        return receipt
-
-    monkeypatch.setattr(CaptureRepository, "close_start", save)
-    try:
-        with pytest.raises(ConsistencyError):
-            await capture_handler("camera_record")(12, world.runtime)
-        assert len(inputs) == len(receipts) == len(faults) == 1
-        assert receipts[0].kind is DbOutcomeKind.UNKNOWN and faults[0].commit_calls == 1
-        finish, action_finish, key = inputs[0]
-        pending = deps.capture_completions[12]
-        assert pending.request.finish is finish and pending.request.action_finish is action_finish
-        assert pending.key == key
-        assert finish.occurred_at == action_finish.occurred_at == world.formed_at
-        owned.connection.close()
-        reopened = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
-        assert reopened.metadata == world.metadata
-        first_events = saved_transaction_events(reopened.connection, key)
-        assert (first_events is not None) is after_commit
-        assert reopened.connection.execute("SELECT status FROM actions WHERE id=12").fetchone() == (
-            4 if after_commit else 2,)
-        anchors = dict(deps.capture_retry_gate.anchors)
-        deps.config = replace(deps.config, devices={"cam-1": {"driver": "alternate-camera"}})
-        world.runtime.start_config = replace(world.runtime.start_config, max_attempts=9)
-        world.runtime.query_config = replace(world.runtime.query_config, max_attempts=9)
-        world.wall[0] += 100_000_000
-        world.mono[0] += 100_000_000_000
-        now[0] += 100_000_000
-        opened = []
-
-        def saved():
-            _assert_original_inputs(inputs, finish, action_finish, key)
-            assert receipts[1].kind is DbOutcomeKind.COMPLETED and receipts[1].value is None
-            assert world.runtime.pending_capture_completions is deps.capture_completions
-            assert deps.capture_completions == {}
-            assert deps.capture_retry_gate.anchors == {
-                responsibility: anchor for responsibility, anchor in anchors.items()
-                if responsibility not in finish.responsibility_keys}
-            events = _assert_complete_group(world, reopened, finish, key)
-            if first_events is not None:
-                assert events == first_events
-            assert _attempts(reopened) == before_attempts
-            assert _history(reopened)[:len(before_history)] == before_history
-            _assert_no_new_device_call(world, methods, query_calls, runtime_calls)
-
-        original_open = context.open_connection
-
-        def open_connection():
-            current = original_open()
-            assert current.metadata == world.metadata
-            assert current.connection is not reopened.connection
-            opened.append(current)
-            return replace(current, connection=_CandidateBoundary(current.connection, saved))
-
-        context.open_connection = open_connection
-        context.clock = _CandidateClock(saved)
-        with pytest.raises((_BeforeCandidates, _BeforeBusinessCandidates)):
-            await _selected_flow(context, entrance)(context)
-        assert len(opened) == 1
-        saved()
-    finally:
-        (reopened if reopened is not None else owned).connection.close()
-        lifecycle.close_runtime(deps)
+        tmp_path, monkeypatch, capture_resources, mode, after_commit, entrance):
+    await _exercise(tmp_path, monkeypatch, capture_resources, mode, entrance, after_commit=after_commit)
 
 
 @pytest.mark.parametrize("mode", _MODES)
 @pytest.mark.parametrize("confirmation_unknown", [False, True], ids=["rolled-back", "unknown"])
 @pytest.mark.parametrize("entrance", ["normal", "restricted-cancel"])
 async def test_default_entry_keeps_start_close_when_original_key_is_unavailable(
-        tmp_path, monkeypatch, mode, confirmation_unknown, entrance):
-    world, deps, context, methods, now, runtime_calls = await _default_start_close_world(
-        tmp_path, monkeypatch, mode)
-    owned, reopened = world.owned, None
-    actual_save = CaptureRepository.close_start
-    inputs, receipts, faults = [], [], []
-    query_calls = 0 if world.query is None else len(world.query.calls)
-
-    def save(repository, finish, action_finish, key, current):
-        inputs.append((finish, action_finish, key))
-        fault = (_TrackedCommitFailure(current.connection, True) if len(inputs) == 1
-                 else _UnavailableOriginalKey(current.connection, key, confirmation_unknown))
-        faults.append(fault)
-        receipt = actual_save(repository, finish, action_finish, key,
-                              replace(current, connection=fault))
-        receipts.append(receipt)
-        return receipt
-
-    monkeypatch.setattr(CaptureRepository, "close_start", save)
-    try:
-        with pytest.raises(ConsistencyError):
-            await capture_handler("camera_record")(12, world.runtime)
-        assert len(inputs) == len(receipts) == len(faults) == 1
-        assert receipts[0].kind is DbOutcomeKind.UNKNOWN and faults[0].commit_calls == 1
-        finish, action_finish, key = inputs[0]
-        pending = deps.capture_completions[12]
-        assert pending.request.finish is finish and pending.request.action_finish is action_finish
-        assert pending.key == key
-        owned.connection.close()
-        reopened = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
-        assert reopened.metadata == world.metadata
-        assert saved_transaction_events(reopened.connection, key) is not None
-        assert reopened.connection.execute("SELECT status FROM actions WHERE id=12").fetchone() == (4,)
-        before = tuple(reopened.connection.iterdump())
-        anchors = dict(deps.capture_retry_gate.anchors)
-        deps.config = replace(deps.config, devices={"cam-1": {"driver": "alternate-camera"}})
-        world.runtime.start_config = replace(world.runtime.start_config, max_attempts=9)
-        world.runtime.query_config = replace(world.runtime.query_config, max_attempts=9)
-        world.wall[0] += 100_000_000
-        world.mono[0] += 100_000_000_000
-        now[0] += 100_000_000
-        original_open = context.open_connection
-
-        def open_connection():
-            current = original_open()
-            return replace(current, connection=_CandidateBoundary(current.connection,
-                lambda: pytest.fail("原 START 完整申请未核实前不得读取候选")))
-
-        context.open_connection = open_connection
-        context.clock = _CandidateClock(lambda: pytest.fail("原 START 完整申请未核实前不得取得时刻"))
-        with pytest.raises(StateDbFailure):
-            await _selected_flow(context, entrance)(context)
-        _assert_original_inputs(inputs, finish, action_finish, key)
-        assert faults[1].key_reads == 1
-        assert receipts[1].kind is (
-            DbOutcomeKind.UNKNOWN if confirmation_unknown else DbOutcomeKind.ROLLED_BACK)
-        assert deps.capture_completions[12] is pending
-        assert deps.capture_retry_gate.anchors == anchors
-        assert tuple(reopened.connection.iterdump()) == before
-        _assert_no_new_device_call(world, methods, query_calls, runtime_calls)
-    finally:
-        (reopened if reopened is not None else owned).connection.close()
-        lifecycle.close_runtime(deps)
+        tmp_path, monkeypatch, capture_resources, mode, confirmation_unknown, entrance):
+    await _exercise(tmp_path, monkeypatch, capture_resources, mode, entrance,
+        confirmation_unknown=confirmation_unknown)

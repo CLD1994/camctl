@@ -1,0 +1,14 @@
+{
+  "passed": true,
+  "wall_seconds": 9.66866671499156,
+  "cases": [
+    "真实共享export/import/import-media与ACK",
+    "单Application/Files且零HTTP/browser",
+    "既有HB省略store的browser-plan-export",
+    "headless/browser/headless明确关闭重建",
+    "原独立三操作",
+    "store不匹配与未知操作的错误回执和进程收场"
+  ],
+  "source_commit": "0ff20735ec02849cf6a3dfa3436621d1f15026bd"
+}
+

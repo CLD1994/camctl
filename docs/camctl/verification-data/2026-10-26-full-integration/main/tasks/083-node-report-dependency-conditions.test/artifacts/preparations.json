@@ -1,0 +1,15 @@
+[
+  {
+    "label": "package-resources",
+    "command": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/083-node-report-dependency-conditions.test/source/apps/camctl/scripts/sync_resources.py"
+    ],
+    "cwd": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/083-node-report-dependency-conditions.test/source",
+    "started_utc": "2026-10-26T00:41:33.475144+00:00",
+    "pid": 1974223,
+    "exit_code": 0,
+    "finished_utc": "2026-10-26T00:41:33.561545+00:00",
+    "wall_seconds": 0.08639450199552812
+  }
+]

@@ -1,0 +1,40 @@
+[
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-action6]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.02912795999145601
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.26468570799625013
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.002663854989805259
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.2964775229775114
+  },
+  {
+    "nodeid": "tests/integration/devices/test_adb_camera_registration.py::test_real_session_open_resets_settings_but_catalog_reads_do_not[dji-osmo360-ii]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.020495840988587588
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.033689248011796735
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0025444109924137592
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.05672949999279808
+  }
+]

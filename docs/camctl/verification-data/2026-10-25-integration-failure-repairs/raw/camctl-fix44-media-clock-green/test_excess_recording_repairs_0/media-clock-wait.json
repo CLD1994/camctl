@@ -1,0 +1,19 @@
+{
+  "target_utc_us": 1792919108500000,
+  "system_utc_before_us": 1792919168448243,
+  "business_before": {
+    "mode": "running",
+    "epoch": 3,
+    "utc_us": 1792919102018115,
+    "monotonic_ns": 69590060695244,
+    "real_monotonic_ns": 69596260450519
+  },
+  "business_after": {
+    "mode": "running",
+    "epoch": 3,
+    "utc_us": 1792919108559433,
+    "monotonic_ns": 69596602013010,
+    "real_monotonic_ns": 69602801768285
+  },
+  "real_elapsed_ns": 6541450381
+}

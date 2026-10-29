@@ -307,12 +307,21 @@ async def test_large_window_releases_overflow_once_and_keyset_pages_do_not_resca
     # 所有规模数据由真实受理事务生成，没有手填不对应事件的投影或目录。
     _submit_many(owned, 3, 1)
     early_sparse_wm = _to_wm(owned.connection)
-    await _finish_many(owned, 128)
+    await _finish_many(owned, 4)
+    output_window_end = _to_wm(owned.connection)
     _submit_many(owned, 4200, 2)
     early = _to_wm(owned.connection)
     _submit_many(owned, 3, 3)
     request = ReportScopeRequest(_boundary(owned.connection), 0, _to_wm(owned.connection), 17)
     repository = HistoryRepository(path / 'state.db')
+    # 前一计划的产物 4 与后一计划的动作 4 共用整数编号；此窗口只包含前一计划的变化。
+    assert owned.connection.execute('SELECT source_action_id FROM outputs WHERE id=4').fetchone()[0] == 1
+    assert owned.connection.execute('SELECT plan_id FROM actions WHERE id=4').fetchone()[0] == 2
+    output_window = replace(request, from_wm=early_sparse_wm, to_wm=output_window_end)
+    with repository.open_report_selection(output_window) as selection:
+        assert _read(selection, 'output', 1) == [1, 2, 3, 4]
+        assert _read(selection, 'output', 2) == []
+        assert _read(selection, 'action', 2) == []
     probe = _QueryProbe(repository, monkeypatch)
     with repository.open_report_selection(request) as selection:
         assert _read(selection, 'plan') == [1, 2, 3]
@@ -349,7 +358,7 @@ async def test_large_window_releases_overflow_once_and_keyset_pages_do_not_resca
         assert not any('TEMP B-TREE FOR ORDER BY' in row for row in plans)
         print({'preflight_vm_steps': preflight_steps, 'page_vm_min': min(vm_pages),
                'page_vm_max': max(vm_pages), 'pages': len(vm_pages) + 1,
-               'candidate_queries': len(candidate_sql), 'unrelated_outputs': 128,
+               'candidate_queries': len(candidate_sql), 'unrelated_outputs': 4,
                'query_plan': plans, 'candidate_query_plan': candidate_plan})
     gc.collect()
     assert all(reference() is None for reference in probe.candidates)
@@ -392,11 +401,11 @@ async def _finish_many(owned, count, *, action_id=1):
     from camctl.persistence.repositories.scheduling import StartOutcome
     assert started.value.outcome is StartOutcome.STARTED, started.value
     activity_id = owned.connection.execute('SELECT id FROM device_activities WHERE action_id=?', (action_id,)).fetchone()[0]
-    runtime = _runtime(owned)
-    runtime.driver = _ActivityDriver(activity_target=str(activity_id))
-    runtime.results = ResultsDouble({activity_id: tuple(_entry(f'photo-{action_id}-{index}', kind=FileKind.PHOTO) for index in range(count))})
-    dispatched = await dispatch_ready(runtime, ready_capture_actions(owned.connection, now))
-    assert all(not isinstance(outcome, BaseException) for _, outcome in dispatched), dispatched
+    async with _runtime(owned) as runtime:
+        runtime.driver = _ActivityDriver(activity_target=str(activity_id))
+        runtime.results = ResultsDouble({activity_id: tuple(_entry(f'photo-{action_id}-{index}', kind=FileKind.PHOTO) for index in range(count))})
+        dispatched = await dispatch_ready(runtime, ready_capture_actions(owned.connection, now))
+        assert all(not isinstance(outcome, BaseException) for _, outcome in dispatched), dispatched
     assert owned.connection.execute('SELECT COUNT(*) FROM outputs WHERE source_action_id=?', (action_id,)).fetchone()[0] == count
 
 

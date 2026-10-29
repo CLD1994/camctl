@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="2.107" timestamp="2026-10-26T04:13:00.072167+08:00" hostname="1e0518e0c6b4"><testcase classname="tests.integration.history.test_report_selection" name="test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window" time="0.380"><failure message="TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'">finished_photo = (OwnedConnection(connection=&lt;sqlite3.Connection object at 0x7f48123735b0&gt;, metadata=DatabaseMetadata(application_id='c...processing_path='/srv/camctl/processing')), PosixPath('/tmp/pytest-of-cld/pytest-107/test_large_window_releases_ove0'))
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x7f4812924bd0&gt;
+
+    @pytest.mark.asyncio
+    async def test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window(finished_photo, monkeypatch):
+        import gc
+        owned, path = finished_photo
+        # 所有规模数据由真实受理事务生成，没有手填不对应事件的投影或目录。
+        _submit_many(owned, 3, 1)
+        early_sparse_wm = _to_wm(owned.connection)
+&gt;       await _finish_many(owned, 128)
+
+apps/camctl/tests/integration/history/test_report_selection.py:310: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/tmp/camctl-quality-repair-evidence/history-preparation/history_preparation_timing.py:45: in finish
+    return await original_finish(owned, count, action_id=action_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/history/test_report_selection.py:395: in _finish_many
+    runtime = _runtime(owned)
+              ^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+owned = OwnedConnection(connection=&lt;sqlite3.Connection object at 0x7f48123735b0&gt;, metadata=DatabaseMetadata(application_id='ca...rsion=5, staging_path='/srv/camctl/staging', ready_path='/srv/camctl/ready', processing_path='/srv/camctl/processing'))
+
+    def _runtime(owned) -&gt; CaptureRuntime:
+&gt;       return CaptureRuntime(
+            owned=owned,
+            scheduling=SchedulingRepository(),
+            operations=OperationRepository(),
+            capture=CaptureRepository(),
+            timelapse=TimelapseRepository(),
+            driver=_ActivityDriver(activity_target="1"),
+            results=ResultsDouble({1: (_entry("shot-1", kind=ResultFileKind.PHOTO),)}),
+            evidence=_PAGE_EVIDENCE,
+            wall_us=lambda: int(time.time() * 1_000_000),
+            monotonic_ns=time.monotonic_ns,
+            window_of=lambda action: LaunchWindow(
+                scheduled_at=action["scheduled_at"],
+                window_end=action["scheduled_at"] + action["max_delay_ms"] * 1000),
+            wait_config=lambda params: CaptureWaitConfig(
+                target_duration_ms=600_000, driver_margin_ms=0),
+        )
+E       TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'
+
+apps/camctl/tests/integration/history/test_report_scope.py:187: TypeError</failure></testcase></testsuite></testsuites>

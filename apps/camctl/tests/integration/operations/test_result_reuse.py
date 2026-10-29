@@ -4,12 +4,11 @@ from dataclasses import replace
 from decimal import Decimal
 import json
 import sqlite3
-from unittest.mock import create_autospec
 
 import pytest
 
 from camctl.contracts.values import ConsistencyError, new_operation_key
-from camctl.contracts.history_values import HistoryBoundary, TransactionRange
+from camctl.contracts.history_values import HistoryBoundary
 from camctl.history.decoding import decode_event_row
 from camctl.operations.attempts import (
     AttemptFinish, AttemptTarget, FinishDisposition, RunFinish, RunOutcome, RunStatus,
@@ -21,7 +20,6 @@ from camctl.operations.models import (
 )
 from camctl.operations.validation import validate_outcome
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories import operations as operation_commands
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.row_history import read_row_values_at_boundary
 from camctl.persistence.transaction import (
@@ -497,7 +495,7 @@ def test_result_commit_receipt_lost_then_same_key_returns_original_result(enviro
     assert again.value.run_status is RunStatus.ACTIVE
 
 
-def test_result_rejects_operation_key_used_for_read_configuration(environment, monkeypatch):
+def test_result_rejects_operation_key_used_for_read_configuration(environment):
     owned, repository = environment
     ticket = repository.begin_attempt(_delete_intent(), new_operation_key(), owned).value.ticket
     body = {"reason": 4, "evidence": {"attempt_id": 1}, "rows": [{
@@ -505,13 +503,14 @@ def test_result_rejects_operation_key_used_for_read_configuration(environment, m
         "before": {"exists": True, "values": {"max_attempts_used": 2}},
         "after": {"exists": True, "values": {"max_attempts_used": 3}},
     }]}
-    # 原键协作者提供的替身事实仍须满足真实存储解码契约。
-    decode_event_row((2, 2, 12, 1, _NOW, 2, None, json.dumps(body)))
-    saved = {"event_id": 2, "occurred_at": _NOW, "transaction": TransactionRange(2, 2, 2),
-             "type": 12, "reason": 4, "body": body}
-    monkeypatch.setattr(operation_commands, "_saved_transaction_events", create_autospec(
-        operation_commands._saved_transaction_events, return_value=[saved]))
-    outcome = _unchanged_reuse(repository, owned, _finish(ticket), new_operation_key())
+    transaction,event=owned.connection.execute('SELECT COALESCE(MAX(id),0)+1,COALESCE(MAX(last_event_id),0)+1 FROM history_transactions').fetchone()
+    key=new_operation_key()
+    decode_event_row((event,transaction,12,1,_NOW,2,None,json.dumps(body)))
+    owned.connection.execute('INSERT INTO history_transactions(id,operation_key,first_event_id,last_event_id) VALUES(?,?,?,?)',
+        (transaction,str(key),event,event))
+    owned.connection.execute('INSERT INTO history_events(id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json) VALUES(?,?,?,?,?,?,?,?)',
+        (event,transaction,12,1,_NOW,2,None,json.dumps(body)))
+    outcome = _unchanged_reuse(repository, owned, _finish(ticket), key)
     assert outcome.kind is DbOutcomeKind.ROLLED_BACK
     assert isinstance(outcome.error, TransactionError), outcome.error
 

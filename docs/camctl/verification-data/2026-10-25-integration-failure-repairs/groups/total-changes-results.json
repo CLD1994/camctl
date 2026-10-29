@@ -1,0 +1,1934 @@
+{
+  "scope": "S2后续：集成测试SQLite连接包装器的total_changes委托",
+  "created_at": "2026-10-25T08:44:59.632781+00:00",
+  "worktree": "/tmp/camctl-fix44-components-20261025",
+  "branch": "fix/fail44-components-20261025",
+  "final_commit": "db87d1e627d3fdd387e5c1a94a01cc368259f1f3",
+  "status": "",
+  "changed_files": {
+    "apps/camctl/tests/integration/acceptance/test_atomicity.py": "46e0a1a55a1de809148cff5c3a1bb1d98200a1691af2ab59b86822a6c89e6be0",
+    "apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py": "af52faa39ab1e760695ba1a475628b02b7fcb5e9e5ff5b8e364d68e106768ebf",
+    "apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py": "54f268c521c20f18adccfdf759b2a4b8ef8dd23ff18240f0cbe77f89c6681df6",
+    "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py": "2e2afee90acf040892233136ae2a93b48d22317e5b2d0317a68b9520c23a8758",
+    "apps/camctl/tests/integration/persistence/test_transactions.py": "628bce3b8d1ad326e0fc67cda861d107a1bd0744be52ce34e8af9e8a1b4912b9",
+    "apps/camctl/tests/integration/reporting/test_ack_sync.py": "20cd9f5831dea16a4e17b50fb128e0ac0dd49ebc56b50f9c8a9d6f95ac1a455d",
+    "apps/camctl/tests/integration/reporting/test_freeze.py": "6317ca507afba97d05538ca57d2d200be3083e50ac8ae69d4deed8a4ea1a91c9",
+    "apps/camctl/tests/integration/reporting/test_management_reuse.py": "cfcae7d86a4a0d343ede5c73e9de30dd12a84ae1bd0585ef60195b73cfd5be67",
+    "apps/camctl/tests/integration/reporting/test_publish.py": "faae507dc195c6f0297f7b06876a55c39235f5cb07937ca49e8f37d5a65bd7b9",
+    "apps/camctl/tests/integration/session/test_submit_boundary.py": "caa7cd501fa80498fc7070a0de8954c2be0aa7d42f4d6f7314f116ef8fb9d3c7"
+  },
+  "base_for_stage": "e87f3cfac636d566cefa4c6b3b612b250ce79a9d",
+  "dependencies": [
+    {
+      "original_commit": "ec25a66e",
+      "local_commit": "8225f5c77ec8fef14ec3d876a0a4c7bebb87e689",
+      "purpose": "已有OSMO共享测试及cancellation连接委托"
+    },
+    {
+      "original_commit": "c5043c16681018c505b1c458c841578e5ee0abed",
+      "local_commit": "e87f3cfac636d566cefa4c6b3b612b250ce79a9d",
+      "purpose": "ResultsDouble读取上下文测试接口前置"
+    }
+  ],
+  "readonly_property_proof": {
+    "path": "/tmp/camctl-fix44-components-evidence-20261025/readonly-properties-verification.json",
+    "sha256": "9264838b652d0fe6d4740d7511298ff4c36fb060ce3b6378fa906780a57f5774",
+    "property_count": 13,
+    "added": [
+      {
+        "path": "apps/camctl/tests/integration/acceptance/test_atomicity.py",
+        "class": "LostCommitResponse",
+        "line": 130,
+        "delegates_to": "connection.total_changes"
+      },
+      {
+        "path": "apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py",
+        "class": "TrackedConnection",
+        "line": 38,
+        "delegates_to": "self.connection.total_changes"
+      },
+      {
+        "path": "apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py",
+        "class": "_FlowConnection",
+        "line": 36,
+        "delegates_to": "self._connection.total_changes"
+      },
+      {
+        "path": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py",
+        "class": "LoseCommit",
+        "line": 430,
+        "delegates_to": "db.total_changes"
+      },
+      {
+        "path": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py",
+        "class": "LoseCommit",
+        "line": 564,
+        "delegates_to": "db.total_changes"
+      },
+      {
+        "path": "apps/camctl/tests/integration/persistence/test_transactions.py",
+        "class": "FailingConnection",
+        "line": 257,
+        "delegates_to": "self._connection.total_changes"
+      },
+      {
+        "path": "apps/camctl/tests/integration/reporting/test_ack_sync.py",
+        "class": "LostCommitResponse",
+        "line": 396,
+        "delegates_to": "connection.total_changes"
+      },
+      {
+        "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+        "class": "OrderedConnection",
+        "line": 315,
+        "delegates_to": "connection.total_changes"
+      },
+      {
+        "path": "apps/camctl/tests/integration/reporting/test_management_reuse.py",
+        "class": "FailingRead",
+        "line": 160,
+        "delegates_to": "connection.total_changes"
+      },
+      {
+        "path": "apps/camctl/tests/integration/reporting/test_management_reuse.py",
+        "class": "LostReceipt",
+        "line": 185,
+        "delegates_to": "connection.total_changes"
+      },
+      {
+        "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+        "class": "LostCommitResponse",
+        "line": 401,
+        "delegates_to": "connection.total_changes"
+      },
+      {
+        "path": "apps/camctl/tests/integration/session/test_submit_boundary.py",
+        "class": "BeginObserver",
+        "line": 208,
+        "delegates_to": "self.connection.total_changes"
+      },
+      {
+        "path": "apps/camctl/tests/integration/session/test_submit_boundary.py",
+        "class": "LostCommitResponse",
+        "line": 319,
+        "delegates_to": "self.connection.total_changes"
+      }
+    ]
+  },
+  "inventory": {
+    "path": "/tmp/camctl-fix44-components-evidence-20261025/total-changes-wrapper-inventory.json",
+    "sha256": "bbee593373b27d09e838591a01e8b7ae5dd463926171eece4dd243a1e3af2914",
+    "counts": {
+      "apps/camctl/tests/integration": {
+        "python_file_count": 494,
+        "execute_class_count": 84
+      },
+      "tests/integration": {
+        "python_file_count": 53,
+        "execute_class_count": 0
+      }
+    }
+  },
+  "verification_summary": {
+    "baseline_failed": 43,
+    "baseline_passed": 12,
+    "latest_unique_passed": 68,
+    "latest_unique_failed": 0
+  },
+  "latest_results": [
+    {
+      "nodeid": "apps/camctl/tests/integration/acceptance/test_atomicity.py::test_unknown_commit_is_checked_by_original_key_before_retry[False]",
+      "outcome": "passed",
+      "duration_seconds": 0.438,
+      "started_at": "2026-10-25T08:41:53.006330+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-acceptance-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/acceptance/test_atomicity.py::test_unknown_commit_is_checked_by_original_key_before_retry[True]",
+      "outcome": "passed",
+      "duration_seconds": 0.063,
+      "started_at": "2026-10-25T08:41:53.006330+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-acceptance-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py::test_devices_progress_independently_and_settle_before_connection_close[False]",
+      "outcome": "passed",
+      "duration_seconds": 0.469,
+      "started_at": "2026-10-25T08:40:34.076166+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-bootstrap-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py::test_devices_progress_independently_and_settle_before_connection_close[True]",
+      "outcome": "passed",
+      "duration_seconds": 0.15,
+      "started_at": "2026-10-25T08:40:34.076166+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-bootstrap-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py::test_capture_state_failure_stops_later_device_flow[projection]",
+      "outcome": "passed",
+      "duration_seconds": 0.096,
+      "started_at": "2026-10-25T08:40:34.076166+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-bootstrap-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py::test_capture_state_failure_stops_later_device_flow[query]",
+      "outcome": "passed",
+      "duration_seconds": 0.079,
+      "started_at": "2026-10-25T08:40:34.076166+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-bootstrap-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py::test_saved_device_failure_allows_other_device_work",
+      "outcome": "passed",
+      "duration_seconds": 0.482,
+      "started_at": "2026-10-25T08:42:43.327920+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-bootstrap-prerequisite-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/operations/test_result_reuse.py::test_result_commit_receipt_lost_then_same_key_returns_original_result",
+      "outcome": "passed",
+      "duration_seconds": 0.042,
+      "started_at": "2026-10-25T08:41:49.568652+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-operations-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/operations/test_result_reuse.py::test_result_recovery_query_error_rolls_back_without_new_facts",
+      "outcome": "passed",
+      "duration_seconds": 0.15,
+      "started_at": "2026-10-25T08:41:49.568652+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-operations-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/operations/test_result_reuse.py::test_result_rolled_back_then_same_key_can_save_original_input",
+      "outcome": "passed",
+      "duration_seconds": 0.041,
+      "started_at": "2026-10-25T08:41:49.568652+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-operations-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/outputs/test_catalog_integrity.py::test_catalog_queries_release_cursors_and_preserve_read_errors[decode-fix]",
+      "outcome": "passed",
+      "duration_seconds": 0.067,
+      "started_at": "2026-10-25T08:41:50.305544+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-outputs-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/outputs/test_catalog_integrity.py::test_catalog_queries_release_cursors_and_preserve_read_errors[decode-read]",
+      "outcome": "passed",
+      "duration_seconds": 0.073,
+      "started_at": "2026-10-25T08:41:50.305544+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-outputs-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/outputs/test_catalog_integrity.py::test_catalog_queries_release_cursors_and_preserve_read_errors[empty-fix]",
+      "outcome": "passed",
+      "duration_seconds": 0.08,
+      "started_at": "2026-10-25T08:41:50.305544+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-outputs-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/outputs/test_catalog_integrity.py::test_catalog_queries_release_cursors_and_preserve_read_errors[empty-read]",
+      "outcome": "passed",
+      "duration_seconds": 0.067,
+      "started_at": "2026-10-25T08:41:50.305544+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-outputs-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/outputs/test_catalog_integrity.py::test_catalog_queries_release_cursors_and_preserve_read_errors[execute-fix]",
+      "outcome": "passed",
+      "duration_seconds": 0.072,
+      "started_at": "2026-10-25T08:41:50.305544+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-outputs-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/outputs/test_catalog_integrity.py::test_catalog_queries_release_cursors_and_preserve_read_errors[execute-read]",
+      "outcome": "passed",
+      "duration_seconds": 0.062,
+      "started_at": "2026-10-25T08:41:50.305544+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-outputs-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/outputs/test_catalog_integrity.py::test_catalog_queries_release_cursors_and_preserve_read_errors[fetch-fix]",
+      "outcome": "passed",
+      "duration_seconds": 0.098,
+      "started_at": "2026-10-25T08:41:50.305544+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-outputs-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/outputs/test_catalog_integrity.py::test_catalog_queries_release_cursors_and_preserve_read_errors[fetch-read]",
+      "outcome": "passed",
+      "duration_seconds": 0.073,
+      "started_at": "2026-10-25T08:41:50.305544+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-outputs-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/outputs/test_catalog_integrity.py::test_catalog_queries_release_cursors_and_preserve_read_errors[success-fix]",
+      "outcome": "passed",
+      "duration_seconds": 0.09,
+      "started_at": "2026-10-25T08:41:50.305544+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-outputs-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/outputs/test_catalog_integrity.py::test_catalog_queries_release_cursors_and_preserve_read_errors[success-read]",
+      "outcome": "passed",
+      "duration_seconds": 0.07,
+      "started_at": "2026-10-25T08:41:50.305544+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-outputs-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/outputs/test_selection_reuse.py::test_committed_selection_with_lost_receipt_recovers_original_response",
+      "outcome": "passed",
+      "duration_seconds": 0.075,
+      "started_at": "2026-10-25T08:41:50.305544+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-outputs-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py::test_fixed_initialization_unknown_commit_reuses_exact_original_selection_ids[False]",
+      "outcome": "passed",
+      "duration_seconds": 0.083,
+      "started_at": "2026-10-25T08:41:50.305544+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-outputs-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py::test_fixed_initialization_unknown_commit_reuses_exact_original_selection_ids[True]",
+      "outcome": "passed",
+      "duration_seconds": 0.079,
+      "started_at": "2026-10-25T08:41:50.305544+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-outputs-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py::test_unknown_commit_recovers_same_source_request_and_ids_after_reopen[False-False]",
+      "outcome": "passed",
+      "duration_seconds": 0.377,
+      "started_at": "2026-10-25T08:41:50.305544+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-outputs-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py::test_unknown_commit_recovers_same_source_request_and_ids_after_reopen[False-True]",
+      "outcome": "passed",
+      "duration_seconds": 0.087,
+      "started_at": "2026-10-25T08:41:50.305544+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-outputs-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py::test_unknown_commit_recovers_same_source_request_and_ids_after_reopen[True-False]",
+      "outcome": "passed",
+      "duration_seconds": 0.08,
+      "started_at": "2026-10-25T08:41:50.305544+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-outputs-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py::test_unknown_commit_recovers_same_source_request_and_ids_after_reopen[True-True]",
+      "outcome": "passed",
+      "duration_seconds": 0.069,
+      "started_at": "2026-10-25T08:41:50.305544+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-outputs-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/persistence/test_transactions/TestAtomicRollback.py::test_commit_failure_is_unknown",
+      "outcome": "passed",
+      "duration_seconds": 0.016,
+      "started_at": "2026-10-25T08:41:56.098092+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-persistence-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/persistence/test_transactions/TestTransactionControlReceipt.py::test_commit_control_is_unknown_without_retry_or_rollback[False]",
+      "outcome": "passed",
+      "duration_seconds": 0.131,
+      "started_at": "2026-10-25T08:41:56.098092+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-persistence-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/persistence/test_transactions/TestTransactionControlReceipt.py::test_commit_control_is_unknown_without_retry_or_rollback[True]",
+      "outcome": "passed",
+      "duration_seconds": 0.027,
+      "started_at": "2026-10-25T08:41:56.098092+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-persistence-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_ack_sync.py::test_unknown_commit_preserves_atomic_sync_result[False]",
+      "outcome": "passed",
+      "duration_seconds": 0.082,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_ack_sync.py::test_unknown_commit_preserves_atomic_sync_result[True]",
+      "outcome": "passed",
+      "duration_seconds": 0.086,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_concurrent_input_and_ack_are_read_at_one_complete_boundary[False-want1]",
+      "outcome": "passed",
+      "duration_seconds": 0.066,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_concurrent_input_and_ack_are_read_at_one_complete_boundary[True-want0]",
+      "outcome": "passed",
+      "duration_seconds": 0.08,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_unknown_freeze_commit_is_resolved_by_original_operation_key[False]",
+      "outcome": "passed",
+      "duration_seconds": 0.035,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_unknown_freeze_commit_is_resolved_by_original_operation_key[True]",
+      "outcome": "passed",
+      "duration_seconds": 0.045,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_unknown_commit_is_resolved_with_same_freeze_key[False]",
+      "outcome": "passed",
+      "duration_seconds": 0.05,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_unknown_commit_is_resolved_with_same_freeze_key[True]",
+      "outcome": "passed",
+      "duration_seconds": 0.051,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT event_id, change_count FROM entity_event_links-failure]",
+      "outcome": "passed",
+      "duration_seconds": 0.047,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT event_id, change_count FROM entity_event_links-intent]",
+      "outcome": "passed",
+      "duration_seconds": 0.058,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT event_id, change_count FROM entity_event_links-prepare]",
+      "outcome": "passed",
+      "duration_seconds": 0.041,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT event_id, change_count FROM entity_event_links-publish]",
+      "outcome": "passed",
+      "duration_seconds": 0.05,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT l.change_count-failure]",
+      "outcome": "passed",
+      "duration_seconds": 0.048,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT l.change_count-intent]",
+      "outcome": "passed",
+      "duration_seconds": 0.05,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT l.change_count-prepare]",
+      "outcome": "passed",
+      "duration_seconds": 0.401,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT l.change_count-publish]",
+      "outcome": "passed",
+      "duration_seconds": 0.061,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT link.event_id, txn.operation_key-failure]",
+      "outcome": "passed",
+      "duration_seconds": 0.05,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT link.event_id, txn.operation_key-intent]",
+      "outcome": "passed",
+      "duration_seconds": 0.061,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT link.event_id, txn.operation_key-prepare]",
+      "outcome": "passed",
+      "duration_seconds": 0.046,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT link.event_id, txn.operation_key-publish]",
+      "outcome": "passed",
+      "duration_seconds": 0.058,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key[False-failure]",
+      "outcome": "passed",
+      "duration_seconds": 0.049,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key[False-prepare]",
+      "outcome": "passed",
+      "duration_seconds": 0.041,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key[True-failure]",
+      "outcome": "passed",
+      "duration_seconds": 0.063,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key[True-prepare]",
+      "outcome": "passed",
+      "duration_seconds": 0.056,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[False-failure]",
+      "outcome": "passed",
+      "duration_seconds": 0.038,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[False-intent]",
+      "outcome": "passed",
+      "duration_seconds": 0.053,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[False-prepare]",
+      "outcome": "passed",
+      "duration_seconds": 0.038,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[False-publish]",
+      "outcome": "passed",
+      "duration_seconds": 0.045,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[True-failure]",
+      "outcome": "passed",
+      "duration_seconds": 0.049,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[True-intent]",
+      "outcome": "passed",
+      "duration_seconds": 0.051,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[True-prepare]",
+      "outcome": "passed",
+      "duration_seconds": 0.051,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[True-publish]",
+      "outcome": "passed",
+      "duration_seconds": 0.044,
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/session/test_submit_boundary.py::test_close_before_submit_requests_later_run",
+      "outcome": "passed",
+      "duration_seconds": 0.056,
+      "started_at": "2026-10-25T08:41:54.208930+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-session-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/session/test_submit_boundary.py::test_close_transaction_failure_keeps_released_admission_closed[False]",
+      "outcome": "passed",
+      "duration_seconds": 0.051,
+      "started_at": "2026-10-25T08:41:54.208930+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-session-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/session/test_submit_boundary.py::test_close_transaction_failure_keeps_released_admission_closed[True]",
+      "outcome": "passed",
+      "duration_seconds": 0.057,
+      "started_at": "2026-10-25T08:41:54.208930+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-session-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/session/test_submit_boundary.py::test_submit_before_close_keeps_acceptor_responsible",
+      "outcome": "passed",
+      "duration_seconds": 0.058,
+      "started_at": "2026-10-25T08:41:54.208930+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-session-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/session/test_submit_boundary.py::test_submit_unknown_commit_does_not_return_handoff_success[False]",
+      "outcome": "passed",
+      "duration_seconds": 0.66,
+      "started_at": "2026-10-25T08:41:54.208930+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-session-total-changes/receipt.json"
+    },
+    {
+      "nodeid": "apps/camctl/tests/integration/session/test_submit_boundary.py::test_submit_unknown_commit_does_not_return_handoff_success[True]",
+      "outcome": "passed",
+      "duration_seconds": 0.068,
+      "started_at": "2026-10-25T08:41:54.208930+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-session-total-changes/receipt.json"
+    }
+  ],
+  "runs": [
+    {
+      "label": "audit-acceptance-total-changes",
+      "command": [
+        "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/acceptance/test_atomicity.py::test_unknown_commit_is_checked_by_original_key_before_retry",
+        "-vv",
+        "--tb=short",
+        "--basetemp",
+        "/tmp/camctl-fix44-components-evidence-20261025/audit-acceptance-total-changes/pytest-tmp",
+        "--junitxml",
+        "/tmp/camctl-fix44-components-evidence-20261025/audit-acceptance-total-changes/junit.xml"
+      ],
+      "cwd": "/tmp/camctl-fix44-components-20261025",
+      "started_at": "2026-10-25T08:38:28.292025+00:00",
+      "source_commit": "8225f5c77ec8fef14ec3d876a0a4c7bebb87e689",
+      "branch": "fix/fail44-components-20261025",
+      "status_before": "",
+      "python": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+      "runtime": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "sqlite": "3.53.1",
+        "camctl_source": "/tmp/camctl-fix44-components-20261025/apps/camctl/src/camctl/__init__.py"
+      },
+      "environment": {
+        "PYTHONPATH": "/tmp/camctl-fix44-components-20261025/apps/camctl/src",
+        "UV_CACHE_DIR": "/tmp/camctl-fix44-components-uv-cache",
+        "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311"
+      },
+      "source_files": {
+        "apps/camctl/tests/integration/acceptance/test_atomicity.py": "d3b3d17fb7a16b2ade993edbf0f10a97d4e6a930f66c5fd138766a96c93c7a49"
+      },
+      "output": "/tmp/camctl-fix44-components-evidence-20261025/audit-acceptance-total-changes/output.log",
+      "junit": "/tmp/camctl-fix44-components-evidence-20261025/audit-acceptance-total-changes/junit.xml",
+      "pid": 1062836,
+      "exit_code": 1,
+      "duration_seconds": 1.3130332239961717,
+      "finished_at": "2026-10-25T08:38:31.283873+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/audit-acceptance-total-changes/receipt.json",
+      "cases": [
+        {
+          "nodeid": "apps/camctl/tests/integration/acceptance/test_atomicity.py::test_unknown_commit_is_checked_by_original_key_before_retry[False]",
+          "outcome": "failure",
+          "duration_seconds": 0.425
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/acceptance/test_atomicity.py::test_unknown_commit_is_checked_by_original_key_before_retry[True]",
+          "outcome": "failure",
+          "duration_seconds": 0.027
+        }
+      ]
+    },
+    {
+      "label": "audit-bootstrap-total-changes",
+      "command": [
+        "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py",
+        "apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py",
+        "-vv",
+        "--tb=short",
+        "--basetemp",
+        "/tmp/camctl-fix44-components-evidence-20261025/audit-bootstrap-total-changes/pytest-tmp",
+        "--junitxml",
+        "/tmp/camctl-fix44-components-evidence-20261025/audit-bootstrap-total-changes/junit.xml"
+      ],
+      "cwd": "/tmp/camctl-fix44-components-20261025",
+      "started_at": "2026-10-25T08:37:20.375505+00:00",
+      "source_commit": "8225f5c77ec8fef14ec3d876a0a4c7bebb87e689",
+      "branch": "fix/fail44-components-20261025",
+      "status_before": "",
+      "python": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+      "runtime": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "sqlite": "3.53.1",
+        "camctl_source": "/tmp/camctl-fix44-components-20261025/apps/camctl/src/camctl/__init__.py"
+      },
+      "environment": {
+        "PYTHONPATH": "/tmp/camctl-fix44-components-20261025/apps/camctl/src",
+        "UV_CACHE_DIR": "/tmp/camctl-fix44-components-uv-cache",
+        "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311"
+      },
+      "source_files": {
+        "apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py": "aca03f9fb8697db2e36cabbf8bf2cc87b07a29e3e86d264124dd0c9c55874349",
+        "apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py": "387d030f96647a007c585a5249a76c3a568e378458ff5275f0fe608e1f846635"
+      },
+      "output": "/tmp/camctl-fix44-components-evidence-20261025/audit-bootstrap-total-changes/output.log",
+      "junit": "/tmp/camctl-fix44-components-evidence-20261025/audit-bootstrap-total-changes/junit.xml",
+      "pid": 1060189,
+      "exit_code": 1,
+      "duration_seconds": 5.8778436860011425,
+      "finished_at": "2026-10-25T08:37:28.023182+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/audit-bootstrap-total-changes/receipt.json",
+      "cases": [
+        {
+          "nodeid": "apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py::test_devices_progress_independently_and_settle_before_connection_close[False]",
+          "outcome": "failure",
+          "duration_seconds": 1.549
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py::test_devices_progress_independently_and_settle_before_connection_close[True]",
+          "outcome": "failure",
+          "duration_seconds": 1.125
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py::test_capture_state_failure_stops_later_device_flow[query]",
+          "outcome": "passed",
+          "duration_seconds": 0.138
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py::test_capture_state_failure_stops_later_device_flow[projection]",
+          "outcome": "passed",
+          "duration_seconds": 0.091
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py::test_saved_device_failure_allows_other_device_work",
+          "outcome": "failure",
+          "duration_seconds": 0.091
+        }
+      ]
+    },
+    {
+      "label": "audit-operations-total-changes",
+      "command": [
+        "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/operations/test_result_reuse.py::test_result_recovery_query_error_rolls_back_without_new_facts",
+        "-vv",
+        "--tb=short",
+        "--basetemp",
+        "/tmp/camctl-fix44-components-evidence-20261025/audit-operations-total-changes/pytest-tmp",
+        "--junitxml",
+        "/tmp/camctl-fix44-components-evidence-20261025/audit-operations-total-changes/junit.xml"
+      ],
+      "cwd": "/tmp/camctl-fix44-components-20261025",
+      "started_at": "2026-10-25T08:37:06.750223+00:00",
+      "source_commit": "8225f5c77ec8fef14ec3d876a0a4c7bebb87e689",
+      "branch": "fix/fail44-components-20261025",
+      "status_before": "",
+      "python": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+      "runtime": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "sqlite": "3.53.1",
+        "camctl_source": "/tmp/camctl-fix44-components-20261025/apps/camctl/src/camctl/__init__.py"
+      },
+      "environment": {
+        "PYTHONPATH": "/tmp/camctl-fix44-components-20261025/apps/camctl/src",
+        "UV_CACHE_DIR": "/tmp/camctl-fix44-components-uv-cache",
+        "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311"
+      },
+      "source_files": {
+        "apps/camctl/tests/integration/operations/test_result_reuse.py": "f20b3b33eae8e2d719b722b08cecbd60a4391075f554f24972d6e8f03291aba8"
+      },
+      "output": "/tmp/camctl-fix44-components-evidence-20261025/audit-operations-total-changes/output.log",
+      "junit": "/tmp/camctl-fix44-components-evidence-20261025/audit-operations-total-changes/junit.xml",
+      "pid": 1059709,
+      "exit_code": 1,
+      "duration_seconds": 3.944409187999554,
+      "finished_at": "2026-10-25T08:37:11.091959+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/audit-operations-total-changes/receipt.json",
+      "cases": [
+        {
+          "nodeid": "apps/camctl/tests/integration/operations/test_result_reuse.py::test_result_recovery_query_error_rolls_back_without_new_facts",
+          "outcome": "failure",
+          "duration_seconds": 1.171
+        }
+      ]
+    },
+    {
+      "label": "audit-outputs-total-changes",
+      "command": [
+        "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py::test_unknown_commit_recovers_same_source_request_and_ids_after_reopen",
+        "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py::test_fixed_initialization_unknown_commit_reuses_exact_original_selection_ids",
+        "-vv",
+        "--tb=short",
+        "--basetemp",
+        "/tmp/camctl-fix44-components-evidence-20261025/audit-outputs-total-changes/pytest-tmp",
+        "--junitxml",
+        "/tmp/camctl-fix44-components-evidence-20261025/audit-outputs-total-changes/junit.xml"
+      ],
+      "cwd": "/tmp/camctl-fix44-components-20261025",
+      "started_at": "2026-10-25T08:37:54.029213+00:00",
+      "source_commit": "8225f5c77ec8fef14ec3d876a0a4c7bebb87e689",
+      "branch": "fix/fail44-components-20261025",
+      "status_before": "",
+      "python": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+      "runtime": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "sqlite": "3.53.1",
+        "camctl_source": "/tmp/camctl-fix44-components-20261025/apps/camctl/src/camctl/__init__.py"
+      },
+      "environment": {
+        "PYTHONPATH": "/tmp/camctl-fix44-components-20261025/apps/camctl/src",
+        "UV_CACHE_DIR": "/tmp/camctl-fix44-components-uv-cache",
+        "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311"
+      },
+      "source_files": {
+        "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py": "20ef14999ea1a2922941a15712c07129ddd6b59d235f552bc3260739319dc32a"
+      },
+      "output": "/tmp/camctl-fix44-components-evidence-20261025/audit-outputs-total-changes/output.log",
+      "junit": "/tmp/camctl-fix44-components-evidence-20261025/audit-outputs-total-changes/junit.xml",
+      "pid": 1061708,
+      "exit_code": 1,
+      "duration_seconds": 1.9588794269948266,
+      "finished_at": "2026-10-25T08:37:56.069884+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/audit-outputs-total-changes/receipt.json",
+      "cases": [
+        {
+          "nodeid": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py::test_unknown_commit_recovers_same_source_request_and_ids_after_reopen[False-False]",
+          "outcome": "failure",
+          "duration_seconds": 0.368
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py::test_unknown_commit_recovers_same_source_request_and_ids_after_reopen[False-True]",
+          "outcome": "failure",
+          "duration_seconds": 0.054
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py::test_unknown_commit_recovers_same_source_request_and_ids_after_reopen[True-False]",
+          "outcome": "failure",
+          "duration_seconds": 0.057
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py::test_unknown_commit_recovers_same_source_request_and_ids_after_reopen[True-True]",
+          "outcome": "failure",
+          "duration_seconds": 0.056
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py::test_fixed_initialization_unknown_commit_reuses_exact_original_selection_ids[False]",
+          "outcome": "failure",
+          "duration_seconds": 0.079
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py::test_fixed_initialization_unknown_commit_reuses_exact_original_selection_ids[True]",
+          "outcome": "failure",
+          "duration_seconds": 0.046
+        }
+      ]
+    },
+    {
+      "label": "audit-persistence-total-changes",
+      "command": [
+        "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_commit_control_is_unknown_without_retry_or_rollback",
+        "apps/camctl/tests/integration/persistence/test_transactions.py::TestAtomicRollback::test_commit_failure_is_unknown",
+        "-vv",
+        "--tb=short",
+        "--basetemp",
+        "/tmp/camctl-fix44-components-evidence-20261025/audit-persistence-total-changes/pytest-tmp",
+        "--junitxml",
+        "/tmp/camctl-fix44-components-evidence-20261025/audit-persistence-total-changes/junit.xml"
+      ],
+      "cwd": "/tmp/camctl-fix44-components-20261025",
+      "started_at": "2026-10-25T08:39:34.559373+00:00",
+      "source_commit": "8225f5c77ec8fef14ec3d876a0a4c7bebb87e689",
+      "branch": "fix/fail44-components-20261025",
+      "status_before": "",
+      "python": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+      "runtime": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "sqlite": "3.53.1",
+        "camctl_source": "/tmp/camctl-fix44-components-20261025/apps/camctl/src/camctl/__init__.py"
+      },
+      "environment": {
+        "PYTHONPATH": "/tmp/camctl-fix44-components-20261025/apps/camctl/src",
+        "UV_CACHE_DIR": "/tmp/camctl-fix44-components-uv-cache",
+        "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311"
+      },
+      "source_files": {
+        "apps/camctl/tests/integration/persistence/test_transactions.py": "374083323ac1c88069866dc463d5e11fce8583e7dc5b945dc0ebf62d3b49540b"
+      },
+      "output": "/tmp/camctl-fix44-components-evidence-20261025/audit-persistence-total-changes/output.log",
+      "junit": "/tmp/camctl-fix44-components-evidence-20261025/audit-persistence-total-changes/junit.xml",
+      "pid": 1064090,
+      "exit_code": 0,
+      "duration_seconds": 0.5965099239983829,
+      "finished_at": "2026-10-25T08:39:35.197974+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/audit-persistence-total-changes/receipt.json",
+      "cases": [
+        {
+          "nodeid": "apps/camctl/tests/integration/persistence/test_transactions/TestTransactionControlReceipt.py::test_commit_control_is_unknown_without_retry_or_rollback[False]",
+          "outcome": "passed",
+          "duration_seconds": 0.162
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/persistence/test_transactions/TestTransactionControlReceipt.py::test_commit_control_is_unknown_without_retry_or_rollback[True]",
+          "outcome": "passed",
+          "duration_seconds": 0.023
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/persistence/test_transactions/TestAtomicRollback.py::test_commit_failure_is_unknown",
+          "outcome": "passed",
+          "duration_seconds": 0.016
+        }
+      ]
+    },
+    {
+      "label": "audit-reporting-total-changes",
+      "command": [
+        "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database",
+        "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key",
+        "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact",
+        "apps/camctl/tests/integration/reporting/test_freeze.py::test_unknown_freeze_commit_is_resolved_by_original_operation_key",
+        "apps/camctl/tests/integration/reporting/test_freeze.py::test_concurrent_input_and_ack_are_read_at_one_complete_boundary",
+        "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_unknown_commit_is_resolved_with_same_freeze_key",
+        "apps/camctl/tests/integration/reporting/test_ack_sync.py::test_unknown_commit_preserves_atomic_sync_result",
+        "-vv",
+        "--tb=short",
+        "--basetemp",
+        "/tmp/camctl-fix44-components-evidence-20261025/audit-reporting-total-changes/pytest-tmp",
+        "--junitxml",
+        "/tmp/camctl-fix44-components-evidence-20261025/audit-reporting-total-changes/junit.xml"
+      ],
+      "cwd": "/tmp/camctl-fix44-components-20261025",
+      "started_at": "2026-10-25T08:35:18.494351+00:00",
+      "source_commit": "aa190d2ed26d4d3b4fe882c3626ea13acc5d5496",
+      "branch": "fix/fail44-components-20261025",
+      "status_before": "",
+      "python": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+      "runtime": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "sqlite": "3.53.1",
+        "camctl_source": "/tmp/camctl-fix44-components-20261025/apps/camctl/src/camctl/__init__.py"
+      },
+      "environment": {
+        "PYTHONPATH": "/tmp/camctl-fix44-components-20261025/apps/camctl/src",
+        "UV_CACHE_DIR": "/tmp/camctl-fix44-components-uv-cache",
+        "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311"
+      },
+      "source_files": {
+        "apps/camctl/tests/integration/reporting/test_ack_sync.py": "8ac2dc91113ed0c62edff1c3e31104495b5fca6c6f2f789a18801c51f07e9608",
+        "apps/camctl/tests/integration/reporting/test_freeze.py": "c2fac2d0e0a568f90519bc47e9512c84c2119f73d9ffb498b3d5931030bc8854",
+        "apps/camctl/tests/integration/reporting/test_freeze_reuse.py": "91aabf05b0414b02624f080cb5b205d32eb4391439d51c5cb402826d7c86743b",
+        "apps/camctl/tests/integration/reporting/test_management_reuse.py": "e9c6097de0b93c4a5d2d54ce53f2e501b319175135cd43cc23c7aed1a47701e2",
+        "apps/camctl/tests/integration/reporting/test_publish.py": "0fc8341db18b4d94207c36ddee4ecb98ea62dbb9060c92fe31b1c2db82deff16"
+      },
+      "output": "/tmp/camctl-fix44-components-evidence-20261025/audit-reporting-total-changes/output.log",
+      "junit": "/tmp/camctl-fix44-components-evidence-20261025/audit-reporting-total-changes/junit.xml",
+      "pid": 1057120,
+      "exit_code": 1,
+      "duration_seconds": 2.9805700269935187,
+      "finished_at": "2026-10-25T08:35:23.123129+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/audit-reporting-total-changes/receipt.json",
+      "cases": [
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT l.change_count-prepare]",
+          "outcome": "failure",
+          "duration_seconds": 0.349
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT l.change_count-intent]",
+          "outcome": "failure",
+          "duration_seconds": 0.039
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT l.change_count-publish]",
+          "outcome": "failure",
+          "duration_seconds": 0.036
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT l.change_count-failure]",
+          "outcome": "failure",
+          "duration_seconds": 0.036
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT event_id, change_count FROM entity_event_links-prepare]",
+          "outcome": "failure",
+          "duration_seconds": 0.037
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT event_id, change_count FROM entity_event_links-intent]",
+          "outcome": "failure",
+          "duration_seconds": 0.039
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT event_id, change_count FROM entity_event_links-publish]",
+          "outcome": "failure",
+          "duration_seconds": 0.091
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT event_id, change_count FROM entity_event_links-failure]",
+          "outcome": "failure",
+          "duration_seconds": 0.054
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT link.event_id, txn.operation_key-prepare]",
+          "outcome": "failure",
+          "duration_seconds": 0.036
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT link.event_id, txn.operation_key-intent]",
+          "outcome": "failure",
+          "duration_seconds": 0.036
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT link.event_id, txn.operation_key-publish]",
+          "outcome": "failure",
+          "duration_seconds": 0.039
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT link.event_id, txn.operation_key-failure]",
+          "outcome": "failure",
+          "duration_seconds": 0.035
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key[False-prepare]",
+          "outcome": "failure",
+          "duration_seconds": 0.032
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key[False-failure]",
+          "outcome": "failure",
+          "duration_seconds": 0.039
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key[True-prepare]",
+          "outcome": "failure",
+          "duration_seconds": 0.031
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key[True-failure]",
+          "outcome": "failure",
+          "duration_seconds": 0.041
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[False-prepare]",
+          "outcome": "failure",
+          "duration_seconds": 0.031
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[False-intent]",
+          "outcome": "failure",
+          "duration_seconds": 0.036
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[False-publish]",
+          "outcome": "failure",
+          "duration_seconds": 0.033
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[False-failure]",
+          "outcome": "failure",
+          "duration_seconds": 0.029
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[True-prepare]",
+          "outcome": "failure",
+          "duration_seconds": 0.03
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[True-intent]",
+          "outcome": "failure",
+          "duration_seconds": 0.035
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[True-publish]",
+          "outcome": "failure",
+          "duration_seconds": 0.035
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[True-failure]",
+          "outcome": "failure",
+          "duration_seconds": 0.032
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_unknown_freeze_commit_is_resolved_by_original_operation_key[False]",
+          "outcome": "passed",
+          "duration_seconds": 0.034
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_unknown_freeze_commit_is_resolved_by_original_operation_key[True]",
+          "outcome": "passed",
+          "duration_seconds": 0.032
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_concurrent_input_and_ack_are_read_at_one_complete_boundary[True-want0]",
+          "outcome": "failure",
+          "duration_seconds": 0.052
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_concurrent_input_and_ack_are_read_at_one_complete_boundary[False-want1]",
+          "outcome": "failure",
+          "duration_seconds": 0.043
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_unknown_commit_is_resolved_with_same_freeze_key[False]",
+          "outcome": "passed",
+          "duration_seconds": 0.035
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_unknown_commit_is_resolved_with_same_freeze_key[True]",
+          "outcome": "passed",
+          "duration_seconds": 0.036
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_ack_sync.py::test_unknown_commit_preserves_atomic_sync_result[False]",
+          "outcome": "failure",
+          "duration_seconds": 0.063
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_ack_sync.py::test_unknown_commit_preserves_atomic_sync_result[True]",
+          "outcome": "failure",
+          "duration_seconds": 0.05
+        }
+      ]
+    },
+    {
+      "label": "audit-session-total-changes",
+      "command": [
+        "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/session/test_submit_boundary.py::test_submit_unknown_commit_does_not_return_handoff_success",
+        "apps/camctl/tests/integration/session/test_submit_boundary.py::test_submit_before_close_keeps_acceptor_responsible",
+        "apps/camctl/tests/integration/session/test_submit_boundary.py::test_close_before_submit_requests_later_run",
+        "apps/camctl/tests/integration/session/test_submit_boundary.py::test_close_transaction_failure_keeps_released_admission_closed",
+        "-vv",
+        "--tb=short",
+        "--basetemp",
+        "/tmp/camctl-fix44-components-evidence-20261025/audit-session-total-changes/pytest-tmp",
+        "--junitxml",
+        "/tmp/camctl-fix44-components-evidence-20261025/audit-session-total-changes/junit.xml"
+      ],
+      "cwd": "/tmp/camctl-fix44-components-20261025",
+      "started_at": "2026-10-25T08:39:06.845690+00:00",
+      "source_commit": "8225f5c77ec8fef14ec3d876a0a4c7bebb87e689",
+      "branch": "fix/fail44-components-20261025",
+      "status_before": "",
+      "python": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+      "runtime": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "sqlite": "3.53.1",
+        "camctl_source": "/tmp/camctl-fix44-components-20261025/apps/camctl/src/camctl/__init__.py"
+      },
+      "environment": {
+        "PYTHONPATH": "/tmp/camctl-fix44-components-20261025/apps/camctl/src",
+        "UV_CACHE_DIR": "/tmp/camctl-fix44-components-uv-cache",
+        "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311"
+      },
+      "source_files": {
+        "apps/camctl/tests/integration/session/test_submit_boundary.py": "98c545e391a259f98b849ccd2e7c9732b69467423d0099403dbcfe4ea5335627"
+      },
+      "output": "/tmp/camctl-fix44-components-evidence-20261025/audit-session-total-changes/output.log",
+      "junit": "/tmp/camctl-fix44-components-evidence-20261025/audit-session-total-changes/junit.xml",
+      "pid": 1063574,
+      "exit_code": 1,
+      "duration_seconds": 2.3788634469965473,
+      "finished_at": "2026-10-25T08:39:09.309948+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/audit-session-total-changes/receipt.json",
+      "cases": [
+        {
+          "nodeid": "apps/camctl/tests/integration/session/test_submit_boundary.py::test_submit_unknown_commit_does_not_return_handoff_success[False]",
+          "outcome": "failure",
+          "duration_seconds": 0.686
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/session/test_submit_boundary.py::test_submit_unknown_commit_does_not_return_handoff_success[True]",
+          "outcome": "failure",
+          "duration_seconds": 0.04
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/session/test_submit_boundary.py::test_submit_before_close_keeps_acceptor_responsible",
+          "outcome": "passed",
+          "duration_seconds": 0.06
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/session/test_submit_boundary.py::test_close_before_submit_requests_later_run",
+          "outcome": "failure",
+          "duration_seconds": 0.042
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/session/test_submit_boundary.py::test_close_transaction_failure_keeps_released_admission_closed[False]",
+          "outcome": "passed",
+          "duration_seconds": 0.052
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/session/test_submit_boundary.py::test_close_transaction_failure_keeps_released_admission_closed[True]",
+          "outcome": "passed",
+          "duration_seconds": 0.05
+        }
+      ]
+    },
+    {
+      "label": "repaired-acceptance-total-changes",
+      "command": [
+        "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/acceptance/test_atomicity.py::test_unknown_commit_is_checked_by_original_key_before_retry",
+        "-vv",
+        "--tb=short",
+        "--basetemp",
+        "/tmp/camctl-fix44-components-evidence-20261025/repaired-acceptance-total-changes/pytest-tmp",
+        "--junitxml",
+        "/tmp/camctl-fix44-components-evidence-20261025/repaired-acceptance-total-changes/junit.xml"
+      ],
+      "cwd": "/tmp/camctl-fix44-components-20261025",
+      "started_at": "2026-10-25T08:41:53.006330+00:00",
+      "source_commit": "8225f5c77ec8fef14ec3d876a0a4c7bebb87e689",
+      "branch": "fix/fail44-components-20261025",
+      "status_before": "M apps/camctl/tests/integration/acceptance/test_atomicity.py\n M apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py\n M apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py\n M apps/camctl/tests/integration/outputs/test_source_resolution_batches.py\n M apps/camctl/tests/integration/persistence/test_transactions.py\n M apps/camctl/tests/integration/reporting/test_ack_sync.py\n M apps/camctl/tests/integration/reporting/test_freeze.py\n M apps/camctl/tests/integration/reporting/test_management_reuse.py\n M apps/camctl/tests/integration/reporting/test_publish.py\n M apps/camctl/tests/integration/session/test_submit_boundary.py",
+      "python": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+      "runtime": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "sqlite": "3.53.1",
+        "camctl_source": "/tmp/camctl-fix44-components-20261025/apps/camctl/src/camctl/__init__.py"
+      },
+      "environment": {
+        "PYTHONPATH": "/tmp/camctl-fix44-components-20261025/apps/camctl/src",
+        "UV_CACHE_DIR": "/tmp/camctl-fix44-components-uv-cache",
+        "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311"
+      },
+      "source_files": {
+        "apps/camctl/tests/integration/acceptance/test_atomicity.py": "46e0a1a55a1de809148cff5c3a1bb1d98200a1691af2ab59b86822a6c89e6be0"
+      },
+      "output": "/tmp/camctl-fix44-components-evidence-20261025/repaired-acceptance-total-changes/output.log",
+      "junit": "/tmp/camctl-fix44-components-evidence-20261025/repaired-acceptance-total-changes/junit.xml",
+      "pid": 1066421,
+      "exit_code": 0,
+      "duration_seconds": 1.1201272170001175,
+      "finished_at": "2026-10-25T08:41:54.175503+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-acceptance-total-changes/receipt.json",
+      "cases": [
+        {
+          "nodeid": "apps/camctl/tests/integration/acceptance/test_atomicity.py::test_unknown_commit_is_checked_by_original_key_before_retry[False]",
+          "outcome": "passed",
+          "duration_seconds": 0.438
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/acceptance/test_atomicity.py::test_unknown_commit_is_checked_by_original_key_before_retry[True]",
+          "outcome": "passed",
+          "duration_seconds": 0.063
+        }
+      ]
+    },
+    {
+      "label": "repaired-bootstrap-prerequisite-total-changes",
+      "command": [
+        "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py::test_saved_device_failure_allows_other_device_work",
+        "-vv",
+        "--tb=short",
+        "--basetemp",
+        "/tmp/camctl-fix44-components-evidence-20261025/repaired-bootstrap-prerequisite-total-changes/pytest-tmp",
+        "--junitxml",
+        "/tmp/camctl-fix44-components-evidence-20261025/repaired-bootstrap-prerequisite-total-changes/junit.xml"
+      ],
+      "cwd": "/tmp/camctl-fix44-components-20261025",
+      "started_at": "2026-10-25T08:42:43.327920+00:00",
+      "source_commit": "e87f3cfac636d566cefa4c6b3b612b250ce79a9d",
+      "branch": "fix/fail44-components-20261025",
+      "status_before": "M apps/camctl/tests/integration/acceptance/test_atomicity.py\n M apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py\n M apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py\n M apps/camctl/tests/integration/outputs/test_source_resolution_batches.py\n M apps/camctl/tests/integration/persistence/test_transactions.py\n M apps/camctl/tests/integration/reporting/test_ack_sync.py\n M apps/camctl/tests/integration/reporting/test_freeze.py\n M apps/camctl/tests/integration/reporting/test_management_reuse.py\n M apps/camctl/tests/integration/reporting/test_publish.py\n M apps/camctl/tests/integration/session/test_submit_boundary.py",
+      "python": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+      "runtime": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "sqlite": "3.53.1",
+        "camctl_source": "/tmp/camctl-fix44-components-20261025/apps/camctl/src/camctl/__init__.py"
+      },
+      "environment": {
+        "PYTHONPATH": "/tmp/camctl-fix44-components-20261025/apps/camctl/src",
+        "UV_CACHE_DIR": "/tmp/camctl-fix44-components-uv-cache",
+        "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311"
+      },
+      "source_files": {
+        "apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py": "54f268c521c20f18adccfdf759b2a4b8ef8dd23ff18240f0cbe77f89c6681df6"
+      },
+      "output": "/tmp/camctl-fix44-components-evidence-20261025/repaired-bootstrap-prerequisite-total-changes/output.log",
+      "junit": "/tmp/camctl-fix44-components-evidence-20261025/repaired-bootstrap-prerequisite-total-changes/junit.xml",
+      "pid": 1067589,
+      "exit_code": 0,
+      "duration_seconds": 1.5428255699953297,
+      "finished_at": "2026-10-25T08:42:44.923628+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-bootstrap-prerequisite-total-changes/receipt.json",
+      "cases": [
+        {
+          "nodeid": "apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py::test_saved_device_failure_allows_other_device_work",
+          "outcome": "passed",
+          "duration_seconds": 0.482
+        }
+      ]
+    },
+    {
+      "label": "repaired-bootstrap-total-changes",
+      "command": [
+        "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py",
+        "apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py",
+        "-vv",
+        "--tb=short",
+        "--basetemp",
+        "/tmp/camctl-fix44-components-evidence-20261025/repaired-bootstrap-total-changes/pytest-tmp",
+        "--junitxml",
+        "/tmp/camctl-fix44-components-evidence-20261025/repaired-bootstrap-total-changes/junit.xml"
+      ],
+      "cwd": "/tmp/camctl-fix44-components-20261025",
+      "started_at": "2026-10-25T08:40:34.076166+00:00",
+      "source_commit": "8225f5c77ec8fef14ec3d876a0a4c7bebb87e689",
+      "branch": "fix/fail44-components-20261025",
+      "status_before": "M apps/camctl/tests/integration/acceptance/test_atomicity.py\n M apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py\n M apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py\n M apps/camctl/tests/integration/outputs/test_source_resolution_batches.py\n M apps/camctl/tests/integration/persistence/test_transactions.py\n M apps/camctl/tests/integration/reporting/test_ack_sync.py\n M apps/camctl/tests/integration/reporting/test_freeze.py\n M apps/camctl/tests/integration/reporting/test_management_reuse.py\n M apps/camctl/tests/integration/reporting/test_publish.py\n M apps/camctl/tests/integration/session/test_submit_boundary.py",
+      "python": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+      "runtime": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "sqlite": "3.53.1",
+        "camctl_source": "/tmp/camctl-fix44-components-20261025/apps/camctl/src/camctl/__init__.py"
+      },
+      "environment": {
+        "PYTHONPATH": "/tmp/camctl-fix44-components-20261025/apps/camctl/src",
+        "UV_CACHE_DIR": "/tmp/camctl-fix44-components-uv-cache",
+        "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311"
+      },
+      "source_files": {
+        "apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py": "af52faa39ab1e760695ba1a475628b02b7fcb5e9e5ff5b8e364d68e106768ebf",
+        "apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py": "54f268c521c20f18adccfdf759b2a4b8ef8dd23ff18240f0cbe77f89c6681df6"
+      },
+      "output": "/tmp/camctl-fix44-components-evidence-20261025/repaired-bootstrap-total-changes/output.log",
+      "junit": "/tmp/camctl-fix44-components-evidence-20261025/repaired-bootstrap-total-changes/junit.xml",
+      "pid": 1064994,
+      "exit_code": 1,
+      "duration_seconds": 2.542375571007142,
+      "finished_at": "2026-10-25T08:40:38.322882+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-bootstrap-total-changes/receipt.json",
+      "cases": [
+        {
+          "nodeid": "apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py::test_devices_progress_independently_and_settle_before_connection_close[False]",
+          "outcome": "passed",
+          "duration_seconds": 0.469
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py::test_devices_progress_independently_and_settle_before_connection_close[True]",
+          "outcome": "passed",
+          "duration_seconds": 0.15
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py::test_capture_state_failure_stops_later_device_flow[query]",
+          "outcome": "passed",
+          "duration_seconds": 0.079
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py::test_capture_state_failure_stops_later_device_flow[projection]",
+          "outcome": "passed",
+          "duration_seconds": 0.096
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py::test_saved_device_failure_allows_other_device_work",
+          "outcome": "failure",
+          "duration_seconds": 0.092
+        }
+      ]
+    },
+    {
+      "label": "repaired-operations-total-changes",
+      "command": [
+        "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/operations/test_result_reuse.py::test_result_recovery_query_error_rolls_back_without_new_facts",
+        "apps/camctl/tests/integration/operations/test_result_reuse.py::test_result_rolled_back_then_same_key_can_save_original_input",
+        "apps/camctl/tests/integration/operations/test_result_reuse.py::test_result_commit_receipt_lost_then_same_key_returns_original_result",
+        "-vv",
+        "--tb=short",
+        "--basetemp",
+        "/tmp/camctl-fix44-components-evidence-20261025/repaired-operations-total-changes/pytest-tmp",
+        "--junitxml",
+        "/tmp/camctl-fix44-components-evidence-20261025/repaired-operations-total-changes/junit.xml"
+      ],
+      "cwd": "/tmp/camctl-fix44-components-20261025",
+      "started_at": "2026-10-25T08:41:49.568652+00:00",
+      "source_commit": "8225f5c77ec8fef14ec3d876a0a4c7bebb87e689",
+      "branch": "fix/fail44-components-20261025",
+      "status_before": "M apps/camctl/tests/integration/acceptance/test_atomicity.py\n M apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py\n M apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py\n M apps/camctl/tests/integration/outputs/test_source_resolution_batches.py\n M apps/camctl/tests/integration/persistence/test_transactions.py\n M apps/camctl/tests/integration/reporting/test_ack_sync.py\n M apps/camctl/tests/integration/reporting/test_freeze.py\n M apps/camctl/tests/integration/reporting/test_management_reuse.py\n M apps/camctl/tests/integration/reporting/test_publish.py\n M apps/camctl/tests/integration/session/test_submit_boundary.py",
+      "python": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+      "runtime": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "sqlite": "3.53.1",
+        "camctl_source": "/tmp/camctl-fix44-components-20261025/apps/camctl/src/camctl/__init__.py"
+      },
+      "environment": {
+        "PYTHONPATH": "/tmp/camctl-fix44-components-20261025/apps/camctl/src",
+        "UV_CACHE_DIR": "/tmp/camctl-fix44-components-uv-cache",
+        "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311"
+      },
+      "source_files": {
+        "apps/camctl/tests/integration/operations/test_result_reuse.py": "f20b3b33eae8e2d719b722b08cecbd60a4391075f554f24972d6e8f03291aba8"
+      },
+      "output": "/tmp/camctl-fix44-components-evidence-20261025/repaired-operations-total-changes/output.log",
+      "junit": "/tmp/camctl-fix44-components-evidence-20261025/repaired-operations-total-changes/junit.xml",
+      "pid": 1066317,
+      "exit_code": 0,
+      "duration_seconds": 0.6614104019972729,
+      "finished_at": "2026-10-25T08:41:50.273415+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-operations-total-changes/receipt.json",
+      "cases": [
+        {
+          "nodeid": "apps/camctl/tests/integration/operations/test_result_reuse.py::test_result_recovery_query_error_rolls_back_without_new_facts",
+          "outcome": "passed",
+          "duration_seconds": 0.15
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/operations/test_result_reuse.py::test_result_rolled_back_then_same_key_can_save_original_input",
+          "outcome": "passed",
+          "duration_seconds": 0.041
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/operations/test_result_reuse.py::test_result_commit_receipt_lost_then_same_key_returns_original_result",
+          "outcome": "passed",
+          "duration_seconds": 0.042
+        }
+      ]
+    },
+    {
+      "label": "repaired-outputs-total-changes",
+      "command": [
+        "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py::test_unknown_commit_recovers_same_source_request_and_ids_after_reopen",
+        "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py::test_fixed_initialization_unknown_commit_reuses_exact_original_selection_ids",
+        "apps/camctl/tests/integration/outputs/test_selection_reuse.py::test_committed_selection_with_lost_receipt_recovers_original_response",
+        "apps/camctl/tests/integration/outputs/test_catalog_integrity.py::test_catalog_queries_release_cursors_and_preserve_read_errors",
+        "-vv",
+        "--tb=short",
+        "--basetemp",
+        "/tmp/camctl-fix44-components-evidence-20261025/repaired-outputs-total-changes/pytest-tmp",
+        "--junitxml",
+        "/tmp/camctl-fix44-components-evidence-20261025/repaired-outputs-total-changes/junit.xml"
+      ],
+      "cwd": "/tmp/camctl-fix44-components-20261025",
+      "started_at": "2026-10-25T08:41:50.305544+00:00",
+      "source_commit": "8225f5c77ec8fef14ec3d876a0a4c7bebb87e689",
+      "branch": "fix/fail44-components-20261025",
+      "status_before": "M apps/camctl/tests/integration/acceptance/test_atomicity.py\n M apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py\n M apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py\n M apps/camctl/tests/integration/outputs/test_source_resolution_batches.py\n M apps/camctl/tests/integration/persistence/test_transactions.py\n M apps/camctl/tests/integration/reporting/test_ack_sync.py\n M apps/camctl/tests/integration/reporting/test_freeze.py\n M apps/camctl/tests/integration/reporting/test_management_reuse.py\n M apps/camctl/tests/integration/reporting/test_publish.py\n M apps/camctl/tests/integration/session/test_submit_boundary.py",
+      "python": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+      "runtime": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "sqlite": "3.53.1",
+        "camctl_source": "/tmp/camctl-fix44-components-20261025/apps/camctl/src/camctl/__init__.py"
+      },
+      "environment": {
+        "PYTHONPATH": "/tmp/camctl-fix44-components-20261025/apps/camctl/src",
+        "UV_CACHE_DIR": "/tmp/camctl-fix44-components-uv-cache",
+        "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311"
+      },
+      "source_files": {
+        "apps/camctl/tests/integration/outputs/test_catalog_integrity.py": "79ca62e0918b2b4a9ddb82b5b3156216fcae945f46ae86d7f3e07898de4e18d0",
+        "apps/camctl/tests/integration/outputs/test_selection_reuse.py": "82b7bf9bf0c3f0e3efa5eade80e1cc8cae067ff40cd7ed9e7053ad224e2e74d8",
+        "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py": "2e2afee90acf040892233136ae2a93b48d22317e5b2d0317a68b9520c23a8758"
+      },
+      "output": "/tmp/camctl-fix44-components-evidence-20261025/repaired-outputs-total-changes/output.log",
+      "junit": "/tmp/camctl-fix44-components-evidence-20261025/repaired-outputs-total-changes/junit.xml",
+      "pid": 1066357,
+      "exit_code": 0,
+      "duration_seconds": 2.6251797360018827,
+      "finished_at": "2026-10-25T08:41:52.973233+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-outputs-total-changes/receipt.json",
+      "cases": [
+        {
+          "nodeid": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py::test_unknown_commit_recovers_same_source_request_and_ids_after_reopen[False-False]",
+          "outcome": "passed",
+          "duration_seconds": 0.377
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py::test_unknown_commit_recovers_same_source_request_and_ids_after_reopen[False-True]",
+          "outcome": "passed",
+          "duration_seconds": 0.087
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py::test_unknown_commit_recovers_same_source_request_and_ids_after_reopen[True-False]",
+          "outcome": "passed",
+          "duration_seconds": 0.08
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py::test_unknown_commit_recovers_same_source_request_and_ids_after_reopen[True-True]",
+          "outcome": "passed",
+          "duration_seconds": 0.069
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py::test_fixed_initialization_unknown_commit_reuses_exact_original_selection_ids[False]",
+          "outcome": "passed",
+          "duration_seconds": 0.083
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py::test_fixed_initialization_unknown_commit_reuses_exact_original_selection_ids[True]",
+          "outcome": "passed",
+          "duration_seconds": 0.079
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/outputs/test_selection_reuse.py::test_committed_selection_with_lost_receipt_recovers_original_response",
+          "outcome": "passed",
+          "duration_seconds": 0.075
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/outputs/test_catalog_integrity.py::test_catalog_queries_release_cursors_and_preserve_read_errors[success-read]",
+          "outcome": "passed",
+          "duration_seconds": 0.07
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/outputs/test_catalog_integrity.py::test_catalog_queries_release_cursors_and_preserve_read_errors[success-fix]",
+          "outcome": "passed",
+          "duration_seconds": 0.09
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/outputs/test_catalog_integrity.py::test_catalog_queries_release_cursors_and_preserve_read_errors[empty-read]",
+          "outcome": "passed",
+          "duration_seconds": 0.067
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/outputs/test_catalog_integrity.py::test_catalog_queries_release_cursors_and_preserve_read_errors[empty-fix]",
+          "outcome": "passed",
+          "duration_seconds": 0.08
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/outputs/test_catalog_integrity.py::test_catalog_queries_release_cursors_and_preserve_read_errors[fetch-read]",
+          "outcome": "passed",
+          "duration_seconds": 0.073
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/outputs/test_catalog_integrity.py::test_catalog_queries_release_cursors_and_preserve_read_errors[fetch-fix]",
+          "outcome": "passed",
+          "duration_seconds": 0.098
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/outputs/test_catalog_integrity.py::test_catalog_queries_release_cursors_and_preserve_read_errors[execute-read]",
+          "outcome": "passed",
+          "duration_seconds": 0.062
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/outputs/test_catalog_integrity.py::test_catalog_queries_release_cursors_and_preserve_read_errors[execute-fix]",
+          "outcome": "passed",
+          "duration_seconds": 0.072
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/outputs/test_catalog_integrity.py::test_catalog_queries_release_cursors_and_preserve_read_errors[decode-read]",
+          "outcome": "passed",
+          "duration_seconds": 0.073
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/outputs/test_catalog_integrity.py::test_catalog_queries_release_cursors_and_preserve_read_errors[decode-fix]",
+          "outcome": "passed",
+          "duration_seconds": 0.067
+        }
+      ]
+    },
+    {
+      "label": "repaired-persistence-total-changes",
+      "command": [
+        "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/persistence/test_transactions.py::TestTransactionControlReceipt::test_commit_control_is_unknown_without_retry_or_rollback",
+        "apps/camctl/tests/integration/persistence/test_transactions.py::TestAtomicRollback::test_commit_failure_is_unknown",
+        "-vv",
+        "--tb=short",
+        "--basetemp",
+        "/tmp/camctl-fix44-components-evidence-20261025/repaired-persistence-total-changes/pytest-tmp",
+        "--junitxml",
+        "/tmp/camctl-fix44-components-evidence-20261025/repaired-persistence-total-changes/junit.xml"
+      ],
+      "cwd": "/tmp/camctl-fix44-components-20261025",
+      "started_at": "2026-10-25T08:41:56.098092+00:00",
+      "source_commit": "8225f5c77ec8fef14ec3d876a0a4c7bebb87e689",
+      "branch": "fix/fail44-components-20261025",
+      "status_before": "M apps/camctl/tests/integration/acceptance/test_atomicity.py\n M apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py\n M apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py\n M apps/camctl/tests/integration/outputs/test_source_resolution_batches.py\n M apps/camctl/tests/integration/persistence/test_transactions.py\n M apps/camctl/tests/integration/reporting/test_ack_sync.py\n M apps/camctl/tests/integration/reporting/test_freeze.py\n M apps/camctl/tests/integration/reporting/test_management_reuse.py\n M apps/camctl/tests/integration/reporting/test_publish.py\n M apps/camctl/tests/integration/session/test_submit_boundary.py",
+      "python": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+      "runtime": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "sqlite": "3.53.1",
+        "camctl_source": "/tmp/camctl-fix44-components-20261025/apps/camctl/src/camctl/__init__.py"
+      },
+      "environment": {
+        "PYTHONPATH": "/tmp/camctl-fix44-components-20261025/apps/camctl/src",
+        "UV_CACHE_DIR": "/tmp/camctl-fix44-components-uv-cache",
+        "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311"
+      },
+      "source_files": {
+        "apps/camctl/tests/integration/persistence/test_transactions.py": "628bce3b8d1ad326e0fc67cda861d107a1bd0744be52ce34e8af9e8a1b4912b9"
+      },
+      "output": "/tmp/camctl-fix44-components-evidence-20261025/repaired-persistence-total-changes/output.log",
+      "junit": "/tmp/camctl-fix44-components-evidence-20261025/repaired-persistence-total-changes/junit.xml",
+      "pid": 1066567,
+      "exit_code": 0,
+      "duration_seconds": 0.551236080005765,
+      "finished_at": "2026-10-25T08:41:56.695754+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-persistence-total-changes/receipt.json",
+      "cases": [
+        {
+          "nodeid": "apps/camctl/tests/integration/persistence/test_transactions/TestTransactionControlReceipt.py::test_commit_control_is_unknown_without_retry_or_rollback[False]",
+          "outcome": "passed",
+          "duration_seconds": 0.131
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/persistence/test_transactions/TestTransactionControlReceipt.py::test_commit_control_is_unknown_without_retry_or_rollback[True]",
+          "outcome": "passed",
+          "duration_seconds": 0.027
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/persistence/test_transactions/TestAtomicRollback.py::test_commit_failure_is_unknown",
+          "outcome": "passed",
+          "duration_seconds": 0.016
+        }
+      ]
+    },
+    {
+      "label": "repaired-reporting-total-changes",
+      "command": [
+        "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database",
+        "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key",
+        "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact",
+        "apps/camctl/tests/integration/reporting/test_freeze.py::test_unknown_freeze_commit_is_resolved_by_original_operation_key",
+        "apps/camctl/tests/integration/reporting/test_freeze.py::test_concurrent_input_and_ack_are_read_at_one_complete_boundary",
+        "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_unknown_commit_is_resolved_with_same_freeze_key",
+        "apps/camctl/tests/integration/reporting/test_ack_sync.py::test_unknown_commit_preserves_atomic_sync_result",
+        "-vv",
+        "--tb=short",
+        "--basetemp",
+        "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/pytest-tmp",
+        "--junitxml",
+        "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/junit.xml"
+      ],
+      "cwd": "/tmp/camctl-fix44-components-20261025",
+      "started_at": "2026-10-25T08:40:30.967695+00:00",
+      "source_commit": "8225f5c77ec8fef14ec3d876a0a4c7bebb87e689",
+      "branch": "fix/fail44-components-20261025",
+      "status_before": "M apps/camctl/tests/integration/acceptance/test_atomicity.py\n M apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py\n M apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py\n M apps/camctl/tests/integration/outputs/test_source_resolution_batches.py\n M apps/camctl/tests/integration/persistence/test_transactions.py\n M apps/camctl/tests/integration/reporting/test_ack_sync.py\n M apps/camctl/tests/integration/reporting/test_freeze.py\n M apps/camctl/tests/integration/reporting/test_management_reuse.py\n M apps/camctl/tests/integration/reporting/test_publish.py\n M apps/camctl/tests/integration/session/test_submit_boundary.py",
+      "python": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+      "runtime": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "sqlite": "3.53.1",
+        "camctl_source": "/tmp/camctl-fix44-components-20261025/apps/camctl/src/camctl/__init__.py"
+      },
+      "environment": {
+        "PYTHONPATH": "/tmp/camctl-fix44-components-20261025/apps/camctl/src",
+        "UV_CACHE_DIR": "/tmp/camctl-fix44-components-uv-cache",
+        "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311"
+      },
+      "source_files": {
+        "apps/camctl/tests/integration/reporting/test_ack_sync.py": "20cd9f5831dea16a4e17b50fb128e0ac0dd49ebc56b50f9c8a9d6f95ac1a455d",
+        "apps/camctl/tests/integration/reporting/test_freeze.py": "6317ca507afba97d05538ca57d2d200be3083e50ac8ae69d4deed8a4ea1a91c9",
+        "apps/camctl/tests/integration/reporting/test_freeze_reuse.py": "91aabf05b0414b02624f080cb5b205d32eb4391439d51c5cb402826d7c86743b",
+        "apps/camctl/tests/integration/reporting/test_management_reuse.py": "cfcae7d86a4a0d343ede5c73e9de30dd12a84ae1bd0585ef60195b73cfd5be67",
+        "apps/camctl/tests/integration/reporting/test_publish.py": "faae507dc195c6f0297f7b06876a55c39235f5cb07937ca49e8f37d5a65bd7b9"
+      },
+      "output": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/output.log",
+      "junit": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/junit.xml",
+      "pid": 1064917,
+      "exit_code": 0,
+      "duration_seconds": 3.0112608350027585,
+      "finished_at": "2026-10-25T08:40:34.040619+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-reporting-total-changes/receipt.json",
+      "cases": [
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT l.change_count-prepare]",
+          "outcome": "passed",
+          "duration_seconds": 0.401
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT l.change_count-intent]",
+          "outcome": "passed",
+          "duration_seconds": 0.05
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT l.change_count-publish]",
+          "outcome": "passed",
+          "duration_seconds": 0.061
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT l.change_count-failure]",
+          "outcome": "passed",
+          "duration_seconds": 0.048
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT event_id, change_count FROM entity_event_links-prepare]",
+          "outcome": "passed",
+          "duration_seconds": 0.041
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT event_id, change_count FROM entity_event_links-intent]",
+          "outcome": "passed",
+          "duration_seconds": 0.058
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT event_id, change_count FROM entity_event_links-publish]",
+          "outcome": "passed",
+          "duration_seconds": 0.05
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT event_id, change_count FROM entity_event_links-failure]",
+          "outcome": "passed",
+          "duration_seconds": 0.047
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT link.event_id, txn.operation_key-prepare]",
+          "outcome": "passed",
+          "duration_seconds": 0.046
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT link.event_id, txn.operation_key-intent]",
+          "outcome": "passed",
+          "duration_seconds": 0.061
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT link.event_id, txn.operation_key-publish]",
+          "outcome": "passed",
+          "duration_seconds": 0.058
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_original_management_restore_failure_preserves_exception_and_database[SELECT link.event_id, txn.operation_key-failure]",
+          "outcome": "passed",
+          "duration_seconds": 0.05
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key[False-prepare]",
+          "outcome": "passed",
+          "duration_seconds": 0.041
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key[False-failure]",
+          "outcome": "passed",
+          "duration_seconds": 0.049
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key[True-prepare]",
+          "outcome": "passed",
+          "duration_seconds": 0.056
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_management_reuse.py::test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key[True-failure]",
+          "outcome": "passed",
+          "duration_seconds": 0.063
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[False-prepare]",
+          "outcome": "passed",
+          "duration_seconds": 0.038
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[False-intent]",
+          "outcome": "passed",
+          "duration_seconds": 0.053
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[False-publish]",
+          "outcome": "passed",
+          "duration_seconds": 0.045
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[False-failure]",
+          "outcome": "passed",
+          "duration_seconds": 0.038
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[True-prepare]",
+          "outcome": "passed",
+          "duration_seconds": 0.051
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[True-intent]",
+          "outcome": "passed",
+          "duration_seconds": 0.051
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[True-publish]",
+          "outcome": "passed",
+          "duration_seconds": 0.044
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_publish.py::test_unknown_management_commit_reuses_original_key_without_duplicate_fact[True-failure]",
+          "outcome": "passed",
+          "duration_seconds": 0.049
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_unknown_freeze_commit_is_resolved_by_original_operation_key[False]",
+          "outcome": "passed",
+          "duration_seconds": 0.035
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_unknown_freeze_commit_is_resolved_by_original_operation_key[True]",
+          "outcome": "passed",
+          "duration_seconds": 0.045
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_concurrent_input_and_ack_are_read_at_one_complete_boundary[True-want0]",
+          "outcome": "passed",
+          "duration_seconds": 0.08
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_freeze.py::test_concurrent_input_and_ack_are_read_at_one_complete_boundary[False-want1]",
+          "outcome": "passed",
+          "duration_seconds": 0.066
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_unknown_commit_is_resolved_with_same_freeze_key[False]",
+          "outcome": "passed",
+          "duration_seconds": 0.05
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py::test_unknown_commit_is_resolved_with_same_freeze_key[True]",
+          "outcome": "passed",
+          "duration_seconds": 0.051
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_ack_sync.py::test_unknown_commit_preserves_atomic_sync_result[False]",
+          "outcome": "passed",
+          "duration_seconds": 0.082
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/reporting/test_ack_sync.py::test_unknown_commit_preserves_atomic_sync_result[True]",
+          "outcome": "passed",
+          "duration_seconds": 0.086
+        }
+      ]
+    },
+    {
+      "label": "repaired-session-total-changes",
+      "command": [
+        "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/session/test_submit_boundary.py::test_submit_unknown_commit_does_not_return_handoff_success",
+        "apps/camctl/tests/integration/session/test_submit_boundary.py::test_submit_before_close_keeps_acceptor_responsible",
+        "apps/camctl/tests/integration/session/test_submit_boundary.py::test_close_before_submit_requests_later_run",
+        "apps/camctl/tests/integration/session/test_submit_boundary.py::test_close_transaction_failure_keeps_released_admission_closed",
+        "-vv",
+        "--tb=short",
+        "--basetemp",
+        "/tmp/camctl-fix44-components-evidence-20261025/repaired-session-total-changes/pytest-tmp",
+        "--junitxml",
+        "/tmp/camctl-fix44-components-evidence-20261025/repaired-session-total-changes/junit.xml"
+      ],
+      "cwd": "/tmp/camctl-fix44-components-20261025",
+      "started_at": "2026-10-25T08:41:54.208930+00:00",
+      "source_commit": "8225f5c77ec8fef14ec3d876a0a4c7bebb87e689",
+      "branch": "fix/fail44-components-20261025",
+      "status_before": "M apps/camctl/tests/integration/acceptance/test_atomicity.py\n M apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py\n M apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py\n M apps/camctl/tests/integration/outputs/test_source_resolution_batches.py\n M apps/camctl/tests/integration/persistence/test_transactions.py\n M apps/camctl/tests/integration/reporting/test_ack_sync.py\n M apps/camctl/tests/integration/reporting/test_freeze.py\n M apps/camctl/tests/integration/reporting/test_management_reuse.py\n M apps/camctl/tests/integration/reporting/test_publish.py\n M apps/camctl/tests/integration/session/test_submit_boundary.py",
+      "python": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python",
+      "runtime": {
+        "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+        "sqlite": "3.53.1",
+        "camctl_source": "/tmp/camctl-fix44-components-20261025/apps/camctl/src/camctl/__init__.py"
+      },
+      "environment": {
+        "PYTHONPATH": "/tmp/camctl-fix44-components-20261025/apps/camctl/src",
+        "UV_CACHE_DIR": "/tmp/camctl-fix44-components-uv-cache",
+        "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-components-20261025/apps/camctl/.venv311"
+      },
+      "source_files": {
+        "apps/camctl/tests/integration/session/test_submit_boundary.py": "caa7cd501fa80498fc7070a0de8954c2be0aa7d42f4d6f7314f116ef8fb9d3c7"
+      },
+      "output": "/tmp/camctl-fix44-components-evidence-20261025/repaired-session-total-changes/output.log",
+      "junit": "/tmp/camctl-fix44-components-evidence-20261025/repaired-session-total-changes/junit.xml",
+      "pid": 1066476,
+      "exit_code": 0,
+      "duration_seconds": 1.8053463440010091,
+      "finished_at": "2026-10-25T08:41:56.067470+00:00",
+      "receipt": "/tmp/camctl-fix44-components-evidence-20261025/repaired-session-total-changes/receipt.json",
+      "cases": [
+        {
+          "nodeid": "apps/camctl/tests/integration/session/test_submit_boundary.py::test_submit_unknown_commit_does_not_return_handoff_success[False]",
+          "outcome": "passed",
+          "duration_seconds": 0.66
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/session/test_submit_boundary.py::test_submit_unknown_commit_does_not_return_handoff_success[True]",
+          "outcome": "passed",
+          "duration_seconds": 0.068
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/session/test_submit_boundary.py::test_submit_before_close_keeps_acceptor_responsible",
+          "outcome": "passed",
+          "duration_seconds": 0.058
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/session/test_submit_boundary.py::test_close_before_submit_requests_later_run",
+          "outcome": "passed",
+          "duration_seconds": 0.056
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/session/test_submit_boundary.py::test_close_transaction_failure_keeps_released_admission_closed[False]",
+          "outcome": "passed",
+          "duration_seconds": 0.051
+        },
+        {
+          "nodeid": "apps/camctl/tests/integration/session/test_submit_boundary.py::test_close_transaction_failure_keeps_released_admission_closed[True]",
+          "outcome": "passed",
+          "duration_seconds": 0.057
+        }
+      ]
+    }
+  ],
+  "evidence_directory": "/tmp/camctl-fix44-components-evidence-20261025",
+  "scope_boundaries": [
+    "只新增13个只读属性，AST去除新增属性后与基线相同。",
+    "未修改生产源码、故障注入、事务步骤、断言或主报告。",
+    "已有通用委托及无消费路径的纯替身没有机械增加属性。",
+    "目录分进程且顺序运行，未执行全量回归。"
+  ],
+  "notes": [
+    "bootstrap正常设备失败用例在连接修复后暴露ResultsDouble接口缺失，依赖提交修复后只复验该1项通过。",
+    "scheduling.FaultConnection由root处理；cancellation._FaultConnection由OSMO代理处理，本提交不重复。"
+  ]
+}

@@ -1,0 +1,77 @@
+{
+  "id": "root/test_camctl_cancellation_roundtrip",
+  "scope": "root",
+  "path": "tests/integration/test_camctl_cancellation_roundtrip.py",
+  "targets": [
+    "tests/integration/test_camctl_cancellation_roundtrip.py"
+  ],
+  "estimated_seconds": 6.5349627360010345,
+  "historical_failure_observed": true,
+  "status": "passed",
+  "number": 29,
+  "worker": 1,
+  "artifacts": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/029-root-test_camctl_cancellation_roundtrip/artifacts",
+  "cwd": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/029-root-test_camctl_cancellation_roundtrip/source",
+  "started_utc": "2026-10-26T00:39:20.446559+00:00",
+  "command": [
+    "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/029-root-test_camctl_cancellation_roundtrip/source/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "tests/integration/test_camctl_cancellation_roundtrip.py",
+    "-q",
+    "--durations=0",
+    "-p",
+    "integration_progress",
+    "--basetemp",
+    "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/029-root-test_camctl_cancellation_roundtrip/tmp/pytest",
+    "-p",
+    "camctl_memory_plugin",
+    "--camctl-memory-limit",
+    "2GiB",
+    "--camctl-memory-cgroup-root",
+    "/sys/fs/cgroup/memory/camctl-budget-1922809-b293c146ab7744439fec45b828581e67"
+  ],
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/control:/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/029-root-test_camctl_cancellation_roundtrip/source/apps/camctl/src",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/workers/1/python-cache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/workers/1/project-env",
+    "UV_CACHE_DIR": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/workers/1/uv-cache",
+    "UV_OFFLINE": "1",
+    "TMPDIR": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/029-root-test_camctl_cancellation_roundtrip/tmp"
+  },
+  "preparations": [
+    {
+      "label": "package-resources",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/029-root-test_camctl_cancellation_roundtrip/source/apps/camctl/scripts/sync_resources.py"
+      ],
+      "cwd": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/029-root-test_camctl_cancellation_roundtrip/source",
+      "started_utc": "2026-10-26T00:39:21.521751+00:00",
+      "pid": 1969189,
+      "exit_code": 0,
+      "finished_utc": "2026-10-26T00:39:21.563006+00:00",
+      "wall_seconds": 0.04124949898687191
+    }
+  ],
+  "preparation": "package-resources",
+  "preparation_pid": 1969189,
+  "pid": 1969191,
+  "execution_started_utc": "2026-10-26T00:39:21.564370+00:00",
+  "progress": {
+    "status": "finished",
+    "exit_code": 0,
+    "collected": 1,
+    "outcomes": {
+      "passed": 1
+    },
+    "subchecks": {},
+    "elapsed_seconds": 33.80610361199069,
+    "utc": "2026-10-26T00:39:56.167207+00:00",
+    "pid": 1969191
+  },
+  "exit_code": 0,
+  "finished_utc": "2026-10-26T00:39:56.237325+00:00",
+  "wall_seconds": 35.17244452299201
+}

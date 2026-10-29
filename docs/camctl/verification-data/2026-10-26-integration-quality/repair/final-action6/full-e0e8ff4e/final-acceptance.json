@@ -1,0 +1,49 @@
+{
+  "tested_head": "e0e8ff4e3919dc570882d68cd2454285e017f57c",
+  "shared_production_commit": "f9ba88c8608e51ced26feb8bc0490b505c837688",
+  "test_change_commit": "bb72d223",
+  "whole_tree_sha256": "8d63fb0e94543d3827d51aa3d425a2a91d8ee24781a398392094365c1fb5594b",
+  "original_assert_count": 127,
+  "current_assert_count": 128,
+  "original_asserts_all_preserved": true,
+  "production_files_identical": true,
+  "changed_test_files": [
+    "tests/integration/README.md",
+    "tests/integration/_action6_segmented_entry.py",
+    "tests/integration/test_action6_segmented_recovery_roundtrip.py"
+  ],
+  "same_source_for_all_eight": true,
+  "pytest": {
+    "passed": 8,
+    "failed": 0,
+    "unexecuted": 0,
+    "wall_seconds": 237.02,
+    "plugin_wall_seconds": 237.0536288900039,
+    "exit_code": 0
+  },
+  "resource": {
+    "scope": "each camctl CLI and all descendants; pytest/client/C host outside",
+    "leaf_count": 80,
+    "requested_combined_limit_bytes": 2147483648,
+    "all_leaf_combined_limits_correct": true,
+    "max_leaf_combined_peak_bytes": 154796032,
+    "oom_kills": 0,
+    "all_leaf_groups_removed": true,
+    "budget_launcher_exit_code": 0,
+    "delegation_removed": true
+  },
+  "all_known_owned_processes_exited": true,
+  "cleanup_lifecycle_real_witness": "/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/inspection-cleanup-lifecycle.json",
+  "evidence": {
+    "command": "/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/command.sh",
+    "source_before": "/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/source-before.json",
+    "source_after": "/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/source-after.json",
+    "pytest_log": "/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/pytest.log",
+    "xml": "/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/result.xml",
+    "summary": "/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/result-summary.json",
+    "resource": "/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/resource-summary.json",
+    "process": "/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/process-receipt.json",
+    "cli_origins": "/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/cli-origins.json",
+    "database": "/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/database-summary.json"
+  }
+}

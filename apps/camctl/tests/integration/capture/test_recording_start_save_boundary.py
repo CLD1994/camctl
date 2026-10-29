@@ -42,7 +42,7 @@ async def test_start_grant_state_failure_stops_before_device_call(tmp_path, kind
                 return DbOutcome(kind=kind, error=ConsistencyError("授予事务不可靠"))
 
         driver = StartDriver(_result(confirmed=True))
-        runtime = _configured(owned, driver)
+        runtime = (await _configured(owned, driver))
         runtime.scheduling = UnavailableGrant()
         with pytest.raises(ConsistencyError):
             await capture_handler("camera_record")(12, runtime)
@@ -98,7 +98,7 @@ async def test_unresolved_result_save_keeps_original_outcome_and_identity_for_sa
                 return super().execute(statement, params)
 
         proxy = PersistentFault(owned.connection, driver, "commit_before")
-        runtime = _configured(replace(owned, connection=proxy), driver)
+        runtime = (await _configured(replace(owned, connection=proxy), driver))
         deadlines = []
         runtime.on_recording_deadline = lambda action_id, deadline: deadlines.append((action_id, deadline))
         with pytest.raises(ConsistencyError):
@@ -134,7 +134,7 @@ async def test_actual_start_result_is_verified_and_resaved_with_same_key_without
         driver = StartDriver(_result(confirmed=True), returned=lambda: before_result.append(
             tuple(owned.connection.iterdump())))
         proxy = ResultWriteFault(owned.connection, driver, mode)
-        runtime = _configured(replace(owned, connection=proxy), driver)
+        runtime = (await _configured(replace(owned, connection=proxy), driver))
         await capture_handler("camera_record")(12, runtime)
         assert len(driver.calls) == 1
         assert _start(owned)[1:] == (3, 1, 0)
@@ -155,7 +155,7 @@ async def test_dispatch_prevented_result_and_expiration_share_transaction(tmp_pa
     try:
         wall = [_NOW]
         driver = StartDriver(_result(confirmed=True))
-        runtime = _configured(owned, driver, wall=wall)
+        runtime = (await _configured(owned, driver, wall=wall))
 
         class ExpiredAfterGrant(SchedulingRepository):
             def grant_start(self, *args, **kwargs):
@@ -192,7 +192,7 @@ def _joint_confirm(runtime):
 async def test_joint_start_same_key_rejects_changed_original_input(tmp_path, changed):
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result(confirmed=True)))
+        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
         finish, observation = _joint_confirm(runtime)
         key = new_operation_key()
         first = runtime.capture.finish_start_result(finish, observation, key, owned)
@@ -217,7 +217,7 @@ async def test_joint_start_same_key_rejects_changed_original_input(tmp_path, cha
 async def test_joint_query_same_key_rejects_changed_original_start_segment(tmp_path):
     owned = _world(tmp_path)
     try:
-        runtime = _configured(owned, StartDriver(_result()))
+        runtime = (await _configured(owned, StartDriver(_result())))
         ticket, reason = runtime.grant(runtime.action(12))
         assert ticket is not None, reason
         runtime.finish(ticket, _result(error=ErrorValue("transport_timeout", "transport")))
@@ -260,7 +260,7 @@ async def test_residual_consumer_finds_unfinished_old_start_under_terminal_actio
     owned = _world(tmp_path)
     try:
         driver = StartDriver(_result(confirmed=True))
-        original = _configured(owned, driver)
+        original = (await _configured(owned, driver))
         ticket, reason = original.grant(original.action(12))
         assert ticket is not None, reason
         horizon = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
@@ -271,8 +271,8 @@ async def test_residual_consumer_finds_unfinished_old_start_under_terminal_actio
         recovery = EvidenceRegistry((EvidenceContract(
             "adb_foreground_recovery", 1, "control", frozenset()),))
 
-        def factory(current_owned, device_id):
-            runtime = _configured(current_owned, driver)
+        async def factory(current_owned, device_id):
+            runtime = (await _configured(current_owned, driver))
             runtime.recovery_boundary = boundary
             runtime.recovery_max_event_id = horizon if old_h else 1
             runtime.recovery_evidence_for = lambda saved, operation: (

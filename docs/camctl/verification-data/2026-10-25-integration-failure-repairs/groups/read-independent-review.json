@@ -1,0 +1,280 @@
+{
+  "reviewed_at_utc": "2026-10-25T08:47:16.323742+00:00",
+  "reviewer": "/root/fix44_clock",
+  "mode": "独立只读复核；未修改被审工作树，未重复已通过测试",
+  "step": "S8",
+  "diagnosis_id": 20,
+  "worktree": "/tmp/camctl-fix44-read-20261025",
+  "baseline": "5d20849e53fbfb045d25a2799e268827967196b2",
+  "reviewed_commit": "81344aca9e9958a156f856c08ed44b04f2ac58e8",
+  "final_source_commit": "436459e2607be2aaed179d162ee743b9c76946c3",
+  "working_tree_status": "",
+  "disposition": "通过本次 S8 局部独立复核",
+  "findings": [],
+  "reviewed_files": [
+    {
+      "path": "apps/camctl/src/camctl/bootstrap/capture_assembly.py",
+      "sha256": "b4fa9df964b96237953ade1d1a79f645ba2a4cff76a3ce6d9467b69451993640"
+    },
+    {
+      "path": "apps/camctl/src/camctl/bootstrap/lifecycle.py",
+      "sha256": "61d9fe7c56629299288027ab190ab62c9c4f5755a40fb2d99561698749a6ba18"
+    },
+    {
+      "path": "apps/camctl/src/camctl/capture/media_flow.py",
+      "sha256": "7a9068fc1d855a03348f72f0693f8d9e4c26fe642edfbfc9082fccc59b791495"
+    },
+    {
+      "path": "apps/camctl/tests/integration/bootstrap/test_inspection_read_dispatch.py",
+      "sha256": "5dbb6bbfc2bbef56a99f790fe6b34374846fa6c7de375ee8dcc8386bcaad860b"
+    },
+    {
+      "path": "docs/camctl/database/file-fields.md",
+      "sha256": "bc520b3eab8ab460e9ed1e13c0beb6c2222543d4f159e8ffcac0dd9396fe054f"
+    }
+  ],
+  "contracts": [
+    {
+      "path": "docs/superpowers/plans/2026-10-25-integration-failure-repairs.md",
+      "lines": [
+        36,
+        48
+      ],
+      "verified": "READ 六类状态与同类入口审计范围；函数和队列组织属于实现选择。"
+    },
+    {
+      "path": "docs/camctl/verification-data/2026-10-25-integration-failure-diagnosis/contracts/read-audit.json",
+      "verified": "旧消费者在绑定和状态判断前仅 JOIN recording_processing，合法 inspection 在真实摘要 await 期间可被普通及残留入口看到。"
+    },
+    {
+      "path": "docs/architecture/file-copy.md",
+      "lines": [
+        245,
+        270
+      ],
+      "verified": "完整 AttemptFinish 优先；真实 clean ReadEnd 不被进度或新进程替代；未知重送使用原完整申请、时刻和键；绑定缺失按所需源摘要分类。"
+    },
+    {
+      "path": "docs/camctl/database/outputs-files.md",
+      "lines": [
+        79,
+        93
+      ],
+      "verified": "delivery/processing/inspection 三种独立用途，检查副本保护在来源和绑定消费者可靠结束前保留。"
+    },
+    {
+      "path": "docs/camctl/database/segments.md",
+      "lines": [
+        25,
+        35
+      ],
+      "verified": "检查由来源 action 固定成员拥有，唯一 inspection 输入副本；保存终态后复用指标和 probe，保护释放沿原生命周期。"
+    }
+  ],
+  "verified_boundaries": [
+    {
+      "boundary": "普通、残留和受限接线",
+      "evidence": [
+        "bootstrap/lifecycle.py:130",
+        "bootstrap/lifecycle.py:188",
+        "bootstrap/lifecycle.py:826",
+        "bootstrap/lifecycle.py:864",
+        "bootstrap/lifecycle.py:1068",
+        "bootstrap/capture_assembly.py:895"
+      ],
+      "conclusion": "三处 session_capture_assembly 和 prepared 恢复入口共享 RuntimeDeps.capture_segment_inspection_results；重建 MediaFlow 使用同一集合，受限入口只重送既定结果。"
+    },
+    {
+      "boundary": "原保存结果与 UNKNOWN",
+      "evidence": [
+        "capture/media_flow.py:681",
+        "capture/segment_inspections.py:128",
+        "outputs/read_attempts.py:274",
+        "outputs/read_attempts.py:284"
+      ],
+      "conclusion": "原 PendingReadResult 保留完整 finish/key；检查结果保存使用集合中原 request/key。检查结果 UNKNOWN 仅可能在前一步 READ 可靠完成后形成；恢复先核实该原检查结果不会将未可靠保存的 READ 当成功。原发生时刻不重新取当前时间。"
+    },
+    {
+      "boundary": "真实 READ 与检查失败",
+      "evidence": [
+        "capture/media_flow.py:709",
+        "outputs/read_attempts.py:200",
+        "capture/media_flow.py:822",
+        "capture/segment_inspections.py:143",
+        "capture/segment_inspections.py:224"
+      ],
+      "conclusion": "必要源摘要缺失且绑定不可用时，先核实 held ticket、真实 clean End 和完整可靠进度，READ 尝试保存 SUCCEEDED/read_returned，run 保存绑定失败，检查再保存对应业务失败；两项可靠保存后才释放读取机会，不解除检查副本内容保护。"
+    },
+    {
+      "boundary": "绑定匹配、已知或不支持源摘要",
+      "evidence": [
+        "capture/media_flow.py:775",
+        "capture/segment_inspections.py:514"
+      ],
+      "conclusion": "分派不抢走原拥有者的本地核验；可靠摘要存在或明确不支持时沿原 End 继续本地工作，矩阵断言仅一次原读取且没有新增摘要或探测。"
+    },
+    {
+      "boundary": "终态、取消和关系损坏",
+      "evidence": [
+        "capture/media_flow.py:735",
+        "capture/media_flow.py:758",
+        "capture/media_flow.py:774",
+        "capture/action6_recovery.py:103"
+      ],
+      "conclusion": "copy、ticket、attempt、action、member、set、source、observer 不一致均拒绝；保留原 End 和数据库。合法已有终态或可靠取消不形成新绑定业务决定；原终态收场入口重送待保存检查结果。"
+    },
+    {
+      "boundary": "实际收场计数与受限转换",
+      "evidence": [
+        "bootstrap/background_flow.py:69",
+        "bootstrap/flows.py:155",
+        "bootstrap/flows.py:224",
+        "bootstrap/lifecycle.py:1306",
+        "session/service.py:849",
+        "session/service.py:1149",
+        "session/service.py:1247",
+        "session/service.py:1758"
+      ],
+      "conclusion": "BackgroundFlow 从实际任务创建到结果交付均计一项，CaptureFlow 和 CombinedLocalWork 汇总到会话判断；驱动轮次先消费/核实结果再判断工作。转受限先收场实际任务，再由 winddown 的 prepared 前置核实共享检查结果。检查结果集合本身不另计数；未发现可达的成功退出遗漏路径。"
+    }
+  ],
+  "evidence_validation": {
+    "receipt": "/tmp/camctl-fix44-read-results.json",
+    "receipt_sha256": "1be1cbbf66fa9669e4298ad07049a19662e5ee670195781b5ba60fbf2215eea8",
+    "source_and_log_hashes": "独立重新计算并与实施收据逐项一致",
+    "runs": [
+      {
+        "id": "actual-end-original-red",
+        "command": [
+          "/tmp/camctl-fix44-read-venv/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/bootstrap/test_inspection_read_dispatch.py",
+          "-q"
+        ],
+        "cwd": "/tmp/camctl-fix44-read-20261025",
+        "exit_code": 1,
+        "result": "2 failed in 1.62s；普通和残留入口均误报缺少 processing。",
+        "log": "/tmp/camctl-fix44-read-red.log",
+        "log_sha256": "a2d436c0f158d3656c8e159f78089c905297372140c7af9b89eba0f0f5903dc8"
+      },
+      {
+        "id": "ticket-attempt-red",
+        "command": [
+          "/tmp/camctl-fix44-read-venv/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/bootstrap/test_inspection_read_dispatch.py",
+          "-k",
+          "relations and attempt",
+          "-q"
+        ],
+        "cwd": "/tmp/camctl-fix44-read-20261025",
+        "exit_code": 1,
+        "result": "1 failed, 22 deselected in 0.97s；损坏 attempt_id 未被拒绝。",
+        "log": "/tmp/camctl-fix44-read-attempt-red.log",
+        "log_sha256": "cabab2255927228e96330b9d5273337db2fcb324e11da83b937121c7c0ab8310"
+      },
+      {
+        "id": "inspection-matrix-green",
+        "command": [
+          "/tmp/camctl-fix44-read-venv/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/bootstrap/test_inspection_read_dispatch.py",
+          "-q"
+        ],
+        "cwd": "/tmp/camctl-fix44-read-20261025",
+        "exit_code": 0,
+        "result": "24 passed in 2.69s",
+        "log": "/tmp/camctl-fix44-read-matrix.log",
+        "log_sha256": "a3893a678e2ba8a6006a69e4f3b67a81f5a3f91cc72b10bfbd55fee0a5a7ee13"
+      },
+      {
+        "id": "capture-related",
+        "command": [
+          "/tmp/camctl-fix44-read-venv/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/capture/test_segment_inspections.py",
+          "apps/camctl/tests/integration/capture/test_media_flow.py",
+          "apps/camctl/tests/integration/capture/test_input_copy.py",
+          "-q"
+        ],
+        "cwd": "/tmp/camctl-fix44-read-20261025",
+        "exit_code": 0,
+        "result": "30 passed in 8.06s",
+        "log": "/tmp/camctl-fix44-read-capture.log",
+        "log_sha256": "d5ac3ed60e8799367adee6bddfe0e8f199da68310f824c72b1bf167093bc5ba1"
+      },
+      {
+        "id": "unit-related",
+        "command": [
+          "/tmp/camctl-fix44-read-venv/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/unit/capture",
+          "apps/camctl/tests/unit/bootstrap",
+          "-q"
+        ],
+        "cwd": "/tmp/camctl-fix44-read-20261025",
+        "exit_code": 0,
+        "result": "1888 passed in 19.58s",
+        "log": "/tmp/camctl-fix44-read-unit.log",
+        "log_sha256": "b4956ca368c26ac47289379f1525e590ab11c9b5a9ffe8c3331d9d6d751825fd"
+      },
+      {
+        "id": "bootstrap-before-fixture-prerequisite",
+        "command": [
+          "/tmp/camctl-fix44-read-venv/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/bootstrap/test_inspection_read_dispatch.py",
+          "apps/camctl/tests/integration/bootstrap/test_read_held_end_binding.py",
+          "apps/camctl/tests/integration/bootstrap/test_read_held_end_required_digest.py",
+          "apps/camctl/tests/integration/bootstrap/test_internal_read_binding_reuse.py",
+          "apps/camctl/tests/integration/bootstrap/test_capture_completion_read_settlement.py",
+          "apps/camctl/tests/integration/bootstrap/test_media_local_settlement.py",
+          "apps/camctl/tests/integration/bootstrap/test_media_saved_result_consumers.py",
+          "-q"
+        ],
+        "cwd": "/tmp/camctl-fix44-read-20261025",
+        "exit_code": 1,
+        "result": "26 failed, 43 passed, 7 errors in 40.03s",
+        "log": "/tmp/camctl-fix44-read-bootstrap.log",
+        "log_sha256": "389876fb048487fdc6872073368f36b520bbabaf66ea5229cce25188a773e20d"
+      },
+      {
+        "id": "bootstrap-final-combined",
+        "command": [
+          "/tmp/camctl-fix44-read-venv/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/bootstrap/test_inspection_read_dispatch.py",
+          "apps/camctl/tests/integration/bootstrap/test_read_held_end_binding.py",
+          "apps/camctl/tests/integration/bootstrap/test_read_held_end_required_digest.py",
+          "apps/camctl/tests/integration/bootstrap/test_internal_read_binding_reuse.py",
+          "apps/camctl/tests/integration/bootstrap/test_capture_completion_read_settlement.py",
+          "apps/camctl/tests/integration/bootstrap/test_media_local_settlement.py",
+          "apps/camctl/tests/integration/bootstrap/test_media_saved_result_consumers.py",
+          "-q"
+        ],
+        "cwd": "/tmp/camctl-fix44-read-20261025",
+        "exit_code": 0,
+        "result": "78 passed in 17.74s",
+        "log": "/tmp/camctl-fix44-read-bootstrap-final.log",
+        "log_sha256": "9b5a0dfcc7046898a4b9f7d40b8b7191d943c5791cf15761785e1422d755219d"
+      }
+    ],
+    "rerun_by_reviewer": false,
+    "scope_note": "本轮直接读取最终源码、状态矩阵、失败日志、通过日志和实施收据；未将实施者完成声明单独作为签收依据。"
+  },
+  "remaining_integration_validation": [
+    "S7/S8 合并后的根 Action6 安装版 ID20 联合验收由 root 执行。",
+    "原 44 项及完整跨组件组合验收由 root 执行。"
+  ],
+  "limits": [
+    "软件契约和组件协作复核，不代表真实相机或目标硬件验收。",
+    "实际收场计数采用生产控制流逐段审查，未新增重复运行的计数测试。"
+  ]
+}

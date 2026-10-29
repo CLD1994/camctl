@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "session_id": "06acd4e4-7d79-4df9-a9f5-6513be3c9513",
+  "node_pid": 1644507,
+  "counts": {
+    "node_process_starts": 1,
+    "application_starts": 1,
+    "files_starts": 1,
+    "http_server_starts": 0,
+    "browser_starts": 0
+  },
+  "browser_processes": [],
+  "commands": [
+    {
+      "id": 1,
+      "operation": "export",
+      "arguments": [
+        "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/sync8db-all-pytest/test_installed_segment_source_0/world/client-store",
+        "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/sync8db-all-pytest/test_installed_segment_source_0/world/plan-body.json",
+        "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/sync8db-all-pytest/test_installed_segment_source_0/world/client-plan-1.json",
+        "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/sync8db-all-pytest/test_installed_segment_source_0/world/client-receipts/001-client-export.json"
+      ],
+      "started_monotonic_ns": "105250116636836",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 0,
+        "files_starts": 0,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "request_id": "3081091000499302215",
+      "finished_monotonic_ns": "105250369301587",
+      "elapsed_seconds": 0.252664751,
+      "node_cpu_microseconds": {
+        "user": 315983,
+        "system": 162
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    },
+    {
+      "id": 2,
+      "operation": "close",
+      "arguments": [],
+      "started_monotonic_ns": "105409442760416",
+      "outcome": "passed",
+      "contexts_before": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      },
+      "finished_monotonic_ns": "105409445562477",
+      "elapsed_seconds": 0.002802061,
+      "node_cpu_microseconds": {
+        "user": 1164,
+        "system": 0
+      },
+      "contexts_after": {
+        "node_process_starts": 1,
+        "application_starts": 1,
+        "files_starts": 1,
+        "http_server_starts": 0,
+        "browser_starts": 0
+      }
+    }
+  ],
+  "node_cpu_scope": "process.cpuUsage只包含当前Node进程，不含Chromium或其他子进程。",
+  "status": "closed",
+  "node_cpu_at_ready_microseconds": {
+    "user": 1927053,
+    "system": 121071
+  },
+  "node_cpu_total_microseconds": {
+    "user": 2393947,
+    "system": 161616
+  }
+}

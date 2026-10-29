@@ -1,0 +1,73 @@
+{
+  "id": "root/test_timelapse_time_parameters",
+  "scope": "root",
+  "path": "tests/integration/test_timelapse_time_parameters.py",
+  "targets": [
+    "tests/integration/test_timelapse_time_parameters.py::test_describe_python_browser_and_node_export_agree[dji-action6]",
+    "tests/integration/test_timelapse_time_parameters.py::test_describe_python_browser_and_node_export_agree[dji-osmo360-ii]"
+  ],
+  "estimated_seconds": 6.0745075899940275,
+  "historical_failure_observed": true,
+  "status": "passed",
+  "number": 17,
+  "worker": 0,
+  "artifacts": "/tmp/camctl-fix44-verified-20261025/tasks/017-root-test_timelapse_time_parameters/artifacts",
+  "cwd": "/tmp/camctl-fix44-verified-20261025/tasks/017-root-test_timelapse_time_parameters/source",
+  "started_utc": "2026-10-25T09:25:28.877781+00:00",
+  "command": [
+    "/tmp/camctl-fix44-verified-20261025/tasks/017-root-test_timelapse_time_parameters/source/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "tests/integration/test_timelapse_time_parameters.py::test_describe_python_browser_and_node_export_agree[dji-action6]",
+    "tests/integration/test_timelapse_time_parameters.py::test_describe_python_browser_and_node_export_agree[dji-osmo360-ii]",
+    "-q",
+    "--durations=0",
+    "-p",
+    "integration_progress",
+    "--basetemp",
+    "/tmp/camctl-fix44-verified-20261025/tasks/017-root-test_timelapse_time_parameters/tmp/pytest"
+  ],
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-fix44-verified-20261025/control:/tmp/camctl-fix44-verified-20261025/tasks/017-root-test_timelapse_time_parameters/source/apps/camctl/src",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-verified-20261025/workers/0/python-cache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-verified-20261025/workers/0/project-env",
+    "UV_CACHE_DIR": "/tmp/camctl-fix44-verified-20261025/workers/0/uv-cache",
+    "UV_OFFLINE": "1",
+    "TMPDIR": "/tmp/camctl-fix44-verified-20261025/tasks/017-root-test_timelapse_time_parameters/tmp"
+  },
+  "preparations": [
+    {
+      "label": "package-resources",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-fix44-verified-20261025/tasks/017-root-test_timelapse_time_parameters/source/apps/camctl/scripts/sync_resources.py"
+      ],
+      "cwd": "/tmp/camctl-fix44-verified-20261025/tasks/017-root-test_timelapse_time_parameters/source",
+      "started_utc": "2026-10-25T09:25:31.441480+00:00",
+      "pid": 1138825,
+      "exit_code": 0,
+      "finished_utc": "2026-10-25T09:25:31.514441+00:00",
+      "wall_seconds": 0.07298080400505569
+    }
+  ],
+  "preparation": "package-resources",
+  "preparation_pid": 1138825,
+  "pid": 1138827,
+  "execution_started_utc": "2026-10-25T09:25:31.516417+00:00",
+  "progress": {
+    "status": "finished",
+    "exit_code": 0,
+    "collected": 2,
+    "outcomes": {
+      "passed": 2
+    },
+    "subchecks": {},
+    "elapsed_seconds": 64.78123906800465,
+    "utc": "2026-10-25T09:26:39.974562+00:00",
+    "pid": 1138827
+  },
+  "exit_code": 0,
+  "finished_utc": "2026-10-25T09:26:40.430950+00:00",
+  "wall_seconds": 67.19264972199744
+}

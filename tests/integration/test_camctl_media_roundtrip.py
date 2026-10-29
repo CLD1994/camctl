@@ -29,6 +29,7 @@ from pathlib import Path
 
 import pytest
 
+from _osmo_builtin_clock import read_clock, whole_second_utc_us
 from camctl_fixtures import (
     Deployment,
     future_schedule,
@@ -60,13 +61,24 @@ def _query(state_db: Path, sql: str, params=()) -> list[tuple]:
 
 
 def _await_row(state_db: Path, sql: str, params=(), *,
-               timeout_s: float = 60.0) -> list[tuple]:
+               timeout_s: float = 60.0, process=None) -> list[tuple]:
     """轮询查询直到出现行；同步点，不使用随机 sleep。"""
     deadline = time.monotonic() + timeout_s
     while True:
         rows = _query(state_db, sql, params)
         if rows:
             return rows
+        if process is not None and process.poll() is not None:
+            stdout, stderr = process.communicate(timeout=30)
+            diagnostics = {
+                "exit_code": process.returncode, "stdout": stdout, "stderr": stderr,
+                "actions": _query(
+                    state_db, "SELECT id,status,expiration_reason FROM actions ORDER BY id"),
+            }
+            diagnostic_path = state_db.parent / "media-start-failure.json"
+            diagnostic_path.write_text(
+                json.dumps(diagnostics, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            pytest.fail(f"等待录像启动时 CLI 已退出；诊断见 {diagnostic_path}: {diagnostics}")
         assert time.monotonic() < deadline, f"等待超时: {sql}"
 
 
@@ -178,11 +190,16 @@ def _start_recording_and_interrupt(deployment: Deployment,
         rows = _await_row(
             deployment.state_db,
             "SELECT started_at FROM device_activities"
-            " WHERE started_at IS NOT NULL")
+            " WHERE started_at IS NOT NULL", process=process)
         if resume_clock:
             deployment.resume_clock()
     finally:
-        terminate_process_tree(process)
+        try:
+            terminate_process_tree(process)
+        except ProcessLookupError:
+            # 提前退出诊断已回收直接子进程时，不用清理异常覆盖原错误。
+            if process.poll() is None:
+                raise
     _recover_wal(deployment.state_db)
     started_at_us = int(rows[0][0])
     assert _query(
@@ -191,11 +208,25 @@ def _start_recording_and_interrupt(deployment: Deployment,
     return started_at_us
 
 
-def _wait_wall_past(moment: datetime) -> None:
-    """等待部署墙钟越过给定时刻（加一秒余量）。"""
-    target = moment + timedelta(seconds=1)
-    while datetime.now(timezone.utc) < target:
+def _wait_business_past(deployment: Deployment, moment: datetime) -> None:
+    """等待原业务 UTC 越过给定时刻，保留真实推进和一秒余量。"""
+    target_us = int((moment + timedelta(seconds=1)).timestamp() * 1_000_000)
+    started_ns = time.monotonic_ns()
+    before = read_clock(deployment.clock_state_path)
+    system_utc_before_us = time.time_ns() // 1000
+    assert before["mode"] == "running", before
+    reading = before
+    while reading["utc_us"] < target_us:
         time.sleep(0.1)
+        reading = read_clock(deployment.clock_state_path)
+    (deployment.root / "media-clock-wait.json").write_text(
+        json.dumps({
+            "target_utc_us": target_us,
+            "system_utc_before_us": system_utc_before_us,
+            "business_before": before,
+            "business_after": reading,
+            "real_elapsed_ns": time.monotonic_ns() - started_ns,
+        }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _assert_repaired_delivery(deployment: Deployment) -> None:
@@ -229,10 +260,13 @@ def _assert_repaired_delivery(deployment: Deployment) -> None:
 
 
 @_MEDIA_TOOLS
-def test_insufficient_timing_checks_repairs_and_delivers(tmp_path: Path) -> None:
+def test_insufficient_timing_checks_repairs_and_delivers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """计时证据不足的检查链：受限会话保守停止保存等待阶段，正常会
     话拷贝原片以真实 ffprobe 确认时长、超过门槛后无重编码修复，修
     复成品登记提升并由默认取回交付。"""
+    monkeypatch.setenv("CAMCTL_TEST_TRACE_DISPATCH", "1")
     deployment = Deployment(tmp_path, recording_margin_s="0.5", controlled_clock=True)
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
@@ -305,10 +339,18 @@ def test_insufficient_timing_checks_repairs_and_delivers(tmp_path: Path) -> None
 
 
 @_MEDIA_TOOLS
-def test_excess_recording_repairs_without_probing(tmp_path: Path) -> None:
+def test_excess_recording_repairs_without_probing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """可信计时多录的对账链：跨会话对账停止确认录制严格超过门槛后
     固定多录决定，不取回探测时长直接修复，修复成品由默认取回交付。"""
-    deployment = Deployment(tmp_path, recording_margin_s="0.5")
+    monkeypatch.setenv("CAMCTL_TEST_TRACE_DISPATCH", "1")
+    # 冻结准备后，业务 UTC 可以落后于系统钟。显式保留这个差距，
+    # 使本例能拒绝用系统当前时间等待业务 started_at 的错误同步。
+    initial_utc_us = whole_second_utc_us() - 60_000_000
+    monkeypatch.setattr(
+        "_osmo_builtin_clock.whole_second_utc_us", lambda: initial_utc_us)
+    deployment = Deployment(tmp_path, recording_margin_s="0.5", controlled_clock=True)
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
@@ -320,14 +362,18 @@ def test_excess_recording_repairs_without_probing(tmp_path: Path) -> None:
         {"1": [video_file("clip-1", size_bytes=len(content))]},
         record_duration_s=_TARGET_DURATION_S,
         device_files={"clip-1": {"path": str(source)}})
-    _submit_record_and_obtain(deployment, spec)
+    scheduled_at = deployment.schedule(1)
+    _submit_record_and_obtain(deployment, spec, scheduled_at=scheduled_at)
+    deployment.freeze_at(scheduled_at)
 
-    # 第一个会话启动录像后中断；等待墙钟越过目标加余量再由正常会
-    # 话对账停止，停止确认时的已录时长严格超过修复门槛。
-    started_at_us = _start_recording_and_interrupt(deployment, spec)
+    # 第一个会话启动录像后中断；等待同一业务 UTC 越过目标加余量，
+    # 再由正常会话对账停止，停止确认时的已录时长严格超过修复门槛。
+    started_at_us = _start_recording_and_interrupt(deployment, spec, resume_clock=True)
     started_moment = datetime.fromtimestamp(
         started_at_us / 1_000_000, tz=timezone.utc)
-    _wait_wall_past(started_moment + timedelta(
+    assert datetime.now(timezone.utc) > started_moment + timedelta(
+        seconds=_TARGET_DURATION_S + 3.5)
+    _wait_business_past(deployment, started_moment + timedelta(
         seconds=_TARGET_DURATION_S + 2.5))
 
     reconciled = deployment.camctl(
@@ -350,7 +396,11 @@ def test_excess_recording_repairs_without_probing(tmp_path: Path) -> None:
     assert repair_state == 5
     basis = json.loads(repair_basis)
     assert basis["reason"] == 2
-    assert Decimal(str(basis["actual_duration_s"])) > Decimal("3.5")
+    # 本分支使用实际控制耗时，不能把它当作媒体探测取得的时长。
+    assert "actual_duration_s" not in basis
+    elapsed_ns = basis["control_elapsed_ns"]
+    assert isinstance(elapsed_ns, int) and not isinstance(elapsed_ns, bool)
+    assert Decimal(elapsed_ns) / Decimal(1_000_000_000) > Decimal("3.5")
     # 门槛秒数与判定使用的实际比较门槛一致：目标加余量，不只余量。
     assert Decimal(str(basis["threshold_s"])) == Decimal("3.5")
     _assert_repaired_delivery(deployment)

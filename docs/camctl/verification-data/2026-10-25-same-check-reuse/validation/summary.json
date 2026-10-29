@@ -1,0 +1,134 @@
+{
+  "scope": "外部AST函数替换的可行性试验；不是仓库正式实现或全量回归。",
+  "source_head": "7644b7c6be42a995f3eab629721296e01309d826",
+  "exit_code": 0,
+  "driver_exit_code": 0,
+  "started_utc": "2026-10-25T14:44:17.193141+00:00",
+  "finished_utc": "2026-10-25T14:47:41.818187+00:00",
+  "elapsed_monotonic_s": 189.80081708199577,
+  "pytest_reported_elapsed_s": 188.61,
+  "junit": {
+    "name": "pytest",
+    "errors": "0",
+    "failures": "0",
+    "skipped": "0",
+    "tests": "91",
+    "time": "188.596",
+    "timestamp": "2026-10-25T22:44:18.121523+08:00",
+    "hostname": "1e0518e0c6b4"
+  },
+  "case_count": 91,
+  "cases_by_file": {
+    "tests.integration.persistence.test_segment_transaction_batches": 46,
+    "tests.integration.persistence.test_segment_storage": 18,
+    "tests.integration.persistence.test_segment_result_page_inputs": 27
+  },
+  "capacity": {
+    "outcome": "passed",
+    "junit_time_s": 150.84,
+    "reports": [
+      {
+        "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_fixed_batch_write_and_verification_have_bounded_residency",
+        "when": "setup",
+        "outcome": "passed",
+        "duration": 0.0010230539919575676,
+        "failure": null
+      },
+      {
+        "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_fixed_batch_write_and_verification_have_bounded_residency",
+        "when": "call",
+        "outcome": "passed",
+        "duration": 150.83724126999732,
+        "failure": null
+      },
+      {
+        "nodeid": "tests/integration/persistence/test_segment_transaction_batches.py::test_fixed_batch_write_and_verification_have_bounded_residency",
+        "when": "teardown",
+        "outcome": "passed",
+        "duration": 0.0012672190059674904,
+        "failure": null
+      }
+    ],
+    "N": [
+      20,
+      200,
+      400
+    ],
+    "B": 4,
+    "max_fetch": 128,
+    "whole_group_checks_max": 3,
+    "write_N200_minus_N20_upper_bytes": 2000000,
+    "verify_N200_minus_N20_upper_bytes": 2000000,
+    "write_N400_minus_N200_upper_bytes": 400000,
+    "verify_N400_minus_N200_upper_bytes": 400000,
+    "thresholds_changed": false,
+    "source": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py",
+    "source_line": 448,
+    "actual_peak_values": null,
+    "peak_evidence_limit": "pytest默认未保存通过用例捕获stdout，JUnit无system-out；P3A_GROWTH未进入日志，因此三档实际峰值不能恢复。容量通过可确认原四项增长断言通过，不能给出实际峰值数字。本次不补跑。"
+  },
+  "assembly": {
+    "function_count": 3,
+    "replacements": [
+      {
+        "module": "camctl.persistence.repositories.result_pages",
+        "module_file": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+        "function": "_verify_page_relations",
+        "old_id": 140614136577408,
+        "new_id": 140614151319008,
+        "old_code_file": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/result_pages.py",
+        "new_code_file": "/tmp/camctl-same-check-options-ykdqfnct/candidate-functions.py",
+        "signature": "(connection, saved, raw, event, transaction)",
+        "is_generator": false,
+        "full_target_globals": true,
+        "candidate_ast_sha256": "cf415bf99d026b1ed4f64c8167d29d2052962ca2534c707868c722326470a6de"
+      },
+      {
+        "module": "camctl.persistence.repositories.segment_transactions",
+        "module_file": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+        "function": "_verify_scope_members",
+        "old_id": 140614123763040,
+        "new_id": 140614136577408,
+        "old_code_file": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+        "new_code_file": "/tmp/camctl-same-check-options-ykdqfnct/candidate-functions.py",
+        "signature": "(request, assessment, reader)",
+        "is_generator": false,
+        "full_target_globals": true,
+        "candidate_ast_sha256": "3e6a74e803518203a8fc4876045439fd15497780fdf30adb0c3e5f9cdd50c015"
+      },
+      {
+        "module": "camctl.persistence.repositories.segment_transactions",
+        "module_file": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+        "function": "_canonical_events",
+        "old_id": 140614123049568,
+        "new_id": 140614123763040,
+        "old_code_file": "/tmp/camctl-same-check-options-ykdqfnct/source/apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+        "new_code_file": "/tmp/camctl-same-check-options-ykdqfnct/candidate-functions.py",
+        "signature": "(request, transaction, header, reader, qualification)",
+        "is_generator": true,
+        "full_target_globals": true,
+        "candidate_ast_sha256": "b1ec7d59e2390d29adebccfe074ad27986fac3b1dad2adef0704355ff7cdf596"
+      }
+    ],
+    "camctl_imported_module_count": 228,
+    "all_camctl_imports_within_isolated_source": true,
+    "import_paths_file": "pytest-progress.json"
+  },
+  "source_integrity": {
+    "compared_to_baseline": {
+      "source_head": "7644b7c6be42a995f3eab629721296e01309d826",
+      "source": "/tmp/camctl-same-check-options-ykdqfnct/source",
+      "compared_files": 1139,
+      "mismatches": [],
+      "method": "逐项与git show baseline:path字节比较；未将snapshot当作git worktree。"
+    },
+    "before_after_changes": [],
+    "recorded_hash_count": 1138
+  },
+  "limitations": [
+    "只有所列91参数实例的结果；未运行persistence全目录或其他组件。",
+    "这是外部函数替换可行性结果，未将候选实施到生产源码、现有测试或配置。",
+    "未新增晚批PREVIEW与申请头谎报计数的专门反例；调查建议仍保留，不能宣称本轮已覆盖。",
+    "本轮没有普通实现的同节点对照，188.61秒不能作为稳定提速幅度。"
+  ]
+}

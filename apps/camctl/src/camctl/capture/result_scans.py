@@ -131,11 +131,16 @@ async def advance_result_scan(pending: PendingResultScan, *, runtime,
 
 async def _accept_saved_page(pending, runtime, page_qualified):
     held = pending.saves.pending
+    if held is None:
+        return pending.finished
     held.application.retry_failed()
     return await held.application.run(lambda: _apply_saved_page(pending, runtime, page_qualified, held))
 
 
 async def _apply_saved_page(pending, runtime, page_qualified, held):
+    current = pending.saves.pending
+    if current is None or current.save is not held.save:
+        return pending.finished
     original = held.request
     record_call_outcome(original.outcome.outcome, ticket=original.ticket,
         context={"stage": "capture.result_page", "page_no": original.page_no},
@@ -157,7 +162,7 @@ async def _apply_saved_page(pending, runtime, page_qualified, held):
     saved = SavedResultPage(pending.saves.pending.response, page, original.occurred_at)
     await _retain_completed_wait(pending, saved, runtime=runtime)
     qualified = page_qualified is None or await page_qualified(saved)
-    pending.last_ref = pending.saves.take()
+    pending.last_ref = pending.saves.take(expected=held)
     pending.last_outcome = original.outcome
     pending.last_cursor = original.cursor
     pending.occurred_at = original.occurred_at

@@ -1,0 +1,19 @@
+Traceback (most recent call last):
+  File "/tmp/camctl-quality-repair-evidence/cleanup-followup/check_run_budget.py", line 172, in <module>
+    asyncio.run(main())
+  File "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/tmp/camctl-quality-repair-evidence/cleanup-followup/check_run_budget.py", line 164, in main
+    result={'production_repo':str(REPO),'source':str(SOURCE),'lifecycle':await lifecycle(),'bounded':await bounded()}
+                                                                         ^^^^^^^^^^^^^^^^^
+  File "/tmp/camctl-quality-repair-evidence/cleanup-followup/check_run_budget.py", line 106, in lifecycle
+    assert runtime.executor.unfinished_files() == frozenset()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError

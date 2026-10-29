@@ -1,0 +1,15 @@
+[
+  {
+    "label": "package-resources",
+    "command": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/source/apps/camctl/scripts/sync_resources.py"
+    ],
+    "cwd": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/source",
+    "started_utc": "2026-10-25T06:08:07.948295+00:00",
+    "pid": 934265,
+    "exit_code": 0,
+    "finished_utc": "2026-10-25T06:08:08.116929+00:00",
+    "wall_seconds": 0.16862461699929554
+  }
+]

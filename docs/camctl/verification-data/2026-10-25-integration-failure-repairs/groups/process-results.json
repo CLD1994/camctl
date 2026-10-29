@@ -1,0 +1,240 @@
+{
+  "scope": "S6; ID36 and ID39; full test_camctl_process_recovery.py related coverage",
+  "baseline_commit": "5d20849e53fbfb045d25a2799e268827967196b2",
+  "commit": "379001c74b014f73cba99355df3dd6038dfbd79e",
+  "branch": "fix/fail44-process-20261025",
+  "worktree_clean": true,
+  "environment": {
+    "baseline_commit": "5d20849e53fbfb045d25a2799e268827967196b2",
+    "worktree": "/tmp/camctl-fix44-process-20261025",
+    "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+    "executable": "/tmp/camctl-fix44-process-venv/bin/python",
+    "sqlite": "3.53.1",
+    "pytest": "9.1.1",
+    "camctl_source": "/tmp/camctl-fix44-process-20261025/apps/camctl/src/camctl/__init__.py",
+    "baseline_test_sha256": "4f8737d1fa70a8bb718872651f69a8d5cf446f998c2e93732da23c8b75c92f3a"
+  },
+  "test_source": {
+    "path": "/tmp/camctl-fix44-process-20261025/tests/integration/test_camctl_process_recovery.py",
+    "sha256": "1866c866f25a81993ae7a4bacda9ea5f300216a56fcbfc3c0aa74ff944f1c49f"
+  },
+  "setup": {
+    "dependency_environment": "/tmp/camctl-fix44-process-venv",
+    "uv_cache": "/tmp/camctl-fix44-process-uv-cache",
+    "resource_sync_command": [
+      "/tmp/camctl-fix44-process-venv/bin/python",
+      "apps/camctl/scripts/sync_resources.py"
+    ],
+    "resource_sync_exit_code": 0,
+    "resource_sync_log": "/tmp/camctl-fix44-process-evidence/resource-sync.log",
+    "initial_attempt": {
+      "exit_code": 1,
+      "log": "/tmp/camctl-fix44-process-evidence/red.log",
+      "reason": "本工作树尚未生成包资源，init在日志断言之前停止；同步后重跑。"
+    }
+  },
+  "red": {
+    "command": [
+      "/tmp/camctl-fix44-process-venv/bin/python",
+      "-m",
+      "pytest",
+      "tests/integration/test_camctl_process_recovery.py::test_next_run_waits_for_old_group_settlement[0]",
+      "tests/integration/test_camctl_process_recovery.py::test_next_run_waits_for_old_group_settlement[7]",
+      "-q",
+      "--basetemp=/tmp/camctl-fix44-process-evidence/red-contract-data",
+      "--junitxml=/tmp/camctl-fix44-process-evidence/red-contract.xml"
+    ],
+    "cwd": "/tmp/camctl-fix44-process-20261025",
+    "environment": {
+      "PYTHONPATH": "/tmp/camctl-fix44-process-20261025/apps/camctl/src"
+    },
+    "exit_code": 1,
+    "log": "/tmp/camctl-fix44-process-evidence/red-contract.log",
+    "result": {
+      "suite": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "2",
+        "skipped": "0",
+        "tests": "2",
+        "time": "54.619",
+        "timestamp": "2026-10-25T16:27:32.214744+08:00",
+        "hostname": "1e0518e0c6b4"
+      },
+      "cases": [
+        {
+          "classname": "tests.integration.test_camctl_process_recovery",
+          "name": "test_next_run_waits_for_old_group_settlement[0]",
+          "time": "49.424",
+          "outcome": "failed"
+        },
+        {
+          "classname": "tests.integration.test_camctl_process_recovery",
+          "name": "test_next_run_waits_for_old_group_settlement[7]",
+          "time": "4.971",
+          "outcome": "failed"
+        }
+      ]
+    },
+    "failure": "两例均在旧连续子串next()查找中StopIteration；旧组收场及新run已实际完成。"
+  },
+  "green": {
+    "command": [
+      "/tmp/camctl-fix44-process-venv/bin/python",
+      "-m",
+      "pytest",
+      "tests/integration/test_camctl_process_recovery.py",
+      "-vv",
+      "--durations=8",
+      "--basetemp=/tmp/camctl-fix44-process-evidence/green-data",
+      "--junitxml=/tmp/camctl-fix44-process-evidence/green.xml"
+    ],
+    "cwd": "/tmp/camctl-fix44-process-20261025",
+    "environment": {
+      "PYTHONPATH": "/tmp/camctl-fix44-process-20261025/apps/camctl/src"
+    },
+    "started_utc": "2026-10-25T08:34:08.742760+00:00",
+    "output_log": "/tmp/camctl-fix44-process-evidence/green.log",
+    "exit_code": 0,
+    "elapsed_s": 43.472969505994115,
+    "ended_utc": "2026-10-25T08:34:55.406690+00:00",
+    "result": {
+      "suite": {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "8",
+        "time": "42.964",
+        "timestamp": "2026-10-25T16:34:09.163639+08:00",
+        "hostname": "1e0518e0c6b4"
+      },
+      "cases": [
+        {
+          "classname": "tests.integration.test_camctl_process_recovery",
+          "name": "test_next_run_waits_for_old_group_settlement[0]",
+          "time": "18.382",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.integration.test_camctl_process_recovery",
+          "name": "test_next_run_waits_for_old_group_settlement[7]",
+          "time": "2.978",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.integration.test_camctl_process_recovery",
+          "name": "test_abnormal_restart_keeps_shared_budget",
+          "time": "6.710",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.integration.test_camctl_process_recovery",
+          "name": "test_unknown_scan_keeps_call_and_pending_request",
+          "time": "2.149",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.integration.test_camctl_process_recovery",
+          "name": "test_early_reap_never_signals_stale_group_or_starts_run",
+          "time": "2.022",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.integration.test_camctl_process_recovery",
+          "name": "test_original_group_does_not_kill_parallel_submit_or_other_groups[grouped]",
+          "time": "3.261",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.integration.test_camctl_process_recovery",
+          "name": "test_original_group_does_not_kill_parallel_submit_or_other_groups[detached]",
+          "time": "3.514",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.integration.test_camctl_process_recovery",
+          "name": "test_original_group_does_not_kill_parallel_submit_or_other_groups[racing]",
+          "time": "3.874",
+          "outcome": "passed"
+        }
+      ]
+    },
+    "process_order": [
+      {
+        "old_cli": {
+          "role": "cli",
+          "pid": 1056072,
+          "pgid": 1056072,
+          "start": "6779166",
+          "command": "run"
+        },
+        "new_cli": {
+          "role": "cli",
+          "pid": 1056154,
+          "pgid": 1056154,
+          "start": "6779437",
+          "command": "run"
+        },
+        "old_exit_code": 0,
+        "group_reaped_line": 12,
+        "spawn_request_line": 14,
+        "spawned_line": 15,
+        "spawn_fields": {
+          "call": "3",
+          "attempt": "3",
+          "command": "run",
+          "operation": "spawn",
+          "plan": "(none)",
+          "automatic": "0",
+          "retries": "0"
+        },
+        "order_verified": true,
+        "log": "/tmp/camctl-fix44-process-evidence/green-data/test_next_run_waits_for_old_gr0/module.log",
+        "process_trace": "/tmp/camctl-fix44-process-evidence/green-data/test_next_run_waits_for_old_gr0/process-trace"
+      },
+      {
+        "old_cli": {
+          "role": "cli",
+          "pid": 1056166,
+          "pgid": 1056166,
+          "start": "6779478",
+          "command": "run"
+        },
+        "new_cli": {
+          "role": "cli",
+          "pid": 1056257,
+          "pgid": 1056257,
+          "start": "6779737",
+          "command": "run"
+        },
+        "old_exit_code": 7,
+        "group_reaped_line": 12,
+        "spawn_request_line": 17,
+        "spawned_line": 18,
+        "spawn_fields": {
+          "call": "3",
+          "attempt": "3",
+          "command": "run",
+          "operation": "spawn",
+          "plan": "(none)",
+          "automatic": "0",
+          "retries": "0"
+        },
+        "order_verified": true,
+        "log": "/tmp/camctl-fix44-process-evidence/green-data/test_next_run_waits_for_old_gr1/module.log",
+        "process_trace": "/tmp/camctl-fix44-process-evidence/green-data/test_next_run_waits_for_old_gr1/process-trace"
+      }
+    ]
+  },
+  "changes": [
+    "仅修改进程恢复测试文件。",
+    "按字段边界匹配日志；以真实新CLI PID定位spawned，再用相同call/attempt定位spawn请求并比较顺序。",
+    "同类预算、扫描、终止、submit结果日志按单行字段和具体PID或command匹配。"
+  ],
+  "checks": {
+    "git_diff_check_exit_code": 0,
+    "resource_sync_check_exit_code": 0
+  },
+  "limits": "只验证Linux软件协作，未执行全量集成测试或真实设备验收。"
+}

@@ -1,0 +1,8 @@
+[
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/014-root-test_camctl_report_roundtrip/source/tests/integration/test_camctl_report_roundtrip.py::test_report_import_ack_roundtrip",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/014-root-test_camctl_report_roundtrip/source/tests/integration/test_camctl_report_roundtrip.py::test_invalid_body_with_valid_ack_absorbs_ack_only",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/014-root-test_camctl_report_roundtrip/source/tests/integration/test_camctl_report_roundtrip.py::test_resubmitted_request_keeps_single_identity",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/014-root-test_camctl_report_roundtrip/source/tests/integration/test_camctl_report_roundtrip.py::test_report_generation_failure_preserves_responsibility",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/014-root-test_camctl_report_roundtrip/source/tests/integration/test_camctl_report_roundtrip.py::test_report_save_failure_retry_keeps_determined_bytes",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/014-root-test_camctl_report_roundtrip/source/tests/integration/test_camctl_report_roundtrip.py::test_state_db_failure_delivers_log_copy"
+]

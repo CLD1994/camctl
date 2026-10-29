@@ -1,0 +1,3 @@
+[
+  "tests/integration/test_camctl_media_roundtrip.py::test_managed_tool_children_stay_in_process_group"
+]

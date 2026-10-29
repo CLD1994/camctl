@@ -561,7 +561,7 @@ async def test_unknown_guard_checks_original_call_and_unique_group(owned,tmp_pat
 async def test_unknown_cannot_include_an_actual_baseline_chunk(owned,tmp_path,bounded):
     from camctl.capture import baseline_models as models
     from camctl.persistence.repositories.baseline import append_event
-    from camctl.persistence.repositories.baseline_reads import _unconfirmed_event
+    from ..support.output_planning import capture_operation
     from camctl.persistence.transaction import CommandPlan,row_facts
     from camctl.history.reads import BaselineReadWriteScope
     from ..capture.test_baseline_history import _entries
@@ -569,13 +569,16 @@ async def test_unknown_cannot_include_an_actual_baseline_chunk(owned,tmp_path,bo
     capture=CaptureRepository()
     first=capture.save_baseline_read_intent(intent,intent.call_key,owned).value
     before=owned.connection.execute('SELECT COUNT(*) FROM history_events').fetchone()
+    proposal=capture_operation(owned,lambda actual: capture.save_baseline_read_unconfirmed(
+        models.BaselineReadUnconfirmedSave(first.call_id,_SCHEDULED+5),intent.result_save_key,actual))
+    unconfirmed,=proposal.events
     class Command:
         def plan(self,scope):
             allocation=scope.allocate(2)
             activity=row_facts(scope.connection,'device_activities',intent.activity_id)
             events=(append_event(models.BaselineChunkSave(intent.activity_id,1,
                 _entries('a.OSV'),_SCHEDULED+5),activity,allocation.first_event_id,allocation.txn_id),
-                _unconfirmed_event(first.call_id,_SCHEDULED+5,allocation.last_event_id,allocation.txn_id))
+                replace(unconfirmed,event_id=allocation.last_event_id,transaction_id=allocation.txn_id,rows=tuple(replace(row,after=replace(row.after,values={**row.after.values,'result_event_id':allocation.last_event_id})) for row in unconfirmed.rows)))
             from camctl.history.validators import validate_event_structure
             assert [validate_event_structure(event)[:2] for event in events]==[
                 ('BASELINE_CHUNK','APPEND'),('BASELINE_READ','UNCONFIRMED')]

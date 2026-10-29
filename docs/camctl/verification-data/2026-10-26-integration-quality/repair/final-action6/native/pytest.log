@@ -1,0 +1,17 @@
+内存预算启动收据：/tmp/camctl-quality-repair-evidence/final-action6/native/budget/launcher.json
+============================= test session starts ==============================
+platform linux -- Python 3.11.17, pytest-9.1.1, pluggy-1.6.0 -- /workspaces/camctl/apps/camctl/.venv311/bin/python
+cachedir: tmp/camctl-quality-repair-evidence/final-action6/native/pytest-cache
+rootdir: /
+plugins: mock-3.16.0, asyncio-1.4.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 1 item
+
+tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters PASSED [100%]
+
+- generated xml file: /tmp/camctl-quality-repair-evidence/final-action6/native/result.xml -
+============================= slowest 10 durations =============================
+23.49s call     tmp/camctl-quality-repair-lidlmje7/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters
+18.60s setup    tmp/camctl-quality-repair-lidlmje7/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters
+0.07s teardown tmp/camctl-quality-repair-lidlmje7/action6/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters
+============================== 1 passed in 42.72s ==============================

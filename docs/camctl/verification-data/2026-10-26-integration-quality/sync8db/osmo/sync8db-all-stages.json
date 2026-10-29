@@ -1,0 +1,124 @@
+{
+  "commands": [
+    {
+      "argv": [
+        "uv",
+        "build",
+        "--project",
+        "/tmp/camctl-sync8db-tests-ojv22ku3/osmo/apps/camctl",
+        "--wheel",
+        "--out-dir",
+        "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/sync8db-all-pytest/osmo-builtin-package0/dist"
+      ],
+      "cwd": "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/sync8db-all-pytest/osmo-builtin-package0",
+      "started_ns": 105245109708575,
+      "outcome": "passed",
+      "elapsed_seconds": 0.570440579
+    },
+    {
+      "argv": [
+        "uv",
+        "export",
+        "--project",
+        "/tmp/camctl-sync8db-tests-ojv22ku3/osmo/apps/camctl",
+        "--frozen",
+        "--no-dev",
+        "--no-emit-project",
+        "-o",
+        "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/sync8db-all-pytest/osmo-builtin-package0/requirements.txt"
+      ],
+      "cwd": "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/sync8db-all-pytest/osmo-builtin-package0",
+      "started_ns": 105245680766556,
+      "outcome": "passed",
+      "elapsed_seconds": 0.009271667
+    },
+    {
+      "argv": [
+        "uv",
+        "venv",
+        "--python",
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/sync8db-all-pytest/osmo-builtin-package0/venv"
+      ],
+      "cwd": "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/sync8db-all-pytest/osmo-builtin-package0",
+      "started_ns": 105245690181285,
+      "outcome": "passed",
+      "elapsed_seconds": 0.006275817
+    },
+    {
+      "argv": [
+        "uv",
+        "pip",
+        "install",
+        "--python",
+        "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/sync8db-all-pytest/osmo-builtin-package0/venv/bin/python",
+        "--require-hashes",
+        "-r",
+        "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/sync8db-all-pytest/osmo-builtin-package0/requirements.txt"
+      ],
+      "cwd": "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/sync8db-all-pytest/osmo-builtin-package0",
+      "started_ns": 105245696615894,
+      "outcome": "passed",
+      "elapsed_seconds": 0.369657323
+    },
+    {
+      "argv": [
+        "uv",
+        "pip",
+        "install",
+        "--python",
+        "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/sync8db-all-pytest/osmo-builtin-package0/venv/bin/python",
+        "--no-deps",
+        "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/sync8db-all-pytest/osmo-builtin-package0/dist/camctl-0.1.0-py3-none-any.whl"
+      ],
+      "cwd": "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/sync8db-all-pytest/osmo-builtin-package0",
+      "started_ns": 105246066570785,
+      "outcome": "passed",
+      "elapsed_seconds": 0.073935595
+    },
+    {
+      "argv": [
+        "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/sync8db-all-pytest/osmo-builtin-package0/runtime/normal/tools/camctl",
+        "init",
+        "--config",
+        "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/sync8db-all-pytest/test_installed_segment_source_0/world/deployment/config.toml"
+      ],
+      "cwd": "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/sync8db-all-pytest/test_installed_segment_source_0/world",
+      "started_ns": 105246155526227,
+      "outcome": "passed",
+      "elapsed_seconds": 1.629374593
+    },
+    {
+      "argv": [
+        "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/sync8db-all-pytest/osmo-builtin-package0/runtime/normal/tools/camctl",
+        "describe",
+        "--config",
+        "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/sync8db-all-pytest/test_installed_segment_source_0/world/deployment/config.toml"
+      ],
+      "cwd": "/tmp/camctl-sync8db-osmo-runtime-ojv22ku3/sync8db-all-pytest/test_installed_segment_source_0/world",
+      "started_ns": 105247785268208,
+      "outcome": "passed",
+      "elapsed_seconds": 1.058174543
+    }
+  ],
+  "pytest_phases": [
+    {
+      "nodeid": "tmp/camctl-sync8db-tests-ojv22ku3/osmo/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[normal-indexes0-2-succeeded]",
+      "when": "setup",
+      "duration": 14.659280312000192,
+      "outcome": "passed"
+    },
+    {
+      "nodeid": "tmp/camctl-sync8db-tests-ojv22ku3/osmo/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[normal-indexes0-2-succeeded]",
+      "when": "call",
+      "duration": 163.54461752799398,
+      "outcome": "failed"
+    },
+    {
+      "nodeid": "tmp/camctl-sync8db-tests-ojv22ku3/osmo/tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[normal-indexes0-2-succeeded]",
+      "when": "teardown",
+      "duration": 0.4385726210020948,
+      "outcome": "passed"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+[
+  {
+    "nodeid": "tests/integration/test_camctl_media_roundtrip.py::test_excess_recording_repairs_without_probing",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.004277270003512967
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 18.794161059006
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.000463703996501863
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 18.798902033006016
+  }
+]

@@ -15,8 +15,6 @@ from __future__ import annotations
 from camctl.capture.result_inputs import RESULT_FILES_CONTRACT, RESULT_PAGE_CONTRACT
 
 import asyncio
-import contextlib
-import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -26,38 +24,35 @@ import pytest
 
 from camctl.acceptance.ports import ParameterDefinition
 from camctl.acceptance.service import CommandMode
-from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.bootstrap.flows import cancel_flow, capture_flow, residual_flow
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
-from camctl.capture.handlers import CaptureRuntime, SessionRecordingState
 from camctl.capture.results import FileKind as ResultFileKind
-from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.devices.evidence import (
     DeviceObservation, EvidenceContract, EvidenceRegistry,
 )
 from camctl.devices.tasks import CaptureTask
 from camctl.devices.ports import DeviceCallResult
-from camctl.operations.attempts import RetryWaitGate
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.repositories.capture import (
-    CaptureRepository, register_capture_guards,
+    register_capture_guards,
 )
 from camctl.persistence.repositories.cancellation import (
     register_cancellation_guards,
 )
 from camctl.persistence.repositories.operations import (
-    OperationRepository, register_operation_guards,
+    register_operation_guards,
 )
-from camctl.persistence.repositories.scheduling import SchedulingRepository
 from camctl.persistence.repositories.timelapse import (
-    TimelapseRepository, register_timelapse_guards,
+    register_timelapse_guards,
 )
 from camctl.reporting.policy import register_report_guards, register_sync_guard
 from camctl.persistence.repositories.outputs import register_outputs_guards
-from camctl.scheduling.rules import LaunchWindow
 
 from ..capture.test_capture_contract import ResultsDouble, _entry
-from .test_run_dispatch import _parsed
+from ..support.capture import capture_assembly
+from ..support.session import submit_plan, session_config, cancel_session, await_database, query_database
+from camctl.persistence.directory_switch import canonical_to_path
+from camctl.bootstrap.capture_assembly import execution_wait_config
 
 register_operation_guards()
 register_capture_guards()
@@ -236,18 +231,7 @@ class _StopDouble:
 
 
 def _config_for(home: Path):
-    return load_config(
-        {
-            "paths": {
-                "state_db": str(home / "state.db"),
-                "log_file": str(home / "camctl.log"),
-                "staging": str(home / "staging"),
-                "ready": str(home / "ready"),
-                "processing": str(home / "processing"),
-            }
-        },
-        ConfigDefaults(),
-    )
+    return session_config(home)
 
 
 def _future_schedule(seconds: int) -> str:
@@ -303,124 +287,104 @@ def _cancel_plan(request_id: str, target_id: int) -> dict:
 
 
 async def _submit_plan(tmp_path: Path, cfg, catalog, body: dict) -> None:
-    deps = build_runtime(CommandMode.SUBMIT, cfg, catalog=catalog)
-    try:
-        outcome = await execute_command(deps, await _parsed(tmp_path, body))
-        assert outcome.succeeded is True, outcome.details
-    finally:
-        close_runtime(deps)
+    await submit_plan(tmp_path, cfg, catalog, body)
 
 
 def _winddown_factory(driver, stopper, query, clock, files=None):
-    """会话共享锚点表与重试等待门槛：推进循环每轮重建运行时。"""
-    anchors: dict[int, tuple[int, int]] = {}
-    retry_gate = RetryWaitGate()
+    """同会话的普通与残留流程共用一个正式生产工厂。"""
+    factory = None
 
-    def build(owned, device_id: str) -> CaptureRuntime:
-        runtime = CaptureRuntime(
-            owned=owned,
-            scheduling=SchedulingRepository(),
-            operations=OperationRepository(),
-            capture=CaptureRepository(),
-            timelapse=TimelapseRepository(),
-            driver=driver,
-            results=ResultsDouble(files or {}),
-            evidence=_EVIDENCE,
-            wall_us=lambda: int(time.time() * 1_000_000),
-            monotonic_ns=lambda: clock["ns"],
-            window_of=lambda action: LaunchWindow(
-                scheduled_at=action["scheduled_at"],
-                window_end=action["scheduled_at"] + action["max_delay_ms"] * 1000),
-            wait_config=lambda params: CaptureWaitConfig(
-                target_duration_ms=600_000, driver_margin_ms=0),
-            stopper=stopper,
-            retry_gate=retry_gate,
-            state_query=query,
-        )
-        runtime.recording_state = SessionRecordingState(runtime, anchors)
-        return runtime
+    async def build(database, device_id):
+        nonlocal factory
+        if factory is None:
+            factory = capture_assembly(
+                driver=driver, stopper=stopper, query=query,
+                results=ResultsDouble(files or {}), evidence=_EVIDENCE,
+                devices={"cam-1": {"kind": "camera", "driver": "camctl-adb"}},
+                staging=canonical_to_path(database.metadata.staging_path),
+                wall_us=lambda: int(time.time() * 1_000_000),
+                monotonic_ns=lambda: clock["ns"], wait_config=execution_wait_config)
+        return await factory(database, device_id)
 
     return build
 
 
-def _tracewrap(name, flow):
-    async def wrapped(context):
-        try:
-            return await flow(context)
-        except BaseException:
-            import traceback
-            print(f"FLOW {name} TRACEBACK:", flush=True)
-            traceback.print_exc()
-            raise
-    return wrapped
-
-
-def _run_session(deps, cfg, factory, *, trace=False):
+def _run_session(deps, cfg, factory, *, settled_round=None):
     scheduling = capture_flow(factory)
     residual = residual_flow(factory, owns_device=scheduling.owns_device)
-    deps.background_flows = (scheduling,)
-    if trace:
-        scheduling = _tracewrap("scheduling", scheduling)
-        residual = _tracewrap("residual", residual)
+    flows = {
+        "scheduling": scheduling,
+        "residual": residual,
+        "cancel": cancel_flow(ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing)),
+    }
+    if settled_round is not None:
+        async def observe_round(_context):
+            # 保留原 CaptureFlow 作为会话拥有者，观察流程只等其当前任务交付。
+            await scheduling.settle()
+            settled_round.set()
+        flows["observed_round"] = observe_round
     return asyncio.create_task(execute_command(
-        deps, None,
-        flows={
-            "scheduling": scheduling,
-            "residual": residual,
-            "cancel": cancel_flow(ready=Path(cfg.paths.ready),
-                                  processing=Path(cfg.paths.processing)),
-        },
-        poll_interval_s=0.1,
-    ))
+        deps, None, flows=flows, poll_interval_s=0.1))
+
+
+async def _await_settled_round(event, task, *, timeout_s=20.0):
+    waiter = asyncio.create_task(event.wait())
+    try:
+        done, _ = await asyncio.wait((waiter, task), timeout=timeout_s,
+            return_when=asyncio.FIRST_COMPLETED)
+        if task in done:
+            outcome = await task
+            pytest.fail(f"原收场首轮交付前会话结束: {outcome!r}")
+        assert waiter in done, "原收场首轮未在等待预算内交付"
+    finally:
+        waiter.cancel()
+        await asyncio.gather(waiter, return_exceptions=True)
+
+
+async def _await_followup_result(db, attempt, *, task, timeout_s=20.0):
+    await _await_query(db,
+        "SELECT r.status,r.attempts_used,r.retry_wait_required,"
+        " EXISTS(SELECT 1 FROM operation_attempts t WHERE t.run_id=r.id"
+        " AND t.attempt_no=r.attempts_used AND t.status=3 AND t.result_event_id IS NOT NULL)"
+        " FROM operation_runs r WHERE r.responsibility_key='followup/2/1'",
+        (2, attempt, 1, 1), timeout_s=timeout_s, task=task)
 
 
 async def _cancel_task(task: asyncio.Task) -> None:
-    task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await task
+    await cancel_session(task)
 
 
 def _scalar(db_path: Path, sql: str, *params):
-    with sqlite3.connect(db_path) as connection:
-        return connection.execute(sql, params).fetchone()
+    return query_database(db_path, sql, params)
 
 
 async def _await_query(
-        db_path: Path, sql: str, expected, timeout_s: float = 20.0) -> None:
-    """异步轮询查询结果；等待期间让出控制权供会话任务推进。"""
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        with sqlite3.connect(db_path) as connection:
-            row = connection.execute(sql).fetchone()
-        if row == expected:
-            return
-        await asyncio.sleep(0.05)
-    raise AssertionError(
-        f"等待 {sql} = {expected} 超时，当前: {_scalar(db_path, sql)}")
+        db_path: Path, sql: str, expected, timeout_s: float = 20.0, *, task=None) -> None:
+    await await_database(db_path, sql, expected, timeout_s=timeout_s, task=task)
 
 
-async def _exhaust_original_stop(db_path: Path, clock: dict) -> None:
+async def _exhaust_original_stop(db_path: Path, clock: dict, *, task=None) -> None:
     """推进 A 的录像到三次停止失败耗尽：动作失败终态、活动占用保留。"""
     await _await_query(
         db_path,
         "SELECT started_at IS NOT NULL FROM device_activities"
-        " WHERE id = 1", (1,))
+        " WHERE id = 1", (1,), task=task)
     clock["ns"] += 6_000_000_001
-    await _await_query(
-        db_path,
-        "SELECT status, attempts_used FROM operation_runs"
-        " WHERE responsibility_key = 'stop/1'", (2, 1))
+    returned = ("EXISTS(SELECT 1 FROM operation_attempts t WHERE t.run_id=r.id"
+        " AND t.attempt_no=r.attempts_used AND t.status=3 AND t.result_event_id IS NOT NULL)")
+    await _await_query(db_path,
+        f"SELECT r.status,r.attempts_used,{returned} FROM operation_runs r"
+        " WHERE r.responsibility_key='stop/1'", (2, 1, 1), task=task)
     for expected in (2, 3):
         clock["ns"] += 3_000_000_000
-        await _await_query(
-            db_path,
-            "SELECT attempts_used FROM operation_runs"
-            " WHERE responsibility_key = 'stop/1'", (expected,))
+        await _await_query(db_path,
+            f"SELECT r.attempts_used,{returned} FROM operation_runs r"
+            " WHERE r.responsibility_key='stop/1'", (expected, 1), task=task)
     await _await_query(
         db_path,
         "SELECT status FROM operation_runs"
-        " WHERE responsibility_key = 'stop/1'", (6,))
-    await _await_query(db_path, "SELECT status FROM actions WHERE id = 1", (4,))
+        " WHERE responsibility_key = 'stop/1'", (6,), task=task)
+    await _await_query(db_path, "SELECT status FROM actions WHERE id = 1", (4,), task=task)
     assert _scalar(
         db_path, "SELECT activity_state, occupancy_state"
         " FROM device_activities WHERE id = 1") == (2, 1)
@@ -450,10 +414,10 @@ class TestResidualWinddown:
         task = _run_session(
             deps, cfg, _winddown_factory(driver, stopper, query, clock, files))
         try:
-            await _await_query(db, "SELECT status FROM actions WHERE id = 2", (2,))
+            await _await_query(db, "SELECT status FROM actions WHERE id = 2", (2,), task=task)
             assert _scalar(db, "SELECT id FROM operation_runs"
                            " WHERE responsibility_key = 'start/2'") is None
-            await _exhaust_original_stop(db, clock)
+            await _exhaust_original_stop(db, clock, task=task)
             query.release.set()
             # 触发动作到期先执行前检查：观察到残留活动仍在录制，建立
             # 独立收场流程并按预算停止；第 4 次停止调用（收场第 1 次）
@@ -461,15 +425,15 @@ class TestResidualWinddown:
             await _await_query(
                 db,
                 "SELECT status, attempts_used FROM operation_runs"
-                " WHERE responsibility_key = 'followup/2/1'", (3, 1))
+                " WHERE responsibility_key = 'followup/2/1'", (3, 1), task=task)
             assert query.calls == ["query"]
             assert len(stopper.calls) == 4
             await _await_query(
                 db,
                 "SELECT activity_state, occupancy_state"
-                " FROM device_activities WHERE id = 1", (3, 2))
+                " FROM device_activities WHERE id = 1", (3, 2), task=task)
             # 残留解除后触发动作放行：照片正常执行并登记产物。
-            await _await_query(db, "SELECT status FROM actions WHERE id = 2", (3,))
+            await _await_query(db, "SELECT status FROM actions WHERE id = 2", (3,), task=task)
             assert _scalar(
                 db, "SELECT COUNT(*) FROM outputs WHERE source_action_id = 2"
             ) == (1,)
@@ -498,13 +462,13 @@ class TestResidualWinddown:
         task = _run_session(
             deps, cfg, _winddown_factory(driver, stopper, query, clock))
         try:
-            await _exhaust_original_stop(db, clock)
+            await _exhaust_original_stop(db, clock, task=task)
             # 触发动作到期执行前检查失败：不建立收场流程，动作保持
             # 待执行并按间隔重查。
             await _await_query(
                 db,
-                "SELECT status, attempts_used FROM operation_runs"
-                " WHERE responsibility_key = 'query/preflight/2'", (2, 1))
+                "SELECT status, attempts_used, retry_wait_required FROM operation_runs"
+                " WHERE responsibility_key = 'query/preflight/2'", (2, 1, 1), task=task)
             assert _scalar(
                 db, "SELECT COUNT(*) FROM operation_runs"
                 " WHERE kind = 8") == (0,)
@@ -519,11 +483,11 @@ class TestResidualWinddown:
         task = _run_session(
             deps, cfg, _winddown_factory(driver, stopper, query, clock))
         try:
-            await _await_query(db, "SELECT status FROM actions WHERE id = 2", (6,))
+            await _await_query(db, "SELECT status FROM actions WHERE id = 2", (6,), task=task)
             await _await_query(
                 db,
                 "SELECT status FROM operation_runs"
-                " WHERE responsibility_key = 'query/preflight/2'", (5,))
+                " WHERE responsibility_key = 'query/preflight/2'", (5,), task=task)
             assert _scalar(
                 db, "SELECT COUNT(*) FROM operation_runs"
                 " WHERE kind = 8") == (0,)
@@ -557,11 +521,11 @@ class TestResidualWinddown:
         task = _run_session(
             deps, cfg, _winddown_factory(driver, stopper, query, clock))
         try:
-            await _exhaust_original_stop(db, clock)
+            await _exhaust_original_stop(db, clock, task=task)
             await _await_query(
                 db,
                 "SELECT status, attempts_used FROM operation_runs"
-                " WHERE responsibility_key = 'followup/2/1'", (2, 1))
+                " WHERE responsibility_key = 'followup/2/1'", (2, 1), task=task)
         finally:
             await _cancel_task(task)
         close_runtime(deps)
@@ -571,33 +535,19 @@ class TestResidualWinddown:
             tmp_path, cfg, _WinddownCatalog(), _cancel_plan("2", 2))
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_WinddownCatalog())
         task = _run_session(
-            deps, cfg, _winddown_factory(driver, stopper, query, clock),
-            trace=True)
+            deps, cfg, _winddown_factory(driver, stopper, query, clock))
         try:
-            await asyncio.sleep(2.0)
-            print("DIAG done:", task.done(), flush=True)
-            if task.done() and not task.cancelled():
-                print("DIAG exc:", task.exception(), flush=True)
-                import traceback
-                print("DIAG result:", task.result(), flush=True)
-                # 回放第二阶段会话并打印流程异常栈：复刻门推进路径。
-                try:
-                    from camctl.capture.residual import pass_residual_gate
-                    runtime2 = _winddown_factory(
-                        driver, stopper, query, clock, None)(owned2, "cam-1")                         if False else None
-                except Exception:
-                    traceback.print_exc()
-            await _await_query(db, "SELECT status FROM actions WHERE id = 2", (6,))
+            await _await_query(db, "SELECT status FROM actions WHERE id = 2", (6,), task=task)
             clock["ns"] += 3_000_000_000
             await _await_query(
                 db,
                 "SELECT status, attempts_used FROM operation_runs"
-                " WHERE responsibility_key = 'followup/2/1'", (3, 2))
+                " WHERE responsibility_key = 'followup/2/1'", (3, 2), task=task)
             assert len(stopper.calls) == 5
             await _await_query(
                 db,
                 "SELECT activity_state, occupancy_state"
-                " FROM device_activities WHERE id = 1", (3, 2))
+                " FROM device_activities WHERE id = 1", (3, 2), task=task)
         finally:
             await _cancel_task(task)
         close_runtime(deps)
@@ -625,28 +575,28 @@ class TestResidualWinddown:
         task = _run_session(
             deps, cfg, _winddown_factory(driver, stopper, query, clock))
         try:
-            await _await_query(db, "SELECT status FROM actions WHERE id = 2", (2,))
+            await _await_query(db, "SELECT status FROM actions WHERE id = 2", (2,), task=task)
             assert _scalar(db, "SELECT id FROM operation_runs"
                            " WHERE responsibility_key = 'start/2'") is None
-            await _exhaust_original_stop(db, clock)
+            await _exhaust_original_stop(db, clock, task=task)
             query.release.set()
             # 收场预算（3 次）与原停止预算分别计数，全部失败后流程按
             # recording_stop_failed 失败终态化，残留事实保留。
             await _await_query(
                 db,
                 "SELECT status, attempts_used FROM operation_runs"
-                " WHERE responsibility_key = 'followup/2/1'", (2, 1))
+                " WHERE responsibility_key = 'followup/2/1'", (2, 1), task=task)
             for expected in (2, 3):
                 clock["ns"] += 3_000_000_000
                 await _await_query(
                     db,
                     "SELECT attempts_used FROM operation_runs"
                     " WHERE responsibility_key = 'followup/2/1'",
-                    (expected,))
+                    (expected,), task=task)
             await _await_query(
                 db,
                 "SELECT status, attempts_used FROM operation_runs"
-                " WHERE responsibility_key = 'followup/2/1'", (4, 3))
+                " WHERE responsibility_key = 'followup/2/1'", (4, 3), task=task)
             assert _scalar(
                 db, "SELECT error_json ->> '$.code' FROM operation_runs"
                 " WHERE responsibility_key = 'followup/2/1'"
@@ -655,7 +605,7 @@ class TestResidualWinddown:
             # 收场失败后触发动作不再开始：启动窗口耗尽后按过期终态
             # 收尾，设备活动执行事实与占用原样保留。
             await _await_query(
-                db, "SELECT status FROM actions WHERE id = 2", (5,))
+                db, "SELECT status FROM actions WHERE id = 2", (5,), task=task)
             assert _scalar(
                 db, "SELECT activity_state, occupancy_state"
                 " FROM device_activities WHERE id = 1") == (2, 1)
@@ -687,11 +637,8 @@ class TestResidualWinddown:
         task = _run_session(
             deps, cfg, _winddown_factory(driver, stopper, query, clock))
         try:
-            await _exhaust_original_stop(db, clock)
-            await _await_query(
-                db,
-                "SELECT status, attempts_used FROM operation_runs"
-                " WHERE responsibility_key = 'followup/2/1'", (2, 1))
+            await _exhaust_original_stop(db, clock, task=task)
+            await _await_followup_result(db, 1, task=task)
         finally:
             await _cancel_task(task)
         close_runtime(deps)
@@ -699,23 +646,23 @@ class TestResidualWinddown:
         # 次完成停止（第 5 次失败、第 6 次确认），触发动作随后放行。
         files = {2: (_entry("photo-1", kind=ResultFileKind.PHOTO),)}
         deps = build_runtime(CommandMode.RUN, cfg, catalog=_WinddownCatalog())
+        settled_round = asyncio.Event()
         task = _run_session(
-            deps, cfg,
-            _winddown_factory(driver, stopper, query, clock, files))
+            deps, cfg, _winddown_factory(driver, stopper, query, clock, files),
+            settled_round=settled_round)
         try:
-            # 重启后的重试等待按本次间隔从本会话首次观察重新计时：先
-            # 让会话推进一轮登记锚点，再推进单调钟触发剩余次数。
-            await asyncio.sleep(0.5)
+            # 首轮公开推进完整交付后，原重试等待已观察到本次单调钟。
+            deadline = time.monotonic() + 20.0
+            await _await_settled_round(settled_round, task, timeout_s=20.0)
             clock["ns"] += 3_000_000_000
-            await _await_query(
-                db,
-                "SELECT attempts_used FROM operation_runs"
-                " WHERE responsibility_key = 'followup/2/1'", (2,))
+            # 观察与结果保存共用原20秒等待预算；意图计数不表示实际返回。
+            await _await_followup_result(db, 2, task=task,
+                timeout_s=max(0.0, deadline - time.monotonic()))
             clock["ns"] += 3_000_000_000
             await _await_query(
                 db,
                 "SELECT status, attempts_used FROM operation_runs"
-                " WHERE responsibility_key = 'followup/2/1'", (3, 3))
+                " WHERE responsibility_key = 'followup/2/1'", (3, 3), task=task)
             assert _scalar(
                 db, "SELECT COUNT(*) FROM operation_runs"
                 " WHERE kind = 8") == (1,)
@@ -723,9 +670,9 @@ class TestResidualWinddown:
             await _await_query(
                 db,
                 "SELECT activity_state, occupancy_state"
-                " FROM device_activities WHERE id = 1", (3, 2))
+                " FROM device_activities WHERE id = 1", (3, 2), task=task)
             await _await_query(
-                db, "SELECT status FROM actions WHERE id = 2", (3,))
+                db, "SELECT status FROM actions WHERE id = 2", (3,), task=task)
         finally:
             await _cancel_task(task)
         close_runtime(deps)
@@ -752,12 +699,12 @@ class TestResidualWinddown:
         task = _run_session(
             deps, cfg, _winddown_factory(driver, stopper, query, clock, files))
         try:
-            await _exhaust_original_stop(db, clock)
+            await _exhaust_original_stop(db, clock, task=task)
             # 执行前检查可靠确认设备空闲（设备已自行停止）：保存观察
             # 后触发动作直接开始，不建立收场流程，也不发送停止命令；
             # 残留活动的陈旧执行事实与占用原样保留。
             await _await_query(
-                db, "SELECT status FROM actions WHERE id = 2", (3,))
+                db, "SELECT status FROM actions WHERE id = 2", (3,), task=task)
             assert query.calls == ["query"]
             assert len(stopper.calls) == 3
             assert _scalar(
@@ -797,22 +744,22 @@ class TestResidualWinddown:
         task = _run_session(
             deps, cfg, _winddown_factory(driver, stopper, query, clock))
         try:
-            await _await_query(db, "SELECT status FROM actions WHERE id = 2", (2,))
+            await _await_query(db, "SELECT status FROM actions WHERE id = 2", (2,), task=task)
             assert _scalar(db, "SELECT id FROM operation_runs"
                            " WHERE responsibility_key = 'start/2'") is None
-            await _exhaust_original_stop(db, clock)
+            await _exhaust_original_stop(db, clock, task=task)
             query.release.set()
             await _await_query(
                 db,
                 "SELECT status, attempts_used, retry_wait_required FROM operation_runs"
-                " WHERE responsibility_key = 'query/preflight/2'", (2, 1, 1))
+                " WHERE responsibility_key = 'query/preflight/2'", (2, 1, 1), task=task)
             for expected in (2, 3):
                 clock["ns"] += 3_000_000_000
                 await _await_query(
                     db,
                     "SELECT attempts_used FROM operation_runs"
                     " WHERE responsibility_key = 'query/preflight/2'",
-                    (expected,))
+                    (expected,), task=task)
             # 检查预算（3 次）耗尽：不推测空闲也不停止，触发动作保持
             # RUNNING 且没有启动尝试，不建立收场流程。
             assert len(query.calls) == 3
@@ -824,11 +771,11 @@ class TestResidualWinddown:
             assert _scalar(db, "SELECT id FROM operation_runs"
                            " WHERE responsibility_key = 'start/2'") is None
             assert len(stopper.calls) == 3
-            await _await_query(db, "SELECT status FROM actions WHERE id = 2", (5,))
+            await _await_query(db, "SELECT status FROM actions WHERE id = 2", (5,), task=task)
             await _await_query(
                 db, "SELECT status, attempts_used, retry_wait_required"
                 " FROM operation_runs WHERE responsibility_key = 'query/preflight/2'",
-                (6, 3, 0))
+                (6, 3, 0), task=task)
         finally:
             await _cancel_task(task)
         close_runtime(deps)
@@ -856,16 +803,16 @@ class TestResidualWinddown:
         task = _run_session(
             deps, cfg, _winddown_factory(driver, stopper, query, clock, files))
         try:
-            await _await_query(db, "SELECT status FROM actions WHERE id = 2", (2,))
-            await _exhaust_original_stop(db, clock)
+            await _await_query(db, "SELECT status FROM actions WHERE id = 2", (2,), task=task)
+            await _exhaust_original_stop(db, clock, task=task)
             query.release.set()
             await _await_query(
                 db, "SELECT status, attempts_used FROM operation_runs"
-                " WHERE responsibility_key = 'query/residual/2/1'", (2, 1))
-            await _await_query(db, "SELECT status FROM actions WHERE id = 2", (5,))
+                " WHERE responsibility_key = 'query/residual/2/1'", (2, 1), task=task)
+            await _await_query(db, "SELECT status FROM actions WHERE id = 2", (5,), task=task)
             await _await_query(
                 db, "SELECT first_window_observed_at IS NOT NULL"
-                " FROM actions WHERE id = 3", (1,))
+                " FROM actions WHERE id = 3", (1,), task=task)
             # 后续候选不取得第二套收场或查询预算。原停止已经发出，
             # 触发者过期不结束尚需核实的原确认查询。
             assert _scalar(db, "SELECT COUNT(*) FROM operation_runs WHERE kind = 8") == (1,)
@@ -877,11 +824,11 @@ class TestResidualWinddown:
             clock["ns"] += 3_000_000_000
             await _await_query(
                 db, "SELECT status, attempts_used FROM operation_runs"
-                " WHERE responsibility_key = 'followup/2/1'", (3, 1))
+                " WHERE responsibility_key = 'followup/2/1'", (3, 1), task=task)
             await _await_query(
                 db, "SELECT status, attempts_used FROM operation_runs"
-                " WHERE responsibility_key = 'query/residual/2/1'", (3, 2))
-            await _await_query(db, "SELECT status FROM actions WHERE id = 3", (3,))
+                " WHERE responsibility_key = 'query/residual/2/1'", (3, 2), task=task)
+            await _await_query(db, "SELECT status FROM actions WHERE id = 3", (3,), task=task)
             assert query.calls == ["query", "query", "query"]
             assert len(stopper.calls) == 4
             assert _scalar(db, "SELECT status, attempts_used FROM operation_runs"
@@ -914,11 +861,11 @@ class TestResidualWinddown:
         task = _run_session(
             deps, cfg, _winddown_factory(driver, stopper, query, clock, files))
         try:
-            await _exhaust_original_stop(db, clock)
+            await _exhaust_original_stop(db, clock, task=task)
             await _await_query(
                 db,
                 "SELECT status, attempts_used FROM operation_runs"
-                " WHERE responsibility_key = 'followup/2/1'", (3, 1))
+                " WHERE responsibility_key = 'followup/2/1'", (3, 1), task=task)
             assert len(stopper.calls) == 4
             assert query.calls == ["query", "query"]
             assert _scalar(
@@ -927,9 +874,9 @@ class TestResidualWinddown:
             await _await_query(
                 db,
                 "SELECT activity_state, occupancy_state"
-                " FROM device_activities WHERE id = 1", (3, 2))
+                " FROM device_activities WHERE id = 1", (3, 2), task=task)
             await _await_query(
-                db, "SELECT status FROM actions WHERE id = 2", (3,))
+                db, "SELECT status FROM actions WHERE id = 2", (3,), task=task)
         finally:
             await _cancel_task(task)
         close_runtime(deps)

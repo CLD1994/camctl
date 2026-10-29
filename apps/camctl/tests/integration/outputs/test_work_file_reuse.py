@@ -93,7 +93,7 @@ def test_cleanup_result_guard_requires_exact_boolean_request(work_env, evidence)
     _release_ok(owned, file_id)
     request = CleanupResultSave(file_id, WorkFileOutcome.COMPLETED, None,
                                1_736_935_210_000_000, False)
-    plan = _proposal(owned, outputs._CleanupResultCommand(request, new_operation_key()))
+    plan = _proposal(owned, OutputsRepository().save_cleanup_result, request)
 
     with pytest.raises(EventValidationError):
         _validate(plan, events=(replace(plan.events[0], evidence=evidence),))

@@ -1,0 +1,15 @@
+证据目录 /tmp/camctl-fix44-clock-red
+启动 root/test_camctl_c_module_roundtrip pid=1035045 cwd=/tmp/camctl-fix44-clock-red/tasks/001-root-test_camctl_c_module_roundtrip/source
+进度 root/test_camctl_c_module_roundtrip pid=1035045 tests/integration/test_camctl_c_module_roundtrip.py::test_capture_obtain_cleanup_roundtrip_via_c_module
+进度 root/test_camctl_c_module_roundtrip pid=1035045 tests/integration/test_camctl_c_module_roundtrip.py::test_capture_obtain_cleanup_roundtrip_via_c_module
+结束 root/test_camctl_c_module_roundtrip status=failed exit=1 seconds=38.370
+启动 root/test_camctl_output_roundtrip pid=1036154 cwd=/tmp/camctl-fix44-clock-red/tasks/002-root-test_camctl_output_roundtrip/source
+进度 root/test_camctl_output_roundtrip pid=1036154 tests/integration/test_camctl_output_roundtrip.py::test_three_capture_kinds_partial_obtain
+结束 root/test_camctl_output_roundtrip status=failed exit=1 seconds=13.728
+启动 root/test_camctl_session_recovery pid=1036605 cwd=/tmp/camctl-fix44-clock-red/tasks/003-root-test_camctl_session_recovery/source
+进度 root/test_camctl_session_recovery pid=1036605 tests/integration/test_camctl_session_recovery.py::test_concurrent_submits_and_duplicate_identity
+结束 root/test_camctl_session_recovery status=failed exit=1 seconds=15.420
+启动 root/test_camctl_cancellation_roundtrip pid=1037189 cwd=/tmp/camctl-fix44-clock-red/tasks/004-root-test_camctl_cancellation_roundtrip/source
+进度 root/test_camctl_cancellation_roundtrip pid=1037189 tests/integration/test_camctl_cancellation_roundtrip.py::test_cleanup_unknown_preserves_original_request_result
+结束 root/test_camctl_cancellation_roundtrip status=failed exit=1 seconds=10.126
+汇总 /tmp/camctl-fix44-clock-red/summary.json exit=1

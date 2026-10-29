@@ -1,0 +1,473 @@
+{
+  "production_repo": "/tmp/camctl-quality-repair-lidlmje7/cleanup-followup",
+  "source": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/failed-source-commit-diagnostic/state.db",
+  "lifecycle": {
+    "before": {
+      "boundary": 368,
+      "cursor": 3,
+      "files": [
+        [
+          1,
+          1,
+          1
+        ],
+        [
+          2,
+          1,
+          1
+        ],
+        [
+          3,
+          1,
+          1
+        ]
+      ],
+      "classifications": [
+        {
+          "facts": {
+            "file_id": 1,
+            "purpose": 2,
+            "owner_action_id": 1,
+            "owner_delivery_id": null,
+            "relative_path": "recording-inputs/1.mp4",
+            "retention_state": 1,
+            "cleanup_state": 1,
+            "owner_finished": true,
+            "operations_stopped": true
+          },
+          "decision": {
+            "action": "delete",
+            "reason": "归属终态且操作停止，可以清理"
+          }
+        },
+        {
+          "facts": {
+            "file_id": 2,
+            "purpose": 2,
+            "owner_action_id": 1,
+            "owner_delivery_id": null,
+            "relative_path": "recording-inputs/2.mp4",
+            "retention_state": 1,
+            "cleanup_state": 1,
+            "owner_finished": true,
+            "operations_stopped": true
+          },
+          "decision": {
+            "action": "delete",
+            "reason": "归属终态且操作停止，可以清理"
+          }
+        },
+        {
+          "facts": {
+            "file_id": 3,
+            "purpose": 2,
+            "owner_action_id": 1,
+            "owner_delivery_id": null,
+            "relative_path": "recording-inputs/3.mp4",
+            "retention_state": 1,
+            "cleanup_state": 1,
+            "owner_finished": true,
+            "operations_stopped": true
+          },
+          "decision": {
+            "action": "delete",
+            "reason": "归属终态且操作停止，可以清理"
+          }
+        }
+      ]
+    },
+    "kept": {
+      "boundary": 371,
+      "cursor": 3,
+      "files": [
+        [
+          1,
+          1,
+          1
+        ],
+        [
+          2,
+          1,
+          1
+        ],
+        [
+          3,
+          1,
+          1
+        ]
+      ],
+      "classifications": [
+        {
+          "facts": {
+            "file_id": 1,
+            "purpose": 2,
+            "owner_action_id": 1,
+            "owner_delivery_id": null,
+            "relative_path": "recording-inputs/1.mp4",
+            "retention_state": 1,
+            "cleanup_state": 1,
+            "owner_finished": true,
+            "operations_stopped": true
+          },
+          "decision": {
+            "action": "delete",
+            "reason": "归属终态且操作停止，可以清理"
+          }
+        },
+        {
+          "facts": {
+            "file_id": 2,
+            "purpose": 2,
+            "owner_action_id": 1,
+            "owner_delivery_id": null,
+            "relative_path": "recording-inputs/2.mp4",
+            "retention_state": 1,
+            "cleanup_state": 1,
+            "owner_finished": true,
+            "operations_stopped": true
+          },
+          "decision": {
+            "action": "delete",
+            "reason": "归属终态且操作停止，可以清理"
+          }
+        },
+        {
+          "facts": {
+            "file_id": 3,
+            "purpose": 2,
+            "owner_action_id": 1,
+            "owner_delivery_id": null,
+            "relative_path": "recording-inputs/3.mp4",
+            "retention_state": 1,
+            "cleanup_state": 1,
+            "owner_finished": true,
+            "operations_stopped": true
+          },
+          "decision": {
+            "action": "delete",
+            "reason": "归属终态且操作停止，可以清理"
+          }
+        }
+      ]
+    },
+    "same_run_after_actual_use_ended": {
+      "boundary": 371,
+      "cursor": 3,
+      "files": [
+        [
+          1,
+          1,
+          1
+        ],
+        [
+          2,
+          1,
+          1
+        ],
+        [
+          3,
+          1,
+          1
+        ]
+      ],
+      "classifications": [
+        {
+          "facts": {
+            "file_id": 1,
+            "purpose": 2,
+            "owner_action_id": 1,
+            "owner_delivery_id": null,
+            "relative_path": "recording-inputs/1.mp4",
+            "retention_state": 1,
+            "cleanup_state": 1,
+            "owner_finished": true,
+            "operations_stopped": true
+          },
+          "decision": {
+            "action": "delete",
+            "reason": "归属终态且操作停止，可以清理"
+          }
+        },
+        {
+          "facts": {
+            "file_id": 2,
+            "purpose": 2,
+            "owner_action_id": 1,
+            "owner_delivery_id": null,
+            "relative_path": "recording-inputs/2.mp4",
+            "retention_state": 1,
+            "cleanup_state": 1,
+            "owner_finished": true,
+            "operations_stopped": true
+          },
+          "decision": {
+            "action": "delete",
+            "reason": "归属终态且操作停止，可以清理"
+          }
+        },
+        {
+          "facts": {
+            "file_id": 3,
+            "purpose": 2,
+            "owner_action_id": 1,
+            "owner_delivery_id": null,
+            "relative_path": "recording-inputs/3.mp4",
+            "retention_state": 1,
+            "cleanup_state": 1,
+            "owner_finished": true,
+            "operations_stopped": true
+          },
+          "decision": {
+            "action": "delete",
+            "reason": "归属终态且操作停止，可以清理"
+          }
+        }
+      ]
+    },
+    "next_normal_run": {
+      "boundary": 383,
+      "cursor": 3,
+      "files": [
+        [
+          1,
+          2,
+          4
+        ],
+        [
+          2,
+          2,
+          4
+        ],
+        [
+          3,
+          2,
+          4
+        ]
+      ],
+      "classifications": [
+        {
+          "facts": {
+            "file_id": 1,
+            "purpose": 2,
+            "owner_action_id": 1,
+            "owner_delivery_id": null,
+            "relative_path": "recording-inputs/1.mp4",
+            "retention_state": 2,
+            "cleanup_state": 4,
+            "owner_finished": true,
+            "operations_stopped": true
+          },
+          "decision": {
+            "action": "already_cleaned",
+            "reason": "清理已完成"
+          }
+        },
+        {
+          "facts": {
+            "file_id": 2,
+            "purpose": 2,
+            "owner_action_id": 1,
+            "owner_delivery_id": null,
+            "relative_path": "recording-inputs/2.mp4",
+            "retention_state": 2,
+            "cleanup_state": 4,
+            "owner_finished": true,
+            "operations_stopped": true
+          },
+          "decision": {
+            "action": "already_cleaned",
+            "reason": "清理已完成"
+          }
+        },
+        {
+          "facts": {
+            "file_id": 3,
+            "purpose": 2,
+            "owner_action_id": 1,
+            "owner_delivery_id": null,
+            "relative_path": "recording-inputs/3.mp4",
+            "retention_state": 2,
+            "cleanup_state": 4,
+            "owner_finished": true,
+            "operations_stopped": true
+          },
+          "decision": {
+            "action": "already_cleaned",
+            "reason": "清理已完成"
+          }
+        }
+      ]
+    },
+    "physical_stat_calls": [
+      "/tmp/camctl-quality-repair-evidence/cleanup-followup/lifecycle-2/staging/recording-inputs/1.mp4",
+      "/tmp/camctl-quality-repair-evidence/cleanup-followup/lifecycle-2/staging/recording-inputs/2.mp4",
+      "/tmp/camctl-quality-repair-evidence/cleanup-followup/lifecycle-2/staging/recording-inputs/3.mp4"
+    ],
+    "physical_unlink_calls": [
+      "/tmp/camctl-quality-repair-evidence/cleanup-followup/lifecycle-2/staging/recording-inputs/1.mp4",
+      "/tmp/camctl-quality-repair-evidence/cleanup-followup/lifecycle-2/staging/recording-inputs/2.mp4",
+      "/tmp/camctl-quality-repair-evidence/cleanup-followup/lifecycle-2/staging/recording-inputs/3.mp4"
+    ],
+    "unregistered_file_preserved": true,
+    "source_files_preserved": true,
+    "limit_per_run": 128,
+    "batch_size": 32
+  },
+  "bounded": {
+    "configured_batch_size": 1,
+    "configured_limit_per_run": 1,
+    "normal_runs": [
+      {
+        "boundary": 372,
+        "cursor": 1,
+        "files": [
+          [
+            1,
+            2,
+            4
+          ],
+          [
+            2,
+            1,
+            1
+          ],
+          [
+            3,
+            1,
+            1
+          ]
+        ],
+        "classifications": [
+          {
+            "facts": {
+              "file_id": 1,
+              "purpose": 2,
+              "owner_action_id": 1,
+              "owner_delivery_id": null,
+              "relative_path": "recording-inputs/1.mp4",
+              "retention_state": 2,
+              "cleanup_state": 4,
+              "owner_finished": true,
+              "operations_stopped": true
+            },
+            "decision": {
+              "action": "already_cleaned",
+              "reason": "清理已完成"
+            }
+          },
+          {
+            "facts": {
+              "file_id": 2,
+              "purpose": 2,
+              "owner_action_id": 1,
+              "owner_delivery_id": null,
+              "relative_path": "recording-inputs/2.mp4",
+              "retention_state": 1,
+              "cleanup_state": 1,
+              "owner_finished": true,
+              "operations_stopped": true
+            },
+            "decision": {
+              "action": "delete",
+              "reason": "归属终态且操作停止，可以清理"
+            }
+          },
+          {
+            "facts": {
+              "file_id": 3,
+              "purpose": 2,
+              "owner_action_id": 1,
+              "owner_delivery_id": null,
+              "relative_path": "recording-inputs/3.mp4",
+              "retention_state": 1,
+              "cleanup_state": 1,
+              "owner_finished": true,
+              "operations_stopped": true
+            },
+            "decision": {
+              "action": "delete",
+              "reason": "归属终态且操作停止，可以清理"
+            }
+          }
+        ]
+      },
+      {
+        "boundary": 376,
+        "cursor": 2,
+        "files": [
+          [
+            1,
+            2,
+            4
+          ],
+          [
+            2,
+            2,
+            4
+          ],
+          [
+            3,
+            1,
+            1
+          ]
+        ],
+        "classifications": [
+          {
+            "facts": {
+              "file_id": 1,
+              "purpose": 2,
+              "owner_action_id": 1,
+              "owner_delivery_id": null,
+              "relative_path": "recording-inputs/1.mp4",
+              "retention_state": 2,
+              "cleanup_state": 4,
+              "owner_finished": true,
+              "operations_stopped": true
+            },
+            "decision": {
+              "action": "already_cleaned",
+              "reason": "清理已完成"
+            }
+          },
+          {
+            "facts": {
+              "file_id": 2,
+              "purpose": 2,
+              "owner_action_id": 1,
+              "owner_delivery_id": null,
+              "relative_path": "recording-inputs/2.mp4",
+              "retention_state": 2,
+              "cleanup_state": 4,
+              "owner_finished": true,
+              "operations_stopped": true
+            },
+            "decision": {
+              "action": "already_cleaned",
+              "reason": "清理已完成"
+            }
+          },
+          {
+            "facts": {
+              "file_id": 3,
+              "purpose": 2,
+              "owner_action_id": 1,
+              "owner_delivery_id": null,
+              "relative_path": "recording-inputs/3.mp4",
+              "retention_state": 1,
+              "cleanup_state": 1,
+              "owner_finished": true,
+              "operations_stopped": true
+            },
+            "decision": {
+              "action": "delete",
+              "reason": "归属终态且操作停止，可以清理"
+            }
+          }
+        ]
+      }
+    ],
+    "third_file_waits_next_run": true
+  },
+  "source_database_sha256": "249e84cef3022a907c67d9fae7265b380cd8eed65eaafc65cbd4b7d1fec70325",
+  "source_database_preserved": true
+}

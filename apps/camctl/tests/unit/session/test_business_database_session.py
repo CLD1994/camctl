@@ -14,7 +14,8 @@ from camctl.persistence.runtime import DatabaseMetadata, OwnedConnection
 from camctl.session.clock import ClockCheckInput
 from camctl.session.locks import AdmissionLease, SessionLease
 from camctl.session.service import (AcceptanceRepositoryPort, SessionContext, SessionPaths,
-    SessionRepositoryPort, SnapshotOwnerPort, StateDbFailure, _run_work_facts, _try_close, run_session)
+    SessionRepositoryPort, SnapshotOwnerPort, StateDbFailure, _drive_flows,
+    _run_work_facts, _try_close, run_session)
 from camctl.session.work import WorkFacts, classify_work
 from support.business_database import inline_business_database
 
@@ -160,6 +161,52 @@ async def test_work_facts_adds_loop_owned_count_without_changing_unknown(stored)
     context.facts_query = lambda _: WorkFacts(0, stored, False, False, False, False, False, False)
     result = await _run_work_facts(context)
     assert result.required_settlements == (None if stored is None else 5)
+
+
+async def test_completed_discovery_allows_close_check_and_finds_input_before_close():
+    from camctl.bootstrap.background_flow import BackgroundFlow, CombinedLocalWork
+
+    context, database, owned, repository, _session, admission = world()
+    context.database = database
+    release = asyncio.Event()
+    pending, discoveries = [], []
+
+    async def discover(current):
+        discoveries.append(tuple(pending))
+        await release.wait()
+        pending.clear()
+
+    flow = BackgroundFlow(discover)
+    context.flows = {"obtain": flow}
+    context.local_work = CombinedLocalWork((flow,))
+    context.facts_query = lambda _: WorkFacts(
+        len(pending), 0, False, False, False, False, False, False)
+
+    def close(command, key, current):
+        assert current is owned
+        decision = classify_work(command.facts_query(current.connection))
+        if not decision.needs_driver:
+            command.release_admission()
+        return DbOutcome(DbOutcomeKind.COMPLETED,
+                         CloseDecision(not decision.needs_driver, decision))
+
+    repository.close_admission.side_effect = close
+    assert await _drive_flows(context) is None
+    release.set()
+    await asyncio.sleep(0)
+
+    assert await _drive_flows(context) is None
+    assert discoveries == [()]
+    assert (await _run_work_facts(context)).required_settlements == 0
+    pending.append("newly accepted input")
+    assert await _try_close(context, database, admission) is None
+    admission.close.assert_not_called()
+
+    assert await _drive_flows(context) is None
+    assert discoveries == [(), ("newly accepted input",)]
+    assert (await _run_work_facts(context)).unfinished_actions == 0
+    assert (await _try_close(context, database, admission)).succeeded
+    admission.close.assert_called_once()
 
 
 async def test_startup_clock_policy_enqueue_timeout_is_state_db_error_and_emergency_settles():

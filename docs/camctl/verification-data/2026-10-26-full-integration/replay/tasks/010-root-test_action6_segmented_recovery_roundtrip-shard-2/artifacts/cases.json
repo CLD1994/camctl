@@ -1,0 +1,78 @@
+[
+  {
+    "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-source-commit-receipt]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 22.84371819900116
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 73.14688086899696
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.14186491999134887
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 96.13246398798947
+  },
+  {
+    "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[unknown-prefix]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0014486629952443764
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 45.85599607200129
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.23104938000324182
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 46.088494114999776
+  },
+  {
+    "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_native_required_photo_failure_keeps_reached_video_scope_and_waiters",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0020946860022377223
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 32.89851723999891
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.1307621379964985
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 33.031374063997646
+  },
+  {
+    "nodeid": "tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_video_modes_freeze_for_both_cameras_and_both_video_actions",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012907119962619618
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 11.566884679996292
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.01580464400467463
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 11.583980035997229
+  }
+]

@@ -14,6 +14,7 @@ from pathlib import Path
 from time import monotonic_ns as _default_monotonic_ns
 
 import pytest
+import pytest_asyncio
 
 from camctl.contracts.values import new_operation_key
 from camctl.devices.bindings import DeviceBinding
@@ -37,7 +38,8 @@ from camctl.persistence.repositories.outputs import (
 )
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
-from ..persistence.test_runtime import _create_valid_database
+from ..support.database import business_database, create_test_database
+from ..support.outputs import cleanup_runtime
 
 register_operation_guards()
 register_outputs_guards()
@@ -97,10 +99,10 @@ class DriverDouble:
             observations=observations, error=self.query_error)
 
 
-@pytest.fixture
-def pipeline(tmp_path: Path):
+@pytest_asyncio.fixture
+async def pipeline(tmp_path: Path):
     target = tmp_path / "state.db"
-    _create_valid_database(target)
+    create_test_database(target)
     owned = open_existing(target, DbOpenMode.EXISTING_RW, DbConfig())
     connection = owned.connection
     connection.execute("BEGIN IMMEDIATE")
@@ -156,27 +158,19 @@ def pipeline(tmp_path: Path):
         "INSERT INTO cleanup_items (id, action_id, requested_output_id, output_id,"
         " status, restriction_state) VALUES (91, 30, 701, 701, 1, 1)")
     connection.commit()
-    yield owned
-    owned.connection.close()
+    try:
+        async with business_database(target) as database:
+            yield owned, database
+    finally:
+        owned.connection.close()
 
 
-def _runtime(owned, driver, *, delete_attempts=1, query_attempts=1,
-             monotonic_ns=_default_monotonic_ns) -> CleanupRuntime:
-    return CleanupRuntime(
-        owned=owned,
-        outputs=OutputsRepository(),
-        operations=OperationRepository(),
-        driver=driver,
-        evidence=_EVIDENCE,
-        binding_of=lambda item_id: _BINDING,
-        occurred_at=lambda: _NOW + 10,
-        delete_config=AttemptConfig(
-            max_attempts=delete_attempts, timeout_s=Decimal("10"),
-            retry_interval_s=Decimal("1")),
-        query_config=AttemptConfig(
-            max_attempts=query_attempts, timeout_s=Decimal("10"),
-            retry_interval_s=Decimal("1")),
-        monotonic_ns=monotonic_ns,
+async def _runtime(database, driver, *, delete_attempts=1, query_attempts=1,
+                   monotonic_ns=_default_monotonic_ns):
+    return await cleanup_runtime(
+        database, driver, _EVIDENCE, item_id=91,
+        delete_attempts=delete_attempts, query_attempts=query_attempts,
+        occurred_at=lambda: _NOW + 10, monotonic_ns=monotonic_ns,
     )
 
 
@@ -191,9 +185,9 @@ pytestmark = pytest.mark.asyncio
 
 class TestDeletionChain:
     async def test_confirmed_delete_succeeds_with_cleaned_projection(self, pipeline):
-        owned = pipeline
+        owned, database = pipeline
         driver = DriverDouble(absent=True)
-        step = await delete_source_file(_runtime(owned, driver), 91)
+        step = await delete_source_file(await _runtime(database, driver), 91)
         assert step.phase == "succeeded" and step.detail == "DELETED", step
         assert _value(
             owned, "SELECT status, restriction_state, outcome, error_code"
@@ -210,9 +204,9 @@ class TestDeletionChain:
             " WHERE responsibility_key = 'delete/91'") == (1,)
 
     async def test_unknown_delete_confirmed_absent_by_query(self, pipeline):
-        owned = pipeline
+        owned, database = pipeline
         driver = DriverDouble(absent=False, present=False)
-        step = await delete_source_file(_runtime(owned, driver), 91)
+        step = await delete_source_file(await _runtime(database, driver), 91)
         assert step.phase == "succeeded" and step.detail == "ABSENCE_CONFIRMED", step
         assert _value(
             owned, "SELECT status, outcome FROM cleanup_items WHERE id = 91"
@@ -224,11 +218,11 @@ class TestDeletionChain:
             " WHERE responsibility_key IN ('delete/91', 'exists/91')") == (2,)
 
     async def test_unknown_delete_with_file_still_present_waits(self, pipeline):
-        owned = pipeline
+        owned, database = pipeline
         driver = DriverDouble(absent=False, present=True)
         clock = {"ns": _default_monotonic_ns()}
-        runtime = _runtime(
-            owned, driver, delete_attempts=2,
+        runtime = await _runtime(
+            database, driver, delete_attempts=2,
             monotonic_ns=lambda: clock["ns"])
         step = await delete_source_file(runtime, 91)
         assert step.phase == "still_present", step
@@ -244,16 +238,16 @@ class TestDeletionChain:
 
     async def test_delete_budget_exhaustion_fails_with_registered_error(
             self, pipeline):
-        owned = pipeline
+        owned, database = pipeline
         driver = DriverDouble(absent=False, present=True)
         # 第一次：删除效果未知，查询确认仍在——等待预算内重试。
         first = await delete_source_file(
-            _runtime(owned, driver, delete_attempts=1, query_attempts=1), 91)
+            await _runtime(database, driver, delete_attempts=1, query_attempts=1), 91)
         assert first.phase == "still_present", first
         # 重试进入删除：删除预算耗尽按公共错误终态失败；查询预算独立
         # 不受影响（未确认缺席不以删除代替核实）。
         second = await delete_source_file(
-            _runtime(owned, driver, delete_attempts=1, query_attempts=1), 91)
+            await _runtime(database, driver, delete_attempts=1, query_attempts=1), 91)
         assert second.phase == "failed", second
         assert second.detail == "delete_attempts_exhausted", second
         row = _value(
@@ -264,10 +258,10 @@ class TestDeletionChain:
         assert json.loads(row[2])["output_id"] == "701"
 
     async def test_terminal_member_is_idempotent(self, pipeline):
-        owned = pipeline
+        owned, database = pipeline
         driver = DriverDouble(absent=True)
-        await delete_source_file(_runtime(owned, driver), 91)
-        again = await delete_source_file(_runtime(owned, driver), 91)
+        await delete_source_file(await _runtime(database, driver), 91)
+        again = await delete_source_file(await _runtime(database, driver), 91)
         assert again.phase == "already_terminal", again
         assert driver.delete_calls == 1
         assert _value(owned, "SELECT COUNT(*) FROM outputs") == (1,)

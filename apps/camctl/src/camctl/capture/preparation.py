@@ -183,10 +183,11 @@ async def _save_owner(owner, database, operations, *, retry=False):
     return result
 
 
-async def _save_cached_request(database, cache, action_id, *, scheduling, capture, ending=False, retry=False):
+async def _save_cached_request(database, cache, action_id, *, scheduling, capture, ending=False, retry=False, original=None):
     requests = cache.endings if ending else cache.reservations
-    original = requests.get(action_id)
     if original is None:
+        original = requests.get(action_id)
+    if original is None or requests.get(action_id) is not original:
         return
     if ending:
         kind, request, key = original
@@ -197,6 +198,8 @@ async def _save_cached_request(database, cache, action_id, *, scheduling, captur
         kind, method, message = None, scheduling.reserve_preparation, "原准备占用未可靠保存"
 
     async def save_and_apply():
+        if requests.get(action_id) is not original:
+            return
         notification_error = None
         try:
             receipt = await database.write(lambda owned: method(request, key, owned), key=key)
@@ -208,7 +211,8 @@ async def _save_cached_request(database, cache, action_id, *, scheduling, captur
         value = _completed(receipt, message)
         if kind == "release" and value.outcome.value == "rejected":
             raise ConsistencyError(f"准备释放条件未成立: {value.reason}")
-        del requests[action_id]
+        if requests.get(action_id) is original:
+            del requests[action_id]
         if ending or getattr(getattr(value, "outcome", None), "value", None) != "rejected":
             cache.changed_actions.add(action_id)
         if notification_error is not None:
@@ -237,12 +241,12 @@ async def resume_preparation_saves(database, cache, *, operations=None, scheduli
     async def save_and_apply():
         for owner in tuple(cache.owners.values()):
             await _save_owner(owner, database, operations, retry=True)
-        for action_id in tuple(cache.reservations):
+        for action_id, original in tuple(cache.reservations.items()):
             await _save_cached_request(database, cache, action_id,
-                scheduling=scheduling, capture=capture, retry=True)
-        for action_id in tuple(cache.endings):
+                scheduling=scheduling, capture=capture, retry=True, original=original)
+        for action_id, original in tuple(cache.endings.items()):
             await _save_cached_request(database, cache, action_id,
-                scheduling=scheduling, capture=capture, ending=True, retry=True)
+                scheduling=scheduling, capture=capture, ending=True, retry=True, original=original)
     return await settle_required(save_and_apply())
 
 
@@ -559,7 +563,7 @@ async def _advance_preparation(runtime, action_id):
             cache.reservations[action_id] = request, new_operation_key()
         value = await _save_cached_request(runtime.database, cache, action_id,
             scheduling=runtime.scheduling, capture=runtime.capture)
-        if value.outcome.value == "rejected":
+        if value is None or value.outcome.value == "rejected":
             return BaselinePreparation(PreparationPhase.WAITING, wakeup_required=False)
         activity = (await _activity(runtime, action_id))
     if activity is None:

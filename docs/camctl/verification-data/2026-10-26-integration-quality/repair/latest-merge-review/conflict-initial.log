@@ -1,0 +1,43 @@
+FFF                                                                      [100%]
+=================================== FAILURES ===================================
+_________________ test_historical_error_shape_is_state_failure _________________
+apps/camctl/tests/integration/reporting/test_result_error_state.py:135: in test_historical_error_shape_is_state_failure
+    owned, runtime, action_id, error = await _exhausted_world(tmp_path, "timelapse", True)
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/reporting/test_result_error_generation.py:41: in _exhausted_world
+    owned, runtime, action_id, handler = await consumer_world(
+apps/camctl/tests/integration/capture/result_consumer_fixtures.py:155: in consumer_world
+    runtime = (_runtime(owned, driver=control) if runtime_factory is None
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_capture_contract.py:339: in _runtime
+    return CaptureRuntime(
+E   TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'
+________ test_uninterpretable_frozen_error_stops_worker_without_publish ________
+apps/camctl/tests/integration/reporting/test_result_error_state.py:155: in test_uninterpretable_frozen_error_stops_worker_without_publish
+    owned, runtime, action_id, error = await _exhausted_world(tmp_path, "timelapse", True)
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/reporting/test_result_error_generation.py:41: in _exhausted_world
+    owned, runtime, action_id, handler = await consumer_world(
+apps/camctl/tests/integration/capture/result_consumer_fixtures.py:155: in consumer_world
+    runtime = (_runtime(owned, driver=control) if runtime_factory is None
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_capture_contract.py:339: in _runtime
+    return CaptureRuntime(
+E   TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'
+________________ test_output_fsync_error_remains_report_failure ________________
+apps/camctl/tests/integration/reporting/test_result_error_state.py:180: in test_output_fsync_error_remains_report_failure
+    owned, runtime, _action_id, _error = await _exhausted_world(tmp_path, "timelapse", True)
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/reporting/test_result_error_generation.py:41: in _exhausted_world
+    owned, runtime, action_id, handler = await consumer_world(
+apps/camctl/tests/integration/capture/result_consumer_fixtures.py:155: in consumer_world
+    runtime = (_runtime(owned, driver=control) if runtime_factory is None
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/capture/test_capture_contract.py:339: in _runtime
+    return CaptureRuntime(
+E   TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'
+=========================== short test summary info ============================
+FAILED apps/camctl/tests/integration/reporting/test_result_error_state.py::test_historical_error_shape_is_state_failure
+FAILED apps/camctl/tests/integration/reporting/test_result_error_state.py::test_uninterpretable_frozen_error_stops_worker_without_publish
+FAILED apps/camctl/tests/integration/reporting/test_result_error_state.py::test_output_fsync_error_remains_report_failure
+3 failed in 5.36s

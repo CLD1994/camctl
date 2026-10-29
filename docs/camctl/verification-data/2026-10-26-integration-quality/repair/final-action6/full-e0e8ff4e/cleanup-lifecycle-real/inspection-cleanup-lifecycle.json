@@ -1,0 +1,79 @@
+{
+  "previous_run": {
+    "pid": 1739223,
+    "history_horizon": 243,
+    "started_monotonic_ns": 109578205117660
+  },
+  "checked_event_ids": {
+    "1": 246,
+    "2": 247,
+    "3": 248
+  },
+  "files_before_next_run": [
+    [
+      1,
+      "recording-inputs/1.mp4",
+      1,
+      1
+    ],
+    [
+      2,
+      "recording-inputs/2.mp4",
+      1,
+      1
+    ],
+    [
+      3,
+      "recording-inputs/3.mp4",
+      1,
+      1
+    ]
+  ],
+  "files_before_cleanup": [
+    [
+      1,
+      "recording-inputs/1.mp4",
+      1,
+      1
+    ],
+    [
+      2,
+      "recording-inputs/2.mp4",
+      1,
+      1
+    ],
+    [
+      3,
+      "recording-inputs/3.mp4",
+      1,
+      1
+    ]
+  ],
+  "budget_seconds": 180,
+  "previous_run_result": "call=1 command=run pid=1739223 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0",
+  "next_run": {
+    "pid": 1739316,
+    "history_horizon": 304,
+    "started_monotonic_ns": 109582942806259
+  },
+  "files_after_cleanup": [
+    [
+      1,
+      "recording-inputs/1.mp4",
+      2,
+      4
+    ],
+    [
+      2,
+      "recording-inputs/2.mp4",
+      2,
+      4
+    ],
+    [
+      3,
+      "recording-inputs/3.mp4",
+      2,
+      4
+    ]
+  ]
+}

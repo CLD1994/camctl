@@ -18,7 +18,7 @@ pytestmark = pytest.mark.asyncio
 
 
 async def _obtain(cfg, owned, context, driver, request_id):
-    _accept(owned, request_id, [{
+    await _accept(owned, request_id, [{
         "name": "取回", "type": "obtain_action_outputs",
         "scheduled_at": "2026-01-15 09:00:00",
         "params": {"source": {"plan_instance_id": "1", "group": "files"}},

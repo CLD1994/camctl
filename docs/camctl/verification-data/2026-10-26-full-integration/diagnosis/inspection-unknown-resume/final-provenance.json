@@ -1,0 +1,115 @@
+{
+  "at": "2026-10-26T01:17:37.184325+00:00",
+  "repair_commit": "69c9857f40b7d65385ec9538425c0849db9f56fd",
+  "integrated_commit": "4e42c81c965ecb6e901abf5f477b09cb163dc29e",
+  "integrated_root_head_observed": "4e42c81c965ecb6e901abf5f477b09cb163dc29e",
+  "integrated_root_status_observed": "",
+  "byte_identity": [
+    {
+      "path": "apps/camctl/src/camctl/capture/media_flow.py",
+      "repair_blob": "f334f1603925f57ec9f72e0aab480fe7be34cfb0",
+      "integrated_blob": "f334f1603925f57ec9f72e0aab480fe7be34cfb0",
+      "sha256": "e391940e138258466123a0251f7a146b6428aa3cdf74efc03209226571252610",
+      "byte_equal": true
+    },
+    {
+      "path": "apps/camctl/tests/unit/capture/test_internal_read_save_owner.py",
+      "repair_blob": "feb01fdf778bdaa59a4c6529b45930c168d53e72",
+      "integrated_blob": "feb01fdf778bdaa59a4c6529b45930c168d53e72",
+      "sha256": "303fe52c0adc52dde63a43117468bcd09e7ce13a8456202d53613750c034bc1d",
+      "byte_equal": true
+    }
+  ],
+  "verification": {
+    "red-original": {
+      "receipt": "/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/red-original-receipt.json",
+      "xml": "/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/red-original.xml",
+      "xml_summary": [
+        {
+          "tests": "2",
+          "failures": "2",
+          "errors": "0",
+          "skipped": "0",
+          "time": "3.375"
+        }
+      ],
+      "exit_code": 1,
+      "module_file": "/tmp/camctl-merge-272f-inspection-resume/apps/camctl/src/camctl/capture/media_flow.py",
+      "head_recorded_before_command": "9fbb734ca18e56934ba32942009e9ea46eccd089"
+    },
+    "red-unit": {
+      "receipt": "/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/red-unit-receipt.json",
+      "xml": "/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/red-unit.xml",
+      "xml_summary": [
+        {
+          "tests": "8",
+          "failures": "2",
+          "errors": "0",
+          "skipped": "0",
+          "time": "0.928"
+        }
+      ],
+      "exit_code": 1,
+      "module_file": "/tmp/camctl-merge-272f-inspection-resume/apps/camctl/src/camctl/capture/media_flow.py",
+      "head_recorded_before_command": "9fbb734ca18e56934ba32942009e9ea46eccd089"
+    },
+    "green-original": {
+      "receipt": "/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/green-original-receipt.json",
+      "xml": "/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/green-original.xml",
+      "xml_summary": [
+        {
+          "tests": "2",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "1.587"
+        }
+      ],
+      "exit_code": 0,
+      "module_file": "/tmp/camctl-merge-272f-inspection-resume/apps/camctl/src/camctl/capture/media_flow.py",
+      "head_recorded_before_command": "9fbb734ca18e56934ba32942009e9ea46eccd089"
+    },
+    "green-narrow-unit": {
+      "receipt": "/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/green-narrow-unit-receipt.json",
+      "xml": "/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/green-narrow-unit.xml",
+      "xml_summary": [
+        {
+          "tests": "86",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "3.074"
+        }
+      ],
+      "exit_code": 0,
+      "module_file": "/tmp/camctl-merge-272f-inspection-resume/apps/camctl/src/camctl/capture/media_flow.py",
+      "head_recorded_before_command": "9fbb734ca18e56934ba32942009e9ea46eccd089"
+    },
+    "green-inspection-file": {
+      "receipt": "/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/green-inspection-file-receipt.json",
+      "xml": "/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/green-inspection-file.xml",
+      "xml_summary": [
+        {
+          "tests": "24",
+          "failures": "0",
+          "errors": "0",
+          "skipped": "0",
+          "time": "6.897"
+        }
+      ],
+      "exit_code": 0,
+      "module_file": "/tmp/camctl-merge-272f-inspection-resume/apps/camctl/src/camctl/capture/media_flow.py",
+      "head_recorded_before_command": "9fbb734ca18e56934ba32942009e9ea46eccd089"
+    }
+  },
+  "source_receipt_boundary": "Each run receipt source field records HEAD before command. Original red ran clean 9fbb; green runs used explicit module_file/PYTHONPATH in the independent worktree plus the then-uncommitted repair. They must not be described as clean-9fbb green tests or tests of an already committed 69c. Final committed repair is proven byte-equal to integrated root at 4e42; older green receipts have not been rewritten.",
+  "independent_root_acceptance_reported_by_parent": {
+    "commit": "4e42c81c965ecb6e901abf5f477b09cb163dc29e",
+    "passed": 387,
+    "elapsed_seconds": 17.61,
+    "scope": "13 files including original 352, internal read/stopped, inspection24",
+    "evidence_boundary": "Parent supplied this acceptance result; this subagent did not rerun it or independently open its XML."
+  },
+  "mechanism_provenance": "/tmp/camctl-full-272f-diagnosis/inspection-unknown-resume/source-provenance.json",
+  "bootstrap_source_boundary": "/tmp/camctl-full-272f-diagnosis/bootstrap/category-source-provenance.json"
+}

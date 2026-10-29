@@ -1,0 +1,251 @@
+{
+  "created_utc": "2026-10-27T11:45:06.855753+00:00",
+  "reason": "用户要求收尾后暂停；不启动新测试或集成",
+  "coordinator_head": "425b76ef459b96da2cbc7c2f044d73522b834f5c",
+  "scope": "暂停快照，不代表阶段验收。未提交代码只作恢复材料，不可直接集成。",
+  "worktrees": [
+    {
+      "worktree": "/tmp/camctl-refactor-20261026/capture",
+      "head": "1d3879a8cdd99aeb4eda1e85bc566b12cc3b26f2",
+      "branch": "test/refactor-capture-20261026",
+      "status": " M apps/camctl/tests/integration/support/result_cases.py\n?? apps/camctl/tests/integration/support/output_planning.py\n?? apps/camctl/tests/integration/support/session.py\n",
+      "production_changed_files": []
+    },
+    {
+      "worktree": "/tmp/camctl-refactor-20261026/capture-cancellation",
+      "head": "876c105b524792f23c7fe33c79cf3070a4f6e3f0",
+      "branch": "test/refactor-capture-cancellation-20261027",
+      "status": "",
+      "production_changed_files": []
+    },
+    {
+      "worktree": "/tmp/camctl-refactor-20261026/bootstrap-runtime-owners",
+      "head": "23849d29d1b68b308016fe94c7a296a66c14b9f2",
+      "branch": "test/refactor-bootstrap-runtime-owners-20261027",
+      "status": "",
+      "production_changed_files": []
+    },
+    {
+      "worktree": "/tmp/camctl-refactor-20261026/capture-result-diagnostics",
+      "head": "15b22e134b4ffe0b74355e4becc950e04c4ecbb8",
+      "branch": "test/refactor-capture-result-diagnostics-20261027",
+      "status": " M apps/camctl/tests/integration/capture/test_global_error_diagnostics.py\n M apps/camctl/tests/integration/capture/test_result_error_diagnostics.py\n M apps/camctl/tests/integration/support/capture_diagnostic_cases.py\n",
+      "production_changed_files": []
+    },
+    {
+      "worktree": "/tmp/camctl-refactor-20261026/capture-media-consumers",
+      "head": "3280919830b1a7c4ce016fdc6ff30ecc31dddbf5",
+      "branch": "test/refactor-capture-media-consumers-20261027",
+      "status": " M apps/camctl/tests/integration/support/capture_media_cases.py\n",
+      "production_changed_files": []
+    },
+    {
+      "worktree": "/tmp/camctl-refactor-20261026/capture-native",
+      "head": "603a911fd437fbf3416b782696e2c2521ad4266c",
+      "branch": "test/refactor-capture-native-20261027",
+      "status": " M apps/camctl/tests/integration/capture/test_timelapse_host_timer.py\n M apps/camctl/tests/integration/support/native_capture_cases.py\n",
+      "production_changed_files": []
+    },
+    {
+      "worktree": "/tmp/camctl-refactor-20261026/bootstrap-cleanup-contracts",
+      "head": "fbd538a4426f9dc5be036369e000a80d4cde0b58",
+      "branch": "test/refactor-bootstrap-cleanup-contracts-20261027",
+      "status": "",
+      "production_changed_files": []
+    },
+    {
+      "worktree": "/tmp/camctl-refactor-20261026/capture-storage-guards",
+      "head": "2c1644011fd71455eab928870c00fedc436c6a20",
+      "branch": "test/refactor-capture-storage-guards-20261027",
+      "status": "",
+      "production_changed_files": []
+    },
+    {
+      "worktree": "/tmp/camctl-refactor-20261026/bootstrap",
+      "head": "094353b827632df21f50d8dd64396b5f73200b93",
+      "branch": "test/refactor-bootstrap-20261026",
+      "status": "",
+      "production_changed_files": []
+    },
+    {
+      "worktree": "/tmp/camctl-refactor-20261026/capture-recording-consumers",
+      "head": "9c2a1acb7fc7333249e265f4624a7fd481159d79",
+      "branch": "test/refactor-capture-recording-consumers-20261027",
+      "status": "",
+      "production_changed_files": []
+    },
+    {
+      "worktree": "/tmp/camctl-refactor-20261026/source-capacity-audit",
+      "head": "9d36d1ebbb9afb035054ac9a4281a47045650763",
+      "branch": "test/source-capacity-audit-20261027",
+      "status": "",
+      "production_changed_files": []
+    },
+    {
+      "worktree": "/tmp/camctl-refactor-20261026/evidence-stage4",
+      "head": "a02f7549aaae051902a1ed59a700790150a8bb64",
+      "branch": "docs/integration-refactor-evidence-stage4-20261027",
+      "status": "",
+      "production_changed_files": []
+    }
+  ],
+  "owned_test_processes": [],
+  "artifacts": [
+    {
+      "file": "capture/working-tree.patch.gz",
+      "source": "/tmp/camctl-refactor-20261026/capture",
+      "uncompressed_bytes": 1428,
+      "sha256": "e2e83d9336de374a0712bd10bb0c453def00357da474e0d99cbd0c486b8353d1"
+    },
+    {
+      "file": "capture/untracked/apps/camctl/tests/integration/support/output_planning.py.gz",
+      "source": "/tmp/camctl-refactor-20261026/capture/apps/camctl/tests/integration/support/output_planning.py",
+      "uncompressed_bytes": 10432,
+      "sha256": "5080bd6ba786a6b109d1bdba11dd12bf315d35d6ad0703ffff192eeb6de399e4"
+    },
+    {
+      "file": "capture/untracked/apps/camctl/tests/integration/support/session.py.gz",
+      "source": "/tmp/camctl-refactor-20261026/capture/apps/camctl/tests/integration/support/session.py",
+      "uncompressed_bytes": 9967,
+      "sha256": "94b46d5d863d980d3789727a36aa0ab367fbddb15d81573c769493656622e912"
+    },
+    {
+      "file": "capture/pause-checkpoint.json.gz",
+      "source": "/tmp/camctl-refactor-20261026/capture/.local/pause-checkpoint.json",
+      "uncompressed_bytes": 3386,
+      "sha256": "e270ea2184b302e37d58bc196268748fdaa1419ffa46fa8274d12248527e2c67"
+    },
+    {
+      "file": "capture/refactor-report.json.gz",
+      "source": "/tmp/camctl-refactor-20261026/capture/.local/refactor-report.json",
+      "uncompressed_bytes": 519801,
+      "sha256": "97de78113d2d8069bb2c492060e8254a097bb897b07973e0e9b312b62ff9f0b4"
+    },
+    {
+      "file": "capture-cancellation/refactor-report.json.gz",
+      "source": "/tmp/camctl-refactor-20261026/capture-cancellation/.local/refactor-report.json",
+      "uncompressed_bytes": 134264,
+      "sha256": "b73c7566a22f74b7ab4caef68357e73af761e70bbd831d3f8baa538468518194"
+    },
+    {
+      "file": "capture-cancellation/cancellation-evidence/stable-capture-review-checkpoint.json.gz",
+      "source": "/tmp/camctl-refactor-20261026/capture-cancellation/.local/cancellation-evidence/stable-capture-review-checkpoint.json",
+      "uncompressed_bytes": 1667,
+      "sha256": "86cf597a35051fa5c97265b853bde110ba393b10d928342f84160d68a5dc1a42"
+    },
+    {
+      "file": "capture-cancellation/cancellation-evidence/final123.json.gz",
+      "source": "/tmp/camctl-refactor-20261026/capture-cancellation/.local/cancellation-evidence/final123.json",
+      "uncompressed_bytes": 1108,
+      "sha256": "ec6f5c74b4bf3ac342d48b082bf6dc66a89bce253d991372abadde440bcd17bc"
+    },
+    {
+      "file": "bootstrap-runtime-owners/refactor-report.json.gz",
+      "source": "/tmp/camctl-refactor-20261026/bootstrap-runtime-owners/.local/refactor-report.json",
+      "uncompressed_bytes": 59268,
+      "sha256": "03a0f143447e6ad5e423e74046abb399f2d56eff24f491947065b4f25023606a"
+    },
+    {
+      "file": "bootstrap-runtime-owners/bootstrap-runtime-owners/checkpoint.json.gz",
+      "source": "/tmp/camctl-refactor-20261026/bootstrap-runtime-owners/.local/bootstrap-runtime-owners/checkpoint.json",
+      "uncompressed_bytes": 1316,
+      "sha256": "df2a726f7e455005072462009e7034e33b12c6230a6c7a4bddb1d1fc898050db"
+    },
+    {
+      "file": "bootstrap-runtime-owners/bootstrap-runtime-owners/refactor-report.json.gz",
+      "source": "/tmp/camctl-refactor-20261026/bootstrap-runtime-owners/.local/bootstrap-runtime-owners/refactor-report.json",
+      "uncompressed_bytes": 59268,
+      "sha256": "03a0f143447e6ad5e423e74046abb399f2d56eff24f491947065b4f25023606a"
+    },
+    {
+      "file": "capture-result-diagnostics/working-tree.patch.gz",
+      "source": "/tmp/camctl-refactor-20261026/capture-result-diagnostics",
+      "uncompressed_bytes": 52901,
+      "sha256": "f5233fb9f790da6acf4da4eccd13d0c06e68540c91c861efae5bc2df11501bca"
+    },
+    {
+      "file": "capture-result-diagnostics/paused-checkpoint.json.gz",
+      "source": "/tmp/camctl-refactor-20261026/capture-result-diagnostics/.local/paused-checkpoint.json",
+      "uncompressed_bytes": 3560,
+      "sha256": "f305b7e654bb3b297cfa7264c899dac6beb0fbe08dbb1d453df1c2756ea55a82"
+    },
+    {
+      "file": "capture-result-diagnostics/refactor-report.json.gz",
+      "source": "/tmp/camctl-refactor-20261026/capture-result-diagnostics/.local/refactor-report.json",
+      "uncompressed_bytes": 19598,
+      "sha256": "b51a0f4b4fe1fc6072f93e29bf935e00532af79bf02f88142b67545691820dc4"
+    },
+    {
+      "file": "capture-media-consumers/working-tree.patch.gz",
+      "source": "/tmp/camctl-refactor-20261026/capture-media-consumers",
+      "uncompressed_bytes": 820,
+      "sha256": "f08a29972c1b80a2f80850cbb97cf2282c235c2dbbcb54e37c02b537f76eb010"
+    },
+    {
+      "file": "capture-media-consumers/refactor-report.json.gz",
+      "source": "/tmp/camctl-refactor-20261026/capture-media-consumers/.local/refactor-report.json",
+      "uncompressed_bytes": 167582,
+      "sha256": "7858a2c227a5ec5c68fa05caf5659984ed9ddfe4e94ef81857f269dcca305244"
+    },
+    {
+      "file": "capture-media-consumers/media-review/checkpoint.json.gz",
+      "source": "/tmp/camctl-refactor-20261026/capture-media-consumers/.local/media-review/checkpoint.json",
+      "uncompressed_bytes": 1574,
+      "sha256": "05a3fcb572379eb6198ce7022d32b901ab95d008fa4fb15429da8a2a56bc3d8a"
+    },
+    {
+      "file": "capture-native/working-tree.patch.gz",
+      "source": "/tmp/camctl-refactor-20261026/capture-native",
+      "uncompressed_bytes": 5861,
+      "sha256": "d1d224d8ef392f5e0b58cc1cde1737dec82be36d7d287a12eb8050f9afbfb315"
+    },
+    {
+      "file": "capture-native/checkpoint.json.gz",
+      "source": "/tmp/camctl-refactor-20261026/capture-native/.local/checkpoint.json",
+      "uncompressed_bytes": 2749,
+      "sha256": "8c5192e58a187acb7b6523f225d245b9d72492be4fe3f23a5f967476ab9835a5"
+    },
+    {
+      "file": "capture-native/refactor-report.json.gz",
+      "source": "/tmp/camctl-refactor-20261026/capture-native/.local/refactor-report.json",
+      "uncompressed_bytes": 77204,
+      "sha256": "ee9f547adf4288ae99ee48dbd2883dacb5f69e4d366f892ff467b7dffc348139"
+    },
+    {
+      "file": "bootstrap-cleanup-contracts/refactor-report.json.gz",
+      "source": "/tmp/camctl-refactor-20261026/bootstrap-cleanup-contracts/.local/refactor-report.json",
+      "uncompressed_bytes": 143427,
+      "sha256": "075961e7ddbdba5f76ee9d2bf22bd0bce8db36aa01fe9196d3dcaec5da8a7efd"
+    },
+    {
+      "file": "capture-storage-guards/refactor-report.json.gz",
+      "source": "/tmp/camctl-refactor-20261026/capture-storage-guards/.local/refactor-report.json",
+      "uncompressed_bytes": 149753,
+      "sha256": "1661048a972f0d521c7ab16c1639a9e3d33eb8ab6944359a51936680246c1f5c"
+    },
+    {
+      "file": "bootstrap/refactor-report.json.gz",
+      "source": "/tmp/camctl-refactor-20261026/bootstrap/.local/refactor-report.json",
+      "uncompressed_bytes": 295505,
+      "sha256": "b21b1af8a6f2f424662845da41c80e12ad7698981d56b5c8bb7f2c7ae29d0641"
+    },
+    {
+      "file": "capture-recording-consumers/refactor-report.json.gz",
+      "source": "/tmp/camctl-refactor-20261026/capture-recording-consumers/.local/refactor-report.json",
+      "uncompressed_bytes": 62423,
+      "sha256": "a5485b7649bd976bee9df0dbfa5af654c8ef4540a65066ca48ac18173c86304d"
+    },
+    {
+      "file": "source-capacity-audit/refactor-report.json.gz",
+      "source": "/tmp/camctl-refactor-20261026/source-capacity-audit/.local/refactor-report.json",
+      "uncompressed_bytes": 14359,
+      "sha256": "6df0f640e044d8051db2f34df4370be16c1bf2cde3a5183fed722d083c4cc7ab"
+    },
+    {
+      "file": "independent-audit-checkpoint.md.gz",
+      "source": "/tmp/camctl-refactor-20261026/audit-pending-checkpoint-20261027.md",
+      "uncompressed_bytes": 2995,
+      "sha256": "c9fb64c00381c250a7987cab4256fc6ba87c7523ecc7d127ff86dda1c51a0a49"
+    }
+  ]
+}

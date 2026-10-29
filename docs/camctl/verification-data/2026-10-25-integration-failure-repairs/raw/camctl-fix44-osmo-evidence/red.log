@@ -1,0 +1,189 @@
+FFF                                                                      [100%]
+=================================== FAILURES ===================================
+_____ test_original_result_pages_are_consumed_before_new_listing[partial] ______
+
+owned = OwnedConnection(connection=<sqlite3.Connection object at 0x7f5ad35f3e20>, metadata=DatabaseMetadata(application_id='ca...rsion=5, staging_path='/srv/camctl/staging', ready_path='/srv/camctl/ready', processing_path='/srv/camctl/processing'))
+tmp_path = PosixPath('/tmp/camctl-fix44-osmo-evidence/red-tmp/test_original_result_pages_are0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f5ad35640d0>
+pages = 'partial'
+
+    @pytest.mark.parametrize("pages", ["none", "partial", "terminal", "terminal_error"])
+    async def test_original_result_pages_are_consumed_before_new_listing(owned, tmp_path, monkeypatch, pages):
+        world = await _world(owned, tmp_path, monkeypatch)
+        runtime, ticket = await _result_attempt(world)
+>       original = None if pages == "none" else await _save_actual_page(world, runtime, ticket, monkeypatch, pages)
+                                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py:265: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+world = namespace(owned=OwnedConnection(connection=<sqlite3.Connection object at 0x7f5ad35f3e20>, metadata=DatabaseMetadata(ap...'cam-1', driver_id='dji-osmo360-ii'), kind='camera_record', activity_id=1, wall=[1768467611000000], mono=[41000000000])
+runtime = CaptureRuntime(owned=OwnedConnection(connection=<sqlite3.Connection object at 0x7f5ad35f3e20>, metadata=DatabaseMetada...red=True)}, reservations={}, endings={}), session_key='e5b1c655a73949a19fdf6add35631272', prepare_lead_s=Decimal('10'))
+ticket = AttemptTicket(attempt_id=1, operation='result', target_id='1', responsibility_key='results/1', run_id=4)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f5ad35640d0>
+page_kind = 'partial'
+
+    async def _save_actual_page(world, runtime, ticket, monkeypatch, page_kind):
+        from ..capture.test_record_file_completion_wait import _stop_context
+        context = {**_stop_context(world.owned, 1), "kind": "record_stop", "file_completion_wait_ms": 30000}
+        world.channel.directory_end = b"MORE" if page_kind == "partial" else b"END"
+        world.channel.metadata_error = page_kind == "terminal_error"
+    
+        async def elapsed(seconds):
+            world.mono[0] += int(seconds * 1_000_000_000)
+        monkeypatch.setattr(asyncio, "sleep", elapsed)
+        page = await runtime.results.list_page(ticket, cursor=None, timeout_s=Decimal("40"),
+            output_scope=runtime.action(1)["execution_spec_json"]["output_scope"], completion_context=context,
+            video_result_mode=runtime.action(1)["execution_spec_json"].get("video_result_mode"))
+        if page_kind == "terminal_error":
+            assert page.outcome.status.name == "FAILED"
+            assert page.outcome.error.code == "adb_metadata_failed"
+            assert not page.scan_complete
+        else:
+>           assert page.outcome.status.name == "SUCCEEDED", page.outcome.error
+E           AssertionError: ErrorValue(code='adb_directory_failed', stage='device_file_access', details={'reason': 'call_failed', 'transport_error': None, 'output_failure': None, 'local_exit_code': 7, 'local_signal': None, 'stderr': 'source interrupted'})
+E           assert 'FAILED' == 'SUCCEEDED'
+E             
+E             - SUCCEEDED
+E             + FAILED
+
+apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py:245: AssertionError
+_____ test_original_result_pages_are_consumed_before_new_listing[terminal] _____
+
+owned = OwnedConnection(connection=<sqlite3.Connection object at 0x7f5ad35f3d30>, metadata=DatabaseMetadata(application_id='ca...rsion=5, staging_path='/srv/camctl/staging', ready_path='/srv/camctl/ready', processing_path='/srv/camctl/processing'))
+tmp_path = PosixPath('/tmp/camctl-fix44-osmo-evidence/red-tmp/test_original_result_pages_are1')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f5ad387c590>
+pages = 'terminal'
+
+    @pytest.mark.parametrize("pages", ["none", "partial", "terminal", "terminal_error"])
+    async def test_original_result_pages_are_consumed_before_new_listing(owned, tmp_path, monkeypatch, pages):
+        world = await _world(owned, tmp_path, monkeypatch)
+        runtime, ticket = await _result_attempt(world)
+>       original = None if pages == "none" else await _save_actual_page(world, runtime, ticket, monkeypatch, pages)
+                                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py:265: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+world = namespace(owned=OwnedConnection(connection=<sqlite3.Connection object at 0x7f5ad35f3d30>, metadata=DatabaseMetadata(ap...'cam-1', driver_id='dji-osmo360-ii'), kind='camera_record', activity_id=1, wall=[1768467611000000], mono=[41000000000])
+runtime = CaptureRuntime(owned=OwnedConnection(connection=<sqlite3.Connection object at 0x7f5ad35f3d30>, metadata=DatabaseMetada...red=True)}, reservations={}, endings={}), session_key='a9387052d76345768a621979bf1497ec', prepare_lead_s=Decimal('10'))
+ticket = AttemptTicket(attempt_id=1, operation='result', target_id='1', responsibility_key='results/1', run_id=4)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f5ad387c590>
+page_kind = 'terminal'
+
+    async def _save_actual_page(world, runtime, ticket, monkeypatch, page_kind):
+        from ..capture.test_record_file_completion_wait import _stop_context
+        context = {**_stop_context(world.owned, 1), "kind": "record_stop", "file_completion_wait_ms": 30000}
+        world.channel.directory_end = b"MORE" if page_kind == "partial" else b"END"
+        world.channel.metadata_error = page_kind == "terminal_error"
+    
+        async def elapsed(seconds):
+            world.mono[0] += int(seconds * 1_000_000_000)
+        monkeypatch.setattr(asyncio, "sleep", elapsed)
+        page = await runtime.results.list_page(ticket, cursor=None, timeout_s=Decimal("40"),
+            output_scope=runtime.action(1)["execution_spec_json"]["output_scope"], completion_context=context,
+            video_result_mode=runtime.action(1)["execution_spec_json"].get("video_result_mode"))
+        if page_kind == "terminal_error":
+            assert page.outcome.status.name == "FAILED"
+            assert page.outcome.error.code == "adb_metadata_failed"
+            assert not page.scan_complete
+        else:
+>           assert page.outcome.status.name == "SUCCEEDED", page.outcome.error
+E           AssertionError: ErrorValue(code='adb_directory_failed', stage='device_file_access', details={'reason': 'call_failed', 'transport_error': None, 'output_failure': None, 'local_exit_code': 7, 'local_signal': None, 'stderr': 'source interrupted'})
+E           assert 'FAILED' == 'SUCCEEDED'
+E             
+E             - SUCCEEDED
+E             + FAILED
+
+apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py:245: AssertionError
+_ test_new_result_round_has_new_ticket_and_keeps_original_budget_and_pages[none] _
+
+owned = OwnedConnection(connection=<sqlite3.Connection object at 0x7f5ad32a6c50>, metadata=DatabaseMetadata(application_id='ca...rsion=5, staging_path='/srv/camctl/staging', ready_path='/srv/camctl/ready', processing_path='/srv/camctl/processing'))
+tmp_path = PosixPath('/tmp/camctl-fix44-osmo-evidence/red-tmp/test_new_result_round_has_new_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7f5ad387e090>
+pages = 'none'
+
+    @pytest.mark.parametrize("pages", ["none", "partial"])
+    async def test_new_result_round_has_new_ticket_and_keeps_original_budget_and_pages(
+            owned, tmp_path, monkeypatch, pages):
+        world = await _world(owned, tmp_path, monkeypatch)
+        runtime, ticket = await _result_attempt(world)
+        original = None if pages == "none" else await _save_actual_page(world, runtime, ticket, monkeypatch, pages)
+        horizon = _reopen(world)
+        declaration = world.cfg.devices[BINDING.device_id]
+        world.cfg = replace(world.cfg, devices={BINDING.device_id: {**declaration,
+            "result_check": {**declaration["result_check"], "max_attempts": 2}}})
+        world.channel.directory_end = b"END"
+        world.channel.allowed_ticket = (ticket.run_id, ticket.attempt_id + 1)
+        original_calls = len(world.channel.result_tickets)
+        try:
+            resumed = _capture(world, recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
+                recovery_max_event_id=lambda: horizon)
+            if pages == "none":
+                async def elapsed(seconds):
+                    world.mono[0] += int(seconds * 1_000_000_000)
+                monkeypatch.setattr(asyncio, "sleep", elapsed)
+>           await capture_handler(world.kind)(1, resumed)
+
+apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py:531: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+apps/camctl/src/camctl/capture/handlers.py:3516: in _record_handler
+    await _advance_recording_outcome(context, action, decision)
+apps/camctl/src/camctl/capture/handlers.py:4044: in _advance_recording_outcome
+    await advance_segmented_recording(context, action, decision)
+apps/camctl/src/camctl/capture/segment_completion.py:310: in advance_segmented_recording
+    listing = await common._listing_round(runtime, action_id)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/operations/owned_calls.py:86: in owned
+    raise actual.error
+apps/camctl/src/camctl/operations/owned_calls.py:57: in run
+    value = await function(*args, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/capture/handlers.py:5197: in _listing_round
+    listing = await _listing_round_input(runtime, action_id)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/capture/handlers.py:5295: in _listing_round_input
+    return await _continue_result_scan(runtime, pending)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/capture/handlers.py:5066: in _continue_result_scan
+    if not await advance_result_scan(pending, runtime=runtime,
+apps/camctl/src/camctl/capture/result_scans.py:117: in advance_result_scan
+    page = await runtime.results.list_page(pending.ticket, **page_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/bootstrap/capture_assembly.py:546: in list_page
+    result = await self._driver.list_results(request, _RESULT_BATCH_SIZE)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/devices/drivers/adb_cameras/driver.py:306: in list_results
+    result = await self.contract.result_reader(self, request, batch)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/devices/drivers/adb_cameras/osmo360ii_results.py:29: in list_osmo360ii_results
+    return await list_declared_results(driver, request, batch, profile)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/devices/drivers/adb_cameras/bounded_result_reading.py:273: in list_declared_results
+    listing = await request.result_directory_reader(filesystem, directory_request, stop=_NeverStop())
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/bootstrap/capture_assembly.py:535: in read_directory
+    listing = await context.directory_scan.read_directory(directory_request, stop=stop)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/devices/drivers/adb_cameras/directory_scan.py:200: in read_directory
+    raw = await fs.transport.run_stream(spec, stop, receive)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <integration.bootstrap.test_osmo_shared_recovery.Channel object at 0x7f5ad3eae3d0>
+spec = ToolSpec(argv=('adb', '-s', 'serial-1', 'shell', '-T', 'sh -c \'tmp=$(mktemp) || exit $?\ntrap \'"\'"\'rm -f -- "$tmp"...d" || exit $?\nprintf \'"\'"\'END\\000\'"\'"\' || exit $?\''), timeout_s=Decimal('10'), terminate_grace_s=Decimal('3'))
+stop = <camctl.devices.drivers.adb_cameras.record_results._NeverStop object at 0x7f5ad4fcdf50>
+receive = <function AdbDirectoryScan.read_directory.<locals>.receive at 0x7f5ad37f8900>
+
+    async def run_stream(self, spec, stop, receive):
+>       assert not self.forbidden, "原READ不能重开源流"
+E       AssertionError: 原READ不能重开源流
+E       assert not True
+E        +  where True = <integration.bootstrap.test_osmo_shared_recovery.Channel object at 0x7f5ad3eae3d0>.forbidden
+
+apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py:82: AssertionError
+=========================== short test summary info ============================
+FAILED apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_result_pages_are_consumed_before_new_listing[partial]
+FAILED apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_result_pages_are_consumed_before_new_listing[terminal]
+FAILED apps/camctl/tests/integration/bootstrap/test_osmo_shared_recovery.py::test_new_result_round_has_new_ticket_and_keeps_original_budget_and_pages[none]
+3 failed in 3.75s

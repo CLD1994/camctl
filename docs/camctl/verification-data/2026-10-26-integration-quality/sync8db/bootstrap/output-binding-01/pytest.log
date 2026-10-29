@@ -1,0 +1,25 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.17, pytest-9.1.1, pluggy-1.6.0 -- /workspaces/camctl/apps/camctl/.venv311/bin/python
+cachedir: .pytest_cache
+rootdir: /tmp/camctl-sync8db-tests-ojv22ku3/bootstrap/apps/camctl
+configfile: pyproject.toml
+plugins: mock-3.16.0, asyncio-1.4.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 13 items
+
+apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py::test_selected_obtain_item_binding_failure_keeps_other_device[missing] PASSED [  7%]
+apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py::test_selected_obtain_item_binding_failure_keeps_other_device[mismatch] PASSED [ 15%]
+apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py::test_cleanup_uses_each_members_original_binding[missing] PASSED [ 23%]
+apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py::test_cleanup_uses_each_members_original_binding[mismatch] PASSED [ 30%]
+apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py::test_cleanup_uses_each_members_original_binding[matched] PASSED [ 38%]
+apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py::test_matched_single_device_cleanup_saves_reliable_absence PASSED [ 46%]
+apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py::test_verified_copy_publishes_without_source_device[missing] PASSED [ 53%]
+apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py::test_verified_copy_publishes_without_source_device[mismatch] PASSED [ 61%]
+apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py::test_unfinished_read_binding_failure_closes_responsibility_and_keeps_progress[missing] PASSED [ 69%]
+apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py::test_unfinished_read_binding_failure_closes_responsibility_and_keeps_progress[mismatch] PASSED [ 76%]
+apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py::test_unfinished_cleanup_binding_failure_preserves_unknown_delete[missing] PASSED [ 84%]
+apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py::test_unfinished_cleanup_binding_failure_preserves_unknown_delete[mismatch] PASSED [ 92%]
+apps/camctl/tests/integration/bootstrap/test_output_binding_changes.py::test_cleanup_passes_committed_ticket_and_each_operation_timeout PASSED [100%]
+
+- generated xml file: /tmp/camctl-sync8db-evidence/bootstrap/output-binding-01/junit.xml -
+============================== 13 passed in 7.42s ==============================

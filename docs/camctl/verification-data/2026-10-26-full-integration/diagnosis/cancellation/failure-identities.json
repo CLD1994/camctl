@@ -1,0 +1,2081 @@
+[
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_cancellation_contract.py::TestEntryMatrix::test_four_entries_match_independent_results",
+    "phase": "call",
+    "error": "TypeError: TargetSettlement.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 90,
+    "trace_start_line": 7,
+    "trace_end_line": 92,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_cancellation_contract.py:212: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_cancellation_contract.py::TestEntryMatrix::test_cancel_results_survive_restart",
+    "phase": "call",
+    "error": "TypeError: TargetSettlement.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 163,
+    "trace_start_line": 93,
+    "trace_end_line": 165,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_cancellation_contract.py:212: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_cancellation_contract.py::TestEntryMatrix::test_finished_cancel_does_not_wait_for_device",
+    "phase": "call",
+    "error": "TypeError: TargetSettlement.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 236,
+    "trace_start_line": 166,
+    "trace_end_line": 238,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_cancellation_contract.py:212: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_controller_cancel.py::TestOriginSettlement::test_c1_canceled_c2_succeeded_a_continues",
+    "phase": "call",
+    "error": "TypeError: CancellationRuntime.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 272,
+    "trace_start_line": 239,
+    "trace_end_line": 274,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_controller_cancel.py:149: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_controller_cancel.py::TestOriginSettlement::test_interrupt_boundaries_reenter_idempotently",
+    "phase": "call",
+    "error": "TypeError: CancellationRuntime.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 321,
+    "trace_start_line": 275,
+    "trace_end_line": 323,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_controller_cancel.py:149: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_controller_cancel.py::TestOriginSettlement::test_c2_with_both_reuses_original_flow",
+    "phase": "call",
+    "error": "TypeError: CancellationRuntime.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 356,
+    "trace_start_line": 324,
+    "trace_end_line": 358,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_controller_cancel.py:149: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_effects.py::TestApplyTransactions::test_terminal_target_succeeds_without_rewriting",
+    "phase": "call",
+    "error": "AssertionError: ConsistencyError('已执行拍摄缺少设备活动: 13')",
+    "error_line": 370,
+    "trace_start_line": 359,
+    "trace_end_line": 375,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_effects.py:271: AssertionError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_effects.py::TestFinishCancelAction::test_any_failure_fails_action_with_machine_error",
+    "phase": "call",
+    "error": "AssertionError: TransactionError('取消成员尚未全部终态: 93 status=1')",
+    "error_line": 397,
+    "trace_start_line": 376,
+    "trace_end_line": 402,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_effects.py:356: AssertionError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_effects.py::TestFinishCancelAction::test_all_succeeded_completes_action_and_plan",
+    "phase": "call",
+    "error": "AssertionError: TransactionError('取消成员尚未全部终态: 93 status=1')",
+    "error_line": 422,
+    "trace_start_line": 403,
+    "trace_end_line": 427,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_effects.py:374: AssertionError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_effects.py::TestFinishCancelAction::test_terminal_new_key_recovers_without_new_history",
+    "phase": "call",
+    "error": "AttributeError: 'NoneType' object has no attribute 'disposition'",
+    "error_line": 452,
+    "trace_start_line": 428,
+    "trace_end_line": 454,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_effects.py:398: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_effects.py::TestApplyCancelService::test_cancel_mark_is_not_settlement",
+    "phase": "call",
+    "error": "TypeError: CancellationRuntime.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 485,
+    "trace_start_line": 455,
+    "trace_end_line": 487,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_effects.py:125: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_effects.py::TestApplyCancelService::test_failure_does_not_abandon_other_items",
+    "phase": "call",
+    "error": "TypeError: CancellationRuntime.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 515,
+    "trace_start_line": 488,
+    "trace_end_line": 517,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_effects.py:125: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_effects.py::TestApplyCancelService::test_late_result_enables_restart_summary",
+    "phase": "call",
+    "error": "TypeError: CancellationRuntime.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 548,
+    "trace_start_line": 518,
+    "trace_end_line": 550,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_effects.py:125: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[action-entered]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 734,
+    "trace_start_line": 551,
+    "trace_end_line": 736,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[action-unknown]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 786,
+    "trace_start_line": 737,
+    "trace_end_line": 788,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:54: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[group-entered]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 972,
+    "trace_start_line": 789,
+    "trace_end_line": 974,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[group-unknown]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 1024,
+    "trace_start_line": 975,
+    "trace_end_line": 1026,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:54: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[plan-entered]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 1210,
+    "trace_start_line": 1027,
+    "trace_end_line": 1212,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[plan-unknown]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 1262,
+    "trace_start_line": 1213,
+    "trace_end_line": 1264,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:54: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[request-entered]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 1448,
+    "trace_start_line": 1265,
+    "trace_end_line": 1450,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_source_cannot_disappear_behind_preview_label[request-unknown]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 1500,
+    "trace_start_line": 1451,
+    "trace_end_line": 1502,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:54: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[terminal-action-entry_sets0]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 1541,
+    "trace_start_line": 1503,
+    "trace_end_line": 1543,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[entered-action-entry_sets1]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 1741,
+    "trace_start_line": 1544,
+    "trace_end_line": 1743,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_model_rejects_omissions_extra_members_and_wrong_effects[entered-preview-entry_sets2]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 1941,
+    "trace_start_line": 1744,
+    "trace_end_line": 1943,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[ready]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 1997,
+    "trace_start_line": 1944,
+    "trace_end_line": 1999,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[unknown]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 2051,
+    "trace_start_line": 2000,
+    "trace_end_line": 2053,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:54: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[entered]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 2239,
+    "trace_start_line": 2054,
+    "trace_end_line": 2241,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[no_effect]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 2268,
+    "trace_start_line": 2242,
+    "trace_end_line": 2270,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[zero_tools]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 2297,
+    "trace_start_line": 2271,
+    "trace_end_line": 2299,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[terminal]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 2326,
+    "trace_start_line": 2300,
+    "trace_end_line": 2328,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_sql_and_complete_rows_keep_same_start_partition[blocked]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 2382,
+    "trace_start_line": 2329,
+    "trace_end_line": 2384,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[action-entered]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 2570,
+    "trace_start_line": 2385,
+    "trace_end_line": 2572,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[action-unknown]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 2624,
+    "trace_start_line": 2573,
+    "trace_end_line": 2626,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:54: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[action-terminal]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 2653,
+    "trace_start_line": 2627,
+    "trace_end_line": 2655,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[action-blocked]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 2709,
+    "trace_start_line": 2656,
+    "trace_end_line": 2711,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[preview-entered]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 2897,
+    "trace_start_line": 2712,
+    "trace_end_line": 2899,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[preview-unknown]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 2951,
+    "trace_start_line": 2900,
+    "trace_end_line": 2953,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:54: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[preview-terminal]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 2980,
+    "trace_start_line": 2954,
+    "trace_end_line": 2982,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[preview-blocked]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 3036,
+    "trace_start_line": 2983,
+    "trace_end_line": 3038,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[group-entered]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 3224,
+    "trace_start_line": 3039,
+    "trace_end_line": 3226,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[group-unknown]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 3278,
+    "trace_start_line": 3227,
+    "trace_end_line": 3280,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:54: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[group-terminal]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 3307,
+    "trace_start_line": 3281,
+    "trace_end_line": 3309,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[group-blocked]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 3363,
+    "trace_start_line": 3310,
+    "trace_end_line": 3365,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[plan-entered]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 3551,
+    "trace_start_line": 3366,
+    "trace_end_line": 3553,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[plan-unknown]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 3605,
+    "trace_start_line": 3554,
+    "trace_end_line": 3607,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:54: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[plan-terminal]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 3634,
+    "trace_start_line": 3608,
+    "trace_end_line": 3636,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[plan-blocked]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 3690,
+    "trace_start_line": 3637,
+    "trace_end_line": 3692,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[request-entered]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 3878,
+    "trace_start_line": 3693,
+    "trace_end_line": 3880,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[request-unknown]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 3932,
+    "trace_start_line": 3881,
+    "trace_end_line": 3934,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:54: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[request-terminal]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 3961,
+    "trace_start_line": 3935,
+    "trace_end_line": 3963,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_authoritative_complete_scope_keeps_valid_direct_and_linked_members[request-blocked]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 4017,
+    "trace_start_line": 3964,
+    "trace_end_line": 4019,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_scope_requires_authoritative_address_links_and_start_ranges[action-missing_ranges0]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 4216,
+    "trace_start_line": 4020,
+    "trace_end_line": 4218,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_scope_requires_authoritative_address_links_and_start_ranges[group-missing_ranges1]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 4414,
+    "trace_start_line": 4219,
+    "trace_end_line": 4416,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_scope_requires_authoritative_address_links_and_start_ranges[plan-missing_ranges2]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 4612,
+    "trace_start_line": 4417,
+    "trace_end_line": 4614,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_complete_scope_requires_authoritative_address_links_and_start_ranges[request-missing_ranges3]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 4811,
+    "trace_start_line": 4615,
+    "trace_end_line": 4813,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_key_keeps_first_direct_decision_after_capture_finishes",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 4994,
+    "trace_start_line": 4814,
+    "trace_end_line": 4996,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_original_key_does_not_accept_a_duplicated_member_request",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 5177,
+    "trace_start_line": 4997,
+    "trace_end_line": 5179,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_new_origin_reuses_original_hb_cancel_and_preview_scope[applied]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 5231,
+    "trace_start_line": 5180,
+    "trace_end_line": 5233,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_new_origin_reuses_original_hb_cancel_and_preview_scope[terminal]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 5285,
+    "trace_start_line": 5234,
+    "trace_end_line": 5287,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_fixed_request_scope.py::test_new_origin_reuses_original_hb_cancel_and_preview_scope[entered]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 5471,
+    "trace_start_line": 5288,
+    "trace_end_line": 5473,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_each_mixed_camera_keeps_its_original_preview_permission[False-unstarted-True]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 5691,
+    "trace_start_line": 5474,
+    "trace_end_line": 5693,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:79: "
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_each_mixed_camera_keeps_its_original_preview_permission[False-confirming-False]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 5723,
+    "trace_start_line": 5694,
+    "trace_end_line": 5725,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:58: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_each_mixed_camera_keeps_its_original_preview_permission[False-running_no_stop-False]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 5756,
+    "trace_start_line": 5726,
+    "trace_end_line": 5758,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:58: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_each_mixed_camera_keeps_its_original_preview_permission[False-running_with_stop-True]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 5789,
+    "trace_start_line": 5759,
+    "trace_end_line": 5791,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:58: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_each_mixed_camera_keeps_its_original_preview_permission[True-unstarted-True]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 6009,
+    "trace_start_line": 5792,
+    "trace_end_line": 6011,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:79: "
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_each_mixed_camera_keeps_its_original_preview_permission[True-confirming-False]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 6041,
+    "trace_start_line": 6012,
+    "trace_end_line": 6043,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:58: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_each_mixed_camera_keeps_its_original_preview_permission[True-running_no_stop-False]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 6073,
+    "trace_start_line": 6044,
+    "trace_end_line": 6075,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:58: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_each_mixed_camera_keeps_its_original_preview_permission[True-running_with_stop-True]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 6106,
+    "trace_start_line": 6076,
+    "trace_end_line": 6108,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:58: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[resolve-group-entered-confirm_inflight]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 6147,
+    "trace_start_line": 6109,
+    "trace_end_line": 6149,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:128: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[resolve-group-entered-confirm_ended]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 6188,
+    "trace_start_line": 6150,
+    "trace_end_line": 6190,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:128: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[resolve-group-unknown-confirm_inflight]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 6229,
+    "trace_start_line": 6191,
+    "trace_end_line": 6231,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:128: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[resolve-group-unknown-confirm_ended]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 6270,
+    "trace_start_line": 6232,
+    "trace_end_line": 6272,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:128: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[resolve-group-ready-confirm_inflight]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 6311,
+    "trace_start_line": 6273,
+    "trace_end_line": 6313,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:128: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[resolve-group-ready-confirm_ended]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 6352,
+    "trace_start_line": 6314,
+    "trace_end_line": 6354,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:128: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[resolve-plan-entered-confirm_inflight]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 6393,
+    "trace_start_line": 6355,
+    "trace_end_line": 6395,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:128: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[resolve-plan-entered-confirm_ended]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 6434,
+    "trace_start_line": 6396,
+    "trace_end_line": 6436,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:128: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[resolve-plan-unknown-confirm_inflight]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 6475,
+    "trace_start_line": 6437,
+    "trace_end_line": 6477,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:128: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[resolve-plan-unknown-confirm_ended]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 6516,
+    "trace_start_line": 6478,
+    "trace_end_line": 6518,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:128: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[resolve-plan-ready-confirm_inflight]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 6557,
+    "trace_start_line": 6519,
+    "trace_end_line": 6559,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:128: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[resolve-plan-ready-confirm_ended]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 6598,
+    "trace_start_line": 6560,
+    "trace_end_line": 6600,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:128: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[repository-group-entered-confirm_inflight]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 6639,
+    "trace_start_line": 6601,
+    "trace_end_line": 6641,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:128: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[repository-group-entered-confirm_ended]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 6680,
+    "trace_start_line": 6642,
+    "trace_end_line": 6682,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:128: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[repository-group-unknown-confirm_inflight]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 6721,
+    "trace_start_line": 6683,
+    "trace_end_line": 6723,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:128: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[repository-group-unknown-confirm_ended]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 6762,
+    "trace_start_line": 6724,
+    "trace_end_line": 6764,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:128: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[repository-group-ready-confirm_inflight]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 6803,
+    "trace_start_line": 6765,
+    "trace_end_line": 6805,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:128: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[repository-group-ready-confirm_ended]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 6844,
+    "trace_start_line": 6806,
+    "trace_end_line": 6846,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:128: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[repository-plan-entered-confirm_inflight]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 6885,
+    "trace_start_line": 6847,
+    "trace_end_line": 6887,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:128: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[repository-plan-entered-confirm_ended]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 6926,
+    "trace_start_line": 6888,
+    "trace_end_line": 6928,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:128: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[repository-plan-unknown-confirm_inflight]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 6967,
+    "trace_start_line": 6929,
+    "trace_end_line": 6969,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:128: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[repository-plan-unknown-confirm_ended]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 7008,
+    "trace_start_line": 6970,
+    "trace_end_line": 7010,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:128: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[repository-plan-ready-confirm_inflight]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 7049,
+    "trace_start_line": 7011,
+    "trace_end_line": 7051,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:128: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py::test_foreign_residual_keeps_each_mixed_source_preview_scope[repository-plan-ready-confirm_ended]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 7090,
+    "trace_start_line": 7052,
+    "trace_end_line": 7092,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_mixed_scope.py:128: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_direct_fixed_repository_rejects_ineligible_link_source[CancellationEffect.NOT_APPLIED-entered]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 7276,
+    "trace_start_line": 7093,
+    "trace_end_line": 7278,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_direct_fixed_repository_rejects_ineligible_link_source[CancellationEffect.NOT_APPLIED-zero_tools]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 7303,
+    "trace_start_line": 7279,
+    "trace_end_line": 7305,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_direct_fixed_repository_rejects_ineligible_link_source[CancellationEffect.NOT_APPLIED-no_effect]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 7330,
+    "trace_start_line": 7306,
+    "trace_end_line": 7332,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_direct_fixed_repository_rejects_ineligible_link_source[CancellationEffect.NOT_APPLIED-unknown]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 7382,
+    "trace_start_line": 7333,
+    "trace_end_line": 7384,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:54: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_direct_fixed_repository_rejects_ineligible_link_source[CancellationEffect.NOT_APPLIED-ready]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 7436,
+    "trace_start_line": 7385,
+    "trace_end_line": 7438,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_direct_fixed_repository_rejects_ineligible_link_source[CancellationEffect.NOT_REQUIRED-entered]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 7622,
+    "trace_start_line": 7439,
+    "trace_end_line": 7624,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_direct_fixed_repository_rejects_ineligible_link_source[CancellationEffect.NOT_REQUIRED-zero_tools]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 7649,
+    "trace_start_line": 7625,
+    "trace_end_line": 7651,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_direct_fixed_repository_rejects_ineligible_link_source[CancellationEffect.NOT_REQUIRED-no_effect]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 7676,
+    "trace_start_line": 7652,
+    "trace_end_line": 7678,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_direct_fixed_repository_rejects_ineligible_link_source[CancellationEffect.NOT_REQUIRED-unknown]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 7728,
+    "trace_start_line": 7679,
+    "trace_end_line": 7730,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:54: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_direct_fixed_repository_rejects_ineligible_link_source[CancellationEffect.NOT_REQUIRED-ready]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 7782,
+    "trace_start_line": 7731,
+    "trace_end_line": 7784,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_bare_fixed_event_rejects_ineligible_or_missing_source_facts[True-entered]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 7973,
+    "trace_start_line": 7785,
+    "trace_end_line": 7975,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_bare_fixed_event_rejects_ineligible_or_missing_source_facts[True-unknown]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 8030,
+    "trace_start_line": 7976,
+    "trace_end_line": 8032,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:54: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_bare_fixed_event_rejects_ineligible_or_missing_source_facts[False-entered]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 8221,
+    "trace_start_line": 8033,
+    "trace_end_line": 8223,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_bare_fixed_event_rejects_ineligible_or_missing_source_facts[False-unknown]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 8278,
+    "trace_start_line": 8224,
+    "trace_end_line": 8280,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:54: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_fixed_repository_accepts_reliable_original_link_source[terminal]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 8304,
+    "trace_start_line": 8281,
+    "trace_end_line": 8306,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_fixed_repository_accepts_reliable_original_link_source[blocked]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 8357,
+    "trace_start_line": 8307,
+    "trace_end_line": 8359,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_fixed_repository_accepts_reliable_original_link_source[canceled]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 8410,
+    "trace_start_line": 8360,
+    "trace_end_line": 8412,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_direct_preview_and_both_require_original_address_and_valid_link[entered-SelectionBasis.DIRECT-True-plan]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 8599,
+    "trace_start_line": 8413,
+    "trace_end_line": 8601,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_direct_preview_and_both_require_original_address_and_valid_link[entered-SelectionBasis.DIRECT-True-request]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 8788,
+    "trace_start_line": 8602,
+    "trace_end_line": 8790,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_direct_preview_and_both_require_original_address_and_valid_link[unknown-SelectionBasis.DIRECT-True-plan]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 8843,
+    "trace_start_line": 8791,
+    "trace_end_line": 8845,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:54: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_direct_preview_and_both_require_original_address_and_valid_link[unknown-SelectionBasis.DIRECT-True-request]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 8898,
+    "trace_start_line": 8846,
+    "trace_end_line": 8900,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:54: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_direct_preview_and_both_require_original_address_and_valid_link[entered-SelectionBasis.BOTH-False-plan]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 9087,
+    "trace_start_line": 8901,
+    "trace_end_line": 9089,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_direct_preview_and_both_require_original_address_and_valid_link[entered-SelectionBasis.BOTH-False-request]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 9276,
+    "trace_start_line": 9090,
+    "trace_end_line": 9278,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_direct_preview_and_both_require_original_address_and_valid_link[terminal-SelectionBasis.BOTH-True-plan]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 9306,
+    "trace_start_line": 9279,
+    "trace_end_line": 9308,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_direct_preview_and_both_require_original_address_and_valid_link[terminal-SelectionBasis.BOTH-True-request]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 9336,
+    "trace_start_line": 9309,
+    "trace_end_line": 9338,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_both_label_cannot_add_an_unaddressed_preview",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 9360,
+    "trace_start_line": 9339,
+    "trace_end_line": 9362,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_mixed_composite_sources_keep_each_previews_own_source[True-entered]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 9558,
+    "trace_start_line": 9363,
+    "trace_end_line": 9560,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:242: "
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_mixed_composite_sources_keep_each_previews_own_source[True-unknown]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 9591,
+    "trace_start_line": 9561,
+    "trace_end_line": 9593,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:245: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_mixed_composite_sources_keep_each_previews_own_source[False-entered]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 9789,
+    "trace_start_line": 9594,
+    "trace_end_line": 9791,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:242: "
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_mixed_composite_sources_keep_each_previews_own_source[False-unknown]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 9822,
+    "trace_start_line": 9792,
+    "trace_end_line": 9824,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:245: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_independent_guard_accepts_reliable_preceding_original_source[terminal]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 9849,
+    "trace_start_line": 9825,
+    "trace_end_line": 9851,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_independent_guard_accepts_reliable_preceding_original_source[blocked]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 9903,
+    "trace_start_line": 9852,
+    "trace_end_line": 9905,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_independent_guard_requires_every_original_source_range[missing0]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 9933,
+    "trace_start_line": 9906,
+    "trace_end_line": 9935,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_independent_guard_requires_every_original_source_range[missing1]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 9963,
+    "trace_start_line": 9936,
+    "trace_end_line": 9965,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_independent_guard_requires_every_original_source_range[missing2]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 9993,
+    "trace_start_line": 9966,
+    "trace_end_line": 9995,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_independent_guard_requires_every_original_source_range[missing3]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 10023,
+    "trace_start_line": 9996,
+    "trace_end_line": 10025,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_independent_guard_requires_every_original_source_range[missing4]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 10053,
+    "trace_start_line": 10026,
+    "trace_end_line": 10055,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_independent_guard_rejects_extra_conflicting_or_future_facts[extra_link]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 10082,
+    "trace_start_line": 10056,
+    "trace_end_line": 10084,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_independent_guard_rejects_extra_conflicting_or_future_facts[duplicate_entry]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 10111,
+    "trace_start_line": 10085,
+    "trace_end_line": 10113,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_independent_guard_rejects_extra_conflicting_or_future_facts[wrong_entry_identity]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 10140,
+    "trace_start_line": 10114,
+    "trace_end_line": 10142,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_independent_guard_rejects_extra_conflicting_or_future_facts[future_result]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 10194,
+    "trace_start_line": 10143,
+    "trace_end_line": 10196,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:54: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_action_direct_preview_remains_independent",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 10380,
+    "trace_start_line": 10197,
+    "trace_end_line": 10382,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_no_intent_header_alone_cannot_replace_atomic_source_apply[False]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 10437,
+    "trace_start_line": 10383,
+    "trace_end_line": 10439,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_no_intent_header_alone_cannot_replace_atomic_source_apply[True]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 10494,
+    "trace_start_line": 10440,
+    "trace_end_line": 10496,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_independent_guard_does_not_classify_partial_source_as_another_driver[type]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 10682,
+    "trace_start_line": 10497,
+    "trace_end_line": 10684,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_independent_guard_does_not_classify_partial_source_as_another_driver[driver_id]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 10870,
+    "trace_start_line": 10685,
+    "trace_end_line": 10872,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_independent_guard_does_not_classify_partial_source_as_another_driver[execution_spec_json]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 11058,
+    "trace_start_line": 10873,
+    "trace_end_line": 11060,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:51: in world"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_no_intent_guard_borrows_exact_same_transaction_source_apply[None]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 11118,
+    "trace_start_line": 11061,
+    "trace_end_line": 11120,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_no_intent_guard_borrows_exact_same_transaction_source_apply[missing]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 11178,
+    "trace_start_line": 11121,
+    "trace_end_line": 11180,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_no_intent_guard_borrows_exact_same_transaction_source_apply[wrong_source]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 11238,
+    "trace_start_line": 11181,
+    "trace_end_line": 11240,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_no_intent_guard_borrows_exact_same_transaction_source_apply[wrong_item]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 11298,
+    "trace_start_line": 11241,
+    "trace_end_line": 11300,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_no_intent_guard_borrows_exact_same_transaction_source_apply[wrong_txn]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 11358,
+    "trace_start_line": 11301,
+    "trace_end_line": 11360,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_no_intent_guard_borrows_exact_same_transaction_source_apply[outside]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 11418,
+    "trace_start_line": 11361,
+    "trace_end_line": 11420,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_no_intent_guard_borrows_exact_same_transaction_source_apply[before_fixed]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 11478,
+    "trace_start_line": 11421,
+    "trace_end_line": 11480,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_no_intent_guard_borrows_exact_same_transaction_source_apply[duplicate]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 11538,
+    "trace_start_line": 11481,
+    "trace_end_line": 11540,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_no_intent_guard_borrows_exact_same_transaction_source_apply[split]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 11598,
+    "trace_start_line": 11541,
+    "trace_end_line": 11600,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_no_intent_guard_borrows_exact_same_transaction_source_apply[wrong_time]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 11658,
+    "trace_start_line": 11601,
+    "trace_end_line": 11660,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_no_intent_guard_borrows_exact_same_transaction_source_apply[wrong_mode]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 11718,
+    "trace_start_line": 11661,
+    "trace_end_line": 11720,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_plan_iteration_merges_only_verified_current_members[sparse_other_plan]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 11776,
+    "trace_start_line": 11721,
+    "trace_end_line": 11778,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_plan_iteration_merges_only_verified_current_members[explicit_other_plan]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 11834,
+    "trace_start_line": 11779,
+    "trace_end_line": 11836,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_plan_iteration_merges_only_verified_current_members[new_in]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 11892,
+    "trace_start_line": 11837,
+    "trace_end_line": 11894,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_plan_iteration_merges_only_verified_current_members[move_out]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 11950,
+    "trace_start_line": 11895,
+    "trace_end_line": 11952,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_plan_iteration_merges_only_verified_current_members[delete]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 12008,
+    "trace_start_line": 11953,
+    "trace_end_line": 12010,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_plan_iteration_merges_only_verified_current_members[missing_owner]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 12066,
+    "trace_start_line": 12011,
+    "trace_end_line": 12068,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py::test_plan_iteration_merges_only_verified_current_members[invalid_owner]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 12124,
+    "trace_start_line": 12069,
+    "trace_end_line": 12126,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_real_photo_start_saves_entry_even_when_first_tool_fails",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 12147,
+    "trace_start_line": 12127,
+    "trace_end_line": 12149,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_returned_no_photo_effect_does_not_reopen_start_cancellation",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 12172,
+    "trace_start_line": 12150,
+    "trace_end_line": 12174,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_photo_cancel_before_entry_prevents_late_start",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 12187,
+    "trace_start_line": 12175,
+    "trace_end_line": 12189,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py:90: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_entered_start_rejection_finishes_without_waiting_for_photo",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 12374,
+    "trace_start_line": 12190,
+    "trace_end_line": 12376,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py:120: "
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_photo_cancel_rejection_respects_preview_addressing[action]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 12566,
+    "trace_start_line": 12377,
+    "trace_end_line": 12568,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py:170: "
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_photo_cancel_rejection_respects_preview_addressing[group]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 12758,
+    "trace_start_line": 12569,
+    "trace_end_line": 12760,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py:170: "
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_photo_cancel_rejection_respects_preview_addressing[plan]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 12950,
+    "trace_start_line": 12761,
+    "trace_end_line": 12952,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py:170: "
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_photo_cancel_rejection_respects_preview_addressing[request]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 13142,
+    "trace_start_line": 12953,
+    "trace_end_line": 13144,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py:170: "
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_setup_failure_releases_occupancy_without_claiming_activity_started",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 13165,
+    "trace_start_line": 13145,
+    "trace_end_line": 13167,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_driver_entered_with_zero_tools_keeps_entry_and_rejects_cancel",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 13195,
+    "trace_start_line": 13168,
+    "trace_end_line": 13197,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_cancel_before_any_start_does_not_fabricate_attempt",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 13224,
+    "trace_start_line": 13198,
+    "trace_end_line": 13226,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py:79: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_direct_cancel_mode_cannot_bypass_entered_start[pre_start]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 13413,
+    "trace_start_line": 13227,
+    "trace_end_line": 13415,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py:252: "
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_direct_cancel_mode_cannot_bypass_entered_start[with_stop]",
+    "phase": "call",
+    "error": "TimeoutError",
+    "error_line": 13602,
+    "trace_start_line": 13416,
+    "trace_end_line": 13604,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py:252: "
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_preview_both_is_deduplicated_when_source_cancel_is_applied",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 13641,
+    "trace_start_line": 13605,
+    "trace_end_line": 13643,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py:151: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_original_entry_cancel_transaction_rolls_back_or_reuses_exact_request[result]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 13662,
+    "trace_start_line": 13644,
+    "trace_end_line": 13664,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py:290: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_original_entry_cancel_transaction_rolls_back_or_reuses_exact_request[fixed]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 13683,
+    "trace_start_line": 13665,
+    "trace_end_line": 13685,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py:290: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_original_entry_cancel_transaction_rolls_back_or_reuses_exact_request[apply]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 13704,
+    "trace_start_line": 13686,
+    "trace_end_line": 13706,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py:290: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_original_entry_cancel_transaction_rolls_back_or_reuses_exact_request[committed_unknown]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 13725,
+    "trace_start_line": 13707,
+    "trace_end_line": 13727,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py:290: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_atomic_cancel_of_all_pending_photo_sources_completes_original_plan",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 13765,
+    "trace_start_line": 13728,
+    "trace_end_line": 13767,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py:151: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_cancel_after_actual_relative_focus_rejects_and_keeps_original_limits[valid]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 13806,
+    "trace_start_line": 13768,
+    "trace_end_line": 13808,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_cancel_after_actual_relative_focus_rejects_and_keeps_original_limits[window]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 13847,
+    "trace_start_line": 13809,
+    "trace_end_line": 13849,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_cancel_after_actual_relative_focus_rejects_and_keeps_original_limits[budget]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'",
+    "error_line": 13888,
+    "trace_start_line": 13850,
+    "trace_end_line": 13890,
+    "last_location": "apps/camctl/src/camctl/capture/handlers.py:3273: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_cancel_origin_itself_canceled_keeps_already_applied_source_responsibility",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'wall_us'",
+    "error_line": 13920,
+    "trace_start_line": 13891,
+    "trace_end_line": 13922,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py:79: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_independent_fixed_event_guard_rejects_false_entry_request[ticket]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 13938,
+    "trace_start_line": 13923,
+    "trace_end_line": 13940,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py:431: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_independent_fixed_event_guard_rejects_false_entry_request[time]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 13956,
+    "trace_start_line": 13941,
+    "trace_end_line": 13958,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py:431: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_independent_fixed_event_guard_rejects_false_entry_request[source]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 13974,
+    "trace_start_line": 13959,
+    "trace_end_line": 13976,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py:431: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_independent_fixed_event_guard_rejects_false_entry_request[missing]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 13992,
+    "trace_start_line": 13977,
+    "trace_end_line": 13994,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py:431: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_unknown_grant_never_authorizes_driver_or_guesses_cancel_success[False]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'scheduling'",
+    "error_line": 14009,
+    "trace_start_line": 13995,
+    "trace_end_line": 14011,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py:458: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_unknown_grant_never_authorizes_driver_or_guesses_cancel_success[True]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'scheduling'",
+    "error_line": 14026,
+    "trace_start_line": 14012,
+    "trace_end_line": 14028,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py:458: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_original_grant_without_ready_session_permit_never_enters_driver[lost]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 14042,
+    "trace_start_line": 14029,
+    "trace_end_line": 14044,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py:481: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py::test_original_grant_without_ready_session_permit_never_enters_driver[unknown]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'grant'",
+    "error_line": 14058,
+    "trace_start_line": 14045,
+    "trace_end_line": 14060,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_start_boundary.py:481: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py::test_four_entries_share_motor_permission[False-target0]",
+    "phase": "call",
+    "error": "TypeError: load_eligibility_facts() got an unexpected keyword argument 'motor_permits'",
+    "error_line": 14084,
+    "trace_start_line": 14061,
+    "trace_end_line": 14086,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py:80: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py::test_four_entries_share_motor_permission[False-target1]",
+    "phase": "call",
+    "error": "TypeError: load_eligibility_facts() got an unexpected keyword argument 'motor_permits'",
+    "error_line": 14110,
+    "trace_start_line": 14087,
+    "trace_end_line": 14112,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py:80: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py::test_four_entries_share_motor_permission[False-target2]",
+    "phase": "call",
+    "error": "TypeError: load_eligibility_facts() got an unexpected keyword argument 'motor_permits'",
+    "error_line": 14136,
+    "trace_start_line": 14113,
+    "trace_end_line": 14138,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py:80: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py::test_four_entries_share_motor_permission[False-target3]",
+    "phase": "call",
+    "error": "TypeError: load_eligibility_facts() got an unexpected keyword argument 'motor_permits'",
+    "error_line": 14162,
+    "trace_start_line": 14139,
+    "trace_end_line": 14164,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py:80: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py::test_four_entries_share_motor_permission[True-target0]",
+    "phase": "call",
+    "error": "TypeError: load_eligibility_facts() got an unexpected keyword argument 'motor_permits'",
+    "error_line": 14188,
+    "trace_start_line": 14165,
+    "trace_end_line": 14190,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py:80: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py::test_four_entries_share_motor_permission[True-target1]",
+    "phase": "call",
+    "error": "TypeError: load_eligibility_facts() got an unexpected keyword argument 'motor_permits'",
+    "error_line": 14214,
+    "trace_start_line": 14191,
+    "trace_end_line": 14216,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py:80: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py::test_four_entries_share_motor_permission[True-target2]",
+    "phase": "call",
+    "error": "TypeError: load_eligibility_facts() got an unexpected keyword argument 'motor_permits'",
+    "error_line": 14240,
+    "trace_start_line": 14217,
+    "trace_end_line": 14242,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py:80: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py::test_four_entries_share_motor_permission[True-target3]",
+    "phase": "call",
+    "error": "TypeError: load_eligibility_facts() got an unexpected keyword argument 'motor_permits'",
+    "error_line": 14266,
+    "trace_start_line": 14243,
+    "trace_end_line": 14268,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py:80: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py::test_local_intent_cancel_has_no_persisted_unknown_gap",
+    "phase": "call",
+    "error": "TypeError: CancellationRepository() takes no arguments",
+    "error_line": 14277,
+    "trace_start_line": 14269,
+    "trace_end_line": 14279,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py:93: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py::test_verify_motor_cancel_operation_preserves_original_result[apply]",
+    "phase": "call",
+    "error": "TypeError: CancellationRepository() takes no arguments",
+    "error_line": 14292,
+    "trace_start_line": 14280,
+    "trace_end_line": 14294,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py:164: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py::test_verify_motor_cancel_operation_preserves_original_result[record]",
+    "phase": "call",
+    "error": "TypeError: CancellationRepository() takes no arguments",
+    "error_line": 14307,
+    "trace_start_line": 14295,
+    "trace_end_line": 14309,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py:164: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py::test_cancel_unknown_reopens_verifies_and_stops_before_settlement[apply]",
+    "phase": "call",
+    "error": "TypeError: CancellationRepository() takes no arguments",
+    "error_line": 14337,
+    "trace_start_line": 14310,
+    "trace_end_line": 14339,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py:210: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py::test_cancel_unknown_reopens_verifies_and_stops_before_settlement[record]",
+    "phase": "call",
+    "error": "TypeError: CancellationRepository() takes no arguments",
+    "error_line": 14367,
+    "trace_start_line": 14340,
+    "trace_end_line": 14369,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_motor_cancel.py:210: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py::test_running_sync_cancel_settles_target_before_member_success[False]",
+    "phase": "call",
+    "error": "TypeError: TargetSettlement.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 14403,
+    "trace_start_line": 14370,
+    "trace_end_line": 14405,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py:146: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py::test_running_sync_cancel_settles_target_before_member_success[True]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14443,
+    "trace_start_line": 14406,
+    "trace_end_line": 14445,
+    "last_location": "apps/camctl/src/camctl/reporting/publication.py:272: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py::test_acknowledged_running_sync_can_cancel_without_rewriting_ack",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14481,
+    "trace_start_line": 14446,
+    "trace_end_line": 14483,
+    "last_location": "apps/camctl/src/camctl/reporting/publication.py:272: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py::test_acknowledged_sync_recovers_local_action_success",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14519,
+    "trace_start_line": 14484,
+    "trace_end_line": 14521,
+    "last_location": "apps/camctl/src/camctl/reporting/publication.py:272: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py::test_work_facts_keeps_acknowledged_local_result_pending",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14557,
+    "trace_start_line": 14522,
+    "trace_end_line": 14559,
+    "last_location": "apps/camctl/src/camctl/reporting/publication.py:272: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py::test_report_cancel_original_key_rejects_changed_apply_mode[CancelApplyMode.TERMINAL]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14599,
+    "trace_start_line": 14560,
+    "trace_end_line": 14601,
+    "last_location": "apps/camctl/src/camctl/reporting/publication.py:272: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py::test_report_cancel_original_mode_reuses_after_later_facts[CancelApplyMode.TERMINAL]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14641,
+    "trace_start_line": 14602,
+    "trace_end_line": 14643,
+    "last_location": "apps/camctl/src/camctl/reporting/publication.py:272: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py::test_target_cancel_recovers_after_origin_stops_waiting",
+    "phase": "call",
+    "error": "TypeError: TargetSettlement.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 14677,
+    "trace_start_line": 14644,
+    "trace_end_line": 14679,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py:146: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py::test_one_sync_cancel_preserves_shared_frozen_report_and_other_success",
+    "phase": "call",
+    "error": "TypeError: TargetSettlement.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 14712,
+    "trace_start_line": 14680,
+    "trace_end_line": 14714,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py:146: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py::test_local_result_save_failure_stops_maintenance[False]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14752,
+    "trace_start_line": 14715,
+    "trace_end_line": 14754,
+    "last_location": "apps/camctl/src/camctl/reporting/publication.py:272: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py::test_local_result_save_failure_stops_maintenance[True]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14792,
+    "trace_start_line": 14755,
+    "trace_end_line": 14794,
+    "last_location": "apps/camctl/src/camctl/reporting/publication.py:272: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py::test_report_state_query_failure_is_fatal_before_following_flow[SELECT id FROM actions WHERE type = 7-False]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14832,
+    "trace_start_line": 14795,
+    "trace_end_line": 14834,
+    "last_location": "apps/camctl/src/camctl/reporting/publication.py:272: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py::test_report_state_query_failure_is_fatal_before_following_flow[SELECT id FROM actions WHERE type = 7-True]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14872,
+    "trace_start_line": 14835,
+    "trace_end_line": 14874,
+    "last_location": "apps/camctl/src/camctl/reporting/publication.py:272: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py::test_report_state_query_failure_is_fatal_before_following_flow[SELECT s.action_id-False]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14912,
+    "trace_start_line": 14875,
+    "trace_end_line": 14914,
+    "last_location": "apps/camctl/src/camctl/reporting/publication.py:272: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py::test_report_state_query_failure_is_fatal_before_following_flow[SELECT s.action_id-True]",
+    "phase": "call",
+    "error": "AttributeError: 'OwnedConnection' object has no attribute 'write'",
+    "error_line": 14952,
+    "trace_start_line": 14915,
+    "trace_end_line": 14954,
+    "last_location": "apps/camctl/src/camctl/reporting/publication.py:272: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py::test_sync_cancel_history_replays_target_sync_member_and_plan",
+    "phase": "call",
+    "error": "TypeError: TargetSettlement.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 15005,
+    "trace_start_line": 14955,
+    "trace_end_line": 15007,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_report_sync_lifecycle.py:146: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_target_types.py::TestObtainWithdrawal::test_terminal_obtain_still_withdraws_ready",
+    "phase": "call",
+    "error": "TypeError: CancellationRuntime.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 15043,
+    "trace_start_line": 15008,
+    "trace_end_line": 15045,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_target_types.py:183: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_target_types.py::TestObtainWithdrawal::test_processing_delivery_is_not_retractable",
+    "phase": "call",
+    "error": "TypeError: CancellationRuntime.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 15081,
+    "trace_start_line": 15046,
+    "trace_end_line": 15083,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_target_types.py:183: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_target_types.py::TestObtainWithdrawal::test_unknown_position_saves_finite_unconfirmed_result",
+    "phase": "call",
+    "error": "TypeError: CancellationRuntime.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 15119,
+    "trace_start_line": 15084,
+    "trace_end_line": 15121,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_target_types.py:183: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_target_types.py::TestCleanupSettlement::test_deleted_item_does_not_block_others",
+    "phase": "call",
+    "error": "TypeError: TargetSettlement.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 15153,
+    "trace_start_line": 15122,
+    "trace_end_line": 15155,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_target_types.py:149: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_target_types.py::TestCaptureAndReportSettlement::test_running_capture_waits_for_execution_chain",
+    "phase": "call",
+    "error": "TypeError: TargetSettlement.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 15180,
+    "trace_start_line": 15156,
+    "trace_end_line": 15182,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_target_types.py:149: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_target_types.py::TestCaptureAndReportSettlement::test_running_report_without_sync_rejects_settlement",
+    "phase": "call",
+    "error": "TypeError: TargetSettlement.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 15209,
+    "trace_start_line": 15183,
+    "trace_end_line": 15211,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_target_types.py:149: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_target_types.py::TestCancelTaskSettlementDelegation::test_cancel_action_target_delegates_to_origin_settle",
+    "phase": "call",
+    "error": "TypeError: TargetSettlement.__init__() got an unexpected keyword argument 'owned'",
+    "error_line": 15267,
+    "trace_start_line": 15212,
+    "trace_end_line": 15269,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_target_types.py:149: TypeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_unfixed_cancel_origin.py::test_real_c2_cancels_running_unfixed_c1_without_touching_its_targets",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 15318,
+    "trace_start_line": 15270,
+    "trace_end_line": 15320,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_unfixed_cancel_origin.py::test_finish_itself_rechecks_complete_pending_empty_members[pending_members]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 15372,
+    "trace_start_line": 15321,
+    "trace_end_line": 15374,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_unfixed_cancel_origin.py::test_finish_itself_rechecks_complete_pending_empty_members[fixed_empty]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 15426,
+    "trace_start_line": 15375,
+    "trace_end_line": 15428,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_unfixed_cancel_origin.py::test_finish_itself_rechecks_complete_pending_empty_members[failed_empty]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 15480,
+    "trace_start_line": 15429,
+    "trace_end_line": 15482,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_unfixed_cancel_origin.py::test_finish_itself_rechecks_complete_pending_empty_members[read_failure]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 15534,
+    "trace_start_line": 15483,
+    "trace_end_line": 15536,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_unfixed_cancel_origin.py::test_empty_finish_reuses_original_key_and_time_after_unknown[False]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 15589,
+    "trace_start_line": 15537,
+    "trace_end_line": 15591,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  },
+  {
+    "nodeid": "apps/camctl/tests/integration/cancellation/test_unfixed_cancel_origin.py::test_empty_finish_reuses_original_key_and_time_after_unknown[True]",
+    "phase": "call",
+    "error": "AttributeError: 'coroutine' object has no attribute 'start_entries'",
+    "error_line": 15644,
+    "trace_start_line": 15592,
+    "trace_end_line": 15646,
+    "last_location": "apps/camctl/tests/integration/cancellation/test_hasselblad_preview_fixed_boundary.py:56: AttributeError"
+  }
+]

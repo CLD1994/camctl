@@ -1,0 +1,230 @@
+[
+  {
+    "nodeid": "tests/integration/motor/test_history_reports.py::test_motor_history_all_restore_paths_have_same_public_result",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.5231695769907674
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.10848790498857852
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.027254332992015406
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.6589118149713613
+  },
+  {
+    "nodeid": "tests/integration/motor/test_history_reports.py::test_group_source_resolution_excludes_motor",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0324691010027891
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.04373412000131793
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.02483280299929902
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.10103602400340606
+  },
+  {
+    "nodeid": "tests/integration/motor/test_history_reports.py::test_partial_write_is_persisted_and_disables_later_actions",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.031006635996163823
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.09845767199294642
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.024753125006100163
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.1542174329952104
+  },
+  {
+    "nodeid": "tests/integration/motor/test_notification_pipe.py::test_real_pipe_normalized_lines_and_eof",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0008580720023019239
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006526479992317036
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004103230021428317
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0019210430036764592
+  },
+  {
+    "nodeid": "tests/integration/motor/test_notification_pipe.py::test_full_pipe_returns_without_waiting_or_retry",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00035120399843435735
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005341210053302348
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00020018800569232553
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0010855130094569176
+  },
+  {
+    "nodeid": "tests/integration/motor/test_notification_pipe.py::test_closed_reader_is_explicit_write_failure",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00022906700905878097
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.00028786300390493125
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0001678139960858971
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0006847440090496093
+  },
+  {
+    "nodeid": "tests/integration/motor/test_notification_pipe.py::test_read_end_is_rejected_and_closed",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0002281789929838851
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0002782439987640828
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0001927679986692965
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0006991909904172644
+  },
+  {
+    "nodeid": "tests/integration/motor/test_notification_pipe.py::test_regular_file_is_not_a_notification_channel",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005996889958623797
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.0003580170014174655
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.00025174900656566024
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0012094550038455054
+  },
+  {
+    "nodeid": "tests/integration/motor/test_notification_pipe.py::test_invalid_descriptor_keeps_explicit_unavailable_reason",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.00020054899505339563
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.00023215501278173178
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0002831020101439208
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.0007158060179790482
+  },
+  {
+    "nodeid": "tests/integration/motor/test_notification_pipe.py::test_cli_early_configuration_failure_closes_notification_fd",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011346649989718571
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.04620638799679
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0004414870054461062
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.04778254000120796
+  },
+  {
+    "nodeid": "tests/integration/motor/test_notification_pipe.py::test_managed_tool_does_not_inherit_notification_writer",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0005061520059825853
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.03315648599527776
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.005263585990178399
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.038926223991438746
+  },
+  {
+    "nodeid": "tests/integration/motor/test_notification_pipe.py::test_report_process_does_not_inherit_notification_writer",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.000962701000389643
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 0.41366970699164085
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0007202820124803111
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 0.4153526900045108
+  }
+]

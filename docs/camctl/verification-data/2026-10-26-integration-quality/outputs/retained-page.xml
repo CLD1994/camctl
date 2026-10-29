@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="1.144" timestamp="2026-10-26T02:04:06.253254+08:00" hostname="1e0518e0c6b4"><testcase classname="tests.integration.outputs.test_read_discovery" name="test_candidate_capacity_tracks_batch_not_total" time="0.426"><failure message="AssertionError: 发现器保留了已消费页的候选详情&#10;assert False&#10; +  where False = all(&lt;generator object test_candidate_capacity_tracks_batch_not_total.&lt;locals&gt;.&lt;genexpr&gt; at 0x7f70d7cd5e50&gt;)">two_copies = (OwnedConnection(connection=&lt;sqlite3.Connection object at 0x7f70d5db0040&gt;, metadata=DatabaseMetadata(application_id='c...(outcome=&lt;QualificationOutcome.GRANTED: 'granted'&gt;, copy_id=2, run_id=2, delivery_id=2, target_file_id=2, reason=None))
+
+    def test_candidate_capacity_tracks_batch_not_total(two_copies):
+        import gc
+        import json
+        import weakref
+        from .test_qualification import _seed_action, _seed_selection_and_item
+        from camctl.outputs.read_discovery import ReadDiscoveryOwner
+    
+        owned, _, _ = two_copies
+        seeded = 0
+        for total, batch_size in ((12, 1), (120, 1), (120, 3)):
+            repository = OutputsRepository(read_batch_size=batch_size)
+            for identity in range(1000 + seeded, 1000 + total):
+                _seed_action(owned.connection, identity, 1, action_type=4)
+                _seed_selection_and_item(owned.connection, dependency_id=identity, selection_id=identity,
+                    item_id=identity, owner_action_id=identity, source_action_id=11, output_id=701)
+                owned.connection.commit()
+                result = repository.grant_file(replace(_command(), action_id=identity, item_id=identity), new_operation_key(), owned)
+                assert result.kind is DbOutcomeKind.COMPLETED and result.value.copy_id is not None, result
+            seeded = total
+            before = tuple(owned.connection.iterdump())
+            owner = ReadDiscoveryOwner(batch_size)
+            connection = _BoundedConnection(owned.connection, batch_size)
+            owner.begin_round(connection, _NOW)
+            returned = seen = largest = 0
+            while True:
+                page = owner.reads(connection, "reads", _NOW)
+                returned = len(page.items)
+                seen += returned
+                largest = max(largest, returned)
+                assert returned &lt;= batch_size and owner.cursor_count &lt;= 1
+                references = tuple(weakref.ref(candidate) for candidate in page.items)
+                exhausted = page.exhausted
+                del page
+                # 已释放的候选无需扫描整个堆；仍存活时保留循环回收后的释放检查。
+                if any(reference() is not None for reference in references):
+                    gc.collect()
+&gt;               assert all(reference() is None for reference in references), "发现器保留了已消费页的候选详情"
+E               AssertionError: 发现器保留了已消费页的候选详情
+E               assert False
+E                +  where False = all(&lt;generator object test_candidate_capacity_tracks_batch_not_total.&lt;locals&gt;.&lt;genexpr&gt; at 0x7f70d7cd5e50&gt;)
+
+apps/camctl/tests/integration/outputs/test_read_discovery.py:306: AssertionError</failure></testcase></testsuite></testsuites>

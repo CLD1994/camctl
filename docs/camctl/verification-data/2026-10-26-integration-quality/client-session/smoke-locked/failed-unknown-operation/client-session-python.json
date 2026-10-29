@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "session_id": "1815d51a-88b1-4906-9521-2c34276eb415",
+  "nodeid": "",
+  "command_prefix": [
+    "node",
+    "--import",
+    "tsx",
+    "/tmp/camctl-quality-client-session-20261026/tests/integration/client_driver.ts"
+  ],
+  "phase_timeout_seconds": 120,
+  "startup": {
+    "started_monotonic_ns": 100683007553641,
+    "finished_monotonic_ns": 100683890114448,
+    "elapsed_seconds": 0.882560807,
+    "outcome": "passed"
+  },
+  "commands": [
+    {
+      "id": 1,
+      "operation": "unknown-operation",
+      "arguments": [],
+      "receipt_path": "/tmp/camctl-quality-evidence/client-session/smoke-locked/failed-unknown-operation.json",
+      "started_monotonic_ns": 100683890697316,
+      "finished_monotonic_ns": 100683930597714,
+      "elapsed_seconds": 0.039900398,
+      "outcome": "failed"
+    }
+  ],
+  "close": null,
+  "node_pid": 1542427,
+  "failure": "SessionError: 客户端命令失败：{\"message\": \"未知客户端会话操作或路径数量：unknown-operation\", \"stack\": \"Error: 未知客户端会话操作或路径数量：unknown-operation\\n    at invalid (/tmp/camctl-quality-client-session-20261026/tests/integration/client_driver.ts:1342:11)\\n    at dispatchClientCommand (/tmp/camctl-quality-client-session-20261026/tests/integration/client_driver.ts:1344:58)\\n    at worldClientSession (/tmp/camctl-quality-client-session-20261026/tests/integration/client_driver.ts:1254:35)\\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\\n    at async main (/tmp/camctl-quality-client-session-20261026/tests/integration/client_driver.ts:1360:5)\"}",
+  "cleanup": {
+    "survivors": [],
+    "notes": [],
+    "owned_processes": [
+      {
+        "pid": 1542427,
+        "ppid": 1542113,
+        "pgid": 1542427,
+        "starttime": "10068300",
+        "state": "R"
+      }
+    ]
+  }
+}

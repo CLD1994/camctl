@@ -2,8 +2,8 @@
 
 三个消费者均从真实公开历史进入首次查询。COMMIT 故障在真实
 OperationRepository 事务内注入，随后关闭旧连接并复验原键。
-恢复调用共同 _run_query 保存边界，尚不作为默认会话入口或成员
-结果、本地续接、取消分类全部完成的证据。
+恢复沿公开删除入口，在原 QUERY 已可靠保存的仓储边界结束；
+成员结果、本地续接及取消分类由各自组合用例继续验证。
 """
 
 from __future__ import annotations
@@ -20,13 +20,14 @@ from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.devices.evidence import EvidenceRegistry
 from camctl.operations.attempts import AttemptConfig, FinishDisposition
 from camctl.outputs.cleanup_flow import (
-    FinishCleanupAction, _run_query, _verify_before_delete, delete_source_file,
+    FinishCleanupAction, delete_source_file,
 )
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 
 from ..bootstrap.test_output_binding_changes import _NOW, _save_photos, environment
+from ..support.outputs import cleanup_factory, output_drivers
 from .test_cleanup_query_save_recovery import (
     _MatrixDriver, _apply_cleanup_cancel, _new_runtime, _original_member_rows,
     _start_cleanup,
@@ -85,6 +86,10 @@ def _dependent_facts(connection, item_id, action_id, output_id):
     )
 
 
+class _SavedQuery(Exception):
+    """原查询已可靠保存；本专项在成员消费前结束公开调用。"""
+
+
 class _CommitQueryPort(OperationRepository):
     """保存原输入的 spy；首次目标 QUERY 在真实 SQL COMMIT 处故障。"""
 
@@ -114,6 +119,8 @@ class _CommitQueryPort(OperationRepository):
         else:
             outcome = super().finish_attempt(finish, key, owned)
         self.receipts.append(outcome)
+        if len(self.calls) == 2 and outcome.kind is DbOutcomeKind.COMPLETED:
+            return replace(outcome, handoff_error=_SavedQuery())
         return outcome
 
 
@@ -171,7 +178,7 @@ def _assert_saved_result(connection, ticket, present, occurred_at, key):
 @pytest.mark.parametrize("after_commit", [False, True], ids=["before_commit", "after_commit"])
 @pytest.mark.parametrize("present", [True, False, None], ids=["present", "absent", "unknown"])
 @pytest.mark.parametrize("consumer", ["before", "after", "cancel"])
-async def test_query_result_commit_unknown(environment, consumer, present, after_commit):
+async def test_query_result_commit_unknown(environment, consumer, present, after_commit, capture_resources):
     """提交前后 UNKNOWN 均先停止消费，再在 fresh 连接复验原结果。"""
     cfg, owned, context, capture_driver = environment
     await _save_photos(cfg, owned, context, capture_driver)
@@ -182,7 +189,7 @@ async def test_query_result_commit_unknown(environment, consumer, present, after
     old_member = None
     if consumer == "before":
         old_action, old_item = _start_cleanup(owned, output_id, "2")
-        previous = _new_runtime(cfg, owned, driver, query_attempts=1)
+        previous = await _new_runtime(cfg, owned, driver, query_attempts=1)
         assert (await delete_source_file(previous, old_item)).phase == "query_unknown"
         failed = await delete_source_file(previous, old_item)
         assert (failed.phase, failed.detail) == ("failed", "file_query_attempts_exhausted")
@@ -193,20 +200,17 @@ async def test_query_result_commit_unknown(environment, consumer, present, after
         action_id, item_id = _start_cleanup(owned, output_id, "3")
     else:
         action_id, item_id = _start_cleanup(owned, output_id, "2")
-    base = _new_runtime(cfg, owned, driver)
+    base = await _new_runtime(cfg, owned, driver)
     port = _CommitQueryPort(item_id, action_id, output_id, after_commit=after_commit)
     base.operations = port
-    runtime = base.for_item(item_id)
+    runtime = await base.for_item(item_id)
     driver.matrix_enabled, driver.present = True, present
     queries_before, deletes_before = len(driver.queries), len(driver.deletes)
     if consumer == "cancel":
         driver.on_delete_return = lambda: _apply_cleanup_cancel(owned, action_id)
 
     with pytest.raises(ConsistencyError):
-        if consumer == "before":
-            await _verify_before_delete(runtime, item_id, action_id, output_id)
-        else:
-            await delete_source_file(runtime, item_id)
+        await delete_source_file(runtime, item_id)
     assert len(port.calls) == len(port.receipts) == 1
     assert port.receipts[0].kind is DbOutcomeKind.UNKNOWN
     assert port.receipts[0].error is port.fault.error
@@ -223,6 +227,7 @@ async def test_query_result_commit_unknown(environment, consumer, present, after
     # 未提交事务随旧连接关闭回滚；已实际提交的结果保持。恢复只用
     # 新连接读取可靠事实，不在未知的原事务内猜测是否提交。
     owned.connection.close()
+    await runtime.database.close()
     fresh = context.open_connection()
     try:
         assert fresh.metadata.instance_id == instance_id
@@ -238,17 +243,18 @@ async def test_query_result_commit_unknown(environment, consumer, present, after
             assert _query_row(fresh.connection, ticket) == (1, 1, None, None, None)
             saved_row = None
 
-        # replace 保持原 runtime 全部数据字段及共享集合，替换连接和
-        # 当前执行端口；原保存不使用新驱动、证据或时钟重新解释。
-        resumed = replace(
-            runtime, owned=fresh, driver=_NoNewCalls(), evidence=EvidenceRegistry(()),
+        # 新工厂保留同会话的原保存责任，新配置不提供设备操作能力。
+        database = await capture_resources.restart_database(fresh)
+        factory = cleanup_factory(
+            devices=cfg.devices, drivers=output_drivers(_NoNewCalls(), EvidenceRegistry(())),
+            max_delete_attempts=1, max_query_attempts=1,
             occurred_at=lambda: _NOW + 9_999_999, monotonic_ns=lambda: 900,
-            query_config=AttemptConfig(1, Decimal("2"), Decimal("0")),
-            delete_config=AttemptConfig(1, Decimal("2"), Decimal("0")),
-            for_item=None,
         )
-        observed = await _run_query(resumed, ticket, item_id)
-        assert observed is present
+        base = await factory(database)
+        base.operations = port
+        resumed = await base.for_item(item_id)
+        with pytest.raises(_SavedQuery):
+            await delete_source_file(resumed, item_id)
         assert len(port.calls) == len(port.receipts) == 2
         restored_finish, restored_key, restored_instance = port.calls[1]
         assert restored_finish == original_finish

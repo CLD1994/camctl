@@ -1,0 +1,176 @@
+{
+  "recorded_utc": "2026-10-25T17:40:48.500392+00:00",
+  "scope": "targeted checks, not a full integration regression",
+  "primary_passed": 156,
+  "subchecks_passed": 10,
+  "acceptance_commands": [
+    {
+      "name": "tools-final",
+      "passed": 127,
+      "subchecks_passed": 8,
+      "wall_seconds": 4.101592231003451,
+      "pytest_seconds": 3.616,
+      "source": "9d6387e3b677d5d0aa78a1c6346647a8ab6fc10e"
+    },
+    {
+      "name": "integration-runner",
+      "passed": 13,
+      "subchecks_passed": 2,
+      "wall_seconds": 18.17324986300082,
+      "pytest_seconds": 17.899,
+      "source": "70a77bd9593fd880d257b6dbfb80432b5fa291a6"
+    },
+    {
+      "name": "capacity-functional",
+      "passed": 7,
+      "subchecks_passed": 0,
+      "wall_seconds": 4.7006338280043565,
+      "pytest_seconds": 3.677,
+      "source": "477d40a1d2433c61c1921f73983ff1800e6cd965"
+    },
+    {
+      "name": "bounded-read",
+      "passed": 1,
+      "subchecks_passed": 0,
+      "wall_seconds": 11.953946013003588,
+      "pytest_seconds": 11.348,
+      "source": "70a77bd9593fd880d257b6dbfb80432b5fa291a6"
+    },
+    {
+      "name": "real-budget",
+      "passed": 2,
+      "subchecks_passed": 0,
+      "wall_seconds": 0.82257279100304,
+      "pytest_seconds": 0.353,
+      "source": "22281f1903536521ba62c9bbb1b1dcd337f402cc"
+    },
+    {
+      "name": "capacity-with-plugin",
+      "passed": 1,
+      "subchecks_passed": 0,
+      "wall_seconds": 54.51246063600411,
+      "pytest_seconds": 53.944,
+      "source": "f55038b05c27dc2bcc8dd6afe7cdb40fa0046f51"
+    },
+    {
+      "name": "host-deployment",
+      "passed": 5,
+      "subchecks_passed": 0,
+      "wall_seconds": 37.10774603500613,
+      "pytest_seconds": 36.656,
+      "source": "f55038b05c27dc2bcc8dd6afe7cdb40fa0046f51"
+    }
+  ],
+  "capacity": {
+    "input_count": 513,
+    "batch_size": 4,
+    "limit_bytes": 2147483648,
+    "combined_peak_bytes": 36081664,
+    "events": {
+      "oom_kill_disable": 0,
+      "under_oom": 0,
+      "oom_kill": 0,
+      "failcnt": 0,
+      "memsw_failcnt": 0
+    },
+    "status": "completed",
+    "group_removed": true,
+    "timing": {
+      "input_count": 513,
+      "batch_size": 4,
+      "preflight_seconds": 0.00130121799884364,
+      "preparation_seconds": 13.349165388004621,
+      "budgeted_process_seconds": 37.0448909990082,
+      "parent_verification_seconds": 2.983653263989254
+    },
+    "worker_timing": {
+      "finish": 23.015533516008873,
+      "later_observations": 0.01331369997933507,
+      "later_verify": 8.308890814994811,
+      "retry": 2.6874887570011197,
+      "verify": 2.6808740100095747
+    }
+  },
+  "host": {
+    "receipt_count": 15,
+    "combined_peak_bytes": 93224960,
+    "all_removed": true
+  },
+  "delegations": [
+    {
+      "receipt": "delegation/host-deployment-delegation/launcher.json",
+      "uid": 1002,
+      "exit_code": 0,
+      "errors": [],
+      "path_absent_after_run": true
+    },
+    {
+      "receipt": "delegation/capacity-with-plugin-delegation/launcher.json",
+      "uid": 1002,
+      "exit_code": 0,
+      "errors": [],
+      "path_absent_after_run": true
+    },
+    {
+      "receipt": "delegation/capacity-delegation/launcher.json",
+      "uid": 1002,
+      "exit_code": 4,
+      "errors": [],
+      "path_absent_after_run": true
+    },
+    {
+      "receipt": "delegation/real-budget-delegation/launcher.json",
+      "uid": 1002,
+      "exit_code": 0,
+      "errors": [],
+      "path_absent_after_run": true
+    }
+  ],
+  "collection_only_commands": [
+    "component-collection"
+  ],
+  "non_acceptance_invocations": {
+    "controller": "incorrect test filename; zero tests executed; corrected by tools-final",
+    "capacity": "component plugin options were not registered; no business or pressure workload; corrected by component configuration and collection checks; actual capacity accepted through the same explicitly loaded plugin in capacity-with-plugin"
+  },
+  "quality_checks": {
+    "doc_links": {
+      "command": [
+        "node",
+        "scripts/check-doc-links.mjs"
+      ],
+      "exit_code": 0,
+      "checked_links": 5729,
+      "log": "commands/doc-links-final.log"
+    },
+    "git_diff_check": {
+      "command": [
+        "git",
+        "diff",
+        "--check",
+        "f198f81f",
+        "--",
+        ".",
+        ":(exclude)docs/camctl/verification-data/2026-10-25-memory-swap-budget"
+      ],
+      "exit_code": 0,
+      "raw_archive_command": [
+        "git",
+        "-c",
+        "core.whitespace=blank-at-eol,space-before-tab,-blank-at-eof",
+        "diff",
+        "--check",
+        "f198f81f",
+        "--",
+        "docs/camctl/verification-data/2026-10-25-memory-swap-budget"
+      ],
+      "raw_archive_exit_code": 0,
+      "raw_archive_note": "Original log bytes are preserved, including terminal blank lines. Generated CSV uses LF."
+    }
+  },
+  "separate_pending": [
+    "strict no-swap business run",
+    "larger workloads and long sessions",
+    "target ARM64 environment"
+  ]
+}

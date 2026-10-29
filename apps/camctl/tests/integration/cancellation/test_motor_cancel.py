@@ -78,7 +78,7 @@ def test_four_entries_share_motor_permission(motor_cancel, target, local):
     ids = resolve_cancel_target(target, SqliteCancelLookup(owned.connection)).action_ids
     assert ids == (1,)
     facts = load_eligibility_facts(
-        owned.connection, 1, motor_permits={1: permit} if local else {}
+        owned.connection, 1, motor_permit=permit if local else None
     )
     expected = (
         CancelEligibility.ALLOW_PRE_START
@@ -88,9 +88,10 @@ def test_four_entries_share_motor_permission(motor_cancel, target, local):
     assert decide_cancel_eligibility(facts) is expected
 
 
-def test_local_intent_cancel_has_no_persisted_unknown_gap(motor_cancel):
+@pytest.mark.asyncio
+async def test_local_intent_cancel_has_no_persisted_unknown_gap(motor_cancel):
     owned, motor, permit = motor_cancel
-    repository = CancellationRepository(motor_permits={1: permit})
+    repository = CancellationRepository()
     start = repository.start_cancel_action(
         StartCancelAction(2, NOW + 1), new_operation_key(), owned
     )
@@ -106,7 +107,7 @@ def test_local_intent_cancel_has_no_persisted_unknown_gap(motor_cancel):
         saved.value.item_ids[0], CancelApplyMode.PRE_START, NOW + 3
     )
     key = new_operation_key()
-    result = repository.apply_cancel_target(command, key, owned)
+    result = repository.apply_cancel_target(command, key, owned, motor_permit=permit)
     assert result.kind is DbOutcomeKind.COMPLETED, result.error
     facts = motor.read_facts(1, owned)
     assert (
@@ -131,9 +132,10 @@ def test_local_intent_cancel_has_no_persisted_unknown_gap(motor_cancel):
     clock = Mock(spec=ClockPort)
     policy = Mock()
     permits = {1: permit}
-    decision = advance_motor(
-        1, MotorRuntime(owned, motor, writer, clock, policy, permits)
-    )
+    from ..support.database import business_database, database_path
+    async with business_database(database_path(owned)) as database:
+        decision = await advance_motor(
+            1, MotorRuntime(database, motor, writer, clock, policy, permits))
     assert decision is MotorDecision.KEEP_TERMINAL and permits == {}
     writer.send.assert_not_called()
     clock.utc_micros.assert_not_called()
@@ -161,12 +163,12 @@ def test_verify_motor_cancel_operation_preserves_original_result(motor_cancel, s
     from camctl.cancellation.models import RecordCancelResult
 
     owned, _, permit = motor_cancel
-    repository = CancellationRepository(motor_permits={1: permit})
+    repository = CancellationRepository()
     item_id = _fixed_motor_item(motor_cancel, repository)
     key = new_operation_key()
     if stage == "apply":
         request = ApplyCancelTarget(item_id, CancelApplyMode.PRE_START, NOW + 3)
-        result = repository.apply_cancel_target(request, key, owned)
+        result = repository.apply_cancel_target(request, key, owned, motor_permit=permit)
         changed = replace(request, mode=CancelApplyMode.TERMINAL)
     else:
         request = RecordCancelResult(
@@ -207,15 +209,15 @@ async def test_cancel_unknown_reopens_verifies_and_stops_before_settlement(
 
     owned, _, permit = motor_cancel
     permits = {1: permit} if stage == "apply" else {}
-    repository = CancellationRepository(motor_permits=permits)
+    repository = CancellationRepository()
     item_id = _fixed_motor_item(motor_cancel, repository)
     path = owned.connection.execute("PRAGMA database_list").fetchone()[2]
     method = "apply_cancel_target" if stage == "apply" else "record_cancel_result"
     original = getattr(repository, method)
     requests = []
 
-    def unknown(request, key, connection):
-        saved = original(request, key, connection)
+    def unknown(request, key, connection, **options):
+        saved = original(request, key, connection, **options)
         assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
         requests.append((request, key))
         return DbOutcome(
@@ -228,33 +230,49 @@ async def test_cancel_unknown_reopens_verifies_and_stops_before_settlement(
 
     def verify(request, key, connection):
         verified.append((request, key))
-        return CancellationRepository(motor_permits=permits).verify_motor_operation(
+        assert len(opened) == 2 and opened[0].closed
+        assert connection.connection is opened[1]
+        return CancellationRepository().verify_motor_operation(
             request, key, connection
         )
 
     monkeypatch.setattr(repository, "verify_motor_operation", verify)
     opened = []
 
+    class ObservedConnection:
+        def __init__(self, actual):
+            self.actual = actual
+            self.closed = False
+
+        def __getattr__(self, name):
+            return getattr(self.actual, name)
+
+        def close(self):
+            self.actual.close()
+            self.closed = True
+
     def reopen():
+        from camctl.persistence.runtime import OwnedConnection
         fresh = open_existing(Path(path), DbOpenMode.EXISTING_RW, DbConfig())
-        opened.append(fresh)
-        return fresh
+        observed = ObservedConnection(fresh.connection)
+        opened.append(observed)
+        return OwnedConnection(observed, fresh.metadata)
 
     settlement = Mock(spec=TargetSettlementPort)
     settlement.settle = AsyncMock()
+    from ..session.support import assert_database_closed, open_session_database
+    database = await open_session_database(Path(path), factory=reopen)
     runtime = CancellationRuntime(
-        owned,
-        repository,
-        settlement,
-        lambda: NOW + 3,
-        motor_permits=permits,
-        open_connection=reopen,
+        database, repository, settlement, lambda: NOW + 3, motor_permits=permits,
     )
-    with pytest.raises(ConsistencyError) as stopped:
-        await apply_cancel(ApplyCancel(2, (item_id,)), runtime)
-    assert requests == verified and len(verified) == 1, str(stopped.value)
-    assert len(opened) == 1
-    settlement.settle.assert_not_called()
-    for closed in (owned, *opened):
-        with pytest.raises(sqlite3.ProgrammingError):
-            closed.connection.execute("SELECT 1")
+    try:
+        with pytest.raises(ConsistencyError) as stopped:
+            await apply_cancel(ApplyCancel(2, (item_id,)), runtime)
+        assert requests == verified and len(verified) == 1, str(stopped.value)
+        assert len(opened) == 2
+        settlement.settle.assert_not_called()
+    finally:
+        await database.close()
+    assert all(connection.closed for connection in opened)
+    await assert_database_closed(database)
+    assert owned.connection.execute("SELECT 1").fetchone() == (1,)

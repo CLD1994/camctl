@@ -1,0 +1,50 @@
+{
+  "baseline": "771030c9",
+  "production_baseline": "980f5ff4",
+  "integrated_head": "c65a566a02a410625a2fa63d531cd56527ebcad4",
+  "reviewed_files": 547,
+  "python_files": 543,
+  "node_files": 4,
+  "decisions": {
+    "待重构": 270,
+    "保留": 262,
+    "部分删除": 15
+  },
+  "changed_test_files": 16,
+  "removed_test_functions": 18,
+  "removed_parameter_instances": 1,
+  "before_test_functions": 3879,
+  "after_test_functions": 3861,
+  "before_collected_nodes": 10566,
+  "after_collected_nodes": 10548,
+  "removed_collected_nodes": [
+    "apps/camctl/tests/integration/acceptance/test_links.py::TestAutoPreviewConflicts::test_manual_obtain_and_camera_unaffected_by_conflict",
+    "apps/camctl/tests/integration/bootstrap/test_configuration.py::TestRealTomlLoading::test_missing_file_uses_defaults_without_search",
+    "apps/camctl/tests/integration/capture/test_recording_finish.py::test_terminal_action_is_not_rewritten",
+    "apps/camctl/tests/integration/capture/test_recording_start_runtime.py::test_unrepresentable_recording_is_rejected_before_start_dispatch",
+    "apps/camctl/tests/integration/contracts/test_enums.py::TestRegistryEnums::test_cross_enum_mixing_is_rejected",
+    "apps/camctl/tests/integration/contracts/test_enums.py::TestRegistryEnums::test_decode_and_round_trip",
+    "apps/camctl/tests/integration/contracts/test_enums.py::TestRegistryEnums::test_public_text_encoding",
+    "apps/camctl/tests/integration/contracts/test_enums.py::TestRegistryEnums::test_unknown_column_is_rejected",
+    "apps/camctl/tests/integration/logging_runtime/test_copies.py::TestDelivery::test_database_unavailable_does_not_block_delivery",
+    "apps/camctl/tests/integration/logging_runtime/test_handler.py::TestOrderedClose::test_zero_drops_no_summary",
+    "apps/camctl/tests/integration/outputs/test_selection_lookup.py::test_unqueried_explicit_target_never_becomes_missing_error",
+    "apps/camctl/tests/integration/outputs/test_sources.py::test_all_six_source_forms_resolve_against_sqlite",
+    "apps/camctl/tests/integration/reporting/test_freeze.py::test_pending_sync_action_does_not_expand_report_scope",
+    "apps/camctl/tests/integration/reporting/test_publish.py::TestPublishFlow::test_publish_without_bytes_rejected",
+    "apps/camctl/tests/integration/reporting/test_result_error_generation.py::test_exhausted_results_generate_schema_valid_public_errors[timelapse-True-end_unconfirmed]",
+    "apps/camctl/tests/integration/session/test_clock.py::TestLowerBoundPersistence::test_clock_failure_preserves_acceptance",
+    "apps/camctl/tests/integration/session/test_handoff.py::TestSubmitRacesAdmissionClose::test_acceptor_present_hands_work_over",
+    "apps/camctl/tests/integration/session/test_handoff.py::TestSubmitRacesAdmissionClose::test_new_work_keeps_admission_for_current_run"
+  ],
+  "added_collected_nodes": [],
+  "modified_retained_tests": [
+    "apps/camctl/tests/integration/capture/test_finish_reuse.py::test_new_key_after_terminal_recovers_without_reregistering",
+    "apps/camctl/tests/integration/reporting/test_publish.py::test_success_requires_current_publish_intent",
+    "apps/camctl/tests/integration/reporting/test_result_error_generation.py::test_exhausted_results_generate_schema_valid_public_errors"
+  ],
+  "new_test_imports_removed": [],
+  "production_unchanged": true,
+  "unit_test_source_unchanged": true,
+  "full_integration_executed": false
+}

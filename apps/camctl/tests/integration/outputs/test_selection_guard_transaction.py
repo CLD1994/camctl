@@ -9,25 +9,39 @@ import pytest
 
 from camctl.contracts.values import new_operation_key
 from camctl.history.decoding import decode_event_row
+from camctl.persistence.models import DbOutcomeKind
 from camctl.history.reads import ReadCoverage
 from camctl.history.replay import EntityImage, apply_forward, apply_reverse
 from camctl.history import validators
-from camctl.history.validators import EventValidationError, validate_event
+from camctl.history.validators import register_guard
+from camctl.history.validators import EventValidationError
+from ..support.output_planning import capture_operation, validate_static_event as validate_event
 from camctl.outputs.sources import SelectionMode
 from camctl.persistence.repositories import outputs
+from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.transaction import commit_operation, row_facts
 
 from .test_selection_guard import _proposal, _request, _snapshot, _NOW, selection_database, family_database
 from .test_selection_event_sequence import _Sequence
-from ..operations.test_result_reuse import _FaultConnection
+from ..support.output_planning import storage_fault as _FaultConnection
+
+
+@pytest.fixture(autouse=True)
+def restore_formal_guards():
+    """观察 H1 当前事实后，由所属模块恢复正式登记，不保留测试 spy。"""
+    try:
+        yield
+    finally:
+        register_capture_guards()
+        outputs.register_outputs_guards()
 
 
 class _SelectionProposal:
-    def __init__(self, command, key, mutation):
-        self.command, self.key, self.mutation = command, key, mutation
+    def __init__(self, proposal, mutation):
+        self.proposal, self.mutation = proposal, mutation
 
     def plan(self, scope):
-        plan = outputs._FixSelectionCommand(self.command, self.key).plan(scope)
+        plan = self.proposal
         event, = plan.events
         if self.mutation == "omit":
             event = replace(event, rows=event.rows[:-1])
@@ -46,7 +60,7 @@ class _SelectionProposal:
             plan = replace(plan, owners=owners)
         else:
             raise AssertionError(self.mutation)
-        return replace(plan, events=(event,))
+        return _Sequence((event,), plan).plan(scope)
 
 
 def _sparse_event(event, owners):
@@ -65,7 +79,9 @@ def test_transaction_preserves_complete_saved_order(selection_database, mode, mu
     command = outputs.FixSelection(61, _snapshot(owned.connection, mode, ids), _NOW)
     before = tuple(owned.connection.iterdump())
     key = new_operation_key()
-    receipt = commit_operation(_SelectionProposal(command, key, mutation), key, owned)
+    saved = capture_operation(owned, lambda target:
+        outputs.OutputsRepository().fix_selection(command, key, target))
+    receipt = commit_operation(_SelectionProposal(saved, mutation), key, owned)
     if mutation not in ("reverse_rows", "sparse_ids"):
         assert receipt.kind == "rolled_back", receipt.error
         assert isinstance(receipt.error, EventValidationError), receipt.error
@@ -118,7 +134,7 @@ def test_formal_transaction_requires_reliable_empty_current_selection(selection_
         seen.append((proposal.event_type, proposal.reason))
         original(proposal, current)
 
-    monkeypatch.setitem(validators.NAMED_GUARDS, "source_selection", inspect)
+    register_guard("source_selection", inspect)
     receipt = commit_operation(_Sequence((event,), context), new_operation_key(), owned)
     assert seen == [(4, 1)], receipt.error
     if state == "other_selection":
@@ -139,9 +155,9 @@ def test_selection_write_failure_rolls_back_history_and_projection(selection_dat
     before = tuple(owned.connection.iterdump())
     target = replace(owned, connection=_FaultConnection(owned.connection, failure))
     key = new_operation_key()
-    receipt = commit_operation(outputs._FixSelectionCommand(command, key), key, target)
-    assert receipt.kind == "rolled_back", receipt.error
-    assert isinstance(receipt.error, sqlite3.OperationalError), receipt.error
+    receipt = outputs.OutputsRepository().fix_selection(command, key, target)
+    assert receipt.kind is DbOutcomeKind.ROLLED_BACK, receipt.error
+    assert type(receipt.error) is sqlite3.DatabaseError, receipt.error
     assert tuple(owned.connection.iterdump()) == before
 
 
@@ -161,7 +177,12 @@ def test_history_replays_saved_choice_without_current_catalog(selection_database
     ids = (705, 703, 999, 704) if mode is SelectionMode.EXPLICIT_IDS else ()
     command = outputs.FixSelection(61, _snapshot(owned.connection, mode, ids), _NOW)
     key = new_operation_key()
-    proposal = _SelectionProposal(command, key, "sparse_ids") if sparse else outputs._FixSelectionCommand(command, key)
+    if sparse:
+        saved_proposal = capture_operation(owned, lambda target:
+            outputs.OutputsRepository().fix_selection(command, key, target))
+        proposal = _SelectionProposal(saved_proposal, "sparse_ids")
+    else:
+        proposal = _Sequence((event,), context)
     receipt = commit_operation(proposal, key, owned)
     assert receipt.kind == "completed", receipt.error
     with closing(owned.connection.execute(

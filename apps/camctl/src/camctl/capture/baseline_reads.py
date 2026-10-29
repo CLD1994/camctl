@@ -10,7 +10,7 @@ from camctl.devices.directory import DirectoryRead
 from camctl.operations.owned_calls import owned_tool_call
 from camctl.logging_runtime.diagnostics import DiagnosticState, record_error
 from camctl.operations.recovery import RecoveryBoundary
-from camctl.persistence.business import settle_required
+from camctl.persistence.business import SharedSave, settle_required
 from camctl.persistence.models import DbOutcomeKind, db_outcome_for, db_failure
 
 
@@ -38,6 +38,7 @@ class PendingBaselineRead:
     locally_created: bool=True
     aborted_before_call: bool=False
     wakeup_pending: bool=False
+    consumption: SharedSave=field(default_factory=SharedSave,repr=False,compare=False)
     error_diagnostic: DiagnosticState=field(default_factory=DiagnosticState, compare=False, repr=False)
 
 
@@ -56,6 +57,9 @@ async def _resume_baseline_read_save(owner, *, capture, database):
             and owner.task is not None and not owner.task.done()):
         return None
     async def save_and_apply():
+        current = owner.saves.pending
+        if current is None or current.save is not pending.save:
+            return owner.result
         notification_error = None
         try:
             receipt = await owner.saves.resume_save(capture, database)
@@ -70,7 +74,7 @@ async def _resume_baseline_read_save(owner, *, capture, database):
                 raise owner.diagnostic
             raise _PendingReadSave()
         request=pending.request
-        response=owner.saves.take()
+        response=owner.saves.take(expected=pending)
         owner.wakeup_pending=True
         if isinstance(request,BaselineReadIntent):
             owner.intent_view=response

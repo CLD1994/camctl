@@ -1,0 +1,145 @@
+{
+  "frozen_manifest": {
+    "archive_path": "additions/replay-final/supplemental/final-audit-manifest-json/final-audit-manifest.json",
+    "original_bytes": 3336,
+    "original_sha256": "5397d50087f339c74d440fdf3c3461813db08d04ac255b5415b73b6932711672",
+    "source_path": "/tmp/camctl-full-272f-audit/final-audit-manifest.json"
+  },
+  "canonical_audit_file_count": 15,
+  "files": {
+    "unified-audit.json": {
+      "archive_path": "additions/replay-final/supplemental/unified-audit/unified-audit.json",
+      "original_bytes": 5924,
+      "original_sha256": "eb597f2fd941dc8c8b53806cfa87c5ccb277619d2f4cdd29f45a7d2ba0dd7f4d",
+      "source_path": "/tmp/camctl-full-272f-audit/unified-audit.json"
+    },
+    "combined-coverage-audit.json": {
+      "archive_path": "additions/replay-final/supplemental/combined-coverage-audit/combined-coverage-audit.json",
+      "original_bytes": 18096,
+      "original_sha256": "c2c15a679bf5acc4761e67427dc43b7088ccb3a43c9c085677ee0ad342fd289a",
+      "source_path": "/tmp/camctl-full-272f-audit/combined-coverage-audit.json"
+    },
+    "combined-case-histories.json": {
+      "archive_path": "additions/replay-final/supplemental/combined-case-histories/combined-case-histories.json",
+      "original_bytes": 9914124,
+      "original_sha256": "97af3883c00629cdbef41520fbc1baa9949de98dc9cc4ea78284c79d2cba8515",
+      "source_path": "/tmp/camctl-full-272f-audit/combined-case-histories.json"
+    },
+    "unified-resource-audit.json": {
+      "archive_path": "additions/replay-final/supplemental/unified-resource-audit/unified-resource-audit.json",
+      "original_bytes": 39549,
+      "original_sha256": "07ce2d5333228610aedf135fe456beca0c7460fa4115caac5d56730b4fbec8a4",
+      "source_path": "/tmp/camctl-full-272f-audit/unified-resource-audit.json"
+    },
+    "production-identity.json": {
+      "archive_path": "additions/replay-final/supplemental/production-identity/production-identity.json",
+      "original_bytes": 3549,
+      "original_sha256": "bc65b2f7a30d9919f723e2979c331e66c571889a32a55aabae01521a517953e0",
+      "source_path": "/tmp/camctl-full-272f-audit/production-identity.json"
+    },
+    "capacity-execution-gap.json": {
+      "archive_path": "additions/replay-final/supplemental/capacity-execution-gap/capacity-execution-gap.json",
+      "original_bytes": 24716,
+      "original_sha256": "18a3114a988e4950a35abc3721a3fd2c7d95d82e7a37d2bb8dbe21a3ecde9b92",
+      "source_path": "/tmp/camctl-full-272f-audit/capacity-execution-gap.json"
+    },
+    "final-narrow-audit.json": {
+      "archive_path": "additions/replay-final/supplemental/final-narrow-audit/final-narrow-audit.json",
+      "original_bytes": 3259,
+      "original_sha256": "32e498acfa0c61576f713212ebd9b716ca5fb2a2a8762b4e35107cf42de6a6c4",
+      "source_path": "/tmp/camctl-full-272f-audit/final-narrow-audit.json"
+    },
+    "coverage-audit.json": {
+      "archive_path": "additions/replay-final/supplemental/coverage-audit/coverage-audit.json",
+      "original_bytes": 509935,
+      "original_sha256": "d9b96685d6e0db33cd1c624f353c71710c08ac59ac878904088850d89068d33a",
+      "source_path": "/tmp/camctl-full-272f-audit/coverage-audit.json"
+    },
+    "canonical-inventory.json": {
+      "archive_path": "additions/replay-final/supplemental/canonical-inventory/canonical-inventory.json",
+      "original_bytes": 1575472,
+      "original_sha256": "94ea7adb6ca4fec6265cce42e4723c93ef9270add8d44a253bc7fc9c9b1e4ac1",
+      "source_path": "/tmp/camctl-full-272f-audit/canonical-inventory.json"
+    },
+    "canonical-cases.json": {
+      "archive_path": "additions/replay-final/supplemental/canonical-cases/canonical-cases.json",
+      "original_bytes": 6496594,
+      "original_sha256": "df75c80c7b6c70c5510cb01b6c4c8d971f64e469e9bc68babff41ae9ecacec31",
+      "source_path": "/tmp/camctl-full-272f-audit/canonical-cases.json"
+    },
+    "resource-audit.json": {
+      "archive_path": "audits/resources/main/resource-audit.json",
+      "original_bytes": 1166454,
+      "original_sha256": "0e3a7c26191ae116c1cc13b5b0bf32857b4661e8277647f788bc2b1ede9f4c33",
+      "source_path": "/tmp/camctl-full-272f-audit/resource-audit.json"
+    },
+    "replay/coverage-audit.json": {
+      "archive_path": "additions/replay-final/supplemental/replay-coverage-audit/coverage-audit.json",
+      "original_bytes": 72339,
+      "original_sha256": "2ad8b97b00c86745a25a5ce2c11ff0892eb66b54dec0c3f3ce9c023583b3ff0f",
+      "source_path": "/tmp/camctl-full-272f-audit/replay/coverage-audit.json"
+    },
+    "replay/canonical-inventory.json": {
+      "archive_path": "additions/replay-final/supplemental/replay-canonical-inventory/canonical-inventory.json",
+      "original_bytes": 187007,
+      "original_sha256": "d267e32247d22c512154efe4e8514f77730bd953b6b8ed48589d8bef9bb2c812",
+      "source_path": "/tmp/camctl-full-272f-audit/replay/canonical-inventory.json"
+    },
+    "replay/canonical-cases.json": {
+      "archive_path": "additions/replay-final/supplemental/replay-canonical-cases/canonical-cases.json",
+      "original_bytes": 861604,
+      "original_sha256": "0e50c71b0038b3bdfea850c7a4419f77a084da6a84bd5f4e86c5430a1e24accd",
+      "source_path": "/tmp/camctl-full-272f-audit/replay/canonical-cases.json"
+    },
+    "replay/resource-audit.json": {
+      "archive_path": "audits/resources/replay/resource-audit.json",
+      "original_bytes": 2584581,
+      "original_sha256": "66b7fa7343543d02c5e78c0631c25a13d4f1cfde652ffbd9ecae01f26514c5cf",
+      "source_path": "/tmp/camctl-full-272f-audit/replay/resource-audit.json"
+    }
+  },
+  "additional_reference_files": {
+    "final-audit-manifest.json": {
+      "archive_path": "additions/replay-final/supplemental/final-audit-manifest-json/final-audit-manifest.json",
+      "original_bytes": 3336,
+      "original_sha256": "5397d50087f339c74d440fdf3c3461813db08d04ac255b5415b73b6932711672",
+      "source_path": "/tmp/camctl-full-272f-audit/final-audit-manifest.json"
+    },
+    "timing-audit.json": {
+      "archive_path": "additions/replay-final/supplemental/timing-audit-json/timing-audit.json",
+      "original_bytes": 176407,
+      "original_sha256": "a41f581f2e2c5e46672584d3d25a65df5598779daa07f012256b29f2585611f1",
+      "source_path": "/tmp/camctl-full-272f-audit/timing-audit.json"
+    },
+    "shard-target-path-check.json": {
+      "archive_path": "additions/replay-final/supplemental/shard-target-path-check-json/shard-target-path-check.json",
+      "original_bytes": 471,
+      "original_sha256": "890f44c06c439a8144e8b913da40a59725b5fd9021e8031b91057e3bb38ecb57",
+      "source_path": "/tmp/camctl-full-272f-audit/shard-target-path-check.json"
+    },
+    "final_audit.py": {
+      "archive_path": "additions/replay-final/supplemental/final_audit-py/final_audit.py",
+      "original_bytes": 8789,
+      "original_sha256": "14dbee429d50bbe6cd55e0659d7797859c09f87adb8ff3c27b8f37cc68396447",
+      "source_path": "/tmp/camctl-full-272f-audit/final_audit.py"
+    },
+    "resource_audit.py": {
+      "archive_path": "additions/replay-final/supplemental/resource_audit-py/resource_audit.py",
+      "original_bytes": 7776,
+      "original_sha256": "2d51c7f2310d1e85530c62fb45b7a046133688cfe7296b0804daacdabae6d088",
+      "source_path": "/tmp/camctl-full-272f-audit/resource_audit.py"
+    },
+    "combined_audit.py": {
+      "archive_path": "additions/replay-final/supplemental/combined_audit-py/combined_audit.py",
+      "original_bytes": 6817,
+      "original_sha256": "dd773046acf2af2f5d509b09db84e9ff81ca7188d88d39dbb169d3c9ff5425ab",
+      "source_path": "/tmp/camctl-full-272f-audit/combined_audit.py"
+    },
+    "finalize_audit.py": {
+      "archive_path": "additions/replay-final/supplemental/finalize_audit-py/finalize_audit.py",
+      "original_bytes": 9235,
+      "original_sha256": "5286225e3f1912485188e7543d4ed6317f6589ed32492201198fd65021703551",
+      "source_path": "/tmp/camctl-full-272f-audit/finalize_audit.py"
+    }
+  }
+}

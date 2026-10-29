@@ -1,0 +1,66 @@
+call=1 attempt=1 command=run operation=spawn plan=(none) automatic=0 retries=0
+call=2 submit accepted path=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/client-plan-1.json
+call=1 attempt=1 command=run pid=1738772 spawned execution=unknown
+call=2 attempt=2 command=submit operation=spawn plan=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/client-plan-1.json automatic=0 retries=0
+call=2 attempt=2 command=submit pid=1738773 spawned execution=unknown
+call=2 command=submit pid=1738773 stream=exit_observed data=exit record retained; group settlement pending
+call=2 command=submit pid=1738773 stream=group_reaped data=all execution stopped; child record reaped
+call=2 command=submit pid=1738773 result=success exit_kind=0 exit=0 needs_run=1 overflow=0 io_error=0
+call=3 submit accepted path=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/client-plan-2.json
+call=3 attempt=3 command=submit operation=spawn plan=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/client-plan-2.json automatic=0 retries=0
+call=3 attempt=3 command=submit pid=1738880 spawned execution=unknown
+call=3 command=submit pid=1738880 stream=exit_observed data=exit record retained; group settlement pending
+call=3 command=submit pid=1738880 stream=group_reaped data=all execution stopped; child record reaped
+call=3 command=submit pid=1738880 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0
+call=4 submit accepted path=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/client-plan-3.json
+call=4 attempt=4 command=submit operation=spawn plan=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/client-plan-3.json automatic=0 retries=0
+call=4 attempt=4 command=submit pid=1738914 spawned execution=unknown
+call=4 command=submit pid=1738914 stream=exit_observed data=exit record retained; group settlement pending
+call=4 command=submit pid=1738914 stream=group_reaped data=all execution stopped; child record reaped
+call=4 command=submit pid=1738914 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0
+call=1 attempt=1 command=run operation=spawn plan=(none) automatic=0 retries=0
+call=2 submit accepted path=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/client-plan-1.json
+call=1 attempt=1 command=run pid=1739223 spawned execution=unknown
+call=2 attempt=2 command=submit operation=spawn plan=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/client-plan-1.json automatic=0 retries=0
+call=2 attempt=2 command=submit pid=1739224 spawned execution=unknown
+call=2 command=submit pid=1739224 stream=exit_observed data=exit record retained; group settlement pending
+call=2 command=submit pid=1739224 stream=group_reaped data=all execution stopped; child record reaped
+call=2 command=submit pid=1739224 result=success exit_kind=0 exit=0 needs_run=1 overflow=0 io_error=0
+claim operation=moved ready=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/deployment/ready processing=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/deployment/processing file=3.MP4 errno=0 detail=ok
+claim operation=moved ready=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/deployment/ready processing=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/deployment/processing file=status-report-12-30707832b4670082544b1456589d61ee9e8c35cacc96374e6e4c0f4041ff2f34.json errno=0 detail=ok
+claim operation=moved ready=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/deployment/ready processing=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/deployment/processing file=1.MP4 errno=0 detail=ok
+claim operation=moved ready=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/deployment/ready processing=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/deployment/processing file=5.MP4 errno=0 detail=ok
+claim operation=moved ready=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/deployment/ready processing=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/deployment/processing file=6.MP4 errno=0 detail=ok
+claim operation=moved ready=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/deployment/ready processing=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/deployment/processing file=4.MP4 errno=0 detail=ok
+claim operation=moved ready=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/deployment/ready processing=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/deployment/processing file=2.MP4 errno=0 detail=ok
+call=1 command=run pid=1739223 stream=exit_observed data=exit record retained; group settlement pending
+call=1 command=run pid=1739223 stream=group_reaped data=all execution stopped; child record reaped
+call=1 command=run pid=1739223 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0
+call=3 attempt=3 command=run operation=spawn plan=(none) automatic=0 retries=0
+call=3 attempt=3 command=run pid=1739309 spawned execution=unknown
+call=1 attempt=1 command=run operation=spawn plan=(none) automatic=0 retries=0
+call=1 attempt=1 command=run pid=1739316 spawned execution=unknown
+call=2 submit accepted path=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/client-plan-4.json
+call=2 attempt=2 command=submit operation=spawn plan=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/client-plan-4.json automatic=0 retries=0
+call=2 attempt=2 command=submit pid=1739360 spawned execution=unknown
+call=1 command=run pid=1739316 stream=exit_observed data=exit record retained; group settlement pending
+call=1 command=run pid=1739316 stream=group_reaped data=all execution stopped; child record reaped
+call=1 command=run pid=1739316 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0
+call=2 command=submit pid=1739360 stream=exit_observed data=exit record retained; group settlement pending
+call=2 command=submit pid=1739360 stream=group_reaped data=all execution stopped; child record reaped
+call=2 command=submit pid=1739360 result=success exit_kind=0 exit=0 needs_run=1 overflow=0 io_error=0
+call=3 attempt=3 command=run operation=spawn plan=(none) automatic=0 retries=0
+call=3 attempt=3 command=run pid=1739390 spawned execution=unknown
+claim operation=moved ready=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/deployment/ready processing=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/deployment/processing file=7.MP4 errno=0 detail=ok
+claim operation=moved ready=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/deployment/ready processing=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/deployment/processing file=status-report-14-f113998baa66fb637073a7f3e077e57d647d1a821077fa04012f8afece488d2f.json errno=0 detail=ok
+call=4 submit accepted path=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/client-plan-5.json
+call=4 attempt=4 command=submit operation=spawn plan=/tmp/camctl-quality-repair-evidence/final-action6/full-e0e8ff4e/data/test_installed_action6_ordinar3/action6-record/client-plan-5.json automatic=0 retries=0
+call=4 attempt=4 command=submit pid=1739485 spawned execution=unknown
+call=3 command=run pid=1739390 stream=exit_observed data=exit record retained; group settlement pending
+call=3 command=run pid=1739390 stream=group_reaped data=all execution stopped; child record reaped
+call=3 command=run pid=1739390 result=success exit_kind=0 exit=0 needs_run=0 overflow=0 io_error=0
+call=4 command=submit pid=1739485 stream=exit_observed data=exit record retained; group settlement pending
+call=4 command=submit pid=1739485 stream=group_reaped data=all execution stopped; child record reaped
+call=4 command=submit pid=1739485 result=success exit_kind=0 exit=0 needs_run=1 overflow=0 io_error=0
+call=5 attempt=5 command=run operation=spawn plan=(none) automatic=0 retries=0
+call=5 attempt=5 command=run pid=1739511 spawned execution=unknown

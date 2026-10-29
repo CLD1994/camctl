@@ -1,0 +1,75 @@
+{
+  "id": "root/test_camctl_capture_roundtrip",
+  "scope": "root",
+  "path": "tests/integration/test_camctl_capture_roundtrip.py",
+  "targets": [
+    "tests/integration/test_camctl_capture_roundtrip.py::test_timelapse_recovers_remaining_wait"
+  ],
+  "estimated_seconds": 6.748118077000981,
+  "historical_failure_observed": false,
+  "status": "running",
+  "number": 15,
+  "worker": 1,
+  "artifacts": "/tmp/camctl-fix44-verified-20261025/tasks/015-root-test_camctl_capture_roundtrip/artifacts",
+  "cwd": "/tmp/camctl-fix44-verified-20261025/tasks/015-root-test_camctl_capture_roundtrip/source",
+  "started_utc": "2026-10-25T09:25:18.373988+00:00",
+  "command": [
+    "/tmp/camctl-fix44-verified-20261025/tasks/015-root-test_camctl_capture_roundtrip/source/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "tests/integration/test_camctl_capture_roundtrip.py::test_timelapse_recovers_remaining_wait",
+    "-q",
+    "--durations=0",
+    "-p",
+    "integration_progress",
+    "--basetemp",
+    "/tmp/camctl-fix44-verified-20261025/tasks/015-root-test_camctl_capture_roundtrip/tmp/pytest"
+  ],
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-fix44-verified-20261025/control:/tmp/camctl-fix44-verified-20261025/tasks/015-root-test_camctl_capture_roundtrip/source/apps/camctl/src",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-fix44-verified-20261025/workers/1/python-cache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-fix44-verified-20261025/workers/1/project-env",
+    "UV_CACHE_DIR": "/tmp/camctl-fix44-verified-20261025/workers/1/uv-cache",
+    "UV_OFFLINE": "1",
+    "TMPDIR": "/tmp/camctl-fix44-verified-20261025/tasks/015-root-test_camctl_capture_roundtrip/tmp"
+  },
+  "preparations": [
+    {
+      "label": "package-resources",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-fix44-verified-20261025/tasks/015-root-test_camctl_capture_roundtrip/source/apps/camctl/scripts/sync_resources.py"
+      ],
+      "cwd": "/tmp/camctl-fix44-verified-20261025/tasks/015-root-test_camctl_capture_roundtrip/source",
+      "started_utc": "2026-10-25T09:25:19.473172+00:00",
+      "pid": 1138519,
+      "exit_code": 0,
+      "finished_utc": "2026-10-25T09:25:19.534715+00:00",
+      "wall_seconds": 0.061545228003524244
+    }
+  ],
+  "preparation": "package-resources",
+  "preparation_pid": 1138519,
+  "pid": 1138521,
+  "execution_started_utc": "2026-10-25T09:25:19.536737+00:00",
+  "progress": {
+    "status": "starting",
+    "nodeid": "tests/integration/test_camctl_capture_roundtrip.py"
+  },
+  "source": "16ba001be32d4c54c052e49ba09bd4aed5b1d4aeb5f16fa51df58ea1abbfdba0",
+  "versions": {
+    "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+    "version": [
+      3,
+      11
+    ],
+    "sqlite": "3.53.1",
+    "pytest": "9.1.1",
+    "executable": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "site_packages": "/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages",
+    "uv": "uv 0.13.5 (x86_64-unknown-linux-musl)",
+    "node": "v24.22.1",
+    "git": "git version 2.43.0"
+  }
+}

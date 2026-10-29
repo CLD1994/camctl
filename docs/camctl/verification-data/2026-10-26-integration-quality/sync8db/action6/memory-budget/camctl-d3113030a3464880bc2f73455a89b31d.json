@@ -1,0 +1,58 @@
+{
+  "schema": 1,
+  "budget_scope": "memory_and_swap",
+  "status": "completed",
+  "command": [
+    "/tmp/camctl-sync8db-evidence/action6/native/data/test_installed_action6_native_0/action6-native/tools/camctl",
+    "describe",
+    "--config",
+    "/tmp/camctl-sync8db-evidence/action6/native/data/test_installed_action6_native_0/action6-native/deployment/config.toml"
+  ],
+  "requested_limit": "2GiB",
+  "limit_bytes": 2147483648,
+  "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1642514-45463310b7cb4bb0ae5c682894efe4b3",
+  "controller": "cgroup-v1",
+  "group": "/sys/fs/cgroup/memory/camctl-budget-1642514-45463310b7cb4bb0ae5c682894efe4b3/camctl-memory-1642538-c8e71cf1cbd74f35bafe238a80df5c8a",
+  "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1642514-45463310b7cb4bb0ae5c682894efe4b3",
+  "baseline": {
+    "budget_scope": "memory_and_swap",
+    "limit_bytes": 2147483648,
+    "combined_limit_bytes": 2147483648,
+    "peak_bytes": 0,
+    "combined_peak_bytes": 0,
+    "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+    "swap_peak_bytes": null,
+    "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+    "host_swap_bytes": 4294967296,
+    "events": {
+      "oom_kill_disable": 0,
+      "under_oom": 0,
+      "oom_kill": 0,
+      "failcnt": 0,
+      "memsw_failcnt": 0
+    }
+  },
+  "pid": 1643370,
+  "evidence": {
+    "budget_scope": "memory_and_swap",
+    "limit_bytes": 2147483648,
+    "combined_limit_bytes": 2147483648,
+    "peak_bytes": 39657472,
+    "combined_peak_bytes": 39657472,
+    "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+    "swap_peak_bytes": null,
+    "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+    "host_swap_bytes": 4294967296,
+    "events": {
+      "oom_kill_disable": 0,
+      "under_oom": 0,
+      "oom_kill": 0,
+      "failcnt": 0,
+      "memsw_failcnt": 0
+    }
+  },
+  "final_status": "completed",
+  "group_removed": true,
+  "elapsed_seconds": 0.9297408460115548,
+  "returncode": 0
+}

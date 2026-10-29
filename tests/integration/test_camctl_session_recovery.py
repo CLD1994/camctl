@@ -91,15 +91,20 @@ def _await_gate_entry(
 
 
 def _resume_after_capture_start(
-        deployment: Deployment, process, name: str, *, deadline: float) -> CliResult:
+        deployment: Deployment, process, name: str | tuple[str, ...], *,
+        deadline: float) -> CliResult:
     """实际 START 责任收场后推进业务钟，保留原进程完成预算。"""
     try:
+        names = (name,) if isinstance(name, str) else name
+        placeholders = ",".join("?" for _ in names)
         _await_row(
             deployment.state_db,
-            "SELECT r.id FROM operation_runs r"
+            "SELECT COUNT(DISTINCT a.name) FROM operation_runs r"
             " JOIN actions a ON a.id = r.action_id"
-            " WHERE a.name = ? AND r.responsibility_key = 'start/' || a.id"
-            " AND r.status IN (3, 4)", (name,), process=process)
+            f" WHERE a.name IN ({placeholders})"
+            " AND r.responsibility_key = 'start/' || a.id"
+            " AND r.status IN (3, 4) HAVING COUNT(DISTINCT a.name) = ?",
+            (*names, len(names)), process=process)
         deployment.resume_clock()
         stdout, stderr = process.communicate(
             timeout=max(0, deadline - time.monotonic()))
@@ -351,7 +356,7 @@ def test_start_call_interruption_settles_unconfirmed(tmp_path: Path) -> None:
 
 def test_concurrent_submits_and_duplicate_identity(tmp_path: Path) -> None:
     """并发 submit 交错执行互不干扰；同请求身份重送不重复受理。"""
-    deployment = Deployment(tmp_path)
+    deployment = Deployment(tmp_path, controlled_clock=True)
     initialized = deployment.camctl(
         "init", "--config", str(deployment.config_path))
     assert initialized.exit_code == 0, initialized.stderr
@@ -361,6 +366,7 @@ def test_concurrent_submits_and_duplicate_identity(tmp_path: Path) -> None:
         device_files={"shot-1": "content-one",
                       "shot-2": "content-two"})
     deployment.install_client_capabilities(spec)
+    shoot_at = deployment.schedule(1)
 
     def body(request_id: str, action: str) -> dict:
         return {
@@ -371,7 +377,7 @@ def test_concurrent_submits_and_duplicate_identity(tmp_path: Path) -> None:
                 "name": action,
                 "type": "camera_take_photo",
                 "device_id": "cam-1",
-                "scheduled_at": future_schedule(1),
+                "scheduled_at": shoot_at,
                 "params": {"type": "single_shot"},
                 "policy": {"max_delay_ms": 5000},
             }],
@@ -399,8 +405,12 @@ def test_concurrent_submits_and_duplicate_identity(tmp_path: Path) -> None:
     assert _query(state_db, "SELECT COUNT(*) FROM plans") == [(2,)]
     assert _query(state_db, "SELECT COUNT(*) FROM actions") == [(2,)]
 
-    run = deployment.camctl(
+    deployment.freeze_at(shoot_at)
+    deadline = time.monotonic() + 180
+    process = deployment.start_camctl(
         "run", "--config", str(deployment.config_path), driver=spec)
+    run = _resume_after_capture_start(
+        deployment, process, ("shoot-a", "shoot-b"), deadline=deadline)
     assert run.exit_code == 0, run.stderr
     assert _query(state_db, "SELECT status FROM plans") == [(3,), (3,)]
     assert _query(

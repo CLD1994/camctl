@@ -1,0 +1,78 @@
+[
+  {
+    "nodeid": "tests/integration/test_camctl_process_recovery.py::test_next_run_waits_for_old_group_settlement[7]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 20.137432919000275
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 5.139223432997824
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0323062390089035
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 25.308962591007003
+  },
+  {
+    "nodeid": "tests/integration/test_camctl_process_recovery.py::test_early_reap_never_signals_stale_group_or_starts_run",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012980369938304648
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 4.040624337998452
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.02826530499442015
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 4.070187679986702
+  },
+  {
+    "nodeid": "tests/integration/test_camctl_process_recovery.py::test_original_group_does_not_kill_parallel_submit_or_other_groups[grouped]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0009453110105823725
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 5.925742744002491
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.04578277299879119
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 5.972470828011865
+  },
+  {
+    "nodeid": "tests/integration/test_camctl_process_recovery.py::test_original_group_does_not_kill_parallel_submit_or_other_groups[detached]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002448569008265622
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 6.654728048000834
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.03611385199474171
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 6.693290469003841
+  }
+]

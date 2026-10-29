@@ -970,7 +970,14 @@ def test_installed_hasselblad_photo_pair_obtain_and_source_reuse(
         rows = connection.execute(
             "SELECT name,effective_params_json,execution_spec_json FROM actions"
             " ORDER BY input_index").fetchall()
-    assert format_version == 2
+    format_versions = json.loads(_probe(
+        installed,
+        "import json, sys; from camctl.resources import resource_bytes; "
+        "registry = json.loads(resource_bytes('registry/enum-registry.json')); "
+        "sys.stdout.write(json.dumps(registry['enums']"
+        "['database_metadata.format_version']['members']))"))
+    assert format_version == max(format_versions.values())
+    assert format_version >= format_versions["V2"]
     assert len(rows) == 3
     assert json.loads(rows[0][1]) == expected_params
     assert json.loads(rows[0][2]) == {

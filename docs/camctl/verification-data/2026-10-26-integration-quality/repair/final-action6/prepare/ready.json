@@ -1,0 +1,16 @@
+{
+  "observed_time_ns": 1792960041632337934,
+  "repo": "/tmp/camctl-quality-repair-lidlmje7/action6",
+  "branch": "test/quality-repair-action6-lidlmje7",
+  "head": "5f89ea67173e11370009e0fee43a7bbb449ea653",
+  "status": "",
+  "locked_dependencies_verified": true,
+  "client_build_exit_code": 0,
+  "node_modules_external_symlinks": [],
+  "test_assert_count": 127,
+  "native_command": "/tmp/camctl-quality-repair-evidence/final-action6/native/command.sh",
+  "remaining_command": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/command.sh",
+  "source_gate": "/tmp/camctl-quality-repair-evidence/final-action6/final-source-commit.txt",
+  "source_gate_exists": false,
+  "acceptance_started": false
+}

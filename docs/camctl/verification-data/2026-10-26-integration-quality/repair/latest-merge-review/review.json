@@ -1,0 +1,411 @@
+{
+  "created_utc": "2026-10-25T21:18:11.718244+00:00",
+  "root": "/tmp/camctl-quality-repair-lidlmje7/latest-merge-review",
+  "branch": "test/latest-merge-reporting-lidlmje7",
+  "baseline": "d896d4b28194258cb5da71b160d5ef22d642d48e",
+  "commit": "a4d4be07c69a40db9574a419719a77e3b62ddcec",
+  "status": "",
+  "conclusion": "合并冲突处理保留真实 worker HistoryRepository 配置核验，status_history 与 report_read_scope 均委托真实仓储；history.py 自动合并完整保留本分支 expected_result 身份保护及上游状态时间读取。发现的是旧共享拍摄夹具接口不兼容，仅测试侧适配后相关范围通过，无生产修改。",
+  "history_merge_checks": {
+    "against_upstream_27f84527": "history.py 差异只有撤回时补充 expected_result=future。",
+    "against_first_parent": "history.py 差异只有上游 status_history 稀疏目录读取、_status_history_range 缓存及 report_read_scope 退出清理。",
+    "expected_result": "SqliteSnapshotStore._run 以原 future 撤回，实际返回仍沿 _await_actual_result 收场。",
+    "report_scope": "HistoryRepository.report_read_scope 保留实例/目录绑定校验、同报告连接及独立短事务；结束清空状态历史缓存与验证资源。",
+    "conflict_file": "reader.status_history 与 reader.report_read_scope 同时透传 actual；open_report_action 使用真实 handle；worker.generate_report_file 注入仍核对真实仓储路径/DbConfig/instance/目录及 GenerationSpec，没有替换 worker.HistoryRepository。"
+  },
+  "fixture_change": {
+    "file": "apps/camctl/tests/integration/reporting/test_result_error_generation.py",
+    "scope": "_exhausted_world 使用 consumer_world 已有 runtime_factory 端口创建真实 BusinessDatabase 和 CaptureRuntime，状态读取等待异步 action，准备结束等待关闭 worker；返回后报告只消费完整保存历史与原调用记录。",
+    "original_assert_count": 28,
+    "current_assert_count": 28,
+    "assertions_equal_after_only_await_normalization": true,
+    "sha256": "0a239d64bdf3247c40bd8490f68fe9c3025f8090174a8651da1062b774235b61"
+  },
+  "test_counts": {
+    "conflict_file": 3,
+    "direct_preparation_file": 3,
+    "status_history_integration": 6,
+    "history_seams_units": 53,
+    "total_passed_after_adaptation": 65
+  },
+  "checks": [
+    {
+      "label": "conflict-initial",
+      "receipt": "/tmp/camctl-quality-repair-evidence/latest-merge-review/conflict-initial.json",
+      "exit_code": 1,
+      "pid": 1751851,
+      "process_reaped": true,
+      "results": [
+        {
+          "classname": "tests.integration.reporting.test_result_error_state",
+          "name": "test_historical_error_shape_is_state_failure",
+          "outcome": "failed"
+        },
+        {
+          "classname": "tests.integration.reporting.test_result_error_state",
+          "name": "test_uninterpretable_frozen_error_stops_worker_without_publish",
+          "outcome": "failed"
+        },
+        {
+          "classname": "tests.integration.reporting.test_result_error_state",
+          "name": "test_output_fsync_error_remains_report_failure",
+          "outcome": "failed"
+        }
+      ]
+    },
+    {
+      "label": "conflict-adapted-01",
+      "receipt": "/tmp/camctl-quality-repair-evidence/latest-merge-review/conflict-adapted-01.json",
+      "exit_code": 0,
+      "pid": 1754722,
+      "process_reaped": true,
+      "results": [
+        {
+          "classname": "tests.integration.reporting.test_result_error_state",
+          "name": "test_historical_error_shape_is_state_failure",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.integration.reporting.test_result_error_state",
+          "name": "test_uninterpretable_frozen_error_stops_worker_without_publish",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.integration.reporting.test_result_error_state",
+          "name": "test_output_fsync_error_remains_report_failure",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.integration.reporting.test_result_error_generation",
+          "name": "test_exhausted_results_generate_schema_valid_public_errors[photo-False-still_running]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.integration.reporting.test_result_error_generation",
+          "name": "test_exhausted_results_generate_schema_valid_public_errors[timelapse-True-end_unconfirmed]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.integration.reporting.test_result_error_generation",
+          "name": "test_exhausted_result_report_rebuilds_same_frozen_history_after_reopen",
+          "outcome": "passed"
+        }
+      ]
+    },
+    {
+      "label": "status-history",
+      "receipt": "/tmp/camctl-quality-repair-evidence/latest-merge-review/status-history.json",
+      "exit_code": 0,
+      "pid": 1755750,
+      "process_reaped": true,
+      "results": [
+        {
+          "classname": "tests.integration.reporting.test_status_history",
+          "name": "test_new_report_has_complete_terminal_creation_times",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.integration.reporting.test_status_history",
+          "name": "test_full_history_survives_incremental_window_and_local_completion",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.integration.reporting.test_status_history",
+          "name": "test_actual_epoch_creation_keeps_zero_time",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.integration.reporting.test_status_history",
+          "name": "test_reader_port_keeps_historical_clock_judgment",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.integration.reporting.test_status_history",
+          "name": "test_status_query_uses_sparse_index_without_event_body_reads",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.integration.reporting.test_status_history",
+          "name": "test_status_history_rejects_wrong_entity_enum_and_broken_chain",
+          "outcome": "passed"
+        }
+      ]
+    },
+    {
+      "label": "history-seams",
+      "receipt": "/tmp/camctl-quality-repair-evidence/latest-merge-review/history-seams.json",
+      "exit_code": 0,
+      "pid": 1756674,
+      "process_reaped": true,
+      "results": [
+        {
+          "classname": "tests.unit.persistence.test_report_read_resources",
+          "name": "test_report_scope_reuses_connection_but_releases_every_page",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_report_read_resources",
+          "name": "test_outside_report_scope_keeps_independent_connection_ownership",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_report_read_resources",
+          "name": "test_frozen_registration_uses_report_connection_and_short_transaction",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_report_read_resources",
+          "name": "test_report_read_failure_rolls_back_and_clears_bounded_caches[failure0]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_report_read_resources",
+          "name": "test_report_read_failure_rolls_back_and_clears_bounded_caches[failure1]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_report_read_resources",
+          "name": "test_report_read_failure_rolls_back_and_clears_bounded_caches[failure2]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_report_read_resources",
+          "name": "test_transaction_cleanup_failure_is_not_hidden[COMMIT]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_report_read_resources",
+          "name": "test_transaction_cleanup_failure_is_not_hidden[ROLLBACK]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_report_read_resources",
+          "name": "test_each_report_rechecks_actual_connection_instance",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_report_read_resources",
+          "name": "test_report_scope_rejects_expected_instance_mismatch",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_report_read_resources",
+          "name": "test_report_scope_checks_directories_on_actual_generation_connection",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_report_read_resources",
+          "name": "test_report_scope_preserves_format_failure",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_report_read_resources",
+          "name": "test_report_scope_closes_even_when_connection_close_fails",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_report_read_resources",
+          "name": "test_report_scope_rejects_nested_reports",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_report_read_resources",
+          "name": "test_report_projection_validator_is_lazy_reused_and_cleared_per_object",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_report_read_resources",
+          "name": "test_failed_report_releases_all_resources_and_next_report_recreates_them[failure0]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_report_read_resources",
+          "name": "test_failed_report_releases_all_resources_and_next_report_recreates_them[failure1]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_report_read_resources",
+          "name": "test_projection_validator_outside_report_keeps_independent_storage",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_report_read_resources",
+          "name": "test_report_validator_failure_does_not_fall_back_to_a_new_structure",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.history.test_status_history",
+          "name": "test_state_order_preserves_equal_and_reversed_wall_clock",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.history.test_status_history",
+          "name": "test_creation_can_already_be_terminal_and_at_epoch",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.history.test_status_history",
+          "name": "test_incomplete_or_inconsistent_directory_is_rejected[rows0-1]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.history.test_status_history",
+          "name": "test_incomplete_or_inconsistent_directory_is_rejected[rows1-2]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.history.test_status_history",
+          "name": "test_incomplete_or_inconsistent_directory_is_rejected[rows2-2]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.history.test_status_history",
+          "name": "test_incomplete_or_inconsistent_directory_is_rejected[rows3-2]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.history.test_status_history",
+          "name": "test_incomplete_or_inconsistent_directory_is_rejected[rows4-3]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.history.test_status_history",
+          "name": "test_incomplete_or_inconsistent_directory_is_rejected[rows5-1]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.history.test_status_history",
+          "name": "test_incomplete_or_inconsistent_directory_is_rejected[rows6-2]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_executor_identity",
+          "name": "test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.WRITE-admission]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_executor_identity",
+          "name": "test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.WRITE-queued]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_executor_identity",
+          "name": "test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.WRITE-dispatched]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_executor_identity",
+          "name": "test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.WRITE-awaiting_delivery]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_executor_identity",
+          "name": "test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.READ-admission]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_executor_identity",
+          "name": "test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.READ-queued]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_executor_identity",
+          "name": "test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.READ-dispatched]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_executor_identity",
+          "name": "test_duplicate_in_flight_key_preserves_original_operation[DbJobKind.READ-awaiting_delivery]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_executor_identity",
+          "name": "test_unknown_result_allows_original_key_verification_after_delivery",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_executor_identity",
+          "name": "test_late_admission_timeout_does_not_settle_reused_key",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_executor_identity",
+          "name": "test_late_withdrawal_cannot_cancel_new_operation_with_reused_key",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_executor_identity",
+          "name": "test_result_delivery_clears_old_dispatch_before_original_key_reuse",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.persistence.test_executor_identity",
+          "name": "test_business_cancel_withdraws_only_its_original_result",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.history.test_snapshot_object_discovery",
+          "name": "test_start_or_unchanged_upper_only_reads_latest_plan[None-12]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.history.test_snapshot_object_discovery",
+          "name": "test_start_or_unchanged_upper_only_reads_latest_plan[12-12]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.history.test_snapshot_object_discovery",
+          "name": "test_start_or_unchanged_upper_only_reads_latest_plan[None-None]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.history.test_snapshot_object_discovery",
+          "name": "test_new_range_keeps_per_object_threshold_and_both_endpoints[0]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.history.test_snapshot_object_discovery",
+          "name": "test_new_range_keeps_per_object_threshold_and_both_endpoints[1]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.history.test_snapshot_object_discovery",
+          "name": "test_missing_new_object_progress_is_an_error",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.history.test_snapshot_object_discovery",
+          "name": "test_invalid_input_fails_before_dispatch[-1-64]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.history.test_snapshot_object_discovery",
+          "name": "test_invalid_input_fails_before_dispatch[True-64]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.history.test_snapshot_object_discovery",
+          "name": "test_invalid_input_fails_before_dispatch[1-64]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.history.test_snapshot_object_discovery",
+          "name": "test_invalid_input_fails_before_dispatch[0-0]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.history.test_snapshot_object_discovery",
+          "name": "test_invalid_input_fails_before_dispatch[0-True]",
+          "outcome": "passed"
+        },
+        {
+          "classname": "tests.unit.history.test_snapshot_object_discovery",
+          "name": "test_snapshot_enqueue_timeout_is_not_converted_to_read_failure",
+          "outcome": "passed"
+        }
+      ]
+    }
+  ],
+  "remaining_owned_pids_or_groups": [],
+  "limits": "只运行冲突文件、其直接准备文件、状态历史专项与4个直接接缝单元文件；未运行全量、真实CLI、其他集成目录或设备验收。"
+}

@@ -22,12 +22,12 @@ pytestmark = pytest.mark.asyncio
 
 class _FiniteResults(ResultsDouble):
     async def list_page(self, ticket, *, cursor, timeout_s, output_scope=None,
-                        completion_context=None, video_result_mode=None):
+                        completion_context=None, video_result_mode=None, reading_context=None):
         if completion_context is not None:
             assert completion_context['kind'] == 'timelapse_natural'
         page = await super().list_page(ticket, cursor=cursor, timeout_s=timeout_s,
             output_scope=output_scope, completion_context=completion_context,
-            video_result_mode=video_result_mode)
+            video_result_mode=video_result_mode, reading_context=reading_context)
         observations = tuple(DeviceObservation(o.type, o.version,
             {**o.data, 'entries': [{**e, 'format_id': 'osv'} for e in o.data['entries']]})
             if o.type == 'result_files_listed' else o for o in page.outcome.observations)
@@ -54,8 +54,8 @@ async def _world(tmp_path, *, unknown=False, extra_rules=(), startup_margin_ms=N
         spec['startup_margin_ms'] = startup_margin_ms
         owned.connection.execute('UPDATE actions SET execution_spec_json=? WHERE id=13', (json.dumps(spec),))
     wall, mono = [_NOW], [5_000_000_000]
-    runtime = _runtime(owned, results=_FiniteResults({13: (_entry('finite-original'),)}),
-        stop_config=AttemptConfig(3, Decimal('1'), Decimal('0')))
+    runtime = (await _runtime(owned, results=_FiniteResults({13: (_entry('finite-original'),)}),
+        stop_config=AttemptConfig(3, Decimal('1'), Decimal('0'))))
     runtime.wall_us = lambda: wall[0]
     runtime.monotonic_ns = lambda: mono[0]
     runtime.wait_config = lambda action: CaptureWaitConfig(1000, 200, 50, startup_margin_ms=startup_margin_ms or 0)
@@ -312,8 +312,8 @@ async def test_missing_sent_recovers_old_start_then_finishes_with_unknown_occupa
     from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
     owned = _environment(tmp_path, _TIMELAPSE)
     _freeze_finite_spec(owned)
-    runtime = _runtime(owned, results=_FiniteResults({}),
-        stop_config=AttemptConfig(3, Decimal('1'), Decimal('0')))
+    runtime = (await _runtime(owned, results=_FiniteResults({}),
+        stop_config=AttemptConfig(3, Decimal('1'), Decimal('0'))))
     runtime.wait_config = lambda action: CaptureWaitConfig(1000, 200, 50)
     runtime.grant(runtime.action(13))
     _apply_public_cancel(owned, 13, _NOW)

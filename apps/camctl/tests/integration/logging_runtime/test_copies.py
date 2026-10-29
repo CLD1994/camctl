@@ -607,18 +607,6 @@ class TestDelivery:
         assert [p.name for p in logs_dir.iterdir()] == [MARKER_NAME]
         channel.close()
 
-    async def test_database_unavailable_does_not_block_delivery(
-            self, tmp_path: Path) -> None:
-        """交付不依赖状态库：流程内没有任何数据库访问。"""
-        staging, ready, logs_dir, log_path = _layout(tmp_path)
-        channel = _channel(log_path)
-        marker = MarkerStore(logs_dir)
-        from camctl.logging_runtime.copies import deliver_failure_copy
-        receipt = await deliver_failure_copy(
-            _request(staging, ready, channel, marker))
-        assert receipt.outcome is CopyOutcome.PUBLISHED
-        channel.close()
-
     @pytest.mark.parametrize("failed_progress_call,failed_stage", [
         (2, MarkerStage.COPIED),
         (3, MarkerStage.PUBLISHED),

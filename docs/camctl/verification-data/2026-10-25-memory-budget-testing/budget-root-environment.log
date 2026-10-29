@@ -1,0 +1,24 @@
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_______________ test_real_cgroup_finishes_the_whole_process_tree _______________
+tests/integration/test_memory_budget_launcher.py:124: in test_real_cgroup_finishes_the_whole_process_tree
+    memory.ensure_memory_budget_available(budget)
+scripts/camctl_memory.py:261: in ensure_memory_budget_available
+    group = _new_group(config)
+            ^^^^^^^^^^^^^^^^^^
+scripts/camctl_memory.py:216: in _new_group
+    raise BudgetEnvironmentError("cgroup v1 宿主存在交换空间，无法保证全局回收期间不换页")
+E   camctl_memory.BudgetEnvironmentError: cgroup v1 宿主存在交换空间，无法保证全局回收期间不换页
+____ test_real_cgroup_detects_aggregate_child_oom_when_parent_returns_zero _____
+tests/integration/test_memory_budget_launcher.py:152: in test_real_cgroup_detects_aggregate_child_oom_when_parent_returns_zero
+    memory.ensure_memory_budget_available(budget)
+scripts/camctl_memory.py:261: in ensure_memory_budget_available
+    group = _new_group(config)
+            ^^^^^^^^^^^^^^^^^^
+scripts/camctl_memory.py:216: in _new_group
+    raise BudgetEnvironmentError("cgroup v1 宿主存在交换空间，无法保证全局回收期间不换页")
+E   camctl_memory.BudgetEnvironmentError: cgroup v1 宿主存在交换空间，无法保证全局回收期间不换页
+=========================== short test summary info ============================
+FAILED tests/integration/test_memory_budget_launcher.py::test_real_cgroup_finishes_the_whole_process_tree
+FAILED tests/integration/test_memory_budget_launcher.py::test_real_cgroup_detects_aggregate_child_oom_when_parent_returns_zero
+2 failed in 0.13s

@@ -1,0 +1,19 @@
+{
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "apps/camctl/tests/unit/capture/test_capture_save_coordination.py",
+    "apps/camctl/tests/unit/capture/test_media_save_identity.py",
+    "apps/camctl/tests/unit/capture/test_media_database_ownership.py",
+    "-q"
+  ],
+  "cwd": "/tmp/camctl-quality-repair-lidlmje7/save-owner",
+  "environment": {
+    "PYTHONPATH": "apps/camctl/src:apps/camctl/tests"
+  },
+  "started_utc": "2026-10-25T20:35:06.532028+00:00",
+  "exit_code": 1,
+  "ended_utc": "2026-10-25T20:35:08.162373+00:00",
+  "log": "/tmp/camctl-quality-repair-evidence/save-owner/media-output-scope-green-002.log"
+}

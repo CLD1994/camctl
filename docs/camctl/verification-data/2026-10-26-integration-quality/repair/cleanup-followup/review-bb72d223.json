@@ -1,0 +1,92 @@
+{
+  "reviewed_utc": "2026-10-25T21:06:38.379271+00:00",
+  "reviewer": "/root/repair_background_exit",
+  "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+  "reviewed_commit": "bb72d223b4641eb9b1c7da945eed1295837aeb93",
+  "root_head": "66aee56d1f34e36f910db124d3fceaf5d5bc1dca",
+  "root_status": "",
+  "target_patch_equals_root": true,
+  "mode": "独立只读源码与现有证据评审；未运行测试、未修改仓库、未操作运行中的 Action6 世界或进程。",
+  "conclusion": "在本次两个调用方及现有多文件软件场景边界内，未发现需要阻断的实质缺口。此测试修正符合每文件每正常 run 最多一次检查与清理尝试的既有契约。",
+  "findings": [],
+  "checks": [
+    {
+      "topic": "预算与生命周期契约",
+      "evidence": [
+        "docs/architecture/file-handoff.md:169-203",
+        "docs/architecture/camera-recovery.md:316",
+        "docs/superpowers/specs/2026-10-23-video-result-modes-and-segmentation-design.md:172-193"
+      ],
+      "result": "历史副本检查时仍有用途则占用本轮机会；用途结束不重开本轮尝试，下一正常 run 可重新核实。测试等待实际下一轮，符合既有规则。"
+    },
+    {
+      "topic": "PID与历史边界",
+      "evidence": [
+        "tests/integration/_action6_segmented_entry.py:13-29",
+        "tests/integration/test_action6_segmented_recovery_roundtrip.py:140-157",
+        "apps/host-demo/src/process.c:120-151",
+        "scripts/camctl_memory_plugin.py:70-92",
+        "scripts/camctl_memory.py:576-605"
+      ],
+      "result": "仅实际 run 进入前使用只读连接取得 MAX(history_events.id)，记录当前 PID 和真实单调时间。C 创建独立 PGID=PID，预算代理及 Action6 shell 均通过 exec 保留 PID，因此本轮事件边界与 C 成功退出记录具有同一实际身份。"
+    },
+    {
+      "topic": "可靠本轮检查依据",
+      "evidence": [
+        "tests/integration/test_action6_segmented_recovery_roundtrip.py:598-621",
+        "apps/camctl/src/camctl/outputs/work_files.py:560-574",
+        "apps/camctl/src/camctl/persistence/repositories/outputs.py:5050-5080"
+      ],
+      "result": "只读取 run 启动 horizon 之后的可靠历史；每个尚未 COMPLETED 的原 file_id 都必须在清理游标推进记录中出现，才进入已消费机会分支。实际生产 save_cleanup_checked 在可靠完成后推进扫描位置；检查/结果保存错误不会被 helper 构造为成功。"
+    },
+    {
+      "topic": "自然退出与执行组收场",
+      "evidence": [
+        "tests/integration/test_action6_segmented_recovery_roundtrip.py:631-659",
+        "tests/integration/_wsl_host_demo.py:296-343",
+        "apps/host-demo/src/host.c:198-230",
+        "apps/host-demo/src/scheduler.c:48-62"
+      ],
+      "result": "先等待同一 PID 的 result=success、exit_kind=0、exit=0、needs_run=0，再核对旧 PGID 消失，之后才调用 demo.stop。测试没有以强停旧 run 替代自然业务完成；此时 stop 关闭的是无新输入的空闲 C host。新 host 初始化实际安排下一正常 run。"
+    },
+    {
+      "topic": "等待预算与结果强度",
+      "evidence": [
+        "tests/integration/test_action6_segmented_recovery_roundtrip.py:578-680"
+      ],
+      "result": "所有新增等待与原最终清理等待使用同一真实单调钟 deadline=开始+180，未在下一轮重置等待预算。原 RELEASABLE/COMPLETED 和物理路径不存在检查保留，并新增清理前后 file_id/relative_path 相同的检查。HostDemo 启停仍沿用既有生命周期端口。"
+    },
+    {
+      "topic": "原调用方后续处理",
+      "evidence": [
+        "tests/integration/test_action6_segmented_recovery_roundtrip.py:1085-1141",
+        "tests/integration/test_action6_segmented_recovery_roundtrip.py:1262-1279",
+        "tests/integration/_wsl_host_demo.py:198-290"
+      ],
+      "result": "同一 demo 对象经 start 更新 proc 与 host PID，原部署目录/launcher/env/客户端仍被复用。普通录像调用方随后仍通过该 demo 提交 late-explicit 新取回、领取/导入媒体并 ACK；原生照片失败调用方仍通过该 demo 提交 ACK。helper 自身在重建前重新建立 failure 观察起点。"
+    },
+    {
+      "topic": "原断言完整性",
+      "method": "只读 AST 比较父提交与 bb72d223 的 assert 节点，不导入测试模块或执行测试。",
+      "old_assert_count": 127,
+      "new_assert_count": 128,
+      "missing_original_asserts": [],
+      "result": "原127条 assert 全部保持，新增1条身份/路径断言。"
+    }
+  ],
+  "existing_evidence_inspected": [
+    "cleanup-followup/conclusion.md",
+    "cleanup-followup/identity-and-source-integrity.json",
+    "cleanup-followup/check_run_budget.py"
+  ],
+  "limits": [
+    "本评审不构成最终8项 Action6 安装版运行通过的声明；最终真实联合链结果由独立执行会话提供。",
+    "已有 cleanup-followup 窄见证来自现场独立副本，证明原预算模型；不把该窄见证当作当前最终真实 C host 运行结果。",
+    "helper 按当前原始多文件场景及已登记世界进程边界复核；未泛化审计所有 HostDemo 调用方或所有中间文件容量配置。"
+  ],
+  "sha256": {
+    "tests/integration/README.md": "d0a5b2b5c0ea12ea3a759000f3c2c16432385499cd072ec233db24aa8653d34d",
+    "tests/integration/_action6_segmented_entry.py": "cf612777c32ad35190ea7cb47de0c059f391270e52cb82d46bff2895e78f3c14",
+    "tests/integration/test_action6_segmented_recovery_roundtrip.py": "676c3d66338270803bbdc5b3af29d16c706b1a07ffad55311b08c60367b5c53c"
+  }
+}

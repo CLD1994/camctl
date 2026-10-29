@@ -1,0 +1,82 @@
+{
+  "id": "root/test_camctl_session_recovery/shard-2",
+  "scope": "root",
+  "path": "tests/integration/test_camctl_session_recovery.py",
+  "targets": [
+    "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_session_recovery/source/tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed",
+    "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_session_recovery/source/tests/integration/test_camctl_session_recovery.py::test_future_action_waits_and_past_window_expires"
+  ],
+  "estimated_seconds": 2.0,
+  "historical_failure_observed": true,
+  "parent_id": "root/test_camctl_session_recovery",
+  "shard": 2,
+  "shards": 4,
+  "collection": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_session_recovery/artifacts",
+  "collected_nodes": 6,
+  "status": "failed",
+  "number": 48,
+  "worker": 3,
+  "artifacts": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/048-root-test_camctl_session_recovery-shard-2/artifacts",
+  "cwd": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/048-root-test_camctl_session_recovery-shard-2/source",
+  "started_utc": "2026-10-26T00:40:17.404117+00:00",
+  "command": [
+    "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/048-root-test_camctl_session_recovery-shard-2/source/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_session_recovery/source/tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed",
+    "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_camctl_session_recovery/source/tests/integration/test_camctl_session_recovery.py::test_future_action_waits_and_past_window_expires",
+    "-q",
+    "--durations=0",
+    "-p",
+    "integration_progress",
+    "--basetemp",
+    "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/048-root-test_camctl_session_recovery-shard-2/tmp/pytest",
+    "-p",
+    "camctl_memory_plugin",
+    "--camctl-memory-limit",
+    "2GiB",
+    "--camctl-memory-cgroup-root",
+    "/sys/fs/cgroup/memory/camctl-budget-1922809-b293c146ab7744439fec45b828581e67"
+  ],
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/control:/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/048-root-test_camctl_session_recovery-shard-2/source/apps/camctl/src",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/workers/3/python-cache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/workers/3/project-env",
+    "UV_CACHE_DIR": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/workers/3/uv-cache",
+    "UV_OFFLINE": "1",
+    "TMPDIR": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/048-root-test_camctl_session_recovery-shard-2/tmp"
+  },
+  "preparations": [
+    {
+      "label": "package-resources",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/048-root-test_camctl_session_recovery-shard-2/source/apps/camctl/scripts/sync_resources.py"
+      ],
+      "cwd": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/048-root-test_camctl_session_recovery-shard-2/source",
+      "started_utc": "2026-10-26T00:40:19.887846+00:00",
+      "pid": 1971247,
+      "exit_code": 0,
+      "finished_utc": "2026-10-26T00:40:20.020502+00:00",
+      "wall_seconds": 0.13266063199262135
+    }
+  ],
+  "preparation": "package-resources",
+  "preparation_pid": 1971247,
+  "pid": 1971250,
+  "execution_started_utc": "2026-10-26T00:40:20.022316+00:00",
+  "progress": {
+    "status": "finished",
+    "exit_code": 4,
+    "collected": 0,
+    "outcomes": {},
+    "subchecks": {},
+    "elapsed_seconds": 0.025472295994404703,
+    "utc": "2026-10-26T00:40:20.498976+00:00",
+    "pid": 1971250
+  },
+  "exit_code": 4,
+  "finished_utc": "2026-10-26T00:40:20.574842+00:00",
+  "wall_seconds": 3.170708456003922
+}

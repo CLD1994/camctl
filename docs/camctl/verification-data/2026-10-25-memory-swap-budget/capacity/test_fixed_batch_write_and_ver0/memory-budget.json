@@ -1,0 +1,58 @@
+{
+  "schema": 1,
+  "budget_scope": "memory_and_swap",
+  "status": "completed",
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "/opt/devcontainer/.codex/worktrees/de38/camctl/apps/camctl/tests/integration/persistence/segment_capacity_worker.py",
+    "/tmp/camctl-memsw-validation/capacity-with-plugin-tmp/test_fixed_batch_write_and_ver0/capacity-input.json",
+    "/tmp/camctl-memsw-validation/capacity-with-plugin-tmp/test_fixed_batch_write_and_ver0/capacity-result.json"
+  ],
+  "requested_limit": "2GiB",
+  "limit_bytes": 2147483648,
+  "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1481519-f5421145e9bd455c8c7d002c366b0fd9",
+  "controller": "cgroup-v1",
+  "group": "/sys/fs/cgroup/memory/camctl-budget-1481519-f5421145e9bd455c8c7d002c366b0fd9/camctl-memory-1481522-65d18ddb4d6a4576aabd5574dbb5e548",
+  "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1481519-f5421145e9bd455c8c7d002c366b0fd9",
+  "baseline": {
+    "budget_scope": "memory_and_swap",
+    "limit_bytes": 2147483648,
+    "combined_limit_bytes": 2147483648,
+    "peak_bytes": 0,
+    "combined_peak_bytes": 0,
+    "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+    "swap_peak_bytes": null,
+    "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+    "host_swap_bytes": 4294967296,
+    "events": {
+      "oom_kill_disable": 0,
+      "under_oom": 0,
+      "oom_kill": 0,
+      "failcnt": 0,
+      "memsw_failcnt": 0
+    }
+  },
+  "pid": 1481786,
+  "evidence": {
+    "budget_scope": "memory_and_swap",
+    "limit_bytes": 2147483648,
+    "combined_limit_bytes": 2147483648,
+    "peak_bytes": 36081664,
+    "combined_peak_bytes": 36081664,
+    "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+    "swap_peak_bytes": null,
+    "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+    "host_swap_bytes": 4294967296,
+    "events": {
+      "oom_kill_disable": 0,
+      "under_oom": 0,
+      "oom_kill": 0,
+      "failcnt": 0,
+      "memsw_failcnt": 0
+    }
+  },
+  "final_status": "completed",
+  "group_removed": true,
+  "elapsed_seconds": 37.04282968099869,
+  "returncode": 0
+}

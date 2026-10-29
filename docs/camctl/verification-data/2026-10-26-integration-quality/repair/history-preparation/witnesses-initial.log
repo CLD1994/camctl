@@ -1,0 +1,208 @@
+EE..F                                                                    [100%]
+==================================== ERRORS ====================================
+_ ERROR at setup of test_all_five_targets_keep_pages_parent_filter_and_legal_empty[4096] _
+
+self = <Coroutine test_all_five_targets_keep_pages_parent_filter_and_legal_empty[4096]>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+
+/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest_asyncio/plugin.py:558: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest_asyncio/plugin.py:944: in pytest_fixture_setup
+    hook_result = yield
+                  ^^^^^
+/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest_asyncio/plugin.py:455: in _async_fixture_wrapper
+    result = runner.run(setup(), context=context)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/base_events.py:654: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest_asyncio/plugin.py:451: in setup
+    res = await fixture_function(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/history/test_restore_paths.py:637: in two_item_world
+    await _submit(owned, tmp_path, "1")
+apps/camctl/tests/integration/history/test_report_scope.py:134: in _submit
+    result = await accept_input(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+source = ParsedInput(path='/tmp/pytest-of-cld/pytest-114/test_all_five_targets_keep_pag0/plan-1.json', document={'request_id': ...'cam-1', 'scheduled_at': '2026-10-25 20:19:49', 'params': {'type': 'single_shot'}, 'policy': {'max_delay_ms': 5000}}]})
+context = AcceptanceContext(mode=<CommandMode.RUN: 'run'>, catalog=<integration.history.test_report_scope._Catalog object at 0x7...ject at 0x7f3b7c5c1950>, clock=<integration.history.test_report_scope.C object at 0x7f3b7c5c3190>, submit_handoff=None)
+key = '31d1f528b2e9c7bc46ed760958bb611e'
+database = OwnedConnection(connection=<sqlite3.Connection object at 0x7f3b7ca3fd30>, metadata=DatabaseMetadata(application_id='ca...rsion=5, staging_path='/srv/camctl/staging', ready_path='/srv/camctl/ready', processing_path='/srv/camctl/processing'))
+
+    async def accept_input(
+        source: ParsedInput | InputDiagnostic,
+        context: AcceptanceContext,
+        key: OperationKey,
+        database,
+    ) -> AcceptanceResult:
+        """处理一次输入并返回完整提交结果。
+    
+        业务拒绝是已提交结果；回滚、未知或连接失效按状态库错误上
+        交，不解释为业务结果。事件时间取自上下文的时钟端口。
+        """
+        occurred_at = context.clock.utc_micros() if context.clock is not None else 0
+        command = ProcessInput(
+            source=source,
+            catalog=context.catalog,
+            mode=context.mode,
+            occurred_at=occurred_at,
+            submit_handoff=context.submit_handoff,
+        )
+>       outcome = await database.write(
+                        ^^^^^^^^^^^^^^
+            lambda owned: context.repository.process_input(command, key, owned),
+            key=key,
+            description="输入处理",
+        )
+E       AttributeError: 'OwnedConnection' object has no attribute 'write'
+
+apps/camctl/src/camctl/acceptance/service.py:121: AttributeError
+_ ERROR at setup of test_all_five_targets_keep_pages_parent_filter_and_legal_empty[0] _
+
+self = <Coroutine test_all_five_targets_keep_pages_parent_filter_and_legal_empty[0]>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+
+/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest_asyncio/plugin.py:558: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest_asyncio/plugin.py:944: in pytest_fixture_setup
+    hook_result = yield
+                  ^^^^^
+/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest_asyncio/plugin.py:455: in _async_fixture_wrapper
+    result = runner.run(setup(), context=context)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/base_events.py:654: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+/workspaces/camctl/apps/camctl/.venv311/lib/python3.11/site-packages/pytest_asyncio/plugin.py:451: in setup
+    res = await fixture_function(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/history/test_restore_paths.py:637: in two_item_world
+    await _submit(owned, tmp_path, "1")
+apps/camctl/tests/integration/history/test_report_scope.py:134: in _submit
+    result = await accept_input(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+source = ParsedInput(path='/tmp/pytest-of-cld/pytest-114/test_all_five_targets_keep_pag1/plan-1.json', document={'request_id': ...'cam-1', 'scheduled_at': '2026-10-25 20:19:49', 'params': {'type': 'single_shot'}, 'policy': {'max_delay_ms': 5000}}]})
+context = AcceptanceContext(mode=<CommandMode.RUN: 'run'>, catalog=<integration.history.test_report_scope._Catalog object at 0x7...ject at 0x7f3b7c1b6310>, clock=<integration.history.test_report_scope.C object at 0x7f3b7c1b6390>, submit_handoff=None)
+key = '47938e0752415c94ddde419878b4e7ba'
+database = OwnedConnection(connection=<sqlite3.Connection object at 0x7f3b7ca3f4c0>, metadata=DatabaseMetadata(application_id='ca...rsion=5, staging_path='/srv/camctl/staging', ready_path='/srv/camctl/ready', processing_path='/srv/camctl/processing'))
+
+    async def accept_input(
+        source: ParsedInput | InputDiagnostic,
+        context: AcceptanceContext,
+        key: OperationKey,
+        database,
+    ) -> AcceptanceResult:
+        """处理一次输入并返回完整提交结果。
+    
+        业务拒绝是已提交结果；回滚、未知或连接失效按状态库错误上
+        交，不解释为业务结果。事件时间取自上下文的时钟端口。
+        """
+        occurred_at = context.clock.utc_micros() if context.clock is not None else 0
+        command = ProcessInput(
+            source=source,
+            catalog=context.catalog,
+            mode=context.mode,
+            occurred_at=occurred_at,
+            submit_handoff=context.submit_handoff,
+        )
+>       outcome = await database.write(
+                        ^^^^^^^^^^^^^^
+            lambda owned: context.repository.process_input(command, key, owned),
+            key=key,
+            description="输入处理",
+        )
+E       AttributeError: 'OwnedConnection' object has no attribute 'write'
+
+apps/camctl/src/camctl/acceptance/service.py:121: AttributeError
+=================================== FAILURES ===================================
+________ test_selection_pages_preserve_targets_and_necessary_ancestors _________
+
+finished_photo = (OwnedConnection(connection=<sqlite3.Connection object at 0x7f3b7d9313f0>, metadata=DatabaseMetadata(application_id='c...processing_path='/srv/camctl/processing')), PosixPath('/tmp/pytest-of-cld/pytest-114/test_selection_pages_preserve_0'))
+
+    @pytest.mark.asyncio
+    async def test_selection_pages_preserve_targets_and_necessary_ancestors(finished_photo):
+        owned, path = finished_photo
+>       await _submit(owned, path, '1')
+
+apps/camctl/tests/integration/history/test_report_selection.py:32: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+apps/camctl/tests/integration/history/test_report_scope.py:134: in _submit
+    result = await accept_input(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+source = ParsedInput(path='/tmp/pytest-of-cld/pytest-114/test_selection_pages_preserve_0/plan-1.json', document={'request_id': ...'cam-1', 'scheduled_at': '2026-10-25 20:19:52', 'params': {'type': 'single_shot'}, 'policy': {'max_delay_ms': 5000}}]})
+context = AcceptanceContext(mode=<CommandMode.RUN: 'run'>, catalog=<integration.history.test_report_scope._Catalog object at 0x7...ject at 0x7f3b7c1eb6d0>, clock=<integration.history.test_report_scope.C object at 0x7f3b7c1e9e50>, submit_handoff=None)
+key = '367fad7b72c1e4492944f351a56befde'
+database = OwnedConnection(connection=<sqlite3.Connection object at 0x7f3b7d9313f0>, metadata=DatabaseMetadata(application_id='ca...rsion=5, staging_path='/srv/camctl/staging', ready_path='/srv/camctl/ready', processing_path='/srv/camctl/processing'))
+
+    async def accept_input(
+        source: ParsedInput | InputDiagnostic,
+        context: AcceptanceContext,
+        key: OperationKey,
+        database,
+    ) -> AcceptanceResult:
+        """处理一次输入并返回完整提交结果。
+    
+        业务拒绝是已提交结果；回滚、未知或连接失效按状态库错误上
+        交，不解释为业务结果。事件时间取自上下文的时钟端口。
+        """
+        occurred_at = context.clock.utc_micros() if context.clock is not None else 0
+        command = ProcessInput(
+            source=source,
+            catalog=context.catalog,
+            mode=context.mode,
+            occurred_at=occurred_at,
+            submit_handoff=context.submit_handoff,
+        )
+>       outcome = await database.write(
+                        ^^^^^^^^^^^^^^
+            lambda owned: context.repository.process_input(command, key, owned),
+            key=key,
+            description="输入处理",
+        )
+E       AttributeError: 'OwnedConnection' object has no attribute 'write'
+
+apps/camctl/src/camctl/acceptance/service.py:121: AttributeError
+============================= slowest 5 durations ==============================
+1.31s call     tests/integration/history/test_report_selection.py::test_late_corruption_is_visible_before_candidate_limit[actions]
+0.93s call     tests/integration/history/test_report_selection.py::test_late_corruption_is_visible_before_candidate_limit[plans]
+0.03s setup    tests/integration/history/test_report_selection.py::test_all_five_targets_keep_pages_parent_filter_and_legal_empty[4096]
+0.02s setup    tests/integration/history/test_report_selection.py::test_late_corruption_is_visible_before_candidate_limit[actions]
+0.02s setup    tests/integration/history/test_report_selection.py::test_selection_pages_preserve_targets_and_necessary_ancestors
+=========================== short test summary info ============================
+FAILED apps/camctl/tests/integration/history/test_report_selection.py::test_selection_pages_preserve_targets_and_necessary_ancestors
+ERROR apps/camctl/tests/integration/history/test_report_selection.py::test_all_five_targets_keep_pages_parent_filter_and_legal_empty[4096]
+ERROR apps/camctl/tests/integration/history/test_report_selection.py::test_all_five_targets_keep_pages_parent_filter_and_legal_empty[0]
+1 failed, 2 passed, 2 errors in 4.31s

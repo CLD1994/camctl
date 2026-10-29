@@ -1,0 +1,17 @@
+{
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "apps/camctl/tests/integration/bootstrap/test_inspection_read_dispatch.py::test_original_inspection_result_survives_recreated_capture_runtime",
+    "-q"
+  ],
+  "cwd": "/tmp/camctl-quality-repair-lidlmje7/save-owner",
+  "environment": {
+    "PYTHONPATH": "apps/camctl/src:apps/camctl/tests"
+  },
+  "started_utc": "2026-10-25T20:31:54.032816+00:00",
+  "ended_utc": "2026-10-25T20:31:56.020858+00:00",
+  "exit_code": 0,
+  "log": "/tmp/camctl-quality-repair-evidence/save-owner/internal-read-real-integration-001.log"
+}

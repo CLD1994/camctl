@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -14,7 +15,9 @@ from camctl.acceptance.service import (
 )
 from camctl.contracts.values import new_operation_key
 from camctl.logging_runtime.diagnostics import error_diagnostics_context, flush_diagnostics
-from camctl.persistence.models import DbOutcome, DbOutcomeKind, _attach_db_outcome, db_outcome_for
+from camctl.persistence.models import DbOutcome, DbOutcomeKind, db_outcome_for
+
+from ..support.database import business_database, create_test_database
 
 pytestmark = pytest.mark.asyncio
 
@@ -50,21 +53,31 @@ async def test_failed_admission_keeps_original_control_object_and_actual_result(
 
 
 @pytest.mark.parametrize("error_type", [RuntimeError, asyncio.CancelledError])
-async def test_completed_result_diagnostics_survive_observer_or_control_failure(error_type):
+async def test_completed_result_diagnostics_survive_observer_or_control_failure(error_type, tmp_path):
     result = AcceptanceResult(PlanDisposition.REJECTED, None, AckDisposition.NOT_PROCESSED, 0,
         diagnostics=({"error": {"message": "原业务拒绝"}, "context": {"action_id": 7}},))
     failure = error_type("提交后的实际交付错误")
-    actual = DbOutcome(DbOutcomeKind.COMPLETED, value=result)
-    _attach_db_outcome(failure, actual)
-    database = SimpleNamespace(write=AsyncMock(side_effect=failure))
+    actual = DbOutcome(DbOutcomeKind.COMPLETED, value=result,
+        **({"control": failure} if error_type is asyncio.CancelledError else {"observer_error": failure}))
+    calls = []
+
+    class ResultPort:
+        def process_input(self, command, key, owned):
+            calls.append((command, key))
+            return actual
+
+    path = tmp_path / "state.db"
+    create_test_database(path)
     diagnostics = []
-    with error_diagnostics_context(None, diagnostics.append):
-        with pytest.raises(error_type) as caught:
-            await accept_input(ParsedInput("/input", {}), context(), new_operation_key(), database)
-        await flush_diagnostics()
+    async with business_database(path) as database:
+        with error_diagnostics_context(None, diagnostics.append):
+            with pytest.raises(error_type) as caught:
+                await accept_input(ParsedInput("/input", {}), replace(context(), repository=ResultPort()),
+                    new_operation_key(), database)
+            await flush_diagnostics()
     assert caught.value is failure
     assert db_outcome_for(failure) is actual
-    assert database.write.await_count == 1
+    assert len(calls) == 1
     assert len(diagnostics) == 1
     payload = json.loads(diagnostics[0])
     assert payload["context"]["action_id"] == 7

@@ -7,7 +7,7 @@ from unittest.mock import create_autospec
 import pytest
 
 from camctl.capture.baseline_models import BaselineFixSave
-from camctl.capture.handlers import _recording_port, _stop_call, capture_handler
+from camctl.capture.handlers import capture_handler
 from camctl.contracts.values import new_operation_key
 from camctl.devices.ports import DeviceCallResult, StopDriver
 from camctl.persistence.models import DbOutcomeKind
@@ -16,7 +16,8 @@ from camctl.persistence.repositories.segments import SegmentRepository
 from .result_consumer_fixtures import consumer_world, returned
 from .test_action6_segmented_normal import Action6RecordCatalog
 from .test_action6_segmented_recovery import _attach_media, _entries
-from .test_capture_contract import _NOW
+from .test_capture_contract import _NOW, _PAGE_EVIDENCE, ResultsDouble
+from ..support.capture import capture_runtime
 from .test_record_file_completion_wait import (
     _completed_result,
     _result_port,
@@ -33,10 +34,10 @@ async def test_action6_recording_handler_persists_current_session_elapsed_and_in
     catalog = Action6RecordCatalog()
     catalog.duration_s = Decimal("60")
     owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, "record", catalog=catalog, start=False
+        tmp_path, "record", catalog=catalog, start=False,
+        runtime_options={"wall_us": lambda: clock["wall_us"],
+            "monotonic_ns": lambda: clock["monotonic_ns"]},
     )
-    runtime.wall_us = lambda: clock["wall_us"]
-    runtime.monotonic_ns = lambda: clock["monotonic_ns"]
     runtime.repair_margin_s = Decimal("2")
 
     (activity_id,) = owned.connection.execute(
@@ -56,12 +57,12 @@ async def test_action6_recording_handler_persists_current_session_elapsed_and_in
         )
 
     result_driver = _result_port(runtime, read_results)
-    tools = _attach_media(
+    tools = (await _attach_media(
         runtime,
         owned,
         tmp_path,
         (Decimal("18"), Decimal("27"), Decimal("22"), Decimal("40")),
-    )
+    ))
     stopper = create_autospec(StopDriver, instance=True)
     stopper.stop.return_value = DeviceCallResult.from_outcome(
         returned("stop", "stop_confirmed", activity_id)
@@ -70,23 +71,17 @@ async def test_action6_recording_handler_persists_current_session_elapsed_and_in
 
     try:
         await capture_handler(handler)(action_id, runtime)
-        state = _recording_port(runtime).recording_state(action_id)
-        assert state.anchor_from_current_session
-        assert state.stop_target_ns is not None
-        stop_target_ns = state.stop_target_ns
-
-        # 模拟同一 run 的单调时钟到达真实停止调用之后；启动及内容起点
-        # 都来自生产 handler / RecordingStatePort，不从 finish 注入时长。
+        stopper.stop.assert_not_awaited()
+        spec, = owned.connection.execute(
+            "SELECT execution_spec_json FROM actions WHERE id=?", (action_id,)).fetchone()
+        spec = json.loads(spec)
         start_anchor_ns = clock["monotonic_ns"]
-        target_ms = runtime.action(action_id)["execution_spec_json"][
-            "target_duration_ms"
-        ]
-        startup_margin_ms = runtime.action(action_id)["execution_spec_json"].get(
-            "startup_margin_ms", 0
-        )
-        assert stop_target_ns == start_anchor_ns + (
-            target_ms + startup_margin_ms
+        stop_target_ns = start_anchor_ns + (
+            spec["target_duration_ms"] + spec.get("startup_margin_ms", 0)
         ) * 1_000_000
+        clock["monotonic_ns"] = stop_target_ns - 1
+        await capture_handler(handler)(action_id, runtime)
+        stopper.stop.assert_not_awaited()
         clock["monotonic_ns"] = start_anchor_ns + 75_000_000_000
         clock["wall_us"] = _NOW + 75_000_000
 
@@ -116,16 +111,24 @@ async def test_action6_recording_handler_persists_current_session_elapsed_and_in
 
 
 async def test_action6_recording_stop_after_restart_saves_unknown_without_reusing_clock(
-    tmp_path,
+    tmp_path, capture_resources,
 ):
     clock = {"wall_us": _NOW, "monotonic_ns": 5_000_000_000}
     catalog = Action6RecordCatalog()
     catalog.duration_s = Decimal("60")
+    controls = []
+    stopper = create_autospec(StopDriver, instance=True)
+    stopper.stop.side_effect = lambda request: DeviceCallResult.from_outcome(
+        returned("stop", "stop_confirmed", request.ticket.target_id))
+
+    async def assemble(owned, *, driver):
+        controls.append(driver)
+        return await capture_runtime(owned, driver=driver, evidence=_PAGE_EVIDENCE,
+            results=ResultsDouble({}), stopper=stopper,
+            wall_us=lambda: clock["wall_us"], monotonic_ns=lambda: clock["monotonic_ns"])
+
     owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, "record", catalog=catalog, start=False
-    )
-    runtime.wall_us = lambda: clock["wall_us"]
-    runtime.monotonic_ns = lambda: clock["monotonic_ns"]
+        tmp_path, "record", catalog=catalog, start=False, runtime_factory=assemble)
 
     (activity_id,) = owned.connection.execute(
         "SELECT id FROM device_activities WHERE action_id=?", (action_id,)
@@ -135,29 +138,16 @@ async def test_action6_recording_stop_after_restart_saves_unknown_without_reusin
     )
     assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
 
-    stopper = create_autospec(StopDriver, instance=True)
-    stopper.stop.return_value = DeviceCallResult.from_outcome(
-        returned("stop", "stop_confirmed", activity_id)
-    )
-    runtime.stopper = stopper
-
     try:
         await capture_handler(handler)(action_id, runtime)
-        assert _recording_port(runtime).recording_state(
-            action_id
-        ).anchor_from_current_session
-
-        # 重启后旧 monotonic 不能和新 session 拼接成原始控制时长。
-        runtime.recording_state = None
+        stopper.stop.assert_not_awaited()
         clock["monotonic_ns"] = 1_000_000_000
         clock["wall_us"] = _NOW + 75_000_000
-        assert not _recording_port(runtime).recording_state(
-            action_id
-        ).anchor_from_current_session
-
-        stopped = await _stop_call(runtime, runtime.action(action_id))
-
-        assert stopped.phase == "confirmed"
+        database = await capture_resources.restart_database(owned)
+        runtime = await capture_resources.runtime(database, driver=controls[0],
+            evidence=_PAGE_EVIDENCE, results=ResultsDouble({}), stopper=stopper,
+            wall_us=lambda: clock["wall_us"], monotonic_ns=lambda: clock["monotonic_ns"])
+        await capture_handler(handler)(action_id, runtime)
         stopper.stop.assert_awaited_once()
         assert owned.connection.execute(
             "SELECT control_elapsed_ns FROM device_activities WHERE action_id=?",

@@ -1,0 +1,85 @@
+{
+  "id": "root/test_osmo_builtin_record_segmentation_roundtrip/shard-1",
+  "scope": "root",
+  "path": "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py",
+  "targets": [
+    "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[overrun-indexes1-3-succeeded]",
+    "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[empty-indexes5-0-failed]"
+  ],
+  "estimated_seconds": 235.1826276770007,
+  "historical_failure_observed": false,
+  "parent_id": "root/test_osmo_builtin_record_segmentation_roundtrip",
+  "shard": 1,
+  "shards": 3,
+  "collection": "/tmp/camctl-integration-replay-20261026-u19lkvoe/collection/root-test_osmo_builtin_record_segmentation_roundtrip/artifacts",
+  "collected_nodes": 8,
+  "status": "passed",
+  "number": 9,
+  "worker": 1,
+  "artifacts": "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/009-root-test_osmo_builtin_record_segmentation_roundtrip-shard-1/artifacts",
+  "cwd": "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/009-root-test_osmo_builtin_record_segmentation_roundtrip-shard-1/source",
+  "started_utc": "2026-10-26T01:00:26.984446+00:00",
+  "command": [
+    "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/009-root-test_osmo_builtin_record_segmentation_roundtrip-shard-1/source/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "--rootdir=/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/009-root-test_osmo_builtin_record_segmentation_roundtrip-shard-1/source",
+    "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[overrun-indexes1-3-succeeded]",
+    "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py::test_installed_segment_source_default_explicit_delivery_and_ack[empty-indexes5-0-failed]",
+    "-q",
+    "--durations=0",
+    "-p",
+    "integration_progress",
+    "--basetemp",
+    "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/009-root-test_osmo_builtin_record_segmentation_roundtrip-shard-1/tmp/pytest",
+    "-p",
+    "camctl_memory_plugin",
+    "--camctl-memory-limit",
+    "2GiB",
+    "--camctl-memory-cgroup-root",
+    "/sys/fs/cgroup/memory/camctl-budget-1985550-348d6ec12f114ac4930fa9a30d807340"
+  ],
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-integration-replay-20261026-u19lkvoe/control:/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/009-root-test_osmo_builtin_record_segmentation_roundtrip-shard-1/source/apps/camctl/src",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-integration-replay-20261026-u19lkvoe/workers/1/python-cache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-integration-replay-20261026-u19lkvoe/workers/1/project-env",
+    "UV_CACHE_DIR": "/tmp/camctl-integration-replay-20261026-u19lkvoe/workers/1/uv-cache",
+    "UV_OFFLINE": "1",
+    "TMPDIR": "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/009-root-test_osmo_builtin_record_segmentation_roundtrip-shard-1/tmp"
+  },
+  "preparations": [
+    {
+      "label": "package-resources",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/009-root-test_osmo_builtin_record_segmentation_roundtrip-shard-1/source/apps/camctl/scripts/sync_resources.py"
+      ],
+      "cwd": "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/009-root-test_osmo_builtin_record_segmentation_roundtrip-shard-1/source",
+      "started_utc": "2026-10-26T01:00:28.316143+00:00",
+      "pid": 2023913,
+      "exit_code": 0,
+      "finished_utc": "2026-10-26T01:00:28.385780+00:00",
+      "wall_seconds": 0.06965455099998508
+    }
+  ],
+  "preparation": "package-resources",
+  "preparation_pid": 2023913,
+  "pid": 2023915,
+  "execution_started_utc": "2026-10-26T01:00:28.387819+00:00",
+  "progress": {
+    "status": "finished",
+    "exit_code": 0,
+    "collected": 2,
+    "outcomes": {
+      "passed": 2
+    },
+    "subchecks": {},
+    "elapsed_seconds": 156.84388847800437,
+    "utc": "2026-10-26T01:03:06.215464+00:00",
+    "pid": 2023915
+  },
+  "exit_code": 0,
+  "finished_utc": "2026-10-26T01:03:06.373357+00:00",
+  "wall_seconds": 158.6598373099987
+}

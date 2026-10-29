@@ -1,0 +1,1331 @@
+{
+  "scope": "44项冻结失败中的排期与时钟分区；不修改仓库。根任务另授权在独立/tmp历史副本只补跑ID30一次，并仅追加异常诊断钩子。",
+  "frozen_source": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+  "current_source": "1973dc05（由根任务固定的快照）",
+  "ids": [
+    17,
+    18,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    34,
+    35,
+    37,
+    38
+  ],
+  "closed_count": 12,
+  "open_ids": [
+    18,
+    26,
+    29,
+    30
+  ],
+  "classification_boundary": "status=5是EXPIRED，status=4是FAILED；逐来源no_outputs导致21不是独立的取回时钟失败。第30项原库未保存过期事实且存在会话错误，不能混入EXPIRED计数。",
+  "contracts": [
+    {
+      "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/architecture/scheduling-execution.md",
+      "line": 117,
+      "detail": "窗口限制START派发；在途结果不因窗口结束丢弃"
+    },
+    {
+      "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/architecture/scheduling-execution.md",
+      "line": 131,
+      "detail": "未派发/在途/已确认/未知的分区"
+    },
+    {
+      "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/tests/integration/README.md",
+      "line": 9,
+      "detail": "受控业务钟只隔离准备且保留真实超时与窗口"
+    }
+  ],
+  "findings": [
+    {
+      "diagnosis_id": 17,
+      "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+      "root_cause": "浏览器预设保存、关闭重开、应用和导出共耗93.153076秒，输入 scheduled_at 仍固定在浏览器操作开始时；max_delay_ms=60000，实际动作受理比截止时刻晚34.273714秒。",
+      "classification": "新观察到的测试装配时序失败，后续测试侧修正已闭合；未证实生产回归",
+      "first_real_error": "capture 在60秒窗口结束后才被受理，保存 EXPIRED/window_missed；没有 START、attempt 或 hb_cli 调用。浏览器导出本身成功，随后 succeeded 报告轮询等待90秒才报错。",
+      "completed_before_failure": "真实浏览器参数选择、预设保存、重开、应用及下载成功；C host 受理计划成功并发布了 expired 报告。",
+      "status": {
+        "historical_baseline_outcome": "passed",
+        "frozen_outcome": "failed",
+        "frozen_is_new_failure_vs_baseline": true,
+        "production_regression_proven": false,
+        "latest_status": "此前定向补测通过，1973dc05中央本轮未重跑该已闭合身份",
+        "closed": true,
+        "latest_pass": {
+          "nodeid": "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_photo_roundtrip[jpeg-device-0.000333]",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 23.300459879996197
+            },
+            "call": {
+              "outcome": "passed",
+              "duration_seconds": 138.03440506299376
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.0009234460012521595
+            }
+          },
+          "outcome": "passed",
+          "duration_seconds": 161.3357883889912,
+          "task": "root/test_hasselblad_photo_roundtrip",
+          "source_commit": "4728a4cf247dceae1fb11f5ed1a8eec7491238e0",
+          "snapshot_sha256": "08faf94a07b15aa637e32b2c2daa5fac9ea57c11d21d1ff493b65329978c8cb3",
+          "run": "/tmp/camctl-itopt-combined-20261025"
+        }
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/artifacts/output.log",
+          "line": 3,
+          "detail": "冻结48d2ee64原始pytest失败"
+        },
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/008-root-test_hasselblad_photo_roundtrip-shard-4/tmp/pytest/test_installed_hasselblad_phot3/deployment/state.db",
+          "detail": "只读查询保存事实；明细见独立派生证据",
+          "sql": "SELECT id,name,status,execution_started,first_window_observed_at,expiration_reason FROM actions; SELECT * FROM operation_runs; SELECT * FROM operation_attempts;"
+        },
+        {
+          "path": "/tmp/camctl-diag-clock-db-evidence.json",
+          "line": 3,
+          "detail": "原始数据库完整行与历史事件的只读导出"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-timing/cross-component-cases.csv",
+          "line": 28,
+          "detail": "原计时基线status=passed"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-optimization/combined-validation.json",
+          "line": 3722,
+          "detail": "匹配同一nodeid的真实passed证据与执行源码身份"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-optimization/hasselblad-window.json",
+          "line": 101,
+          "detail": "浏览器93.153076秒及受理晚34.273714秒时间线"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-optimization-round2/hb-after-4/cases.json",
+          "line": 384,
+          "detail": "round2 jobs4同身份通过，call51.929131秒"
+        }
+      ],
+      "recommendation": "在真实网页预设准备完成后，通过原时间表单保存新的执行时间并下载实际请求；保留60秒max_delay_ms、全部精确参数与原预设步骤。该修正已有定向及round2通过证据。",
+      "acceptance": "保留60秒窗口与真实网页预设流程；浏览器准备完成后经真实表单保存新排期，实际capture成功，参数/词元、原图与预览的独立取回、报告与ACK均通过。",
+      "unresolved": []
+    },
+    {
+      "diagnosis_id": 18,
+      "nodeid": "tests/integration/test_camctl_c_module_roundtrip.py::test_capture_obtain_cleanup_roundtrip_via_c_module",
+      "root_cause": "三种拍摄共用同一相机和同一5秒窗口；软件准备后首次窗口观察已在scheduled_at+4.80秒附近。照片先获得真实调用并成功，后两项尚未派发时窗口耗尽。该失败不能归因于取回或清理生产路径。",
+      "classification": "原基线已失败的测试装配时序缺陷，当前仍复现",
+      "first_real_error": "拍照已实际 START、完成并登记产物；拍录和延时已进入 RUNNING 并保存窗口内观察，但在尚未取得 START 机会时保存 EXPIRED/window_exhausted。",
+      "completed_before_failure": "客户端导出、C host submit、照片 START、结果列举和照片产物登记成功；两种取回已初始化，清理尚待执行。",
+      "status": {
+        "historical_baseline_outcome": "failed",
+        "frozen_outcome": "failed",
+        "frozen_is_new_failure_vs_baseline": false,
+        "production_regression_proven": false,
+        "latest_status": "1973dc05中央补测失败",
+        "closed": false,
+        "current_actions": [
+          {
+            "id": 1,
+            "name": "拍照",
+            "status": 3,
+            "execution_started": 1,
+            "first_window_observed_at": 1792908543802199,
+            "expiration_reason": null,
+            "error_code": null
+          },
+          {
+            "id": 2,
+            "name": "拍录",
+            "status": 5,
+            "execution_started": 1,
+            "first_window_observed_at": 1792908543812328,
+            "expiration_reason": 2,
+            "error_code": null
+          },
+          {
+            "id": 3,
+            "name": "延时",
+            "status": 5,
+            "execution_started": 1,
+            "first_window_observed_at": 1792908543827959,
+            "expiration_reason": 2,
+            "error_code": null
+          },
+          {
+            "id": 4,
+            "name": "取照片",
+            "status": 2,
+            "execution_started": 1,
+            "first_window_observed_at": null,
+            "expiration_reason": null,
+            "error_code": null
+          },
+          {
+            "id": 5,
+            "name": "取延时",
+            "status": 2,
+            "execution_started": 1,
+            "first_window_observed_at": null,
+            "expiration_reason": null,
+            "error_code": null
+          },
+          {
+            "id": 6,
+            "name": "清理",
+            "status": 1,
+            "execution_started": 0,
+            "first_window_observed_at": null,
+            "expiration_reason": null,
+            "error_code": null
+          }
+        ],
+        "current_first_error": "继续保存实际EXPIRED；未进入该身份的后续取回/交付/清理或恢复验收路径。"
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/016-root-test_camctl_c_module_roundtrip-shard-1/artifacts/output.log",
+          "line": 3,
+          "detail": "冻结48d2ee64原始pytest失败"
+        },
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/016-root-test_camctl_c_module_roundtrip-shard-1/tmp/pytest/test_capture_obtain_cleanup_ro0/deployment/state.db",
+          "detail": "只读查询保存事实；明细见独立派生证据",
+          "sql": "SELECT id,name,status,execution_started,first_window_observed_at,expiration_reason FROM actions; SELECT * FROM operation_runs; SELECT * FROM operation_attempts;"
+        },
+        {
+          "path": "/tmp/camctl-diag-clock-db-evidence.json",
+          "line": 148,
+          "detail": "原始数据库完整行与历史事件的只读导出"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-timing/cross-component-cases.csv",
+          "line": 3,
+          "detail": "原计时基线status=failed"
+        },
+        {
+          "path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/003-root-test_camctl_c_module_roundtrip/artifacts/output.log",
+          "line": 120,
+          "detail": "当前1973dc05 jobs4原始输出"
+        },
+        {
+          "path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/003-root-test_camctl_c_module_roundtrip/tmp/pytest/test_capture_obtain_cleanup_ro0/deployment/state.db",
+          "detail": "当前中央补测的真实状态库",
+          "sql": "SELECT id,name,status,expiration_reason FROM actions ORDER BY id"
+        }
+      ],
+      "recommendation": "在对应成功或恢复场景显式启用已有 Deployment 受控业务钟，从该世界的 business UTC 生成原排期；准备完成后 freeze_at 原 scheduled_at，在真实 START 或原有在途门闩已保存后才从同一对 UTC/单调读数恢复。保留原 max_delay_ms、真实客户端、CLI、SQLite、C host 及后续真实等待。轮询同时观察当前CLI退出和不相容终态并保存诊断。",
+      "acceptance": "六动作均成功；三份独立来源产物、两份交付、仅照片清理及availability矩阵、C领取、报告字节、客户端导入和累计ACK全部保持；同一相机冲突规则保持。",
+      "unresolved": [
+        "中央补测仍在原窗口内/外终态处停止，完整业务目标尚无成功见证；应先在测试装配隔离准备后再检查后续真实协作，不根据未到达路径推断生产故障。"
+      ]
+    },
+    {
+      "diagnosis_id": 22,
+      "nodeid": "tests/integration/test_video_size_estimate.py::test_record_estimate_stays_out_of_execution_and_report",
+      "root_cause": "测试在确定 scheduled_at 后继续执行真实客户端导出、CLI 初始化及初始报告等软件准备；这些准备消耗真实启动窗口，测试未把业务时间与准备耗时隔离。生产端按既有窗口契约拒绝晚发新的 START。",
+      "classification": "新观察到的测试装配时序失败，后续测试侧修正已闭合；未证实生产回归",
+      "first_real_error": "估算交接录像保存 EXPIRED/window_missed，execution_started=0；不是估算参数进入执行参数或报告的断言失败。",
+      "completed_before_failure": "CLI init、能力加载、客户端录像草稿及导出、submit 和 run 退出码检查成功。",
+      "status": {
+        "historical_baseline_outcome": "passed",
+        "frozen_outcome": "failed",
+        "frozen_is_new_failure_vs_baseline": true,
+        "production_regression_proven": false,
+        "latest_status": "此前定向补测通过，1973dc05中央本轮未重跑该已闭合身份",
+        "closed": true,
+        "latest_pass": {
+          "nodeid": "tests/integration/test_video_size_estimate.py::test_record_estimate_stays_out_of_execution_and_report",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.0014048940065549687
+            },
+            "call": {
+              "outcome": "passed",
+              "duration_seconds": 25.111254593000922
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.0010029969998868182
+            }
+          },
+          "outcome": "passed",
+          "duration_seconds": 25.113662484007364,
+          "task": "root/test_video_size_estimate",
+          "source_commit": "37b7bb17727ad029468861d45c5658daf99b1f05",
+          "snapshot_sha256": "0de0b8dd86388c11dd750d2ed1bb732672aac6d511a16aba43af9710fe9b73f3",
+          "run": "/tmp/camctl-itopt-real-clock-ready-20261025"
+        }
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/031-root-test_video_size_estimate/artifacts/output.log",
+          "line": 3,
+          "detail": "冻结48d2ee64原始pytest失败"
+        },
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/031-root-test_video_size_estimate/tmp/pytest/test_record_estimate_stays_out0/deployment/state.db",
+          "detail": "只读查询保存事实；明细见独立派生证据",
+          "sql": "SELECT id,name,status,execution_started,first_window_observed_at,expiration_reason FROM actions; SELECT * FROM operation_runs; SELECT * FROM operation_attempts;"
+        },
+        {
+          "path": "/tmp/camctl-diag-clock-db-evidence.json",
+          "line": 788,
+          "detail": "原始数据库完整行与历史事件的只读导出"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-timing/cross-component-cases.csv",
+          "line": 82,
+          "detail": "原计时基线status=passed"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-optimization/combined-validation.json",
+          "line": 4044,
+          "detail": "匹配同一nodeid的真实passed证据与执行源码身份"
+        }
+      ],
+      "recommendation": "在对应成功或恢复场景显式启用已有 Deployment 受控业务钟，从该世界的 business UTC 生成原排期；准备完成后 freeze_at 原 scheduled_at，在真实 START 或原有在途门闩已保存后才从同一对 UTC/单调读数恢复。保留原 max_delay_ms、真实客户端、CLI、SQLite、C host 及后续真实等待。轮询同时观察当前CLI退出和不相容终态并保存诊断。",
+      "acceptance": "真实录像成功；估算只在客户端展示，完整effective_params及报告仍不含估算。",
+      "unresolved": []
+    },
+    {
+      "diagnosis_id": 23,
+      "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_cross_plan_reference_and_multi_request",
+      "root_cause": "测试在确定 scheduled_at 后继续执行真实客户端导出、CLI 初始化及初始报告等软件准备；这些准备消耗真实启动窗口，测试未把业务时间与准备耗时隔离。生产端按既有窗口契约拒绝晚发新的 START。",
+      "classification": "新观察到的测试装配时序失败，后续测试侧修正已闭合；未证实生产回归",
+      "first_real_error": "两份计划的首拍、次拍各自保存 EXPIRED/window_missed，均无 START；取回首拍随后以 obtain_items_failed(21) 结束，逐来源记录 no_outputs。",
+      "completed_before_failure": "两次真实客户端导出、两次 submit、两次 run 及计划 completed 检查成功。",
+      "status": {
+        "historical_baseline_outcome": "passed",
+        "frozen_outcome": "failed",
+        "frozen_is_new_failure_vs_baseline": true,
+        "production_regression_proven": false,
+        "latest_status": "此前定向补测通过，1973dc05中央本轮未重跑该已闭合身份",
+        "closed": true,
+        "latest_pass": {
+          "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_cross_plan_reference_and_multi_request",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.002082668994262349
+            },
+            "call": {
+              "outcome": "passed",
+              "duration_seconds": 57.767297095000686
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.002932837000116706
+            }
+          },
+          "outcome": "passed",
+          "duration_seconds": 57.772312600995065,
+          "task": "root/test_camctl_output_roundtrip/shard-1",
+          "source_commit": "4728a4cf247dceae1fb11f5ed1a8eec7491238e0",
+          "snapshot_sha256": "08faf94a07b15aa637e32b2c2daa5fac9ea57c11d21d1ff493b65329978c8cb3",
+          "run": "/tmp/camctl-itopt-combined-20261025"
+        }
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/033-root-test_camctl_output_roundtrip-shard-1/artifacts/output.log",
+          "line": 3,
+          "detail": "冻结48d2ee64原始pytest失败"
+        },
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/033-root-test_camctl_output_roundtrip-shard-1/tmp/pytest/test_cross_plan_reference_and_0/deployment/state.db",
+          "detail": "只读查询保存事实；明细见独立派生证据",
+          "sql": "SELECT id,name,status,execution_started,first_window_observed_at,expiration_reason FROM actions; SELECT * FROM operation_runs; SELECT * FROM operation_attempts;"
+        },
+        {
+          "path": "/tmp/camctl-diag-clock-db-evidence.json",
+          "line": 927,
+          "detail": "原始数据库完整行与历史事件的只读导出"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-timing/cross-component-cases.csv",
+          "line": 46,
+          "detail": "原计时基线status=passed"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-optimization/combined-validation.json",
+          "line": 3561,
+          "detail": "匹配同一nodeid的真实passed证据与执行源码身份"
+        }
+      ],
+      "recommendation": "在对应成功或恢复场景显式启用已有 Deployment 受控业务钟，从该世界的 business UTC 生成原排期；准备完成后 freeze_at 原 scheduled_at，在真实 START 或原有在途门闩已保存后才从同一对 UTC/单调读数恢复。保留原 max_delay_ms、真实客户端、CLI、SQLite、C host 及后续真实等待。轮询同时观察当前CLI退出和不相容终态并保存诊断。",
+      "acceptance": "两拍摄及跨计划取回均成功，引用指向首计划的真实产物及交付，真实客户端导入可定位。",
+      "unresolved": []
+    },
+    {
+      "diagnosis_id": 24,
+      "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_recording_delivery_survives_late_cancel",
+      "root_cause": "测试在确定 scheduled_at 后继续执行真实客户端导出、CLI 初始化及初始报告等软件准备；这些准备消耗真实启动窗口，测试未把业务时间与准备耗时隔离。生产端按既有窗口契约拒绝晚发新的 START。",
+      "classification": "新观察到的测试装配时序失败，后续测试侧修正已闭合；未证实生产回归",
+      "first_real_error": "拍录保存 EXPIRED/window_missed；取回随后因来源没有产物而失败(21/no_outputs)，测试尚未进入晚取消对已交付文件的检查。",
+      "completed_before_failure": "真实客户端导出、submit、run 退出成功及计划 completed 检查成功；无交付成功事实。",
+      "status": {
+        "historical_baseline_outcome": "passed",
+        "frozen_outcome": "failed",
+        "frozen_is_new_failure_vs_baseline": true,
+        "production_regression_proven": false,
+        "latest_status": "此前定向补测通过，1973dc05中央本轮未重跑该已闭合身份",
+        "closed": true,
+        "latest_pass": {
+          "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_recording_delivery_survives_late_cancel",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.001977523003006354
+            },
+            "call": {
+              "outcome": "passed",
+              "duration_seconds": 32.28421092699864
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.0005308769978000782
+            }
+          },
+          "outcome": "passed",
+          "duration_seconds": 32.286719326999446,
+          "task": "root/test_camctl_output_roundtrip/shard-2",
+          "source_commit": "4728a4cf247dceae1fb11f5ed1a8eec7491238e0",
+          "snapshot_sha256": "08faf94a07b15aa637e32b2c2daa5fac9ea57c11d21d1ff493b65329978c8cb3",
+          "run": "/tmp/camctl-itopt-combined-20261025"
+        }
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/035-root-test_camctl_output_roundtrip-shard-2/artifacts/output.log",
+          "line": 3,
+          "detail": "冻结48d2ee64原始pytest失败"
+        },
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/035-root-test_camctl_output_roundtrip-shard-2/tmp/pytest/test_recording_delivery_surviv0/deployment/state.db",
+          "detail": "只读查询保存事实；明细见独立派生证据",
+          "sql": "SELECT id,name,status,execution_started,first_window_observed_at,expiration_reason FROM actions; SELECT * FROM operation_runs; SELECT * FROM operation_attempts;"
+        },
+        {
+          "path": "/tmp/camctl-diag-clock-db-evidence.json",
+          "line": 1276,
+          "detail": "原始数据库完整行与历史事件的只读导出"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-timing/cross-component-cases.csv",
+          "line": 53,
+          "detail": "原计时基线status=passed"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-optimization/combined-validation.json",
+          "line": 3584,
+          "detail": "匹配同一nodeid的真实passed证据与执行源码身份"
+        }
+      ],
+      "recommendation": "在对应成功或恢复场景显式启用已有 Deployment 受控业务钟，从该世界的 business UTC 生成原排期；准备完成后 freeze_at 原 scheduled_at，在真实 START 或原有在途门闩已保存后才从同一对 UTC/单调读数恢复。保留原 max_delay_ms、真实客户端、CLI、SQLite、C host 及后续真实等待。轮询同时观察当前CLI退出和不相容终态并保存诊断。",
+      "acceptance": "录像与取回先真实完成；晚取消后来源历史与已发布交付保持原身份和字节。",
+      "unresolved": []
+    },
+    {
+      "diagnosis_id": 25,
+      "nodeid": "tests/integration/test_camctl_session_recovery.py::test_report_failure_preserves_device_work_and_redelivers",
+      "root_cause": "测试在确定 scheduled_at 后继续执行真实客户端导出、CLI 初始化及初始报告等软件准备；这些准备消耗真实启动窗口，测试未把业务时间与准备耗时隔离。生产端按既有窗口契约拒绝晚发新的 START。",
+      "classification": "新观察到的测试装配时序失败，后续测试侧修正已闭合；未证实生产回归",
+      "first_real_error": "shoot 保存 EXPIRED/window_missed，无 START；测试尚未取得预期的拍摄成功同步点，报告故障恢复与重投步骤尚未执行。",
+      "completed_before_failure": "CLI init、客户端导出、submit 成功，真实 run 进入会话且报告故障路径已使 ready 发布不能成功；拍摄未开始。",
+      "status": {
+        "historical_baseline_outcome": "passed",
+        "frozen_outcome": "failed",
+        "frozen_is_new_failure_vs_baseline": true,
+        "production_regression_proven": false,
+        "latest_status": "此前定向补测通过，1973dc05中央本轮未重跑该已闭合身份",
+        "closed": true,
+        "latest_pass": {
+          "nodeid": "tests/integration/test_camctl_session_recovery.py::test_report_failure_preserves_device_work_and_redelivers",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.0016628430021228269
+            },
+            "call": {
+              "outcome": "passed",
+              "duration_seconds": 24.981124590995023
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.0013293959927977994
+            }
+          },
+          "outcome": "passed",
+          "duration_seconds": 24.984116829989944,
+          "task": "root/test_camctl_session_recovery/shard-4",
+          "source_commit": "4728a4cf247dceae1fb11f5ed1a8eec7491238e0",
+          "snapshot_sha256": "08faf94a07b15aa637e32b2c2daa5fac9ea57c11d21d1ff493b65329978c8cb3",
+          "run": "/tmp/camctl-itopt-combined-20261025"
+        }
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/036-root-test_camctl_session_recovery-shard-4/artifacts/output.log",
+          "line": 3,
+          "detail": "冻结48d2ee64原始pytest失败"
+        },
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/036-root-test_camctl_session_recovery-shard-4/tmp/pytest/test_report_failure_preserves_0/deployment/state.db",
+          "detail": "只读查询保存事实；明细见独立派生证据",
+          "sql": "SELECT id,name,status,execution_started,first_window_observed_at,expiration_reason FROM actions; SELECT * FROM operation_runs; SELECT * FROM operation_attempts;"
+        },
+        {
+          "path": "/tmp/camctl-diag-clock-db-evidence.json",
+          "line": 1502,
+          "detail": "原始数据库完整行与历史事件的只读导出"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-timing/cross-component-cases.csv",
+          "line": 75,
+          "detail": "原计时基线status=passed"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-optimization/combined-validation.json",
+          "line": 3676,
+          "detail": "匹配同一nodeid的真实passed证据与执行源码身份"
+        }
+      ],
+      "recommendation": "在对应成功或恢复场景显式启用已有 Deployment 受控业务钟，从该世界的 business UTC 生成原排期；准备完成后 freeze_at 原 scheduled_at，在真实 START 或原有在途门闩已保存后才从同一对 UTC/单调读数恢复。保留原 max_delay_ms、真实客户端、CLI、SQLite、C host 及后续真实等待。轮询同时观察当前CLI退出和不相容终态并保存诊断。",
+      "acceptance": "保留原run启动前ready已被普通文件占据的故障安排；拍摄仍能真实成功，报告失败责任保留；修复目录后的新run成功重投相同业务事实。",
+      "unresolved": []
+    },
+    {
+      "diagnosis_id": 26,
+      "nodeid": "tests/integration/test_camctl_session_recovery.py::test_concurrent_submits_and_duplicate_identity",
+      "root_cause": "测试在确定 scheduled_at 后继续执行真实客户端导出、CLI 初始化及初始报告等软件准备；这些准备消耗真实启动窗口，测试未把业务时间与准备耗时隔离。生产端按既有窗口契约拒绝晚发新的 START。",
+      "classification": "原基线已失败的测试装配时序缺陷，当前仍复现",
+      "first_real_error": "shoot-a、shoot-b 均保存 EXPIRED/window_missed，无 START；三个并发 submit 已全部成功，两份计划及两份动作身份断言已通过。",
+      "completed_before_failure": "三个真实 submit 全部退出0；同一请求重送未重复受理，计划数和动作数均为2；run退出0，计划各completed。",
+      "status": {
+        "historical_baseline_outcome": "failed",
+        "frozen_outcome": "failed",
+        "frozen_is_new_failure_vs_baseline": false,
+        "production_regression_proven": false,
+        "latest_status": "1973dc05中央补测失败",
+        "closed": false,
+        "current_actions": [
+          {
+            "id": 1,
+            "name": "shoot-b",
+            "status": 5,
+            "execution_started": 0,
+            "first_window_observed_at": null,
+            "expiration_reason": 1,
+            "error_code": null
+          },
+          {
+            "id": 2,
+            "name": "shoot-a",
+            "status": 5,
+            "execution_started": 0,
+            "first_window_observed_at": null,
+            "expiration_reason": 1,
+            "error_code": null
+          }
+        ],
+        "current_first_error": "继续保存实际EXPIRED；未进入该身份的后续取回/交付/清理或恢复验收路径。"
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/037-root-test_camctl_session_recovery-shard-3/artifacts/output.log",
+          "line": 3,
+          "detail": "冻结48d2ee64原始pytest失败"
+        },
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/037-root-test_camctl_session_recovery-shard-3/tmp/pytest/test_concurrent_submits_and_du0/deployment/state.db",
+          "detail": "只读查询保存事实；明细见独立派生证据",
+          "sql": "SELECT id,name,status,execution_started,first_window_observed_at,expiration_reason FROM actions; SELECT * FROM operation_runs; SELECT * FROM operation_attempts;"
+        },
+        {
+          "path": "/tmp/camctl-diag-clock-db-evidence.json",
+          "line": 1653,
+          "detail": "原始数据库完整行与历史事件的只读导出"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-timing/cross-component-cases.csv",
+          "line": 92,
+          "detail": "原计时基线status=failed"
+        },
+        {
+          "path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/010-root-test_camctl_session_recovery/artifacts/output.log",
+          "line": 63,
+          "detail": "当前1973dc05 jobs4原始输出"
+        },
+        {
+          "path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/010-root-test_camctl_session_recovery/tmp/pytest/test_concurrent_submits_and_du0/deployment/state.db",
+          "detail": "当前中央补测的真实状态库",
+          "sql": "SELECT id,name,status,expiration_reason FROM actions ORDER BY id"
+        }
+      ],
+      "recommendation": "在对应成功或恢复场景显式启用已有 Deployment 受控业务钟，从该世界的 business UTC 生成原排期；准备完成后 freeze_at 原 scheduled_at，在真实 START 或原有在途门闩已保存后才从同一对 UTC/单调读数恢复。保留原 max_delay_ms、真实客户端、CLI、SQLite、C host 及后续真实等待。轮询同时观察当前CLI退出和不相容终态并保存诊断。",
+      "acceptance": "保留三个并发submit、两份请求、同正文重送；实际仅两份plan/action和两次拍摄/两份output，均成功；并发受理顺序不作为固定动作ID预期。",
+      "unresolved": [
+        "中央补测仍在原窗口内/外终态处停止，完整业务目标尚无成功见证；应先在测试装配隔离准备后再检查后续真实协作，不根据未到达路径推断生产故障。"
+      ]
+    },
+    {
+      "diagnosis_id": 27,
+      "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_repeated_obtain_of_same_output_yields_independent_deliveries",
+      "root_cause": "测试在确定 scheduled_at 后继续执行真实客户端导出、CLI 初始化及初始报告等软件准备；这些准备消耗真实启动窗口，测试未把业务时间与准备耗时隔离。生产端按既有窗口契约拒绝晚发新的 START。",
+      "classification": "新观察到的测试装配时序失败，后续测试侧修正已闭合；未证实生产回归",
+      "first_real_error": "拍录保存 EXPIRED/window_missed；两次取回分别 no_outputs，动作各以21失败；没有形成可比较的独立 delivery。",
+      "completed_before_failure": "客户端导出、submit、run、计划 completed 均通过；来源未拍摄，两个 delivery 未建立。",
+      "status": {
+        "historical_baseline_outcome": "passed",
+        "frozen_outcome": "failed",
+        "frozen_is_new_failure_vs_baseline": true,
+        "production_regression_proven": false,
+        "latest_status": "此前定向补测通过，1973dc05中央本轮未重跑该已闭合身份",
+        "closed": true,
+        "latest_pass": {
+          "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_repeated_obtain_of_same_output_yields_independent_deliveries",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.0036999959993408993
+            },
+            "call": {
+              "outcome": "passed",
+              "duration_seconds": 20.324736560003657
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.0005344130040612072
+            }
+          },
+          "outcome": "passed",
+          "duration_seconds": 20.32897096900706,
+          "task": "root/test_camctl_output_roundtrip/shard-3",
+          "source_commit": "4728a4cf247dceae1fb11f5ed1a8eec7491238e0",
+          "snapshot_sha256": "08faf94a07b15aa637e32b2c2daa5fac9ea57c11d21d1ff493b65329978c8cb3",
+          "run": "/tmp/camctl-itopt-combined-20261025"
+        }
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/038-root-test_camctl_output_roundtrip-shard-4/artifacts/output.log",
+          "line": 3,
+          "detail": "冻结48d2ee64原始pytest失败"
+        },
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/038-root-test_camctl_output_roundtrip-shard-4/tmp/pytest/test_repeated_obtain_of_same_o0/deployment/state.db",
+          "detail": "只读查询保存事实；明细见独立派生证据",
+          "sql": "SELECT id,name,status,execution_started,first_window_observed_at,expiration_reason FROM actions; SELECT * FROM operation_runs; SELECT * FROM operation_attempts;"
+        },
+        {
+          "path": "/tmp/camctl-diag-clock-db-evidence.json",
+          "line": 1849,
+          "detail": "原始数据库完整行与历史事件的只读导出"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-timing/cross-component-cases.csv",
+          "line": 88,
+          "detail": "原计时基线status=passed"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-optimization/combined-validation.json",
+          "line": 3607,
+          "detail": "匹配同一nodeid的真实passed证据与执行源码身份"
+        }
+      ],
+      "recommendation": "在对应成功或恢复场景显式启用已有 Deployment 受控业务钟，从该世界的 business UTC 生成原排期；准备完成后 freeze_at 原 scheduled_at，在真实 START 或原有在途门闩已保存后才从同一对 UTC/单调读数恢复。保留原 max_delay_ms、真实客户端、CLI、SQLite、C host 及后续真实等待。轮询同时观察当前CLI退出和不相容终态并保存诊断。",
+      "acceptance": "同一来源实际成功，两份独立取回分别形成不同delivery，output保持同一身份且字节相同。",
+      "unresolved": []
+    },
+    {
+      "diagnosis_id": 28,
+      "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_auto_preview_obtains_registered_preview",
+      "root_cause": "测试在确定 scheduled_at 后继续执行真实客户端导出、CLI 初始化及初始报告等软件准备；这些准备消耗真实启动窗口，测试未把业务时间与准备耗时隔离。生产端按既有窗口契约拒绝晚发新的 START。",
+      "classification": "新观察到的测试装配时序失败，后续测试侧修正已闭合；未证实生产回归",
+      "first_real_error": "shoot 保存 EXPIRED/window_missed；自动预览取回随后 no_outputs/21；没有 START 或预览产物登记。",
+      "completed_before_failure": "客户端自动展开预览动作并成功导出、submit、run，来源没有拍摄。",
+      "status": {
+        "historical_baseline_outcome": "passed",
+        "frozen_outcome": "failed",
+        "frozen_is_new_failure_vs_baseline": true,
+        "production_regression_proven": false,
+        "latest_status": "此前定向补测通过，1973dc05中央本轮未重跑该已闭合身份",
+        "closed": true,
+        "latest_pass": {
+          "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_auto_preview_obtains_registered_preview",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.002568082003563177
+            },
+            "call": {
+              "outcome": "passed",
+              "duration_seconds": 24.055348144000163
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.025196301001415122
+            }
+          },
+          "outcome": "passed",
+          "duration_seconds": 24.08311252700514,
+          "task": "root/test_camctl_output_roundtrip/shard-4",
+          "source_commit": "4728a4cf247dceae1fb11f5ed1a8eec7491238e0",
+          "snapshot_sha256": "08faf94a07b15aa637e32b2c2daa5fac9ea57c11d21d1ff493b65329978c8cb3",
+          "run": "/tmp/camctl-itopt-combined-20261025"
+        }
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/039-root-test_camctl_output_roundtrip-shard-3/artifacts/output.log",
+          "line": 3,
+          "detail": "冻结48d2ee64原始pytest失败"
+        },
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/039-root-test_camctl_output_roundtrip-shard-3/tmp/pytest/test_auto_preview_obtains_regi0/deployment/state.db",
+          "detail": "只读查询保存事实；明细见独立派生证据",
+          "sql": "SELECT id,name,status,execution_started,first_window_observed_at,expiration_reason FROM actions; SELECT * FROM operation_runs; SELECT * FROM operation_attempts;"
+        },
+        {
+          "path": "/tmp/camctl-diag-clock-db-evidence.json",
+          "line": 2156,
+          "detail": "原始数据库完整行与历史事件的只读导出"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-timing/cross-component-cases.csv",
+          "line": 90,
+          "detail": "原计时基线status=passed"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-optimization/combined-validation.json",
+          "line": 3538,
+          "detail": "匹配同一nodeid的真实passed证据与执行源码身份"
+        }
+      ],
+      "recommendation": "在对应成功或恢复场景显式启用已有 Deployment 受控业务钟，从该世界的 business UTC 生成原排期；准备完成后 freeze_at 原 scheduled_at，在真实 START 或原有在途门闩已保存后才从同一对 UTC/单调读数恢复。保留原 max_delay_ms、真实客户端、CLI、SQLite、C host 及后续真实等待。轮询同时观察当前CLI退出和不相容终态并保存诊断。",
+      "acceptance": "来源和自动预览均成功，预览真实登记并且取回选择预览而非原片。",
+      "unresolved": []
+    },
+    {
+      "diagnosis_id": 29,
+      "nodeid": "tests/integration/test_camctl_output_roundtrip.py::test_three_capture_kinds_partial_obtain",
+      "root_cause": "测试在确定 scheduled_at 后继续执行真实客户端导出、CLI 初始化及初始报告等软件准备；这些准备消耗真实启动窗口，测试未把业务时间与准备耗时隔离。生产端按既有窗口契约拒绝晚发新的 START。",
+      "classification": "原基线已失败的测试装配时序缺陷，当前仍复现",
+      "first_real_error": "拍照、拍录、延时均保存 EXPIRED/window_missed，无 START；两份取回随后 no_outputs/21。",
+      "completed_before_failure": "客户端导出三拍摄与两取回、submit、run、计划completed均通过。",
+      "status": {
+        "historical_baseline_outcome": "failed",
+        "frozen_outcome": "failed",
+        "frozen_is_new_failure_vs_baseline": false,
+        "production_regression_proven": false,
+        "latest_status": "1973dc05中央补测失败",
+        "closed": false,
+        "current_actions": [
+          {
+            "id": 1,
+            "name": "拍照",
+            "status": 5,
+            "execution_started": 0,
+            "first_window_observed_at": null,
+            "expiration_reason": 1,
+            "error_code": null
+          },
+          {
+            "id": 2,
+            "name": "拍录",
+            "status": 5,
+            "execution_started": 0,
+            "first_window_observed_at": null,
+            "expiration_reason": 1,
+            "error_code": null
+          },
+          {
+            "id": 3,
+            "name": "延时",
+            "status": 5,
+            "execution_started": 0,
+            "first_window_observed_at": null,
+            "expiration_reason": 1,
+            "error_code": null
+          },
+          {
+            "id": 4,
+            "name": "取照片",
+            "status": 4,
+            "execution_started": 1,
+            "first_window_observed_at": null,
+            "expiration_reason": null,
+            "error_code": 21
+          },
+          {
+            "id": 5,
+            "name": "取延时",
+            "status": 4,
+            "execution_started": 1,
+            "first_window_observed_at": null,
+            "expiration_reason": null,
+            "error_code": 21
+          }
+        ],
+        "current_first_error": "继续保存实际EXPIRED；未进入该身份的后续取回/交付/清理或恢复验收路径。"
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/039-root-test_camctl_output_roundtrip-shard-3/artifacts/output.log",
+          "line": 72,
+          "detail": "冻结48d2ee64原始pytest失败"
+        },
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/039-root-test_camctl_output_roundtrip-shard-3/tmp/pytest/test_three_capture_kinds_parti0/deployment/state.db",
+          "detail": "只读查询保存事实；明细见独立派生证据",
+          "sql": "SELECT id,name,status,execution_started,first_window_observed_at,expiration_reason FROM actions; SELECT * FROM operation_runs; SELECT * FROM operation_attempts;"
+        },
+        {
+          "path": "/tmp/camctl-diag-clock-db-evidence.json",
+          "line": 2382,
+          "detail": "原始数据库完整行与历史事件的只读导出"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-timing/cross-component-cases.csv",
+          "line": 80,
+          "detail": "原计时基线status=failed"
+        },
+        {
+          "path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/009-root-test_camctl_output_roundtrip/artifacts/output.log",
+          "line": 91,
+          "detail": "当前1973dc05 jobs4原始输出"
+        },
+        {
+          "path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/009-root-test_camctl_output_roundtrip/tmp/pytest/test_three_capture_kinds_parti0/deployment/state.db",
+          "detail": "当前中央补测的真实状态库",
+          "sql": "SELECT id,name,status,expiration_reason FROM actions ORDER BY id"
+        }
+      ],
+      "recommendation": "在对应成功或恢复场景显式启用已有 Deployment 受控业务钟，从该世界的 business UTC 生成原排期；准备完成后 freeze_at 原 scheduled_at，在真实 START 或原有在途门闩已保存后才从同一对 UTC/单调读数恢复。保留原 max_delay_ms、真实客户端、CLI、SQLite、C host 及后续真实等待。轮询同时观察当前CLI退出和不相容终态并保存诊断。",
+      "acceptance": "五动作均成功；三拍摄产物各保留身份，仅照片和延时产生两份交付，真实报告及导入保持。",
+      "unresolved": [
+        "中央补测仍在原窗口内/外终态处停止，完整业务目标尚无成功见证；应先在测试装配隔离准备后再检查后续真实协作，不根据未到达路径推断生产故障。"
+      ]
+    },
+    {
+      "diagnosis_id": 30,
+      "nodeid": "tests/integration/test_camctl_media_roundtrip.py::test_excess_recording_repairs_without_probing",
+      "root_cause": "原日志只能把错误定位在 START 意图可靠提交之后、START 结果保存之前的 state_db_error；没有保存底层异常链，无法从现存证据确定其精确触发点。原意图只比window_end早180微秒，存在窗口交界，但不能据此宣称已经过期或确认派发前过期事务有缺陷。当前补测另确认测试错误读取控制计时分支不存在的 actual_duration_s，属于潜伏的断言与契约漂移。",
+      "classification": "原基线已失败；原START阶段state_db_error底层原因未决，当前另暴露潜伏的测试断言契约错误",
+      "first_real_error": "CLI 首个实际会话错误是 state_db_error；此前已保存窗口内观察、RUNNING、START 意图和一次额度，未保存 START 结果、sent_at 或 started_at；动作仍为 RUNNING，并未保存 EXPIRED。轮询60秒后才报告等不到 started_at。",
+      "completed_before_failure": "真实媒体样例已生成、init和submit成功，run通过时钟检查并发布初始报告，窗口观察及START意图提交成功，取回初始化也已提交；之后会话失败。",
+      "status": {
+        "historical_baseline_outcome": "failed",
+        "frozen_outcome": "failed",
+        "frozen_is_new_failure_vs_baseline": false,
+        "production_regression_proven": false,
+        "latest_status": "1973dc05中央补测失败",
+        "closed": false,
+        "current_actions": [
+          {
+            "id": 1,
+            "name": "拍录",
+            "status": 3,
+            "execution_started": 1,
+            "first_window_observed_at": 1792908545841047,
+            "expiration_reason": null,
+            "error_code": null
+          },
+          {
+            "id": 2,
+            "name": "取回",
+            "status": 3,
+            "execution_started": 1,
+            "first_window_observed_at": null,
+            "expiration_reason": null,
+            "error_code": null
+          }
+        ],
+        "current_first_error": "KeyError: actual_duration_s，测试源码第353行；此前两动作均SUCCEEDED、repair_state=5。",
+        "current_recording_processing": [
+          {
+            "check_decision": 2,
+            "check_state": 1,
+            "check_basis_json": "{\"reason\":3,\"target_duration_ms\":3000,\"control_elapsed_ns\":8434007000}",
+            "repair_state": 5,
+            "repair_basis_json": "{\"reason\":2,\"target_duration_ms\":3000,\"threshold_s\":3.5,\"control_elapsed_ns\":8434007000}"
+          }
+        ]
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/040-root-test_camctl_media_roundtrip-shard-1/artifacts/output.log",
+          "line": 3,
+          "detail": "冻结48d2ee64原始pytest失败"
+        },
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/040-root-test_camctl_media_roundtrip-shard-1/tmp/pytest/test_excess_recording_repairs_0/deployment/state.db",
+          "detail": "只读查询保存事实；明细见独立派生证据",
+          "sql": "SELECT id,name,status,execution_started,first_window_observed_at,expiration_reason FROM actions; SELECT * FROM operation_runs; SELECT * FROM operation_attempts;"
+        },
+        {
+          "path": "/tmp/camctl-diag-clock-db-evidence.json",
+          "line": 2779,
+          "detail": "原始数据库完整行与历史事件的只读导出"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-timing/cross-component-cases.csv",
+          "line": 55,
+          "detail": "原计时基线status=failed"
+        },
+        {
+          "path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/006-root-test_camctl_media_roundtrip/artifacts/output.log",
+          "line": 55,
+          "detail": "当前1973dc05 jobs4原始输出"
+        },
+        {
+          "path": "/tmp/camctl-44-diagnostic-current-20261025/tasks/006-root-test_camctl_media_roundtrip/tmp/pytest/test_excess_recording_repairs_0/deployment/state.db",
+          "detail": "当前中央补测的真实状态库",
+          "sql": "SELECT id,name,status,expiration_reason FROM actions ORDER BY id"
+        },
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/040-root-test_camctl_media_roundtrip-shard-1/tmp/pytest/test_excess_recording_repairs_0/deployment/camctl.log",
+          "line": 1,
+          "detail": "原CLI实际会话错误state_db_error"
+        },
+        {
+          "path": "/tmp/camctl-diag-clock-plan-probe.log",
+          "line": 1,
+          "detail": "原库只读/独立副本的轻量诊断：相同未派发结束输入可提交；不是对原未知异常的复现"
+        },
+        {
+          "path": "/tmp/camctl-diag-clock-plan-probe.py",
+          "line": 1,
+          "detail": "探针源码；仅原库副本写入"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/tests/integration/test_camctl_media_roundtrip.py",
+          "line": 353,
+          "detail": "当前测试错误读取媒体时长字段"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/docs/camctl/database/operation-fields.md",
+          "line": 698,
+          "detail": "actual_duration_s只保存媒体探测时长，控制耗时独立表达"
+        },
+        {
+          "path": "/tmp/camctl-failure-diagnosis-20261025/apps/camctl/src/camctl/capture/handlers.py",
+          "line": 3621,
+          "detail": "控制计时多录分支保存control_elapsed_ns"
+        },
+        {
+          "path": "/tmp/camctl-diag-clock-id30-once/receipt.json",
+          "line": 1,
+          "detail": "唯一历史复现命令、原源码身份、诊断diff摘要、退出1及63.552616秒用时"
+        },
+        {
+          "path": "/tmp/camctl-diag-clock-id30-once/output.log",
+          "line": 1,
+          "detail": "本次只有window_missed后等START超时，未重现原state_db_error"
+        },
+        {
+          "path": "/tmp/camctl-diag-clock-id30-once/diagnostic.diff",
+          "line": 1,
+          "detail": "唯一异常映射诊断钩子，没有修改业务分支或时钟"
+        }
+      ],
+      "recommendation": "测试按已确认控制计时契约读取control_elapsed_ns，与threshold_s精确换算比较，不能要求该分支提供actual_duration_s。启动装配可沿已有受控业务钟隔离准备，取得真实START后恢复运行并按原中断及真实等待推进。为原state_db_error增加测试入口异常链与进程退出诊断，独立保留授予后窗口结束分区的真实仓储验收。",
+      "acceptance": "按控制计时依据比较control_elapsed_ns/1e9严格超过原threshold_s，保留actual_duration_s的媒体探测专属语义；修复成品、编码、时长、默认交付、报告完整断言继续执行。另以窗口授予后结束的窄分区保存NOT_DISPATCHED+EXPIRED，不重发START；若会话错误再现，必须保存原异常链与全部进程输出以闭合原state_db_error。",
+      "unresolved": [
+        "原state_db_error没有异常链；无法从现存日志确认底层异常、准确派发是否发生或结果保存故障类别。",
+        "原START意图在window_end前180微秒，窗口交界相关仅为候选触发条件；独立副本的共同过期事务成功，不能把相关性写成已证实生产缺陷。",
+        "当前测试在第353行中止，后续_assert_repaired_delivery与报告断言没有执行，不能因数据库succeeded就宣称整项通过。",
+        "唯一历史复现未到达原START意图后故障分区，只再次保存window_missed；不继续重复复现。仍缺原错误的异常链、准确出错函数和原结果保存回执。"
+      ],
+      "diagnostic_single_replay": {
+        "source_identity": "48d2ee640f3c1243d0a38f1697aaa7e4a74081e1",
+        "original_source": "/tmp/camctl-itopt-final-20261025/tasks/040-root-test_camctl_media_roundtrip-shard-1/source",
+        "cwd": "/tmp/camctl-diag-clock-id30-once/source",
+        "command": [
+          "/tmp/camctl-itopt-final-20261025/tasks/040-root-test_camctl_media_roundtrip-shard-1/source/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "tests/integration/test_camctl_media_roundtrip.py::test_excess_recording_repairs_without_probing",
+          "-q",
+          "--durations=0",
+          "--basetemp",
+          "/tmp/camctl-diag-clock-id30-once/tmp/pytest",
+          "--junitxml",
+          "/tmp/camctl-diag-clock-id30-once/result.xml"
+        ],
+        "changed_file": "apps/camctl/src/camctl/session/service.py",
+        "original_file_sha256": "536e3b0e6ef96be62ca9349576ad6d5301be4bb01050a84697bc219ed30d03c3",
+        "diagnostic_file_sha256": "d21b0e8128584bb2556619c307cafda44d62466bd281892d6fb8dc9ce41a9060",
+        "scope": "仅异常被映射为state_db_error之前追加原异常链；不改行为、时钟、预算和门闩；只运行ID30一次。",
+        "started_monotonic": 60038.265468665,
+        "exit_code": 1,
+        "wall_seconds": 63.55261576200428,
+        "exception_log_exists": false,
+        "observed_outcome": "仅该nodeid执行一次。退出1；原source副本在START意图前先EXPIRED/window_missed，无operation_runs，原state_db_error未复现；没有异常链文件。",
+        "interpretation": "窗口失败与异常未复现不能否定原故障，也不证明相关生产分支没有缺陷；现存证据不足以恢复原异常链。"
+      }
+    },
+    {
+      "diagnosis_id": 31,
+      "nodeid": "tests/integration/test_camctl_media_roundtrip.py::test_insufficient_timing_checks_repairs_and_delivers",
+      "root_cause": "测试在确定 scheduled_at 后继续执行真实客户端导出、CLI 初始化及初始报告等软件准备；这些准备消耗真实启动窗口，测试未把业务时间与准备耗时隔离。生产端按既有窗口契约拒绝晚发新的 START。",
+      "classification": "新观察到的测试装配时序失败，后续测试侧修正已闭合；未证实生产回归",
+      "first_real_error": "拍录保存 EXPIRED/window_missed，无 START；取回随后 no_outputs/21；尚未进入计时不足、媒体探测或修复路径。",
+      "completed_before_failure": "真实媒体样例生成、init和submit成功；run正常结束并保存来源过期及取回失败。",
+      "status": {
+        "historical_baseline_outcome": "passed",
+        "frozen_outcome": "failed",
+        "frozen_is_new_failure_vs_baseline": true,
+        "production_regression_proven": false,
+        "latest_status": "此前定向补测通过，1973dc05中央本轮未重跑该已闭合身份",
+        "closed": true,
+        "latest_pass": {
+          "nodeid": "tests/integration/test_camctl_media_roundtrip.py::test_insufficient_timing_checks_repairs_and_delivers",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.0025999509962275624
+            },
+            "call": {
+              "outcome": "passed",
+              "duration_seconds": 23.255916321002587
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.00039371200546156615
+            }
+          },
+          "outcome": "passed",
+          "duration_seconds": 23.258909984004276,
+          "task": "root/test_camctl_media_roundtrip",
+          "source_commit": "4728a4cf247dceae1fb11f5ed1a8eec7491238e0",
+          "snapshot_sha256": "08faf94a07b15aa637e32b2c2daa5fac9ea57c11d21d1ff493b65329978c8cb3",
+          "run": "/tmp/camctl-itopt-combined-20261025"
+        }
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/041-root-test_camctl_media_roundtrip-shard-2/artifacts/output.log",
+          "line": 3,
+          "detail": "冻结48d2ee64原始pytest失败"
+        },
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/041-root-test_camctl_media_roundtrip-shard-2/tmp/pytest/test_insufficient_timing_check0/deployment/state.db",
+          "detail": "只读查询保存事实；明细见独立派生证据",
+          "sql": "SELECT id,name,status,execution_started,first_window_observed_at,expiration_reason FROM actions; SELECT * FROM operation_runs; SELECT * FROM operation_attempts;"
+        },
+        {
+          "path": "/tmp/camctl-diag-clock-db-evidence.json",
+          "line": 3005,
+          "detail": "原始数据库完整行与历史事件的只读导出"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-timing/cross-component-cases.csv",
+          "line": 58,
+          "detail": "原计时基线status=passed"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-optimization/combined-validation.json",
+          "line": 3515,
+          "detail": "匹配同一nodeid的真实passed证据与执行源码身份"
+        }
+      ],
+      "recommendation": "在对应成功或恢复场景显式启用已有 Deployment 受控业务钟，从该世界的 business UTC 生成原排期；准备完成后 freeze_at 原 scheduled_at，在真实 START 或原有在途门闩已保存后才从同一对 UTC/单调读数恢复。保留原 max_delay_ms、真实客户端、CLI、SQLite、C host 及后续真实等待。轮询同时观察当前CLI退出和不相容终态并保存诊断。",
+      "acceptance": "取得原START后真实中断并恢复，计时不足使实际探测发生，真实修复及交付断言保持。",
+      "unresolved": []
+    },
+    {
+      "diagnosis_id": 34,
+      "nodeid": "tests/integration/test_camctl_capture_roundtrip.py::test_timelapse_recovers_remaining_wait",
+      "root_cause": "测试在确定 scheduled_at 后继续执行真实客户端导出、CLI 初始化及初始报告等软件准备；这些准备消耗真实启动窗口，测试未把业务时间与准备耗时隔离。生产端按既有窗口契约拒绝晚发新的 START。",
+      "classification": "新观察到的测试装配时序失败，后续测试侧修正已闭合；未证实生产回归",
+      "first_real_error": "timelapse 保存 EXPIRED/window_missed，无 START 或首次等待事件；恢复剩余等待的中断点尚未到达。",
+      "completed_before_failure": "init、合法计划提交、run启动及初始报告成功；未进入真实延时等待。",
+      "status": {
+        "historical_baseline_outcome": "passed",
+        "frozen_outcome": "failed",
+        "frozen_is_new_failure_vs_baseline": true,
+        "production_regression_proven": false,
+        "latest_status": "此前定向补测通过，1973dc05中央本轮未重跑该已闭合身份",
+        "closed": true,
+        "latest_pass": {
+          "nodeid": "tests/integration/test_camctl_capture_roundtrip.py::test_timelapse_recovers_remaining_wait",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.0015655520037398674
+            },
+            "call": {
+              "outcome": "passed",
+              "duration_seconds": 17.34221471100318
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.0013924360027885996
+            }
+          },
+          "outcome": "passed",
+          "duration_seconds": 17.34517269900971,
+          "task": "root/test_camctl_capture_roundtrip",
+          "source_commit": "4728a4cf247dceae1fb11f5ed1a8eec7491238e0",
+          "snapshot_sha256": "08faf94a07b15aa637e32b2c2daa5fac9ea57c11d21d1ff493b65329978c8cb3",
+          "run": "/tmp/camctl-itopt-combined-20261025"
+        }
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/045-root-test_camctl_capture_roundtrip/artifacts/output.log",
+          "line": 3,
+          "detail": "冻结48d2ee64原始pytest失败"
+        },
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/045-root-test_camctl_capture_roundtrip/tmp/pytest/test_timelapse_recovers_remain0/deployment/state.db",
+          "detail": "只读查询保存事实；明细见独立派生证据",
+          "sql": "SELECT id,name,status,execution_started,first_window_observed_at,expiration_reason FROM actions; SELECT * FROM operation_runs; SELECT * FROM operation_attempts;"
+        },
+        {
+          "path": "/tmp/camctl-diag-clock-db-evidence.json",
+          "line": 3231,
+          "detail": "原始数据库完整行与历史事件的只读导出"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-timing/cross-component-cases.csv",
+          "line": 94,
+          "detail": "原计时基线status=passed"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-optimization/combined-validation.json",
+          "line": 3492,
+          "detail": "匹配同一nodeid的真实passed证据与执行源码身份"
+        }
+      ],
+      "recommendation": "在对应成功或恢复场景显式启用已有 Deployment 受控业务钟，从该世界的 business UTC 生成原排期；准备完成后 freeze_at 原 scheduled_at，在真实 START 或原有在途门闩已保存后才从同一对 UTC/单调读数恢复。保留原 max_delay_ms、真实客户端、CLI、SQLite、C host 及后续真实等待。轮询同时观察当前CLI退出和不相容终态并保存诊断。",
+      "acceptance": "原首次等待事件持久化后终止旧执行组，重启继续同一expected_check_at及剩余等待，不重发START。",
+      "unresolved": []
+    },
+    {
+      "diagnosis_id": 35,
+      "nodeid": "tests/integration/test_camctl_session_recovery.py::test_process_restart_resumes_interrupted_work",
+      "root_cause": "测试在确定 scheduled_at 后继续执行真实客户端导出、CLI 初始化及初始报告等软件准备；这些准备消耗真实启动窗口，测试未把业务时间与准备耗时隔离。生产端按既有窗口契约拒绝晚发新的 START。",
+      "classification": "新观察到的测试装配时序失败，后续测试侧修正已闭合；未证实生产回归",
+      "first_real_error": "timelapse 保存 EXPIRED/window_missed，首次受理时已经超过启动窗口约2.258秒；没有 START 流程，因此未到达预期的启动结果中断点。",
+      "completed_before_failure": "init、客户端导出和submit成功；run启动但在首次可执行观察前窗口已结束。",
+      "status": {
+        "historical_baseline_outcome": "passed",
+        "frozen_outcome": "failed",
+        "frozen_is_new_failure_vs_baseline": true,
+        "production_regression_proven": false,
+        "latest_status": "此前定向补测通过，1973dc05中央本轮未重跑该已闭合身份",
+        "closed": true,
+        "latest_pass": {
+          "nodeid": "tests/integration/test_camctl_session_recovery.py::test_process_restart_resumes_interrupted_work",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.0018995290010934696
+            },
+            "call": {
+              "outcome": "passed",
+              "duration_seconds": 31.469180237996625
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.00039274799928534776
+            }
+          },
+          "outcome": "passed",
+          "duration_seconds": 31.471472514997004,
+          "task": "root/test_camctl_session_recovery/shard-1",
+          "source_commit": "4728a4cf247dceae1fb11f5ed1a8eec7491238e0",
+          "snapshot_sha256": "08faf94a07b15aa637e32b2c2daa5fac9ea57c11d21d1ff493b65329978c8cb3",
+          "run": "/tmp/camctl-itopt-combined-20261025"
+        }
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/047-root-test_camctl_session_recovery-shard-1/artifacts/output.log",
+          "line": 3,
+          "detail": "冻结48d2ee64原始pytest失败"
+        },
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/047-root-test_camctl_session_recovery-shard-1/tmp/pytest/test_process_restart_resumes_i0/deployment/state.db",
+          "detail": "只读查询保存事实；明细见独立派生证据",
+          "sql": "SELECT id,name,status,execution_started,first_window_observed_at,expiration_reason FROM actions; SELECT * FROM operation_runs; SELECT * FROM operation_attempts;"
+        },
+        {
+          "path": "/tmp/camctl-diag-clock-db-evidence.json",
+          "line": 3370,
+          "detail": "原始数据库完整行与历史事件的只读导出"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-timing/cross-component-cases.csv",
+          "line": 61,
+          "detail": "原计时基线status=passed"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-optimization/combined-validation.json",
+          "line": 3653,
+          "detail": "匹配同一nodeid的真实passed证据与执行源码身份"
+        }
+      ],
+      "recommendation": "在对应成功或恢复场景显式启用已有 Deployment 受控业务钟，从该世界的 business UTC 生成原排期；准备完成后 freeze_at 原 scheduled_at，在真实 START 或原有在途门闩已保存后才从同一对 UTC/单调读数恢复。保留原 max_delay_ms、真实客户端、CLI、SQLite、C host 及后续真实等待。轮询同时观察当前CLI退出和不相容终态并保存诊断。",
+      "acceptance": "按原已保存START结果中断，真实新进程恢复；迟到的新计划、原身份和产物断言保持。",
+      "unresolved": []
+    },
+    {
+      "diagnosis_id": 37,
+      "nodeid": "tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed",
+      "root_cause": "测试在确定 scheduled_at 后继续执行真实客户端导出、CLI 初始化及初始报告等软件准备；这些准备消耗真实启动窗口，测试未把业务时间与准备耗时隔离。生产端按既有窗口契约拒绝晚发新的 START。",
+      "classification": "新观察到的测试装配时序失败，后续测试侧修正已闭合；未证实生产回归",
+      "first_real_error": "timelapse 保存 EXPIRED/window_missed，无 START 尝试；原 control.gate 未进入，测试尚未制造启动调用在途中断。",
+      "completed_before_failure": "init、客户端导出和submit成功；run启动后未进入启动调用门闩。",
+      "status": {
+        "historical_baseline_outcome": "passed",
+        "frozen_outcome": "failed",
+        "frozen_is_new_failure_vs_baseline": true,
+        "production_regression_proven": false,
+        "latest_status": "此前定向补测通过，1973dc05中央本轮未重跑该已闭合身份",
+        "closed": true,
+        "latest_pass": {
+          "nodeid": "tests/integration/test_camctl_session_recovery.py::test_start_call_interruption_settles_unconfirmed",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 0.003278067000792362
+            },
+            "call": {
+              "outcome": "passed",
+              "duration_seconds": 25.52861194700381
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.0003697260035551153
+            }
+          },
+          "outcome": "passed",
+          "duration_seconds": 25.532259740008158,
+          "task": "root/test_camctl_session_recovery/shard-2",
+          "source_commit": "4728a4cf247dceae1fb11f5ed1a8eec7491238e0",
+          "snapshot_sha256": "08faf94a07b15aa637e32b2c2daa5fac9ea57c11d21d1ff493b65329978c8cb3",
+          "run": "/tmp/camctl-itopt-combined-20261025"
+        }
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/049-root-test_camctl_session_recovery-shard-2/artifacts/output.log",
+          "line": 3,
+          "detail": "冻结48d2ee64原始pytest失败"
+        },
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/049-root-test_camctl_session_recovery-shard-2/tmp/pytest/test_start_call_interruption_s0/deployment/state.db",
+          "detail": "只读查询保存事实；明细见独立派生证据",
+          "sql": "SELECT id,name,status,execution_started,first_window_observed_at,expiration_reason FROM actions; SELECT * FROM operation_runs; SELECT * FROM operation_attempts;"
+        },
+        {
+          "path": "/tmp/camctl-diag-clock-db-evidence.json",
+          "line": 3509,
+          "detail": "原始数据库完整行与历史事件的只读导出"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-timing/cross-component-cases.csv",
+          "line": 64,
+          "detail": "原计时基线status=passed"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-optimization/combined-validation.json",
+          "line": 3699,
+          "detail": "匹配同一nodeid的真实passed证据与执行源码身份"
+        }
+      ],
+      "recommendation": "在对应成功或恢复场景显式启用已有 Deployment 受控业务钟，从该世界的 business UTC 生成原排期；准备完成后 freeze_at 原 scheduled_at，在真实 START 或原有在途门闩已保存后才从同一对 UTC/单调读数恢复。保留原 max_delay_ms、真实客户端、CLI、SQLite、C host 及后续真实等待。轮询同时观察当前CLI退出和不相容终态并保存诊断。",
+      "acceptance": "核对原control.gate已由本CLI进入，START尝试在途且sent_at未保存后终止旧组；恢复沿原责任以启动未知结束，不重发，并允许后续照片成功。",
+      "unresolved": []
+    },
+    {
+      "diagnosis_id": 38,
+      "nodeid": "tests/integration/test_camctl_c_module_roundtrip.py::test_auto_preview_roundtrip_via_c_module",
+      "root_cause": "测试在确定 scheduled_at 后继续执行真实客户端导出、CLI 初始化及初始报告等软件准备；这些准备消耗真实启动窗口，测试未把业务时间与准备耗时隔离。生产端按既有窗口契约拒绝晚发新的 START。",
+      "classification": "新观察到的测试装配时序失败，后续测试侧修正已闭合；未证实生产回归",
+      "first_real_error": "shoot 保存 EXPIRED/window_missed，无 START；C host 已成功 submit，自动预览取回尚为 RUNNING，失败观察器即按来源终态结束等待。",
+      "completed_before_failure": "客户端自动预览导出成功；C host启动run、接收submit，submit子进程退出0/needs_run=1。",
+      "status": {
+        "historical_baseline_outcome": "passed",
+        "frozen_outcome": "failed",
+        "frozen_is_new_failure_vs_baseline": true,
+        "production_regression_proven": false,
+        "latest_status": "此前定向补测通过，1973dc05中央本轮未重跑该已闭合身份",
+        "closed": true,
+        "latest_pass": {
+          "nodeid": "tests/integration/test_camctl_c_module_roundtrip.py::test_auto_preview_roundtrip_via_c_module",
+          "phases": {
+            "setup": {
+              "outcome": "passed",
+              "duration_seconds": 22.999480847996892
+            },
+            "call": {
+              "outcome": "passed",
+              "duration_seconds": 15.273189405001176
+            },
+            "teardown": {
+              "outcome": "passed",
+              "duration_seconds": 0.0005770630014012568
+            }
+          },
+          "outcome": "passed",
+          "duration_seconds": 38.27324731599947,
+          "task": "root/test_camctl_c_module_roundtrip",
+          "source_commit": "37b7bb17727ad029468861d45c5658daf99b1f05",
+          "snapshot_sha256": "0de0b8dd86388c11dd750d2ed1bb732672aac6d511a16aba43af9710fe9b73f3",
+          "run": "/tmp/camctl-itopt-real-clock-ready-20261025"
+        }
+      },
+      "evidence": [
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/052-root-test_camctl_c_module_roundtrip-shard-3/artifacts/output.log",
+          "line": 3,
+          "detail": "冻结48d2ee64原始pytest失败"
+        },
+        {
+          "path": "/tmp/camctl-itopt-final-20261025/tasks/052-root-test_camctl_c_module_roundtrip-shard-3/tmp/pytest/test_auto_preview_roundtrip_vi0/deployment/state.db",
+          "detail": "只读查询保存事实；明细见独立派生证据",
+          "sql": "SELECT id,name,status,execution_started,first_window_observed_at,expiration_reason FROM actions; SELECT * FROM operation_runs; SELECT * FROM operation_attempts;"
+        },
+        {
+          "path": "/tmp/camctl-diag-clock-db-evidence.json",
+          "line": 3648,
+          "detail": "原始数据库完整行与历史事件的只读导出"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-timing/cross-component-cases.csv",
+          "line": 86,
+          "detail": "原计时基线status=passed"
+        },
+        {
+          "path": "/opt/devcontainer/.codex/worktrees/de38/camctl/docs/camctl/verification-data/2026-10-25-integration-optimization/combined-validation.json",
+          "line": 3469,
+          "detail": "匹配同一nodeid的真实passed证据与执行源码身份"
+        }
+      ],
+      "recommendation": "在对应成功或恢复场景显式启用已有 Deployment 受控业务钟，从该世界的 business UTC 生成原排期；准备完成后 freeze_at 原 scheduled_at，在真实 START 或原有在途门闩已保存后才从同一对 UTC/单调读数恢复。保留原 max_delay_ms、真实客户端、CLI、SQLite、C host 及后续真实等待。轮询同时观察当前CLI退出和不相容终态并保存诊断。",
+      "acceptance": "拍摄与自动预览均成功，真实C递交、产物登记、预览交付和领取导入全部通过。",
+      "unresolved": []
+    }
+  ]
+}

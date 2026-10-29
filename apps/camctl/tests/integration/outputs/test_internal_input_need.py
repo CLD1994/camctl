@@ -12,7 +12,8 @@ import pytest
 
 from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import ConsistencyError, new_operation_key
-from camctl.history.validators import EventContext, EventValidationError, validate_event
+from camctl.history.validators import EventValidationError
+from ..support.output_planning import capture_operation, event_case, validate_static_event as validate_event
 from camctl.outputs.qualification import QualificationOutcome
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories import outputs
@@ -151,24 +152,14 @@ def test_existing_preparation_reuse_ignores_later_need_change(internal):
 
 
 def _creation_event(owned, command):
-    owned.connection.execute("BEGIN")
-    try:
-        plan = outputs._GrantFileCommand(command, new_operation_key()).plan(
-            TransactionScope(owned.connection, 1, 1))
-    finally:
-        owned.connection.rollback()
-    event = next(
-        event for event in plan.events
-        if any(row.table == "file_copies" for row in event.rows)
-    )
-    return plan, event
+    plan = capture_operation(owned, lambda target: OutputsRepository().grant_file(
+        command, new_operation_key(), target))
+    event, context = event_case(plan, 22)
+    return context, event
 
 
 def _validate(plan, rows, event):
-    context = EventContext(
-        TransactionRange(2, 2, 2), dict(plan.owners), rows,
-        read_coverage=plan.read_coverage)
-    validate_event(event, context)
+    validate_event(event, replace(plan, state_rows=rows))
 
 
 def test_creation_guard_rejects_contradiction_or_missing_need(internal):

@@ -17,6 +17,9 @@ from pathlib import Path
 
 import pytest
 
+from camctl.capture.media_flow import CaptureProcessingSaves as _RepositorySaves
+from ..support.capture import capture_database
+
 from camctl.capture.media import (
     CheckContext,
     CheckExecutionPhase,
@@ -280,39 +283,6 @@ def _input_ref(staging: Path) -> FileRef:
                    "recording-inputs/701.mp4", staging)
 
 
-class _RepositorySaves:
-    """把真实仓储适配成编排保存端口；每次保存使用新操作键。"""
-
-    def __init__(self, owned) -> None:
-        self.owned = owned
-        self.repository = CaptureRepository()
-
-    def _commit(self, outcome) -> SaveReceipt:
-        if outcome.kind is DbOutcomeKind.COMPLETED:
-            return SaveReceipt(SaveDisposition.SAVED, value=outcome.value)
-        if outcome.kind is DbOutcomeKind.ROLLED_BACK:
-            return SaveReceipt(SaveDisposition.REJECTED, error=outcome.error)
-        return SaveReceipt(SaveDisposition.UNKNOWN, error=outcome.error)
-
-    def save_check_result(self, command):
-        return self._commit(self.repository.save_check_result(
-            command, new_operation_key(), self.owned))
-
-    def save_repair_decision(self, command):
-        return self._commit(self.repository.save_repair_decision(
-            command, new_operation_key(), self.owned))
-
-    def save_repair_result(self, command):
-        return self._commit(self.repository.save_repair_result(
-            command, new_operation_key(), self.owned))
-
-    def start_repair_output(self, command):
-        return self._commit(self.repository.start_repair_output(
-            command, new_operation_key(), self.owned))
-
-    def complete_repair_output(self, command):
-        return self._commit(self.repository.complete_repair_output(
-            command, new_operation_key(), self.owned))
 
 
 class _SubprocessTools:
@@ -371,7 +341,7 @@ async def test_check_pipeline_completes_with_decision(pipeline) -> None:
     owned, staging, tools = pipeline
     step = await execute_check(CheckContext(
         processing=_status(owned), input_file=_input_ref(staging),
-        policy=_POLICY, tools=tools, saves=_RepositorySaves(owned),
+        policy=_POLICY, tools=tools, saves=_RepositorySaves(await capture_database(owned)),
         occurred_at=_NOW + 10))
     assert step.phase is CheckExecutionPhase.CHECK_COMPLETED, step.error
     row = _row(
@@ -402,7 +372,7 @@ async def test_check_pipeline_tool_failure_is_terminal(pipeline, tmp_path) -> No
         ffprobe=_tool(tmp_path, "probe-fail", _FAILING_PROBE_BODY))
     step = await execute_check(CheckContext(
         processing=_status(owned), input_file=_input_ref(staging),
-        policy=_POLICY, tools=tools, saves=_RepositorySaves(owned),
+        policy=_POLICY, tools=tools, saves=_RepositorySaves(await capture_database(owned)),
         occurred_at=_NOW + 10))
     assert step.phase is CheckExecutionPhase.CHECK_TERMINAL
     row = _row(
@@ -437,7 +407,7 @@ async def test_check_pipeline_audio_only_saves_unconfirmed(
             ' "format": {"duration": "75.125"}}))\n'))
     step = await execute_check(CheckContext(
         processing=_status(owned), input_file=_input_ref(staging),
-        policy=_POLICY, tools=tools, saves=_RepositorySaves(owned),
+        policy=_POLICY, tools=tools, saves=_RepositorySaves(await capture_database(owned)),
         occurred_at=_NOW + 10))
     assert step.phase is CheckExecutionPhase.CHECK_TERMINAL
     row = _row(
@@ -469,7 +439,7 @@ async def test_check_recovery_fixes_decision_from_saved_media(pipeline) -> None:
         assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
     step = await execute_check(CheckContext(
         processing=_status(owned), input_file=_input_ref(staging),
-        policy=_POLICY, tools=tools, saves=_RepositorySaves(owned),
+        policy=_POLICY, tools=tools, saves=_RepositorySaves(await capture_database(owned)),
         occurred_at=_NOW + 10))
     assert step.phase is CheckExecutionPhase.FINISHED_DECISION_SAVED, step.error
     assert _row(
@@ -511,7 +481,7 @@ async def test_repair_pipeline_registers_output_and_succeeds(pipeline) -> None:
     await _seed_pending_repair(owned)
     step = await execute_repair(RepairContext(
         processing=_status(owned), input_file=_input_ref(staging),
-        extension="mp4", tools=tools, saves=_RepositorySaves(owned),
+        extension="mp4", tools=tools, saves=_RepositorySaves(await capture_database(owned)),
         occurred_at=_NOW + 20))
     assert step.phase is RepairExecutionPhase.SUCCEEDED, step.error
     output_id = _row(
@@ -547,7 +517,7 @@ async def test_repair_pipeline_resumes_after_start(pipeline) -> None:
     assert started.value.file_id == 702
     step = await execute_repair(RepairContext(
         processing=_status(owned), input_file=_input_ref(staging),
-        extension="mp4", tools=tools, saves=_RepositorySaves(owned),
+        extension="mp4", tools=tools, saves=_RepositorySaves(await capture_database(owned)),
         occurred_at=_NOW + 20))
     assert step.phase is RepairExecutionPhase.SUCCEEDED, step.error
     assert _row(
@@ -567,7 +537,7 @@ async def test_repair_pipeline_failure_saves_error(pipeline, tmp_path) -> None:
         output_args=("--fail",))
     step = await execute_repair(RepairContext(
         processing=_status(owned), input_file=_input_ref(staging),
-        extension="mp4", tools=tools, saves=_RepositorySaves(owned),
+        extension="mp4", tools=tools, saves=_RepositorySaves(await capture_database(owned)),
         occurred_at=_NOW + 20))
     assert step.phase is RepairExecutionPhase.FAILED_SAVED, step.error
     row = _row(

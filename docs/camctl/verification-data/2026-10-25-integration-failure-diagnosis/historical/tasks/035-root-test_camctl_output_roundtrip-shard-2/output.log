@@ -1,0 +1,75 @@
+F.                                                                       [100%]
+=================================== FAILURES ===================================
+_________________ test_recording_delivery_survives_late_cancel _________________
+
+tmp_path = PosixPath('/tmp/camctl-itopt-final-20261025/tasks/035-root-test_camctl_output_roundtrip-shard-2/tmp/pytest/test_recording_delivery_surviv0')
+
+    def test_recording_delivery_survives_late_cancel(tmp_path: Path) -> None:
+        """录像交付存活迟到取消：拷贝交付到 ready、领取进 processing、
+        取消按不可撤回收场后原请求终态与交付字节保持。"""
+        deployment = Deployment(tmp_path)
+        initialized = deployment.camctl(
+            "init", "--config", str(deployment.config_path))
+        assert initialized.exit_code == 0, initialized.stderr
+    
+        spec = stub_driver_spec(
+            {"1": [video_file("clip-1")]},
+            device_files={"clip-1": _CLIP_CONTENT})
+        deployment.install_client_capabilities(spec)
+    
+        # 客户端真实导出：录像与取回同计划，取回按名称引用本计划来源。
+        body = {
+            "request_id": "0",
+            "created_at": "2026-01-15 08:00:00",
+            "name": "record-and-obtain",
+            "actions": [
+                {
+                    "name": "拍录",
+                    "type": "camera_record",
+                    "device_id": "cam-1",
+                    "scheduled_at": future_schedule(1),
+                    "params": {"type": "video"},
+                    "policy": {"max_delay_ms": 5000},
+                },
+                {
+                    "name": "取回",
+                    "type": "obtain_action_outputs",
+                    "scheduled_at": future_schedule(2),
+                    "params": {
+                        "source": {"action_name": "拍录"},
+                        "purpose": "manual",
+                    },
+                },
+            ],
+        }
+        plan_path, receipt = deployment.export_plan_with_client(body)
+        original_request = str(receipt["request_id"])
+        submitted = deployment.camctl(
+            "submit", str(plan_path), "--config", str(deployment.config_path),
+            driver=spec)
+        assert submitted.exit_code == 0, submitted.stderr
+        assert submitted.message() == {"kind": "succeeded", "body": {"needs_run": True}}
+    
+        # 一个 run 会话完成录像、产物核实、取回拷贝与交付发布。
+        run = deployment.camctl(
+            "run", "--config", str(deployment.config_path), driver=spec)
+        assert run.exit_code == 0, run.stderr
+    
+        state_db = deployment.state_db
+        assert _query(state_db, "SELECT status FROM plans") == [(3,)]
+>       assert _query(
+            state_db, "SELECT status FROM actions ORDER BY id") == [(3,), (3,)]
+E       assert [(5,), (4,)] == [(3,), (3,)]
+E         
+E         At index 0 diff: (5,) != (3,)
+E         Use -v to get more diff
+
+tests/integration/test_camctl_output_roundtrip.py:142: AssertionError
+============================== slowest durations ===============================
+13.88s call     tests/integration/test_camctl_output_roundtrip.py::test_recording_delivery_survives_late_cancel
+9.74s call     tests/integration/test_camctl_output_roundtrip.py::test_duplicate_auto_preview_fails_at_admission
+
+(4 durations < 0.005s hidden.  Use -vv to show these durations.)
+=========================== short test summary info ============================
+FAILED tests/integration/test_camctl_output_roundtrip.py::test_recording_delivery_survives_late_cancel
+1 failed, 1 passed in 23.83s

@@ -10,7 +10,7 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.operations.attempts import RunOutcome
 from camctl.outputs.cleanup_flow import (
-    CleanupOutcomeChoice, FinishCleanupItem, _verify_before_delete,
+    CleanupOutcomeChoice, FinishCleanupItem,
     advance_cleanup, delete_source_file,
 )
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
@@ -56,7 +56,7 @@ class _BlockedQueryResults(OperationRepository):
 async def test_advance_saves_all_original_queries_before_any_new_device_call(environment):
     # A 接手 C1 的未知删除，自己的原查询属于 BEFORE_DELETE。
     base, driver, action_a, item_a, _ = await _world(environment, "before", True)
-    owned = base.owned
+    owned = environment[1]
     output_a = owned.connection.execute(
         "SELECT output_id FROM cleanup_items WHERE id=?", (item_a,),
     ).fetchone()[0]
@@ -70,9 +70,9 @@ async def test_advance_saves_all_original_queries_before_any_new_device_call(env
     base.operations = port
 
     with pytest.raises(ConsistencyError):
-        await _verify_before_delete(base.for_item(item_a), item_a, action_a, output_a)
+        await delete_source_file(await base.for_item(item_a), item_a)
     with pytest.raises(ConsistencyError):
-        await delete_source_file(base.for_item(item_b), item_b)
+        await delete_source_file(await base.for_item(item_b), item_b)
     originals = {int(request.ticket.target_id): (request, key)
                  for request, key in port.calls}
     assert set(originals) == {item_a, item_b}
@@ -107,9 +107,9 @@ async def test_advance_saves_all_original_queries_before_any_new_device_call(env
     assert _member_facts(owned, item_b)[0] == 3
 
 
-async def test_other_success_key_does_not_become_original_member_save(environment):
+async def test_other_success_key_does_not_become_original_member_save(environment, capture_resources):
     base, driver, _, item_id, _ = await _world(environment, "after", False)
-    runtime, members, operations = _instrument(
+    runtime, members, operations = await _instrument(
         base, item_id, member_method="finish_cleanup_item", after_commit=False)
     await _first_rejected(runtime, item_id, {"result_rejected"})
     assert members.fault is not None and members.fault.triggered
@@ -117,7 +117,8 @@ async def test_other_success_key_does_not_become_original_member_save(environmen
     _, _, original_key = members.calls[0]
     original_query = operations.query_facts
     calls_before = (len(driver.deletes), len(driver.queries))
-    runtime.owned.connection.close()
+    await runtime.database.close()
+    environment[1].connection.close()
 
     fresh = environment[2].open_connection()
     try:
@@ -135,7 +136,8 @@ async def test_other_success_key_does_not_become_original_member_save(environmen
         assert actual_member[4] is not None
         assert _saved_key_count(fresh, actual_key) == 1
         before_recovery = _history(fresh)
-        resumed = _fresh_runtime(runtime, fresh, driver.query_requests[-1].binding)
+        resumed = await _fresh_runtime(
+            runtime, fresh, driver.query_requests[-1].binding, capture_resources, item_id)
 
         step = await delete_source_file(resumed, item_id)
 

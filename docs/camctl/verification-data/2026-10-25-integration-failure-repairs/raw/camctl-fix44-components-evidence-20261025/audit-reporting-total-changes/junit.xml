@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="28" skipped="0" tests="32" time="2.654" timestamp="2026-10-25T16:35:18.725416+08:00" hostname="1e0518e0c6b4"><testcase classname="tests.integration.reporting.test_management_reuse" name="test_original_management_restore_failure_preserves_exception_and_database[SELECT l.change_count-prepare]" time="0.349"><failure message="assert AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;) is OperationalError('\u539f\u62a5\u544a\u6062\u590d\u8bfb\u53d6\u5931\u8d25')&#10; +  where AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;) = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;), boundary=None, stage=None).error">apps/camctl/tests/integration/reporting/test_management_reuse.py:162: in test_original_management_restore_failure_preserves_exception_and_database
+    assert result.error is problem
+E   assert AttributeError("'FailingRead' object has no attribute 'total_changes'") is OperationalError('\u539f\u62a5\u544a\u6062\u590d\u8bfb\u53d6\u5931\u8d25')
+E    +  where AttributeError("'FailingRead' object has no attribute 'total_changes'") = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError("'FailingRead' object has no attribute 'total_changes'"), boundary=None, stage=None).error</failure></testcase><testcase classname="tests.integration.reporting.test_management_reuse" name="test_original_management_restore_failure_preserves_exception_and_database[SELECT l.change_count-intent]" time="0.039"><failure message="assert AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;) is OperationalError('\u539f\u62a5\u544a\u6062\u590d\u8bfb\u53d6\u5931\u8d25')&#10; +  where AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;) = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;), boundary=None, stage=None).error">apps/camctl/tests/integration/reporting/test_management_reuse.py:162: in test_original_management_restore_failure_preserves_exception_and_database
+    assert result.error is problem
+E   assert AttributeError("'FailingRead' object has no attribute 'total_changes'") is OperationalError('\u539f\u62a5\u544a\u6062\u590d\u8bfb\u53d6\u5931\u8d25')
+E    +  where AttributeError("'FailingRead' object has no attribute 'total_changes'") = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError("'FailingRead' object has no attribute 'total_changes'"), boundary=None, stage=None).error</failure></testcase><testcase classname="tests.integration.reporting.test_management_reuse" name="test_original_management_restore_failure_preserves_exception_and_database[SELECT l.change_count-publish]" time="0.036"><failure message="assert AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;) is OperationalError('\u539f\u62a5\u544a\u6062\u590d\u8bfb\u53d6\u5931\u8d25')&#10; +  where AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;) = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;), boundary=None, stage=None).error">apps/camctl/tests/integration/reporting/test_management_reuse.py:162: in test_original_management_restore_failure_preserves_exception_and_database
+    assert result.error is problem
+E   assert AttributeError("'FailingRead' object has no attribute 'total_changes'") is OperationalError('\u539f\u62a5\u544a\u6062\u590d\u8bfb\u53d6\u5931\u8d25')
+E    +  where AttributeError("'FailingRead' object has no attribute 'total_changes'") = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError("'FailingRead' object has no attribute 'total_changes'"), boundary=None, stage=None).error</failure></testcase><testcase classname="tests.integration.reporting.test_management_reuse" name="test_original_management_restore_failure_preserves_exception_and_database[SELECT l.change_count-failure]" time="0.036"><failure message="assert AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;) is OperationalError('\u539f\u62a5\u544a\u6062\u590d\u8bfb\u53d6\u5931\u8d25')&#10; +  where AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;) = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;), boundary=None, stage=None).error">apps/camctl/tests/integration/reporting/test_management_reuse.py:162: in test_original_management_restore_failure_preserves_exception_and_database
+    assert result.error is problem
+E   assert AttributeError("'FailingRead' object has no attribute 'total_changes'") is OperationalError('\u539f\u62a5\u544a\u6062\u590d\u8bfb\u53d6\u5931\u8d25')
+E    +  where AttributeError("'FailingRead' object has no attribute 'total_changes'") = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError("'FailingRead' object has no attribute 'total_changes'"), boundary=None, stage=None).error</failure></testcase><testcase classname="tests.integration.reporting.test_management_reuse" name="test_original_management_restore_failure_preserves_exception_and_database[SELECT event_id, change_count FROM entity_event_links-prepare]" time="0.037"><failure message="assert AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;) is OperationalError('\u539f\u62a5\u544a\u6062\u590d\u8bfb\u53d6\u5931\u8d25')&#10; +  where AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;) = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;), boundary=None, stage=None).error">apps/camctl/tests/integration/reporting/test_management_reuse.py:162: in test_original_management_restore_failure_preserves_exception_and_database
+    assert result.error is problem
+E   assert AttributeError("'FailingRead' object has no attribute 'total_changes'") is OperationalError('\u539f\u62a5\u544a\u6062\u590d\u8bfb\u53d6\u5931\u8d25')
+E    +  where AttributeError("'FailingRead' object has no attribute 'total_changes'") = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError("'FailingRead' object has no attribute 'total_changes'"), boundary=None, stage=None).error</failure></testcase><testcase classname="tests.integration.reporting.test_management_reuse" name="test_original_management_restore_failure_preserves_exception_and_database[SELECT event_id, change_count FROM entity_event_links-intent]" time="0.039"><failure message="assert AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;) is OperationalError('\u539f\u62a5\u544a\u6062\u590d\u8bfb\u53d6\u5931\u8d25')&#10; +  where AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;) = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;), boundary=None, stage=None).error">apps/camctl/tests/integration/reporting/test_management_reuse.py:162: in test_original_management_restore_failure_preserves_exception_and_database
+    assert result.error is problem
+E   assert AttributeError("'FailingRead' object has no attribute 'total_changes'") is OperationalError('\u539f\u62a5\u544a\u6062\u590d\u8bfb\u53d6\u5931\u8d25')
+E    +  where AttributeError("'FailingRead' object has no attribute 'total_changes'") = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError("'FailingRead' object has no attribute 'total_changes'"), boundary=None, stage=None).error</failure></testcase><testcase classname="tests.integration.reporting.test_management_reuse" name="test_original_management_restore_failure_preserves_exception_and_database[SELECT event_id, change_count FROM entity_event_links-publish]" time="0.091"><failure message="assert AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;) is OperationalError('\u539f\u62a5\u544a\u6062\u590d\u8bfb\u53d6\u5931\u8d25')&#10; +  where AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;) = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;), boundary=None, stage=None).error">apps/camctl/tests/integration/reporting/test_management_reuse.py:162: in test_original_management_restore_failure_preserves_exception_and_database
+    assert result.error is problem
+E   assert AttributeError("'FailingRead' object has no attribute 'total_changes'") is OperationalError('\u539f\u62a5\u544a\u6062\u590d\u8bfb\u53d6\u5931\u8d25')
+E    +  where AttributeError("'FailingRead' object has no attribute 'total_changes'") = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError("'FailingRead' object has no attribute 'total_changes'"), boundary=None, stage=None).error</failure></testcase><testcase classname="tests.integration.reporting.test_management_reuse" name="test_original_management_restore_failure_preserves_exception_and_database[SELECT event_id, change_count FROM entity_event_links-failure]" time="0.054"><failure message="assert AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;) is OperationalError('\u539f\u62a5\u544a\u6062\u590d\u8bfb\u53d6\u5931\u8d25')&#10; +  where AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;) = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;), boundary=None, stage=None).error">apps/camctl/tests/integration/reporting/test_management_reuse.py:162: in test_original_management_restore_failure_preserves_exception_and_database
+    assert result.error is problem
+E   assert AttributeError("'FailingRead' object has no attribute 'total_changes'") is OperationalError('\u539f\u62a5\u544a\u6062\u590d\u8bfb\u53d6\u5931\u8d25')
+E    +  where AttributeError("'FailingRead' object has no attribute 'total_changes'") = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError("'FailingRead' object has no attribute 'total_changes'"), boundary=None, stage=None).error</failure></testcase><testcase classname="tests.integration.reporting.test_management_reuse" name="test_original_management_restore_failure_preserves_exception_and_database[SELECT link.event_id, txn.operation_key-prepare]" time="0.036"><failure message="assert AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;) is OperationalError('\u539f\u62a5\u544a\u6062\u590d\u8bfb\u53d6\u5931\u8d25')&#10; +  where AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;) = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;), boundary=None, stage=None).error">apps/camctl/tests/integration/reporting/test_management_reuse.py:162: in test_original_management_restore_failure_preserves_exception_and_database
+    assert result.error is problem
+E   assert AttributeError("'FailingRead' object has no attribute 'total_changes'") is OperationalError('\u539f\u62a5\u544a\u6062\u590d\u8bfb\u53d6\u5931\u8d25')
+E    +  where AttributeError("'FailingRead' object has no attribute 'total_changes'") = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError("'FailingRead' object has no attribute 'total_changes'"), boundary=None, stage=None).error</failure></testcase><testcase classname="tests.integration.reporting.test_management_reuse" name="test_original_management_restore_failure_preserves_exception_and_database[SELECT link.event_id, txn.operation_key-intent]" time="0.036"><failure message="assert AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;) is OperationalError('\u539f\u62a5\u544a\u6062\u590d\u8bfb\u53d6\u5931\u8d25')&#10; +  where AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;) = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;), boundary=None, stage=None).error">apps/camctl/tests/integration/reporting/test_management_reuse.py:162: in test_original_management_restore_failure_preserves_exception_and_database
+    assert result.error is problem
+E   assert AttributeError("'FailingRead' object has no attribute 'total_changes'") is OperationalError('\u539f\u62a5\u544a\u6062\u590d\u8bfb\u53d6\u5931\u8d25')
+E    +  where AttributeError("'FailingRead' object has no attribute 'total_changes'") = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError("'FailingRead' object has no attribute 'total_changes'"), boundary=None, stage=None).error</failure></testcase><testcase classname="tests.integration.reporting.test_management_reuse" name="test_original_management_restore_failure_preserves_exception_and_database[SELECT link.event_id, txn.operation_key-publish]" time="0.039"><failure message="assert AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;) is OperationalError('\u539f\u62a5\u544a\u6062\u590d\u8bfb\u53d6\u5931\u8d25')&#10; +  where AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;) = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;), boundary=None, stage=None).error">apps/camctl/tests/integration/reporting/test_management_reuse.py:162: in test_original_management_restore_failure_preserves_exception_and_database
+    assert result.error is problem
+E   assert AttributeError("'FailingRead' object has no attribute 'total_changes'") is OperationalError('\u539f\u62a5\u544a\u6062\u590d\u8bfb\u53d6\u5931\u8d25')
+E    +  where AttributeError("'FailingRead' object has no attribute 'total_changes'") = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError("'FailingRead' object has no attribute 'total_changes'"), boundary=None, stage=None).error</failure></testcase><testcase classname="tests.integration.reporting.test_management_reuse" name="test_original_management_restore_failure_preserves_exception_and_database[SELECT link.event_id, txn.operation_key-failure]" time="0.035"><failure message="assert AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;) is OperationalError('\u539f\u62a5\u544a\u6062\u590d\u8bfb\u53d6\u5931\u8d25')&#10; +  where AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;) = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError(&quot;'FailingRead' object has no attribute 'total_changes'&quot;), boundary=None, stage=None).error">apps/camctl/tests/integration/reporting/test_management_reuse.py:162: in test_original_management_restore_failure_preserves_exception_and_database
+    assert result.error is problem
+E   assert AttributeError("'FailingRead' object has no attribute 'total_changes'") is OperationalError('\u539f\u62a5\u544a\u6062\u590d\u8bfb\u53d6\u5931\u8d25')
+E    +  where AttributeError("'FailingRead' object has no attribute 'total_changes'") = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError("'FailingRead' object has no attribute 'total_changes'"), boundary=None, stage=None).error</failure></testcase><testcase classname="tests.integration.reporting.test_management_reuse" name="test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key[False-prepare]" time="0.032"><failure message="AssertionError: AttributeError(&quot;'LostReceipt' object has no attribute 'total_changes'&quot;)&#10;assert &lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt; is &lt;DbOutcomeKind.UNKNOWN: 'unknown'&gt;&#10; +  where &lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt; = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError(&quot;'LostReceipt' object has no attribute 'total_changes'&quot;), boundary=None, stage=None).kind&#10; +  and   &lt;DbOutcomeKind.UNKNOWN: 'unknown'&gt; = DbOutcomeKind.UNKNOWN">apps/camctl/tests/integration/reporting/test_management_reuse.py:188: in test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key
+    assert result.kind is DbOutcomeKind.UNKNOWN, result.error
+E   AssertionError: AttributeError("'LostReceipt' object has no attribute 'total_changes'")
+E   assert &lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt; is &lt;DbOutcomeKind.UNKNOWN: 'unknown'&gt;
+E    +  where &lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt; = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError("'LostReceipt' object has no attribute 'total_changes'"), boundary=None, stage=None).kind
+E    +  and   &lt;DbOutcomeKind.UNKNOWN: 'unknown'&gt; = DbOutcomeKind.UNKNOWN</failure></testcase><testcase classname="tests.integration.reporting.test_management_reuse" name="test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key[False-failure]" time="0.039"><failure message="AssertionError: AttributeError(&quot;'LostReceipt' object has no attribute 'total_changes'&quot;)&#10;assert &lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt; is &lt;DbOutcomeKind.UNKNOWN: 'unknown'&gt;&#10; +  where &lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt; = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError(&quot;'LostReceipt' object has no attribute 'total_changes'&quot;), boundary=None, stage=None).kind&#10; +  and   &lt;DbOutcomeKind.UNKNOWN: 'unknown'&gt; = DbOutcomeKind.UNKNOWN">apps/camctl/tests/integration/reporting/test_management_reuse.py:188: in test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key
+    assert result.kind is DbOutcomeKind.UNKNOWN, result.error
+E   AssertionError: AttributeError("'LostReceipt' object has no attribute 'total_changes'")
+E   assert &lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt; is &lt;DbOutcomeKind.UNKNOWN: 'unknown'&gt;
+E    +  where &lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt; = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError("'LostReceipt' object has no attribute 'total_changes'"), boundary=None, stage=None).kind
+E    +  and   &lt;DbOutcomeKind.UNKNOWN: 'unknown'&gt; = DbOutcomeKind.UNKNOWN</failure></testcase><testcase classname="tests.integration.reporting.test_management_reuse" name="test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key[True-prepare]" time="0.031"><failure message="AssertionError: AttributeError(&quot;'LostReceipt' object has no attribute 'total_changes'&quot;)&#10;assert &lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt; is &lt;DbOutcomeKind.UNKNOWN: 'unknown'&gt;&#10; +  where &lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt; = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError(&quot;'LostReceipt' object has no attribute 'total_changes'&quot;), boundary=None, stage=None).kind&#10; +  and   &lt;DbOutcomeKind.UNKNOWN: 'unknown'&gt; = DbOutcomeKind.UNKNOWN">apps/camctl/tests/integration/reporting/test_management_reuse.py:188: in test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key
+    assert result.kind is DbOutcomeKind.UNKNOWN, result.error
+E   AssertionError: AttributeError("'LostReceipt' object has no attribute 'total_changes'")
+E   assert &lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt; is &lt;DbOutcomeKind.UNKNOWN: 'unknown'&gt;
+E    +  where &lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt; = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError("'LostReceipt' object has no attribute 'total_changes'"), boundary=None, stage=None).kind
+E    +  and   &lt;DbOutcomeKind.UNKNOWN: 'unknown'&gt; = DbOutcomeKind.UNKNOWN</failure></testcase><testcase classname="tests.integration.reporting.test_management_reuse" name="test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key[True-failure]" time="0.041"><failure message="AssertionError: AttributeError(&quot;'LostReceipt' object has no attribute 'total_changes'&quot;)&#10;assert &lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt; is &lt;DbOutcomeKind.UNKNOWN: 'unknown'&gt;&#10; +  where &lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt; = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError(&quot;'LostReceipt' object has no attribute 'total_changes'&quot;), boundary=None, stage=None).kind&#10; +  and   &lt;DbOutcomeKind.UNKNOWN: 'unknown'&gt; = DbOutcomeKind.UNKNOWN">apps/camctl/tests/integration/reporting/test_management_reuse.py:188: in test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key
+    assert result.kind is DbOutcomeKind.UNKNOWN, result.error
+E   AssertionError: AttributeError("'LostReceipt' object has no attribute 'total_changes'")
+E   assert &lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt; is &lt;DbOutcomeKind.UNKNOWN: 'unknown'&gt;
+E    +  where &lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt; = DbOutcome(kind=&lt;DbOutcomeKind.ROLLED_BACK: 'rolled_back'&gt;, value=None, error=AttributeError("'LostReceipt' object has no attribute 'total_changes'"), boundary=None, stage=None).kind
+E    +  and   &lt;DbOutcomeKind.UNKNOWN: 'unknown'&gt; = DbOutcomeKind.UNKNOWN</failure></testcase><testcase classname="tests.integration.reporting.test_publish" name="test_unknown_management_commit_reuses_original_key_without_duplicate_fact[False-prepare]" time="0.031"><failure message="AssertionError: assert 'rolled_back' == 'unknown'&#10;  &#10;  - unknown&#10;  + rolled_back">apps/camctl/tests/integration/reporting/test_publish.py:408: in test_unknown_management_commit_reuses_original_key_without_duplicate_fact
+    assert result.kind.value == "unknown"
+E   AssertionError: assert 'rolled_back' == 'unknown'
+E     
+E     - unknown
+E     + rolled_back</failure></testcase><testcase classname="tests.integration.reporting.test_publish" name="test_unknown_management_commit_reuses_original_key_without_duplicate_fact[False-intent]" time="0.036"><failure message="AssertionError: assert 'rolled_back' == 'unknown'&#10;  &#10;  - unknown&#10;  + rolled_back">apps/camctl/tests/integration/reporting/test_publish.py:408: in test_unknown_management_commit_reuses_original_key_without_duplicate_fact
+    assert result.kind.value == "unknown"
+E   AssertionError: assert 'rolled_back' == 'unknown'
+E     
+E     - unknown
+E     + rolled_back</failure></testcase><testcase classname="tests.integration.reporting.test_publish" name="test_unknown_management_commit_reuses_original_key_without_duplicate_fact[False-publish]" time="0.033"><failure message="AssertionError: assert 'rolled_back' == 'unknown'&#10;  &#10;  - unknown&#10;  + rolled_back">apps/camctl/tests/integration/reporting/test_publish.py:408: in test_unknown_management_commit_reuses_original_key_without_duplicate_fact
+    assert result.kind.value == "unknown"
+E   AssertionError: assert 'rolled_back' == 'unknown'
+E     
+E     - unknown
+E     + rolled_back</failure></testcase><testcase classname="tests.integration.reporting.test_publish" name="test_unknown_management_commit_reuses_original_key_without_duplicate_fact[False-failure]" time="0.029"><failure message="AssertionError: assert 'rolled_back' == 'unknown'&#10;  &#10;  - unknown&#10;  + rolled_back">apps/camctl/tests/integration/reporting/test_publish.py:408: in test_unknown_management_commit_reuses_original_key_without_duplicate_fact
+    assert result.kind.value == "unknown"
+E   AssertionError: assert 'rolled_back' == 'unknown'
+E     
+E     - unknown
+E     + rolled_back</failure></testcase><testcase classname="tests.integration.reporting.test_publish" name="test_unknown_management_commit_reuses_original_key_without_duplicate_fact[True-prepare]" time="0.030"><failure message="AssertionError: assert 'rolled_back' == 'unknown'&#10;  &#10;  - unknown&#10;  + rolled_back">apps/camctl/tests/integration/reporting/test_publish.py:408: in test_unknown_management_commit_reuses_original_key_without_duplicate_fact
+    assert result.kind.value == "unknown"
+E   AssertionError: assert 'rolled_back' == 'unknown'
+E     
+E     - unknown
+E     + rolled_back</failure></testcase><testcase classname="tests.integration.reporting.test_publish" name="test_unknown_management_commit_reuses_original_key_without_duplicate_fact[True-intent]" time="0.035"><failure message="AssertionError: assert 'rolled_back' == 'unknown'&#10;  &#10;  - unknown&#10;  + rolled_back">apps/camctl/tests/integration/reporting/test_publish.py:408: in test_unknown_management_commit_reuses_original_key_without_duplicate_fact
+    assert result.kind.value == "unknown"
+E   AssertionError: assert 'rolled_back' == 'unknown'
+E     
+E     - unknown
+E     + rolled_back</failure></testcase><testcase classname="tests.integration.reporting.test_publish" name="test_unknown_management_commit_reuses_original_key_without_duplicate_fact[True-publish]" time="0.035"><failure message="AssertionError: assert 'rolled_back' == 'unknown'&#10;  &#10;  - unknown&#10;  + rolled_back">apps/camctl/tests/integration/reporting/test_publish.py:408: in test_unknown_management_commit_reuses_original_key_without_duplicate_fact
+    assert result.kind.value == "unknown"
+E   AssertionError: assert 'rolled_back' == 'unknown'
+E     
+E     - unknown
+E     + rolled_back</failure></testcase><testcase classname="tests.integration.reporting.test_publish" name="test_unknown_management_commit_reuses_original_key_without_duplicate_fact[True-failure]" time="0.032"><failure message="AssertionError: assert 'rolled_back' == 'unknown'&#10;  &#10;  - unknown&#10;  + rolled_back">apps/camctl/tests/integration/reporting/test_publish.py:408: in test_unknown_management_commit_reuses_original_key_without_duplicate_fact
+    assert result.kind.value == "unknown"
+E   AssertionError: assert 'rolled_back' == 'unknown'
+E     
+E     - unknown
+E     + rolled_back</failure></testcase><testcase classname="tests.integration.reporting.test_freeze" name="test_unknown_freeze_commit_is_resolved_by_original_operation_key[False]" time="0.034" /><testcase classname="tests.integration.reporting.test_freeze" name="test_unknown_freeze_commit_is_resolved_by_original_operation_key[True]" time="0.032" /><testcase classname="tests.integration.reporting.test_freeze" name="test_concurrent_input_and_ack_are_read_at_one_complete_boundary[True-want0]" time="0.052"><failure message="AttributeError: 'OrderedConnection' object has no attribute 'total_changes'">apps/camctl/tests/integration/reporting/test_freeze.py:339: in test_concurrent_input_and_ack_are_read_at_one_complete_boundary
+    assert mutated.result(timeout=20).kind is DbOutcomeKind.COMPLETED
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/concurrent/futures/_base.py:456: in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/concurrent/futures/_base.py:401: in __get_result
+    raise self._exception
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/reporting/test_freeze.py:331: in execute
+    return _process(body, ordered)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/acceptance/test_atomicity.py:21: in _process
+    return AcceptanceRepository().process_input(
+apps/camctl/src/camctl/persistence/repositories/acceptance.py:589: in process_input
+    receipt = commit_operation(
+apps/camctl/src/camctl/logging_runtime/transaction_timing.py:108: in traced
+    return function(command, operation_key, owned)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/transaction.py:695: in commit_operation
+    return _commit_operation(command, operation_key, connection)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/transaction.py:855: in _commit_operation
+    context, reads = _bind_event_reads(
+apps/camctl/src/camctl/persistence/transaction.py:227: in _bind_event_reads
+    bind_admission(connection,event,transaction,reads,source_guard_state)
+apps/camctl/src/camctl/persistence/repositories/admission_sources.py:44: in bind
+    or row_facts(db, 'plans', scope.plan_id) is not None
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/transaction.py:1129: in row_facts
+    return reuse_read(connection, key, lambda: _load_row_facts(connection, table, row_id))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/read_reuse.py:86: in reuse_read
+    generation = connection.total_changes
+                 ^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'OrderedConnection' object has no attribute 'total_changes'</failure></testcase><testcase classname="tests.integration.reporting.test_freeze" name="test_concurrent_input_and_ack_are_read_at_one_complete_boundary[False-want1]" time="0.043"><failure message="AttributeError: 'OrderedConnection' object has no attribute 'total_changes'">apps/camctl/tests/integration/reporting/test_freeze.py:339: in test_concurrent_input_and_ack_are_read_at_one_complete_boundary
+    assert mutated.result(timeout=20).kind is DbOutcomeKind.COMPLETED
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/concurrent/futures/_base.py:449: in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/concurrent/futures/_base.py:401: in __get_result
+    raise self._exception
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/reporting/test_freeze.py:331: in execute
+    return _process(body, ordered)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/acceptance/test_atomicity.py:21: in _process
+    return AcceptanceRepository().process_input(
+apps/camctl/src/camctl/persistence/repositories/acceptance.py:589: in process_input
+    receipt = commit_operation(
+apps/camctl/src/camctl/logging_runtime/transaction_timing.py:108: in traced
+    return function(command, operation_key, owned)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/transaction.py:695: in commit_operation
+    return _commit_operation(command, operation_key, connection)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/transaction.py:855: in _commit_operation
+    context, reads = _bind_event_reads(
+apps/camctl/src/camctl/persistence/transaction.py:227: in _bind_event_reads
+    bind_admission(connection,event,transaction,reads,source_guard_state)
+apps/camctl/src/camctl/persistence/repositories/admission_sources.py:44: in bind
+    or row_facts(db, 'plans', scope.plan_id) is not None
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/transaction.py:1129: in row_facts
+    return reuse_read(connection, key, lambda: _load_row_facts(connection, table, row_id))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/read_reuse.py:86: in reuse_read
+    generation = connection.total_changes
+                 ^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'OrderedConnection' object has no attribute 'total_changes'</failure></testcase><testcase classname="tests.integration.reporting.test_freeze_reuse" name="test_unknown_commit_is_resolved_with_same_freeze_key[False]" time="0.035" /><testcase classname="tests.integration.reporting.test_freeze_reuse" name="test_unknown_commit_is_resolved_with_same_freeze_key[True]" time="0.036" /><testcase classname="tests.integration.reporting.test_ack_sync" name="test_unknown_commit_preserves_atomic_sync_result[False]" time="0.063"><failure message="AttributeError: 'LostCommitResponse' object has no attribute 'total_changes'">apps/camctl/tests/integration/reporting/test_ack_sync.py:402: in test_unknown_commit_preserves_atomic_sync_result
+    outcome = _process(_body("registered", report), LostCommitResponse(), key)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/acceptance/test_atomicity.py:21: in _process
+    return AcceptanceRepository().process_input(
+apps/camctl/src/camctl/persistence/repositories/acceptance.py:589: in process_input
+    receipt = commit_operation(
+apps/camctl/src/camctl/logging_runtime/transaction_timing.py:108: in traced
+    return function(command, operation_key, owned)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/transaction.py:695: in commit_operation
+    return _commit_operation(command, operation_key, connection)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/transaction.py:855: in _commit_operation
+    context, reads = _bind_event_reads(
+apps/camctl/src/camctl/persistence/transaction.py:227: in _bind_event_reads
+    bind_admission(connection,event,transaction,reads,source_guard_state)
+apps/camctl/src/camctl/persistence/repositories/admission_sources.py:44: in bind
+    or row_facts(db, 'plans', scope.plan_id) is not None
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/transaction.py:1129: in row_facts
+    return reuse_read(connection, key, lambda: _load_row_facts(connection, table, row_id))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/read_reuse.py:86: in reuse_read
+    generation = connection.total_changes
+                 ^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'LostCommitResponse' object has no attribute 'total_changes'</failure></testcase><testcase classname="tests.integration.reporting.test_ack_sync" name="test_unknown_commit_preserves_atomic_sync_result[True]" time="0.050"><failure message="AttributeError: 'LostCommitResponse' object has no attribute 'total_changes'">apps/camctl/tests/integration/reporting/test_ack_sync.py:402: in test_unknown_commit_preserves_atomic_sync_result
+    outcome = _process(_body("registered", report), LostCommitResponse(), key)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/tests/integration/acceptance/test_atomicity.py:21: in _process
+    return AcceptanceRepository().process_input(
+apps/camctl/src/camctl/persistence/repositories/acceptance.py:589: in process_input
+    receipt = commit_operation(
+apps/camctl/src/camctl/logging_runtime/transaction_timing.py:108: in traced
+    return function(command, operation_key, owned)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/transaction.py:695: in commit_operation
+    return _commit_operation(command, operation_key, connection)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/transaction.py:855: in _commit_operation
+    context, reads = _bind_event_reads(
+apps/camctl/src/camctl/persistence/transaction.py:227: in _bind_event_reads
+    bind_admission(connection,event,transaction,reads,source_guard_state)
+apps/camctl/src/camctl/persistence/repositories/admission_sources.py:44: in bind
+    or row_facts(db, 'plans', scope.plan_id) is not None
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/transaction.py:1129: in row_facts
+    return reuse_read(connection, key, lambda: _load_row_facts(connection, table, row_id))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/persistence/read_reuse.py:86: in reuse_read
+    generation = connection.total_changes
+                 ^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'LostCommitResponse' object has no attribute 'total_changes'</failure></testcase></testsuite></testsuites>

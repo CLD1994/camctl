@@ -1,0 +1,53 @@
+[
+  {
+    "facts": {
+      "file_id": 1,
+      "purpose": 2,
+      "owner_action_id": 1,
+      "owner_delivery_id": null,
+      "relative_path": "recording-inputs/1.mp4",
+      "retention_state": 1,
+      "cleanup_state": 1,
+      "owner_finished": true,
+      "operations_stopped": true
+    },
+    "decision": {
+      "action": "delete",
+      "reason": "归属终态且操作停止，可以清理"
+    }
+  },
+  {
+    "facts": {
+      "file_id": 2,
+      "purpose": 2,
+      "owner_action_id": 1,
+      "owner_delivery_id": null,
+      "relative_path": "recording-inputs/2.mp4",
+      "retention_state": 1,
+      "cleanup_state": 1,
+      "owner_finished": true,
+      "operations_stopped": true
+    },
+    "decision": {
+      "action": "delete",
+      "reason": "归属终态且操作停止，可以清理"
+    }
+  },
+  {
+    "facts": {
+      "file_id": 3,
+      "purpose": 2,
+      "owner_action_id": 1,
+      "owner_delivery_id": null,
+      "relative_path": "recording-inputs/3.mp4",
+      "retention_state": 1,
+      "cleanup_state": 1,
+      "owner_finished": true,
+      "operations_stopped": true
+    },
+    "decision": {
+      "action": "delete",
+      "reason": "归属终态且操作停止，可以清理"
+    }
+  }
+]

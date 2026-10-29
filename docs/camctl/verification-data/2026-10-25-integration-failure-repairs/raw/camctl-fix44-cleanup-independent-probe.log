@@ -1,0 +1,61 @@
+{
+  "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+  "sqlite": "3.53.1",
+  "loaded_package": "/tmp/camctl-fix44-cleanup-20261025/apps/camctl/src/camctl/__init__.py",
+  "source_root": "/tmp/camctl-fix44-cleanup-20261025",
+  "source_commit": "99d8c640c66cab12a7ed9d0cf73d00fa7398f89e",
+  "source_status": "",
+  "scope": "只读原始数据库；执行生产 _discover；不执行 pytest、清理、run、submit 或资源生成。",
+  "worlds": {
+    "historical": {
+      "database": "/tmp/camctl-itopt-final-20261025/tasks/018-root-test_action6_segmented_recovery_roundtrip-shard-4/tmp/pytest/test_installed_action6_ordinar1/action6-record/deployment/state.db",
+      "query_only": 1,
+      "publication_h": 174,
+      "source_input_ids": [
+        1,
+        2,
+        3
+      ],
+      "discovered_first_file_ids": [
+        1,
+        2,
+        3
+      ],
+      "processed": {},
+      "historical_ceiling": 0,
+      "historical_remaining": 1,
+      "discovery_after": 263,
+      "conditional_schedule": "本 run 在 H 时等待者尚运行，H 已消费；输入在启动历史上界0之外；保留终库提供其后真实事件。只探测发现，不执行实际检查或删除。"
+    },
+    "diagnostic_current": {
+      "database": "/tmp/camctl-44-diagnostic-current-20261025/tasks/004-root-test_action6_segmented_recovery_roundtrip/tmp/pytest/test_installed_action6_ordinar0/action6-record/deployment/state.db",
+      "query_only": 1,
+      "publication_h": 175,
+      "source_input_ids": [
+        1,
+        2,
+        3
+      ],
+      "discovered_first_file_ids": [
+        1,
+        2,
+        3
+      ],
+      "processed": {},
+      "historical_ceiling": 0,
+      "historical_remaining": 1,
+      "discovery_after": 320,
+      "conditional_schedule": "本 run 在 H 时等待者尚运行，H 已消费；输入在启动历史上界0之外；保留终库提供其后真实事件。只探测发现，不执行实际检查或删除。"
+    }
+  },
+  "source_sha256": {
+    "apps/camctl/src/camctl/bootstrap/work_file_assembly.py": "dc73e05873cc699411749124123a4a54567805c9fdb4deb5fc209e6a4394f2a1",
+    "apps/camctl/src/camctl/outputs/segment_copy_reuse.py": "62412965771d6a0f8d0128f024adc77fbb6264f62127847fcbccbd803fa54650",
+    "apps/camctl/src/camctl/persistence/repositories/outputs.py": "b4b08c1a14e55158096ffe3e4a439ca4fc875fd87280083a1ddf71bc0e1fd456",
+    "apps/camctl/src/camctl/persistence/repositories/segment_selections.py": "85d0c7e82d2984ec7a153f77e73c082d0153946830aaba781a7472ec770a5faf"
+  },
+  "database_sha256_after": {
+    "historical": "925a5a2962da1f548fcb6d2b87dc57c0823b4a115efd82d3ea6ccbbaa097f994",
+    "diagnostic_current": "511d77b5029e8f7c4d8a62259e71e7a19a8a5ef28d5f6f9c9efcc3e6790992a4"
+  }
+}

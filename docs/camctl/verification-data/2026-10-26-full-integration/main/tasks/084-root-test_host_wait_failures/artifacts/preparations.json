@@ -1,0 +1,15 @@
+[
+  {
+    "label": "package-resources",
+    "command": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/084-root-test_host_wait_failures/source/apps/camctl/scripts/sync_resources.py"
+    ],
+    "cwd": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/084-root-test_host_wait_failures/source",
+    "started_utc": "2026-10-26T00:41:34.556657+00:00",
+    "pid": 1974269,
+    "exit_code": 0,
+    "finished_utc": "2026-10-26T00:41:34.620190+00:00",
+    "wall_seconds": 0.06355598400114104
+  }
+]

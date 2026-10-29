@@ -1,0 +1,285 @@
+{
+  "world": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/016-root-test_action6_builtin_demo_roundtrip/tmp/pytest/test_installed_builtin_action60/deployment-world",
+  "actions": [
+    {
+      "id": 1,
+      "name": "capture",
+      "status": 3,
+      "error_code": null
+    }
+  ],
+  "runs": [
+    {
+      "id": 1,
+      "kind": 10,
+      "status": 3,
+      "responsibility_key": "prepare/1/5a6d0d9a4b8a4d5bb0c5aed9eb9fbc59"
+    },
+    {
+      "id": 2,
+      "kind": 1,
+      "status": 3,
+      "responsibility_key": "start/1"
+    },
+    {
+      "id": 3,
+      "kind": 2,
+      "status": 3,
+      "responsibility_key": "stop/1"
+    },
+    {
+      "id": 4,
+      "kind": 7,
+      "status": 3,
+      "responsibility_key": "results/1"
+    }
+  ],
+  "results": [
+    {
+      "run_id": 1,
+      "kind": 10,
+      "status": 2,
+      "effect": 3,
+      "evidence_type": "control_returned",
+      "evidence_version": 2,
+      "evidence_data_keys": [
+        "calls"
+      ],
+      "observations": [
+        {
+          "type": "capture_preparation_completed",
+          "version": 1,
+          "data": {
+            "activity_id": "1"
+          }
+        }
+      ],
+      "calls_count": 15,
+      "aperture_and_bitrate_calls": [
+        {
+          "command": [
+            "dji_mb_ctrl",
+            "-S",
+            "test",
+            "-R",
+            "diag",
+            "-g",
+            "1",
+            "-t",
+            "0",
+            "-s",
+            "2",
+            "-c",
+            "0x26",
+            "1801"
+          ],
+          "status": "failed",
+          "effect": "unknown",
+          "error": {
+            "code": "action6_response_unconfirmed",
+            "stage": "device_response",
+            "details": {
+              "local_exit_code": 0,
+              "local_signal": null,
+              "transport_error": null,
+              "output_failure": null,
+              "stderr_hex": "",
+              "response_count": 1,
+              "declared_length": 1,
+              "response_payload": "e3",
+              "response_reason": "response_payload_unconfirmed",
+              "reason": "response_payload_unconfirmed"
+            }
+          },
+          "result_document": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "control_returned",
+                "version": 1,
+                "data": {}
+              }
+            },
+            "observations": [],
+            "call_info": {
+              "local_exit": {
+                "exit_code": 0
+              }
+            }
+          },
+          "stdout_hex": "5b646a695f6d625f6374726c5d207265616420676c6f62616c207365713a20310a52657370206d6573736167652c206c656e203d20312c20646174613a0a202065330a"
+        },
+        {
+          "command": [
+            "simulate_device",
+            "-s",
+            "bitrate",
+            "2"
+          ],
+          "status": "succeeded",
+          "effect": "confirmed",
+          "error": null,
+          "result_document": {
+            "format_version": 1,
+            "settlement": {
+              "basis": "observed",
+              "evidence": {
+                "type": "control_returned",
+                "version": 1,
+                "data": {}
+              }
+            },
+            "observations": [
+              {
+                "type": "setting_command_accepted",
+                "version": 1,
+                "data": {
+                  "activity_id": "1",
+                  "response_payload": null,
+                  "confirmation_basis": "action6_simulate_device_exit/v1"
+                }
+              }
+            ],
+            "call_info": {
+              "local_exit": {
+                "exit_code": 0
+              }
+            }
+          },
+          "stdout_hex": "6c696e6b20746f2073657276657220726c7420300a726567697374657220746f207365727665722073756363657373730a"
+        }
+      ]
+    },
+    {
+      "run_id": 2,
+      "kind": 1,
+      "status": 2,
+      "effect": 3,
+      "evidence_type": "control_returned",
+      "evidence_version": 1,
+      "evidence_data_keys": [],
+      "observations": [
+        {
+          "type": "recording_sent",
+          "version": 1,
+          "data": {
+            "activity_id": "1",
+            "response_payload": "00",
+            "confirmation_basis": "action6_record_ack/v1"
+          }
+        }
+      ],
+      "calls_count": 0,
+      "aperture_and_bitrate_calls": []
+    },
+    {
+      "run_id": 3,
+      "kind": 2,
+      "status": 2,
+      "effect": 3,
+      "evidence_type": "stop_returned",
+      "evidence_version": 1,
+      "evidence_data_keys": [],
+      "observations": [
+        {
+          "type": "stop_confirmed",
+          "version": 1,
+          "data": {
+            "activity_id": "1",
+            "response_payload": "00",
+            "confirmation_basis": "action6_record_ack/v1"
+          }
+        }
+      ],
+      "calls_count": 0,
+      "aperture_and_bitrate_calls": []
+    },
+    {
+      "run_id": 4,
+      "kind": 7,
+      "status": 2,
+      "effect": 3,
+      "evidence_type": "result_returned",
+      "evidence_version": 2,
+      "evidence_data_keys": [
+        "file_completion",
+        "file_completion_source_page_event_id",
+        "calls",
+        "call_count",
+        "optional_preview_observations"
+      ],
+      "observations": [
+        {
+          "type": "result_files_listed",
+          "version": 2,
+          "data": {
+            "activity_id": "1",
+            "entries": [
+              {
+                "identity": "/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20000101080811_0001_D.LRF",
+                "locator": {
+                  "path": "/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20000101080811_0001_D.LRF"
+                },
+                "complete": true,
+                "size_bytes": 25,
+                "kind": "video",
+                "format_id": "lrf",
+                "original_name": "DJI_20000101080811_0001_D.LRF",
+                "media_type": null,
+                "paired_identity": "/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20000101080811_0001_D.MP4"
+              },
+              {
+                "identity": "/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20000101080811_0001_D.MP4",
+                "locator": {
+                  "path": "/mnt/media_rw/emulated/DCIM/DJI_001/DJI_20000101080811_0001_D.MP4"
+                },
+                "complete": true,
+                "size_bytes": 1824,
+                "kind": "video",
+                "format_id": "mp4",
+                "original_name": "DJI_20000101080811_0001_D.MP4",
+                "media_type": null,
+                "paired_identity": null
+              },
+              {
+                "identity": "/mnt/media_rw/emulated/DCIM/DJI_001/DJI_OLD.MP4",
+                "locator": {
+                  "path": "/mnt/media_rw/emulated/DCIM/DJI_001/DJI_OLD.MP4"
+                },
+                "complete": true,
+                "size_bytes": 1824,
+                "kind": "video",
+                "format_id": "mp4",
+                "original_name": "DJI_OLD.MP4",
+                "media_type": null,
+                "paired_identity": null
+              }
+            ],
+            "cursor": null,
+            "next_cursor": null,
+            "set_finalized": true,
+            "completion_evidence": null
+          }
+        }
+      ],
+      "calls_count": 5,
+      "aperture_and_bitrate_calls": []
+    }
+  ],
+  "outputs": [
+    {
+      "id": 1,
+      "source_action_id": 1,
+      "kind": 3
+    },
+    {
+      "id": 2,
+      "source_action_id": 1,
+      "kind": 1
+    }
+  ],
+  "reports": [
+    "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/016-root-test_action6_builtin_demo_roundtrip/tmp/pytest/test_installed_builtin_action60/deployment-world/deployment/ready/status-report-4-df60e03ede1eb6c2528cb4112077315d32e1b6e29018be4a4bb5e2985fb2e5de.json"
+  ]
+}

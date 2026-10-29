@@ -1,0 +1,1 @@
+{"first_waiter_completed": false, "second_waiter_completed": true, "second_waiter_value": "first", "submitted_values": ["first", "second"], "actual_worker_threads": 0}

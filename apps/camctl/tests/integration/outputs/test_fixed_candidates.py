@@ -7,10 +7,10 @@ import json
 import pytest
 
 from camctl.contracts.values import ConsistencyError, new_operation_key
-from camctl.contracts.history_values import TransactionRange
 from camctl.history.reads import ReadCoverage
-from camctl.history.validators import EventContext, EventValidationError, validate_event
-from camctl.outputs.competition import has_product_predecessor
+from camctl.history.validators import EventValidationError
+from ..support.output_planning import validate_static_event as validate_event
+from ..support.output_storage_cases import observe_product_competition, observed_rows
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories import outputs
 
@@ -80,7 +80,9 @@ def test_formal_grant_requires_reliable_empty_prestart_selection(competition_dat
     _fixed_source(competition_database.connection, mode=2)
     event, context = _proposal(competition_database)
     assert validate_event(event, context).branch_name == "GRANT"
-    assert context.complete_rows("obtain_source_selections", "dependency_id", 191) == {}
+    assert (
+        observed_rows(context, "obtain_source_selections", "dependency_id", 191) == {}
+    )
     ranges = dict(context.read_coverage.ranges)
     ranges["obtain_source_selections", "dependency_id"] -= {191}
     with pytest.raises(EventValidationError):
@@ -114,13 +116,14 @@ def test_formal_grant_rejects_inconsistent_selection_initialization(
 
 
 def _assert_predecessor(owned, expected):
-    """同一可靠读取结果必须在 SQL 候选判断和事件当前事实判断中一致。"""
+    """实际资格申请反映已固定目标和当前竞争结果，原库保持不变。"""
     before = tuple(owned.connection.iterdump())
-    reads = outputs._ProductReads(owned.connection, {})
-    assert has_product_predecessor(reads, 31, 701, _NOW) is expected
-    context = EventContext(TransactionRange(2, 2, 2), {}, reads.state_rows,
-                           read_coverage=reads.read_coverage())
-    assert has_product_predecessor(outputs._CurrentProductReads(context), 31, 701, _NOW) is expected
+    assert (
+        observe_product_competition(
+            owned, action_id=31, output_id=701, occurred_at=_NOW
+        )
+        is expected
+    )
     assert tuple(owned.connection.iterdump()) == before
 
 

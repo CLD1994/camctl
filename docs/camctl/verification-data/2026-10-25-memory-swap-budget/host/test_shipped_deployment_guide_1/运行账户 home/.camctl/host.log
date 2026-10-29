@@ -1,0 +1,11 @@
+call=1 attempt=1 command=run operation=spawn plan=(none) automatic=0 retries=0
+call=2 submit accepted path=/tmp/camctl-memsw-validation/host-deployment-tmp/test_shipped_deployment_guide_1/plan.json
+call=1 attempt=1 command=run pid=1483295 spawned execution=unknown
+call=2 attempt=2 command=submit operation=spawn plan=/tmp/camctl-memsw-validation/host-deployment-tmp/test_shipped_deployment_guide_1/plan.json automatic=0 retries=0
+call=2 attempt=2 command=submit pid=1483296 spawned execution=unknown
+call=2 command=submit pid=1483296 stream=exit_observed data=exit record retained; group settlement pending
+call=2 command=submit pid=1483296 stream=group_reaped data=all execution stopped; child record reaped
+call=2 command=submit pid=1483296 result=success exit_kind=0 exit=0 needs_run=1 overflow=0 io_error=0
+call=1 attempt=1 command=run operation=spawn plan=(none) automatic=0 retries=0
+call=1 attempt=1 command=run pid=1483313 spawned execution=unknown
+claim operation=moved ready=/tmp/camctl-memsw-validation/host-deployment-tmp/test_shipped_deployment_guide_1/运行账户 home/.camctl/custom-ready processing=/tmp/camctl-memsw-validation/host-deployment-tmp/test_shipped_deployment_guide_1/运行账户 home/.camctl/custom-processing file=status-report-3-d371a65859e68d84afd91fe13dd8ca3d63bbe87bbd695c1d5ef5650dd238d4bf.json errno=0 detail=ok

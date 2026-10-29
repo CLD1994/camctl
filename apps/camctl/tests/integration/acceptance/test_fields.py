@@ -7,7 +7,7 @@ from camctl.acceptance.service import PlanDisposition
 from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.public_projection import ProjectionInput, project_public
 from camctl.contracts.schemas import create_validator, validation_errors
-from camctl.contracts.workflow_errors import _registry
+from camctl.contracts.workflow_errors import registered_error
 from .test_acceptance import environment, _accept, _plan_body
 
 pytestmark = pytest.mark.asyncio
@@ -70,7 +70,7 @@ async def test_admission_details_match_registry(environment, tmp_path):
     await _accept(environment, tmp_path, body)
     details = parse_exact_json(connection.execute("SELECT error_details_json FROM actions").fetchone()[0])
     assert details["issues"] == [{"field":"actions[0].params.shots", "reason":"range", "value":99}]
-    schema = {"$schema":"https://json-schema.org/draft/2020-12/schema", **_registry()["codes"]["action_validation_failed"]["details_schema"]}
+    schema = {"$schema":"https://json-schema.org/draft/2020-12/schema", **registered_error("action_validation_failed")["details_schema"]}
     assert not validation_errors(create_validator(schema), details)
 
 

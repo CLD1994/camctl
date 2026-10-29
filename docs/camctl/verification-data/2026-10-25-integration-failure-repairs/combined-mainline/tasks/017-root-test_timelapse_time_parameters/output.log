@@ -1,0 +1,8 @@
+..                                                                       [100%]
+============================== slowest durations ===============================
+33.48s call     tests/integration/test_timelapse_time_parameters.py::test_describe_python_browser_and_node_export_agree[dji-action6]
+30.91s call     tests/integration/test_timelapse_time_parameters.py::test_describe_python_browser_and_node_export_agree[dji-osmo360-ii]
+0.01s setup    tests/integration/test_timelapse_time_parameters.py::test_describe_python_browser_and_node_export_agree[dji-osmo360-ii]
+
+(3 durations < 0.005s hidden.  Use -vv to show these durations.)
+2 passed in 64.77s (0:01:04)

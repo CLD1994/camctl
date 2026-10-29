@@ -9,7 +9,9 @@ from adb_metadata_fixtures import collect_fake_metadata_many
 
 from camctl.bootstrap.capture_assembly import DriverResultListing
 from camctl.bootstrap.config import ConfigDefaults, load_config
-from camctl.capture.handlers import _begin_check_round, _record_file_completion_context
+from ..persistence.result_page_fixtures import begin_result_check
+from .result_page_storage import result_page_storage, completion_context, allow_dispatch, SavedDirectoryScan
+from ..support.capture import capture_database
 from camctl.capture.result_pages import ResultPageSave
 from camctl.capture.results import (CaptureFile, CaptureFileSet, FileKind, ProductRequirements,
     ProductRule, RuleState, assess_capture_files)
@@ -36,7 +38,6 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from ..acceptance.test_acceptance import _plan_body
 from ..capture.test_baseline_history import _append, _fix
 from ..capture.test_baseline_start import _grant
-from ..capture.test_capture_contract import _runtime
 from ..scheduling.test_start_action import _SCHEDULED, _accept_plan, _start, owned
 
 
@@ -50,6 +51,9 @@ class Filesystem:
         self.paths = sorted(paths)
         self.directory_calls = []
         self.metadata_errors = set(metadata_errors)
+
+    def directory_scan(self, request):
+        return SavedDirectoryScan(self)
 
     async def read_directory(self, request, *, stop):
         self.directory_calls.append(request)
@@ -113,7 +117,7 @@ async def _world(owned, tmp_path, monkeypatch, outputs, baseline=(), result_mode
     operations = OperationRepository()
     start_ticket = granted.value.ticket
     result = await driver.control(ControlRequest("start_timelapse", BINDING, params, start_ticket,
-        Decimal("90"), lambda: None, start_return_meaning=StartReturn.SENT))
+        Decimal("90"), allow_dispatch, start_return_meaning=StartReturn.SENT))
     saved = operations.finish_attempt(AttemptFinish(start_ticket,
         validate_outcome(start_ticket, result.outcome, contract.evidence), _SCHEDULED,
         run_finish=RunFinish(RunOutcome.SUCCEEDED)), new_operation_key(), owned)
@@ -130,10 +134,10 @@ async def _world(owned, tmp_path, monkeypatch, outputs, baseline=(), result_mode
         run_finish=RunFinish(RunOutcome.SUCCEEDED)), new_operation_key(), owned)
     assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
 
-    runtime = _runtime(owned)
-    result_ticket = _begin_check_round(runtime, 1).ticket
-    context = _record_file_completion_context(runtime, 1)
-    assert context["kind"] == "timelapse_stop" and context["file_completion_wait_ms"] == 30_000
+    runtime = await result_page_storage(owned, _SCHEDULED + 2)
+    result_ticket = begin_result_check(owned, runtime, 1).ticket
+    context = completion_context(owned, 1, kind="timelapse_stop")
+    assert context["kind"] == "timelapse_stop" and context["file_completion_wait_ms"] == 3_000
     return contract, driver, runtime, result_ticket, context, waits
 
 
@@ -199,7 +203,7 @@ async def test_action6_pages_register_many_jpegs_and_cross_page_mp4_lrf_pair(
 
     entries = [entry for saved in pages for entry in saved.page.entries]
     assert [entry.identity for entry in entries] == sorted(paths)
-    assert waits == [30.0]
+    assert waits == [3.0]
     assert pages[0].page.outcome.settlement.evidence.data["file_completion_source_page_event_id"] is None
     assert all(saved.page.outcome.settlement.evidence.data["file_completion_source_page_event_id"]
         == pages[0].ref.event_id for saved in pages[1:])
@@ -222,9 +226,8 @@ async def test_action6_pages_register_many_jpegs_and_cross_page_mp4_lrf_pair(
 
 async def test_segmented_formal_adapter_pairs_only_new_files_after_complete_scan(
         owned, tmp_path, monkeypatch):
-    from camctl.capture.handlers import ListingPhase, ListingRound
-    from camctl.capture.result_scans import SavedResultEntries
-    from camctl.capture.segment_completion import register_segment_observations
+    from camctl.capture.files import FileCompletionSave, OwnershipFromResultPageSave, PairResultFilesSave
+    from camctl.persistence.repositories.history import HistoryRepository
 
     baseline = tuple(ROOT + f"/A/{index:03}.JPG" for index in range(31))
     stem = ROOT + "/DJI_001/DJI_20261022100000_0001_D."
@@ -235,7 +238,7 @@ async def test_segmented_formal_adapter_pairs_only_new_files_after_complete_scan
     filesystem = Filesystem([*baseline, preview, video])
     monkeypatch.setattr(driver, "_filesystem", lambda binding: filesystem)
     adapter = DriverResultListing(driver, BINDING, contract.evidence,
-        capture_repository=runtime.capture, owned=owned)
+        capture_repository=runtime.capture, database=runtime.database)
     mode = runtime.action(1)["execution_spec_json"]["video_result_mode"]
     first = await adapter.list_page(ticket, cursor=None, timeout_s=Decimal("40"),
         output_scope={"directories": [ROOT]}, completion_context=context,
@@ -254,9 +257,29 @@ async def test_segmented_formal_adapter_pairs_only_new_files_after_complete_scan
         validate_outcome(ticket, second.outcome, contract.evidence), _SCHEDULED + 4),
         new_operation_key(), owned)
     assert final.kind is DbOutcomeKind.COMPLETED, final.error
-    register_segment_observations(runtime, 1, ListingRound(
-        ListingPhase.LISTED, SavedResultEntries(runtime.capture, owned, final.value),
-        ticket, second.outcome, _SCHEDULED + 4, scan_complete=True, set_finalized=True))
+    pages = runtime.capture.read_result_pages(ticket, None, 128, owned).items
+    for page in pages:
+        for entry in page.page.entries:
+            file_id = dict(page.file_ids).get(entry.identity)
+            if file_id is None:
+                continue
+            ownership = runtime.capture.save_ownership_from_result_page(
+                OwnershipFromResultPageSave(page.ref, file_id, page.occurred_at),
+                new_operation_key(), owned)
+            assert ownership.kind is DbOutcomeKind.COMPLETED, ownership.error
+            completion = runtime.capture.save_file_completion(FileCompletionSave(
+                file_id, 3, page.occurred_at, basis=3, observation=entry.evidence,
+                size_bytes=entry.size_bytes, activity_id=int(ticket.target_id),
+                result_page_event_id=page.ref.event_id,
+                stop_result_event_id=context["stop_result_event_id"]), new_operation_key(), owned)
+            assert completion.kind is DbOutcomeKind.COMPLETED, completion.error
+    preview_id = owned.connection.execute(
+        "SELECT file_id FROM result_page_files WHERE identity=?", (preview,)).fetchone()[0]
+    boundary = HistoryRepository(Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])).current_boundary()
+    paired = runtime.capture.save_result_file_pairing(
+        PairResultFilesSave(preview_id, final.value, boundary, _SCHEDULED + 5),
+        new_operation_key(), owned)
+    assert paired.kind is DbOutcomeKind.COMPLETED, paired.error
     assert len(filesystem.directory_calls) == 2
     assert owned.connection.execute("SELECT COUNT(*) FROM device_files").fetchone() == (2,)
     assert owned.connection.execute(
@@ -273,7 +296,7 @@ async def test_action6_dng_stays_dng_and_missing_frozen_jpeg_rule_is_explicit(
     dng, video = ROOT + "/A/Frame.DNG", ROOT + "/A/clip.MP4"
     pages, _ = await _save_pages(contract, driver, runtime, ticket, context,
         Filesystem([dng, video]))
-    assert waits == [30.0]
+    assert waits == [3.0]
 
     entries = [entry for saved in pages for entry in saved.page.entries]
     assert {entry.identity: (entry.kind, entry.format_id) for entry in entries} == {
@@ -286,7 +309,7 @@ async def test_action6_dng_stays_dng_and_missing_frozen_jpeg_rule_is_explicit(
 
 
 async def test_formal_result_adapter_rejects_lrf_after_saved_original_disappears(
-        owned, tmp_path, monkeypatch):
+        owned, tmp_path, monkeypatch, capture_resources):
     """可靠前页 MP4 在后页配对扫描前消失时，不能最终化孤立 LRF。"""
     # Action6 将驱动目录批量上限固定为 32：31 张照片后，MP4 正好成为页尾。
     photos = [ROOT + f"/a/{index:03}.JPG" for index in range(31)]
@@ -296,12 +319,14 @@ async def test_formal_result_adapter_rejects_lrf_after_saved_original_disappears
     filesystem = Filesystem([*photos, video, preview, tail_photo])
     monkeypatch.setattr(driver, "_filesystem", lambda binding: filesystem)
     database = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
+    from camctl.capture.result_reading import ResultReadingContext
+    reading_context = ResultReadingContext(ticket)
     adapter = DriverResultListing(driver, BINDING, contract.evidence,
-        capture_repository=runtime.capture, owned=owned)
+        capture_repository=runtime.capture, database=runtime.database)
     output_scope = runtime.action(1)["execution_spec_json"]["output_scope"]
 
     first = await adapter.list_page(ticket, cursor=None, timeout_s=Decimal("40"),
-        output_scope=output_scope, completion_context=context,
+        output_scope=output_scope, completion_context=context, reading_context=reading_context,
         video_result_mode=runtime.action(1)["execution_spec_json"]["video_result_mode"])
     first_save = runtime.capture.save_result_page(ResultPageSave(ticket, 1, None,
         validate_outcome(ticket, first.outcome, contract.evidence), _SCHEDULED + 3),
@@ -316,11 +341,11 @@ async def test_formal_result_adapter_rejects_lrf_after_saved_original_disappears
     owned.connection.close()
     reopened = open_existing(database, DbOpenMode.EXISTING_RW, DbConfig())
     try:
-        # 服务进程重开后只从同一尝试的可靠历史重建前页提供器。
+        # 数据库观察连接重开后，原扫描仍持有同一清单；前页依据从可靠历史重建。
         adapter = DriverResultListing(driver, BINDING, contract.evidence,
-            capture_repository=runtime.capture, owned=reopened)
+            capture_repository=runtime.capture, database=await capture_resources.restart_database(reopened))
         second = await adapter.list_page(ticket, cursor=first.next_cursor, timeout_s=Decimal("40"),
-            output_scope=output_scope, completion_context=context,
+            output_scope=output_scope, completion_context=context, reading_context=reading_context,
             video_result_mode="single_file")
 
         page = next(value.data for value in second.outcome.observations
@@ -340,8 +365,9 @@ async def test_formal_result_adapter_rejects_lrf_after_saved_original_disappears
         stored = runtime.capture.read_result_pages(ticket, None, 8, reopened).items
         assert stored[-1].page.outcome.error.code == "action6_result_conflict"
         assert [entry.identity for entry in stored[-1].page.entries] == [tail_photo]
-        assert waits == [30.0]
+        assert waits == [3.0]
     finally:
+        reading_context.close()
         reopened.connection.close()
 
 
@@ -354,7 +380,7 @@ async def test_formal_result_adapter_does_not_treat_baseline_original_as_new_his
     filesystem = Filesystem([*photos, video, preview, tail_photo])
     monkeypatch.setattr(driver, "_filesystem", lambda binding: filesystem)
     adapter = DriverResultListing(driver, BINDING, contract.evidence,
-        capture_repository=runtime.capture, owned=owned)
+        capture_repository=runtime.capture, database=runtime.database)
     scope = runtime.action(1)["execution_spec_json"]["output_scope"]
     first = await adapter.list_page(ticket, cursor=None, timeout_s=Decimal("40"),
         output_scope=scope, completion_context=context,
@@ -393,7 +419,7 @@ async def test_formal_result_adapter_rejects_a_forged_cursor_before_device_dispa
     filesystem = Filesystem([*photos, video, ROOT + "/z/Z.JPG"])
     monkeypatch.setattr(driver, "_filesystem", lambda binding: filesystem)
     adapter = DriverResultListing(driver, BINDING, contract.evidence,
-        capture_repository=runtime.capture, owned=owned)
+        capture_repository=runtime.capture, database=runtime.database)
     scope = runtime.action(1)["execution_spec_json"]["output_scope"]
     first = await adapter.list_page(ticket, cursor=None, timeout_s=Decimal("40"),
         output_scope=scope, completion_context=context,
@@ -435,7 +461,7 @@ async def test_formal_result_adapter_rejects_later_cursor_without_saved_history(
     filesystem = Filesystem([ROOT + "/z/Clip.MP4"])
     monkeypatch.setattr(driver, "_filesystem", lambda binding: filesystem)
     adapter = DriverResultListing(driver, BINDING, contract.evidence,
-        capture_repository=runtime.capture, owned=owned)
+        capture_repository=runtime.capture, database=runtime.database)
     scope = runtime.action(1)["execution_spec_json"]["output_scope"]
     cursor = DirectoryCursor(BINDING, (ROOT,), 0, ROOT + "/z/Previous.MP4")
 
@@ -456,7 +482,7 @@ async def test_formal_result_adapter_does_not_read_previous_attempt_history(
     filesystem = Filesystem([*photos, video, ROOT + "/z/Clip.lrf"])
     monkeypatch.setattr(driver, "_filesystem", lambda binding: filesystem)
     adapter = DriverResultListing(driver, BINDING, contract.evidence,
-        capture_repository=runtime.capture, owned=owned)
+        capture_repository=runtime.capture, database=runtime.database)
     scope = runtime.action(1)["execution_spec_json"]["output_scope"]
     first = await adapter.list_page(first_ticket, cursor=None, timeout_s=Decimal("40"),
         output_scope=scope, completion_context=context,
@@ -470,7 +496,7 @@ async def test_formal_result_adapter_does_not_read_previous_attempt_history(
         validate_outcome(first_ticket, first.outcome, contract.evidence), _SCHEDULED + 4,
         retry_wait=True), new_operation_key(), owned)
     assert finished.kind is DbOutcomeKind.COMPLETED, finished.error
-    second_ticket = _begin_check_round(runtime, 1).ticket
+    second_ticket = begin_result_check(owned, runtime, 1).ticket
     assert second_ticket.attempt_id == first_ticket.attempt_id + 1
     calls_before = len(filesystem.directory_calls)
 
@@ -493,7 +519,7 @@ async def test_formal_result_adapter_rejects_continuation_after_failed_saved_pag
         metadata_errors={failed_photo})
     monkeypatch.setattr(driver, "_filesystem", lambda binding: filesystem)
     adapter = DriverResultListing(driver, BINDING, contract.evidence,
-        capture_repository=runtime.capture, owned=owned)
+        capture_repository=runtime.capture, database=runtime.database)
     scope = runtime.action(1)["execution_spec_json"]["output_scope"]
     first = await adapter.list_page(ticket, cursor=None, timeout_s=Decimal("40"),
         output_scope=scope, completion_context=context,

@@ -8,6 +8,7 @@ import pytest
 
 from camctl.contracts.values import new_operation_key
 from camctl.history import validators
+from camctl.history.validators import register_guard
 from camctl.history.events import business_columns
 from camctl.history.reads import ReadCoverage, PlanReadScope
 from camctl.history.validators import EventValidationError
@@ -18,8 +19,9 @@ from camctl.persistence.transaction import commit_operation, event_envelope, row
 
 from .test_selection_guard import _proposal, _NOW, selection_database, family_database
 from .test_selection_event_sequence import _Sequence
+from ..support.output_planning import observe_ranges
 from .test_qualification import _seed_device_file
-from ..operations.test_result_reuse import _FaultConnection
+from ..support.output_planning import storage_fault as _FaultConnection
 
 
 # 新产物类型、长度、既有配套产物类型及长度。均属于原片705。
@@ -31,6 +33,16 @@ _CASES = {
     "repair_after_preview": (2, 80, 3, 100),
     "larger_repair_after_preview": (2, 120, 3, 100),
 }
+
+
+@pytest.fixture(autouse=True)
+def restore_formal_guards():
+    """观察 H1 当前事实后，由所属模块恢复正式登记，不保留测试 spy。"""
+    try:
+        yield
+    finally:
+        register_capture_guards()
+        outputs.register_outputs_guards()
 
 
 def _file(connection, identity, kind, size, *, pending_repair: bool = False):
@@ -82,15 +94,9 @@ def _scenario(owned, mode, case):
     connection.commit()
     initial, current = _proposal(owned, mode)
     current.state_rows["plans"] = {1: row_facts(connection, "plans", 1)}
-    reads = outputs._CatalogReads(connection)
-    reads.required(file_table, file_id)
-    assert reads.origin(999) is None
-    ranges = dict(current.read_coverage.ranges)
-    for key, identities in reads.read_coverage().ranges.items():
-        ranges[key] = ranges.get(key, frozenset()) | identities
-    for table, rows in reads.state_rows.items():
-        current.state_rows.setdefault(table, {}).update(rows)
-    current = replace(current, read_coverage=ReadCoverage(ranges))
+    current = observe_ranges(current, connection,
+        ("output_origins", "output_id", 999),
+        ("output_origins", "original_output_id", 999))
     origin_id = _output(connection, 999, kind, file_id)
     if kind == 2:
         # 变化后提案按一致状态预跑：登记后的修复承载文件已提升。
@@ -136,7 +142,6 @@ def _changes_selection(case, mode):
 def test_derived_registration_and_origin_take_effect_together(
     selection_database, monkeypatch, mode, case, registration_first, select_changed,
 ):
-    monkeypatch.setattr(validators, "NAMED_GUARDS", dict(validators.NAMED_GUARDS))
     register_capture_guards()
     initial, changed, registrations, context = _scenario(selection_database, mode, case)
     selection = changed if select_changed else initial
@@ -150,7 +155,7 @@ def test_derived_registration_and_origin_take_effect_together(
             row["output_id"] == 999 for row in current.state_rows["output_origins"].values())))
         original(event, current)
 
-    monkeypatch.setitem(validators.NAMED_GUARDS, "source_selection", inspect)
+    register_guard("source_selection", inspect)
     receipt = commit_operation(
         _Sequence(
             events,
@@ -169,7 +174,7 @@ def test_derived_registration_and_origin_take_effect_together(
         assert tuple(selection_database.connection.iterdump()) == before
     else:
         assert receipt.kind == "completed", receipt.error
-        items = outputs._saved_items(selection_database.connection, 61)
+        items = outputs.load_selection(selection_database.connection, 61).items
         if mode is SelectionMode.EXPLICIT_IDS:
             item = next(item for item in items if item.requested_output_id == 999)
             assert (item.output_id, item.error_code) == ((999, None) if registration_first else (None, 1))
@@ -197,7 +202,6 @@ def test_derived_registration_and_origin_take_effect_together(
 @pytest.mark.parametrize("kind", ["preview_only", "repair_only"])
 @pytest.mark.parametrize("failure", ["INSERT INTO output_origins", "INSERT INTO obtain_items"])
 def test_derived_registration_and_selection_rollback_together(selection_database, monkeypatch, kind, failure):
-    monkeypatch.setattr(validators, "NAMED_GUARDS", dict(validators.NAMED_GUARDS))
     register_capture_guards()
     _, selection, registrations, context = _scenario(selection_database, SelectionMode.EXPLICIT_IDS, kind)
     before = tuple(selection_database.connection.iterdump())
@@ -214,5 +218,5 @@ def test_derived_registration_and_selection_rollback_together(selection_database
         target,
     )
     assert receipt.kind == "rolled_back", receipt.error
-    assert isinstance(receipt.error, sqlite3.OperationalError), receipt.error
+    assert type(receipt.error) is sqlite3.DatabaseError, receipt.error
     assert tuple(selection_database.connection.iterdump()) == before

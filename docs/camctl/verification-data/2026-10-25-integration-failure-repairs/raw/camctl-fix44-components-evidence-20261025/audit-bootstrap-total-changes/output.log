@@ -1,0 +1,112 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.17, pytest-9.1.1, pluggy-1.6.0 -- /tmp/camctl-fix44-components-20261025/apps/camctl/.venv311/bin/python
+cachedir: .pytest_cache
+rootdir: /tmp/camctl-fix44-components-20261025/apps/camctl
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, mock-3.16.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 5 items
+
+apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py::test_devices_progress_independently_and_settle_before_connection_close[False] FAILED [ 20%]
+apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py::test_devices_progress_independently_and_settle_before_connection_close[True] FAILED [ 40%]
+apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py::test_capture_state_failure_stops_later_device_flow[query] PASSED [ 60%]
+apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py::test_capture_state_failure_stops_later_device_flow[projection] PASSED [ 80%]
+apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py::test_saved_device_failure_allows_other_device_work FAILED [100%]
+
+=================================== FAILURES ===================================
+_ test_devices_progress_independently_and_settle_before_connection_close[False] _
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/tasks.py:500: in wait_for
+    return fut.result()
+           ^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/locks.py:213: in wait
+    await fut
+E   asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py:90: in test_devices_progress_independently_and_settle_before_connection_close
+    await asyncio.wait_for(entered.wait(), 1)
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/tasks.py:502: in wait_for
+    raise exceptions.TimeoutError() from exc
+E   TimeoutError
+
+During handling of the above exception, another exception occurred:
+apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py:105: in test_devices_progress_independently_and_settle_before_connection_close
+    await task
+apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py:86: in drive
+    await capture(context)
+apps/camctl/src/camctl/bootstrap/flows.py:205: in __call__
+    self._observe_windows(context, owned, tuple(item[0] for item in page.items))
+apps/camctl/src/camctl/bootstrap/flows.py:257: in _observe_windows
+    raise StateDbFailure(f"{operation}事务未完成（{outcome.kind.value}）: {outcome.error}")
+E   camctl.session.service.StateDbFailure: 窗口观察事务未完成（rolled_back）: 'TrackedConnection' object has no attribute 'total_changes'
+_ test_devices_progress_independently_and_settle_before_connection_close[True] _
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/tasks.py:500: in wait_for
+    return fut.result()
+           ^^^^^^^^^^^^
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/locks.py:213: in wait
+    await fut
+E   asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py:90: in test_devices_progress_independently_and_settle_before_connection_close
+    await asyncio.wait_for(entered.wait(), 1)
+/home/cld/.local/share/uv/python/cpython-3.11.17-linux-x86_64-gnu/lib/python3.11/asyncio/tasks.py:502: in wait_for
+    raise exceptions.TimeoutError() from exc
+E   TimeoutError
+______________ test_saved_device_failure_allows_other_device_work ______________
+apps/camctl/src/camctl/bootstrap/flows.py:331: in _advance_device
+    raise outcome
+apps/camctl/src/camctl/capture/dispatch.py:82: in dispatch_ready
+    await handler(descriptor.action_id, runtime)
+apps/camctl/src/camctl/capture/handlers.py:3161: in _photo_handler
+    step = await _control_call(
+apps/camctl/src/camctl/operations/owned_calls.py:86: in owned
+    raise actual.error
+apps/camctl/src/camctl/operations/owned_calls.py:57: in run
+    value = await function(*args, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/capture/handlers.py:1654: in _control_call
+    ticket, reason = runtime.grant(action)
+                     ^^^^^^^^^^^^^^^^^^^^^
+apps/camctl/src/camctl/capture/handlers.py:1012: in grant
+    raise ConsistencyError(f"启动授予事务未可靠完成: {outcome.error}")
+E   camctl.contracts.values.ConsistencyError: 启动授予事务未可靠完成: '_FlowConnection' object has no attribute 'total_changes'
+
+The above exception was the direct cause of the following exception:
+apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py:98: in test_saved_device_failure_allows_other_device_work
+    await context.local_work.settle()
+apps/camctl/src/camctl/bootstrap/background_flow.py:192: in settle
+    await self._settle(excluded_owner=None)
+apps/camctl/src/camctl/bootstrap/background_flow.py:215: in _settle
+    self._raise_failures(failures)
+apps/camctl/src/camctl/bootstrap/background_flow.py:273: in _raise_failures
+    raise failures[0].with_traceback(failures[0].__traceback__)
+apps/camctl/src/camctl/bootstrap/background_flow.py:236: in collect
+    await owner.settle()
+apps/camctl/src/camctl/bootstrap/flows.py:180: in settle
+    await CombinedLocalWork(tuple(self._devices.values())).settle()
+apps/camctl/src/camctl/bootstrap/background_flow.py:192: in settle
+    await self._settle(excluded_owner=None)
+apps/camctl/src/camctl/bootstrap/background_flow.py:215: in _settle
+    self._raise_failures(failures)
+apps/camctl/src/camctl/bootstrap/background_flow.py:273: in _raise_failures
+    raise failures[0].with_traceback(failures[0].__traceback__)
+apps/camctl/src/camctl/bootstrap/background_flow.py:236: in collect
+    await owner.settle()
+apps/camctl/src/camctl/bootstrap/background_flow.py:92: in settle
+    self._consume()
+apps/camctl/src/camctl/bootstrap/background_flow.py:42: in _consume
+    raise error
+apps/camctl/src/camctl/bootstrap/background_flow.py:46: in _run
+    await self._flow(context)
+apps/camctl/src/camctl/bootstrap/flows.py:224: in advance
+    await self._advance_device(context, device_id, candidates)
+apps/camctl/src/camctl/bootstrap/flows.py:344: in _advance_device
+    raise StateDbFailure(f"拍摄流程状态库前提失效: {error}") from error
+E   camctl.session.service.StateDbFailure: 拍摄流程状态库前提失效: 启动授予事务未可靠完成: '_FlowConnection' object has no attribute 'total_changes'
+- generated xml file: /tmp/camctl-fix44-components-evidence-20261025/audit-bootstrap-total-changes/junit.xml -
+=========================== short test summary info ============================
+FAILED apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py::test_devices_progress_independently_and_settle_before_connection_close[False] - camctl.session.service.StateDbFailure: 窗口观察事务未完成（rolled_back）: 'TrackedConnection' object has no attribute 'total_changes'
+FAILED apps/camctl/tests/integration/bootstrap/test_baseline_device_progress.py::test_devices_progress_independently_and_settle_before_connection_close[True] - TimeoutError
+FAILED apps/camctl/tests/integration/bootstrap/test_capture_flow_failures.py::test_saved_device_failure_allows_other_device_work - camctl.session.service.StateDbFailure: 拍摄流程状态库前提失效: 启动授予事务未可靠完成: '_FlowConnection' object has no attribute 'total_changes'
+========================= 3 failed, 2 passed in 4.55s ==========================

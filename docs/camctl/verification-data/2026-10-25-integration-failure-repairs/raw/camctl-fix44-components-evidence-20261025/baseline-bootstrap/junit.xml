@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="2" time="14.386" timestamp="2026-10-25T16:24:08.115760+08:00" hostname="1e0518e0c6b4"><testcase classname="tests.integration.bootstrap.test_distribution" name="test_installed_hasselblad_photo_pair_obtain_and_source_reuse[raw]" time="9.027"><failure message="assert 5 == 2">apps/camctl/tests/integration/bootstrap/test_distribution.py:973: in test_installed_hasselblad_photo_pair_obtain_and_source_reuse
+    assert format_version == 2
+E   assert 5 == 2</failure></testcase><testcase classname="tests.integration.bootstrap.test_distribution" name="test_installed_hasselblad_photo_pair_obtain_and_source_reuse[jpeg]" time="4.888"><failure message="assert 5 == 2">apps/camctl/tests/integration/bootstrap/test_distribution.py:973: in test_installed_hasselblad_photo_pair_obtain_and_source_reuse
+    assert format_version == 2
+E   assert 5 == 2</failure></testcase></testsuite></testsuites>

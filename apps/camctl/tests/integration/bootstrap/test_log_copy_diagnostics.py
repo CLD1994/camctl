@@ -12,119 +12,25 @@ import pytest
 pytestmark = pytest.mark.asyncio
 
 from camctl.acceptance.service import CommandMode
-from camctl.acceptance.input import ParsedInput
 from camctl.bootstrap.lifecycle import (
-    _failure_log_wiring, build_runtime, close_runtime, execute_command,
+    build_runtime, close_runtime, execute_command,
 )
 from camctl.logging_runtime import copies
 from camctl.logging_runtime.clh_adapter import FileChannel, WriteResult
 from camctl.logging_runtime.copies import MarkerStage, SaveOutcome
-from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.reporting.messages import ErrorKind, ResultFailureMessage
 from camctl.reporting.supervisor import (
     GenerationOutcomeKind, WorkerGeneration, WorkerSupervisor,
 )
 
-from .test_composition import RecordingCatalog, _config_for
+from .test_composition import RecordingCatalog
 
 
-async def _run_with_report_failure(deps, monkeypatch):
-    """默认报告流程收到一次已分类的报告生成失败并持久化原错误。"""
-    report_called = {"count": 0}
-
-    async def fail_generation(self, job):
-        report_called["count"] += 1
-        failure = ResultFailureMessage(
-            job_id=job.job_id,
-            instance_id=job.instance_id,
-            error_kind=ErrorKind.REPORT,
-            error_code="controlled_report_failure",
-            error_message="controlled report generation failure",
-        )
-        return WorkerGeneration(
-            kind=GenerationOutcomeKind.REPORT_FAILURE,
-            job_id=job.job_id,
-            failure=failure,
-        )
-
-    monkeypatch.setattr(WorkerSupervisor, "generate", fail_generation)
-    outcome = await execute_command(deps, None)
-    return outcome, report_called
-
-
-async def _runtime(tmp_path: Path):
-    config = _config_for(tmp_path)
-    assert initialize_state(
-        config, Path(config.paths.state_db)).outcome is InitOutcome.CREATED
-    submit = build_runtime(CommandMode.SUBMIT, config, catalog=RecordingCatalog())
-    source = ParsedInput(
-        path=str(tmp_path / "report-trigger.json"),
-        document={
-            "version": 1,
-            "request_id": "sw02-report-trigger",
-            "actions": [],
-        },
-    )
-    try:
-        accepted = await execute_command(submit, source)
-        assert accepted.succeeded is True
-    finally:
-        close_runtime(submit)
-    return build_runtime(CommandMode.RUN, config, catalog=RecordingCatalog())
-
-
-async def _seed_two_pending_reports(deps, tmp_path: Path):
-    from camctl.contracts.values import new_operation_key
-    from camctl.persistence.models import DbOutcomeKind
-    from camctl.reporting.policy import ReportingRepository, register_report_guards
-    from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-
-    register_report_guards()
-    owned = open_existing(deps.state_db, DbOpenMode.EXISTING_RW, DbConfig())
-    try:
-        first = ReportingRepository().freeze_report(
-            new_operation_key(), owned, occurred_at=1_735_689_600_000_000)
-        assert first.kind is DbOutcomeKind.COMPLETED
-        first_report = first.value.report
-    finally:
-        owned.connection.close()
-
-    submit = build_runtime(
-        CommandMode.SUBMIT, deps.config, catalog=RecordingCatalog())
-    source = ParsedInput(
-        path=str(tmp_path / "second-plan.json"),
-        document={
-            "version": 1,
-            "request_id": "sw02-second-report-trigger",
-            "actions": [{
-                "name": "future status",
-                "type": "report_status",
-                "scheduled_at": "2099-01-01 00:00:00",
-                "params": {"scope": "full"},
-            }],
-        },
-    )
-    try:
-        accepted = await execute_command(submit, source)
-        assert accepted.succeeded is True
-    finally:
-        close_runtime(submit)
-
-    owned = open_existing(deps.state_db, DbOpenMode.EXISTING_RW, DbConfig())
-    try:
-        second = ReportingRepository().freeze_report(
-            new_operation_key(), owned, occurred_at=1_735_689_600_000_001)
-        assert second.kind is DbOutcomeKind.COMPLETED
-        second_report = second.value.report
-        pending = owned.connection.execute(
-            "SELECT id, status FROM reports ORDER BY id").fetchall()
-        assert [row[0] for row in pending] == [
-            first_report.report_id, second_report.report_id]
-        assert all(row[1] == 1 for row in pending)
-        assert second_report.report_id != first_report.report_id
-    finally:
-        owned.connection.close()
-    return first_report, second_report
+from ..support.bootstrap_log_cases import (
+    runtime as _runtime, seed_two_pending_reports as _seed_two_pending_reports,
+    run_with_report_failure as _run_with_report_failure, generate_valid_report,
+    observe_failure_service,
+)
 
 
 async def test_default_run_records_marker_progress_failure(
@@ -273,55 +179,52 @@ async def test_default_run_reports_saved_marker_close_error_and_keeps_report_res
 async def test_default_recovery_reports_delete_close_error_after_confirmed_sync(
         tmp_path: Path, monkeypatch) -> None:
     import os
-    import stat
-
-    from camctl.bootstrap.lifecycle import _on_report_recovered
     from camctl.logging_runtime.copies import MarkerStore, SaveOutcome
 
     deps = await _runtime(tmp_path)
-    logs_dir = (Path(deps.config.paths.staging).expanduser() / "logs")
+    logs_dir = Path(deps.config.paths.staging) / "logs"
     marker = MarkerStore(logs_dir)
-    assert marker.create("recovery-close", "log-copy-recovery-close.log").outcome is (
-        SaveOutcome.SAVED)
-    failure_log, _ = _failure_log_wiring(deps)
+    assert marker.create("recovery-close", "log-copy-recovery-close.log").outcome is SaveOutcome.SAVED
     real_close = os.close
 
-    def close_directory_then_report_error(fd: int) -> None:
-        if stat.S_ISDIR(os.fstat(fd).st_mode):
-            real_close(fd)
-            raise OSError("recovery directory close result unconfirmed")
+    def close_directory_then_report_error(fd):
+        target = Path(os.readlink(f"/proc/self/fd/{fd}"))
         real_close(fd)
+        if target == logs_dir:
+            raise OSError("recovery directory close result unconfirmed")
 
     monkeypatch.setattr(copies.os, "close", close_directory_then_report_error)
+    monkeypatch.setattr(WorkerSupervisor, "generate", generate_valid_report)
     try:
-        await _on_report_recovered(deps, failure_log)
+        outcome = await execute_command(deps, None)
     finally:
         close_runtime(deps)
-
+    assert outcome.succeeded is True
+    assert list(Path(deps.config.paths.ready).glob("status-report-*.json"))
     assert marker.check().presence.value == "absent"
     log = Path(deps.config.paths.log_file).read_text(encoding="utf-8")
-    assert "报告日志标记恢复删除诊断" in log
-    assert "outcome=deleted" in log
+    assert "报告日志标记恢复删除诊断" in log and "outcome=deleted" in log
     assert "recovery directory close result unconfirmed" in log
 
 
 async def test_recovery_exception_diagnostic_formats_error_once(
-        tmp_path: Path) -> None:
-    from camctl.bootstrap.lifecycle import _on_report_recovered
-
+        tmp_path: Path, monkeypatch) -> None:
+    from camctl.logging_runtime.copies import MarkerStore
     deps = await _runtime(tmp_path)
 
-    class FailedRecovery:
-        async def on_report_recovered(self) -> None:
-            raise RuntimeError("recovery delete raised unexpectedly")
+    def failed_delete(_marker):
+        raise RuntimeError("recovery delete raised unexpectedly")
 
+    monkeypatch.setattr(MarkerStore, "delete", failed_delete)
+    monkeypatch.setattr(WorkerSupervisor, "generate", generate_valid_report)
     try:
-        await _on_report_recovered(deps, FailedRecovery())
+        outcome = await execute_command(deps, None)
     finally:
         close_runtime(deps)
-
+    assert outcome.succeeded is True
+    assert list(Path(deps.config.paths.ready).glob("status-report-*.json"))
     log = Path(deps.config.paths.log_file).read_text(encoding="utf-8")
-    assert "outcome=unknown; error=RuntimeError: recovery delete raised unexpectedly" in log
+    assert log.count("outcome=unknown; error=RuntimeError: recovery delete raised unexpectedly") == 1
     assert "error=error:" not in log
 
 
@@ -393,177 +296,114 @@ async def test_default_run_records_marker_progress_check_failure(
 
 
 async def test_first_report_copy_precedes_later_report_state_failure(
-        tmp_path: Path) -> None:
+        tmp_path: Path, monkeypatch) -> None:
     import asyncio
-
-    from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-    from camctl.session.service import StateDbFailure, _trigger_failure_log
-    from camctl.bootstrap.flows import report_flow
-
+    from camctl.session.service import StateDbFailure
     deps = await _runtime(tmp_path)
     first_report, second_report = await _seed_two_pending_reports(deps, tmp_path)
+    second_started, release_second = asyncio.Event(), asyncio.Event()
+    generated = []
 
-    failure_log, request_factory = _failure_log_wiring(deps)
-    second_started = asyncio.Event()
-    release_second = asyncio.Event()
-    generated: list[int] = []
+    async def generate(_supervisor, job):
+        generated.append(job.report_id)
+        if len(generated) == 1:
+            return WorkerGeneration(GenerationOutcomeKind.REPORT_FAILURE, job.job_id,
+                failure=ResultFailureMessage(job_id=job.job_id, instance_id=job.instance_id,
+                    error_kind=ErrorKind.REPORT, error_code="first_report_failed",
+                    error_message="first report actual failure detail"))
+        second_started.set()
+        await release_second.wait()
+        raise StateDbFailure("second report state database failed")
 
-    class TwoReportSupervisor:
-        async def generate(self, job):
-            generated.append(job.report_id)
-            if len(generated) == 1:
-                failure = ResultFailureMessage(
-                    job_id=job.job_id,
-                    instance_id=job.instance_id,
-                    error_kind=ErrorKind.REPORT,
-                    error_code="first_report_failed",
-                    error_message="first report actual failure detail",
-                )
-                return WorkerGeneration(
-                    kind=GenerationOutcomeKind.REPORT_FAILURE,
-                    job_id=job.job_id,
-                    failure=failure,
-                )
-            second_started.set()
-            await release_second.wait()
-            raise StateDbFailure("second report state database failed")
-
-    class ReportContext:
-        clock = type("Clock", (), {
-            "utc_micros": staticmethod(lambda: 1_735_689_600_000_000),
-        })()
-        on_log_diagnostic = None
-        on_stderr_diagnostic = None
-        on_log_path_unsafe = None
-
-        def __init__(self):
-            self.failure_log = failure_log
-            self.copy_request_factory = request_factory
-
-        def open_connection(self):
-            return open_existing(deps.state_db, DbOpenMode.EXISTING_RW, DbConfig())
-
-    flow = report_flow(
-        state_db=deps.state_db,
-        staging=Path(deps.config.paths.staging),
-        ready=Path(deps.config.paths.ready),
-        processing=Path(deps.config.paths.processing),
-        history=deps.config.history,
-        database=deps.config.database,
-        supervisor=TwoReportSupervisor(),
-        on_failure=_trigger_failure_log,
-    )
-    context = ReportContext()
-    task = asyncio.create_task(flow(context))
+    monkeypatch.setattr(WorkerSupervisor, "generate", generate)
+    task = asyncio.create_task(execute_command(deps, None))
     try:
         await asyncio.wait_for(second_started.wait(), timeout=10)
-        delivered_while_second_paused = list(
-            Path(deps.config.paths.ready).glob("log-copy-*.log"))
+        delivered = list(Path(deps.config.paths.ready).glob("log-copy-*.log"))
+        assert len(delivered) == 1
+        content = delivered[0].read_bytes()
+        assert b"first report actual failure detail" in content
+        assert any(json.loads(line).get("context", {}).get("report_id") == first_report.report_id
+                   for line in content.decode().splitlines() if line.startswith("{"))
         release_second.set()
-        with pytest.raises(
-                StateDbFailure, match="second report state database failed"):
-            await asyncio.wait_for(task, timeout=10)
+        outcome = await asyncio.wait_for(task, timeout=10)
+        assert outcome.reason == "state_db_error"
     finally:
         release_second.set()
         if not task.done():
-            try:
-                await asyncio.wait_for(task, timeout=10)
-            except StateDbFailure:
-                pass
+            await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=10)
         close_runtime(deps)
-
     assert generated == [first_report.report_id, second_report.report_id]
-    assert len(delivered_while_second_paused) == 1
-    assert b"first report actual failure detail" in delivered_while_second_paused[0].read_bytes()
-    assert f"report_id={first_report.report_id}".encode() in delivered_while_second_paused[0].read_bytes()
+    assert "second report state database failed" in Path(deps.config.paths.log_file).read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("failure_stage", ["factory", "delivery"])
 async def test_default_run_suspends_copy_attempt_exception_until_recovery(
         tmp_path: Path, monkeypatch, failure_stage: str) -> None:
-    from types import SimpleNamespace
-
-    import camctl.bootstrap.lifecycle as lifecycle
-    from camctl.session.service import _trigger_failure_log
+    from camctl.logging_runtime.copies import FailureLogService, deliver_failure_copy
+    from camctl.logging_runtime.diagnostics import error_diagnostics_context, flush_diagnostics
+    from camctl.session.service import run_session
+    from ..support.bootstrap_log_cases import log_session
 
     deps = await _runtime(tmp_path)
     first_report, second_report = await _seed_two_pending_reports(deps, tmp_path)
-    generated: list[int] = []
     attempts = {"factory": 0, "delivery": 0}
+    captured = []
+    original_init = FailureLogService.__init__
+    original_failure = FailureLogService.on_report_failure_with_factory
 
-    async def fail_generation(self, job):
-        generated.append(job.report_id)
-        failure = ResultFailureMessage(
-            job_id=job.job_id,
-            instance_id=job.instance_id,
-            error_kind=ErrorKind.REPORT,
-            error_code=f"controlled_failure_{job.report_id}",
-            error_message=f"report {job.report_id} actual error",
-        )
-        return WorkerGeneration(
-            kind=GenerationOutcomeKind.REPORT_FAILURE,
-            job_id=job.job_id,
-            failure=failure,
-        )
+    async def controlled_delivery(request):
+        attempts["delivery"] += 1
+        if attempts["delivery"] == 1:
+            raise RuntimeError("controlled delivery exception")
+        return await deliver_failure_copy(request)
 
-    original_wiring = lifecycle._failure_log_wiring
-    captured: dict[str, object] = {}
-
-    def capture_wiring(runtime):
-        service, original_factory = original_wiring(runtime)
-        captured["service"] = service
-        real_delivery = service._deliver
-
+    def service_init(service, marker, **kwargs):
         if failure_stage == "delivery":
-            async def fail_first_delivery(request):
-                attempts["delivery"] += 1
-                if attempts["delivery"] == 1:
-                    raise RuntimeError("controlled delivery exception")
-                return await real_delivery(request)
+            kwargs["deliver"] = controlled_delivery
+        original_init(service, marker, **kwargs)
+        captured.append(service)
 
-            service._deliver = fail_first_delivery
-
-        def controlled_factory(error):
+    async def failure(service, factory, *, diagnose=None):
+        def controlled_factory():
             attempts["factory"] += 1
             if failure_stage == "factory" and attempts["factory"] == 1:
                 raise RuntimeError("controlled factory exception")
-            return original_factory(error)
+            return factory()
+        return await original_failure(service, controlled_factory, diagnose=diagnose)
 
-        captured["factory"] = controlled_factory
-        return service, controlled_factory
-
-    monkeypatch.setattr(lifecycle, "_failure_log_wiring", capture_wiring)
-    monkeypatch.setattr(WorkerSupervisor, "generate", fail_generation)
-
+    monkeypatch.setattr(FailureLogService, "__init__", service_init)
+    monkeypatch.setattr(FailureLogService, "on_report_failure_with_factory", failure)
     try:
-        outcome = await execute_command(deps, None)
-        assert outcome.reason == "report_error"
-        assert generated == [first_report.report_id, second_report.report_id]
-        assert attempts["factory"] == 1
-        assert attempts["delivery"] == (1 if failure_stage == "delivery" else 0)
+        outcome, called = await _run_with_report_failure(deps, monkeypatch)
+        assert outcome.reason == "report_error" and called["count"] == 2
+        assert first_report.report_id != second_report.report_id
+        assert attempts == {"factory": 1, "delivery": int(failure_stage == "delivery")}
         assert list(Path(deps.config.paths.ready).glob("log-copy-*.log")) == []
 
-        service = captured["service"]
-        factory = captured["factory"]
-        # run 已完成；后续断言验证无 owner 的服务辅助接口，不重用已停止的 run owner。
-        service.bind_owner(None)
-        deletion = await service.on_report_recovered()
-        assert deletion.outcome.value in {"deleted", "not_present"}
-        context = SimpleNamespace(
-            failure_log=service,
-            copy_request_factory=factory,
-            on_log_diagnostic=None,
-            on_stderr_diagnostic=None,
-            on_log_path_unsafe=None,
-        )
-        await _trigger_failure_log(
-            context, RuntimeError("new round report failure"))
-
-        assert attempts["factory"] == 2
-        assert attempts["delivery"] == (2 if failure_stage == "delivery" else 0)
-        ready_files = list(Path(deps.config.paths.ready).glob("log-copy-*.log"))
-        assert len(ready_files) == 1
-        assert b"new round report failure" in ready_files[0].read_bytes()
+        # 后半段只证明公开服务跨一次真实恢复后的新会话协作，不替代默认恢复工厂测试。
+        next_deps = build_runtime(CommandMode.RUN, deps.config, catalog=RecordingCatalog())
+        async def next_report(_context):
+            raise RuntimeError("new round report failure")
+        context, service, close = log_session(next_deps, {"report": next_report}, service=captured[0])
+        recovery = []
+        async def recover(_database):
+            recovery.append(await service.on_report_recovered())
+        context.on_session_open = recover
+        try:
+            with error_diagnostics_context(next_deps.log_runtime.channel, lambda text: False, background=True):
+                try:
+                    result = await run_session(context, None)
+                finally:
+                    await flush_diagnostics()
+            assert result.reason == "report_error"
+            assert len(recovery) == 1 and recovery[0].outcome.value in {"deleted", "not_present"}
+        finally:
+            close()
+            close_runtime(next_deps)
+        assert attempts == {"factory": 2, "delivery": 2 if failure_stage == "delivery" else 0}
+        ready = list(Path(deps.config.paths.ready).glob("log-copy-*.log"))
+        assert len(ready) == 1 and b"new round report failure" in ready[0].read_bytes()
     finally:
         close_runtime(deps)
 
@@ -571,7 +411,6 @@ async def test_default_run_suspends_copy_attempt_exception_until_recovery(
 @pytest.mark.parametrize("close_fails", [False, True])
 async def test_default_lock_failure_disables_file_logging(
         tmp_path: Path, monkeypatch, close_fails: bool) -> None:
-    import camctl.bootstrap.lifecycle as lifecycle
 
     deps = await _runtime(tmp_path)
     first_report, second_report = await _seed_two_pending_reports(deps, tmp_path)
@@ -581,7 +420,6 @@ async def test_default_lock_failure_disables_file_logging(
     monkeypatch.setattr(sys, "stdout", stdout)
     generated: list[int] = []
     attempts = {"factory": 0, "copy": 0, "lock": 0, "close": 0}
-    captured: dict[str, object] = {}
 
     async def fail_generation(self, job):
         generated.append(job.report_id)
@@ -598,17 +436,11 @@ async def test_default_lock_failure_disables_file_logging(
             failure=failure,
         )
 
-    original_wiring = lifecycle._failure_log_wiring
+    original_init = FileChannel.__init__
 
-    def capture_wiring(runtime):
-        service, original_factory = original_wiring(runtime)
-        captured["service"] = service
-
-        def counted_factory(error):
-            attempts["factory"] += 1
-            return original_factory(error)
-
-        return service, counted_factory
+    def count_helper(channel, *args, **kwargs):
+        attempts["factory"] += 1
+        original_init(channel, *args, **kwargs)
 
     original_copy = FileChannel.copy_with_write
 
@@ -631,7 +463,7 @@ async def test_default_lock_failure_disables_file_logging(
         monkeypatch.setattr(handler, "close", close_with_optional_error)
         return original_copy(channel, record, destination)
 
-    monkeypatch.setattr(lifecycle, "_failure_log_wiring", capture_wiring)
+    monkeypatch.setattr(FileChannel, "__init__", count_helper)
     monkeypatch.setattr(WorkerSupervisor, "generate", fail_generation)
     monkeypatch.setattr(FileChannel, "copy_with_write", lock_failure_copy)
 
@@ -666,7 +498,6 @@ async def test_default_lock_failure_disables_file_logging(
 async def test_default_current_log_io_failure_disables_file_logging(
         tmp_path: Path, monkeypatch, failure_step: str,
         close_fails: bool) -> None:
-    import camctl.bootstrap.lifecycle as lifecycle
     import concurrent_log_handler
 
     deps = await _runtime(tmp_path)
@@ -697,24 +528,6 @@ async def test_default_current_log_io_failure_disables_file_logging(
             failure=failure,
         )
 
-    original_wiring = lifecycle._failure_log_wiring
-
-    def capture_wiring(runtime):
-        service, factory = original_wiring(runtime)
-        original_service_call = service.on_report_failure_with_factory
-
-        async def observe_service_call(*args, **kwargs):
-            receipt = await original_service_call(*args, **kwargs)
-            receipts.append(receipt)
-            return receipt
-
-        service.on_report_failure_with_factory = observe_service_call
-
-        def counted_factory(error):
-            attempts["factory"] += 1
-            return factory(error)
-
-        return service, counted_factory
 
     original_copy = FileChannel.copy_with_write
 
@@ -774,7 +587,7 @@ async def test_default_current_log_io_failure_disables_file_logging(
         monkeypatch.setattr(handler, "close", close_with_optional_error)
         return original_copy(channel, record, destination)
 
-    monkeypatch.setattr(lifecycle, "_failure_log_wiring", capture_wiring)
+    observe_failure_service(monkeypatch, receipts=receipts, factory_started=lambda: attempts.__setitem__("factory", attempts["factory"] + 1))
     monkeypatch.setattr(WorkerSupervisor, "generate", fail_generation)
     monkeypatch.setattr(FileChannel, "copy_with_write", fail_file_operation)
 
@@ -864,7 +677,6 @@ async def test_default_replica_io_failure_keeps_ordinary_log_available(
         tmp_path: Path, monkeypatch) -> None:
     import shutil
 
-    import camctl.bootstrap.lifecycle as lifecycle
 
     deps = await _runtime(tmp_path)
     stderr = io.StringIO()
@@ -872,19 +684,7 @@ async def test_default_replica_io_failure_keeps_ordinary_log_available(
     monkeypatch.setattr(sys, "stderr", stderr)
     monkeypatch.setattr(sys, "stdout", stdout)
     receipts = []
-    original_wiring = lifecycle._failure_log_wiring
 
-    def capture_wiring(runtime):
-        service, factory = original_wiring(runtime)
-        original_deliver = service._deliver
-
-        async def observe_delivery(request):
-            receipt = await original_deliver(request)
-            receipts.append(receipt)
-            return receipt
-
-        service._deliver = observe_delivery
-        return service, factory
 
     original_copyfileobj = shutil.copyfileobj
 
@@ -893,7 +693,7 @@ async def test_default_replica_io_failure_keeps_ordinary_log_available(
             raise OSError("controlled replica write denied")
         return original_copyfileobj(source, target, length)
 
-    monkeypatch.setattr(lifecycle, "_failure_log_wiring", capture_wiring)
+    observe_failure_service(monkeypatch, receipts=receipts)
     monkeypatch.setattr(shutil, "copyfileobj", fail_replica_write)
 
     try:
@@ -1016,7 +816,6 @@ async def test_default_file_io_failure_stops_listener_and_uses_stderr(
 
 async def test_default_unsafe_log_blocks_later_copy_factory(
         tmp_path: Path, monkeypatch) -> None:
-    import camctl.bootstrap.lifecycle as lifecycle
     import concurrent_log_handler
 
     from camctl.logging_runtime.models import LogLevel
@@ -1035,7 +834,7 @@ async def test_default_unsafe_log_blocks_later_copy_factory(
         "helper_create": 0, "copy": 0,
     }
     original_open = concurrent_log_handler._open
-    original_append = concurrent_log_handler.ConcurrentRotatingFileHandler.do_write
+    before = Path(primary_path).read_bytes()
     original_file_channel_init = FileChannel.__init__
     original_copy = FileChannel.copy_with_write
 
@@ -1044,12 +843,17 @@ async def test_default_unsafe_log_blocks_later_copy_factory(
             attempts["open"] += 1
             if attempts["open"] == 1:
                 raise OSError("controlled prior ordinary log open failure")
-        return original_open(file, *args, **kwargs)
-
-    def count_primary_append(handler, message):
-        if handler.baseFilename == primary_path:
-            attempts["append"] += 1
-        return original_append(handler, message)
+        stream = original_open(file, *args, **kwargs)
+        if str(file) != primary_path:
+            return stream
+        class ObservedStream:
+            def __getattr__(self, name):
+                return getattr(stream, name)
+            def write(self, message):
+                result = stream.write(message)
+                attempts["append"] += 1
+                return result
+        return ObservedStream()
 
     def count_helper_create(channel, *args, **kwargs):
         attempts["helper_create"] += 1
@@ -1060,9 +864,6 @@ async def test_default_unsafe_log_blocks_later_copy_factory(
         return original_copy(channel, record, destination)
 
     monkeypatch.setattr(concurrent_log_handler, "_open", fail_first_primary_open)
-    monkeypatch.setattr(
-        concurrent_log_handler.ConcurrentRotatingFileHandler,
-        "do_write", count_primary_append)
     monkeypatch.setattr(FileChannel, "__init__", count_helper_create)
     monkeypatch.setattr(FileChannel, "copy_with_write", count_copy)
 
@@ -1082,18 +883,9 @@ async def test_default_unsafe_log_blocks_later_copy_factory(
         )
 
     generated: list[int] = []
-    original_wiring = lifecycle._failure_log_wiring
 
-    def capture_wiring(runtime):
-        service, factory = original_wiring(runtime)
 
-        def counted_factory(error):
-            attempts["factory"] += 1
-            return factory(error)
-
-        return service, counted_factory
-
-    monkeypatch.setattr(lifecycle, "_failure_log_wiring", capture_wiring)
+    observe_failure_service(monkeypatch, factory_started=lambda: attempts.__setitem__("factory", attempts["factory"] + 1))
     monkeypatch.setattr(WorkerSupervisor, "generate", fail_generation)
 
     try:
@@ -1113,9 +905,14 @@ async def test_default_unsafe_log_blocks_later_copy_factory(
             "helper_create": 0, "copy": 0,
         }
         assert deps.failure_channel is None
+        assert Path(primary_path).read_bytes() == before
         assert list(Path(deps.config.paths.ready).glob("log-copy-*.log")) == []
         assert "controlled prior ordinary log open failure" in stderr.getvalue()
-        assert f"report_id={first_report.report_id}" in stderr.getvalue()
+        diagnostics = [json.loads(line) for line in stderr.getvalue().splitlines()
+                       if line.startswith("{")]
+        assert {item.get("context", {}).get("report_id") for item in diagnostics
+                if item.get("stage") == "report_generate"} == {
+                    first_report.report_id, second_report.report_id}
         assert f"report {first_report.report_id} actual error" in stderr.getvalue()
         assert "run 会话失败: report_error" in stderr.getvalue()
         assert stdout.getvalue() == ""
@@ -1412,7 +1209,6 @@ async def test_default_copy_program_error_keeps_original_channel_failure_facts(
         tmp_path: Path, monkeypatch) -> None:
     import shutil
 
-    import camctl.bootstrap.lifecycle as lifecycle
 
     deps = await _runtime(tmp_path)
     first_report, second_report = await _seed_two_pending_reports(deps, tmp_path)
@@ -1421,10 +1217,9 @@ async def test_default_copy_program_error_keeps_original_channel_failure_facts(
     monkeypatch.setattr(sys, "stderr", stderr)
     monkeypatch.setattr(sys, "stdout", stdout)
     generated: list[int] = []
-    factories: list[Exception] = []
+    factories: list[bool] = []
     receipts = []
     observed_program_errors: list[BaseException] = []
-    original_wiring = lifecycle._failure_log_wiring
     program_error = RuntimeError("controlled snapshot program exception")
 
     async def fail_generation(self, job):
@@ -1442,22 +1237,6 @@ async def test_default_copy_program_error_keeps_original_channel_failure_facts(
             failure=failure,
         )
 
-    def capture_wiring(runtime):
-        service, request_factory = original_wiring(runtime)
-        original_service_call = service.on_report_failure_with_factory
-
-        async def observe_service_call(*args, **kwargs):
-            receipt = await original_service_call(*args, **kwargs)
-            receipts.append(receipt)
-            return receipt
-
-        service.on_report_failure_with_factory = observe_service_call
-
-        def counted_factory(error):
-            factories.append(error)
-            return request_factory(error)
-
-        return service, counted_factory
 
     original_copy = FileChannel.copy_with_write
 
@@ -1486,7 +1265,7 @@ async def test_default_copy_program_error_keeps_original_channel_failure_facts(
             observed_program_errors.append(failure)
             raise
 
-    monkeypatch.setattr(lifecycle, "_failure_log_wiring", capture_wiring)
+    observe_failure_service(monkeypatch, receipts=receipts, factory_started=lambda: factories.append(True))
     monkeypatch.setattr(WorkerSupervisor, "generate", fail_generation)
     monkeypatch.setattr(
         FileChannel, "copy_with_write", fail_copy_program_with_unlock_error)
@@ -1553,79 +1332,122 @@ async def test_default_copy_program_error_keeps_original_channel_failure_facts(
 async def test_failure_wiring_does_not_reopen_failed_helper_channel(
         tmp_path: Path, monkeypatch) -> None:
     deps = await _runtime(tmp_path)
-    original_handler_close = None
-    try:
-        failure_log, request_factory = _failure_log_wiring(deps)
-        first = request_factory(RuntimeError("ownership probe"))
-        channel = first.channel
+    await _seed_two_pending_reports(deps, tmp_path)
+    channels, results, closes = [], [], []
+    original_init, original_copy = FileChannel.__init__, FileChannel.copy_with_write
+
+    def create(channel, *args, **kwargs):
+        original_init(channel, *args, **kwargs)
+        channels.append(channel)
+
+    def copy(channel, record, destination):
         handler = channel._handler
-        original_unlock = handler._do_unlock
-        original_handler_close = handler.close
-
-        def unlock_then_fail():
-            original_unlock()
+        unlock = handler._do_unlock
+        closes.append(handler.close)
+        def fail_unlock():
+            unlock()
             raise OSError("unlock result unavailable")
-
-        def fail_handler_close():
+        def fail_close():
             raise OSError("close result unavailable")
+        monkeypatch.setattr(handler, "_do_unlock", fail_unlock)
+        monkeypatch.setattr(handler, "close", fail_close)
+        result = original_copy(channel, record, destination)
+        results.append(result)
+        return result
 
-        monkeypatch.setattr(handler, "_do_unlock", unlock_then_fail)
-        monkeypatch.setattr(handler, "close", fail_handler_close)
-        destination = (Path(deps.config.paths.staging).expanduser()
-                       / "logs" / "log-copy-ownership-probe.log")
-        result, copy_error = channel.copy_with_write(first.trigger, destination)
-
-        assert result.appended is True
-        assert result.coordination_error is not None
-        assert result.close_error is not None
-        assert copy_error is None
-        second = request_factory(RuntimeError("second ownership probe"))
-        assert second.channel is channel
-        assert channel.disabled is True
-        assert channel.closed is False
-        assert first.marker is failure_log._marker
-    finally:
-        if original_handler_close is not None:
-            original_handler_close()
-        close_runtime(deps)
-
-
-async def test_default_failure_wiring_shares_marker_owner(tmp_path: Path) -> None:
-    deps = await _runtime(tmp_path)
+    monkeypatch.setattr(FileChannel, "__init__", create)
+    monkeypatch.setattr(FileChannel, "copy_with_write", copy)
+    stderr = io.StringIO()
+    monkeypatch.setattr(sys, "stderr", stderr)
     try:
-        failure_log, request_factory = _failure_log_wiring(deps)
-        request = request_factory(RuntimeError("ownership probe"))
-        assert request.marker is failure_log._marker
+        outcome, called = await _run_with_report_failure(deps, monkeypatch)
+        assert outcome.reason == "report_error" and called["count"] == 2
+        assert len(channels) == len(results) == 1
+        result, copy_error = results[0]
+        assert result.appended is True and copy_error is None
+        assert result.coordination_error is not None and result.close_error is not None
+        assert channels[0].disabled is True and channels[0].closed is False
+        assert "unlock result unavailable" in stderr.getvalue()
+        assert "close result unavailable" in stderr.getvalue()
+        assert result.copy_handles_closed is True
+        ready = list(Path(deps.config.paths.ready).glob("log-copy-*.log"))
+        assert len(ready) == 1
+        assert b"controlled report generation failure" in ready[0].read_bytes()
+    finally:
+        for close in closes:
+            close()
+        close_runtime(deps)
+
+
+async def test_default_failure_wiring_shares_marker_owner(tmp_path: Path, monkeypatch) -> None:
+    from camctl.logging_runtime.copies import MarkerStore
+    deps = await _runtime(tmp_path)
+    await _seed_two_pending_reports(deps, tmp_path)
+    creations, deliveries = [], []
+    original_create, original_copy = MarkerStore.create, FileChannel.copy_with_write
+
+    def create(marker, trigger_id, copy_file):
+        creations.append((trigger_id, copy_file))
+        return original_create(marker, trigger_id, copy_file)
+
+    def copy(channel, record, destination):
+        deliveries.append(Path(destination))
+        return original_copy(channel, record, destination)
+
+    monkeypatch.setattr(MarkerStore, "create", create)
+    monkeypatch.setattr(FileChannel, "copy_with_write", copy)
+    try:
+        outcome, called = await _run_with_report_failure(deps, monkeypatch)
     finally:
         close_runtime(deps)
+    assert outcome.reason == "report_error" and called["count"] == 2
+    assert len(creations) == len(deliveries) == 1
+    marker = MarkerStore(Path(deps.config.paths.staging) / "logs").check().state
+    assert marker is not None and marker.stage is MarkerStage.PUBLISHED
+    ready = list(Path(deps.config.paths.ready).glob("log-copy-*.log"))
+    assert len(ready) == 1 and ready[0].name == deliveries[0].name
+    assert marker.copy_name == ready[0].name
 
 
 async def test_stderr_failure_disables_repeated_diagnostic_writes(
         tmp_path: Path, monkeypatch) -> None:
     deps = await _runtime(tmp_path)
+    await _seed_two_pending_reports(deps, tmp_path)
+    from camctl.logging_runtime.copies import MarkerStore
+    # 实际标记创建失败先产生副本诊断，原 report_error 随后还要结束会话。
+    def fail_marker(_marker, *_args):
+        raise OSError("controlled marker write failure")
+    monkeypatch.setattr(MarkerStore, "create", fail_marker)
+    original_write = FileChannel.write_record
+    failed_records = []
+    def fail_diagnostic(channel, record):
+        if "报告失败的日志副本诊断" in record.message:
+            failed_records.append(record)
+            raise OSError("ordinary log closed")
+        return original_write(channel, record)
+    monkeypatch.setattr(FileChannel, "write_record", fail_diagnostic)
 
     class BrokenStderr:
         def __init__(self):
-            self.calls = 0
-
+            self.messages = []
         def write(self, message):
-            self.calls += 1
+            self.messages.append(message)
             raise OSError("stderr closed")
-
         def flush(self):
             raise OSError("stderr closed")
-
     broken = BrokenStderr()
     monkeypatch.setattr(sys, "stderr", broken)
+    stdout = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", stdout)
     try:
-        from camctl.bootstrap.lifecycle import _write_stderr_diagnostic
-
-        _write_stderr_diagnostic(deps, "first diagnostic")
-        _write_stderr_diagnostic(deps, "second diagnostic")
-        assert broken.calls == 1
-        assert deps.stderr_diagnostic_failed is True
+        outcome, called = await _run_with_report_failure(deps, monkeypatch)
     finally:
         close_runtime(deps)
+    assert outcome.reason == "report_error" and called["count"] == 2
+    assert len(failed_records) == len(broken.messages) == 1
+    assert "controlled marker write failure" in broken.messages[0]
+    assert stdout.getvalue() == ""
+    assert not list(Path(deps.config.paths.ready).glob("log-copy-*.log"))
 
 
 async def test_current_copy_and_temp_survive_overlapping_sweep(
@@ -1636,8 +1458,7 @@ async def test_current_copy_and_temp_survive_overlapping_sweep(
 
     from camctl.capture.recovery import RecoveryBoundary
 
-    deps = await _runtime(tmp_path)
-    deps.recovery_boundary = RecoveryBoundary.HOST_LOCAL_SETTLED
+    deps = await _runtime(tmp_path, recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED)
     first_report, _second_report = await _seed_two_pending_reports(deps, tmp_path)
     logs_dir = Path(deps.config.paths.staging) / "logs"
     old_copy = logs_dir / "log-copy-old-overlap.log"
@@ -1772,12 +1593,19 @@ async def test_write_result_disables_log_before_followup_wait(
     import asyncio
     import threading
 
-    import camctl.bootstrap.lifecycle as lifecycle
+    from camctl.capture.recovery import RecoveryBoundary
     import camctl.logging_runtime.clh_adapter as clh_adapter
 
-    deps = await _runtime(tmp_path)
+    deps = await _runtime(tmp_path, recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED)
     await _seed_two_pending_reports(deps, tmp_path)
-    stderr = io.StringIO()
+    diagnosed = asyncio.Event()
+    class ObservedStderr(io.StringIO):
+        def write(self, text):
+            result = super().write(text)
+            if "parallel startup diagnostic after write result" in text:
+                diagnosed.set()
+            return result
+    stderr = ObservedStderr()
     stdout = io.StringIO()
     monkeypatch.setattr(sys, "stderr", stderr)
     monkeypatch.setattr(sys, "stdout", stdout)
@@ -1785,6 +1613,21 @@ async def test_write_result_disables_log_before_followup_wait(
     loop = asyncio.get_running_loop()
     cleanup_started = asyncio.Event()
     release_cleanup = threading.Event()
+    release_scan = threading.Event()
+    scan_started = asyncio.Event()
+    logs_dir = Path(deps.config.paths.staging) / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    original_listdir = copies._listdir
+
+    def startup_failure(path):
+        if Path(path) == logs_dir:
+            loop.call_soon_threadsafe(scan_started.set)
+            if not release_scan.wait(timeout=10):
+                raise TimeoutError("startup scan gate was not released")
+            raise OSError("parallel startup diagnostic after write result")
+        return original_listdir(path)
+
+    monkeypatch.setattr(copies, "_listdir", startup_failure)
     cleanup_names: list[str] = []
     helper_channels: list[FileChannel] = []
     log_deliveries: list[str] = []
@@ -1848,8 +1691,9 @@ async def test_write_result_disables_log_before_followup_wait(
         assert deps.failure_channel is helper_channels[0]
         deliveries_before_diagnostic = tuple(log_deliveries)
 
-        await lifecycle._emit_log_diagnostic(
-            deps, "parallel startup diagnostic after write result")
+        await asyncio.wait_for(scan_started.wait(), timeout=10)
+        release_scan.set()
+        await asyncio.wait_for(diagnosed.wait(), timeout=10)
 
         assert "parallel startup diagnostic after write result" in stderr.getvalue()
         assert stdout.getvalue() == ""
@@ -1860,6 +1704,7 @@ async def test_write_result_disables_log_before_followup_wait(
         release_cleanup.set()
         outcome = await asyncio.wait_for(run_task, timeout=10)
     finally:
+        release_scan.set()
         release_cleanup.set()
         if not run_task.done():
             await asyncio.wait_for(
@@ -1869,3 +1714,70 @@ async def test_write_result_disables_log_before_followup_wait(
     assert deps.log_path_unsafe is True
     assert deps.failure_channel is not None
     assert outcome.reason == "report_error"
+
+
+async def test_default_report_copy_publishes_while_ordinary_error_queue_is_full(
+        tmp_path: Path, monkeypatch) -> None:
+    """真实队列满时仍交付副本，随后结束队列消费且原错误只写一次。"""
+    import asyncio
+    import threading
+    from camctl.logging_runtime.models import LogLevel
+    from camctl.logging_runtime.service import LogRecord
+
+    deps = await _runtime(tmp_path, log={"queue_capacity": 4,
+        "queue_low_watermark": 1, "queue_high_watermark": 2})
+    loop = asyncio.get_running_loop()
+    blocked, copied = asyncio.Event(), asyncio.Event()
+    release = threading.Event()
+    original_write, original_copy = FileChannel.write_record, FileChannel.copy_with_write
+
+    def write(channel, record):
+        if record.message == "queue blocker":
+            loop.call_soon_threadsafe(blocked.set)
+            if not release.wait(timeout=10):
+                raise TimeoutError("ordinary queue gate was not released")
+        return original_write(channel, record)
+
+    def copy(channel, record, destination):
+        result = original_copy(channel, record, destination)
+        loop.call_soon_threadsafe(copied.set)
+        return result
+
+    monkeypatch.setattr(FileChannel, "write_record", write)
+    monkeypatch.setattr(FileChannel, "copy_with_write", copy)
+    channel = deps.log_runtime.channel
+    task = None
+    try:
+        first = await channel.alog(LogRecord(LogLevel.ERROR, "queue blocker"))
+        assert first.decision.kind.value == "accepted"
+        await asyncio.wait_for(blocked.wait(), timeout=10)
+        for index in range(4):
+            admitted = await channel.alog(LogRecord(LogLevel.ERROR, f"queued error {index}"))
+            assert admitted.decision.kind.value == "accepted"
+        assert admitted.queue_depth == 4
+        task = asyncio.create_task(_run_with_report_failure(deps, monkeypatch))
+        await asyncio.wait_for(copied.wait(), timeout=10)
+        # copy_with_write 返回后还要由正式消费者保存进度并发布；等实际 ready 文件。
+        deadline = loop.time() + 10
+        ready = []
+        while not ready and loop.time() < deadline:
+            ready = list(Path(deps.config.paths.ready).glob("log-copy-*.log"))
+            if not ready:
+                await asyncio.sleep(0.01)
+        assert len(ready) == 1
+        assert b"controlled report generation failure" in ready[0].read_bytes()
+        assert not task.done()
+        release.set()
+        outcome, called = await asyncio.wait_for(task, timeout=10)
+        assert outcome.reason == "report_error" and called["count"] == 1
+    finally:
+        release.set()
+        if task is not None and not task.done():
+            await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=10)
+        close_runtime(deps)
+    content = Path(deps.config.paths.log_file).read_text(encoding="utf-8")
+    records = [json.loads(line) for line in content.splitlines() if line.startswith("{")]
+    assert len([record for record in records if record.get("stage") == "report_generate"]) == 1
+    assert content.count("queue blocker") == 1
+    for index in range(4):
+        assert content.count(f"queued error {index}") == 1

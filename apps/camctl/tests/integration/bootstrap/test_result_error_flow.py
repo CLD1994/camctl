@@ -2,21 +2,16 @@
 
 import json
 import multiprocessing
-from functools import partial
 from multiprocessing.connection import Connection
 from pathlib import Path
 from unittest.mock import create_autospec
 
 import pytest
 
-from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.bootstrap.flows import report_flow
 from camctl.contracts.clock import ClockPort
 from camctl.contracts.enums import enum_for
-from camctl.persistence.repositories.acceptance import AcceptanceRepository
-from camctl.persistence.repositories.session import SessionRepository
-from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.reporting import generation, worker
 from camctl.reporting.maintenance import MaintenanceLimits
 from camctl.reporting.messages import (
@@ -25,11 +20,11 @@ from camctl.reporting.messages import (
 )
 from camctl.reporting.supervisor import WorkerSupervisor
 from camctl.reporting.worker import run_job
-from camctl.session.service import SessionContext, SessionPaths, _drive_flows
+from ..support.bootstrap_capture_cases import bootstrap_case, exhausted_result_world, run_flow_round
 
 from ..capture.result_consumer_fixtures import ResultCatalog
-from ..reporting.test_result_error_generation import _exhausted_world, _freeze, _spec
-from ..reporting.test_result_error_state import _file_bytes, _incomplete_history_reader
+from ..reporting.test_result_error_generation import _freeze, _spec
+from ..reporting.test_result_error_state import _file_bytes, _incomplete_history_generator
 
 pytestmark = pytest.mark.asyncio
 
@@ -82,10 +77,6 @@ class _InlineWorker:
         self.parent.close()
 
 
-def _unused(*_args, **_kwargs):
-    raise AssertionError("本用例只推进已装配 flow，不进入受理、会话锁或工作事实查询")
-
-
 def _context(owned, runtime, spec, supervisor, following):
     from camctl.persistence.directory_switch import canonical_to_path
     metadata = owned.metadata
@@ -102,13 +93,8 @@ def _context(owned, runtime, spec, supervisor, following):
         ready=canonical_to_path(metadata.ready_path),
         processing=canonical_to_path(metadata.processing_path),
         history=cfg.history, database=cfg.database, supervisor=supervisor)
-    return SessionContext(
-        mode=CommandMode.RUN, catalog=ResultCatalog(), clock=clock,
-        open_connection=lambda: open_existing(spec.db_path, DbOpenMode.EXISTING_RW, DbConfig()),
-        acceptance_repository=AcceptanceRepository(), session_repository=SessionRepository(),
-        paths=SessionPaths(spec.db_path.with_suffix(".session.lock"), spec.db_path.with_suffix(".admission.lock")),
-        clock_policy=_unused, acquire_session=_unused, acquire_admission=_unused,
-        facts_query=_unused, flows={"report": maintenance, "following": following})
+    return dict(clock=clock, catalog=ResultCatalog(),
+        flows={"report": maintenance, "following": following})
 
 
 def _snapshot(owned, report, runtime):
@@ -122,18 +108,18 @@ def _snapshot(owned, report, runtime):
     )
 
 
-async def test_state_result_stops_following_flow_without_report_failure_write(tmp_path, monkeypatch):
-    owned, runtime, action_id, error = await _exhausted_world(tmp_path, "timelapse", False)
+async def test_state_result_stops_following_flow_without_report_failure_write(tmp_path, monkeypatch, bootstrap_case):
+    owned, runtime, action_id, error = await exhausted_result_world(bootstrap_case, tmp_path)
     rig = None
     try:
         report = _freeze(owned, runtime.wall_us())
         spec = _spec(owned, report, "unused-template.json")
         activity_id, = owned.connection.execute(
             "SELECT id FROM device_activities WHERE action_id=?", (action_id,)).fetchone()
-        reader, supplied = _incomplete_history_reader(spec, report, action_id, activity_id, error)
-        monkeypatch.setattr(worker, "generate_report_file",
-                            partial(generation.generate_report_file, repository=reader))
         rig = _InlineWorker(spec.db_path)
+        generate, supplied = _incomplete_history_generator(
+            report, action_id, activity_id, error, current_job=lambda: rig.jobs[-1])
+        monkeypatch.setattr(worker, "generate_report_file", generate)
         following_calls = []
 
         async def following(context):
@@ -141,7 +127,7 @@ async def test_state_result_stops_following_flow_without_report_failure_write(tm
 
         context = _context(owned, runtime, spec, rig.supervisor, following)
         before = _snapshot(owned, report, runtime)
-        failure = await _drive_flows(context)
+        failure = await run_flow_round(spec.db_path, **context)
 
         assert len(rig.jobs) == len(rig.results) == 1
         assert supplied == [report.boundary]
@@ -159,8 +145,8 @@ async def test_state_result_stops_following_flow_without_report_failure_write(tm
         owned.connection.close()
 
 
-async def test_report_io_result_records_failure_and_drives_following_flow(tmp_path, monkeypatch):
-    owned, runtime, _action_id, _error = await _exhausted_world(tmp_path, "timelapse", False)
+async def test_report_io_result_records_failure_and_drives_following_flow(tmp_path, monkeypatch, bootstrap_case):
+    owned, runtime, _action_id, _error = await exhausted_result_world(bootstrap_case, tmp_path)
     rig = None
     try:
         report = _freeze(owned, runtime.wall_us())
@@ -182,13 +168,13 @@ async def test_report_io_result_records_failure_and_drives_following_flow(tmp_pa
 
         context = _context(owned, runtime, spec, rig.supervisor, following)
         before = _snapshot(owned, report, runtime)
-        failure = await _drive_flows(context)
+        failure = await run_flow_round(spec.db_path, **context)
 
         assert len(rig.jobs) == len(rig.results) == len(syncs) == 1
         result = rig.results[0]
         assert isinstance(result, ResultFailureMessage)
         assert result.error_kind is ErrorKind.REPORT and result.error_code == "OSError"
-        assert failure is None and following_calls == [context]
+        assert failure is None and len(following_calls) == 1
         assert not rig.supervisor.reusable and not rig.process.is_alive()
         job = rig.jobs[0]
         assert not Path(job.staging_path).exists()

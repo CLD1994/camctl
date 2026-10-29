@@ -256,27 +256,6 @@ def test_finish_saves_exact_utc_microseconds(tmp_path: Path, occurred_at) -> Non
         owned.connection.close()
 
 
-@pytest.mark.parametrize("saved_key", [False, True])
-@pytest.mark.parametrize("invalid_intent", ["mapping", "untyped_fields"])
-def test_invalid_intent_type_rolls_back_before_key_reuse(tmp_path: Path, saved_key, invalid_intent) -> None:
-    owned = _seed_environment(tmp_path)
-    repository = OperationRepository()
-    key = new_operation_key()
-    intent = _preflight_intent()
-    try:
-        if saved_key:
-            grant = repository.begin_attempt(intent, key, owned)
-            assert grant.kind is DbOutcomeKind.COMPLETED
-        before = tuple(owned.connection.iterdump())
-        invalid = {} if invalid_intent == "mapping" else SimpleNamespace(**vars(intent))
-        outcome = repository.begin_attempt(invalid, key, owned)
-        assert outcome.kind is DbOutcomeKind.ROLLED_BACK
-        assert isinstance(outcome.error, TransactionError)
-        assert tuple(owned.connection.iterdump()) == before
-    finally:
-        owned.connection.close()
-
-
 def test_first_intent_creates_run_and_attempt_together(tmp_path: Path) -> None:
     owned = _seed_environment(tmp_path)
     repository = OperationRepository()

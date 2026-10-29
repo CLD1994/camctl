@@ -1,0 +1,40 @@
+[
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/035-root-test_action6_segmented_media_fixtures/source/tests/integration/test_action6_segmented_media_fixtures.py::test_action6_media_fixture_contains_real_ordered_segments_and_photo[ordinary-durations]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0011743990035029128
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 2.460477007989539
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0006190299900481477
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 2.46227043698309
+  },
+  {
+    "nodeid": "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/035-root-test_action6_segmented_media_fixtures/source/tests/integration/test_action6_segmented_media_fixtures.py::test_action6_media_fixture_contains_real_ordered_segments_and_photo[native-frame-counts]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002037839003605768
+      },
+      "call": {
+        "outcome": "passed",
+        "duration_seconds": 1.7894771049905103
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012461830046959221
+      }
+    },
+    "outcome": "passed",
+    "duration_seconds": 1.792761126998812
+  }
+]

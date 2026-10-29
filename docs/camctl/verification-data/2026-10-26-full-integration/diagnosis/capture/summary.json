@@ -1,0 +1,92 @@
+{
+  "created_utc": "2026-10-26T00:35:26.007273+00:00",
+  "complete": true,
+  "task_progress": {
+    "status": "finished",
+    "exit_code": 1,
+    "collected": 2129,
+    "outcomes": {
+      "failed": 1801,
+      "passed": 328
+    },
+    "subchecks": {},
+    "elapsed_seconds": 396.06445345999964,
+    "utc": "2026-10-26T00:27:50.645061+00:00",
+    "pid": 1925461
+  },
+  "pytest_final_summary": "1781 failed, 328 passed, 7 warnings, 20 errors in 402.38s (0:06:42)",
+  "counts": {
+    "旧接口": 1720,
+    "旧同步OwnedConnection": 78,
+    "merge接缝": 3,
+    "生产断言问题": 0
+  },
+  "first_cause_group_counts": {
+    "CaptureRuntime仍传owned": 1503,
+    "直接连接传给异步接纳入口": 77,
+    "异步装配factory未await": 107,
+    "业务保存适配器仍同步返回SaveReceipt": 15,
+    "WorkFileContext仍传owned": 1,
+    "旧异步factory使设备入口未开始而门闩超时": 1,
+    "伪造事件缺少真实event_type和reason字段": 1,
+    "优化解释器脚本未await异步_conclude_activity": 3,
+    "CopyContext仍传owned": 1,
+    "直接连接传给异步读取会话": 1,
+    "MediaFlow仍传owned": 81,
+    "同步媒体保存适配器使工具未开始而门闩超时": 4,
+    "录像授予适配器仍同步返回GrantDecision": 3,
+    "重开后的原结果页恢复仍调用save": 3
+  },
+  "exception_counts": {
+    "TypeError: CaptureRuntime.__init__() got an unexpected keyword argument 'owned'": 1503,
+    "AttributeError: 'OwnedConnection' object has no attribute 'write'": 77,
+    "AttributeError: 'coroutine' object has no attribute 'resume_capture_completions'": 50,
+    "AttributeError: 'coroutine' object has no attribute 'capture'": 14,
+    "AttributeError: <coroutine object session_capture_assembly.<locals>.factory at <address>> has no attribute 'save_capture_completion'": 16,
+    "TypeError: object SaveReceipt can't be used in 'await' expression": 15,
+    "TypeError: WorkFileContext.__init__() got an unexpected keyword argument 'owned'": 1,
+    "AttributeError: 'coroutine' object has no attribute 'grant'": 4,
+    "asyncio.exceptions.CancelledError": 5,
+    "AttributeError: 'coroutine' object has no attribute 'for_item'": 5,
+    "AttributeError: 'types.SimpleNamespace' object has no attribute 'event_type'": 1,
+    "AttributeError: 'coroutine' object has no attribute 'action'": 13,
+    "AssertionError: ('', \"<string>:14: RuntimeWarning: coroutine '_conclude_activity' was never awaited": 3,
+    "AttributeError: 'coroutine' object has no attribute 'host_capture'": 4,
+    "TypeError: CopyContext.__init__() got an unexpected keyword argument 'owned'": 1,
+    "AttributeError: 'coroutine' object has no attribute 'results'": 1,
+    "AttributeError: 'OwnedConnection' object has no attribute 'read'": 1,
+    "TypeError: MediaFlow.__init__() got an unexpected keyword argument 'owned'": 81,
+    "TypeError: object GrantDecision can't be used in 'await' expression": 3,
+    "AssertionError: OperationalError('文件发现投影写入失败')": 1,
+    "AssertionError: OperationalError('文件发现提交边界错误')": 2
+  },
+  "all_failed_phase_reports": 1801,
+  "all_trace_blocks": 1801,
+  "all_failure_summary_nodes": 1801,
+  "static_comparison": [
+    "a7755d81",
+    "272fda66"
+  ],
+  "tested_snapshot": "cf4f504b7648bb5004fd20e1d66bfb57ab6a2956a33b6203724b6f0262591950",
+  "original_log_sha256": "b1042ad36818a35295a20691e967d8d5fd32c43e3e7a8143e61c902e62d32d35",
+  "events_sha256": "3a69acdc529da7c7319806697049ccdc4ed1446b8b834cbfbdcab4151ca16058",
+  "limitations": [
+    "未重跑旧夹具失败项；旧接口归因由本次完整堆栈及两父提交源码共同支持。",
+    "五项门闩超时的被压制后台异常未在原日志交付，旧接口阻断由静态前置路径证明，逐项单列推导。",
+    "本结果只诊断最先失败边界；尚未到达的后续业务断言不能据此认为通过。"
+  ],
+  "merge_adapter_fix": {
+    "commit": "c8f50082",
+    "base": "9fbb734c",
+    "nodes": 3,
+    "result": "3 passed in 3.83s",
+    "evidence": "result-page-retry/receipt.json"
+  },
+  "failed_test_file_count": 96,
+  "failed_test_file_provenance_counts": {
+    "both": 92,
+    "a7755d81": 4
+  },
+  "capture_runtime_constructor_fields_equal_in_tested_and_both_parents": true,
+  "input_copy_first_qualify_await_equal_in_tested_and_both_parents": true
+}

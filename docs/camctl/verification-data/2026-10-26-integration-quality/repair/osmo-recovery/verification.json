@@ -1,0 +1,85 @@
+{
+  "date_utc": "2026-10-26",
+  "cwd": "/tmp/camctl-quality-repair-lidlmje7/osmo-recovery",
+  "python": "3.11.17 (main, Oct 21 2026, 17:46:53) [Clang 23.1.3 ]",
+  "baseline": "fc957eb02b10c251062b7578c8c609bf60dc54f8",
+  "scope": "OSMO native-tail recovery observation only",
+  "preserved": {
+    "original_assertions": 32,
+    "parametrized_scenarios": 8,
+    "capture_report_budget_s": 150,
+    "obtain_report_budget_s": 120,
+    "client_command_budget_s": 120,
+    "startup_budget": "HostDemo unchanged",
+    "initial_interruption": "first complete 65536-byte block committed while original gate remains blocked"
+  },
+  "checks": {
+    "counterexamples_before_assertions": {
+      "exit_code": 1,
+      "failed": 12,
+      "passed": 2,
+      "log": "counterexamples-red.log"
+    },
+    "observation_unit_tests": {
+      "exit_code": 0,
+      "passed": 14,
+      "log": "counterexamples-green.log"
+    },
+    "original_module_collection": {
+      "exit_code": 0,
+      "collected": 8,
+      "log": "collect.log"
+    },
+    "existing_read_gate_smoke": {
+      "exit_code": 0,
+      "result": "gate-smoke-result.json"
+    },
+    "python_compile": "passed",
+    "original_assertions_ast_preserved": "passed",
+    "original_scenario_data_ast_preserved": "passed"
+  },
+  "source_sha256": {
+    "tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py": "0ccace8d6d61f22413fd54ec60596a37b0731f58539702da03129d819fa387e2",
+    "tests/integration/_osmo_copy_observation.py": "6a417a850451097139f19622fe8cd9060e7a579ea63ec8ba75ea800e4aeeb0f3",
+    "tests/unit/test_osmo_copy_observation.py": "6fa8668b7080c815fa146673ed4675ded2c31dcc31e63916bcfee388368523ed",
+    "tests/integration/README.md": "51015f3ccf6f1976ee94d25de22da8fd0cb9b76effe56be1e0071fc7580b2a9b"
+  },
+  "not_run": [
+    "installed native-tail scenario",
+    "all eight installed OSMO scenarios",
+    "affected production component regression"
+  ],
+  "remaining": "coordinator combines production repairs, then runs native-tail and all eight original scenarios with original budgets",
+  "commands": [
+    {
+      "command": "/workspaces/camctl/apps/camctl/.venv311/bin/python -m pytest tests/unit/test_osmo_copy_observation.py -q --junitxml=/tmp/camctl-quality-repair-evidence/osmo-recovery/counterexamples-green.xml",
+      "exit_code": 0
+    },
+    {
+      "command": "PYTHONPATH=/tmp/camctl-quality-repair-lidlmje7/osmo-recovery/apps/camctl/src /workspaces/camctl/apps/camctl/.venv311/bin/python -m pytest tests/integration/test_osmo_builtin_record_segmentation_roundtrip.py --collect-only -q",
+      "exit_code": 0
+    },
+    {
+      "command": "/workspaces/camctl/apps/camctl/.venv311/bin/python /tmp/camctl-quality-repair-evidence/osmo-recovery/check-read-gate.py",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "review_scope": "independent read-only review completed; no blocking findings; no full installed chain run",
+  "commit": "f19ade65df6d3cbe2bba080d881bdfb06749d77b",
+  "worktree_status": "",
+  "review": {
+    "agent": "/root/repair_osmo_recovery_test/review_resume_observation",
+    "result": "no blocking findings",
+    "confirmed": [
+      "new started_ns and same-read blocked event",
+      "gate released only after exact source, offset and persisted identity checks",
+      "both native-tail deliveries created before first read with current batch size 100",
+      "original scenarios, bytes and success budgets retained"
+    ],
+    "remaining": "installed native-tail and full eight-scenario combination after production fixes"
+  }
+}

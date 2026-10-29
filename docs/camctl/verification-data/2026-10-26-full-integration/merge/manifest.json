@@ -1,0 +1,263 @@
+{
+  "schema_version": 1,
+  "created_at_utc": "2026-10-26T00:24:52.886924+00:00",
+  "root": "/tmp/camctl-full-272f-archive-stage",
+  "file_count": 42,
+  "total_uncompressed_bytes": 2874376,
+  "hash_algorithm": "SHA-256",
+  "scope": "payload 文件；manifest 自身和压缩包由 bundle-receipt.json 另行记录，避免自引用",
+  "files": [
+    {
+      "path": "evidence/capture-core/consumption-notification/diff-check.exit",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-capture-core/consumption-notification/diff-check.exit",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "evidence/capture-core/consumption-notification/diff-check.log",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-capture-core/consumption-notification/diff-check.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "evidence/capture-core/consumption-notification/green-receipt.json",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-capture-core/consumption-notification/green-receipt.json",
+      "bytes": 677,
+      "sha256": "b934ca5e4e8fe61faa98f2bcf80c0e4bf43299cdae4a13d8feca08e36a8c4d5f"
+    },
+    {
+      "path": "evidence/capture-core/consumption-notification/green.log",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-capture-core/consumption-notification/green.log",
+      "bytes": 99,
+      "sha256": "3e7604ad5bf72ed132c2f502da2f600a115a902e7d590fd1b70e2d9abb7f488c"
+    },
+    {
+      "path": "evidence/capture-core/consumption-notification/green.xml",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-capture-core/consumption-notification/green.xml",
+      "bytes": 8276,
+      "sha256": "1d65ca0efccabb39c99f447dd1f9f3864036c93f569647ade22d9704cdb7b2d9"
+    },
+    {
+      "path": "evidence/capture-core/consumption-notification/red-receipt.json",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-capture-core/consumption-notification/red-receipt.json",
+      "bytes": 663,
+      "sha256": "99b5dcb2598f933802d564e23f4deb7d87950f6c9e62ce23b3c485e3eb1bc0ed"
+    },
+    {
+      "path": "evidence/capture-core/consumption-notification/red.log",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-capture-core/consumption-notification/red.log",
+      "bytes": 18013,
+      "sha256": "c15198a121bd15d795ca7807e20a367ed18e056ac747d15bf5463f55a60d6743"
+    },
+    {
+      "path": "evidence/capture-core/consumption-notification/red.xml",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-capture-core/consumption-notification/red.xml",
+      "bytes": 20624,
+      "sha256": "cf5055d17b84c31f466ffb3a51947cc33909e84f00a2a85343f36f7aa4a8e287"
+    },
+    {
+      "path": "evidence/capture-core/consumption-notification/resolved-files.json",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-capture-core/consumption-notification/resolved-files.json",
+      "bytes": 331,
+      "sha256": "6793e6f3ad0ea008293b6608f107b8e37e5bae10685e3f3c95b52e34e50a55a9"
+    },
+    {
+      "path": "evidence/capture-core/consumption-pytest.log",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-capture-core/consumption-pytest.log",
+      "bytes": 98,
+      "sha256": "64e4217ed4f46747139fb43def322c2f7e61bb2d88b60b071631b029f1610ab0"
+    },
+    {
+      "path": "evidence/capture-core/consumption-receipt.json",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-capture-core/consumption-receipt.json",
+      "bytes": 611,
+      "sha256": "d6d8953db910aa06c697c1e458136efd2f25448d54d7826388e13a395c88f2e1"
+    },
+    {
+      "path": "evidence/capture-core/consumption-result.xml",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-capture-core/consumption-result.xml",
+      "bytes": 817,
+      "sha256": "e178c34ac4d358de09a42f592c9a41f9f48c66a6fa9f61ef2b06176b92e4c4c9"
+    },
+    {
+      "path": "evidence/capture-core/pytest.log",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-capture-core/pytest.log",
+      "bytes": 179,
+      "sha256": "a3179f0f713dd2e195ad86ba04a2872c58b70f7007f183d5be023c8b41401608"
+    },
+    {
+      "path": "evidence/capture-core/receipt.json",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-capture-core/receipt.json",
+      "bytes": 1162,
+      "sha256": "3bc8322cd025895e4cda92067741bdc6b4837ce540cf22e9995c113f3c26a1bb"
+    },
+    {
+      "path": "evidence/capture-core/resolved-files.json",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-capture-core/resolved-files.json",
+      "bytes": 884,
+      "sha256": "33285173d905ee99c69656230478f3f0b7945ae03c5bbf8868640e712ced1de8"
+    },
+    {
+      "path": "evidence/capture-core/result.xml",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-capture-core/result.xml",
+      "bytes": 13248,
+      "sha256": "389813ce50c3fa5eb721d5a0e4a217ae4a2ade6d1fd2b302351a9dcb12dd0496"
+    },
+    {
+      "path": "evidence/capture-read/receipt.json",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-capture-read/receipt.json",
+      "bytes": 1071,
+      "sha256": "b1bd13f79b8ac7ad603bbd5eba9fed08998e37367596fff084a02273d27b239a"
+    },
+    {
+      "path": "evidence/executor/collection-without-resources-summary.json",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-executor/collection-without-resources-summary.json",
+      "bytes": 1189,
+      "sha256": "01ebda88e8960bfdd75250e28c43a4daa5a6b215ea22e9ad8319573db911c4d2"
+    },
+    {
+      "path": "evidence/executor/collection-without-resources-unit.log",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-executor/collection-without-resources-unit.log",
+      "bytes": 5232,
+      "sha256": "525d9abaf3cc3c72f32cbe8d6578b9ebdc06212a86b298cbed78d032a3672507"
+    },
+    {
+      "path": "evidence/executor/collection-without-resources-unit.xml",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-executor/collection-without-resources-unit.xml",
+      "bytes": 5237,
+      "sha256": "c543f33724c25f0e12bed4f1b7c76eb9ce767b875fb415dc7596b97395f021ed"
+    },
+    {
+      "path": "evidence/executor/summary.json",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-executor/summary.json",
+      "bytes": 1305,
+      "sha256": "71b1964bc00bf0ca254c07853e47423fb5dcdb6c52eb22e4063f6f532a41a557"
+    },
+    {
+      "path": "evidence/executor/unit.log",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-executor/unit.log",
+      "bytes": 180,
+      "sha256": "858e2921fea99f9639e34cb8e698b759c159da79f0ca0b8fecf774ac14d08c87"
+    },
+    {
+      "path": "evidence/executor/unit.xml",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-executor/unit.xml",
+      "bytes": 19226,
+      "sha256": "236eb3698411eea80b1c096cd6699bcc9877257bd9f09b3087d1862ac9f0c2bb"
+    },
+    {
+      "path": "evidence/final-combination/camctl-merge-272f-combination.log",
+      "source_path": "/tmp/camctl-merge-272f-combination.log",
+      "bytes": 421,
+      "sha256": "bf58b847ce99de089a74eb6c3f483d7f249a0aab66eaff9380fb4ea66116161d"
+    },
+    {
+      "path": "evidence/final-combination/camctl-merge-272f-combination.xml",
+      "source_path": "/tmp/camctl-merge-272f-combination.xml",
+      "bytes": 61933,
+      "sha256": "256d7b6302d15486004a9ee40497a8e8aa82eda6603ddff4768f51f0642a7e56"
+    },
+    {
+      "path": "evidence/first-full-unit/camctl-merge-272f-unit.log",
+      "source_path": "/tmp/camctl-merge-272f-unit.log",
+      "bytes": 14104,
+      "sha256": "df584d190d631f0c8f9e3bf49196a24b16fb2630c2aecf734f615f86e347d720"
+    },
+    {
+      "path": "evidence/first-full-unit/camctl-merge-272f-unit.xml",
+      "source_path": "/tmp/camctl-merge-272f-unit.xml",
+      "bytes": 2524314,
+      "sha256": "fb412dbe49cf31193834f5608d0297067b7ad76b1f56775b6842bb4f0f4d525f"
+    },
+    {
+      "path": "evidence/preparation/camctl-merge-272f-preparation-context.json",
+      "source_path": "/tmp/camctl-merge-272f-preparation-context.json",
+      "bytes": 159,
+      "sha256": "3f34a35c1de3500a2f22d5244e89a8611b72b805949c0d788e956d2ed4187617"
+    },
+    {
+      "path": "evidence/preparation/camctl-merge-272f-preparation-unit.log",
+      "source_path": "/tmp/camctl-merge-272f-preparation-unit.log",
+      "bytes": 180,
+      "sha256": "9591c646a3274e636611d38fcba8a4cc043c65257e0ae67bf8f30b5f945cdf04"
+    },
+    {
+      "path": "evidence/read-unit/callsite-audit.json",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-read-unit/callsite-audit.json",
+      "bytes": 2087,
+      "sha256": "c7b909c094a2ac203f2f1c226f7b6a8e9b65cacc625dba9f4743cd55168149c0"
+    },
+    {
+      "path": "evidence/read-unit/command.json",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-read-unit/command.json",
+      "bytes": 522,
+      "sha256": "27dda3ec5b6caf61be8fdd4794685d9430fd32aded11f9966cfde4d858246cba"
+    },
+    {
+      "path": "evidence/read-unit/junit.xml",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-read-unit/junit.xml",
+      "bytes": 19020,
+      "sha256": "5168c89c1315538401576079dfa0e201908b1b76d60ffbadab5dc00352198e7a"
+    },
+    {
+      "path": "evidence/read-unit/pytest.log",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-read-unit/pytest.log",
+      "bytes": 179,
+      "sha256": "f9901ea6d619c2379a057ec1f8adb5a3502ac86039b57867e6bc2c02daf3dbd3"
+    },
+    {
+      "path": "evidence/read-unit/snapshot.json",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-read-unit/snapshot.json",
+      "bytes": 490,
+      "sha256": "e54847229eb04f270dbccd113754abd99bfd0d100a09bdadf52467b31bff8be4"
+    },
+    {
+      "path": "evidence/session/green.json",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-session/green.json",
+      "bytes": 2012,
+      "sha256": "ba6eaafc9b41c2ba46f2f0413dc8e91afadd09a5afb9e8ca3394721df90eed8e"
+    },
+    {
+      "path": "evidence/session/green.log",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-session/green.log",
+      "bytes": 260,
+      "sha256": "3dc04c8da7d528812f66382c736cdeda1f6252d2374870a9a001bd8e0bc34ad4"
+    },
+    {
+      "path": "evidence/session/green.xml",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-session/green.xml",
+      "bytes": 37018,
+      "sha256": "f4f55416fde7d6b070c6025f823b27ec656a2de5d60f1becf6afe7471ba0157b"
+    },
+    {
+      "path": "evidence/session/handoff.json",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-session/handoff.json",
+      "bytes": 2253,
+      "sha256": "a460f7b0eaeec16bbbeb72618acb9b6dae919b22e52757c193831f34a1954266"
+    },
+    {
+      "path": "evidence/session/red.json",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-session/red.json",
+      "bytes": 1398,
+      "sha256": "08e3cc414ed025b16bd07817f7d10ff74478263fe1e415436c9ef8f5733dd7a7"
+    },
+    {
+      "path": "evidence/session/red.log",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-session/red.log",
+      "bytes": 2116,
+      "sha256": "77d33b1a501eb4e8e85e5749e138e6bf57fa9c3135e681bdb7b69642a5639271"
+    },
+    {
+      "path": "evidence/session/red.xml",
+      "source_path": "/tmp/camctl-quality-repair-evidence/merge-272f-session/red.xml",
+      "bytes": 2454,
+      "sha256": "12569c7f674398706309619c910da703f7d885f24cff4e400822385a7649a242"
+    },
+    {
+      "path": "merge-summary.json",
+      "source_path": null,
+      "bytes": 104332,
+      "sha256": "cb4676b59ee2e8eb9a8e53be08958871ccb0b7836f50672e7a6cc889e1faa0f0"
+    }
+  ]
+}

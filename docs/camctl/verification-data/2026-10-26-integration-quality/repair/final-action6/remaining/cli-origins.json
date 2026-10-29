@@ -1,0 +1,321 @@
+[
+  {
+    "pid": 1705387,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1705413,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1705559,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1705560,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1705728,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1705791,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1706270,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1706331,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1706330,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1703731,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1703739,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1703839,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1703838,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1704021,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1704073,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1704504,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1704505,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1704767,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1705032,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1701737,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1701746,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1701917,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1701918,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1702154,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1702261,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1702898,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1702897,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1703285,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  },
+  {
+    "pid": 1703435,
+    "python": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/bin/python",
+    "import_origins": {
+      "camctl": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/__init__.py",
+      "camctl.cli": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/cli.py",
+      "camctl.capture.handlers": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/capture/handlers.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_capture": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_capture.py",
+      "camctl.devices.drivers.adb_cameras.osmo360ii_results": "/tmp/camctl-quality-repair-evidence/final-action6/remaining/data/action6-builtin-package0/venv/lib/python3.11/site-packages/camctl/devices/drivers/adb_cameras/osmo360ii_results.py"
+    }
+  }
+]

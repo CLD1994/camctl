@@ -210,7 +210,7 @@ async def test_later_result_round_reuses_completed_wait_from_metadata_failure(tm
         if restart:
             owned.connection.close()
             owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-            runtime = _runtime(owned, check_config=runtime.check_config)
+            runtime = (await _runtime(owned, check_config=runtime.check_config))
 
         async def resumed_read(request, batch):
             assert request.params["completion_context"] == {**context, "prior_completion": prior}
@@ -296,7 +296,7 @@ async def test_repeated_metadata_failures_keep_the_actual_wait_source_page(tmp_p
         if restart:
             owned.connection.close()
             owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-            runtime = _runtime(owned, check_config=runtime.check_config)
+            runtime = (await _runtime(owned, check_config=runtime.check_config))
 
         async def final_read(request, batch):
             assert request.params["completion_context"]["prior_completion"] == prior

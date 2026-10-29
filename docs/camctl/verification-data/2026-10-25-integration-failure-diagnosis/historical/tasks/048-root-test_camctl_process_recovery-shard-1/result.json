@@ -1,0 +1,76 @@
+{
+  "id": "root/test_camctl_process_recovery/shard-1",
+  "scope": "root",
+  "path": "tests/integration/test_camctl_process_recovery.py",
+  "targets": [
+    "tests/integration/test_camctl_process_recovery.py::test_next_run_waits_for_old_group_settlement[0]"
+  ],
+  "estimated_seconds": 12.227906151001662,
+  "historical_failure_observed": true,
+  "parent_id": "root/test_camctl_process_recovery",
+  "shard": 1,
+  "shards": 4,
+  "collection": "/tmp/camctl-itopt-final-20261025/collection/root-test_camctl_process_recovery/artifacts",
+  "collected_nodes": 8,
+  "status": "failed",
+  "number": 48,
+  "worker": 1,
+  "artifacts": "/tmp/camctl-itopt-final-20261025/tasks/048-root-test_camctl_process_recovery-shard-1/artifacts",
+  "cwd": "/tmp/camctl-itopt-final-20261025/tasks/048-root-test_camctl_process_recovery-shard-1/source",
+  "started_utc": "2026-10-25T00:07:07.057722+00:00",
+  "command": [
+    "/tmp/camctl-itopt-final-20261025/tasks/048-root-test_camctl_process_recovery-shard-1/source/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "tests/integration/test_camctl_process_recovery.py::test_next_run_waits_for_old_group_settlement[0]",
+    "-q",
+    "--durations=0",
+    "-p",
+    "integration_progress",
+    "--basetemp",
+    "/tmp/camctl-itopt-final-20261025/tasks/048-root-test_camctl_process_recovery-shard-1/tmp/pytest"
+  ],
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-itopt-final-20261025/control:/tmp/camctl-itopt-final-20261025/tasks/048-root-test_camctl_process_recovery-shard-1/source/apps/camctl/src",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-itopt-final-20261025/workers/1/python-cache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-itopt-final-20261025/workers/1/project-env",
+    "UV_CACHE_DIR": "/tmp/camctl-itopt-final-20261025/workers/1/uv-cache",
+    "UV_OFFLINE": "1",
+    "TMPDIR": "/tmp/camctl-itopt-final-20261025/tasks/048-root-test_camctl_process_recovery-shard-1/tmp"
+  },
+  "preparations": [
+    {
+      "label": "package-resources",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-itopt-final-20261025/tasks/048-root-test_camctl_process_recovery-shard-1/source/apps/camctl/scripts/sync_resources.py"
+      ],
+      "cwd": "/tmp/camctl-itopt-final-20261025/tasks/048-root-test_camctl_process_recovery-shard-1/source",
+      "started_utc": "2026-10-25T00:07:07.934536+00:00",
+      "pid": 485669,
+      "exit_code": 0,
+      "finished_utc": "2026-10-25T00:07:08.229786+00:00",
+      "wall_seconds": 0.29524389199650614
+    }
+  ],
+  "preparation": "package-resources",
+  "preparation_pid": 485669,
+  "pid": 485672,
+  "execution_started_utc": "2026-10-25T00:07:08.231024+00:00",
+  "progress": {
+    "status": "finished",
+    "exit_code": 1,
+    "collected": 1,
+    "outcomes": {
+      "failed": 1
+    },
+    "subchecks": {},
+    "elapsed_seconds": 33.74205238399736,
+    "utc": "2026-10-25T00:07:42.743354+00:00",
+    "pid": 485672
+  },
+  "exit_code": 1,
+  "finished_utc": "2026-10-25T00:07:42.876299+00:00",
+  "wall_seconds": 35.687449204000586
+}

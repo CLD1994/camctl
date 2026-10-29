@@ -1,0 +1,10 @@
+[
+  {
+    "id": "camctl/persistence",
+    "scope": "camctl",
+    "path": "apps/camctl/tests/integration/persistence",
+    "targets": [
+      "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py"
+    ]
+  }
+]

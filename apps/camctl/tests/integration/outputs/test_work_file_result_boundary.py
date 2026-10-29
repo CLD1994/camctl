@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from pathlib import Path
+import sqlite3
 
 import pytest
 
@@ -12,7 +13,8 @@ from camctl.outputs.work_files import (
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..bootstrap.test_binding_transactions import _CommitFailure
-from ..operations.test_result_reuse import _FaultConnection
+from ..support.outputs import SqliteOperationFault
+from ..support.database import business_database
 from .test_work_files import (
     _cancel_delivery, _context, _file_state, _release_ok,
     local_read, read_targets, work_env,  # noqa: F401
@@ -29,64 +31,66 @@ async def test_reopen_preserves_actual_cleanup_result_and_original_key(
     file_id = qualification.target_file_id
     _cancel_delivery(owned, qualification.delivery_id)
     _release_ok(owned, file_id)
-    context = _context(owned, roots)
     database = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
-    observe, remove = work_files._observe_work_file, work_files._remove_work_file
-    observations, removals, saves = [], [], []
+    async with business_database(database) as original_database:
+        context = _context(original_database, roots)
+        observe, remove = work_files._observe_work_file, work_files._remove_work_file
+        observations, removals, saves = [], [], []
 
-    def stat(path):
-        observations.append(path)
-        return observe(path)
+        def stat(path):
+            observations.append(path)
+            return observe(path)
 
-    def unlink(path):
-        removals.append(path)
-        if delete_failed:
-            raise OSError("original unlink refused")
-        remove(path)
+        def unlink(path):
+            removals.append(path)
+            if delete_failed:
+                raise OSError("original unlink refused")
+            remove(path)
 
-    monkeypatch.setattr(work_files, "_observe_work_file", stat)
-    monkeypatch.setattr(work_files, "_remove_work_file", unlink)
-    save = context.repository.save_cleanup_result
+        monkeypatch.setattr(work_files, "_observe_work_file", stat)
+        monkeypatch.setattr(work_files, "_remove_work_file", unlink)
+        save = context.repository.save_cleanup_result
 
-    def fault_once(request, key, current):
-        saves.append((request, key))
-        if len(saves) == 1:
-            connection = (_FaultConnection(current.connection, "UPDATE intermediate_files")
-                          if phase == "projection" else _CommitFailure(
-                              current.connection, phase == "commit_after"))
-            return save(request, key, replace(current, connection=connection))
-        return save(request, key, current)
+        def fault_once(request, key, current):
+            saves.append((request, key))
+            if len(saves) == 1:
+                connection = (SqliteOperationFault(current.connection, sqlite3.SQLITE_UPDATE, "intermediate_files")
+                              if phase == "projection" else _CommitFailure(
+                                  current.connection, phase == "commit_after"))
+                return save(request, key, replace(current, connection=connection))
+            return save(request, key, current)
 
-    monkeypatch.setattr(context.repository, "save_cleanup_result", fault_once)
+        monkeypatch.setattr(context.repository, "save_cleanup_result", fault_once)
 
-    async def clean(current):
-        return (await clean_work_files(current) if historical
-                else await clean_one_work_file(file_id, current))
+        async def clean(current):
+            return (await clean_work_files(current) if historical
+                    else await clean_one_work_file(file_id, current))
 
-    try:
-        with pytest.raises(WorkFileCleanupError) as error:
-            await clean(context)
-        assert error.value.stage == "cleanup_result_failed"
-        assert len(observations) == len(removals) == len(saves) == 1
-    finally:
-        owned.connection.close()
+        try:
+            with pytest.raises(WorkFileCleanupError) as error:
+                await clean(context)
+            assert error.value.stage == "cleanup_result_failed"
+            assert len(observations) == len(removals) == len(saves) == 1
+        finally:
+            owned.connection.close()
     reopened = open_existing(database, DbOpenMode.EXISTING_RW, DbConfig())
     try:
-        context = replace(context, owned=reopened)
+        async with business_database(database) as resumed_database:
+            context = replace(context, database=resumed_database)
 
-        result = await clean(context)
+            result = await clean(context)
 
-        expected = WorkFileSingleOutcome.FAILED if delete_failed else WorkFileSingleOutcome.DELETED
-        if historical:
-            assert (result.checked, result.cleaned, result.failed) == (1, int(not delete_failed), int(delete_failed))
-            assert reopened.connection.execute("SELECT cleanup_cursor_file_id FROM runtime_state").fetchone() == (file_id,)
-        else:
-            assert result.outcome is expected
-        assert saves == [saves[0], saves[0]], "原实际结果、时刻与操作键必须完整复用"
-        assert len(observations) == len(removals) == 1
-        assert _file_state(reopened, file_id)[:2] == (2, 5 if delete_failed else 4)
-        before = tuple(reopened.connection.iterdump())
-        assert (await clean_one_work_file(file_id, context)).outcome is expected
-        assert tuple(reopened.connection.iterdump()) == before
+            expected = WorkFileSingleOutcome.FAILED if delete_failed else WorkFileSingleOutcome.DELETED
+            if historical:
+                assert (result.checked, result.cleaned, result.failed) == (1, int(not delete_failed), int(delete_failed))
+                assert reopened.connection.execute("SELECT cleanup_cursor_file_id FROM runtime_state").fetchone() == (file_id,)
+            else:
+                assert result.outcome is expected
+            assert saves == [saves[0], saves[0]], "原实际结果、时刻与操作键必须完整复用"
+            assert len(observations) == len(removals) == 1
+            assert _file_state(reopened, file_id)[:2] == (2, 5 if delete_failed else 4)
+            before = tuple(reopened.connection.iterdump())
+            assert (await clean_one_work_file(file_id, context)).outcome is expected
+            assert tuple(reopened.connection.iterdump()) == before
     finally:
         reopened.connection.close()

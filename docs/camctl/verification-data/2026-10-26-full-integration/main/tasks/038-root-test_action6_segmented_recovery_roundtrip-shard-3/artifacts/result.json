@@ -1,0 +1,82 @@
+{
+  "id": "root/test_action6_segmented_recovery_roundtrip/shard-3",
+  "scope": "root",
+  "path": "tests/integration/test_action6_segmented_recovery_roundtrip.py",
+  "targets": [
+    "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_action6_segmented_recovery_roundtrip/source/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-copy-progress]",
+    "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_action6_segmented_recovery_roundtrip/source/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[unknown-prefix]"
+  ],
+  "estimated_seconds": 2.0,
+  "historical_failure_observed": true,
+  "parent_id": "root/test_action6_segmented_recovery_roundtrip",
+  "shard": 3,
+  "shards": 4,
+  "collection": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_action6_segmented_recovery_roundtrip/artifacts",
+  "collected_nodes": 8,
+  "status": "failed",
+  "number": 38,
+  "worker": 3,
+  "artifacts": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/038-root-test_action6_segmented_recovery_roundtrip-shard-3/artifacts",
+  "cwd": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/038-root-test_action6_segmented_recovery_roundtrip-shard-3/source",
+  "started_utc": "2026-10-26T00:39:58.478625+00:00",
+  "command": [
+    "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/038-root-test_action6_segmented_recovery_roundtrip-shard-3/source/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_action6_segmented_recovery_roundtrip/source/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[reached-copy-progress]",
+    "tmp/camctl-integration-all-final-20261026-u19lkvoe/collection/root-test_action6_segmented_recovery_roundtrip/source/tests/integration/test_action6_segmented_recovery_roundtrip.py::test_installed_action6_ordinary_recovery_keeps_scope_waiters_and_copy_ownership[unknown-prefix]",
+    "-q",
+    "--durations=0",
+    "-p",
+    "integration_progress",
+    "--basetemp",
+    "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/038-root-test_action6_segmented_recovery_roundtrip-shard-3/tmp/pytest",
+    "-p",
+    "camctl_memory_plugin",
+    "--camctl-memory-limit",
+    "2GiB",
+    "--camctl-memory-cgroup-root",
+    "/sys/fs/cgroup/memory/camctl-budget-1922809-b293c146ab7744439fec45b828581e67"
+  ],
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/control:/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/038-root-test_action6_segmented_recovery_roundtrip-shard-3/source/apps/camctl/src",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/workers/3/python-cache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/workers/3/project-env",
+    "UV_CACHE_DIR": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/workers/3/uv-cache",
+    "UV_OFFLINE": "1",
+    "TMPDIR": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/038-root-test_action6_segmented_recovery_roundtrip-shard-3/tmp"
+  },
+  "preparations": [
+    {
+      "label": "package-resources",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/038-root-test_action6_segmented_recovery_roundtrip-shard-3/source/apps/camctl/scripts/sync_resources.py"
+      ],
+      "cwd": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/038-root-test_action6_segmented_recovery_roundtrip-shard-3/source",
+      "started_utc": "2026-10-26T00:40:01.439320+00:00",
+      "pid": 1970748,
+      "exit_code": 0,
+      "finished_utc": "2026-10-26T00:40:01.509500+00:00",
+      "wall_seconds": 0.07016297000518534
+    }
+  ],
+  "preparation": "package-resources",
+  "preparation_pid": 1970748,
+  "pid": 1970754,
+  "execution_started_utc": "2026-10-26T00:40:01.510817+00:00",
+  "progress": {
+    "status": "finished",
+    "exit_code": 4,
+    "collected": 0,
+    "outcomes": {},
+    "subchecks": {},
+    "elapsed_seconds": 0.019452588996500708,
+    "utc": "2026-10-26T00:40:01.875028+00:00",
+    "pid": 1970754
+  },
+  "exit_code": 4,
+  "finished_utc": "2026-10-26T00:40:01.945451+00:00",
+  "wall_seconds": 3.5676842980028596
+}

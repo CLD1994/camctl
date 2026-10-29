@@ -1,7 +1,8 @@
 """显式分段未知项沿实际票据保存 QUERY v2 后解析或失败。"""
 
 from decimal import Decimal
-from types import SimpleNamespace
+from dataclasses import replace
+from sqlite3 import OperationalError
 
 import pytest
 
@@ -17,7 +18,6 @@ from camctl.operations.attempts import (
     AttemptIntent,
     AttemptTarget,
     OperationKind,
-    RetryWaitGate,
 )
 from camctl.operations.recovery import RecoveryBoundary
 from camctl.operations.models import (
@@ -29,10 +29,12 @@ from camctl.operations.models import (
     Settlement,
     SettlementBasis,
 )
-from camctl.outputs.read_discovery import ReadDiscoveryOwner
-from camctl.outputs.segment_query import advance_segment_queries
-from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from camctl.persistence.repositories.operations import OperationRepository
+from camctl.outputs.obtain_flow import advance_obtain
+from ..support.outputs import obtain_factory, output_drivers
+from ..support.capture import capture_database
+from camctl.devices.drivers.registry import DriverRegistry
+from .test_cleanup_query_commit_recovery import _CommitFaultConnection
+from camctl.persistence.models import DbOutcomeKind
 
 from ..operations.test_obtain_check_identity import _environment, _NOW
 
@@ -40,6 +42,7 @@ from ..operations.test_obtain_check_identity import _environment, _NOW
 _EVIDENCE = EvidenceRegistry(
     (
         EvidenceContract("query_returned", 1, "query", frozenset()),
+        EvidenceContract("file_presence", 1, "query", frozenset({"cleanup_item_id", "present"}), identity_field="cleanup_item_id"),
         EvidenceContract("adb_foreground_recovery", 1, "query", frozenset()),
         EvidenceContract(
             "file_presence",
@@ -52,7 +55,7 @@ _EVIDENCE = EvidenceRegistry(
 )
 
 
-def _world(tmp_path, values):
+async def _world(tmp_path, values):
     _, owned = _environment(tmp_path, host=False)
     db = owned.connection
     db.execute(
@@ -69,6 +72,9 @@ def _world(tmp_path, values):
     class Query:
         def __init__(self):
             self.calls = []
+
+        async def open_read(self, source, offset, ticket, *, idle_timeout_s):
+            raise AssertionError("查询存储边界不得继续读取文件")
 
         async def query_file(self, request):
             self.calls.append(request)
@@ -106,34 +112,49 @@ def _world(tmp_path, values):
             )
 
     query = Query()
-    runtime = SimpleNamespace(
-        owned=owned,
-        operations=OperationRepository(),
-        occurred_at=lambda: _NOW + 20,
-        monotonic_ns=lambda: 0,
-        retry_gate=RetryWaitGate(),
-        pending_segment_queries={},
-        binding_check=None,
-        recovery_boundary=None,
-        recovery_max_event_id=None,
-        recovery_evidence_for=None,
-        on_recovery_diagnostic=None,
-        last_recovery_diagnostic=None,
-        discovery=ReadDiscoveryOwner(),
-        devices={
-            "cam-1": SimpleNamespace(
-                query_driver=query,
-                query_config=AttemptConfig(2, Decimal(1), Decimal(0)),
-                evidence=_EVIDENCE,
-            )
-        },
-    )
+    runtime = await _query_runtime(owned, query)
     return owned, runtime, query
 
 
+class _QuerySettled(Exception):
+    """查询观察和成员结果已经完整保存，本专项在文件读取之前结束。"""
+
+
+@pytest.fixture(autouse=True)
+def query_storage_boundary(monkeypatch):
+    from camctl.outputs import segment_query
+    original = segment_query.settle_queried_item
+    def saved(request, key, owned):
+        result = original(request, key, owned)
+        if result.kind is DbOutcomeKind.COMPLETED:
+            return replace(result, handoff_error=_QuerySettled())
+        return result
+    monkeypatch.setattr(segment_query, "settle_queried_item", saved)
+
+
+async def _query_runtime(owned, query, *, recovery_boundary=RecoveryBoundary.UNCONFIRMED,
+                         recovery_max_event_id=None):
+    registry = output_drivers(query, _EVIDENCE, read=True, query=True)
+    entry = registry.entry("camctl-adb")
+    registry = DriverRegistry((replace(entry, declaration=replace(entry.declaration,
+        adb_foreground_recovery_operations=frozenset({"query"}))),))
+    from pathlib import Path
+    staging = Path(owned.metadata.staging_path)
+    factory = obtain_factory(devices={"cam-1": {"driver": "camctl-adb", "cleanup": {
+        "query_timeout_s": Decimal(1), "query_retry_interval_s": Decimal(0)}}},
+        drivers=registry, staging=staging, ready=Path(owned.metadata.ready_path),
+        processing=Path(owned.metadata.processing_path), max_query_attempts=2,
+        occurred_at=lambda: _NOW + 20, monotonic_ns=lambda: 0,
+        recovery_boundary=recovery_boundary,
+        recovery_max_event_id=None if recovery_max_event_id is None else lambda: recovery_max_event_id)
+    return factory(await capture_database(owned))
+
+
 async def _round(runtime):
-    runtime.discovery.begin_round(runtime.owned.connection, _NOW + 20)
-    await advance_segment_queries(runtime, _NOW + 20)
+    try:
+        await advance_obtain(runtime)
+    except _QuerySettled:
+        return
 
 
 @pytest.mark.asyncio
@@ -141,7 +162,7 @@ async def _round(runtime):
 async def test_actual_v2_resolves_original_identity_or_missing_failure(
     tmp_path, present
 ):
-    owned, runtime, query = _world(tmp_path, [present])
+    owned, runtime, query = await _world(tmp_path, [present])
     try:
         await _round(runtime)
         assert len(query.calls) == 1
@@ -163,19 +184,19 @@ async def test_actual_v2_resolves_original_identity_or_missing_failure(
 
 @pytest.mark.asyncio
 async def test_unknown_receipt_reuses_original_result_then_remaining_budget(tmp_path):
-    owned, runtime, query = _world(tmp_path, [None, True])
+    owned, runtime, query = await _world(tmp_path, [None, True])
     original = runtime.operations.finish_attempt
     requests = []
 
     def lost_once(request, key, owned):
         requests.append((request, key))
-        saved = original(request, key, owned)
         if len(requests) == 1:
-            assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
-            return DbOutcome(
-                DbOutcomeKind.UNKNOWN, error=OSError("实际已提交，回执丢失")
-            )
-        return saved
+            fault = _CommitFaultConnection(owned.connection, after_commit=True)
+            fault.error = OperationalError("实际已提交，回执丢失")
+            saved = original(request, key, replace(owned, connection=fault))
+            assert fault.actual_commits == 1
+            return saved
+        return original(request, key, owned)
 
     runtime.operations.finish_attempt = lost_once
     try:
@@ -194,7 +215,7 @@ async def test_unknown_receipt_reuses_original_result_then_remaining_budget(tmp_
 
 @pytest.mark.asyncio
 async def test_unconfirmed_budget_finishes_item_without_fabricating_missing(tmp_path):
-    owned, runtime, query = _world(tmp_path, [None, None])
+    owned, runtime, query = await _world(tmp_path, [None, None])
     try:
         await _round(runtime)
         await _round(runtime)
@@ -217,9 +238,9 @@ async def test_unconfirmed_budget_finishes_item_without_fabricating_missing(tmp_
 
 @pytest.mark.asyncio
 async def test_cold_recovery_settles_original_ticket_then_uses_remaining_query_budget(
-    tmp_path,
+    tmp_path, capture_resources,
 ):
-    owned, runtime, query = _world(tmp_path, [True])
+    owned, runtime, query = await _world(tmp_path, [True])
     try:
         started = runtime.operations.begin_attempt(
             AttemptIntent(
@@ -241,11 +262,11 @@ async def test_cold_recovery_settles_original_ticket_then_uses_remaining_query_b
         assert owned.connection.execute(
             "SELECT status,result_event_id FROM operation_attempts"
         ).fetchone() == (1, None)
-        runtime.recovery_boundary = RecoveryBoundary.HOST_LOCAL_SETTLED
-        runtime.recovery_max_event_id = owned.connection.execute(
-            "SELECT MAX(id) FROM history_events"
-        ).fetchone()[0]
-        runtime.recovery_evidence_for = lambda binding, operation: _EVIDENCE
+        horizon, = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()
+        await capture_resources.restart_database(owned)
+        runtime = await _query_runtime(owned, query,
+            recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
+            recovery_max_event_id=horizon)
         await _round(runtime)
         attempts = owned.connection.execute(
             "SELECT attempt_no,status,result_event_id FROM operation_attempts ORDER BY attempt_no"
@@ -266,17 +287,19 @@ async def test_committed_projection_receipt_is_verified_before_settling_item(
 ):
     from camctl.outputs import segment_query
 
-    owned, runtime, query = _world(tmp_path, [True])
+    owned, runtime, query = await _world(tmp_path, [True])
     original = segment_query.observe_queried_output
     requests = []
 
     def lost_once(request, key, owned):
         requests.append((request, key))
-        saved = original(request, key, owned)
         if len(requests) == 1:
-            assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
-            return DbOutcome(DbOutcomeKind.UNKNOWN, error=OSError("产物观察回执丢失"))
-        return saved
+            fault = _CommitFaultConnection(owned.connection, after_commit=True)
+            fault.error = OperationalError("产物观察回执丢失")
+            saved = original(request, key, replace(owned, connection=fault))
+            assert fault.actual_commits == 1
+            return saved
+        return original(request, key, owned)
 
     monkeypatch.setattr(segment_query, "observe_queried_output", lost_once)
     try:
@@ -297,7 +320,7 @@ async def test_committed_projection_receipt_is_verified_before_settling_item(
 
 @pytest.mark.asyncio
 async def test_single_original_source_does_not_enter_segment_query(tmp_path):
-    owned, runtime, query = _world(tmp_path, [True])
+    owned, runtime, query = await _world(tmp_path, [True])
     try:
         owned.connection.execute(
             "UPDATE actions SET execution_spec_json=? WHERE id=1",

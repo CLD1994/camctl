@@ -12,8 +12,6 @@ import pytest
 from camctl.acceptance.input import ParsedInput
 from camctl.acceptance.service import CommandMode, ProcessInput
 from camctl.bootstrap.application import query_work_facts
-from camctl.bootstrap.config import ConfigDefaults, load_config
-from camctl.bootstrap.flows import cancel_flow, report_flow
 from camctl.cancellation.models import (
     ApplyCancelTarget,
     CancelApplyMode,
@@ -25,7 +23,6 @@ from camctl.cancellation.models import (
     StartCancelAction,
 )
 from camctl.cancellation.service import ApplyCancel, CancellationRuntime, apply_cancel
-from camctl.session.service import StateDbFailure, _drive_flows
 from camctl.cancellation.settlement import TargetSettlement
 from camctl.contracts.values import new_operation_key
 from camctl.contracts.enums import load_registry
@@ -43,7 +40,6 @@ from camctl.persistence.repositories.acceptance import (
 )
 from camctl.persistence.repositories.cancellation import (
     CancellationRepository,
-    _ApplyCancelTargetCommand,
     register_cancellation_guards,
 )
 from camctl.persistence.repositories.capture import register_capture_guards
@@ -52,7 +48,6 @@ from camctl.persistence.repositories.scheduling import SchedulingRepository, Sta
 from camctl.persistence.repositories.outputs import OutputsRepository, register_outputs_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, OwnedConnection, open_existing
 from camctl.reporting.generation import GenerationSpec, generate_report_file
-from camctl.reporting.messages import ErrorKind, ResultFailureMessage
 from camctl.reporting.models import SyncMode
 from camctl.reporting.policy import (
     ReportingRepository,
@@ -63,10 +58,11 @@ from camctl.reporting.policy import (
     finish_canceled_sync_action,
 )
 from camctl.reporting.publication import DbPublicationSession, DeliveryOutcome, deliver_report
-from camctl.reporting.supervisor import GenerationOutcomeKind, WorkerGeneration
 
 from ..acceptance.test_acceptance import Catalog
-from ..persistence.test_runtime import _create_valid_database
+from ..support.database import business_database, database_path
+from ..support.output_planning import EventSequence, capture_operation
+from ..support.reporting import ReportWorld, report_config, report_world, run_report_session
 
 
 _NOW = 1_750_000_000_000_000
@@ -81,7 +77,7 @@ def environment(tmp_path):
     register_capture_guards()
     register_outputs_guards()
     path = tmp_path / "state.db"
-    _create_valid_database(path)
+    report_world(tmp_path)
     owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         yield owned, tmp_path
@@ -142,11 +138,18 @@ def _fix_cancel(owned, target_id, request_id="3"):
     return origin_id, fixed.value.item_ids[0], repository
 
 
-def _settlement(owned, repository):
-    return TargetSettlement(
-        owned=owned, outputs=OutputsRepository(), cancellations=repository,
-        withdrawal_positions=lambda _delivery_id: "ready", occurred_at=lambda: _NOW,
-    )
+async def _apply(owned, origin_id, item_ids, repository):
+    """公开取消服务通过真实数据库线程和目标拥有者保存进度。"""
+    async def position(_delivery_id):
+        return "ready"
+
+    async with business_database(database_path(owned)) as database:
+        settlement = TargetSettlement(
+            database=database, outputs=OutputsRepository(), cancellations=repository,
+            withdrawal_positions=position, occurred_at=lambda: _NOW)
+        return await apply_cancel(ApplyCancel(origin_id, item_ids), CancellationRuntime(
+            database=database, repository=repository, settlement=settlement,
+            occurred_at=lambda: _NOW))
 
 
 async def _publish(owned, home, report=None):
@@ -162,10 +165,10 @@ async def _publish(owned, home, report=None):
     ))
     ready = home / "ready"
     ready.mkdir(exist_ok=True)
-    published = await deliver_report(
-        report.report_id, generated.path.read_bytes(),
-        HandoffDirectories(home / "staging", ready), DbPublicationSession(owned),
-    )
+    async with business_database(database_path(owned)) as database:
+        published = await deliver_report(
+            report.report_id, generated.path.read_bytes(),
+            HandoffDirectories(home / "staging", ready), DbPublicationSession(database))
     assert published.outcome is DeliveryOutcome.PUBLISHED, published.error
     return report
 
@@ -219,12 +222,7 @@ async def test_running_sync_cancel_settles_target_before_member_success(environm
         await _publish(owned, home)
     origin_id, item_id, repository = _fix_cancel(owned, target_id)
 
-    progress = await apply_cancel(
-        ApplyCancel(origin_id, (item_id,)), CancellationRuntime(
-            owned=owned, repository=repository, settlement=_settlement(owned, repository),
-            occurred_at=lambda: _NOW,
-        ),
-    )
+    progress = await _apply(owned, origin_id, (item_id,), repository)
 
     assert _action(owned, target_id) == (6, 1, 1)
     assert (progress.items[0].status, progress.items[0].outcome) == (3, 1)
@@ -245,44 +243,34 @@ async def test_acknowledged_running_sync_can_cancel_without_rewriting_ack(enviro
     assert acknowledged[:3] == (2, None, report.report_id)
     origin_id, item_id, repository = _fix_cancel(owned, target_id)
 
-    await apply_cancel(
-        ApplyCancel(origin_id, (item_id,)), CancellationRuntime(
-            owned=owned, repository=repository, settlement=_settlement(owned, repository),
-            occurred_at=lambda: _NOW,
-        ),
-    )
+    await _apply(owned, origin_id, (item_id,), repository)
 
     assert _action(owned, target_id) == (6, 1, 1)
     assert _sync(owned, target_id) == acknowledged
 
 
-class _FailedGeneration:
-    """隔离后续报告进程失败；本地结果恢复仍由真实消费者保存。"""
+async def _run(home, *, fault=None, restricted=False):
+    """默认生产装配执行报告与取消，故障只在真实存储连接边界注入。"""
+    from datetime import date
+    from decimal import Decimal
+    from unittest.mock import patch
+    from camctl.bootstrap import lifecycle
 
-    async def generate(self, job):
-        return WorkerGeneration(
-            kind=GenerationOutcomeKind.REPORT_FAILURE, job_id=job.job_id,
-            failure=ResultFailureMessage(
-                job_id=job.job_id, instance_id=job.instance_id,
-                error_kind=ErrorKind.REPORT, error_code="controlled_report_failure",
-                error_message="本轮后续报告生成失败",
-            ),
-        )
+    config = report_config(home)
+    if restricted:
+        config = replace(config, clock=replace(config.clock,
+            min_plausible_date=date.max, recheck_delay_s=Decimal(0), recheck_count=1))
+    world = ReportWorld(home, config)
+    if fault is None:
+        return await run_report_session(world)
+    actual_open = lifecycle.open_existing
 
+    def open_fault(*args, **kwargs):
+        opened = actual_open(*args, **kwargs)
+        return _fault_owned(opened, fault[0], after_commit=fault[1])
 
-def _maintenance(home):
-    cfg = load_config({}, ConfigDefaults())
-    flow = report_flow(
-        state_db=home / "state.db", staging=home / "staging", ready=home / "ready",
-        processing=home / "processing", history=cfg.history, database=cfg.database,
-        supervisor=_FailedGeneration(), start_actions=False,
-    )
-    context = SimpleNamespace(
-        open_connection=lambda: open_existing(
-            home / "state.db", DbOpenMode.EXISTING_RW, DbConfig(),
-        ), clock=SimpleNamespace(utc_micros=lambda: _NOW),
-    )
-    return flow, context
+    with patch.object(lifecycle, "open_existing", open_fault):
+        return await run_report_session(world)
 
 
 @pytest.mark.asyncio
@@ -292,9 +280,8 @@ async def test_acknowledged_sync_recovers_local_action_success(environment):
     report = await _publish(owned, home)
     _process(owned, {"request_id": "1", "last_report_id": str(report.report_id)})
     acknowledged = _sync(owned, target_id)
-    flow, context = _maintenance(home)
-
-    await flow(context)
+    outcome = await _run(home)
+    assert outcome.succeeded, outcome.details
 
     assert _action(owned, target_id) == (3, 1, 0)
     assert _sync(owned, target_id) == (2, report.report_id, acknowledged[2], acknowledged[3])
@@ -313,28 +300,48 @@ async def test_work_facts_keeps_acknowledged_local_result_pending(environment):
 
 
 class _FaultConnection:
-    """仅对指定真实事务语句注入一次错误，其余读写由 SQLite 执行。"""
+    """在实际表访问拒绝一次操作，或丢失指定事务的提交回执。"""
 
-    def __init__(self, connection, prefix, *, after_commit=False):
+    def __init__(self, connection, boundary, *, after_commit=False):
         self.connection = connection
-        self.prefix = prefix
+        self.boundary = boundary
         self.after_commit = after_commit
         self.failed = False
+        self.local_write = False
 
     def execute(self, sql, parameters=()):
-        if sql.startswith(self.prefix) and not self.failed:
+        operation = sql.strip().upper()
+        if (not self.failed and operation == "COMMIT"
+                and self.boundary in ("COMMIT", "LOCAL COMMIT")
+                and (self.boundary == "COMMIT" or self.local_write)):
             self.failed = True
             if self.after_commit:
                 self.connection.execute(sql, parameters)
             raise sqlite3.OperationalError("受控事务失败")
-        return self.connection.execute(sql, parameters)
+        access = {
+            "UPDATE actions": (sqlite3.SQLITE_UPDATE, "actions", None),
+            "UPDATE plans": (sqlite3.SQLITE_UPDATE, "plans", None),
+            "UPDATE state_syncs": (sqlite3.SQLITE_UPDATE, "state_syncs", None),
+            "SELECT id FROM actions WHERE type = 7": (sqlite3.SQLITE_READ, "actions", "type"),
+            "SELECT s.action_id": (sqlite3.SQLITE_READ, "state_syncs", "action_id"),
+        }.get(self.boundary)
 
-    @property
-    def in_transaction(self):
-        return self.connection.in_transaction
+        def authorize(action, table, column, database, source):
+            if action == sqlite3.SQLITE_UPDATE and table == "actions":
+                self.local_write = True
+            if not self.failed and access is not None and (action, table) == access[:2] and (access[2] is None or column == access[2]):
+                self.failed = True
+                return sqlite3.SQLITE_DENY
+            return sqlite3.SQLITE_OK
 
-    def close(self):
-        self.connection.close()
+        self.connection.set_authorizer(authorize)
+        try:
+            return self.connection.execute(sql, parameters)
+        finally:
+            self.connection.set_authorizer(None)
+
+    def __getattr__(self, name):
+        return getattr(self.connection, name)
 
 
 def _fault_owned(owned, prefix, *, after_commit=False):
@@ -520,12 +527,7 @@ async def test_target_cancel_recovers_after_origin_stops_waiting(environment):
     )
     assert applied.kind is DbOutcomeKind.COMPLETED, applied.error
     next_origin, next_item, _repository = _fix_cancel(owned, origin_id, "4")
-    await apply_cancel(
-        ApplyCancel(next_origin, (next_item,)), CancellationRuntime(
-            owned=owned, repository=repository, settlement=_settlement(owned, repository),
-            occurred_at=lambda: _NOW,
-        ),
-    )
+    await _apply(owned, next_origin, (next_item,), repository)
     origin = _action(owned, origin_id)
     member = owned.connection.execute(
         "SELECT status, cancellation_effect, outcome FROM cancel_items WHERE id = ?", (item_id,),
@@ -534,9 +536,8 @@ async def test_target_cancel_recovers_after_origin_stops_waiting(environment):
     assert member == (5, 2, None)
     assert _action(owned, target_id) == (2, 1, 1)
     assert query_work_facts(owned.connection).required_settlements > 0
-    flow, context = _maintenance(home)
-
-    await flow(context)
+    outcome = await _run(home)
+    assert outcome.succeeded, outcome.details
 
     assert _action(owned, target_id) == (6, 1, 1)
     assert _action(owned, origin_id) == origin
@@ -554,12 +555,7 @@ async def test_one_sync_cancel_preserves_shared_frozen_report_and_other_success(
     report = frozen.value.report
     other_sync = _sync(owned, other_id)
     origin_id, item_id, repository = _fix_cancel(owned, target_id)
-    await apply_cancel(
-        ApplyCancel(origin_id, (item_id,)), CancellationRuntime(
-            owned=owned, repository=repository, settlement=_settlement(owned, repository),
-            occurred_at=lambda: _NOW,
-        ),
-    )
+    await _apply(owned, origin_id, (item_id,), repository)
 
     await _publish(owned, home, report)
     completed = record_local_report(
@@ -589,13 +585,9 @@ async def test_local_result_save_failure_stops_maintenance(environment, after_co
     owned, home = environment
     target_id = _start(owned)
     report = await _publish(owned, home)
-    flow, context = _maintenance(home)
-    actual_open = context.open_connection
-    fault_prefix = "COMMIT" if after_commit else "UPDATE actions"
-    context.open_connection = lambda: _fault_owned(actual_open(), fault_prefix, after_commit=after_commit)
-
-    with pytest.raises(StateDbFailure):
-        await flow(context)
+    fault = "LOCAL COMMIT" if after_commit else "UPDATE actions"
+    outcome = await _run(home, fault=(fault, after_commit))
+    assert not outcome.succeeded and outcome.reason == "state_db_error", outcome.details
 
     assert _action(owned, target_id) == ((3, 1, 0) if after_commit else (2, 1, 0))
     assert _sync(owned, target_id)[1] == (report.report_id if after_commit else None)
@@ -608,32 +600,8 @@ async def test_report_state_query_failure_is_fatal_before_following_flow(environ
     owned, home = environment
     target_id = _start(owned)
     await _publish(owned, home)
-    cfg = load_config({}, ConfigDefaults())
-    flow = report_flow(
-        state_db=home / "state.db", staging=home / "staging", ready=home / "ready",
-        processing=home / "processing", history=cfg.history, database=cfg.database,
-        supervisor=_FailedGeneration(), start_actions=start_actions,
-    )
-    context = SimpleNamespace(
-        open_connection=lambda: _fault_owned(open_existing(
-            home / "state.db", DbOpenMode.EXISTING_RW, DbConfig(),
-        ), prefix), clock=SimpleNamespace(utc_micros=lambda: _NOW),
-    )
-
-    with pytest.raises(StateDbFailure):
-        await flow(context)
-
-    followed = []
-
-    async def device_flow(_context):
-        followed.append(True)
-
-    context.flows = {"report": flow, "device": device_flow}
-    context.failure_log = None
-    context.copy_request_factory = None
-    fatal = await _drive_flows(context)
-    assert fatal is not None
-    assert followed == []
+    outcome = await _run(home, fault=(prefix, False), restricted=not start_actions)
+    assert not outcome.succeeded and outcome.reason == "state_db_error", outcome.details
     assert _action(owned, target_id) == (2, 1, 0)
     assert _sync(owned, target_id)[1] is None
 
@@ -647,24 +615,26 @@ async def test_cancel_finish_store_failure_stops_session_without_member_result(e
         ApplyCancelTarget(item_id, CancelApplyMode.WITH_STOP, _NOW), new_operation_key(), owned,
     )
     assert applied.kind is DbOutcomeKind.COMPLETED, applied.error
-    context = SimpleNamespace(
-        open_connection=lambda: _fault_owned(open_existing(
-            home / "state.db", DbOpenMode.EXISTING_RW, DbConfig(),
-        ), "UPDATE plans"), clock=SimpleNamespace(utc_micros=lambda: _NOW),
-    )
+    from camctl.bootstrap.flows import cancel_flow
+    from camctl.session.service import run_session
+    from ..support.session import open_session_database, session_context
+
     followed = []
 
     async def device_flow(_context):
         followed.append(True)
 
-    context.flows = {
-        "cancel": cancel_flow(ready=home / "ready", processing=home / "processing"),
-        "device": device_flow,
-    }
+    async def open_database():
+        return await open_session_database(home / "state.db", factory=lambda: _fault_owned(
+            open_existing(home / "state.db", DbOpenMode.EXISTING_RW, DbConfig()), "UPDATE plans"))
 
-    fatal = await _drive_flows(context)
-
-    assert fatal is not None
+    context = session_context(home / "state.db", clock=SimpleNamespace(utc_micros=lambda: _NOW),
+        catalog=Catalog(), open_database=open_database, flows={
+            "cancel": cancel_flow(ready=home / "ready", processing=home / "processing"),
+            "device": device_flow,
+        })
+    outcome = await run_session(context, None)
+    assert not outcome.succeeded and outcome.reason == "state_db_error", outcome.details
     assert followed == []
     assert _action(owned, target_id) == (2, 1, 1)
     assert owned.connection.execute(
@@ -740,12 +710,7 @@ async def test_sync_cancel_history_replays_target_sync_member_and_plan(environme
         for name, identity in (("action", target_id), ("plan", plan_id),
                                ("state_sync", sync_id), ("action", origin_id))
     }
-    await apply_cancel(
-        ApplyCancel(origin_id, (item_id,)), CancellationRuntime(
-            owned=owned, repository=repository, settlement=_settlement(owned, repository),
-            occurred_at=lambda: _NOW,
-        ),
-    )
+    await _apply(owned, origin_id, (item_id,), repository)
     after = history.current_boundary()
     owners = {table: name for table, name in (
         ("actions", "action"), ("plans", "plan"), ("state_syncs", "state_sync"),
@@ -862,17 +827,15 @@ def test_cancel_guard_rejects_invalid_original_input_evidence(environment, inval
     elif invalid == "extra_field":
         request["unexpected"] = True
     evidence = {} if invalid == "missing" else {"cancel_request": request}
-    actual = _ApplyCancelTargetCommand(ApplyCancelTarget(item_id, CancelApplyMode.WITH_STOP, _NOW), key)
+    command = ApplyCancelTarget(item_id, CancelApplyMode.WITH_STOP, _NOW)
+    proposal = capture_operation(owned, lambda target: CancellationRepository().apply_cancel_target(
+        command, key, target))
+    events = (replace(proposal.events[0], evidence=evidence), *proposal.events[1:])
+    before = tuple(owned.connection.iterdump())
+    receipt = commit_operation(EventSequence(events, proposal), key, owned)
 
-    class EvidenceFault:
-        """在正式事务校验边界替换申请依据；实际状态变化由生产命令形成。"""
-
-        def plan(self, scope):
-            plan = actual.plan(scope)
-            return replace(plan, events=(replace(plan.events[0], evidence=evidence), *plan.events[1:]))
-
-    receipt = commit_operation(EvidenceFault(), key, owned)
-
+    assert tuple(owned.connection.iterdump()) == before
+    assert not owned.connection.in_transaction
     assert receipt.kind == "rolled_back"
     assert _action(owned, target_id) == (2, 1, 0)
     assert _sync(owned, target_id)[0] == 1

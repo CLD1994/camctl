@@ -204,6 +204,10 @@ class BeginObserver:
     def in_transaction(self):
         return self.connection.in_transaction
 
+    @property
+    def total_changes(self):
+        return self.connection.total_changes
+
     def execute(self, statement, parameters=()):
         if statement == "BEGIN IMMEDIATE":
             self.began.set()
@@ -259,8 +263,8 @@ def test_close_before_submit_requests_later_run(runtime, monkeypatch):
     closing, submit_attempted = Event(), Event()
     original_open = lifecycle._open_connection
 
-    def observe_submit(path):
-        owned = original_open(path)
+    def observe_submit(path, config):
+        owned = original_open(path, config)
         return OwnedConnection(BeginObserver(owned.connection, submit_attempted), owned.metadata)
 
     monkeypatch.setattr(lifecycle, "_open_connection", observe_submit)
@@ -311,6 +315,10 @@ async def test_submit_unknown_commit_does_not_return_handoff_success(runtime, mo
         def in_transaction(self):
             return self.connection.in_transaction
 
+        @property
+        def total_changes(self):
+            return self.connection.total_changes
+
         def execute(self, statement, parameters=()):
             if statement == "COMMIT":
                 if commit_reached_database:
@@ -321,8 +329,8 @@ async def test_submit_unknown_commit_does_not_return_handoff_success(runtime, mo
         def close(self):
             self.connection.close()
 
-    def open_fault(path):
-        owned = original_open(path)
+    def open_fault(path, config):
+        owned = original_open(path, config)
         return OwnedConnection(LostCommitResponse(owned.connection), owned.metadata)
 
     monkeypatch.setattr(lifecycle, "_open_connection", open_fault)

@@ -1,0 +1,2774 @@
+[
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_emergency_error_generation.py",
+    "qualified_name": "test_emergency_error_report_keeps_actual_target_reason_and_original_action",
+    "revisions": {
+      "a7755d81": {
+        "line": 37,
+        "end_line": 123,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "9fc592ee27ad52449383360077f12a63bc6addd9d67f3a045f743e3b05dc0ae9",
+        "signature": "tmp_path, outcome, code, attempts, activity_case"
+      },
+      "272fda66": {
+        "line": 37,
+        "end_line": 123,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "9fc592ee27ad52449383360077f12a63bc6addd9d67f3a045f743e3b05dc0ae9",
+        "signature": "tmp_path, outcome, code, attempts, activity_case"
+      },
+      "9fbb734c": {
+        "line": 37,
+        "end_line": 123,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "9fc592ee27ad52449383360077f12a63bc6addd9d67f3a045f743e3b05dc0ae9",
+        "signature": "tmp_path, outcome, code, attempts, activity_case"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+    "qualified_name": "test_freeze_reads_current_ack",
+    "revisions": {
+      "a7755d81": {
+        "line": 102,
+        "end_line": 110,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "0938832a7333c8e9dd0833c54ed1b70b6d712d365643cafd68bcb6118e662e57",
+        "signature": "environment, tmp_path"
+      },
+      "272fda66": {
+        "line": 102,
+        "end_line": 110,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "0938832a7333c8e9dd0833c54ed1b70b6d712d365643cafd68bcb6118e662e57",
+        "signature": "environment, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 102,
+        "end_line": 110,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "0938832a7333c8e9dd0833c54ed1b70b6d712d365643cafd68bcb6118e662e57",
+        "signature": "environment, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+    "qualified_name": "test_freeze_uses_actual_watermark_after_new_submission",
+    "revisions": {
+      "a7755d81": {
+        "line": 113,
+        "end_line": 118,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "4ac4a246514b3ca7648e6aecb6a0df272f96ffe956b27772fe5a759d637d1175",
+        "signature": "environment, tmp_path"
+      },
+      "272fda66": {
+        "line": 113,
+        "end_line": 118,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "4ac4a246514b3ca7648e6aecb6a0df272f96ffe956b27772fe5a759d637d1175",
+        "signature": "environment, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 113,
+        "end_line": 118,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "4ac4a246514b3ca7648e6aecb6a0df272f96ffe956b27772fe5a759d637d1175",
+        "signature": "environment, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+    "qualified_name": "test_reuse_preserves_original_identity_boundary_and_history",
+    "revisions": {
+      "a7755d81": {
+        "line": 121,
+        "end_line": 129,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "f5fee822ac0837bdf9e185e70ec2de19be7d01022e467cd1d0504c20e23f2b88",
+        "signature": "environment, tmp_path"
+      },
+      "272fda66": {
+        "line": 121,
+        "end_line": 129,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "f5fee822ac0837bdf9e185e70ec2de19be7d01022e467cd1d0504c20e23f2b88",
+        "signature": "environment, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 121,
+        "end_line": 129,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "f5fee822ac0837bdf9e185e70ec2de19be7d01022e467cd1d0504c20e23f2b88",
+        "signature": "environment, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+    "qualified_name": "test_empty_ordinary_range_skips_without_history",
+    "revisions": {
+      "a7755d81": {
+        "line": 133,
+        "end_line": 142,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "fe19a76c014e4d6f04aee99abafa9aeef5c5f27cca1e1f0666c5fb30a8e60443",
+        "signature": "environment, tmp_path, initialized_only"
+      },
+      "272fda66": {
+        "line": 133,
+        "end_line": 142,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "fe19a76c014e4d6f04aee99abafa9aeef5c5f27cca1e1f0666c5fb30a8e60443",
+        "signature": "environment, tmp_path, initialized_only"
+      },
+      "9fbb734c": {
+        "line": 133,
+        "end_line": 142,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "fe19a76c014e4d6f04aee99abafa9aeef5c5f27cca1e1f0666c5fb30a8e60443",
+        "signature": "environment, tmp_path, initialized_only"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+    "qualified_name": "test_freeze_takes_complete_boundary_excluding_own_transaction",
+    "revisions": {
+      "a7755d81": {
+        "line": 145,
+        "end_line": 154,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "52a771a30419c180018a1f5d56434cbea7c486b9e4a9ff5dd11ae00be1126292",
+        "signature": "environment, tmp_path"
+      },
+      "272fda66": {
+        "line": 145,
+        "end_line": 154,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "52a771a30419c180018a1f5d56434cbea7c486b9e4a9ff5dd11ae00be1126292",
+        "signature": "environment, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 145,
+        "end_line": 154,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "52a771a30419c180018a1f5d56434cbea7c486b9e4a9ff5dd11ae00be1126292",
+        "signature": "environment, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+    "qualified_name": "test_frozen_report_excludes_later_changes",
+    "revisions": {
+      "a7755d81": {
+        "line": 157,
+        "end_line": 166,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "3e7b0e4edbc6ba89b2cdcbded4f0060b5b82622d610f27f964c870812b011c47",
+        "signature": "environment, tmp_path"
+      },
+      "272fda66": {
+        "line": 157,
+        "end_line": 166,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "3e7b0e4edbc6ba89b2cdcbded4f0060b5b82622d610f27f964c870812b011c47",
+        "signature": "environment, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 157,
+        "end_line": 166,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "3e7b0e4edbc6ba89b2cdcbded4f0060b5b82622d610f27f964c870812b011c47",
+        "signature": "environment, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+    "qualified_name": "test_scope_combines_ack_with_sync_origin",
+    "revisions": {
+      "a7755d81": {
+        "line": 170,
+        "end_line": 180,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "25e970be2a8a89ab7ccf30ba767353b18f48121e5c66b75ae242046805d2b0b7",
+        "signature": "environment, tmp_path, origin_id, want"
+      },
+      "272fda66": {
+        "line": 170,
+        "end_line": 180,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "25e970be2a8a89ab7ccf30ba767353b18f48121e5c66b75ae242046805d2b0b7",
+        "signature": "environment, tmp_path, origin_id, want"
+      },
+      "9fbb734c": {
+        "line": 170,
+        "end_line": 180,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "25e970be2a8a89ab7ccf30ba767353b18f48121e5c66b75ae242046805d2b0b7",
+        "signature": "environment, tmp_path, origin_id, want"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+    "qualified_name": "test_all_sync_origins_and_latest_start_are_combined",
+    "revisions": {
+      "a7755d81": {
+        "line": 183,
+        "end_line": 194,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "59d213d39e8ed9253924b782188e5a76970d3643e4082c07022e95b9379fa5e1",
+        "signature": "environment, tmp_path"
+      },
+      "272fda66": {
+        "line": 183,
+        "end_line": 194,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "59d213d39e8ed9253924b782188e5a76970d3643e4082c07022e95b9379fa5e1",
+        "signature": "environment, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 183,
+        "end_line": 194,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "59d213d39e8ed9253924b782188e5a76970d3643e4082c07022e95b9379fa5e1",
+        "signature": "environment, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+    "qualified_name": "test_pending_sync_action_does_not_expand_report_scope",
+    "revisions": {
+      "a7755d81": {
+        "line": 197,
+        "end_line": 202,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "efe249877c3392ad63e2f6a4f62a7dec09bc86d7d99a559a0b8d52de9cb7c6b8",
+        "signature": "environment, tmp_path"
+      },
+      "272fda66": {
+        "line": 197,
+        "end_line": 202,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "efe249877c3392ad63e2f6a4f62a7dec09bc86d7d99a559a0b8d52de9cb7c6b8",
+        "signature": "environment, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 197,
+        "end_line": 202,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "efe249877c3392ad63e2f6a4f62a7dec09bc86d7d99a559a0b8d52de9cb7c6b8",
+        "signature": "environment, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+    "qualified_name": "test_wider_registered_report_can_satisfy_later_narrower_scope",
+    "revisions": {
+      "a7755d81": {
+        "line": 205,
+        "end_line": 219,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "1d1f17ce7da3c0b4569369d7e04e802840784c00b295e948d012a12b65602a22",
+        "signature": "environment, tmp_path"
+      },
+      "272fda66": {
+        "line": 205,
+        "end_line": 219,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "1d1f17ce7da3c0b4569369d7e04e802840784c00b295e948d012a12b65602a22",
+        "signature": "environment, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 205,
+        "end_line": 219,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "1d1f17ce7da3c0b4569369d7e04e802840784c00b295e948d012a12b65602a22",
+        "signature": "environment, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+    "qualified_name": "test_partial_sync_cannot_reference_report_registered_after_its_start",
+    "revisions": {
+      "a7755d81": {
+        "line": 222,
+        "end_line": 230,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "9bd2f6bc2af5cc7123c5de689d2cffff7bdb775be2c98b1a9782c31238736b65",
+        "signature": "environment, tmp_path"
+      },
+      "272fda66": {
+        "line": 222,
+        "end_line": 230,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "9bd2f6bc2af5cc7123c5de689d2cffff7bdb775be2c98b1a9782c31238736b65",
+        "signature": "environment, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 222,
+        "end_line": 230,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "9bd2f6bc2af5cc7123c5de689d2cffff7bdb775be2c98b1a9782c31238736b65",
+        "signature": "environment, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+    "qualified_name": "test_reuse_rejects_report_left_endpoint_inside_business_transaction",
+    "revisions": {
+      "a7755d81": {
+        "line": 233,
+        "end_line": 243,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "941a818d4c9133c4e35ae3c6e3b118a6241117823ec9ce44b5fc11bb3575fbd5",
+        "signature": "environment, tmp_path"
+      },
+      "272fda66": {
+        "line": 233,
+        "end_line": 243,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "941a818d4c9133c4e35ae3c6e3b118a6241117823ec9ce44b5fc11bb3575fbd5",
+        "signature": "environment, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 233,
+        "end_line": 243,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "941a818d4c9133c4e35ae3c6e3b118a6241117823ec9ce44b5fc11bb3575fbd5",
+        "signature": "environment, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+    "qualified_name": "test_shared_readers_reject_same_invalid_left_boundary",
+    "revisions": {
+      "a7755d81": {
+        "line": 247,
+        "end_line": 264,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "077ad4b7cefc1e92d511f2ad7aa4d7d3302696517dba4d623eaa0d4214dd8e19",
+        "signature": "environment, tmp_path, entry"
+      },
+      "272fda66": {
+        "line": 247,
+        "end_line": 264,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "077ad4b7cefc1e92d511f2ad7aa4d7d3302696517dba4d623eaa0d4214dd8e19",
+        "signature": "environment, tmp_path, entry"
+      },
+      "9fbb734c": {
+        "line": 247,
+        "end_line": 264,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "077ad4b7cefc1e92d511f2ad7aa4d7d3302696517dba4d623eaa0d4214dd8e19",
+        "signature": "environment, tmp_path, entry"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+    "qualified_name": "test_business_boundary_allows_later_management_events_in_same_transaction",
+    "revisions": {
+      "a7755d81": {
+        "line": 267,
+        "end_line": 280,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "68af6c3c99ce76096c64352499a424e2e88bef550783a74c284954ada6bd0816",
+        "signature": "environment, tmp_path"
+      },
+      "272fda66": {
+        "line": 267,
+        "end_line": 280,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "68af6c3c99ce76096c64352499a424e2e88bef550783a74c284954ada6bd0816",
+        "signature": "environment, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 267,
+        "end_line": 280,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "68af6c3c99ce76096c64352499a424e2e88bef550783a74c284954ada6bd0816",
+        "signature": "environment, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+    "qualified_name": "test_later_sync_start_invalidates_full_coverage_candidate",
+    "revisions": {
+      "a7755d81": {
+        "line": 283,
+        "end_line": 294,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "a1c9ba91bb1cd82cfc5e97be5e0ca43422b2ca350d5ab6bd747ae4bdd8aa7fc1",
+        "signature": "environment, tmp_path"
+      },
+      "272fda66": {
+        "line": 283,
+        "end_line": 294,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "a1c9ba91bb1cd82cfc5e97be5e0ca43422b2ca350d5ab6bd747ae4bdd8aa7fc1",
+        "signature": "environment, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 283,
+        "end_line": 294,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "a1c9ba91bb1cd82cfc5e97be5e0ca43422b2ca350d5ab6bd747ae4bdd8aa7fc1",
+        "signature": "environment, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+    "qualified_name": "test_concurrent_input_and_ack_are_read_at_one_complete_boundary",
+    "revisions": {
+      "a7755d81": {
+        "line": 298,
+        "end_line": 354,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "a0b7981ea1b4444b748de8e767305faebbd2d0e47e47ecc5157cf2168d1729e3",
+        "signature": "environment, tmp_path, freeze_first, want"
+      },
+      "272fda66": {
+        "line": 298,
+        "end_line": 350,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "a25337109e71b9977bc1e00e54d6edf1b42bac5fe704bbac900324c3616a210d",
+        "signature": "environment, tmp_path, freeze_first, want"
+      },
+      "9fbb734c": {
+        "line": 298,
+        "end_line": 354,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "a0b7981ea1b4444b748de8e767305faebbd2d0e47e47ecc5157cf2168d1729e3",
+        "signature": "environment, tmp_path, freeze_first, want"
+      }
+    },
+    "same_all": false
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+    "qualified_name": "test_old_report_cannot_satisfy_new_sync_even_without_business_changes",
+    "revisions": {
+      "a7755d81": {
+        "line": 357,
+        "end_line": 365,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "efa0c50f5fcf812bcf6a4689d586893f7617a861d4cc1af2212a162f87e0516c",
+        "signature": "environment, tmp_path"
+      },
+      "272fda66": {
+        "line": 353,
+        "end_line": 361,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "efa0c50f5fcf812bcf6a4689d586893f7617a861d4cc1af2212a162f87e0516c",
+        "signature": "environment, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 357,
+        "end_line": 365,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "efa0c50f5fcf812bcf6a4689d586893f7617a861d4cc1af2212a162f87e0516c",
+        "signature": "environment, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+    "qualified_name": "test_empty_partial_sync_range_still_selects_report_after_start",
+    "revisions": {
+      "a7755d81": {
+        "line": 368,
+        "end_line": 380,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "4eac8b8d750544791f7a1834df41a82c6c414aff9f7900d8cc9e12a843787b2e",
+        "signature": "environment, tmp_path"
+      },
+      "272fda66": {
+        "line": 364,
+        "end_line": 376,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "4eac8b8d750544791f7a1834df41a82c6c414aff9f7900d8cc9e12a843787b2e",
+        "signature": "environment, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 368,
+        "end_line": 380,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "4eac8b8d750544791f7a1834df41a82c6c414aff9f7900d8cc9e12a843787b2e",
+        "signature": "environment, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+    "qualified_name": "test_ended_sync_does_not_expand_new_scope",
+    "revisions": {
+      "a7755d81": {
+        "line": 384,
+        "end_line": 396,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "7bd2ac867974c4b0276ea94102781dd7ea03521db9afb8363797d785e61af4e7",
+        "signature": "environment, tmp_path, status"
+      },
+      "272fda66": {
+        "line": 380,
+        "end_line": 392,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "7bd2ac867974c4b0276ea94102781dd7ea03521db9afb8363797d785e61af4e7",
+        "signature": "environment, tmp_path, status"
+      },
+      "9fbb734c": {
+        "line": 384,
+        "end_line": 396,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "7bd2ac867974c4b0276ea94102781dd7ea03521db9afb8363797d785e61af4e7",
+        "signature": "environment, tmp_path, status"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+    "qualified_name": "test_unreliable_facts_fail_without_partial_registration",
+    "revisions": {
+      "a7755d81": {
+        "line": 400,
+        "end_line": 419,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "35b7a179e1ff1218775269fd310c0b254837e30133fd51b88cb2c17dd9d3e734",
+        "signature": "environment, tmp_path, mutation"
+      },
+      "272fda66": {
+        "line": 396,
+        "end_line": 415,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "35b7a179e1ff1218775269fd310c0b254837e30133fd51b88cb2c17dd9d3e734",
+        "signature": "environment, tmp_path, mutation"
+      },
+      "9fbb734c": {
+        "line": 400,
+        "end_line": 419,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "35b7a179e1ff1218775269fd310c0b254837e30133fd51b88cb2c17dd9d3e734",
+        "signature": "environment, tmp_path, mutation"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+    "qualified_name": "test_read_or_write_failure_rolls_back_freeze",
+    "revisions": {
+      "a7755d81": {
+        "line": 426,
+        "end_line": 433,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "32c0f589a58917f33cff4e304ce84559618009c59cb5ce56a7083f103bf80609",
+        "signature": "environment, tmp_path, prefix"
+      },
+      "272fda66": {
+        "line": 422,
+        "end_line": 429,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "32c0f589a58917f33cff4e304ce84559618009c59cb5ce56a7083f103bf80609",
+        "signature": "environment, tmp_path, prefix"
+      },
+      "9fbb734c": {
+        "line": 426,
+        "end_line": 433,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "32c0f589a58917f33cff4e304ce84559618009c59cb5ce56a7083f103bf80609",
+        "signature": "environment, tmp_path, prefix"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+    "qualified_name": "test_unknown_freeze_commit_is_resolved_by_original_operation_key",
+    "revisions": {
+      "a7755d81": {
+        "line": 437,
+        "end_line": 470,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "2e4165468120d78c440be4784d139d5b303dd2e946b43047fe4a756a6f3317e6",
+        "signature": "environment, tmp_path, commit_reached_database"
+      },
+      "272fda66": {
+        "line": 433,
+        "end_line": 466,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "2e4165468120d78c440be4784d139d5b303dd2e946b43047fe4a756a6f3317e6",
+        "signature": "environment, tmp_path, commit_reached_database"
+      },
+      "9fbb734c": {
+        "line": 437,
+        "end_line": 470,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "2e4165468120d78c440be4784d139d5b303dd2e946b43047fe4a756a6f3317e6",
+        "signature": "environment, tmp_path, commit_reached_database"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze.py",
+    "qualified_name": "test_formal_freeze_guard_rejects_boundary_inside_own_transaction",
+    "revisions": {
+      "a7755d81": {
+        "line": 473,
+        "end_line": 489,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "4a8e5efd4f9f9861deb8caa4636882bcaf58a48ac83c9d47e7670b92a27aa66e",
+        "signature": "environment, tmp_path"
+      },
+      "272fda66": {
+        "line": 469,
+        "end_line": 485,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "4a8e5efd4f9f9861deb8caa4636882bcaf58a48ac83c9d47e7670b92a27aa66e",
+        "signature": "environment, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 473,
+        "end_line": 489,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "4a8e5efd4f9f9861deb8caa4636882bcaf58a48ac83c9d47e7670b92a27aa66e",
+        "signature": "environment, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py",
+    "qualified_name": "test_original_freeze_key_returns_original_generate_response",
+    "revisions": {
+      "a7755d81": {
+        "line": 35,
+        "end_line": 57,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "1969558468fa95e61eb8d46dcb6801835ecb399cce5aea50cd84767496cd1ce3",
+        "signature": "environment, tmp_path, later"
+      },
+      "272fda66": {
+        "line": 35,
+        "end_line": 57,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "1969558468fa95e61eb8d46dcb6801835ecb399cce5aea50cd84767496cd1ce3",
+        "signature": "environment, tmp_path, later"
+      },
+      "9fbb734c": {
+        "line": 35,
+        "end_line": 57,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "1969558468fa95e61eb8d46dcb6801835ecb399cce5aea50cd84767496cd1ce3",
+        "signature": "environment, tmp_path, later"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py",
+    "qualified_name": "test_original_freeze_is_resolved_before_current_opportunity",
+    "revisions": {
+      "a7755d81": {
+        "line": 60,
+        "end_line": 68,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "92e2315178a2a8ffbe1daac2339e2e5a6c5d5f141a5f74bc8e6251a97efa010e",
+        "signature": "environment, tmp_path, monkeypatch"
+      },
+      "272fda66": {
+        "line": 60,
+        "end_line": 68,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "92e2315178a2a8ffbe1daac2339e2e5a6c5d5f141a5f74bc8e6251a97efa010e",
+        "signature": "environment, tmp_path, monkeypatch"
+      },
+      "9fbb734c": {
+        "line": 60,
+        "end_line": 68,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "92e2315178a2a8ffbe1daac2339e2e5a6c5d5f141a5f74bc8e6251a97efa010e",
+        "signature": "environment, tmp_path, monkeypatch"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py",
+    "qualified_name": "test_freeze_rejects_key_owned_by_another_phase",
+    "revisions": {
+      "a7755d81": {
+        "line": 72,
+        "end_line": 83,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "930e23d6a868718acdbe3be7858928bacf58ab11b8bd5b97f96bef4484f98bbf",
+        "signature": "environment, tmp_path, phase"
+      },
+      "272fda66": {
+        "line": 72,
+        "end_line": 83,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "930e23d6a868718acdbe3be7858928bacf58ab11b8bd5b97f96bef4484f98bbf",
+        "signature": "environment, tmp_path, phase"
+      },
+      "9fbb734c": {
+        "line": 72,
+        "end_line": 83,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "930e23d6a868718acdbe3be7858928bacf58ab11b8bd5b97f96bef4484f98bbf",
+        "signature": "environment, tmp_path, phase"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py",
+    "qualified_name": "test_freeze_rejects_changed_or_invalid_original_time",
+    "revisions": {
+      "a7755d81": {
+        "line": 87,
+        "end_line": 93,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "470804464fa154e293670acefad31f11502f01504d8f10a28039ad72e3ffc5fa",
+        "signature": "environment, tmp_path, occurred_at"
+      },
+      "272fda66": {
+        "line": 87,
+        "end_line": 93,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "470804464fa154e293670acefad31f11502f01504d8f10a28039ad72e3ffc5fa",
+        "signature": "environment, tmp_path, occurred_at"
+      },
+      "9fbb734c": {
+        "line": 87,
+        "end_line": 93,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "470804464fa154e293670acefad31f11502f01504d8f10a28039ad72e3ffc5fa",
+        "signature": "environment, tmp_path, occurred_at"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py",
+    "qualified_name": "test_freeze_rejects_unreliable_original_definition",
+    "revisions": {
+      "a7755d81": {
+        "line": 97,
+        "end_line": 123,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "936bbc10aa6847ce6961a64281edc94d9b024a9c4cfdfc85b40f072618093b19",
+        "signature": "environment, tmp_path, mutation"
+      },
+      "272fda66": {
+        "line": 97,
+        "end_line": 123,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "936bbc10aa6847ce6961a64281edc94d9b024a9c4cfdfc85b40f072618093b19",
+        "signature": "environment, tmp_path, mutation"
+      },
+      "9fbb734c": {
+        "line": 97,
+        "end_line": 123,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "936bbc10aa6847ce6961a64281edc94d9b024a9c4cfdfc85b40f072618093b19",
+        "signature": "environment, tmp_path, mutation"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py",
+    "qualified_name": "test_freeze_rejects_invalid_or_composite_original_transaction",
+    "revisions": {
+      "a7755d81": {
+        "line": 127,
+        "end_line": 148,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "a6d268c3c4485d0fdddc2ef1c8e3f564d1c66e89d0c9c772bb2e848d945c03b2",
+        "signature": "environment, tmp_path, invalid"
+      },
+      "272fda66": {
+        "line": 127,
+        "end_line": 148,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "a6d268c3c4485d0fdddc2ef1c8e3f564d1c66e89d0c9c772bb2e848d945c03b2",
+        "signature": "environment, tmp_path, invalid"
+      },
+      "9fbb734c": {
+        "line": 127,
+        "end_line": 148,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "a6d268c3c4485d0fdddc2ef1c8e3f564d1c66e89d0c9c772bb2e848d945c03b2",
+        "signature": "environment, tmp_path, invalid"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py",
+    "qualified_name": "test_original_freeze_rejects_matching_but_invalid_business_range",
+    "revisions": {
+      "a7755d81": {
+        "line": 152,
+        "end_line": 166,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "8f385c1476c4d3e1973652e917411ece4e3583f5d2d93220d02469ca9e4f7bcb",
+        "signature": "environment, tmp_path, column"
+      },
+      "272fda66": {
+        "line": 152,
+        "end_line": 166,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "8f385c1476c4d3e1973652e917411ece4e3583f5d2d93220d02469ca9e4f7bcb",
+        "signature": "environment, tmp_path, column"
+      },
+      "9fbb734c": {
+        "line": 152,
+        "end_line": 166,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "8f385c1476c4d3e1973652e917411ece4e3583f5d2d93220d02469ca9e4f7bcb",
+        "signature": "environment, tmp_path, column"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py",
+    "qualified_name": "test_original_freeze_preserves_nonzero_business_boundary",
+    "revisions": {
+      "a7755d81": {
+        "line": 169,
+        "end_line": 180,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "ae96c8f20eb37a76571e5b82cc837862ba26dc59bc992156cde0a60617e260c8",
+        "signature": "environment, tmp_path"
+      },
+      "272fda66": {
+        "line": 169,
+        "end_line": 180,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "ae96c8f20eb37a76571e5b82cc837862ba26dc59bc992156cde0a60617e260c8",
+        "signature": "environment, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 169,
+        "end_line": 180,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "ae96c8f20eb37a76571e5b82cc837862ba26dc59bc992156cde0a60617e260c8",
+        "signature": "environment, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py",
+    "qualified_name": "test_original_freeze_query_failure_preserves_database",
+    "revisions": {
+      "a7755d81": {
+        "line": 186,
+        "end_line": 197,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "e90dd1e10d31a18501ded8d980c076c40b33e4fa002e418c905ecb31606cdaa7",
+        "signature": "environment, tmp_path, prefix"
+      },
+      "272fda66": {
+        "line": 186,
+        "end_line": 197,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "e90dd1e10d31a18501ded8d980c076c40b33e4fa002e418c905ecb31606cdaa7",
+        "signature": "environment, tmp_path, prefix"
+      },
+      "9fbb734c": {
+        "line": 186,
+        "end_line": 197,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "e90dd1e10d31a18501ded8d980c076c40b33e4fa002e418c905ecb31606cdaa7",
+        "signature": "environment, tmp_path, prefix"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py",
+    "qualified_name": "test_unknown_commit_is_resolved_with_same_freeze_key",
+    "revisions": {
+      "a7755d81": {
+        "line": 201,
+        "end_line": 228,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "19a70fc2c989619ba8b85e15033325003b15469f135d710ed3bc468354a4b6fc",
+        "signature": "environment, tmp_path, committed"
+      },
+      "272fda66": {
+        "line": 201,
+        "end_line": 228,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "19a70fc2c989619ba8b85e15033325003b15469f135d710ed3bc468354a4b6fc",
+        "signature": "environment, tmp_path, committed"
+      },
+      "9fbb734c": {
+        "line": 201,
+        "end_line": 228,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "19a70fc2c989619ba8b85e15033325003b15469f135d710ed3bc468354a4b6fc",
+        "signature": "environment, tmp_path, committed"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_freeze_reuse.py",
+    "qualified_name": "test_unsaved_readonly_decision_does_not_bind_future_freeze",
+    "revisions": {
+      "a7755d81": {
+        "line": 232,
+        "end_line": 244,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "d7e6db2360af4264cb0535b2907e7ac0b5c74614a9e32c413f943389053eeacd",
+        "signature": "environment, tmp_path, first_kind"
+      },
+      "272fda66": {
+        "line": 232,
+        "end_line": 244,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "d7e6db2360af4264cb0535b2907e7ac0b5c74614a9e32c413f943389053eeacd",
+        "signature": "environment, tmp_path, first_kind"
+      },
+      "9fbb734c": {
+        "line": 232,
+        "end_line": 244,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "d7e6db2360af4264cb0535b2907e7ac0b5c74614a9e32c413f943389053eeacd",
+        "signature": "environment, tmp_path, first_kind"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_generation.py",
+    "qualified_name": "TestGenerateReportFile.test_failed_source_error_rebuilds_at_the_frozen_history_boundary",
+    "revisions": {
+      "a7755d81": {
+        "line": 309,
+        "end_line": 354,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "24903e543de3115b12dbe246756c82c45d3caa9ee95612d24c9fc74bc404fb2c",
+        "signature": "self, environment"
+      },
+      "272fda66": {
+        "line": 309,
+        "end_line": 354,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "24903e543de3115b12dbe246756c82c45d3caa9ee95612d24c9fc74bc404fb2c",
+        "signature": "self, environment"
+      },
+      "9fbb734c": {
+        "line": 309,
+        "end_line": 354,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "24903e543de3115b12dbe246756c82c45d3caa9ee95612d24c9fc74bc404fb2c",
+        "signature": "self, environment"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_generation.py",
+    "qualified_name": "TestGenerateReportFile.test_admission_failed_source_flows_through_obtain_and_frozen_report",
+    "revisions": {
+      "a7755d81": {
+        "line": 357,
+        "end_line": 423,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "c0338f28bd52464c0177b4ab22b4858116d1193b6d3305a395dd8adec2fd6a04",
+        "signature": "self, environment, mode"
+      },
+      "272fda66": {
+        "line": 357,
+        "end_line": 423,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "c0338f28bd52464c0177b4ab22b4858116d1193b6d3305a395dd8adec2fd6a04",
+        "signature": "self, environment, mode"
+      },
+      "9fbb734c": {
+        "line": 357,
+        "end_line": 423,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "c0338f28bd52464c0177b4ab22b4858116d1193b6d3305a395dd8adec2fd6a04",
+        "signature": "self, environment, mode"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_management_reuse.py",
+    "qualified_name": "test_rebuilt_prepare_key_recovers_unchanged_bytes",
+    "revisions": {
+      "a7755d81": {
+        "line": 60,
+        "end_line": 77,
+        "kind": "FunctionDef",
+        "ast_sha256": "e6f36785d854e91365894749d85036614e2a53553b5a415ac503e67ad57ff17f",
+        "signature": "connection, tmp_path, later"
+      },
+      "272fda66": {
+        "line": 60,
+        "end_line": 77,
+        "kind": "FunctionDef",
+        "ast_sha256": "e6f36785d854e91365894749d85036614e2a53553b5a415ac503e67ad57ff17f",
+        "signature": "connection, tmp_path, later"
+      },
+      "9fbb734c": {
+        "line": 60,
+        "end_line": 77,
+        "kind": "FunctionDef",
+        "ast_sha256": "e6f36785d854e91365894749d85036614e2a53553b5a415ac503e67ad57ff17f",
+        "signature": "connection, tmp_path, later"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_management_reuse.py",
+    "qualified_name": "test_same_error_with_stage_change_is_saved_and_reusable",
+    "revisions": {
+      "a7755d81": {
+        "line": 81,
+        "end_line": 94,
+        "kind": "FunctionDef",
+        "ast_sha256": "918f5fece496cd646ca44a5b5f3546777106db03f42bffdba7ac16ea1beff782",
+        "signature": "connection, tmp_path, later"
+      },
+      "272fda66": {
+        "line": 81,
+        "end_line": 94,
+        "kind": "FunctionDef",
+        "ast_sha256": "918f5fece496cd646ca44a5b5f3546777106db03f42bffdba7ac16ea1beff782",
+        "signature": "connection, tmp_path, later"
+      },
+      "9fbb734c": {
+        "line": 81,
+        "end_line": 94,
+        "kind": "FunctionDef",
+        "ast_sha256": "918f5fece496cd646ca44a5b5f3546777106db03f42bffdba7ac16ea1beff782",
+        "signature": "connection, tmp_path, later"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_management_reuse.py",
+    "qualified_name": "test_management_original_key_rejects_different_or_invalid_time",
+    "revisions": {
+      "a7755d81": {
+        "line": 99,
+        "end_line": 103,
+        "kind": "FunctionDef",
+        "ast_sha256": "1f8176676dd6d304db6439e733321a853dcdacafe5f915c394d9444230176527",
+        "signature": "connection, tmp_path, phase, occurred_at"
+      },
+      "272fda66": {
+        "line": 99,
+        "end_line": 103,
+        "kind": "FunctionDef",
+        "ast_sha256": "1f8176676dd6d304db6439e733321a853dcdacafe5f915c394d9444230176527",
+        "signature": "connection, tmp_path, phase, occurred_at"
+      },
+      "9fbb734c": {
+        "line": 99,
+        "end_line": 103,
+        "kind": "FunctionDef",
+        "ast_sha256": "1f8176676dd6d304db6439e733321a853dcdacafe5f915c394d9444230176527",
+        "signature": "connection, tmp_path, phase, occurred_at"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_management_reuse.py",
+    "qualified_name": "test_original_management_result_survives_later_publish_and_error",
+    "revisions": {
+      "a7755d81": {
+        "line": 107,
+        "end_line": 117,
+        "kind": "FunctionDef",
+        "ast_sha256": "5d9358bc53f19db1a45fcecab420639496ecaeaa09324632a4253ab8d09d264a",
+        "signature": "connection, tmp_path, phase"
+      },
+      "272fda66": {
+        "line": 107,
+        "end_line": 117,
+        "kind": "FunctionDef",
+        "ast_sha256": "5d9358bc53f19db1a45fcecab420639496ecaeaa09324632a4253ab8d09d264a",
+        "signature": "connection, tmp_path, phase"
+      },
+      "9fbb734c": {
+        "line": 107,
+        "end_line": 117,
+        "kind": "FunctionDef",
+        "ast_sha256": "5d9358bc53f19db1a45fcecab420639496ecaeaa09324632a4253ab8d09d264a",
+        "signature": "connection, tmp_path, phase"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_management_reuse.py",
+    "qualified_name": "test_intent_reuse_requires_original_first_byte_fact",
+    "revisions": {
+      "a7755d81": {
+        "line": 121,
+        "end_line": 138,
+        "kind": "FunctionDef",
+        "ast_sha256": "6f8b1bf87195d38a6d98c98c330b98a6ba98b4e889e8bcdfdc03e784b6a98b19",
+        "signature": "connection, tmp_path, mutation"
+      },
+      "272fda66": {
+        "line": 121,
+        "end_line": 138,
+        "kind": "FunctionDef",
+        "ast_sha256": "6f8b1bf87195d38a6d98c98c330b98a6ba98b4e889e8bcdfdc03e784b6a98b19",
+        "signature": "connection, tmp_path, mutation"
+      },
+      "9fbb734c": {
+        "line": 121,
+        "end_line": 138,
+        "kind": "FunctionDef",
+        "ast_sha256": "6f8b1bf87195d38a6d98c98c330b98a6ba98b4e889e8bcdfdc03e784b6a98b19",
+        "signature": "connection, tmp_path, mutation"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_management_reuse.py",
+    "qualified_name": "test_original_management_restore_failure_preserves_exception_and_database",
+    "revisions": {
+      "a7755d81": {
+        "line": 144,
+        "end_line": 171,
+        "kind": "FunctionDef",
+        "ast_sha256": "62f9bfe5a767bd127d36456b639ee892e3fc29e8d9e2ce28bad7d173829cedaf",
+        "signature": "connection, tmp_path, phase, prefix"
+      },
+      "272fda66": {
+        "line": 144,
+        "end_line": 167,
+        "kind": "FunctionDef",
+        "ast_sha256": "bd56024a1e56b6cde50e34b752511201f1cfa693fc81a1aa80fb55e5ebbf8f12",
+        "signature": "connection, tmp_path, phase, prefix"
+      },
+      "9fbb734c": {
+        "line": 144,
+        "end_line": 171,
+        "kind": "FunctionDef",
+        "ast_sha256": "62f9bfe5a767bd127d36456b639ee892e3fc29e8d9e2ce28bad7d173829cedaf",
+        "signature": "connection, tmp_path, phase, prefix"
+      }
+    },
+    "same_all": false
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_management_reuse.py",
+    "qualified_name": "test_rebuild_or_same_error_unknown_commit_is_resolved_by_original_key",
+    "revisions": {
+      "a7755d81": {
+        "line": 176,
+        "end_line": 212,
+        "kind": "FunctionDef",
+        "ast_sha256": "81ce0808725716a85d6909c15a1fc39633dc6e1282fe001032b4383e7e6f2555",
+        "signature": "connection, tmp_path, phase, committed"
+      },
+      "272fda66": {
+        "line": 172,
+        "end_line": 204,
+        "kind": "FunctionDef",
+        "ast_sha256": "7e8cc799e7fa4e7cd9eda614335b6dbe8b946dde58b31b265759c2a2aec3ad93",
+        "signature": "connection, tmp_path, phase, committed"
+      },
+      "9fbb734c": {
+        "line": 176,
+        "end_line": 212,
+        "kind": "FunctionDef",
+        "ast_sha256": "81ce0808725716a85d6909c15a1fc39633dc6e1282fe001032b4383e7e6f2555",
+        "signature": "connection, tmp_path, phase, committed"
+      }
+    },
+    "same_all": false
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_management_reuse.py",
+    "qualified_name": "test_original_failure_before_bytes_does_not_adopt_later_first_bytes",
+    "revisions": {
+      "a7755d81": {
+        "line": 215,
+        "end_line": 219,
+        "kind": "FunctionDef",
+        "ast_sha256": "dc3b16b75db1a1601e1e77e578e251da75f932a10a2dc18c2b71b9218277bf03",
+        "signature": "connection, tmp_path"
+      },
+      "272fda66": {
+        "line": 207,
+        "end_line": 211,
+        "kind": "FunctionDef",
+        "ast_sha256": "dc3b16b75db1a1601e1e77e578e251da75f932a10a2dc18c2b71b9218277bf03",
+        "signature": "connection, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 215,
+        "end_line": 219,
+        "kind": "FunctionDef",
+        "ast_sha256": "dc3b16b75db1a1601e1e77e578e251da75f932a10a2dc18c2b71b9218277bf03",
+        "signature": "connection, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_management_reuse.py",
+    "qualified_name": "test_original_intent_survives_report_history_crossing_restore_page",
+    "revisions": {
+      "a7755d81": {
+        "line": 222,
+        "end_line": 226,
+        "kind": "FunctionDef",
+        "ast_sha256": "816ce649fae4dbae424a5c8173c0d2bef32222a0ffab53e4118ab7a4e3d0c122",
+        "signature": "connection, tmp_path"
+      },
+      "272fda66": {
+        "line": 214,
+        "end_line": 218,
+        "kind": "FunctionDef",
+        "ast_sha256": "816ce649fae4dbae424a5c8173c0d2bef32222a0ffab53e4118ab7a4e3d0c122",
+        "signature": "connection, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 222,
+        "end_line": 226,
+        "kind": "FunctionDef",
+        "ast_sha256": "816ce649fae4dbae424a5c8173c0d2bef32222a0ffab53e4118ab7a4e3d0c122",
+        "signature": "connection, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_management_reuse.py",
+    "qualified_name": "test_management_wrong_phase_is_rejected_before_current_management",
+    "revisions": {
+      "a7755d81": {
+        "line": 231,
+        "end_line": 237,
+        "kind": "FunctionDef",
+        "ast_sha256": "ecfff1a7c8830ba8289232f5ab222ee1058bbda82d6454be9db4e6cc12d162b1",
+        "signature": "connection, tmp_path, monkeypatch, phase, requested"
+      },
+      "272fda66": {
+        "line": 223,
+        "end_line": 229,
+        "kind": "FunctionDef",
+        "ast_sha256": "ecfff1a7c8830ba8289232f5ab222ee1058bbda82d6454be9db4e6cc12d162b1",
+        "signature": "connection, tmp_path, monkeypatch, phase, requested"
+      },
+      "9fbb734c": {
+        "line": 231,
+        "end_line": 237,
+        "kind": "FunctionDef",
+        "ast_sha256": "ecfff1a7c8830ba8289232f5ab222ee1058bbda82d6454be9db4e6cc12d162b1",
+        "signature": "connection, tmp_path, monkeypatch, phase, requested"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_management_reuse.py",
+    "qualified_name": "test_original_management_key_rejects_another_report",
+    "revisions": {
+      "a7755d81": {
+        "line": 241,
+        "end_line": 251,
+        "kind": "FunctionDef",
+        "ast_sha256": "5ad93cfa2619dd5420766bb124c7d51aaea00ce4d9c3b7f8e98e6f9d44d1bbbd",
+        "signature": "connection, tmp_path, phase"
+      },
+      "272fda66": {
+        "line": 233,
+        "end_line": 243,
+        "kind": "FunctionDef",
+        "ast_sha256": "5ad93cfa2619dd5420766bb124c7d51aaea00ce4d9c3b7f8e98e6f9d44d1bbbd",
+        "signature": "connection, tmp_path, phase"
+      },
+      "9fbb734c": {
+        "line": 241,
+        "end_line": 251,
+        "kind": "FunctionDef",
+        "ast_sha256": "5ad93cfa2619dd5420766bb124c7d51aaea00ce4d9c3b7f8e98e6f9d44d1bbbd",
+        "signature": "connection, tmp_path, phase"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_management_reuse.py",
+    "qualified_name": "test_unchanged_fact_in_original_delta_still_rejects_different_input",
+    "revisions": {
+      "a7755d81": {
+        "line": 255,
+        "end_line": 267,
+        "kind": "FunctionDef",
+        "ast_sha256": "797f0e2b52034ae48a5a12d568f53786e75d20691dd8ca5386760436489564e1",
+        "signature": "connection, tmp_path, phase"
+      },
+      "272fda66": {
+        "line": 247,
+        "end_line": 259,
+        "kind": "FunctionDef",
+        "ast_sha256": "797f0e2b52034ae48a5a12d568f53786e75d20691dd8ca5386760436489564e1",
+        "signature": "connection, tmp_path, phase"
+      },
+      "9fbb734c": {
+        "line": 255,
+        "end_line": 267,
+        "kind": "FunctionDef",
+        "ast_sha256": "797f0e2b52034ae48a5a12d568f53786e75d20691dd8ca5386760436489564e1",
+        "signature": "connection, tmp_path, phase"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_management_reuse.py",
+    "qualified_name": "test_management_reuse_rejects_unreliable_original_or_restore_history",
+    "revisions": {
+      "a7755d81": {
+        "line": 271,
+        "end_line": 295,
+        "kind": "FunctionDef",
+        "ast_sha256": "ef703bdf0c25715b47eceaa2ad4c487a209ab8767fc5e8507b93ad824473b768",
+        "signature": "connection, tmp_path, mutation"
+      },
+      "272fda66": {
+        "line": 263,
+        "end_line": 287,
+        "kind": "FunctionDef",
+        "ast_sha256": "ef703bdf0c25715b47eceaa2ad4c487a209ab8767fc5e8507b93ad824473b768",
+        "signature": "connection, tmp_path, mutation"
+      },
+      "9fbb734c": {
+        "line": 271,
+        "end_line": 295,
+        "kind": "FunctionDef",
+        "ast_sha256": "ef703bdf0c25715b47eceaa2ad4c487a209ab8767fc5e8507b93ad824473b768",
+        "signature": "connection, tmp_path, mutation"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_management_reuse.py",
+    "qualified_name": "test_formal_failure_requires_full_failed_state_and_error",
+    "revisions": {
+      "a7755d81": {
+        "line": 299,
+        "end_line": 307,
+        "kind": "FunctionDef",
+        "ast_sha256": "f4e08e3dc26e2979fbda9e549fb1765a1ac13b2d6daefc6ba89f989cc1b81b58",
+        "signature": "connection, tmp_path, missing"
+      },
+      "272fda66": {
+        "line": 291,
+        "end_line": 299,
+        "kind": "FunctionDef",
+        "ast_sha256": "f4e08e3dc26e2979fbda9e549fb1765a1ac13b2d6daefc6ba89f989cc1b81b58",
+        "signature": "connection, tmp_path, missing"
+      },
+      "9fbb734c": {
+        "line": 299,
+        "end_line": 307,
+        "kind": "FunctionDef",
+        "ast_sha256": "f4e08e3dc26e2979fbda9e549fb1765a1ac13b2d6daefc6ba89f989cc1b81b58",
+        "signature": "connection, tmp_path, missing"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publication_flow.py",
+    "qualified_name": "test_full_chain_publishes_report_file",
+    "revisions": {
+      "a7755d81": {
+        "line": 207,
+        "end_line": 222,
+        "kind": "FunctionDef",
+        "ast_sha256": "1d854c7e4fc656ead3543862d71dac579b1ea9b34d04c2bb1b0bde5ea9ad0922",
+        "signature": "pipeline"
+      },
+      "272fda66": {
+        "line": 207,
+        "end_line": 222,
+        "kind": "FunctionDef",
+        "ast_sha256": "1d854c7e4fc656ead3543862d71dac579b1ea9b34d04c2bb1b0bde5ea9ad0922",
+        "signature": "pipeline"
+      },
+      "9fbb734c": {
+        "line": 207,
+        "end_line": 222,
+        "kind": "FunctionDef",
+        "ast_sha256": "1d854c7e4fc656ead3543862d71dac579b1ea9b34d04c2bb1b0bde5ea9ad0922",
+        "signature": "pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publication_flow.py",
+    "qualified_name": "test_publish_after_claimed_deletion_keeps_recorded_fact",
+    "revisions": {
+      "a7755d81": {
+        "line": 225,
+        "end_line": 236,
+        "kind": "FunctionDef",
+        "ast_sha256": "e2a3c1a7d6d5c0948bb7727684588bdb045fc82d627147f9091a49335be5ba42",
+        "signature": "pipeline"
+      },
+      "272fda66": {
+        "line": 225,
+        "end_line": 236,
+        "kind": "FunctionDef",
+        "ast_sha256": "e2a3c1a7d6d5c0948bb7727684588bdb045fc82d627147f9091a49335be5ba42",
+        "signature": "pipeline"
+      },
+      "9fbb734c": {
+        "line": 225,
+        "end_line": 236,
+        "kind": "FunctionDef",
+        "ast_sha256": "e2a3c1a7d6d5c0948bb7727684588bdb045fc82d627147f9091a49335be5ba42",
+        "signature": "pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publication_flow.py",
+    "qualified_name": "test_stale_ready_report_is_replaced",
+    "revisions": {
+      "a7755d81": {
+        "line": 242,
+        "end_line": 251,
+        "kind": "FunctionDef",
+        "ast_sha256": "ab1a73b4a84aa6e0601dce40ccf37c9680eafa0c885bd2137aacfe22e06b882b",
+        "signature": "pipeline"
+      },
+      "272fda66": {
+        "line": 242,
+        "end_line": 251,
+        "kind": "FunctionDef",
+        "ast_sha256": "ab1a73b4a84aa6e0601dce40ccf37c9680eafa0c885bd2137aacfe22e06b882b",
+        "signature": "pipeline"
+      },
+      "9fbb734c": {
+        "line": 242,
+        "end_line": 251,
+        "kind": "FunctionDef",
+        "ast_sha256": "ab1a73b4a84aa6e0601dce40ccf37c9680eafa0c885bd2137aacfe22e06b882b",
+        "signature": "pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publication_flow.py",
+    "qualified_name": "test_processing_report_is_kept_alongside_new_ready",
+    "revisions": {
+      "a7755d81": {
+        "line": 254,
+        "end_line": 263,
+        "kind": "FunctionDef",
+        "ast_sha256": "b78c4188d4dd0af5e5b702b07a58f98633725ac47859f4b775909c8d99aa5194",
+        "signature": "pipeline"
+      },
+      "272fda66": {
+        "line": 254,
+        "end_line": 263,
+        "kind": "FunctionDef",
+        "ast_sha256": "b78c4188d4dd0af5e5b702b07a58f98633725ac47859f4b775909c8d99aa5194",
+        "signature": "pipeline"
+      },
+      "9fbb734c": {
+        "line": 254,
+        "end_line": 263,
+        "kind": "FunctionDef",
+        "ast_sha256": "b78c4188d4dd0af5e5b702b07a58f98633725ac47859f4b775909c8d99aa5194",
+        "signature": "pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publication_flow.py",
+    "qualified_name": "test_unparseable_ready_files_are_not_touched",
+    "revisions": {
+      "a7755d81": {
+        "line": 266,
+        "end_line": 273,
+        "kind": "FunctionDef",
+        "ast_sha256": "ef8bb9357b3c39f31c39d21791fa2f03429b50d37c1d4aa728338c64d644034b",
+        "signature": "pipeline"
+      },
+      "272fda66": {
+        "line": 266,
+        "end_line": 273,
+        "kind": "FunctionDef",
+        "ast_sha256": "ef8bb9357b3c39f31c39d21791fa2f03429b50d37c1d4aa728338c64d644034b",
+        "signature": "pipeline"
+      },
+      "9fbb734c": {
+        "line": 266,
+        "end_line": 273,
+        "kind": "FunctionDef",
+        "ast_sha256": "ef8bb9357b3c39f31c39d21791fa2f03429b50d37c1d4aa728338c64d644034b",
+        "signature": "pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publication_flow.py",
+    "qualified_name": "test_recover_decision_from_real_observation",
+    "revisions": {
+      "a7755d81": {
+        "line": 304,
+        "end_line": 311,
+        "kind": "FunctionDef",
+        "ast_sha256": "00ba1dbc0f85e765638bc31d0057a0fe432790ede1462e71e86b007f0891f5b6",
+        "signature": "pipeline"
+      },
+      "272fda66": {
+        "line": 304,
+        "end_line": 311,
+        "kind": "FunctionDef",
+        "ast_sha256": "00ba1dbc0f85e765638bc31d0057a0fe432790ede1462e71e86b007f0891f5b6",
+        "signature": "pipeline"
+      },
+      "9fbb734c": {
+        "line": 304,
+        "end_line": 311,
+        "kind": "FunctionDef",
+        "ast_sha256": "00ba1dbc0f85e765638bc31d0057a0fe432790ede1462e71e86b007f0891f5b6",
+        "signature": "pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publication_flow.py",
+    "qualified_name": "test_recovery_saves_publication_for_prepared_report",
+    "revisions": {
+      "a7755d81": {
+        "line": 317,
+        "end_line": 341,
+        "kind": "FunctionDef",
+        "ast_sha256": "05d74d463a45e4a731e1b69bb6c45ed1bbcffa1f71097278cb09eedf60aa8cba",
+        "signature": "pipeline"
+      },
+      "272fda66": {
+        "line": 317,
+        "end_line": 341,
+        "kind": "FunctionDef",
+        "ast_sha256": "05d74d463a45e4a731e1b69bb6c45ed1bbcffa1f71097278cb09eedf60aa8cba",
+        "signature": "pipeline"
+      },
+      "9fbb734c": {
+        "line": 317,
+        "end_line": 341,
+        "kind": "FunctionDef",
+        "ast_sha256": "05d74d463a45e4a731e1b69bb6c45ed1bbcffa1f71097278cb09eedf60aa8cba",
+        "signature": "pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publication_flow.py",
+    "qualified_name": "test_recovery_saves_publication_for_publishing_report",
+    "revisions": {
+      "a7755d81": {
+        "line": 344,
+        "end_line": 357,
+        "kind": "FunctionDef",
+        "ast_sha256": "43da6439e2f30f7d022041f7361f1cac1697e26e3d6906ca28ebf1902a0c406d",
+        "signature": "pipeline"
+      },
+      "272fda66": {
+        "line": 344,
+        "end_line": 357,
+        "kind": "FunctionDef",
+        "ast_sha256": "43da6439e2f30f7d022041f7361f1cac1697e26e3d6906ca28ebf1902a0c406d",
+        "signature": "pipeline"
+      },
+      "9fbb734c": {
+        "line": 344,
+        "end_line": 357,
+        "kind": "FunctionDef",
+        "ast_sha256": "43da6439e2f30f7d022041f7361f1cac1697e26e3d6906ca28ebf1902a0c406d",
+        "signature": "pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publication_flow.py",
+    "qualified_name": "test_recovery_restores_failed_report_then_publishes",
+    "revisions": {
+      "a7755d81": {
+        "line": 360,
+        "end_line": 375,
+        "kind": "FunctionDef",
+        "ast_sha256": "8651732063986b08cc4208dcc00483049b1d40351fe75104aac2f4f5fe23bcd9",
+        "signature": "pipeline"
+      },
+      "272fda66": {
+        "line": 360,
+        "end_line": 375,
+        "kind": "FunctionDef",
+        "ast_sha256": "8651732063986b08cc4208dcc00483049b1d40351fe75104aac2f4f5fe23bcd9",
+        "signature": "pipeline"
+      },
+      "9fbb734c": {
+        "line": 360,
+        "end_line": 375,
+        "kind": "FunctionDef",
+        "ast_sha256": "8651732063986b08cc4208dcc00483049b1d40351fe75104aac2f4f5fe23bcd9",
+        "signature": "pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publication_flow.py",
+    "qualified_name": "test_recovery_rejects_digest_mismatch",
+    "revisions": {
+      "a7755d81": {
+        "line": 378,
+        "end_line": 389,
+        "kind": "FunctionDef",
+        "ast_sha256": "0b2e348c49cb92202f84c9b690a4319c4c09b4ce94903dc9355ff658f2a34f3b",
+        "signature": "pipeline"
+      },
+      "272fda66": {
+        "line": 378,
+        "end_line": 389,
+        "kind": "FunctionDef",
+        "ast_sha256": "0b2e348c49cb92202f84c9b690a4319c4c09b4ce94903dc9355ff658f2a34f3b",
+        "signature": "pipeline"
+      },
+      "9fbb734c": {
+        "line": 378,
+        "end_line": 389,
+        "kind": "FunctionDef",
+        "ast_sha256": "0b2e348c49cb92202f84c9b690a4319c4c09b4ce94903dc9355ff658f2a34f3b",
+        "signature": "pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publication_flow.py",
+    "qualified_name": "test_recovery_rejects_report_without_determined_bytes",
+    "revisions": {
+      "a7755d81": {
+        "line": 392,
+        "end_line": 398,
+        "kind": "FunctionDef",
+        "ast_sha256": "b36c9a340d599dbdb45802feaf7523b8078c199eb74f6a2d92cc1f2942bf0e20",
+        "signature": "pipeline"
+      },
+      "272fda66": {
+        "line": 392,
+        "end_line": 398,
+        "kind": "FunctionDef",
+        "ast_sha256": "b36c9a340d599dbdb45802feaf7523b8078c199eb74f6a2d92cc1f2942bf0e20",
+        "signature": "pipeline"
+      },
+      "9fbb734c": {
+        "line": 392,
+        "end_line": 398,
+        "kind": "FunctionDef",
+        "ast_sha256": "b36c9a340d599dbdb45802feaf7523b8078c199eb74f6a2d92cc1f2942bf0e20",
+        "signature": "pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publication_flow.py",
+    "qualified_name": "test_staging_residue_is_regenerated_and_published",
+    "revisions": {
+      "a7755d81": {
+        "line": 404,
+        "end_line": 418,
+        "kind": "FunctionDef",
+        "ast_sha256": "6b4b66f3214eb8da9a25f23cf192c729ed3eb945ef6026af0e18725ceb7d3539",
+        "signature": "pipeline"
+      },
+      "272fda66": {
+        "line": 404,
+        "end_line": 418,
+        "kind": "FunctionDef",
+        "ast_sha256": "6b4b66f3214eb8da9a25f23cf192c729ed3eb945ef6026af0e18725ceb7d3539",
+        "signature": "pipeline"
+      },
+      "9fbb734c": {
+        "line": 404,
+        "end_line": 418,
+        "kind": "FunctionDef",
+        "ast_sha256": "6b4b66f3214eb8da9a25f23cf192c729ed3eb945ef6026af0e18725ceb7d3539",
+        "signature": "pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publication_flow.py",
+    "qualified_name": "test_republish_reuses_identity_and_settles_sync",
+    "revisions": {
+      "a7755d81": {
+        "line": 421,
+        "end_line": 443,
+        "kind": "FunctionDef",
+        "ast_sha256": "7d68fcb52385e7f21033c02a476b68778c73c1a7dbc0b0dc4f390105bd5c32ac",
+        "signature": "pipeline"
+      },
+      "272fda66": {
+        "line": 421,
+        "end_line": 443,
+        "kind": "FunctionDef",
+        "ast_sha256": "7d68fcb52385e7f21033c02a476b68778c73c1a7dbc0b0dc4f390105bd5c32ac",
+        "signature": "pipeline"
+      },
+      "9fbb734c": {
+        "line": 421,
+        "end_line": 443,
+        "kind": "FunctionDef",
+        "ast_sha256": "7d68fcb52385e7f21033c02a476b68778c73c1a7dbc0b0dc4f390105bd5c32ac",
+        "signature": "pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publication_flow.py",
+    "qualified_name": "test_republish_not_needed_without_responsibility",
+    "revisions": {
+      "a7755d81": {
+        "line": 446,
+        "end_line": 451,
+        "kind": "FunctionDef",
+        "ast_sha256": "22afa1fc447b8cf46fabdb6bf1c0b199631381104a0dda238ee79f81bb680e2f",
+        "signature": "pipeline"
+      },
+      "272fda66": {
+        "line": 446,
+        "end_line": 451,
+        "kind": "FunctionDef",
+        "ast_sha256": "22afa1fc447b8cf46fabdb6bf1c0b199631381104a0dda238ee79f81bb680e2f",
+        "signature": "pipeline"
+      },
+      "9fbb734c": {
+        "line": 446,
+        "end_line": 451,
+        "kind": "FunctionDef",
+        "ast_sha256": "22afa1fc447b8cf46fabdb6bf1c0b199631381104a0dda238ee79f81bb680e2f",
+        "signature": "pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publication_flow.py",
+    "qualified_name": "test_existing_delivered_report_is_kept",
+    "revisions": {
+      "a7755d81": {
+        "line": 454,
+        "end_line": 461,
+        "kind": "FunctionDef",
+        "ast_sha256": "42acfdfd70fd0403139b25cb6acd51a6c4a59ee5d59925eb6278ef089d9f547b",
+        "signature": "pipeline"
+      },
+      "272fda66": {
+        "line": 454,
+        "end_line": 461,
+        "kind": "FunctionDef",
+        "ast_sha256": "42acfdfd70fd0403139b25cb6acd51a6c4a59ee5d59925eb6278ef089d9f547b",
+        "signature": "pipeline"
+      },
+      "9fbb734c": {
+        "line": 454,
+        "end_line": 461,
+        "kind": "FunctionDef",
+        "ast_sha256": "42acfdfd70fd0403139b25cb6acd51a6c4a59ee5d59925eb6278ef089d9f547b",
+        "signature": "pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publication_flow.py",
+    "qualified_name": "test_publication_settles_local_report_and_action_success",
+    "revisions": {
+      "a7755d81": {
+        "line": 467,
+        "end_line": 480,
+        "kind": "FunctionDef",
+        "ast_sha256": "593066cfe7f3b4c53555a954561de4e932cbf3832a4dd1207b93d5b7d34b3a83",
+        "signature": "pipeline"
+      },
+      "272fda66": {
+        "line": 467,
+        "end_line": 480,
+        "kind": "FunctionDef",
+        "ast_sha256": "593066cfe7f3b4c53555a954561de4e932cbf3832a4dd1207b93d5b7d34b3a83",
+        "signature": "pipeline"
+      },
+      "9fbb734c": {
+        "line": 467,
+        "end_line": 480,
+        "kind": "FunctionDef",
+        "ast_sha256": "593066cfe7f3b4c53555a954561de4e932cbf3832a4dd1207b93d5b7d34b3a83",
+        "signature": "pipeline"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "TestPublishFlow.test_bytes_then_publish",
+    "revisions": {
+      "a7755d81": {
+        "line": 68,
+        "end_line": 89,
+        "kind": "FunctionDef",
+        "ast_sha256": "8e7cc77a406dda10b324b8b41d2aa99d6412c41dab57c9f20f211967dd56ce69",
+        "signature": "self, connection, tmp_path: Path"
+      },
+      "272fda66": {
+        "line": 68,
+        "end_line": 89,
+        "kind": "FunctionDef",
+        "ast_sha256": "8e7cc77a406dda10b324b8b41d2aa99d6412c41dab57c9f20f211967dd56ce69",
+        "signature": "self, connection, tmp_path: Path"
+      },
+      "9fbb734c": {
+        "line": 68,
+        "end_line": 89,
+        "kind": "FunctionDef",
+        "ast_sha256": "8e7cc77a406dda10b324b8b41d2aa99d6412c41dab57c9f20f211967dd56ce69",
+        "signature": "self, connection, tmp_path: Path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "TestPublishFlow.test_publish_without_bytes_rejected",
+    "revisions": {
+      "a7755d81": {
+        "line": 91,
+        "end_line": 95,
+        "kind": "FunctionDef",
+        "ast_sha256": "3c70a873f563fde74b5792551fee1332cce071330baae8b937a4b8e4b53c99a9",
+        "signature": "self, connection, tmp_path: Path"
+      },
+      "272fda66": {
+        "line": 91,
+        "end_line": 95,
+        "kind": "FunctionDef",
+        "ast_sha256": "3c70a873f563fde74b5792551fee1332cce071330baae8b937a4b8e4b53c99a9",
+        "signature": "self, connection, tmp_path: Path"
+      },
+      "9fbb734c": {
+        "line": 91,
+        "end_line": 95,
+        "kind": "FunctionDef",
+        "ast_sha256": "3c70a873f563fde74b5792551fee1332cce071330baae8b937a4b8e4b53c99a9",
+        "signature": "self, connection, tmp_path: Path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "TestPublishFlow.test_republish_increments_count",
+    "revisions": {
+      "a7755d81": {
+        "line": 97,
+        "end_line": 113,
+        "kind": "FunctionDef",
+        "ast_sha256": "365adb3dbe2a38de831efa2089b1c1efb8cf59015e3ed16e1c424fc9f95756a3",
+        "signature": "self, connection, tmp_path: Path"
+      },
+      "272fda66": {
+        "line": 97,
+        "end_line": 113,
+        "kind": "FunctionDef",
+        "ast_sha256": "365adb3dbe2a38de831efa2089b1c1efb8cf59015e3ed16e1c424fc9f95756a3",
+        "signature": "self, connection, tmp_path: Path"
+      },
+      "9fbb734c": {
+        "line": 97,
+        "end_line": 113,
+        "kind": "FunctionDef",
+        "ast_sha256": "365adb3dbe2a38de831efa2089b1c1efb8cf59015e3ed16e1c424fc9f95756a3",
+        "signature": "self, connection, tmp_path: Path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "TestPublishFlow.test_changed_bytes_for_same_report_rejected",
+    "revisions": {
+      "a7755d81": {
+        "line": 115,
+        "end_line": 123,
+        "kind": "FunctionDef",
+        "ast_sha256": "7c41e8c7d74cbc6b499bda0ca6cecec28f6ffa9450c758261beabe58d4c10e51",
+        "signature": "self, connection, tmp_path: Path"
+      },
+      "272fda66": {
+        "line": 115,
+        "end_line": 123,
+        "kind": "FunctionDef",
+        "ast_sha256": "7c41e8c7d74cbc6b499bda0ca6cecec28f6ffa9450c758261beabe58d4c10e51",
+        "signature": "self, connection, tmp_path: Path"
+      },
+      "9fbb734c": {
+        "line": 115,
+        "end_line": 123,
+        "kind": "FunctionDef",
+        "ast_sha256": "7c41e8c7d74cbc6b499bda0ca6cecec28f6ffa9450c758261beabe58d4c10e51",
+        "signature": "self, connection, tmp_path: Path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "test_preparation_after_failure_uses_actual_error_before_value",
+    "revisions": {
+      "a7755d81": {
+        "line": 180,
+        "end_line": 185,
+        "kind": "FunctionDef",
+        "ast_sha256": "5ee29beda86e9a02b811e5f55fd2b5361aeb33420b85401884e625c16d294669",
+        "signature": "connection, tmp_path"
+      },
+      "272fda66": {
+        "line": 180,
+        "end_line": 185,
+        "kind": "FunctionDef",
+        "ast_sha256": "5ee29beda86e9a02b811e5f55fd2b5361aeb33420b85401884e625c16d294669",
+        "signature": "connection, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 180,
+        "end_line": 185,
+        "kind": "FunctionDef",
+        "ast_sha256": "5ee29beda86e9a02b811e5f55fd2b5361aeb33420b85401884e625c16d294669",
+        "signature": "connection, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "test_formal_prepare_cannot_replace_bytes_after_failure",
+    "revisions": {
+      "a7755d81": {
+        "line": 188,
+        "end_line": 197,
+        "kind": "FunctionDef",
+        "ast_sha256": "ee1a5c5a8dddee86caf5ee1d0c08d77471285ea339c958594e6e41754579670d",
+        "signature": "connection, tmp_path"
+      },
+      "272fda66": {
+        "line": 188,
+        "end_line": 197,
+        "kind": "FunctionDef",
+        "ast_sha256": "ee1a5c5a8dddee86caf5ee1d0c08d77471285ea339c958594e6e41754579670d",
+        "signature": "connection, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 188,
+        "end_line": 197,
+        "kind": "FunctionDef",
+        "ast_sha256": "ee1a5c5a8dddee86caf5ee1d0c08d77471285ea339c958594e6e41754579670d",
+        "signature": "connection, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "test_formal_publish_rejects_invalid_success_fact",
+    "revisions": {
+      "a7755d81": {
+        "line": 201,
+        "end_line": 212,
+        "kind": "FunctionDef",
+        "ast_sha256": "cce39c8aca7556d081de42502b10c669e574cce83a33ccf52e3304ed78f758f2",
+        "signature": "connection, tmp_path, bad_field"
+      },
+      "272fda66": {
+        "line": 201,
+        "end_line": 212,
+        "kind": "FunctionDef",
+        "ast_sha256": "cce39c8aca7556d081de42502b10c669e574cce83a33ccf52e3304ed78f758f2",
+        "signature": "connection, tmp_path, bad_field"
+      },
+      "9fbb734c": {
+        "line": 201,
+        "end_line": 212,
+        "kind": "FunctionDef",
+        "ast_sha256": "cce39c8aca7556d081de42502b10c669e574cce83a33ccf52e3304ed78f758f2",
+        "signature": "connection, tmp_path, bad_field"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "test_same_bytes_preparation_preserves_phase_and_success_facts",
+    "revisions": {
+      "a7755d81": {
+        "line": 233,
+        "end_line": 244,
+        "kind": "FunctionDef",
+        "ast_sha256": "d978ec26d3b2b520e93d79117ba980efa9b3dd1d75e71e1192536fc3ec3deb64",
+        "signature": "connection, tmp_path, stage, want_status, adds_event"
+      },
+      "272fda66": {
+        "line": 233,
+        "end_line": 244,
+        "kind": "FunctionDef",
+        "ast_sha256": "d978ec26d3b2b520e93d79117ba980efa9b3dd1d75e71e1192536fc3ec3deb64",
+        "signature": "connection, tmp_path, stage, want_status, adds_event"
+      },
+      "9fbb734c": {
+        "line": 233,
+        "end_line": 244,
+        "kind": "FunctionDef",
+        "ast_sha256": "d978ec26d3b2b520e93d79117ba980efa9b3dd1d75e71e1192536fc3ec3deb64",
+        "signature": "connection, tmp_path, stage, want_status, adds_event"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "test_different_rebuilt_bytes_never_replace_fixed_bytes",
+    "revisions": {
+      "a7755d81": {
+        "line": 248,
+        "end_line": 254,
+        "kind": "FunctionDef",
+        "ast_sha256": "e5b6f0d9f88a9657f61b65db6680608a4c7fa0c5e975b3ec81d2d149030dada8",
+        "signature": "connection, tmp_path, stage"
+      },
+      "272fda66": {
+        "line": 248,
+        "end_line": 254,
+        "kind": "FunctionDef",
+        "ast_sha256": "e5b6f0d9f88a9657f61b65db6680608a4c7fa0c5e975b3ec81d2d149030dada8",
+        "signature": "connection, tmp_path, stage"
+      },
+      "9fbb734c": {
+        "line": 248,
+        "end_line": 254,
+        "kind": "FunctionDef",
+        "ast_sha256": "e5b6f0d9f88a9657f61b65db6680608a4c7fa0c5e975b3ec81d2d149030dada8",
+        "signature": "connection, tmp_path, stage"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "test_publish_intent_uses_actual_bytes_and_retains_previous_success",
+    "revisions": {
+      "a7755d81": {
+        "line": 262,
+        "end_line": 274,
+        "kind": "FunctionDef",
+        "ast_sha256": "02ea4d72bc69917af1efdee3f198d21ccb82bae546d169a693a94fd0887faaa7",
+        "signature": "connection, tmp_path, stage, want"
+      },
+      "272fda66": {
+        "line": 262,
+        "end_line": 274,
+        "kind": "FunctionDef",
+        "ast_sha256": "02ea4d72bc69917af1efdee3f198d21ccb82bae546d169a693a94fd0887faaa7",
+        "signature": "connection, tmp_path, stage, want"
+      },
+      "9fbb734c": {
+        "line": 262,
+        "end_line": 274,
+        "kind": "FunctionDef",
+        "ast_sha256": "02ea4d72bc69917af1efdee3f198d21ccb82bae546d169a693a94fd0887faaa7",
+        "signature": "connection, tmp_path, stage, want"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "test_publish_intent_and_success_are_separate_history_transactions",
+    "revisions": {
+      "a7755d81": {
+        "line": 277,
+        "end_line": 286,
+        "kind": "FunctionDef",
+        "ast_sha256": "5188cf34ab612a038b438622a61df28244e5a6eedaef961ea88563c609c42154",
+        "signature": "connection, tmp_path"
+      },
+      "272fda66": {
+        "line": 277,
+        "end_line": 286,
+        "kind": "FunctionDef",
+        "ast_sha256": "5188cf34ab612a038b438622a61df28244e5a6eedaef961ea88563c609c42154",
+        "signature": "connection, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 277,
+        "end_line": 286,
+        "kind": "FunctionDef",
+        "ast_sha256": "5188cf34ab612a038b438622a61df28244e5a6eedaef961ea88563c609c42154",
+        "signature": "connection, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "test_moved_file_without_completed_directory_sync_cannot_record_success",
+    "revisions": {
+      "a7755d81": {
+        "line": 290,
+        "end_line": 297,
+        "kind": "FunctionDef",
+        "ast_sha256": "5ed9130af82d34c7b901fa6662e15cc29a914184436a70fcfe19e2da6cbb522e",
+        "signature": "connection, tmp_path, directory"
+      },
+      "272fda66": {
+        "line": 290,
+        "end_line": 297,
+        "kind": "FunctionDef",
+        "ast_sha256": "5ed9130af82d34c7b901fa6662e15cc29a914184436a70fcfe19e2da6cbb522e",
+        "signature": "connection, tmp_path, directory"
+      },
+      "9fbb734c": {
+        "line": 290,
+        "end_line": 297,
+        "kind": "FunctionDef",
+        "ast_sha256": "5ed9130af82d34c7b901fa6662e15cc29a914184436a70fcfe19e2da6cbb522e",
+        "signature": "connection, tmp_path, directory"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "test_success_requires_current_publish_intent",
+    "revisions": {
+      "a7755d81": {
+        "line": 301,
+        "end_line": 307,
+        "kind": "FunctionDef",
+        "ast_sha256": "1974897001663492bd23e739e619ba57c33525a3afba786490837dfc6564e6bc",
+        "signature": "connection, tmp_path, stage"
+      },
+      "272fda66": {
+        "line": 301,
+        "end_line": 307,
+        "kind": "FunctionDef",
+        "ast_sha256": "1974897001663492bd23e739e619ba57c33525a3afba786490837dfc6564e6bc",
+        "signature": "connection, tmp_path, stage"
+      },
+      "9fbb734c": {
+        "line": 301,
+        "end_line": 307,
+        "kind": "FunctionDef",
+        "ast_sha256": "1974897001663492bd23e739e619ba57c33525a3afba786490837dfc6564e6bc",
+        "signature": "connection, tmp_path, stage"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "test_failed_republication_keeps_previous_success_until_next_publish",
+    "revisions": {
+      "a7755d81": {
+        "line": 310,
+        "end_line": 321,
+        "kind": "FunctionDef",
+        "ast_sha256": "1b03980d9424ce6530759b0570917059e273b4f5d1fec7e815da63c8fc2aeac4",
+        "signature": "connection, tmp_path"
+      },
+      "272fda66": {
+        "line": 310,
+        "end_line": 321,
+        "kind": "FunctionDef",
+        "ast_sha256": "1b03980d9424ce6530759b0570917059e273b4f5d1fec7e815da63c8fc2aeac4",
+        "signature": "connection, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 310,
+        "end_line": 321,
+        "kind": "FunctionDef",
+        "ast_sha256": "1b03980d9424ce6530759b0570917059e273b4f5d1fec7e815da63c8fc2aeac4",
+        "signature": "connection, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "test_real_handoff_result_can_be_saved_after_receiver_deletes_file",
+    "revisions": {
+      "a7755d81": {
+        "line": 324,
+        "end_line": 350,
+        "kind": "FunctionDef",
+        "ast_sha256": "529e25eb4680ecd078b1da5b51ad068fcd38e61d1fa1c8d8db73b2abd8180ea3",
+        "signature": "connection, tmp_path"
+      },
+      "272fda66": {
+        "line": 324,
+        "end_line": 350,
+        "kind": "FunctionDef",
+        "ast_sha256": "529e25eb4680ecd078b1da5b51ad068fcd38e61d1fa1c8d8db73b2abd8180ea3",
+        "signature": "connection, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 324,
+        "end_line": 350,
+        "kind": "FunctionDef",
+        "ast_sha256": "529e25eb4680ecd078b1da5b51ad068fcd38e61d1fa1c8d8db73b2abd8180ea3",
+        "signature": "connection, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "test_management_read_or_write_failure_preserves_all_facts",
+    "revisions": {
+      "a7755d81": {
+        "line": 376,
+        "end_line": 384,
+        "kind": "FunctionDef",
+        "ast_sha256": "07b3bfc121df8477f3934638553dc902c3e0f383f5ca168f734dd8c0ea7d7015",
+        "signature": "connection, tmp_path, operation, prefix"
+      },
+      "272fda66": {
+        "line": 376,
+        "end_line": 384,
+        "kind": "FunctionDef",
+        "ast_sha256": "07b3bfc121df8477f3934638553dc902c3e0f383f5ca168f734dd8c0ea7d7015",
+        "signature": "connection, tmp_path, operation, prefix"
+      },
+      "9fbb734c": {
+        "line": 376,
+        "end_line": 384,
+        "kind": "FunctionDef",
+        "ast_sha256": "07b3bfc121df8477f3934638553dc902c3e0f383f5ca168f734dd8c0ea7d7015",
+        "signature": "connection, tmp_path, operation, prefix"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "test_unknown_management_commit_reuses_original_key_without_duplicate_fact",
+    "revisions": {
+      "a7755d81": {
+        "line": 389,
+        "end_line": 428,
+        "kind": "FunctionDef",
+        "ast_sha256": "2402bdc4f01154e400bb217d2135bdd8485f837aca2248ea55a85060326c27e9",
+        "signature": "connection, tmp_path, operation, commit_reached_database"
+      },
+      "272fda66": {
+        "line": 389,
+        "end_line": 424,
+        "kind": "FunctionDef",
+        "ast_sha256": "9d57ce6de95f8c4a4ac3faeece27adccde29de91b56548e8435980317b150eed",
+        "signature": "connection, tmp_path, operation, commit_reached_database"
+      },
+      "9fbb734c": {
+        "line": 389,
+        "end_line": 428,
+        "kind": "FunctionDef",
+        "ast_sha256": "2402bdc4f01154e400bb217d2135bdd8485f837aca2248ea55a85060326c27e9",
+        "signature": "connection, tmp_path, operation, commit_reached_database"
+      }
+    },
+    "same_all": false
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "test_invalid_fixed_report_basis_prevents_management_updates",
+    "revisions": {
+      "a7755d81": {
+        "line": 432,
+        "end_line": 439,
+        "kind": "FunctionDef",
+        "ast_sha256": "bae206b87d0fcb7fd00199554bb15b3d722129bf37499a5dd1abc01d2e72e73a",
+        "signature": "connection, tmp_path, operation"
+      },
+      "272fda66": {
+        "line": 428,
+        "end_line": 435,
+        "kind": "FunctionDef",
+        "ast_sha256": "bae206b87d0fcb7fd00199554bb15b3d722129bf37499a5dd1abc01d2e72e73a",
+        "signature": "connection, tmp_path, operation"
+      },
+      "9fbb734c": {
+        "line": 432,
+        "end_line": 439,
+        "kind": "FunctionDef",
+        "ast_sha256": "bae206b87d0fcb7fd00199554bb15b3d722129bf37499a5dd1abc01d2e72e73a",
+        "signature": "connection, tmp_path, operation"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "test_operation_key_cannot_be_rebound",
+    "revisions": {
+      "a7755d81": {
+        "line": 443,
+        "end_line": 460,
+        "kind": "FunctionDef",
+        "ast_sha256": "b1c723bc1b6943971ae3e04798c041f3cd3c927a2558e1bd928a4b74941685ab",
+        "signature": "connection, tmp_path, changed_input"
+      },
+      "272fda66": {
+        "line": 439,
+        "end_line": 456,
+        "kind": "FunctionDef",
+        "ast_sha256": "b1c723bc1b6943971ae3e04798c041f3cd3c927a2558e1bd928a4b74941685ab",
+        "signature": "connection, tmp_path, changed_input"
+      },
+      "9fbb734c": {
+        "line": 443,
+        "end_line": 460,
+        "kind": "FunctionDef",
+        "ast_sha256": "b1c723bc1b6943971ae3e04798c041f3cd3c927a2558e1bd928a4b74941685ab",
+        "signature": "connection, tmp_path, changed_input"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "test_old_publish_key_returns_original_success_after_later_republication",
+    "revisions": {
+      "a7755d81": {
+        "line": 463,
+        "end_line": 475,
+        "kind": "FunctionDef",
+        "ast_sha256": "5f46b0464c1c74da3d7ee9759221a8395e86fb511e1e24ec4b874627af363ee4",
+        "signature": "connection, tmp_path"
+      },
+      "272fda66": {
+        "line": 459,
+        "end_line": 471,
+        "kind": "FunctionDef",
+        "ast_sha256": "5f46b0464c1c74da3d7ee9759221a8395e86fb511e1e24ec4b874627af363ee4",
+        "signature": "connection, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 463,
+        "end_line": 475,
+        "kind": "FunctionDef",
+        "ast_sha256": "5f46b0464c1c74da3d7ee9759221a8395e86fb511e1e24ec4b874627af363ee4",
+        "signature": "connection, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "test_management_key_with_invalid_original_group_is_not_reused",
+    "revisions": {
+      "a7755d81": {
+        "line": 480,
+        "end_line": 508,
+        "kind": "FunctionDef",
+        "ast_sha256": "8f8dcb992a81be6d0e9628b1f02428a633f01bd0fdecb91fc20e111a4e34d4f4",
+        "signature": "connection, tmp_path, operation, invalid"
+      },
+      "272fda66": {
+        "line": 476,
+        "end_line": 504,
+        "kind": "FunctionDef",
+        "ast_sha256": "8f8dcb992a81be6d0e9628b1f02428a633f01bd0fdecb91fc20e111a4e34d4f4",
+        "signature": "connection, tmp_path, operation, invalid"
+      },
+      "9fbb734c": {
+        "line": 480,
+        "end_line": 508,
+        "kind": "FunctionDef",
+        "ast_sha256": "8f8dcb992a81be6d0e9628b1f02428a633f01bd0fdecb91fc20e111a4e34d4f4",
+        "signature": "connection, tmp_path, operation, invalid"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "test_management_history_replays_success_failure_and_recovery",
+    "revisions": {
+      "a7755d81": {
+        "line": 511,
+        "end_line": 552,
+        "kind": "FunctionDef",
+        "ast_sha256": "1d6d686bade11ddae84e3e9fb9dbd3061cd514876f4e2b2929bbe329075de359",
+        "signature": "connection, tmp_path"
+      },
+      "272fda66": {
+        "line": 507,
+        "end_line": 548,
+        "kind": "FunctionDef",
+        "ast_sha256": "1d6d686bade11ddae84e3e9fb9dbd3061cd514876f4e2b2929bbe329075de359",
+        "signature": "connection, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 511,
+        "end_line": 552,
+        "kind": "FunctionDef",
+        "ast_sha256": "1d6d686bade11ddae84e3e9fb9dbd3061cd514876f4e2b2929bbe329075de359",
+        "signature": "connection, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "test_management_reader_requires_real_previous_publication",
+    "revisions": {
+      "a7755d81": {
+        "line": 557,
+        "end_line": 569,
+        "kind": "FunctionDef",
+        "ast_sha256": "d17746c6da04faedb89661dae9fdcc465b0632751a1434194193f47549e9f87f",
+        "signature": "connection, tmp_path, operation, mutation"
+      },
+      "272fda66": {
+        "line": 553,
+        "end_line": 565,
+        "kind": "FunctionDef",
+        "ast_sha256": "d17746c6da04faedb89661dae9fdcc465b0632751a1434194193f47549e9f87f",
+        "signature": "connection, tmp_path, operation, mutation"
+      },
+      "9fbb734c": {
+        "line": 557,
+        "end_line": 569,
+        "kind": "FunctionDef",
+        "ast_sha256": "d17746c6da04faedb89661dae9fdcc465b0632751a1434194193f47549e9f87f",
+        "signature": "connection, tmp_path, operation, mutation"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "test_failure_json_type_changes_are_distinct_inputs",
+    "revisions": {
+      "a7755d81": {
+        "line": 574,
+        "end_line": 592,
+        "kind": "FunctionDef",
+        "ast_sha256": "4fd231e0d7d466d1f34767f4b1aa94609c5391a160c672ccb844b76d50a831b6",
+        "signature": "connection, tmp_path, old, new, same_key"
+      },
+      "272fda66": {
+        "line": 570,
+        "end_line": 588,
+        "kind": "FunctionDef",
+        "ast_sha256": "4fd231e0d7d466d1f34767f4b1aa94609c5391a160c672ccb844b76d50a831b6",
+        "signature": "connection, tmp_path, old, new, same_key"
+      },
+      "9fbb734c": {
+        "line": 574,
+        "end_line": 592,
+        "kind": "FunctionDef",
+        "ast_sha256": "4fd231e0d7d466d1f34767f4b1aa94609c5391a160c672ccb844b76d50a831b6",
+        "signature": "connection, tmp_path, old, new, same_key"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "test_equal_report_error_with_new_key_does_not_create_a_new_fact",
+    "revisions": {
+      "a7755d81": {
+        "line": 595,
+        "end_line": 606,
+        "kind": "FunctionDef",
+        "ast_sha256": "b94da04cba5418c9fa78e90e4a9c15575aec9026d766ea4f1fbe9b0e7e3bcd9f",
+        "signature": "connection, tmp_path"
+      },
+      "272fda66": {
+        "line": 591,
+        "end_line": 602,
+        "kind": "FunctionDef",
+        "ast_sha256": "b94da04cba5418c9fa78e90e4a9c15575aec9026d766ea4f1fbe9b0e7e3bcd9f",
+        "signature": "connection, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 595,
+        "end_line": 606,
+        "kind": "FunctionDef",
+        "ast_sha256": "b94da04cba5418c9fa78e90e4a9c15575aec9026d766ea4f1fbe9b0e7e3bcd9f",
+        "signature": "connection, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "test_non_persistable_formal_error_rolls_back_transaction",
+    "revisions": {
+      "a7755d81": {
+        "line": 609,
+        "end_line": 618,
+        "kind": "FunctionDef",
+        "ast_sha256": "027be10d148a676f2ed0993d911efd457af5e93ae2b866dc975b924694b6edca",
+        "signature": "connection, tmp_path"
+      },
+      "272fda66": {
+        "line": 605,
+        "end_line": 614,
+        "kind": "FunctionDef",
+        "ast_sha256": "027be10d148a676f2ed0993d911efd457af5e93ae2b866dc975b924694b6edca",
+        "signature": "connection, tmp_path"
+      },
+      "9fbb734c": {
+        "line": 609,
+        "end_line": 618,
+        "kind": "FunctionDef",
+        "ast_sha256": "027be10d148a676f2ed0993d911efd457af5e93ae2b866dc975b924694b6edca",
+        "signature": "connection, tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "test_formal_intent_comparison_error_rolls_back_transaction",
+    "revisions": {
+      "a7755d81": {
+        "line": 621,
+        "end_line": 637,
+        "kind": "FunctionDef",
+        "ast_sha256": "2d30e51bc1a6836203afdf73718fc6f96ff49a326e9d0b3957ecec225c13fc82",
+        "signature": "connection, tmp_path, monkeypatch"
+      },
+      "272fda66": {
+        "line": 617,
+        "end_line": 633,
+        "kind": "FunctionDef",
+        "ast_sha256": "2d30e51bc1a6836203afdf73718fc6f96ff49a326e9d0b3957ecec225c13fc82",
+        "signature": "connection, tmp_path, monkeypatch"
+      },
+      "9fbb734c": {
+        "line": 621,
+        "end_line": 637,
+        "kind": "FunctionDef",
+        "ast_sha256": "2d30e51bc1a6836203afdf73718fc6f96ff49a326e9d0b3957ecec225c13fc82",
+        "signature": "connection, tmp_path, monkeypatch"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_publish.py",
+    "qualified_name": "test_reader_cannot_accept_outdated_previous_publication_pair",
+    "revisions": {
+      "a7755d81": {
+        "line": 642,
+        "end_line": 653,
+        "kind": "FunctionDef",
+        "ast_sha256": "aa19af291428392ac0249c8a491dd1d280a7cac285d98780a2884283d6a16399",
+        "signature": "connection, tmp_path, operation, mutation"
+      },
+      "272fda66": {
+        "line": 638,
+        "end_line": 649,
+        "kind": "FunctionDef",
+        "ast_sha256": "aa19af291428392ac0249c8a491dd1d280a7cac285d98780a2884283d6a16399",
+        "signature": "connection, tmp_path, operation, mutation"
+      },
+      "9fbb734c": {
+        "line": 642,
+        "end_line": 653,
+        "kind": "FunctionDef",
+        "ast_sha256": "aa19af291428392ac0249c8a491dd1d280a7cac285d98780a2884283d6a16399",
+        "signature": "connection, tmp_path, operation, mutation"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_record_segment_error_report.py",
+    "qualified_name": "test_expired_prepared_source_without_segment_set_reports_selection_failure",
+    "revisions": {
+      "a7755d81": {
+        "line": 27,
+        "end_line": 76,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "652d030b6689adf3d9304ab1f76a21891391fabadf3376ee8d0f7b46afe649a7",
+        "signature": "tmp_path, consumer"
+      },
+      "272fda66": {
+        "line": 27,
+        "end_line": 76,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "652d030b6689adf3d9304ab1f76a21891391fabadf3376ee8d0f7b46afe649a7",
+        "signature": "tmp_path, consumer"
+      },
+      "9fbb734c": {
+        "line": 27,
+        "end_line": 76,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "652d030b6689adf3d9304ab1f76a21891391fabadf3376ee8d0f7b46afe649a7",
+        "signature": "tmp_path, consumer"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_record_segment_error_report.py",
+    "qualified_name": "test_gap_report_preserves_outputs_scope_and_bytes_after_cleanup",
+    "revisions": {
+      "a7755d81": {
+        "line": 79,
+        "end_line": 149,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "ab3da9024dae9beb43689590182ef2f9a24a761b90e6f285886fea38622cc1d7",
+        "signature": "tmp_path"
+      },
+      "272fda66": {
+        "line": 79,
+        "end_line": 149,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "ab3da9024dae9beb43689590182ef2f9a24a761b90e6f285886fea38622cc1d7",
+        "signature": "tmp_path"
+      },
+      "9fbb734c": {
+        "line": 79,
+        "end_line": 149,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "ab3da9024dae9beb43689590182ef2f9a24a761b90e6f285886fea38622cc1d7",
+        "signature": "tmp_path"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_software_recovery_reports.py",
+    "qualified_name": "test_legacy_reports_and_recovery_preserve_original_failure_and_frozen_bytes",
+    "revisions": {
+      "a7755d81": {
+        "line": 26,
+        "end_line": 69,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "adda5ef3a7ba69b609cc79eddb3454035cbd017c4c03c40341ce49014649a943",
+        "signature": "owned, tmp_path, database_format"
+      },
+      "272fda66": {
+        "line": 26,
+        "end_line": 69,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "adda5ef3a7ba69b609cc79eddb3454035cbd017c4c03c40341ce49014649a943",
+        "signature": "owned, tmp_path, database_format"
+      },
+      "9fbb734c": {
+        "line": 26,
+        "end_line": 69,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "adda5ef3a7ba69b609cc79eddb3454035cbd017c4c03c40341ce49014649a943",
+        "signature": "owned, tmp_path, database_format"
+      }
+    },
+    "same_all": true
+  },
+  {
+    "path": "apps/camctl/tests/integration/reporting/test_video_coverage_report.py",
+    "qualified_name": "test_action6_coverage_and_video_scope_survive_report_history",
+    "revisions": {
+      "a7755d81": {
+        "line": 89,
+        "end_line": 147,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "153ea0f861fb843dd2a197f54aa80267f3318316198aed0fd071cc8306a00110",
+        "signature": "tmp_path, action_type"
+      },
+      "272fda66": {
+        "line": 89,
+        "end_line": 147,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "153ea0f861fb843dd2a197f54aa80267f3318316198aed0fd071cc8306a00110",
+        "signature": "tmp_path, action_type"
+      },
+      "9fbb734c": {
+        "line": 89,
+        "end_line": 147,
+        "kind": "AsyncFunctionDef",
+        "ast_sha256": "153ea0f861fb843dd2a197f54aa80267f3318316198aed0fd071cc8306a00110",
+        "signature": "tmp_path, action_type"
+      }
+    },
+    "same_all": true
+  }
+]

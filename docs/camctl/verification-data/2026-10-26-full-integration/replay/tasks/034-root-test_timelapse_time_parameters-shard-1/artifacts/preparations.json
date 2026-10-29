@@ -1,0 +1,15 @@
+[
+  {
+    "label": "package-resources",
+    "command": [
+      "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+      "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/034-root-test_timelapse_time_parameters-shard-1/source/apps/camctl/scripts/sync_resources.py"
+    ],
+    "cwd": "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/034-root-test_timelapse_time_parameters-shard-1/source",
+    "started_utc": "2026-10-26T01:10:26.305099+00:00",
+    "pid": 2053462,
+    "exit_code": 0,
+    "finished_utc": "2026-10-26T01:10:26.346573+00:00",
+    "wall_seconds": 0.04145854800299276
+  }
+]

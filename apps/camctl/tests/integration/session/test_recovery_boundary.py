@@ -12,9 +12,11 @@ async def test_run_initializes_recovery_once_before_clock_and_device_work(enviro
     context, _, _, _ = environment
     observed = []
 
-    def initialize(owned):
-        assert not owned.connection.in_transaction
-        observed.append(owned.connection.execute("SELECT COALESCE(MAX(id), 0) FROM history_events").fetchone()[0])
+    async def initialize(database):
+        def boundary(owned):
+            assert not owned.connection.in_transaction
+            return owned.connection.execute("SELECT COALESCE(MAX(id), 0) FROM history_events").fetchone()[0]
+        observed.append(await database.read(boundary))
 
     async def check(current):
         assert len(observed) == 1
@@ -35,7 +37,7 @@ async def test_recovery_seed_failure_stops_before_device_work(environment):
     context, _, _, _ = environment
     calls = []
 
-    def initialize(owned):
+    async def initialize(database):
         raise RuntimeError("initial history boundary unavailable")
 
     async def device(current):

@@ -117,23 +117,15 @@ class TestAcceptanceNotification:
         from camctl.persistence.repositories.acceptance import AcceptanceRepository
         from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
-        owned = open_existing(
-            Path(config.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig()
+        from ..support.acceptance import accept_source
+        result = await accept_source(
+            parse_input(read),
+            AcceptanceContext(
+                mode=CommandMode.RUN, catalog=deps.catalog,
+                repository=AcceptanceRepository(), clock=None,
+            ),
+            Path(config.paths.state_db),
         )
-        try:
-            result = await accept_input(
-                parse_input(read),
-                AcceptanceContext(
-                    mode=CommandMode.RUN,
-                    catalog=deps.catalog,
-                    repository=AcceptanceRepository(),
-                    clock=deps.clock if hasattr(deps, "clock") else None,
-                ),
-                new_operation_key(),
-                owned,
-            )
-        finally:
-            owned.connection.close()
         assert notifier.notifications == []
 
         # 后续会话从持久化状态重新发现工作（不依赖原通知）。

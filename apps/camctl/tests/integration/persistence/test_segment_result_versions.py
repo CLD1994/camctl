@@ -35,7 +35,6 @@ def _cancel(owned,runtime,action_id):
     from camctl.persistence.repositories.cancellation import CancellationRepository
     from .test_segment_storage import SegmentedCatalog
     from camctl.history.decoding import decode_event_row
-    from camctl.persistence.repositories.result_pages import _COLUMNS
     at=runtime.wall_us()
     instant=datetime.fromtimestamp(at/1_000_000,timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
     _ok(AcceptanceRepository().process_input(ProcessInput(ParsedInput('cancel.json',{
@@ -52,7 +51,7 @@ def _cancel(owned,runtime,action_id):
         new_operation_key(),owned))
     event_id=owned.connection.execute('SELECT last_event_id FROM actions WHERE id=?',(action_id,)).fetchone()[0]
     event=decode_event_row(owned.connection.execute(
-        f'SELECT {_COLUMNS} FROM history_events WHERE id=?',(event_id,)).fetchone())
+        'SELECT id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json FROM history_events WHERE id=?',(event_id,)).fetchone())
     assert any(row.table=='actions' and row.row_id==action_id
         and row.before.values.get('cancel_requested')==0
         and row.after.values.get('cancel_requested')==1 for row in event.rows)
@@ -60,10 +59,9 @@ def _cancel(owned,runtime,action_id):
 
 
 def _request(repository,ref,owned,runtime,cancel):
-    from camctl.persistence.repositories.result_pages import _at
+    from camctl.persistence.repositories.result_pages import read_page_at
     row=repository.read_result_set(ref,owned)
-    scan=None if row['current_final_page_event_id'] is None else _at(
-        owned.connection,row['current_final_page_event_id'])[0].ref
+    scan=None if row['current_final_page_event_id'] is None else read_page_at(row['current_final_page_event_id'],owned).ref
     return ResultSetCreate(ref.action_id,row['activity_id'],row['run_id'],
         SegmentSourceKind.RETAINED_SOURCES,HistoryBoundary(row['source_txn_id'],row['source_event_id']),
         scan,PublicationKind.CANCELED,ref.set_id,cancel,runtime.wall_us())

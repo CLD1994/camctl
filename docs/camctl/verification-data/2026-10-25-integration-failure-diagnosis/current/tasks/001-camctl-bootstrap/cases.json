@@ -1,0 +1,249 @@
+[
+  {
+    "nodeid": "tests/integration/bootstrap/test_distribution.py::test_installed_hasselblad_photo_pair_obtain_and_source_reuse[raw]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 1.346697082000901
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 7.774875036004232
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0012534849956864491
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 9.12282560300082
+  },
+  {
+    "nodeid": "tests/integration/bootstrap/test_distribution.py::test_installed_hasselblad_photo_pair_obtain_and_source_reuse[jpeg]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.002723068006162066
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 13.358974769005727
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.007552098999440204
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 13.369249936011329
+  },
+  {
+    "nodeid": "tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_result_pages_are_consumed_before_new_listing[partial]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.13890836800419493
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 2.989666526998917
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.01843405800173059
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 3.1470089530048426
+  },
+  {
+    "nodeid": "tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_result_pages_are_consumed_before_new_listing[terminal]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.11276717799773905
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 1.083951706001244
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.009177510000881739
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 1.2058963939998648
+  },
+  {
+    "nodeid": "tests/integration/bootstrap/test_osmo_shared_recovery.py::test_unavailable_original_read_keeps_progress_and_uses_own_consumer[missing-False]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.07328339200466871
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 1.4935667059980915
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.043101276001834776
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 1.609951374004595
+  },
+  {
+    "nodeid": "tests/integration/bootstrap/test_osmo_shared_recovery.py::test_unavailable_original_read_keeps_progress_and_uses_own_consumer[mismatch-False]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.07656322700495366
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.5845114090043353
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.021136469003977254
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.6822111050132662
+  },
+  {
+    "nodeid": "tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_recovery_requires_boundary_horizon_and_authorization[boundary-UNCONFIRMED_BOUNDARY-read]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.07991951599979075
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.49647782900137827
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.020927252997353207
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.5973245979985222
+  },
+  {
+    "nodeid": "tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_recovery_requires_boundary_horizon_and_authorization[horizon-MISSING_HORIZON-read]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.05564456799766049
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.6359097070017015
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0700250989975757
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.7615793739969376
+  },
+  {
+    "nodeid": "tests/integration/bootstrap/test_osmo_shared_recovery.py::test_original_recovery_requires_boundary_horizon_and_authorization[authorization-EVIDENCE_UNAVAILABLE-read]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.07024391400045715
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 1.036960662000638
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.12032306800392689
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 1.227527644005022
+  },
+  {
+    "nodeid": "tests/integration/bootstrap/test_osmo_shared_recovery.py::test_formal_read_recovery_reuses_original_finish_after_real_unknown_commit",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.0944770799978869
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.917324779999035
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.05534521299705375
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 1.0671470729939756
+  },
+  {
+    "nodeid": "tests/integration/bootstrap/test_osmo_shared_recovery.py::test_new_result_round_has_new_ticket_and_keeps_original_budget_and_pages[none]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.08949343200220028
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 0.7021452129993122
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.0077985699972487055
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 0.7994372149987612
+  },
+  {
+    "nodeid": "tests/integration/bootstrap/test_osmo_shared_recovery.py::test_new_result_round_has_new_ticket_and_keeps_original_budget_and_pages[partial]",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.126313991000643
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 2.823115418999805
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.012351966004644055
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 2.961781376005092
+  },
+  {
+    "nodeid": "tests/integration/bootstrap/test_osmo_video_mode_completion.py::test_osmo_native_segment_resume_publishes_saved_conclusion_without_device_calls",
+    "phases": {
+      "setup": {
+        "outcome": "passed",
+        "duration_seconds": 0.15091059699625475
+      },
+      "call": {
+        "outcome": "failed",
+        "duration_seconds": 1.0646644700027537
+      },
+      "teardown": {
+        "outcome": "passed",
+        "duration_seconds": 0.005159434003871866
+      }
+    },
+    "outcome": "failed",
+    "duration_seconds": 1.2207345010028803
+  }
+]

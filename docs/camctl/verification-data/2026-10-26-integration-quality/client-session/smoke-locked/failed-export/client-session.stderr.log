@@ -1,0 +1,10 @@
+Error: 客户端命令store与会话store不一致
+    at dispatchClientCommand (/tmp/camctl-quality-client-session-20261026/tests/integration/client_driver.ts:1351:11)
+    at worldClientSession (/tmp/camctl-quality-client-session-20261026/tests/integration/client_driver.ts:1254:35)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async main (/tmp/camctl-quality-client-session-20261026/tests/integration/client_driver.ts:1360:5)
+Error: 客户端命令store与会话store不一致
+    at dispatchClientCommand (/tmp/camctl-quality-client-session-20261026/tests/integration/client_driver.ts:1351:11)
+    at worldClientSession (/tmp/camctl-quality-client-session-20261026/tests/integration/client_driver.ts:1254:35)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async main (/tmp/camctl-quality-client-session-20261026/tests/integration/client_driver.ts:1360:5)

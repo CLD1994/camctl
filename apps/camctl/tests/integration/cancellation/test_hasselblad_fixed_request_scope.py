@@ -7,7 +7,8 @@ from camctl.cancellation.models import (FixCancelTargets,FixedCancelSet,FixedTar
     SelectionBasis,CancellationEffect)
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
-from .test_hasselblad_preview_fixed_boundary import world,close,accept_origin
+from .hasselblad_support import world, close, accept_origin, action as read_action, save_blocked, cancel, fixed_members
+from camctl.history.validators import validate_event
 
 pytestmark=pytest.mark.asyncio
 
@@ -31,7 +32,7 @@ def context_for(owned,runtime,origin,entries):
     from camctl.history.reads import ReadCoverage
     state={table:{identity:row_facts(owned.connection,table,identity)
         for identity, in owned.connection.execute(f'SELECT id FROM {table}')}
-        for table in ('actions','plans','auto_preview_links')}
+        for table in ('actions','plans','auto_preview_links','cancel_items')}
     ids=frozenset(state['actions'])
     ranges={('actions','id'):ids,('actions','plan_id'):frozenset(state['plans']),
         ('plans','id'):frozenset(state['plans']),
@@ -44,21 +45,21 @@ def context_for(owned,runtime,origin,entries):
                 ranges[key]=frozenset((*ranges.get(key,()),*values))
     rows=(update_change('actions',origin,{'target_selection_state':1},{'target_selection_state':2}),)
     for index,(identity,basis,effect) in enumerate(entries,1001):
+        owners[('cancel_items',index)]=('action',origin)
         rows+=(row_change('cancel_items',index,{'action_id':origin,'target_action_id':identity,
             'selection_basis':basis,'cancellation_effect':effect,'status':1,'outcome':None,
             'error_code':None,'error_details_json':None}),)
-    event=event_envelope(100,100,4,3,rows,runtime.wall_us())
+    event=replace(event_envelope(100,100,4,3,rows,runtime.wall_us()),change_seq=1)
     return event,EventContext(TransactionRange(100,100,100),owners,state,read_coverage=ReadCoverage(ranges))
 
 
 def assert_unchanged(owned,runtime,before,case):
     assert not owned.connection.in_transaction,case
     assert tuple(owned.connection.iterdump())==before,case
-    assert runtime.action(1)['cancel_requested']==0 and runtime.action(2)['cancel_requested']==0,case
+    assert read_action(owned,1)['cancel_requested']==0 and read_action(owned,2)['cancel_requested']==0,case
 
 
 def reject(owned,runtime,repository,origin,entries,surface):
-    from camctl.persistence.repositories import cancellation as module
     from camctl.history.validators import EventValidationError
     case=(surface,entries)
     assert not owned.connection.in_transaction,case
@@ -68,7 +69,7 @@ def reject(owned,runtime,repository,origin,entries,surface):
         assert result.kind is DbOutcomeKind.ROLLED_BACK,(case,result)
     else:
         event,context=context_for(owned,runtime,origin,entries)
-        with pytest.raises(EventValidationError): module._cancel_targets_guard(event,context)
+        with pytest.raises(EventValidationError): validate_event(event,context)
     assert_unchanged(owned,runtime,before,case)
 
 
@@ -77,7 +78,7 @@ def reject(owned,runtime,repository,origin,entries,surface):
 async def test_original_source_cannot_disappear_behind_preview_label(tmp_path,monkeypatch,state,kind):
     cfg,owned,driver,runtime,transport,task,repository=await world(tmp_path,state,monkeypatch,photo_group='g')
     try:
-        origin,repository=accept_origin(cfg,owned,runtime,address(kind))
+        origin,repository=await accept_origin(cfg,owned,runtime,address(kind))
         for basis in (1,2,3):
             for surface in ('repository','guard'):
                 reject(owned,runtime,repository,origin,[(2,basis,1)],surface)
@@ -103,7 +104,7 @@ async def test_original_source_cannot_disappear_behind_preview_label(tmp_path,mo
 async def test_complete_model_rejects_omissions_extra_members_and_wrong_effects(tmp_path,monkeypatch,state,kind,entry_sets):
     cfg,owned,driver,runtime,transport,task,repository=await world(tmp_path,state,monkeypatch)
     try:
-        origin,repository=accept_origin(cfg,owned,runtime,address(kind))
+        origin,repository=await accept_origin(cfg,owned,runtime,address(kind))
         for entries in entry_sets:
             for surface in ('repository','guard'):
                 reject(owned,runtime,repository,origin,entries,surface)
@@ -115,11 +116,9 @@ async def test_complete_model_rejects_omissions_extra_members_and_wrong_effects(
 async def test_original_sql_and_complete_rows_keep_same_start_partition(tmp_path,monkeypatch,state):
     from camctl.persistence.repositories import capture_facts as module
     from camctl.persistence.transaction import row_facts
-    from .test_hasselblad_preview_fixed_boundary import save_blocked
-    cfg,owned,driver,runtime,transport,task,repository=await world(tmp_path,'ready' if state=='blocked' else state,monkeypatch)
+    cfg,owned,driver,runtime,transport,task,repository=await world(tmp_path,state,monkeypatch)
     try:
-        if state=='blocked': save_blocked(runtime)
-        action=runtime.action(1)
+        action=read_action(owned,1)
         activities=[row_facts(owned.connection,'device_activities',identity) for identity, in
             owned.connection.execute('SELECT id FROM device_activities WHERE action_id=1')]
         runs=[row_facts(owned.connection,'operation_runs',identity) for identity, in
@@ -142,23 +141,20 @@ async def test_original_sql_and_complete_rows_keep_same_start_partition(tmp_path
 @pytest.mark.parametrize('state',['entered','unknown','terminal','blocked'])
 @pytest.mark.parametrize('kind',['action','preview','group','plan','request'])
 async def test_authoritative_complete_scope_keeps_valid_direct_and_linked_members(tmp_path,monkeypatch,state,kind):
-    from .test_hasselblad_preview_fixed_boundary import save_blocked
-    from camctl.persistence.repositories import cancellation as module
-    cfg,owned,driver,runtime,transport,task,repository=await world(tmp_path,'ready' if state=='blocked' else state,monkeypatch,photo_group='g')
+    cfg,owned,driver,runtime,transport,task,repository=await world(tmp_path,state,monkeypatch,photo_group='g')
     try:
-        if state=='blocked': save_blocked(runtime)
-        origin,repository=accept_origin(cfg,owned,runtime,address(kind))
+        origin,repository=await accept_origin(cfg,owned,runtime,address(kind))
         effect=3 if state=='terminal' else 1
         linked=state in ('terminal','blocked')
         if kind=='preview': entries=[(2,1,1)]
         elif kind in ('plan','request'): entries=[(1,1,effect),(2,3 if linked else 1,1),(3,1,1)]
         else: entries=[(1,1,effect)]+([(2,2,1)] if linked else [])
         event,context=context_for(owned,runtime,origin,entries)
-        module._cancel_targets_guard(event,context)
+        validate_event(event,context)
         result=repository.fix_cancel_targets(fixed(origin,runtime,entries),new_operation_key(),owned)
         assert result.kind is DbOutcomeKind.COMPLETED,result.error
         assert owned.connection.execute('SELECT target_action_id,selection_basis,cancellation_effect FROM cancel_items WHERE action_id=? ORDER BY target_action_id',(origin,)).fetchall()==entries
-        assert runtime.action(1)['cancel_requested']==0
+        assert read_action(owned,1)['cancel_requested']==0
     finally:
         await close(owned,transport,task)
 
@@ -175,20 +171,19 @@ async def test_authoritative_complete_scope_keeps_valid_direct_and_linked_member
     ('request',[('plans','request_id'),('actions','plan_id')]),
 ])
 async def test_complete_scope_requires_authoritative_address_links_and_start_ranges(tmp_path,monkeypatch,kind,missing_ranges):
-    from camctl.persistence.repositories import cancellation as module
     from camctl.history.reads import ReadCoverage
     from camctl.history.validators import EventValidationError
     cfg,owned,driver,runtime,transport,task,repository=await world(tmp_path,'entered',monkeypatch,photo_group='g')
     try:
-        origin,repository=accept_origin(cfg,owned,runtime,address(kind))
+        origin,repository=await accept_origin(cfg,owned,runtime,address(kind))
         entries=[(1,1,1),(2,1,1),(3,1,1)] if kind in ('plan','request') else [(1,1,1)]
         event,context=context_for(owned,runtime,origin,entries)
-        module._cancel_targets_guard(event,context)
+        validate_event(event,context)
         for missing in missing_ranges:
             assert not owned.connection.in_transaction,missing
             before=tuple(owned.connection.iterdump())
             incomplete=replace(context,read_coverage=ReadCoverage({key:value for key,value in context.read_coverage.ranges.items() if key!=missing}))
-            with pytest.raises(EventValidationError): module._cancel_targets_guard(event,incomplete)
+            with pytest.raises(EventValidationError): validate_event(event,incomplete)
             assert_unchanged(owned,runtime,before,missing)
     finally:
         await close(owned,transport,task)
@@ -197,18 +192,18 @@ async def test_complete_scope_requires_authoritative_address_links_and_start_ran
 async def test_original_key_keeps_first_direct_decision_after_capture_finishes(tmp_path,monkeypatch):
     cfg,owned,driver,runtime,transport,task,repository=await world(tmp_path,'entered',monkeypatch)
     try:
-        origin,repository=accept_origin(cfg,owned,runtime,address('action'))
+        origin,repository=await accept_origin(cfg,owned,runtime,address('action'))
         command=fixed(origin,runtime,[(1,1,1)])
         key=new_operation_key()
         assert repository.fix_cancel_targets(command,key,owned).kind is DbOutcomeKind.COMPLETED
         transport.release.set()
         await task
-        assert runtime.action(1)['status'] in (3,4)
+        assert read_action(owned,1)['status'] in (3,4)
         before=tuple(owned.connection.iterdump())
         replay=repository.fix_cancel_targets(command,key,owned)
         assert replay.kind is DbOutcomeKind.COMPLETED,replay.error
         assert tuple(owned.connection.iterdump())==before
-        assert runtime.action(1)['cancel_requested']==0
+        assert read_action(owned,1)['cancel_requested']==0
     finally:
         await close(owned,transport,task)
 
@@ -216,7 +211,7 @@ async def test_original_key_keeps_first_direct_decision_after_capture_finishes(t
 async def test_original_key_does_not_accept_a_duplicated_member_request(tmp_path,monkeypatch):
     cfg,owned,driver,runtime,transport,task,repository=await world(tmp_path,'entered',monkeypatch)
     try:
-        origin,repository=accept_origin(cfg,owned,runtime,address('action'))
+        origin,repository=await accept_origin(cfg,owned,runtime,address('action'))
         command=fixed(origin,runtime,[(1,1,1)])
         key=new_operation_key()
         assert repository.fix_cancel_targets(command,key,owned).kind is DbOutcomeKind.COMPLETED
@@ -230,24 +225,25 @@ async def test_original_key_does_not_accept_a_duplicated_member_request(tmp_path
 
 @pytest.mark.parametrize('state',['applied','terminal','entered'])
 async def test_new_origin_reuses_original_hb_cancel_and_preview_scope(tmp_path,monkeypatch,state):
-    from camctl.bootstrap.flows import _resolve_and_fix
     cfg,owned,driver,runtime,transport,task,repository=await world(tmp_path,'entered' if state=='entered' else 'ready',monkeypatch)
     try:
-        raw=owned.connection.execute('SELECT input_fields_json FROM actions WHERE id=3').fetchone()[0]
-        original_items=_resolve_and_fix(owned,repository,3,raw,runtime.wall_us)
+        await cancel(cfg,runtime)
+        original=[(1,1,1)]+([] if state=='entered' else [(2,2,1)])
+        assert fixed_members(owned,3)==original
         if state=='terminal':
             from camctl.capture.handlers import capture_handler
             await capture_handler('camera_take_photo')(1,runtime)
-            from camctl.cancellation.service import ApplyCancel,apply_cancel
-            from .test_unfixed_cancel_origin import runtime_for
-            await apply_cancel(ApplyCancel(3,original_items),runtime_for(owned,repository,runtime))
-        assert runtime.action(1)['status']==(6 if state=='terminal' else 2)
-        assert runtime.action(1)['cancel_requested']==int(state!='entered')
-        origin,repository=accept_origin(cfg,owned,runtime,address('action'))
-        raw=owned.connection.execute('SELECT input_fields_json FROM actions WHERE id=?',(origin,)).fetchone()[0]
-        _resolve_and_fix(owned,repository,origin,raw,runtime.wall_us)
+            await cancel(cfg,runtime)
+        assert read_action(owned,1)['status']==(6 if state=='terminal' else 2)
+        assert read_action(owned,1)['cancel_requested']==int(state!='entered')
+        origin,repository=await accept_origin(cfg,owned,runtime,address('action'))
+        await cancel(cfg,runtime)
+        # 固定事件保留创建时的初始效果；后续消费单独记录当前终态。
         expected=[(1,1,3 if state=='terminal' else 1)]+([] if state=='entered' else [(2,2,1)])
-        assert owned.connection.execute('SELECT target_action_id,selection_basis,cancellation_effect FROM cancel_items WHERE action_id=? ORDER BY target_action_id',(origin,)).fetchall()==expected
+        assert fixed_members(owned,origin)==expected
+        final=[(1,1,{'terminal':3,'applied':2,'entered':1}[state])]+([] if state=='entered' else [(2,2,3)])
+        assert owned.connection.execute('SELECT target_action_id,selection_basis,cancellation_effect FROM cancel_items WHERE action_id=? ORDER BY target_action_id',(origin,)).fetchall()==final
+        assert read_action(owned,2)['status']==(1 if state=='entered' else 6)
         assert owned.connection.execute('SELECT COUNT(*) FROM operation_runs WHERE kind=1').fetchone()[0]==int(state=='entered')
         assert owned.connection.execute('SELECT id FROM operation_runs WHERE kind=2').fetchall()==[]
     finally:

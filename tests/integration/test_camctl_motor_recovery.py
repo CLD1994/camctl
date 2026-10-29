@@ -1,6 +1,8 @@
 """真实 CLI、SQLite 与管道的发送断点、恢复及报告链。"""
 from __future__ import annotations
 
+from camctl_memory_plugin import run_camctl
+
 import json
 import os
 import sqlite3
@@ -52,7 +54,7 @@ def run_pipe(deployment, path=None, *, phase='', channel='normal'):
     if path is not None: command.append(str(path))
     if channel != 'absent': command += ['--host-notification-fd',str(write_fd)]
     try:
-        result = subprocess.run(command, pass_fds=(write_fd,) if channel != 'absent' else (),
+        result = run_camctl(command, receipt_root=deployment.root, pass_fds=(write_fd,) if channel != 'absent' else (),
                                 capture_output=True, text=True, env=environment, timeout=60)
     finally:
         os.close(write_fd)

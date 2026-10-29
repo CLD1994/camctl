@@ -1,0 +1,83 @@
+{
+  "id": "root/test_hasselblad_photo_parameters/shard-1",
+  "scope": "root",
+  "path": "tests/integration/test_hasselblad_photo_parameters.py",
+  "targets": [
+    "tests/integration/test_hasselblad_photo_parameters.py::test_installed_hasselblad_parameter_validation_agrees_across_consumers"
+  ],
+  "estimated_seconds": 4.019398795997404,
+  "historical_failure_observed": true,
+  "parent_id": "root/test_hasselblad_photo_parameters",
+  "shard": 1,
+  "shards": 3,
+  "collection": "/tmp/camctl-integration-replay-20261026-u19lkvoe/collection/root-test_hasselblad_photo_parameters/artifacts",
+  "collected_nodes": 7,
+  "status": "passed",
+  "number": 33,
+  "worker": 1,
+  "artifacts": "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/033-root-test_hasselblad_photo_parameters-shard-1/artifacts",
+  "cwd": "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/033-root-test_hasselblad_photo_parameters-shard-1/source",
+  "started_utc": "2026-10-26T01:10:11.740525+00:00",
+  "command": [
+    "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/033-root-test_hasselblad_photo_parameters-shard-1/source/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "--rootdir=/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/033-root-test_hasselblad_photo_parameters-shard-1/source",
+    "tests/integration/test_hasselblad_photo_parameters.py::test_installed_hasselblad_parameter_validation_agrees_across_consumers",
+    "-q",
+    "--durations=0",
+    "-p",
+    "integration_progress",
+    "--basetemp",
+    "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/033-root-test_hasselblad_photo_parameters-shard-1/tmp/pytest",
+    "-p",
+    "camctl_memory_plugin",
+    "--camctl-memory-limit",
+    "2GiB",
+    "--camctl-memory-cgroup-root",
+    "/sys/fs/cgroup/memory/camctl-budget-1985550-348d6ec12f114ac4930fa9a30d807340"
+  ],
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-integration-replay-20261026-u19lkvoe/control:/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/033-root-test_hasselblad_photo_parameters-shard-1/source/apps/camctl/src",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-integration-replay-20261026-u19lkvoe/workers/1/python-cache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-integration-replay-20261026-u19lkvoe/workers/1/project-env",
+    "UV_CACHE_DIR": "/tmp/camctl-integration-replay-20261026-u19lkvoe/workers/1/uv-cache",
+    "UV_OFFLINE": "1",
+    "TMPDIR": "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/033-root-test_hasselblad_photo_parameters-shard-1/tmp"
+  },
+  "preparations": [
+    {
+      "label": "package-resources",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/033-root-test_hasselblad_photo_parameters-shard-1/source/apps/camctl/scripts/sync_resources.py"
+      ],
+      "cwd": "/tmp/camctl-integration-replay-20261026-u19lkvoe/tasks/033-root-test_hasselblad_photo_parameters-shard-1/source",
+      "started_utc": "2026-10-26T01:10:13.066292+00:00",
+      "pid": 2052795,
+      "exit_code": 0,
+      "finished_utc": "2026-10-26T01:10:13.120737+00:00",
+      "wall_seconds": 0.05444045200420078
+    }
+  ],
+  "preparation": "package-resources",
+  "preparation_pid": 2052795,
+  "pid": 2052797,
+  "execution_started_utc": "2026-10-26T01:10:13.122238+00:00",
+  "progress": {
+    "status": "finished",
+    "exit_code": 0,
+    "collected": 1,
+    "outcomes": {
+      "passed": 1
+    },
+    "subchecks": {},
+    "elapsed_seconds": 104.85934106099012,
+    "utc": "2026-10-26T01:11:58.733873+00:00",
+    "pid": 2052797
+  },
+  "exit_code": 0,
+  "finished_utc": "2026-10-26T01:11:58.812137+00:00",
+  "wall_seconds": 106.6013982000004
+}

@@ -1,0 +1,27 @@
+{
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "apps/camctl/tests/integration/outputs/test_read_discovery.py::test_candidate_capacity_tracks_batch_not_total",
+    "-q",
+    "-s",
+    "--durations=0",
+    "-p",
+    "timing_probe",
+    "--basetemp=/tmp/camctl-timing-current-outputs-20261025T132740Z/pytest-tmp"
+  ],
+  "cwd": "/tmp/camctl-timing-current-outputs-20261025T132740Z/source",
+  "head": "fc3104424fd8ce64152cbdd6f1b4899d38e011e1",
+  "started_utc": "2026-10-25T13:28:05.054373+00:00",
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-timing-current-outputs-20261025T132740Z:/tmp/camctl-timing-current-outputs-20261025T132740Z/source/apps/camctl/src:/tmp/camctl-timing-current-outputs-20261025T132740Z/source/apps/camctl/tests",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-timing-current-outputs-20261025T132740Z/pycache",
+    "TMPDIR": "/tmp/camctl-timing-current-outputs-20261025T132740Z/tmp",
+    "CAMCTL_EXTERNAL_PROBE_RESULT": "/tmp/camctl-timing-current-outputs-20261025T132740Z/stage-result.json"
+  },
+  "log": "/tmp/camctl-timing-current-outputs-20261025T132740Z/pytest.log",
+  "exit_code": 0,
+  "wall_seconds": 23.156335025007138,
+  "finished_utc": "2026-10-25T13:28:30.482519+00:00"
+}

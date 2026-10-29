@@ -1,0 +1,79 @@
+{
+  "id": "root/test_database_history_sql",
+  "scope": "root",
+  "path": "tests/integration/test_database_history_sql.py",
+  "targets": [
+    "tests/integration/test_database_history_sql.py"
+  ],
+  "estimated_seconds": 0.4258842019844451,
+  "historical_failure_observed": false,
+  "status": "passed",
+  "number": 78,
+  "worker": 3,
+  "artifacts": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/artifacts",
+  "cwd": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source",
+  "started_utc": "2026-10-26T00:41:19.497521+00:00",
+  "command": [
+    "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/apps/camctl/.venv311/bin/python",
+    "-m",
+    "pytest",
+    "tests/integration/test_database_history_sql.py",
+    "-q",
+    "--durations=0",
+    "-p",
+    "integration_progress",
+    "--basetemp",
+    "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/tmp/pytest",
+    "-p",
+    "camctl_memory_plugin",
+    "--camctl-memory-limit",
+    "2GiB",
+    "--camctl-memory-cgroup-root",
+    "/sys/fs/cgroup/memory/camctl-budget-1922809-b293c146ab7744439fec45b828581e67"
+  ],
+  "environment": {
+    "PYTHONPATH": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/control:/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/apps/camctl/src",
+    "PYTHONPYCACHEPREFIX": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/workers/3/python-cache",
+    "UV_PYTHON": "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "UV_PROJECT_ENVIRONMENT": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/workers/3/project-env",
+    "UV_CACHE_DIR": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/workers/3/uv-cache",
+    "UV_OFFLINE": "1",
+    "TMPDIR": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/tmp"
+  },
+  "preparations": [
+    {
+      "label": "package-resources",
+      "command": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source/apps/camctl/scripts/sync_resources.py"
+      ],
+      "cwd": "/tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/078-root-test_database_history_sql/source",
+      "started_utc": "2026-10-26T00:41:21.167811+00:00",
+      "pid": 1973818,
+      "exit_code": 0,
+      "finished_utc": "2026-10-26T00:41:21.256461+00:00",
+      "wall_seconds": 0.0886502270004712
+    }
+  ],
+  "preparation": "package-resources",
+  "preparation_pid": 1973818,
+  "pid": 1973823,
+  "execution_started_utc": "2026-10-26T00:41:21.257957+00:00",
+  "progress": {
+    "status": "finished",
+    "exit_code": 0,
+    "collected": 27,
+    "outcomes": {
+      "passed": 27
+    },
+    "subchecks": {
+      "passed": 342
+    },
+    "elapsed_seconds": 1.378191950992914,
+    "utc": "2026-10-26T00:41:23.115773+00:00",
+    "pid": 1973823
+  },
+  "exit_code": 0,
+  "finished_utc": "2026-10-26T00:41:23.250053+00:00",
+  "wall_seconds": 3.752494261992979
+}

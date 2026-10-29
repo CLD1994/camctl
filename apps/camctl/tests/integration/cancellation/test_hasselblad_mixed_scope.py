@@ -13,8 +13,9 @@ from camctl.host_files.models import BoundDirectories
 from camctl.capture.handlers import capture_handler
 from camctl.persistence.models import DbOutcomeKind
 from ..capture.test_host_photo_flow import _world,_input_time
-from .test_hasselblad_preview_fixed_boundary import close,accept_origin
-from .test_hasselblad_start_boundary import HeldTransport
+from .hasselblad_support import (close, accept_origin, HeldPhotoTransport as HeldTransport,
+    action, grant_unknown, cancel, fixed_members, fixed_key)
+from camctl.history.validators import validate_event
 from .test_hasselblad_fixed_request_scope import fixed,context_for
 
 pytestmark=pytest.mark.asyncio
@@ -77,21 +78,21 @@ async def test_each_mixed_camera_keeps_its_original_preview_permission(tmp_path,
         assert may_apply_cancel(decide_cancel_eligibility(load_eligibility_facts(owned.connection,2))) is allowed
         task=asyncio.create_task(capture_handler('camera_take_photo')(1,runtime))
         await asyncio.wait_for(transport.entered.wait(),1)
-        origin,repository=accept_origin(cfg,owned,runtime,{'plan_instance_id':'1','group':'g'})
+        origin,repository=await accept_origin(cfg,owned,runtime,{'plan_instance_id':'1','group':'g'})
         entries=[(1,1,1),(2,1,1)]+([(4,2,1)] if allowed else [])
         if add_denied_hb_preview: entries.append((3,2,1))
         entries.sort()
         before=tuple(owned.connection.iterdump())
         event,context=context_for(owned,runtime,origin,entries)
         if add_denied_hb_preview:
-            with pytest.raises(EventValidationError): module._cancel_targets_guard(event,context)
-        else: module._cancel_targets_guard(event,context)
+            with pytest.raises(EventValidationError): validate_event(event,context)
+        else: validate_event(event,context)
         result=repository.fix_cancel_targets(fixed(origin,runtime,entries),new_operation_key(),owned)
         assert (result.kind is DbOutcomeKind.COMPLETED) is (not add_denied_hb_preview),result.error
         if add_denied_hb_preview: assert tuple(owned.connection.iterdump())==before
         else:
             assert owned.connection.execute('SELECT target_action_id,selection_basis,cancellation_effect FROM cancel_items WHERE action_id=? ORDER BY target_action_id',(origin,)).fetchall()==entries
-        assert not task.done() and runtime.action(1)['cancel_requested']==0
+        assert not task.done() and action(owned,1)['cancel_requested']==0
     finally:
         await close(owned,transport,task)
 
@@ -102,9 +103,8 @@ async def test_each_mixed_camera_keeps_its_original_preview_permission(tmp_path,
 @pytest.mark.parametrize('surface',['resolve','repository'])
 async def test_foreign_residual_keeps_each_mixed_source_preview_scope(tmp_path,phase,hb_state,address_kind,surface):
     from dataclasses import replace
-    from camctl.bootstrap.flows import _resolve_and_fix
     from camctl.contracts.values import OperationKey
-    from camctl.devices.start_entry import StartEntryCoordinator,EntryBlock
+    from camctl.devices.start_entry import EntryBlock
     from camctl.history.reads import ReadCoverage
     from camctl.history.validators import EventValidationError
     from camctl.persistence.repositories import cancellation as module
@@ -139,10 +139,9 @@ async def test_foreign_residual_keeps_each_mixed_source_preview_scope(tmp_path,p
             task=asyncio.create_task(capture_handler('camera_take_photo')(1,runtime))
             await asyncio.wait_for(transport.entered.wait(),1)
         elif hb_state=='unknown':
-            runtime.grant(runtime.action(1))
-            runtime.start_entries=StartEntryCoordinator()
+            grant_unknown(owned,runtime)
         target={'plan_instance_id':'1',**({'group':'g'} if address_kind=='group' else {})}
-        origin,repository=accept_origin(cfg,owned,runtime,target)
+        origin,repository=await accept_origin(cfg,owned,runtime,target)
         expected=[(1,1,1),(2,1,1),(4,2,1)] if address_kind=='group' else [(1,1,1),(2,1,1),(3,1,1),(4,3,1)]
         if hb_state=='ready':
             expected=[(1,1,1),(2,1,1),(3,2,1),(4,2,1)] if address_kind=='group' else [(1,1,1),(2,1,1),(3,3,1),(4,3,1)]
@@ -154,32 +153,33 @@ async def test_foreign_residual_keeps_each_mixed_source_preview_scope(tmp_path,p
             # 显式提供实际外部主键范围，避免缺上下文代替职责反例。
             context=replace(context,read_coverage=ReadCoverage({**context.read_coverage.ranges,
                 ('device_activities','id'):frozenset((900,))}))
-            module._cancel_targets_guard(event,context)
+            validate_event(event,context)
             broken,broken_context=context_for(owned,runtime,origin,bad)
             broken_context=replace(broken_context,read_coverage=context.read_coverage)
-            with pytest.raises(EventValidationError): module._cancel_targets_guard(broken,broken_context)
+            with pytest.raises(EventValidationError): validate_event(broken,broken_context)
             before=tuple(owned.connection.iterdump())
             rejected=repository.fix_cancel_targets(fixed(origin,runtime,bad),new_operation_key(),owned)
             assert rejected.kind is not DbOutcomeKind.COMPLETED
             assert tuple(owned.connection.iterdump())==before
         old=row_facts(owned.connection,'device_activities',900)
         assert old['action_id']==900 and old['occupancy_state']==1
-        assert row_facts(owned.connection,'actions',900)['plan_id']!=runtime.action(2)['plan_id']
+        assert row_facts(owned.connection,'actions',900)['plan_id']!=action(owned,2)['plan_id']
         saved_runs={t.run_id:row_facts(owned.connection,'operation_runs',t.run_id) for t in (stop,query)}
         saved_attempts={identity:row_facts(owned.connection,'operation_attempts',identity) for run_id in saved_runs for identity, in
             owned.connection.execute('SELECT id FROM operation_attempts WHERE run_id=?',(run_id,))}
         command=fixed(origin,runtime,expected)
         if surface=='resolve':
-            raw=owned.connection.execute('SELECT input_fields_json FROM actions WHERE id=?',(origin,)).fetchone()[0]
-            _resolve_and_fix(owned,repository,origin,raw,runtime.wall_us)
-            key=OperationKey(owned.connection.execute('SELECT operation_key FROM history_transactions ORDER BY id DESC LIMIT 1').fetchone()[0])
+            await cancel(cfg,runtime)
+            assert fixed_members(owned,origin)==expected
+            key=fixed_key(owned,origin)
         else:
             key=new_operation_key()
             if hb_state=='ready':
                 permit=runtime.start_entries.reserve(owned.metadata.instance_id,1,no_intent=True)
                 assert permit is not None
                 command=replace(command,entry_blocks=(EntryBlock(permit.database_id,permit.action_id,permit.ticket),))
-            result=repository.fix_cancel_targets(command,key,owned)
+            snapshots=tuple((block,permit.phase) for block in command.entry_blocks)
+            result=repository.fix_cancel_targets(command,key,owned,reserved_entries=snapshots)
             assert result.kind is DbOutcomeKind.COMPLETED,result.error
         if hb_state=='ready':
             # 真实窄复合的 PlanReadScope 仍只属于当前计划；旧活动保持另一计划归属。
@@ -187,8 +187,10 @@ async def test_foreign_residual_keeps_each_mixed_source_preview_scope(tmp_path,p
             final=[(identity,basis,2 if identity==1 else effect) for identity,basis,effect in expected]
             assert owned.connection.execute('SELECT id FROM operation_runs WHERE kind=1').fetchall()==[]
         else: final=expected
+        if surface=='resolve':
+            final=[(identity,basis,1 if identity==1 and hb_state!='ready' else 2) for identity,basis,effect in expected]
         assert owned.connection.execute('SELECT target_action_id,selection_basis,cancellation_effect FROM cancel_items WHERE action_id=? ORDER BY target_action_id',(origin,)).fetchall()==final
-        assert runtime.action(1)['cancel_requested']==int(hb_state=='ready')
+        assert action(owned,1)['cancel_requested']==int(hb_state=='ready')
         item_id=owned.connection.execute('SELECT id FROM cancel_items WHERE action_id=? AND target_action_id=2',(origin,)).fetchone()[0]
         applied=repository.apply_cancel_target(ApplyCancelTarget(item_id,CancelApplyMode.PRE_START,runtime.wall_us()),new_operation_key(),owned)
         assert applied.kind is DbOutcomeKind.COMPLETED,applied.error
@@ -196,7 +198,7 @@ async def test_foreign_residual_keeps_each_mixed_source_preview_scope(tmp_path,p
         replay=repository.fix_cancel_targets(command,key,owned)
         assert replay.kind is DbOutcomeKind.COMPLETED,replay.error
         assert tuple(owned.connection.iterdump())==before_replay
-        assert runtime.action(1)['cancel_requested']==int(hb_state=='ready')
+        assert action(owned,1)['cancel_requested']==int(hb_state=='ready')
         assert row_facts(owned.connection,'device_activities',900)==old
         assert {identity:row_facts(owned.connection,'operation_runs',identity) for identity in saved_runs}==saved_runs
         assert {identity:row_facts(owned.connection,'operation_attempts',identity) for identity in saved_attempts}==saved_attempts

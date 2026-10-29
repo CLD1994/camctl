@@ -1,0 +1,7 @@
+[
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/018-root-test_camctl_host_deployment/source/tests/integration/test_camctl_host_deployment.py::test_default_configuration_is_shared_by_init_and_run[False]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/018-root-test_camctl_host_deployment/source/tests/integration/test_camctl_host_deployment.py::test_default_configuration_is_shared_by_init_and_run[True]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/018-root-test_camctl_host_deployment/source/tests/integration/test_camctl_host_deployment.py::test_shipped_deployment_guide_publishes_and_claims_same_report[False]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/018-root-test_camctl_host_deployment/source/tests/integration/test_camctl_host_deployment.py::test_shipped_deployment_guide_publishes_and_claims_same_report[True]",
+  "tmp/camctl-integration-all-final-20261026-u19lkvoe/tasks/018-root-test_camctl_host_deployment/source/tests/integration/test_camctl_host_deployment.py::test_submit_saved_rejection_allows_removing_input"
+]

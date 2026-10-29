@@ -9,14 +9,17 @@ import sqlite3
 import subprocess
 import sys
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
+from ..support.capture import capture_database, capture_runtime
+
 from camctl.acceptance.input import ParsedInput
 from camctl.acceptance.ports import ParameterDefinition
-from camctl.acceptance.service import CommandMode
+from camctl.acceptance.service import AcceptanceContext, CommandMode, accept_input
 from camctl.bootstrap.capture_assembly import session_capture_assembly
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.cancellation.models import (
@@ -358,20 +361,16 @@ def _apply_cancel(owned, cancel_action_id: int, action_id: int) -> None:
 
 
 async def _cancel_through_service(owned, runtime, cancel_action_id=2):
-    from camctl.bootstrap.flows import _resolve_and_fix
-    from camctl.cancellation.service import ApplyCancel, CancellationRuntime, apply_cancel
-    from camctl.cancellation.settlement import TargetSettlement
-    from camctl.persistence.repositories.outputs import OutputsRepository
-    repository = CancellationRepository(start_entries=runtime.start_entries)
-    started = repository.start_cancel_action(
-        StartCancelAction(cancel_action_id, _NOW), new_operation_key(), owned)
-    assert started.kind is DbOutcomeKind.COMPLETED, started.error
-    raw, = owned.connection.execute(
-        'SELECT input_fields_json FROM actions WHERE id=?', (cancel_action_id,)).fetchone()
-    ids = _resolve_and_fix(owned, repository, cancel_action_id, raw, runtime.wall_us)
-    return await apply_cancel(ApplyCancel(cancel_action_id, ids), CancellationRuntime(
-        owned, repository, TargetSettlement(owned, OutputsRepository(), repository,
-            lambda _: 'unknown', runtime.wall_us), runtime.wall_us))
+    """正式取消流程处理已受理动作，再读取每个目标的可靠结果。"""
+    from camctl.bootstrap.flows import cancel_flow
+
+    metadata = runtime.database.metadata
+    flow = cancel_flow(ready=Path(metadata.ready_path), processing=Path(metadata.processing_path),
+        start_entries=runtime.start_entries)
+    await flow(SimpleNamespace(database=runtime.database,
+        clock=SimpleNamespace(utc_micros=runtime.wall_us)))
+    return tuple(row[0] for row in owned.connection.execute(
+        "SELECT status FROM cancel_items WHERE action_id=? ORDER BY id", (cancel_action_id,)))
 
 
 async def _world(tmp_path: Path, *, driver: _PhotoDriver | None = None,
@@ -410,12 +409,14 @@ async def _world(tmp_path: Path, *, driver: _PhotoDriver | None = None,
     catalog = (catalog_factory(cfg) if catalog_factory is not None else
         _LegacyPhotoCatalog() if legacy else build_catalog(
         cfg, DriverDefinitions({DRIVER_ID: driver_definition()})))
-    accepted = AcceptanceRepository().process_input(ProcessInput(
-        ParsedInput("hasselblad.json", {
+    database = await capture_database(owned)
+    accepted = await accept_input(ParsedInput("hasselblad.json", {
             "request_id": "1", "created_at": _input_time(), "name": "主机 RAW 拍摄",
             "actions": actions,
-        }), catalog, CommandMode.RUN, _NOW), new_operation_key(), owned)
-    assert accepted.kind is DbOutcomeKind.COMPLETED, accepted.error
+        }), AcceptanceContext(CommandMode.RUN, catalog, AcceptanceRepository(),
+            clock=SimpleNamespace(utc_micros=lambda: _NOW)),
+        new_operation_key(), database)
+    assert accepted.plan_id is not None, accepted
     scheduled = SchedulingRepository()
     for save, request in ((
         (scheduled.observe_window, ObserveWindowRequest(1, _NOW, _NOW)),
@@ -425,13 +426,11 @@ async def _world(tmp_path: Path, *, driver: _PhotoDriver | None = None,
         assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
     clock = wall if wall is not None else [_NOW]
     registry = DriverRegistry((_entry(selected_driver, evidence),))
-    factory = session_capture_assembly(
+    runtime = await capture_runtime(database, driver=selected_driver,
+        evidence=_entry(selected_driver, evidence).evidence,
         devices=cfg.devices, drivers=registry, results=results,
-        staging=Path(cfg.paths.staging),
-        wait_config=lambda _action: None,
-        wall_us=lambda: clock[0], monotonic_ns=lambda: 9_000_000_000,
-    )
-    runtime = factory(owned, "cam-1")
+        staging=Path(cfg.paths.staging), wait_config=lambda _action: None,
+        wall_us=lambda: clock[0], monotonic_ns=lambda: 9_000_000_000)
     return cfg, owned, selected_driver, runtime, clock
 
 
@@ -475,7 +474,7 @@ def _accept_and_start_second_host_photo(cfg, owned):
 async def test_host_photo_uses_saved_task_and_real_assembly_to_register_pair(tmp_path):
     cfg, owned, driver, runtime, _clock = await _world(tmp_path)
     try:
-        action = runtime.action(1)
+        action = (await runtime.action(1))
         assert action["execution_spec_json"] == {
             "output_storage": "host", "start_call_timeout_s": Decimal("180")}
         assert runtime.results is None
@@ -631,25 +630,45 @@ async def test_unknown_activity_close_receipt_recovers_without_repeating_capture
 ])
 async def test_noncompleted_activity_close_receipt_stops_under_python_optimization(receipt_kind):
     script = """
+import asyncio
 import sys
-from types import SimpleNamespace
-from camctl.capture.handlers import _conclude_activity
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from camctl.capture.handlers import capture_handler
 from camctl.contracts.values import ConsistencyError
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
+from camctl.persistence.repositories.capture import CaptureRepository
+from integration.capture.test_host_photo_flow import _world
+from integration.support.capture import capture_test_session
 
-class Capture:
-    def conclude_activity(self, *_args):
-        return DbOutcome(DbOutcomeKind(sys.argv[1]), error=RuntimeError('receipt fault'))
+async def main():
+    with TemporaryDirectory() as home:
+        async with capture_test_session():
+            _cfg, owned, driver, runtime, _clock = await _world(Path(home))
+            original = CaptureRepository.conclude_activity
+            def receipt_fault(self, *_args):
+                return DbOutcome(DbOutcomeKind(sys.argv[1]), error=RuntimeError('receipt fault'))
+            CaptureRepository.conclude_activity = receipt_fault
+            try:
+                try:
+                    await capture_handler('camera_take_photo')(1, runtime)
+                except ConsistencyError as error:
+                    if 'receipt fault' not in str(error):
+                        raise SystemExit(f'wrong failure: {error}')
+                else:
+                    raise SystemExit('capture continued after a non-COMPLETED receipt')
+                if len(driver.requests) != 1:
+                    raise SystemExit('capture call identity changed')
+                if owned.connection.execute('SELECT status FROM actions WHERE id=1').fetchone() != (2,):
+                    raise SystemExit('capture reached terminal before reliable activity close')
+                if owned.connection.execute('SELECT COUNT(*) FROM outputs').fetchone() != (0,):
+                    raise SystemExit('capture registered outputs before reliable activity close')
+                print('noncompleted receipt rejected')
+            finally:
+                CaptureRepository.conclude_activity = original
+                owned.connection.close()
 
-runtime = SimpleNamespace(capture=Capture(), wall_us=lambda: 1, owned=object())
-try:
-    _conclude_activity(runtime, 1)
-except ConsistencyError as error:
-    if 'receipt fault' not in str(error):
-        raise SystemExit(f'wrong failure: {error}')
-    print('noncompleted receipt rejected')
-else:
-    raise SystemExit('helper continued after a non-COMPLETED receipt')
+asyncio.run(main())
 """
     result = subprocess.run(
         [sys.executable, "-O", "-c", script, receipt_kind.value],
@@ -681,7 +700,7 @@ async def test_actual_hasselblad_driver_steps_and_file_port_finish_through_captu
         assert [call.argv[3] for call in transport.calls] == [
             "list", "info", "set", "set", "set", "set", "set", "set", "capture",
         ]
-        assert [call.timeout_s for call in transport.calls] == [Decimal("180")] * 9
+        assert [call.timeout_s for call in transport.calls] == [Decimal("10")] * 8 + [Decimal("180")]
         assert owned.connection.execute(
             "SELECT status FROM actions WHERE id=1").fetchone() == (3,)
         result_json, = owned.connection.execute(
@@ -689,13 +708,20 @@ async def test_actual_hasselblad_driver_steps_and_file_port_finish_through_captu
             " JOIN operation_runs r ON r.id=a.run_id"
             " WHERE r.responsibility_key='start/1'").fetchone()
         photo = json.loads(result_json)["observations"][0]
-        steps = photo["data"]["steps"]
+        prepared_json, = owned.connection.execute(
+            "SELECT a.result_json FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id"
+            " WHERE r.kind=? AND r.action_id=1",
+            (int(enum_for("operation_runs.kind").PREPARE_CAPTURE),)).fetchone()
+        preparation = json.loads(prepared_json)
+        preparation_steps = next(value["data"]["steps"] for value in preparation["observations"]
+            if value["type"] == "photo_preparation_steps")
+        steps = preparation_steps + photo["data"]["steps"]
         assert [step["name"] for step in steps] == [
             "list", "info", "drive_mode_single", "capture_format", "exposure_mode", "iso", "white_balance_mode", "focus_mode", "capture",
         ]
-        diagnostics = json.loads(result_json)["diagnostics"]
-        assert [call["stdout"]["hex"] for call in diagnostics["calls"]] == [raw.output.hex() for raw in transport.outcomes]
-        assert all(call["stderr"] == {"state":"complete", "hex":""} for call in diagnostics["calls"])
+        calls = preparation["diagnostics"]["calls"] + json.loads(result_json)["diagnostics"]["calls"]
+        assert [call["stdout"]["hex"] for call in calls] == [raw.output.hex() for raw in transport.outcomes]
+        assert all(call["stderr"] == {"state":"complete", "hex":""} for call in calls)
         assert all("stderr_hex" not in step for step in steps)
         assert all(isinstance(step, dict) for step in steps)
         assert len(_saved_output_rows(owned)) == 2
@@ -807,7 +833,7 @@ async def test_entered_dispatch_preserves_rejected_cancel_and_window_failure(tmp
 
     async def cancel_callback(request):
         result = await _cancel_through_service(owned, runtime)
-        assert result.items[0].status == 4
+        assert result[0] == 4
 
     canceled_driver = _PhotoDriver(Path(cfg.paths.staging), before_dispatch=cancel_callback)
     registry = DriverRegistry((_entry(canceled_driver),))
@@ -815,7 +841,7 @@ async def test_entered_dispatch_preserves_rejected_cancel_and_window_failure(tmp
         devices=cfg.devices, drivers=registry, staging=Path(cfg.paths.staging),
         wait_config=lambda _action: None, wall_us=lambda: _NOW,
         monotonic_ns=lambda: 9_000_000_000)
-    runtime = factory(owned, "cam-1")
+    runtime = await factory(await capture_database(owned), "cam-1")
     try:
         await capture_handler("camera_take_photo")(1, runtime)
         assert len(canceled_driver.requests) == 1
@@ -836,7 +862,7 @@ async def test_entered_dispatch_preserves_rejected_cancel_and_window_failure(tmp
         devices=cfg.devices, drivers=DriverRegistry((_entry(expired_driver),)),
         staging=Path(cfg.paths.staging), wait_config=lambda _action: None,
         wall_us=lambda: window[0], monotonic_ns=lambda: 9_000_000_000)
-    runtime = factory(owned, "cam-1")
+    runtime = await factory(await capture_database(owned), "cam-1")
     try:
         await capture_handler("camera_take_photo")(1, runtime)
         assert len(expired_driver.requests) == 1
@@ -851,7 +877,7 @@ async def test_entered_dispatch_preserves_rejected_cancel_and_window_failure(tmp
 async def test_legacy_photo_does_not_use_current_hasselblad_binding_as_storage_selector(tmp_path):
     _cfg, owned, driver, runtime, _clock = await _world(tmp_path, legacy=True)
     try:
-        assert runtime.action(1)["execution_spec_json"] == {}
+        assert (await runtime.action(1))["execution_spec_json"] == {}
         assert runtime.results is None
         with pytest.raises(CapabilityNotDeclaredError, match="result"):
             await capture_handler("camera_take_photo")(1, runtime)
@@ -866,7 +892,7 @@ async def test_legacy_photo_with_result_port_keeps_device_listing_path(tmp_path)
     _cfg, owned, driver, runtime, _clock = await _world(
         tmp_path, legacy=True, results=results, evidence=_LEGACY_RESULTS)
     try:
-        assert runtime.action(1)["execution_spec_json"] == {}
+        assert (await runtime.action(1))["execution_spec_json"] == {}
         await capture_handler("camera_take_photo")(1, runtime)
         assert len(driver.requests) == 1
         assert driver.requests[0].timeout_s == Decimal("30")
@@ -929,67 +955,90 @@ async def test_jpeg_photo_unknown_complete_reuses_original_request_and_pair(tmp_
         owned.connection.close()
 
 
-@pytest.mark.parametrize("verifier_failure", ["missing", "raises"])
-async def test_unknown_host_photo_receipt_without_verifier_retains_request(
-    tmp_path, verifier_failure,
+async def test_unknown_host_photo_verification_error_retains_original_request_and_recovers(
+    tmp_path, monkeypatch,
 ):
-    _cfg, owned, driver, runtime, _clock = await _world(tmp_path)
+    from dataclasses import replace
     from camctl.persistence.repositories.host_capture import HostCaptureRepository
+    from ..support import database as database_support
+    from ..support.capture import capture_test_session
 
-    real = HostCaptureRepository()
+    closed = []
+    open_database = database_support.open_existing
 
-    class UnknownCommittedReceipt:
-        def __init__(self):
-            self.saved = []
-            self.verified = []
-            self.verifier_connections = []
+    class ConnectionClose:
+        def __init__(self, connection, position):
+            self.connection, self.position = connection, position
 
-        def prepare_host_photo(self, *args):
-            return real.prepare_host_photo(*args)
+        def __getattr__(self, name):
+            return getattr(self.connection, name)
 
-        def save_host_photo_complete(self, request, key, current_owned):
-            self.saved.append((request, key))
-            receipt = real.save_host_photo_complete(request, key, current_owned)
-            assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-            current_owned.connection.execute("BEGIN").close()
-            return DbOutcome(DbOutcomeKind.UNKNOWN, error=RuntimeError("提交回执未知"))
+        def close(self):
+            self.connection.close()
+            closed[self.position] = True
 
-        def verify_operation(self, request, key, verifier):
-            self.verified.append((request, key))
-            self.verifier_connections.append(verifier.connection)
-            if verifier_failure == "raises":
-                raise OSError("测试仓储核实错误")
-            return real.verify_operation(request, key, verifier)
+    def tracked_open(*args, **kwargs):
+        owned = open_database(*args, **kwargs)
+        position = len(closed)
+        closed.append(False)
+        return replace(owned, connection=ConnectionClose(owned.connection, position))
 
-    uncertain = UnknownCommittedReceipt()
-    runtime.host_capture = uncertain
-    if verifier_failure == "missing":
-        runtime.host_photo_operation_verifier = None
-    try:
-        expected_error = ConsistencyError if verifier_failure == "missing" else OSError
-        with pytest.raises(expected_error):
+    monkeypatch.setattr(database_support, "open_existing", tracked_open)
+    async with capture_test_session():
+        _cfg, owned, driver, runtime, _clock = await _world(tmp_path)
+        real = HostCaptureRepository()
+
+        class UnknownCommittedReceipt:
+            def __init__(self):
+                self.saved, self.verified = [], []
+                self.fail_verification = True
+
+            def prepare_host_photo(self, *args):
+                return real.prepare_host_photo(*args)
+
+            def save_host_photo_complete(self, request, key, current_owned):
+                self.saved.append((request, key))
+                receipt = real.save_host_photo_complete(request, key, current_owned)
+                assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+                current_owned.connection.execute("BEGIN").close()
+                return DbOutcome(DbOutcomeKind.UNKNOWN, error=RuntimeError("提交回执未知"))
+
+            def verify_operation(self, request, key, verifier):
+                self.verified.append((request, key))
+                if self.fail_verification:
+                    raise OSError("测试仓储核实错误")
+                return real.verify_operation(request, key, verifier)
+
+        uncertain = UnknownCommittedReceipt()
+        runtime.host_capture = uncertain
+        try:
+            with pytest.raises(OSError, match="测试仓储核实错误"):
+                await capture_handler("camera_take_photo")(1, runtime)
+            assert len(driver.requests) == 1
+            assert len(uncertain.saved) == len(uncertain.verified) == 1
+            assert uncertain.saved[0] == uncertain.verified[0]
+            assert owned.connection.in_transaction is False
+            assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (2,)
+            assert owned.connection.execute(
+                "SELECT size_bytes,sha256 FROM intermediate_files WHERE owner_action_id=1 ORDER BY purpose"
+            ).fetchall() == [
+                (len(_ORIGINAL), hashlib.sha256(_ORIGINAL).hexdigest()),
+                (len(_PREVIEW), hashlib.sha256(_PREVIEW).hexdigest()),
+            ]
+            assert _saved_output_rows(owned) == []
+            uncertain.fail_verification = False
             await capture_handler("camera_take_photo")(1, runtime)
-
-        assert len(driver.requests) == 1
-        assert len(uncertain.saved) == 1
-        assert owned.connection.in_transaction is False
-        assert len(uncertain.verified) == (0 if verifier_failure == "missing" else 1)
-        assert 1 in runtime.pending_host_photo_completions
-        if verifier_failure == "raises":
-            with pytest.raises(sqlite3.ProgrammingError):
-                uncertain.verifier_connections[0].execute("SELECT 1")
-        assert owned.connection.execute(
-            "SELECT size_bytes,sha256 FROM intermediate_files WHERE owner_action_id=1 ORDER BY purpose"
-        ).fetchall() == [
-            (len(_ORIGINAL), hashlib.sha256(_ORIGINAL).hexdigest()),
-            (len(_PREVIEW), hashlib.sha256(_PREVIEW).hexdigest()),
-        ]
-        assert _saved_output_rows(owned) == []
-    finally:
-        owned.connection.close()
+            assert len(driver.requests) == 1
+            assert uncertain.saved == [uncertain.saved[0]] * 2
+            assert uncertain.verified == uncertain.saved
+            assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (3,)
+            assert len(_saved_output_rows(owned)) == 2
+        finally:
+            owned.connection.close()
+    assert len(closed) >= 3 and all(closed)
 
 
-async def test_v1_metadata_rejects_host_photo_before_grant_or_workspace(tmp_path):
+async def test_v1_metadata_rejects_host_photo_before_grant_or_workspace(tmp_path, capture_resources):
     cfg, owned, driver, _runtime, _clock = await _world(tmp_path)
     owned.connection.close()
     # Keep a valid saved host action but expose a V1 format marker to the
@@ -1002,14 +1051,11 @@ async def test_v1_metadata_rejects_host_photo_before_grant_or_workspace(tmp_path
     finally:
         legacy.close()
     owned = open_existing(Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
-    runtime = session_capture_assembly(
-        devices=cfg.devices,
-        drivers=DriverRegistry((_entry(driver),)),
-        staging=Path(cfg.paths.staging),
-        wait_config=lambda _action: None,
-        wall_us=lambda: _NOW,
-        monotonic_ns=lambda: 9_000_000_000,
-    )(owned, "cam-1")
+    database = await capture_resources.restart_database(Path(cfg.paths.state_db))
+    runtime = await capture_runtime(database, driver=driver, evidence=_entry(driver).evidence,
+        devices=cfg.devices, drivers=DriverRegistry((_entry(driver),)),
+        staging=Path(cfg.paths.staging), wait_config=lambda _action: None,
+        wall_us=lambda: _NOW, monotonic_ns=lambda: 9_000_000_000)
     try:
         activities_before = owned.connection.execute(
             "SELECT COUNT(*) FROM device_activities WHERE action_id=1").fetchone()

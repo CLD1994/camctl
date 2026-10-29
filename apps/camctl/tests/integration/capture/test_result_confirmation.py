@@ -9,6 +9,10 @@
 
 from __future__ import annotations
 
+from ..support.capture import capture_runtime
+from unittest.mock import create_autospec
+from camctl.devices.ports import ControlDriver
+
 import json
 from decimal import Decimal
 from pathlib import Path
@@ -714,23 +718,18 @@ class TestConclusionRecovery:
         from camctl.capture.timelapse import CaptureWaitConfig
         from camctl.scheduling.rules import LaunchWindow
 
-        runtime = CaptureRuntime(
-            owned=owned,
-            scheduling=SchedulingRepository(),
-            operations=OperationRepository(),
-            capture=CaptureRepository(),
-            timelapse=TimelapseRepository(),
-            driver=None,
+        driver = create_autospec(ControlDriver, instance=True)
+        driver.control.side_effect = AssertionError("已保存集合的本地消费不能重新START")
+        runtime = (await capture_runtime(
+            owned,
+            driver=driver,
             results=ResultsDouble(files),
             evidence=EvidenceRegistry(()),
             wall_us=lambda: _NOW + 700_000_000,
             monotonic_ns=lambda: 5_000_000_000,
-            window_of=lambda action: LaunchWindow(
-                scheduled_at=action["scheduled_at"],
-                window_end=action["scheduled_at"] + action["max_delay_ms"] * 1000),
             wait_config=lambda params: CaptureWaitConfig(
                 target_duration_ms=600_000, driver_margin_ms=0),
-        )
+        ))
         await capture_handler("camera_timelapse")(action_id, runtime)
         return runtime
 

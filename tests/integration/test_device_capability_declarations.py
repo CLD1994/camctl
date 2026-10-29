@@ -6,6 +6,8 @@ wheel 与锁定运行依赖在仓库外离线安装，设备工具只作为禁�
 
 from __future__ import annotations
 
+from camctl_memory_plugin import run_test_command
+
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -50,11 +52,11 @@ class Installed:
     wheel: Path
     environment: dict[str, str]
 
-    def run(self, command, *, cwd=None, env=None, timeout=180):
+    def run(self, command, *, cwd=None, env=None, timeout=180, camctl=False):
         environment = dict(self.environment)
         environment.update(env or {})
-        result = subprocess.run(
-            [str(part) for part in command], cwd=cwd or self.root,
+        result = run_test_command(
+            [str(part) for part in command], camctl=camctl, receipt_root=self.root, cwd=cwd or self.root,
             env=environment, capture_output=True, text=True, timeout=timeout,
         )
         logs = self.root / "commands"
@@ -72,7 +74,7 @@ class Installed:
         environment = {"PYTHONPATH": str(PROJECT / "src")} if checkout else {}
         python = sys.executable if checkout else self.python
         entry = [self.root / "declaration_entry.py"] if fixture else ["-m", "camctl"]
-        return self.run([python, *entry, *args], env=environment)
+        return self.run([python, *entry, *args], env=environment, camctl=True)
 
 
 @pytest.fixture(scope="module")
@@ -116,7 +118,7 @@ def package(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def client_build(package):
-    package.run(["pnpm", "run", "build"], cwd=CLIENT)
+    package.run(["npm", "run", "build"], cwd=CLIENT)
 
 
 def _config(package, directory, *, host_storage="host", fixtures=False):

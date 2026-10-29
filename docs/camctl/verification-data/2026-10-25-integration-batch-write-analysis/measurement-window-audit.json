@@ -1,0 +1,484 @@
+{
+  "scope": "独立只读审计现有测试及原始归档；未运行测试、未修改仓库。",
+  "audit_head": "98d3b28da5751e1e8c733f2712180cd5e0e119aa",
+  "sampled_head": "fc3104424fd8ce64152cbdd6f1b4899d38e011e1",
+  "test_body_identical_to_sampled_head": true,
+  "plain_explanation": "测试先把20、200、400个来源文件的观察、归属、完成和分段关系真实保存到SQLite，再以每批4项发布全部正式产物并按原操作键完整核实。它要证明文件数变多时，不会把全部业务对象同时堆在内存中。测得的慢段包含真实业务校验、事件生成及保存，也包含测试逐条SQL/逐行统计和tracemalloc的额外工作；现有单个样本不能把两者拆开。",
+  "contract": [
+    {
+      "claim": "三个独立真实SQLite世界，规模20/200/400；每个世界一次完整分段完成写入、一次原键核实，batch_size=4。",
+      "refs": [
+        {
+          "file": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py",
+          "lines": [
+            477,
+            490
+          ]
+        }
+      ]
+    },
+    {
+      "claim": "返回结果一致，正式产物数量等于输入count；增长路径禁止fetchall，每次fetchmany请求不得超过128。",
+      "refs": [
+        {
+          "file": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py",
+          "lines": [
+            454,
+            464
+          ]
+        },
+        {
+          "file": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py",
+          "lines": [
+            490,
+            491
+          ]
+        }
+      ]
+    },
+    {
+      "claim": "完整历史组COUNT/MIN/MAX检查不超过3次；这是一个特定SQL形状的执行次数，不是全部业务完整性检查总数。",
+      "refs": [
+        {
+          "file": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py",
+          "lines": [
+            473,
+            476
+          ]
+        },
+        {
+          "file": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py",
+          "lines": [
+            491,
+            491
+          ]
+        }
+      ]
+    },
+    {
+      "claim": "原结果页上限128高于处理批量4；200项跨过完整原页边界，200相对20的Python峰值增量小于2000000字节，400相对200的增量小于400000字节，写入和核实各自判断。",
+      "refs": [
+        {
+          "file": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py",
+          "lines": [
+            512,
+            516
+          ]
+        }
+      ]
+    },
+    {
+      "claim": "单文件身份查询走实际唯一索引、只返回1行且少于80个SQLite虚拟机步骤；这不是整个完成事务的VM步数。",
+      "refs": [
+        {
+          "file": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py",
+          "lines": [
+            492,
+            506
+          ]
+        }
+      ]
+    },
+    {
+      "claim": "事件可分批生成保存，但完整分段终态、产物、范围及ACTIVATE必须同组原子可见；核实原键须比较完整原申请和事件。",
+      "refs": [
+        {
+          "file": "docs/camctl/database/transactions.md",
+          "lines": [
+            19,
+            23
+          ]
+        },
+        {
+          "file": "docs/camctl/database/segments.md",
+          "lines": [
+            109,
+            109
+          ]
+        },
+        {
+          "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+          "lines": [
+            1094,
+            1137
+          ]
+        }
+      ]
+    }
+  ],
+  "windows": [
+    {
+      "work": "准备真实世界_ready_world",
+      "inside_test_call": true,
+      "inside_target_write_or_verify_span": false,
+      "tracemalloc": false,
+      "measured_connection": false,
+      "note": "包含保存结果页、逐文件归属/完成、固定成员/判断/范围；_world辅助的6.819秒嵌套在本阶段23.967秒中。",
+      "refs": [
+        {
+          "file": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py",
+          "lines": [
+            58,
+            102
+          ]
+        },
+        {
+          "file": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py",
+          "lines": [
+            477,
+            482
+          ]
+        },
+        {
+          "file": "apps/camctl/tests/integration/persistence/test_segment_storage.py",
+          "lines": [
+            54,
+            85
+          ]
+        }
+      ]
+    },
+    {
+      "work": "显式完整GC",
+      "inside_test_call": true,
+      "inside_target_write_or_verify_span": false,
+      "tracemalloc": false,
+      "measured_connection": "尚未执行任何目标SQL",
+      "count": 6,
+      "measured_seconds": 0.31709542201133445,
+      "note": "两次操作前分别先gc.collect，再start/reset_peak；本次仅0.317秒，不能解释慢段。",
+      "refs": [
+        {
+          "file": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py",
+          "lines": [
+            483,
+            483
+          ]
+        },
+        {
+          "file": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py",
+          "lines": [
+            487,
+            487
+          ]
+        }
+      ]
+    },
+    {
+      "work": "finish_segment_recording",
+      "inside_test_call": true,
+      "inside_target_write_or_verify_span": true,
+      "tracemalloc": true,
+      "measured_connection": true,
+      "note": "包括完整事务规划、事件逐项生成/业务守卫、历史和投影写入及末尾一次COMMIT。key生成也在tracemalloc窗口内，但在该函数计时外。",
+      "refs": [
+        {
+          "file": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py",
+          "lines": [
+            483,
+            485
+          ]
+        },
+        {
+          "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+          "lines": [
+            1071,
+            1077
+          ]
+        },
+        {
+          "file": "apps/camctl/src/camctl/persistence/transaction.py",
+          "lines": [
+            303,
+            410
+          ]
+        }
+      ]
+    },
+    {
+      "work": "verify_segment_finish",
+      "inside_test_call": true,
+      "inside_target_write_or_verify_span": true,
+      "tracemalloc": true,
+      "measured_connection": true,
+      "note": "独立重启内存跟踪窗口，按同key读取完整组并与规范事件流逐项比较；无原写事务重放。",
+      "refs": [
+        {
+          "file": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py",
+          "lines": [
+            487,
+            489
+          ]
+        },
+        {
+          "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+          "lines": [
+            1080,
+            1137
+          ]
+        }
+      ]
+    },
+    {
+      "work": "EXPLAIN QUERY PLAN",
+      "inside_test_call": true,
+      "inside_target_write_or_verify_span": false,
+      "tracemalloc": false,
+      "measured_connection": false,
+      "note": "489已stop内存跟踪；494使用owned原连接，fetchall在探针之外，所以不违反增长路径禁fetchall。",
+      "refs": [
+        {
+          "file": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py",
+          "lines": [
+            489,
+            495
+          ]
+        }
+      ]
+    },
+    {
+      "work": "SQLite逐虚拟机指令进度回调",
+      "inside_test_call": true,
+      "inside_target_write_or_verify_span": false,
+      "tracemalloc": false,
+      "measured_connection": false,
+      "note": "仅在501—505安装，并且只执行一次针对单文件的索引lookup；之后立即卸载。每档实测23步骤，不覆盖写入/核实。",
+      "refs": [
+        {
+          "file": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py",
+          "lines": [
+            496,
+            506
+          ]
+        }
+      ]
+    },
+    {
+      "work": "PRAGMA cache_size及结果打印",
+      "inside_test_call": true,
+      "inside_target_write_or_verify_span": false,
+      "tracemalloc": false,
+      "measured_connection": false,
+      "refs": [
+        {
+          "file": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py",
+          "lines": [
+            507,
+            511
+          ]
+        }
+      ]
+    }
+  ],
+  "instrumentation": {
+    "sql_wrapper": {
+      "refs": [
+        {
+          "file": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py",
+          "lines": [
+            470,
+            476
+          ]
+        }
+      ],
+      "work_per_execute": [
+        "Python字典读取并递增sql_calls整数",
+        "检查SQL是否包含特定完整组核验语句及参数是否匹配",
+        "调用真实SQLite execute",
+        "为返回cursor创建CursorProbe，即使语句不返回业务行"
+      ],
+      "note": "这些操作处于两个tracemalloc窗口中，测试工具的分配也会被跟踪。额外时间尚未独立测量。"
+    },
+    "row_wrapper": {
+      "refs": [
+        {
+          "file": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py",
+          "lines": [
+            451,
+            469
+          ]
+        }
+      ],
+      "fetchone": "每次行读取增加Python方法调用和字典/整数统计；游标迭代也转到fetchone。",
+      "fetchmany": "每个fetchmany批次统计返回行数和最大批量并断言请求size<=128；并非逐行回调。",
+      "note": "fetched_rows计返回行出现次数，包含重复读取；不是唯一行数、文件数或磁盘读取次数。"
+    },
+    "memory": "两个操作各自start/reset_peak/get_traced_memory/stop；峰值是该窗口被tracemalloc跟踪到的Python分配，不是进程树/SQLite总体内存。世界准备在窗口前已完成。不能从该样本推算无跟踪时的耗时。",
+    "external_timer": {
+      "refs": [
+        {
+          "file": "docs/camctl/verification-data/2026-10-25-integration-cost-analysis/current-persistence/timing_persistence.py",
+          "lines": [
+            8,
+            36
+          ]
+        }
+      ],
+      "note": "本轮外部插件额外包装_ready_world、_world、finish、verify及gc，只记录其包含子调用的包络时间；记录工具自身也有成本。"
+    }
+  },
+  "counter_semantics": {
+    "reset": "每个规模开始前只创建一次stats；写入和核实之间没有重置。",
+    "refs": [
+      {
+        "file": "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py",
+        "lines": [
+          480,
+          491
+        ]
+      }
+    ],
+    "sql_calls": "MeasuredConnection.execute的调用总次数，合并write+verify；包含读取、写入、BEGIN/COMMIT/ROLLBACK等通过此接口发出的SQL。不含之前世界准备或之后EXPLAIN/lookup/PRAGMA。不是提交次数。",
+    "fetched_rows": "CursorProbe的fetchone返回非空行次数加fetchmany返回行数，合并write+verify；可重复读取同一行。",
+    "max_fetch": "两段合并的fetchmany最大返回行数；处理batch4不意味着所有来源页和SQL结果都限制4行。",
+    "whole_group_checks": "只识别特定COUNT(*),MIN(id),MAX(id)语句及next_tx参数；合并write+verify，本轮各档1次。",
+    "commit": "finish通过commit_operation -> _write_bounded_plan在循环处理所有事件后单次COMMIT；verify在原连接无事务时BEGIN只读核实，结束ROLLBACK。400项不对应400次COMMIT；准备阶段另有多次已提交业务保存，均不属于这些stats。",
+    "commit_refs": [
+      {
+        "file": "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py",
+        "lines": [
+          1071,
+          1091
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/transaction.py",
+        "lines": [
+          717,
+          739
+        ]
+      },
+      {
+        "file": "apps/camctl/src/camctl/persistence/transaction.py",
+        "lines": [
+          303,
+          410
+        ]
+      }
+    ],
+    "data_volume": "_world以名字、定位信息、size_bytes=10等观察建立真实数据库事实；不能将400项解释为写入400段视频内容的吞吐。",
+    "data_refs": [
+      {
+        "file": "apps/camctl/tests/integration/persistence/test_segment_storage.py",
+        "lines": [
+          60,
+          80
+        ]
+      }
+    ]
+  },
+  "original_sample": {
+    "entry_seconds": 206.42750760700437,
+    "call_seconds": 202.7092772140022,
+    "totals": {
+      "prepare_source_files": {
+        "count": 3,
+        "wall_s": 6.818751644008444,
+        "share_call_percent": 3.36380837508972
+      },
+      "prepare_complete_world": {
+        "count": 3,
+        "wall_s": 23.96747780701844,
+        "share_call_percent": 11.823572229363599
+      },
+      "gc_collect": {
+        "count": 6,
+        "wall_s": 0.31709542201133445,
+        "share_call_percent": 0.15642866787817197
+      },
+      "finish_segment_recording": {
+        "count": 3,
+        "wall_s": 160.32563211402157,
+        "share_call_percent": 79.09141323845984
+      },
+      "verify_segment_finish": {
+        "count": 3,
+        "wall_s": 17.93163531400205,
+        "share_call_percent": 8.845986508585616
+      }
+    },
+    "per_scale": [
+      {
+        "N": 20,
+        "B": 4,
+        "write_peak": 723869,
+        "verify_peak": 409199,
+        "cache_size": -2000,
+        "lookup_vm_steps": 23,
+        "lookup_rows": 1,
+        "lookup_plan": [
+          "SEARCH outputs USING INDEX sqlite_autoindex_outputs_1 (device_file_id=?)"
+        ],
+        "max_fetch": 20,
+        "fetched_rows": 4904,
+        "sql_calls": 3880,
+        "whole_group_checks": 1
+      },
+      {
+        "N": 200,
+        "B": 4,
+        "write_peak": 2247771,
+        "verify_peak": 1924098,
+        "cache_size": -2000,
+        "lookup_vm_steps": 23,
+        "lookup_rows": 1,
+        "lookup_plan": [
+          "SEARCH outputs USING INDEX sqlite_autoindex_outputs_1 (device_file_id=?)"
+        ],
+        "max_fetch": 128,
+        "fetched_rows": 98880,
+        "sql_calls": 72227,
+        "whole_group_checks": 1
+      },
+      {
+        "N": 400,
+        "B": 4,
+        "write_peak": 2229511,
+        "verify_peak": 2116000,
+        "cache_size": -2000,
+        "lookup_vm_steps": 23,
+        "lookup_rows": 1,
+        "lookup_plan": [
+          "SEARCH outputs USING INDEX sqlite_autoindex_outputs_1 (device_file_id=?)"
+        ],
+        "max_fetch": 128,
+        "fetched_rows": 222341,
+        "sql_calls": 151958,
+        "whole_group_checks": 1
+      }
+    ],
+    "sql_calls_all_scales_write_plus_verify": 228065,
+    "fetched_rows_all_scales_write_plus_verify": 326125,
+    "accounted_disjoint_span_seconds": 202.5418406570534,
+    "spans_checked_disjoint": true,
+    "remaining_call_seconds_after_disjoint_spans": 0.16743655694881454,
+    "remaining_note": "余量约0.167秒含查询计划/索引lookup、峰值读取、断言、打印及外部包装记账等未分段工作；不能再精确拆分。EXPLAIN和单lookup不在两个慢段内。"
+  },
+  "supported_conclusions": [
+    "本次call202.709秒中写入160.326秒、核实17.932秒，准备23.967秒；慢段确实在两个目标操作包络中。",
+    "这两个包络包含真实业务处理及逐SQL/逐行包装、tracemalloc，既不能全称数据库耗时，也不能全称测量工具耗时。",
+    "显式GC约0.317秒；EXPLAIN/进度回调在慢段外，均没有证据构成本次主要成本。",
+    "原测试没有墙钟性能阈值，目标是固定批量下的Python峰值增长、有限读取及索引工作量，同时使用真实提交和完整原键核实。"
+  ],
+  "uncertainty": [
+    "尚无同一冻结输入上关闭SQL/行统计、关闭内存跟踪及组合开关的对照；不能量化各工具独立成本或交互放大。",
+    "本轮sql_calls/fetched_rows未区分写入和核实，不能把151958条全归给写入。",
+    "没有完整SQL类别、重复条件、执行计划/存储I/O或提交阶段时长剖分；不能据总次数诊断具体生产算法、缺索引或400次落盘。",
+    "tracemalloc峰值还受临时Python对象、GC及解释器空闲池影响；峰值增大不等同持续业务引用泄漏，参见persistence-runtime.md:312。",
+    "单次开发容器样本且有同期负载，不代表无测量正常运行或目标硬件性能。"
+  ],
+  "input_sha256": {
+    "docs/camctl/verification-data/2026-10-25-integration-cost-analysis/current-persistence/phases.json": "b1e37792695dafc7ce66a4657b71e38d4f129f706d9345687f125c91d73f03ed",
+    "docs/camctl/verification-data/2026-10-25-integration-cost-analysis/current-persistence/totals.json": "15314e67f6c100396cecfe2364a2634f621623f948baf3cc82355cbf25d342b4",
+    "docs/camctl/verification-data/2026-10-25-integration-cost-analysis/current-persistence/pytest.log": "bae05727712a24723d292fe5d5f4d965c8931502195ce3dc9b92cefb01e86798",
+    "docs/camctl/verification-data/2026-10-25-integration-cost-analysis/current-persistence/execution.json": "6560837861a38b4f60b149e677bff6b82135e2e32c3d217c65025d9635f574f8",
+    "docs/camctl/verification-data/2026-10-25-integration-cost-analysis/current-persistence/timing_persistence.py": "c3dd3a48a3da0e96bd297f97b0e1501637dc23f4cd37b1ae7aa6d8d4be7b9926",
+    "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py": "328eae499d90f12750223df7c34725a82b47c983e32017e2219f3a5a83aff24f",
+    "apps/camctl/src/camctl/persistence/repositories/segment_transactions.py": "3125cc50bc1a0fc59e28c3d0baafe70e8f3f05045eb2e567fb05447221cd6fd8",
+    "apps/camctl/src/camctl/persistence/transaction.py": "1ab71f708eb8fe054887a763c78c62c3c6114a330c4e6316565bcaaeca3bed7e",
+    "apps/camctl/tests/integration/persistence/test_segment_storage.py": "5e8094781189e07822cc5ad9521b54f9a5d3b0c35e3035a216f365146d2afc6a",
+    "docs/camctl/database/segments.md": "49551b4629c13884ec4ab6f3917af4c6f4365fe398f11a15fd05efd5849145ac",
+    "docs/camctl/database/transactions.md": "40f19159aa1eb2608a51202c3c21e5aae0576bd1c1d77bb291b5ee3bd13c0375",
+    "docs/camctl/persistence-runtime.md": "c318f8f0b9564d9744f526140286a44aad67b54d72334205f7037d4f1972db69"
+  }
+}

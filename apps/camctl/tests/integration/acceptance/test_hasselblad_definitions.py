@@ -32,6 +32,8 @@ from camctl.persistence.transaction import encode_json_value, row_facts
 from .test_acceptance import RealFileReader, _NOW, _plan_body
 from .test_fields import _action_facts
 from ..persistence.test_runtime import _create_valid_database
+from ..support.acceptance import accept_document
+from ..support.database import database_path
 
 pytestmark = pytest.mark.asyncio
 
@@ -62,10 +64,8 @@ def environment(tmp_path):
 
 async def _accept(environment, tmp_path, body):
     owned, context = environment
-    input_path = tmp_path / "input.json"
-    input_path.write_text(encode_json_value(body), encoding="utf-8")
-    read = await read_input(str(input_path), RealFileReader())
-    return await accept_input(parse_input(read), context, new_operation_key(), owned)
+    return await accept_document(body, context, database_path(owned),
+                                 input_path=tmp_path / "input.json")
 
 
 def _catalog(storage=None):

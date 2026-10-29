@@ -1,0 +1,9 @@
+..                                                                       [100%]
+============================== slowest durations ===============================
+90.37s call     tests/integration/test_camctl_c_module_roundtrip.py::test_capture_obtain_cleanup_roundtrip_via_c_module
+40.17s setup    tests/integration/test_camctl_c_module_roundtrip.py::test_capture_obtain_cleanup_roundtrip_via_c_module
+38.83s call     tests/integration/test_camctl_c_module_roundtrip.py::test_auto_preview_roundtrip_via_c_module
+0.03s setup    tests/integration/test_camctl_c_module_roundtrip.py::test_auto_preview_roundtrip_via_c_module
+0.01s teardown tests/integration/test_camctl_c_module_roundtrip.py::test_capture_obtain_cleanup_roundtrip_via_c_module
+0.01s teardown tests/integration/test_camctl_c_module_roundtrip.py::test_auto_preview_roundtrip_via_c_module
+2 passed in 169.73s (0:02:49)

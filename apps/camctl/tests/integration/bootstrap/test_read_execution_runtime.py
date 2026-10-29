@@ -4,8 +4,9 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 
-from camctl.bootstrap.capture_assembly import _media_flow_with
+from camctl.bootstrap.capture_assembly import session_capture_assembly
 from camctl.bootstrap.obtain_assembly import obtain_flow, session_obtain_assembly
 from camctl.capture.recovery import RecoveryBoundary
 from camctl.capture.media_flow import run_recording_media
@@ -13,17 +14,16 @@ from camctl.devices.drivers.registry import DriverEntry, DriverStatus
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
 from camctl.devices.ports import DriverDeclaration
 from camctl.devices.read_session import ReadSession
-from camctl.operations.attempts import RetryWaitGate, seconds_from_json
+from camctl.operations.attempts import seconds_from_json
 from camctl.outputs.obtain_flow import advance_obtain
 
-from ..capture.test_input_copy import _CONTENT as _MEDIA_CONTENT, pipeline
-from ..capture.test_media_flow import ProbeTools
-from camctl.host_files.media import MediaProbe
+from ..capture.test_input_copy import _CONTENT as _MEDIA_CONTENT
 from .test_output_binding_changes import (
     _CONTENT, _NOW, _accept, _read_registry as _registry, _save_photos, environment)
 from .test_obtain_flow import _MemoryStream
 from .test_output_binding_transactions import pending_read
 from .test_output_read_recovery import _start_unended_read
+from ..support.capture import capture_database
 
 pytestmark = pytest.mark.asyncio
 
@@ -36,10 +36,11 @@ _READ_EVIDENCE = EvidenceRegistry((EvidenceContract(
 class ReadRequests:
     """真实 ReadSession 的端口替身；在调用时读取已经提交的原意图。"""
 
-    def __init__(self, owned, content, *, fail=False):
+    def __init__(self, owned, content, *, fail=False, digest_value=None):
         self.owned, self.content = owned, content
-        self.requests = []
+        self.requests, self.ends = [], []
         self.fail = fail
+        self.digest_value, self.digests = digest_value, []
 
     async def open_read(self, source, offset, ticket, *, idle_timeout_s: Decimal):
         snapshot = None
@@ -49,9 +50,26 @@ class ReadRequests:
                 " FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id"
                 " WHERE r.id=? AND a.attempt_no=?", (ticket.run_id, ticket.attempt_id)).fetchone()
         self.requests.append((ticket, idle_timeout_s, snapshot, offset))
-        return ReadSession(source, offset,
-                           _FailureStream() if self.fail else _MemoryStream(self.content[offset:]),
-                           idle_timeout_s)
+        owner = self
+
+        class ObservedReadSession(ReadSession):
+            async def wait_stopped(self):
+                end = await super().wait_stopped()
+                owner.ends.append((ticket, end))
+                return end
+
+        return ObservedReadSession(source, offset,
+            _FailureStream() if self.fail else _MemoryStream(self.content[offset:]),
+            idle_timeout_s)
+
+
+    async def digest(self, request):
+        from camctl.devices.ports import DeviceCallResult
+        from camctl.devices.evidence import DeviceObservation
+        self.digests.append(request)
+        assert self.digest_value is not None
+        return DeviceCallResult((DeviceObservation("file_digest", 1, {
+            "file_id": request.params["file_id"], "sha256": self.digest_value}),), None)
 
 
 class _FailureStream(_MemoryStream):
@@ -65,7 +83,7 @@ class _FailureStream(_MemoryStream):
 async def _ordinary(environment):
     cfg, owned, context, capture_driver = environment
     await _save_photos(cfg, owned, context, capture_driver)
-    _accept(owned, "2", [{"name": "取回", "type": "obtain_action_outputs",
+    await _accept(owned, "2", [{"name": "取回", "type": "obtain_action_outputs",
         "scheduled_at": "2026-01-15 09:00:00", "params": {
             "source": {"plan_instance_id": "1", "group": "files"}}}])
     declarations = {device: {**declaration, "copy": _SETTINGS}
@@ -79,26 +97,63 @@ async def _ordinary(environment):
     return owned, driver
 
 
-def _internal_flow(pipeline, *, fail=False, maximum=7, checksum_support=3):
-    owned, roots = pipeline[0:2]
-    # 夹具明确声明原片不提供摘要；内容完整时采用正式降级校验。
-    owned.connection.execute("UPDATE device_files SET checksum_support=? WHERE id=11", (checksum_support,))
-    owned.connection.commit()
-    driver = ReadRequests(owned, _MEDIA_CONTENT, fail=fail)
-    entry = DriverEntry("camctl-adb", driver,
-        DriverDeclaration(False, False, False, False, True, False, False),
-        _READ_EVIDENCE, DriverStatus.SOFTWARE_CONTRACT_VERIFIED)
-    flow = _media_flow_with(
-        owned, entry, "cam-1", "camctl-adb", ProbeTools(MediaProbe(Decimal("61"), None)),
-        roots.staging, lambda: _NOW, {"copy": {**_SETTINGS, "max_read_attempts": maximum}}, RetryWaitGate(), lambda: 0)
-    assert flow is not None
-    return flow, driver
+@pytest_asyncio.fixture
+async def pipeline(tmp_path):
+    world, _source_id = await _real_recording_media_flow(tmp_path, duration_s=Decimal("60"))
+    try:
+        yield world
+    finally:
+        world.owned.connection.close()
+
+
+async def _internal_flow(pipeline, *, fail=False, maximum=7, checksum_support=3,
+        reader=None, max_recopies=2, digest_value=None, file_executor=None,
+        recovery_boundary=RecoveryBoundary.UNCONFIRMED, recovery_max_event_id=None):
+    """正式媒体工厂仅接收当前配置和合法读取/摘要端口。"""
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from camctl.devices.drivers.registry import DriverRegistry
+    from .test_media_assembly import _SessionDriver, _EVIDENCE
+
+    reader = ReadRequests(pipeline.owned, _MEDIA_CONTENT, fail=fail,
+        digest_value=digest_value) if reader is None else reader
+    supported = checksum_support == 2
+    if supported and reader.digest_value is None:
+        import hashlib
+        reader.digest_value = hashlib.sha256(reader.content).hexdigest()
+
+    class Driver(_SessionDriver):
+        async def open_read(self, *args, **kwargs):
+            return await reader.open_read(*args, **kwargs)
+
+        async def digest(self, request):
+            return await reader.digest(request)
+
+    driver = Driver(_MEDIA_CONTENT)
+    entry = DriverEntry("camctl-adb", driver, DriverDeclaration(
+        control_supported=True, stop_supported=True, query_supported=False,
+        result_supported=False, read_supported=True, digest_supported=supported,
+        delete_supported=False), _EVIDENCE, DriverStatus.SOFTWARE_CONTRACT_VERIFIED)
+    options = {key: value for key, value in pipeline.runtime_options.items()
+               if key not in {"driver", "evidence"}}
+    devices = {key: {**value, "copy": dict(value["copy"])}
+               for key, value in pipeline.config.devices.items()}
+    devices["cam-1"]["copy"].update(max_read_attempts=maximum, max_recopies=max_recopies)
+    options.update(devices=devices, drivers=DriverRegistry((entry,)),
+        file_executor=file_executor, recovery_boundary=recovery_boundary,
+        recovery_max_event_id=recovery_max_event_id)
+    factory = session_capture_assembly(**options)
+    runtime = await factory(pipeline.database, "cam-1")
+    return SimpleNamespace(owned=pipeline.owned, database=pipeline.database,
+        media=runtime.media, runtime=runtime, roots=pipeline.roots,
+        source_id=pipeline.source_id, factory=factory, runtime_options=options,
+        tool_log=pipeline.tool_log), reader
 
 
 async def _internal(pipeline, *, fail=False, maximum=7):
-    flow, driver = _internal_flow(pipeline, fail=fail, maximum=maximum)
-    await run_recording_media(flow, 1, 1, 11)
-    return flow.owned, driver
+    world, driver = await _internal_flow(pipeline, fail=fail, maximum=maximum)
+    await run_recording_media(world.media, 1, 1, world.source_id)
+    return world.owned, driver
 
 
 async def test_internal_read_exhaustion_finishes_required_check_and_releases_source(pipeline):
@@ -123,7 +178,7 @@ async def test_actual_read_result_is_retained_and_retried_with_original_key(pend
     cfg, owned, command = pending_read
     driver = ReadRequests(owned, _CONTENT)
     factory = _configured_factory(cfg, driver, maximum=7)
-    runtime = factory(owned)
+    runtime = factory(await capture_database(owned))
     original = OperationRepository.finish_attempt
     saves = []
 
@@ -138,7 +193,7 @@ async def test_actual_read_result_is_retained_and_retried_with_original_key(pend
         await advance_obtain(runtime)
     assert len(driver.requests) == 1
 
-    await advance_obtain(factory(owned) if new_round else runtime)
+    await advance_obtain(factory(await capture_database(owned)) if new_round else runtime)
 
     assert len(driver.requests) == 1
     assert len(saves) == 2
@@ -148,12 +203,12 @@ async def test_actual_read_result_is_retained_and_retried_with_original_key(pend
         (saves[0][0].ticket.run_id, saves[0][0].ticket.attempt_id)).fetchone()[1] is not None
 
 
-async def test_internal_actual_read_result_is_retained_before_check(pipeline, monkeypatch):
+async def test_internal_actual_read_result_is_retained_before_check(tmp_path, monkeypatch):
     from camctl.contracts.values import ConsistencyError
     from camctl.persistence.models import DbOutcome, DbOutcomeKind
     from camctl.persistence.repositories.operations import OperationRepository
 
-    flow, driver = _internal_flow(pipeline)
+    world, source_id = await _real_recording_media_flow(tmp_path, duration_s=Decimal("60"))
     original = OperationRepository.finish_attempt
     saves = []
 
@@ -164,20 +219,20 @@ async def test_internal_actual_read_result_is_retained_before_check(pipeline, mo
         return original(repository, finish, key, connection)
 
     monkeypatch.setattr(OperationRepository, "finish_attempt", fail_once)
-    with pytest.raises(ConsistencyError):
-        await run_recording_media(flow, 1, 1, 11)
-    assert flow.tools.calls == []
-
-    await run_recording_media(flow, 1, 1, 11)
-
-    assert len(driver.requests) == 1
-    assert len(saves) == 2
-    assert saves[1] == saves[0]
-    assert flow.tools.calls == ["probe"]
+    try:
+        with pytest.raises(ConsistencyError):
+            await run_recording_media(world.media, 1, 1, source_id)
+        assert not world.tool_log.exists()
+        await run_recording_media(world.media, 1, 1, source_id)
+        assert len(world.reader.requests) == 1
+        assert len(saves) == 2 and saves[1] == saves[0]
+        assert world.tool_log.read_text().splitlines() == ["probe"]
+    finally:
+        world.owned.connection.close()
 
 
 @pytest.mark.parametrize("consumer", ["obtain", "media"])
-async def test_actual_read_call_carries_current_idle_threshold(request, consumer):
+async def test_actual_read_call_carries_current_idle_threshold(request, environment, pipeline, consumer):
     fixture = request.getfixturevalue("environment" if consumer == "obtain" else "pipeline")
     _owned, driver = await (_ordinary(fixture) if consumer == "obtain" else _internal(fixture))
 
@@ -186,7 +241,7 @@ async def test_actual_read_call_carries_current_idle_threshold(request, consumer
 
 
 @pytest.mark.parametrize("consumer", ["obtain", "media"])
-async def test_actual_read_call_has_committed_original_ticket_and_current_budget(request, consumer):
+async def test_actual_read_call_has_committed_original_ticket_and_current_budget(request, environment, pipeline, consumer):
     fixture = request.getfixturevalue("environment" if consumer == "obtain" else "pipeline")
     owned, driver = await (_ordinary(fixture) if consumer == "obtain" else _internal(fixture))
 
@@ -203,15 +258,27 @@ async def test_actual_read_call_has_committed_original_ticket_and_current_budget
             (ticket.run_id, ticket.attempt_id)).fetchone()[1] is not None
 
 
-def _configured_factory(cfg, driver, *, maximum, idle=Decimal("1.25")):
+def _configured_factory(cfg, driver, *, maximum, idle=Decimal("1.25"),
+        max_recopies=1, recovery_boundary=RecoveryBoundary.UNCONFIRMED,
+        recovery_max_event_id=None, file_executor=None):
     declarations = {device: {**declaration, "copy": {
         "max_read_attempts": maximum, "read_idle_timeout_s": idle,
-        "max_recopies": 1, "retry_interval_s": Decimal("0")}}
+        "max_recopies": max_recopies, "retry_interval_s": Decimal("0")}}
         for device, declaration in cfg.devices.items()}
+    from dataclasses import replace
+    from camctl.devices.drivers.registry import DriverRegistry
+    registry = _registry(driver)
+    if driver.digest_value is not None:
+        from .test_media_assembly import _EVIDENCE
+        registry = DriverRegistry(tuple(replace(entry,
+            declaration=replace(entry.declaration, digest_supported=True),
+            evidence=_EVIDENCE) for entry in (registry.entry("camctl-adb"), registry.entry("alternate-camera"))))
     return session_obtain_assembly(
-        devices=declarations, drivers=_registry(driver), staging=Path(cfg.paths.staging),
+        devices=declarations, drivers=registry, staging=Path(cfg.paths.staging),
         ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing), segment_size=4,
-        occurred_at=lambda: _NOW, monotonic_ns=lambda: 0)
+        occurred_at=lambda: _NOW, monotonic_ns=lambda: 0,
+        recovery_boundary=recovery_boundary, recovery_max_event_id=recovery_max_event_id,
+        file_executor=file_executor)
 
 
 @pytest.mark.parametrize("maximum,additional", [(1, 0), (5, 3)])
@@ -249,9 +316,10 @@ async def test_later_run_resumes_original_running_ticket_even_when_new_budget_is
     cfg, owned, command = pending_read
     ticket = _start_unended_read(owned, command.copy_id)
     driver = ReadRequests(owned, _CONTENT)
-    runtime = _configured_factory(cfg, driver, maximum=1, idle=Decimal("2.75"))(owned)
-    runtime.recovery_boundary = RecoveryBoundary.HOST_LOCAL_SETTLED
-    runtime.recovery_max_event_id = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
+    runtime = _configured_factory(cfg, driver, maximum=1, idle=Decimal("2.75"),
+        recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
+        recovery_max_event_id=lambda: owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0])(
+            environment[2].database)
     attempts_before = owned.connection.execute("SELECT COUNT(*) FROM operation_attempts").fetchone()[0]
 
     await advance_obtain(runtime)
@@ -315,16 +383,15 @@ async def _assert_cancelled_read_owned(fixture, consumer):
     if consumer == "obtain":
         cfg, owned, _command = fixture
         driver = Driver(owned, _CONTENT)
-        runtime = _configured_factory(cfg, driver, maximum=7)(owned)
-        runtime.file_executor = executor
+        runtime = _configured_factory(cfg, driver, maximum=7,
+            file_executor=executor)(await capture_database(owned))
         invocation = advance_obtain(runtime)
     else:
-        flow, _initial = _internal_flow(fixture)
-        owned = flow.owned
+        owned = fixture.owned
         driver = Driver(owned, _MEDIA_CONTENT)
-        flow.sessions = flow.sessions.__class__(owned, driver, None)
-        flow.file_executor = executor
-        invocation = run_recording_media(flow, 1, 1, 11)
+        flow, _initial = await _internal_flow(fixture, reader=driver,
+            file_executor=executor)
+        invocation = run_recording_media(flow.media, 1, 1, flow.source_id)
     task = asyncio.create_task(invocation)
     try:
         await asyncio.wait_for(waiting.wait(), timeout=5)
@@ -352,38 +419,26 @@ async def _assert_cancelled_read_owned(fixture, consumer):
                 pass
 
 
-class MismatchingDigest:
-    async def read_digest(self):
-        from camctl.outputs.copy import SourceDigest
-        return SourceDigest("0" * 64)
-
-
 async def _mismatching_reader(request, consumer, maximum):
-    from dataclasses import replace
-
     if consumer == "media":
         fixture = request.getfixturevalue("pipeline")
-        flow, driver = _internal_flow(fixture, checksum_support=2)
-        flow.digest_supported = True
-        flow.digest = MismatchingDigest()
-        flow.max_recopies = maximum
-        return flow.owned, flow, driver, lambda: run_recording_media(flow, 1, 1, 11)
+        flow, driver = await _internal_flow(fixture, checksum_support=2,
+            max_recopies=maximum, digest_value="0" * 64)
+        return flow.owned, flow, driver, lambda: run_recording_media(flow.media, 1, 1, flow.source_id)
     cfg, owned, context, capture_driver = request.getfixturevalue("environment")
     await _save_photos(cfg, owned, context, capture_driver)
-    _accept(owned, "2", [{"name": "取回", "type": "obtain_action_outputs",
+    await _accept(owned, "2", [{"name": "取回", "type": "obtain_action_outputs",
         "scheduled_at": "2026-01-15 09:00:00", "params": {
             "source": {"plan_instance_id": "1", "group": "files"}}}])
-    driver = ReadRequests(owned, _CONTENT)
-    runtime = _configured_factory(cfg, driver, maximum=7)(owned)
-    runtime.devices = {device: replace(assembly, digest_supported=True,
-        digest_for=lambda _file_id: MismatchingDigest(), max_recopies=maximum)
-        for device, assembly in runtime.devices.items()}
+    driver = ReadRequests(owned, _CONTENT, digest_value="0" * 64)
+    runtime = _configured_factory(cfg, driver, maximum=7,
+        max_recopies=maximum)(context.database)
     return owned, runtime, driver, lambda: advance_obtain(runtime)
 
 
 @pytest.mark.parametrize("consumer", ["obtain", "media"])
 @pytest.mark.parametrize("maximum", [0, 1, 2])
-async def test_real_checksum_mismatch_uses_separate_recopy_budget_and_original_attempt(request, consumer, maximum):
+async def test_real_checksum_mismatch_uses_separate_recopy_budget_and_original_attempt(request, environment, pipeline, consumer, maximum):
     import json
 
     owned, _runtime, driver, advance = await _mismatching_reader(request, consumer, maximum)
@@ -409,29 +464,26 @@ async def test_real_checksum_mismatch_uses_separate_recopy_budget_and_original_a
 
 
 @pytest.mark.parametrize("consumer", ["obtain", "media"])
-async def test_registered_recopy_continues_when_later_budget_is_lower(request, consumer):
+async def test_registered_recopy_continues_when_later_budget_is_lower(request, environment, pipeline, consumer):
     from dataclasses import replace
 
     owned, runtime, driver, advance = await _mismatching_reader(request, consumer, 2)
     await advance()
     before = owned.connection.execute("SELECT id,recopies_used,round FROM file_copies").fetchall()
     assert all((used, copy_round) == (1, 2) for _copy, used, copy_round in before)
+    horizon = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
     if consumer == "media":
-        runtime, _unused = _internal_flow(request.getfixturevalue("pipeline"), checksum_support=2)
-        runtime.sessions = runtime.sessions.__class__(owned, driver, None)
-        runtime.digest_supported = True
-        runtime.digest = MismatchingDigest()
-        runtime.max_recopies = 0
-        advance = lambda: run_recording_media(runtime, 1, 1, 11)
+        runtime, _unused = await _internal_flow(request.getfixturevalue("pipeline"),
+            checksum_support=2, reader=driver, max_recopies=0,
+            recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
+            recovery_max_event_id=lambda: horizon)
+        advance = lambda: run_recording_media(runtime.media, 1, 1, runtime.source_id)
     else:
-        cfg = request.getfixturevalue("environment")[0]
-        runtime = _configured_factory(cfg, driver, maximum=7)(owned)
-        runtime.devices = {device: replace(assembly, max_recopies=0) for device, assembly in runtime.devices.items()}
-        runtime.devices = {device: replace(assembly, digest_supported=True,
-            digest_for=lambda _file_id: MismatchingDigest()) for device, assembly in runtime.devices.items()}
+        cfg, _owned, context, _capture = request.getfixturevalue("environment")
+        runtime = _configured_factory(cfg, driver, maximum=7, max_recopies=0,
+            recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
+            recovery_max_event_id=lambda: horizon)(context.database)
         advance = lambda: advance_obtain(runtime)
-    runtime.recovery_boundary = RecoveryBoundary.HOST_LOCAL_SETTLED
-    runtime.recovery_max_event_id = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
 
     await advance()
 
@@ -451,15 +503,15 @@ async def test_registered_recopy_continues_when_later_budget_is_lower(request, c
 ])
 async def test_internal_binding_failure_preserves_running_read_and_reports_reason(pipeline, missing, expected):
     from camctl.bootstrap.capture_assembly import session_capture_assembly
-    from camctl.capture.handlers import _handle_binding_failure
+    from camctl.capture.handlers import capture_handler
     from camctl.capture.timelapse import CaptureWaitConfig
     from camctl.contracts.values import new_operation_key
     from camctl.operations.attempts import AttemptConfig, AttemptIntent, AttemptTarget, OperationKind
     from camctl.persistence.models import DbOutcomeKind
     from camctl.persistence.repositories.operations import OperationRepository
 
-    flow, driver = _internal_flow(pipeline, fail=True)
-    await run_recording_media(flow, 1, 1, 11)
+    flow, driver = await _internal_flow(pipeline, fail=True)
+    await run_recording_media(flow.media, 1, 1, flow.source_id)
     copy_id, copy_round = flow.owned.connection.execute(
         "SELECT id,round FROM file_copies WHERE processing_id=1").fetchone()
     result = OperationRepository().begin_attempt(AttemptIntent(
@@ -478,10 +530,10 @@ async def test_internal_binding_failure_preserves_running_read_and_reports_reaso
         recovery_boundary=(RecoveryBoundary.UNCONFIRMED if missing == "boundary" else RecoveryBoundary.HOST_LOCAL_SETTLED),
         recovery_max_event_id=(None if missing == "horizon" else lambda: horizon),
         on_recovery_diagnostic=diagnostics.append)
-    runtime = factory(flow.owned, "cam-1")
+    runtime = await factory(flow.database, "cam-1")
     before = tuple(flow.owned.connection.iterdump())
 
-    assert _handle_binding_failure(runtime, runtime.action(1)) is True
+    await capture_handler("camera_record")(1, runtime)
 
     assert tuple(flow.owned.connection.iterdump()) == before
     assert diagnostics
@@ -494,7 +546,7 @@ async def test_internal_binding_failure_preserves_running_read_and_reports_reaso
 
 @pytest.mark.parametrize("consumer", ["obtain", "media"])
 @pytest.mark.parametrize("stopped,error", [(False, None), (True, "failed")])
-async def test_read_end_cannot_announce_success_without_confirmed_clean_end(request, consumer, stopped, error):
+async def test_read_end_cannot_announce_success_without_confirmed_clean_end(request, environment, pipeline, consumer, stopped, error):
     from camctl.contracts.values import ConsistencyError
     from camctl.devices.read_session import ReadEnd
 
@@ -535,32 +587,25 @@ async def test_read_end_cannot_announce_success_without_confirmed_clean_end(requ
         "SELECT COUNT(*) FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id"
         " WHERE r.kind=3 AND a.status=2").fetchone() == (0,)
     if consumer == "media":
-        assert runtime.tools.calls == []
+        assert not runtime.tool_log.exists()
 
 
-def _apply_read_business_cancel(owned, target, *, occurred_at=_NOW):
-    from camctl.cancellation.models import (
-        ApplyCancelTarget, CancelApplyMode, CancellationEffect, FixCancelTargets,
-        FixedCancelSet, FixedTarget, SelectionBasis, StartCancelAction,
-    )
-    from camctl.contracts.values import new_operation_key
-    from camctl.persistence.models import DbOutcomeKind
-    from camctl.persistence.repositories.cancellation import CancellationRepository
+async def _apply_read_business_cancel(owned, target, *, occurred_at=_NOW, database=None):
+    from types import SimpleNamespace
+    from camctl.bootstrap.flows import cancel_flow
+    from camctl.persistence.directory_switch import canonical_to_path
+    from ..support.capture import capture_database
 
-    _accept(owned, "30", [{"name": "取消读取所属动作", "type": "cancel_task",
+    await _accept(owned, "30", [{"name": "取消读取所属动作", "type": "cancel_task",
         "scheduled_at": "2026-01-15 09:00:00", "params": {
             "target": {"action_instance_id": str(target)}}}])
-    origin = owned.connection.execute("SELECT id FROM actions WHERE type=6 ORDER BY id DESC").fetchone()[0]
-    repository = CancellationRepository()
-    started = repository.start_cancel_action(StartCancelAction(origin, occurred_at), new_operation_key(), owned)
-    assert started.kind is DbOutcomeKind.COMPLETED, started.error
-    fixed = repository.fix_cancel_targets(FixCancelTargets(origin, FixedCancelSet((
-        FixedTarget(target, SelectionBasis.DIRECT, CancellationEffect.NOT_APPLIED),)), occurred_at),
-        new_operation_key(), owned)
-    assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
-    applied = repository.apply_cancel_target(ApplyCancelTarget(
-        fixed.value.item_ids[0], CancelApplyMode.WITH_STOP, occurred_at), new_operation_key(), owned)
-    assert applied.kind is DbOutcomeKind.COMPLETED, applied.error
+    database = await capture_database(owned) if database is None else database
+    await cancel_flow(ready=canonical_to_path(database.metadata.ready_path),
+        processing=canonical_to_path(database.metadata.processing_path))(
+            SimpleNamespace(database=database,
+                clock=SimpleNamespace(utc_micros=lambda: occurred_at)))
+    assert owned.connection.execute(
+        "SELECT cancel_requested FROM actions WHERE id=?", (target,)).fetchone() == (1,)
 
 
 async def test_business_cancel_obtain_read_saves_actual_stopped_unknown(pending_read):
@@ -568,82 +613,118 @@ async def test_business_cancel_obtain_read_saves_actual_stopped_unknown(pending_
 
 
 async def test_business_cancel_media_read_saves_actual_stopped_unknown(tmp_path):
-    flow, source_id = await _real_recording_media_flow(tmp_path)
-    try:
-        await _assert_business_cancel_read((flow, source_id), "media")
-    finally:
-        flow.owned.connection.close()
+    await _assert_business_cancel_read(tmp_path, "media")
 
 
-async def _real_recording_media_flow(tmp_path):
-    from camctl.acceptance.input import ParsedInput
-    from camctl.acceptance.service import CommandMode
-    from camctl.capture.handlers import capture_handler, advance_winddown, SessionRecordingState
-    from camctl.capture.recording import RecordingPhase, RecordingFacts, decide_recording_next
-    from camctl.capture.timelapse import CaptureWaitConfig
-    from camctl.contracts.values import new_operation_key
-    from camctl.persistence.models import DbOutcomeKind
-    from camctl.persistence.repositories.acceptance import AcceptanceRepository, ProcessInput
-    from camctl.persistence.repositories.scheduling import SchedulingRepository, StartActionRequest
-    from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-    from camctl.bootstrap.config import ConfigDefaults, load_config
+async def _real_recording_media_flow(tmp_path, *, reader_factory=None,
+        copy_settings=None, probe_request=None, repair_request=None,
+        duration_s=Decimal("6"), wall_us=None):
+    """真实受理、START、冷重开和受限停止建立媒体前置。
+
+    返回显式测试世界和 source_id；世界持有观察连接、真实database、
+    正式runtime/media、根目录和驱动。调用者向公开媒体入口传world.media。
+    """
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from camctl.bootstrap.capture_assembly import execution_wait_config
+    from camctl.bootstrap.flows import capture_flow, winddown_flow
+    from camctl.capture.handlers import capture_handler
+    from camctl.devices.drivers.registry import DriverRegistry
+    from camctl.host_files.media import ProbeRequest, RepairRequest
     from camctl.persistence.initialization import initialize_state, InitOutcome
-    from ..capture.test_capture_contract import _entry, _runtime, ResultsDouble
-    from .test_media_assembly import _SessionDriver, _EVIDENCE
+    from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+    from ..capture.test_capture_contract import _entry, ResultsDouble
+    from ..support.capture import capture_database, capture_runtime, capture_test_session
+    from ..support.session import accept_plan, session_config
+    from .test_media_assembly import _SessionDriver, _EVIDENCE, _tool
     from .test_recording_stop import _RecordCatalog, _record_plan
+    from camctl.persistence.repositories.scheduling import register_window_guard
 
+    register_window_guard()
+    settings = dict(_SETTINGS if copy_settings is None else copy_settings)
+    configuration = session_config(tmp_path, devices={"cam-1": {
+        "kind": "camera", "driver": "camctl-adb", "copy": settings}})
     path = tmp_path / "recording-state.db"
-    configuration = load_config({"paths": {
-        "state_db": str(path), "log_file": str(tmp_path / "recording.log"),
-        "staging": str(tmp_path / "staging"), "ready": str(tmp_path / "ready"),
-        "processing": str(tmp_path / "processing")}}, ConfigDefaults())
-    initialized = initialize_state(configuration, path)
-    assert initialized.outcome is InitOutcome.CREATED, initialized.detail
+    configuration = replace(configuration, paths=replace(configuration.paths, state_db=str(path)))
+    assert initialize_state(configuration, path).outcome is InitOutcome.CREATED
     owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-    accepted = AcceptanceRepository().process_input(ProcessInput(ParsedInput(
-        "plan.json", _record_plan("1", "2026-01-15 09:00:00")), _RecordCatalog(),
-        CommandMode.RUN, _NOW), new_operation_key(), owned)
-    assert accepted.kind is DbOutcomeKind.COMPLETED, accepted.error
-    action_id = owned.connection.execute("SELECT id FROM actions").fetchone()[0]
-    started = SchedulingRepository().start_action(StartActionRequest(action_id, _NOW, _NOW),
-                                                  new_operation_key(), owned)
-    assert started.kind is DbOutcomeKind.COMPLETED, started.error
-    driver = _SessionDriver(_MEDIA_CONTENT)
-    runtime = _runtime(owned, driver=driver,
-                       results=ResultsDouble({action_id: (_entry("video", size=len(_MEDIA_CONTENT)),)}), wall=_NOW)
-    runtime.evidence = _EVIDENCE
-    runtime.stopper = driver
-    runtime.wait_config = lambda _action: CaptureWaitConfig(target_duration_ms=6000, driver_margin_ms=0)
-    runtime.monotonic_ns = lambda: 5_000_000_000
-    await capture_handler("camera_record")(action_id, runtime)
-    # 后续受限会话没有原单调钟锚点，实际保守停止会固定检查责任和完整原片。
-    runtime.recording_state = SessionRecordingState(runtime)
-    phase = decide_recording_next(runtime.recording_state.recording_state(action_id), RecordingFacts())
-    assert phase.phase is RecordingPhase.RECONCILE_REQUIRED
-    now_ns = [20_000_000_000]
-    runtime.monotonic_ns = lambda: now_ns[0]
+    reader = (ReadRequests(owned, _MEDIA_CONTENT) if reader_factory is None
+              else reader_factory(owned))
 
-    async def elapsed(seconds):
-        now_ns[0] += int(seconds * 1_000_000_000)
+    class Driver(_SessionDriver):
+        async def open_read(self, source, offset, ticket, *, idle_timeout_s):
+            return await reader.open_read(source, offset, ticket, idle_timeout_s=idle_timeout_s)
 
-    progress = await advance_winddown(action_id, runtime, {}, wait_cap_s=Decimal("6"), sleep=elapsed)
-    assert progress.phase == "progress_saved"
-    phase = decide_recording_next(runtime.recording_state.recording_state(action_id), RecordingFacts())
-    assert phase.phase is RecordingPhase.CONTROL_COMPLETE
-    assert driver.calls == [("control", "start_recording"), ("stop", "stop_recording")]
-    processing_id, source_id = owned.connection.execute(
-        "SELECT id,source_device_file_id FROM recording_processing WHERE action_id=?", (action_id,)).fetchone()
-    assert source_id is not None
-    assert owned.connection.execute("SELECT COUNT(*) FROM device_activities WHERE action_id=?", (action_id,)).fetchone() == (1,)
-    assert owned.connection.execute("SELECT check_decision FROM recording_processing WHERE id=?", (processing_id,)).fetchone() == (3,)
-    staging = Path(configuration.paths.staging)
-    entry = DriverEntry("camctl-adb", ReadRequests(owned, _MEDIA_CONTENT),
-        DriverDeclaration(False, False, False, False, True, False, False),
-        _READ_EVIDENCE, DriverStatus.SOFTWARE_CONTRACT_VERIFIED)
-    flow = _media_flow_with(owned, entry, "cam-1", "camctl-adb", ProbeTools(MediaProbe(Decimal("61"), None)),
-        staging, lambda: _NOW, {"copy": _SETTINGS}, RetryWaitGate(), lambda: 0)
-    flow.segment_size = 4
-    return flow, source_id
+    driver = Driver(_MEDIA_CONTENT)
+    entry = DriverEntry("camctl-adb", driver, DriverDeclaration(
+        control_supported=True, stop_supported=True, query_supported=False,
+        result_supported=False, read_supported=True, digest_supported=False,
+        delete_supported=False), _EVIDENCE, DriverStatus.SOFTWARE_CONTRACT_VERIFIED)
+    registry = DriverRegistry((entry,))
+    results = ResultsDouble({1: (_entry("video", size=len(_MEDIA_CONTENT)),)})
+    clock = {"ns": 5_000_000_000}
+    options = dict(driver=driver, evidence=_EVIDENCE, devices=configuration.devices,
+        drivers=registry, results=results, staging=Path(configuration.paths.staging),
+        wait_config=execution_wait_config,
+        wall_us=(lambda: _NOW) if wall_us is None else wall_us,
+        monotonic_ns=lambda: clock["ns"], segment_size=4)
+    try:
+        # 独立前次会话可靠保存 START，退出作用域时实际结束数据库线程。
+        async with capture_test_session():
+            database = await capture_database(owned)
+            catalog = _RecordCatalog()
+            catalog.duration_s = duration_s
+            await accept_plan(database, tmp_path, catalog,
+                _record_plan("1", "2026-01-15 09:00:00"),
+                SimpleNamespace(utc_micros=lambda: _NOW))
+            async def start_factory(current, device_id):
+                return await capture_runtime(current, device_id=device_id, **options)
+            flow = capture_flow(start_factory)
+            await flow(SimpleNamespace(database=database,
+                clock=SimpleNamespace(utc_micros=lambda: _NOW)))
+            await flow.settle()
+            assert owned.connection.execute(
+                "SELECT started_at IS NOT NULL FROM device_activities WHERE action_id=1").fetchone() == (1,)
+        database = await capture_database(owned)
+        clock["ns"] = 20_000_000_000
+        async def recovered_factory(current, device_id):
+            return await capture_runtime(current, device_id=device_id, media_enabled=False, **options)
+        async def elapsed(seconds):
+            clock["ns"] += int(seconds * 1_000_000_000)
+        await winddown_flow(capture_factory=recovered_factory,
+            wait_cap_s=Decimal("6"), sleep=elapsed)(SimpleNamespace(database=database,
+                clock=SimpleNamespace(utc_micros=lambda: _NOW)))
+        assert driver.calls == [("control", "start_recording"), ("stop", "stop_recording")]
+        processing_id, source_id, check_decision = owned.connection.execute(
+            "SELECT id,source_device_file_id,check_decision FROM recording_processing WHERE action_id=1").fetchone()
+        assert processing_id == 1 and source_id is not None and check_decision == 3
+        assert reader.requests == []
+
+        tool_log = tmp_path / "media-tools.log"
+        if probe_request is None:
+            probe = _tool(tmp_path, "read-world-probe", (
+                "from pathlib import Path\nimport json\n"
+                f"with Path({str(tool_log)!r}).open('a') as log: log.write('probe\\n')\n"
+                "print(json.dumps({'streams': [{'codec_type': 'video'}],"
+                " 'format': {'duration': '61'}}))\n"))
+            probe_request = ProbeRequest(ffprobe=probe)
+        if repair_request is None:
+            repair = _tool(tmp_path, "read-world-repair", (
+                "from pathlib import Path\nimport shutil,sys\n"
+                f"with Path({str(tool_log)!r}).open('a') as log: log.write('repair\\n')\n"
+                "shutil.copyfile(sys.argv[sys.argv.index('-i')+1], sys.argv[-1])\n"))
+            repair_request = RepairRequest(ffmpeg=repair)
+        runtime = await capture_runtime(database, probe_request=probe_request,
+            repair_request=repair_request, **options)
+        assert runtime.media is not None
+        return SimpleNamespace(owned=owned, database=database, runtime=runtime,
+            media=runtime.media, roots=runtime.roots, driver=driver, reader=reader,
+            config=configuration, clock=clock, tool_log=tool_log, source_id=source_id,
+            runtime_options={**options, "probe_request": probe_request,
+                             "repair_request": repair_request}), source_id
+    except BaseException:
+        owned.connection.close()
+        raise
 
 
 async def _assert_business_cancel_read(fixture, consumer):
@@ -673,21 +754,20 @@ async def _assert_business_cancel_read(fixture, consumer):
     if consumer == "obtain":
         cfg, owned, command = fixture
         driver = Driver(owned, _CONTENT)
-        runtime = _configured_factory(cfg, driver, maximum=7)(owned)
+        runtime = _configured_factory(cfg, driver, maximum=7)(await capture_database(owned))
         target = owned.connection.execute(
             "SELECT action_id FROM operation_runs WHERE copy_id=?", (command.copy_id,)).fetchone()[0]
         invocation = advance_obtain(runtime)
     else:
-        runtime, source_id = fixture
-        owned, target = runtime.owned, 1
-        driver = Driver(owned, _MEDIA_CONTENT)
-        runtime.sessions = runtime.sessions.__class__(owned, driver, None)
+        world, source_id = await _real_recording_media_flow(fixture,
+            reader_factory=lambda owned: Driver(owned, _MEDIA_CONTENT))
+        runtime, owned, target, driver = world.media, world.owned, 1, world.reader
         invocation = run_recording_media(runtime, 1, 1, source_id)
     task = asyncio.create_task(invocation)
     try:
         await asyncio.wait_for(waiting.wait(), timeout=5)
         ticket = driver.requests[0][0]
-        _apply_read_business_cancel(owned, target)
+        await _apply_read_business_cancel(owned, target, database=runtime.database)
         assert owned.connection.execute(
             "SELECT status,result_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
             (ticket.run_id, ticket.attempt_id)).fetchone() == (1, None)
@@ -710,6 +790,8 @@ async def _assert_business_cancel_read(fixture, consumer):
         allowed.set()
         if not task.done():
             await task
+        if consumer == "media":
+            owned.connection.close()
 
 
 async def test_restart_finishes_original_failed_read_business_without_reopening(pending_read, monkeypatch):
@@ -719,7 +801,7 @@ async def test_restart_finishes_original_failed_read_business_without_reopening(
 
     cfg, owned, command = pending_read
     driver = ReadRequests(owned, _CONTENT, fail=True)
-    first = _configured_factory(cfg, driver, maximum=2)(owned)
+    first = _configured_factory(cfg, driver, maximum=2)(await capture_database(owned))
     original = OutputsRepository.fail_read_delivery
     calls = []
 
@@ -734,7 +816,7 @@ async def test_restart_finishes_original_failed_read_business_without_reopening(
         await advance_obtain(first)
     assert owned.connection.execute(
         "SELECT status FROM operation_runs WHERE copy_id=?", (command.copy_id,)).fetchone() == (4,)
-    restarted = _configured_factory(cfg, driver, maximum=9)(owned)
+    restarted = _configured_factory(cfg, driver, maximum=9)(await capture_database(owned))
 
     await advance_obtain(restarted)
 
@@ -755,7 +837,7 @@ async def test_restart_finishes_original_internal_read_failure_with_saved_config
     from camctl.persistence.models import DbOutcome, DbOutcomeKind
     from camctl.persistence.repositories.capture import CaptureRepository
 
-    first, driver = _internal_flow(pipeline, fail=True, maximum=1)
+    first, driver = await _internal_flow(pipeline, fail=True, maximum=1)
     original = CaptureRepository.save_check_result
     calls = []
 
@@ -767,10 +849,10 @@ async def test_restart_finishes_original_internal_read_failure_with_saved_config
 
     monkeypatch.setattr(CaptureRepository, "save_check_result", interrupt_once)
     with pytest.raises(ConsistencyError):
-        await run_recording_media(first, 1, 1, 11)
-    restarted, fresh_driver = _internal_flow(pipeline, fail=True, maximum=7)
+        await run_recording_media(first.media, 1, 1, first.source_id)
+    restarted, fresh_driver = await _internal_flow(pipeline, fail=True, maximum=7)
 
-    await run_recording_media(restarted, 1, 1, 11)
+    await run_recording_media(restarted.media, 1, 1, restarted.source_id)
 
     assert len(driver.requests) == 1
     assert fresh_driver.requests == []
@@ -784,7 +866,7 @@ async def test_restart_finishes_original_internal_read_failure_with_saved_config
 
 
 @pytest.mark.parametrize("after_commit", [False, True])
-async def test_obtain_failure_unknown_commit_retries_original_business_key(pending_read, monkeypatch, after_commit):
+async def test_obtain_failure_unknown_commit_retries_original_business_key(pending_read, monkeypatch, after_commit, capture_resources):
     from camctl.contracts.values import ConsistencyError
     from camctl.persistence.models import DbOutcomeKind
     from camctl.persistence.repositories.outputs import OutputsRepository
@@ -811,13 +893,14 @@ async def test_obtain_failure_unknown_commit_retries_original_business_key(pendi
 
     monkeypatch.setattr(OutputsRepository, "fail_read_delivery", uncertain_once)
     with pytest.raises(ConsistencyError):
-        await advance_obtain(factory(owned))
+        await advance_obtain(factory(await capture_database(owned)))
     assert len(driver.requests) == 1
     owned.connection.close()
+    database = await capture_resources.restart_database(Path(cfg.paths.state_db))
     recovered = open_existing(Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
     driver.owned = recovered
     try:
-        await advance_obtain(factory(recovered))
+        await advance_obtain(factory(database))
 
         assert len(driver.requests) == 1
         assert len(saves) == 2
@@ -838,14 +921,14 @@ async def test_obtain_failure_unknown_commit_retries_original_business_key(pendi
 
 
 @pytest.mark.parametrize("after_commit", [False, True])
-async def test_internal_failure_unknown_commit_retries_original_business_key(pipeline, monkeypatch, after_commit):
+async def test_internal_failure_unknown_commit_retries_original_business_key(pipeline, monkeypatch, after_commit, capture_resources):
     from camctl.contracts.values import ConsistencyError
     from camctl.persistence.models import DbOutcomeKind
     from camctl.persistence.repositories.capture import CaptureRepository
     from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
     from ..cancellation.test_report_sync_lifecycle import _fault_owned
 
-    flow, driver = _internal_flow(pipeline, fail=True, maximum=1)
+    flow, driver = await _internal_flow(pipeline, fail=True, maximum=1)
     path = flow.owned.connection.execute("PRAGMA database_list").fetchone()[2]
     original = CaptureRepository.save_check_result
     saves = []
@@ -862,13 +945,15 @@ async def test_internal_failure_unknown_commit_retries_original_business_key(pip
 
     monkeypatch.setattr(CaptureRepository, "save_check_result", uncertain_once)
     with pytest.raises(ConsistencyError):
-        await run_recording_media(flow, 1, 1, 11)
+        await run_recording_media(flow.media, 1, 1, flow.source_id)
     assert len(driver.requests) == 1
     flow.owned.connection.close()
     recovered = open_existing(Path(path), DbOpenMode.EXISTING_RW, DbConfig())
-    flow.owned, driver.owned = recovered, recovered
+    pipeline.database = await capture_resources.restart_database(path)
+    pipeline.owned, driver.owned = recovered, recovered
+    runtime = await flow.factory(pipeline.database, "cam-1")
     try:
-        await run_recording_media(flow, 1, 1, 11)
+        await run_recording_media(runtime.media, 1, 1, flow.source_id)
 
         assert len(driver.requests) == 1
         assert len(saves) == 2
@@ -886,7 +971,7 @@ async def test_internal_failure_unknown_commit_retries_original_business_key(pip
 @pytest.mark.parametrize("change", ["missing", "mismatch"])
 @pytest.mark.parametrize("uncertain_after_commit", [None, False, True])
 async def test_internal_original_read_unknown_recovery_finishes_original_binding_responsibility(
-        tmp_path, monkeypatch, change, uncertain_after_commit):
+        tmp_path, monkeypatch, change, uncertain_after_commit, capture_resources):
     import json
     from dataclasses import replace
     from camctl.bootstrap.capture_assembly import session_capture_assembly
@@ -896,11 +981,11 @@ async def test_internal_original_read_unknown_recovery_finishes_original_binding
     from ..capture.test_capture_contract import ResultsDouble
     from .test_media_assembly import _SessionDriver, _EVIDENCE
 
-    flow, source_id = await _real_recording_media_flow(tmp_path)
+    flow, source_id = await _real_recording_media_flow(tmp_path,
+        reader_factory=lambda owned: ReadRequests(owned, _MEDIA_CONTENT, fail=True))
     try:
-        driver = ReadRequests(flow.owned, _MEDIA_CONTENT, fail=True)
-        flow.sessions = flow.sessions.__class__(flow.owned, driver, None)
-        await run_recording_media(flow, 1, 1, source_id)
+        driver = flow.reader
+        await run_recording_media(flow.media, 1, 1, source_id)
         copy_id = flow.owned.connection.execute("SELECT id FROM file_copies WHERE processing_id=1").fetchone()[0]
         ticket = _start_unended_read(flow.owned, copy_id)
         horizon = flow.owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
@@ -920,7 +1005,7 @@ async def test_internal_original_read_unknown_recovery_finishes_original_binding
             wait_config=lambda _action: CaptureWaitConfig(target_duration_ms=6000, driver_margin_ms=0),
             recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED, recovery_max_event_id=lambda: horizon,
             on_recovery_diagnostic=diagnostics.append)
-        runtime = factory(flow.owned, "cam-1")
+        runtime = await factory(flow.database, "cam-1")
         attempts_before = flow.owned.connection.execute("SELECT COUNT(*) FROM operation_attempts").fetchone()[0]
 
         saves = []
@@ -948,8 +1033,9 @@ async def test_internal_original_read_unknown_recovery_finishes_original_binding
                 await capture_handler("camera_record")(1, runtime)
             path = flow.owned.connection.execute("PRAGMA database_list").fetchone()[2]
             flow.owned.connection.close()
+            flow.database = await capture_resources.restart_database(path)
             flow.owned = open_existing(Path(path), DbOpenMode.EXISTING_RW, DbConfig())
-            runtime = factory(flow.owned, "cam-1")
+            runtime = await factory(flow.database, "cam-1")
         await capture_handler("camera_record")(1, runtime)
         if uncertain_after_commit is not None:
             assert len(saves) == 2 and saves[0] == saves[1]
@@ -982,29 +1068,41 @@ async def test_internal_original_read_unknown_recovery_finishes_original_binding
 
 
 @pytest.mark.parametrize("new_session", [False, True])
-async def test_obtain_verify_preserves_original_end_or_resumes_at_full_offset(pending_read, monkeypatch, new_session):
+async def test_obtain_verify_preserves_original_end_or_resumes_at_full_offset(pending_read, monkeypatch, new_session, capture_resources):
     cfg, owned, _command = pending_read
     driver = ReadRequests(owned, _CONTENT)
+    database = await capture_database(owned)
     factory = _configured_factory(cfg, driver, maximum=7)
-    runtime = factory(owned)
+    runtime = factory(database)
+
+    async def fresh(horizon):
+        if not new_session:
+            return factory(database)
+        next_database = await capture_resources.restart_database(Path(cfg.paths.state_db))
+        return _configured_factory(cfg, driver, maximum=7,
+            recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
+            recovery_max_event_id=lambda: horizon)(next_database)
+
     await _assert_verify_end_recovery(owned, runtime, driver, lambda: advance_obtain(runtime),
-        lambda: _configured_factory(cfg, driver, maximum=7)(owned) if new_session else factory(owned),
-        lambda fresh: advance_obtain(fresh), monkeypatch, new_session)
+        fresh, advance_obtain, monkeypatch, new_session)
 
 
 @pytest.mark.parametrize("new_session", [False, True])
-async def test_internal_verify_preserves_original_end_or_resumes_at_full_offset(pipeline, monkeypatch, new_session):
-    flow, driver = _internal_flow(pipeline)
+async def test_internal_verify_preserves_original_end_or_resumes_at_full_offset(pipeline, monkeypatch, new_session, capture_resources):
+    flow, driver = await _internal_flow(pipeline)
 
-    def fresh():
+    async def fresh(horizon):
         if not new_session:
             return flow
-        reopened, _unused = _internal_flow(pipeline)
-        reopened.sessions = reopened.sessions.__class__(flow.owned, driver, None)
+        pipeline.database = await capture_resources.restart_database(Path(pipeline.config.paths.state_db))
+        reopened, _unused = await _internal_flow(pipeline, reader=driver,
+            recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
+            recovery_max_event_id=lambda: horizon)
         return reopened
 
-    await _assert_verify_end_recovery(flow.owned, flow, driver, lambda: run_recording_media(flow, 1, 1, 11),
-        fresh, lambda runtime: run_recording_media(runtime, 1, 1, 11), monkeypatch, new_session)
+    await _assert_verify_end_recovery(flow.owned, flow, driver,
+        lambda: run_recording_media(flow.media, 1, 1, flow.source_id),
+        fresh, lambda current: run_recording_media(current.media, 1, 1, current.source_id), monkeypatch, new_session)
 
 
 async def _assert_verify_end_recovery(owned, runtime, driver, first_advance, new_runtime, advance, monkeypatch, new_session):
@@ -1033,10 +1131,8 @@ async def _assert_verify_end_recovery(owned, runtime, driver, first_advance, new
     assert owned.connection.execute(
         "SELECT status,result_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
         (original_ticket.run_id, original_ticket.attempt_id)).fetchone() == (1, None)
-    fresh = new_runtime()
-    if new_session:
-        fresh.recovery_boundary = RecoveryBoundary.HOST_LOCAL_SETTLED
-        fresh.recovery_max_event_id = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
+    horizon = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
+    fresh = await new_runtime(horizon)
 
     await advance(fresh)
 
@@ -1056,7 +1152,7 @@ async def _assert_verify_end_recovery(owned, runtime, driver, first_advance, new
 async def test_obtain_complete_actual_read_precedes_later_business_cancel(pending_read):
     cfg, owned, command = pending_read
     driver = ReadRequests(owned, _CONTENT)
-    runtime = _configured_factory(cfg, driver, maximum=7)(owned)
+    runtime = _configured_factory(cfg, driver, maximum=7)(await capture_database(owned))
     target = owned.connection.execute(
         "SELECT action_id FROM operation_runs WHERE copy_id=?", (command.copy_id,)).fetchone()[0]
     await _assert_complete_before_business_cancel(owned, runtime, driver, target,
@@ -1065,11 +1161,10 @@ async def test_obtain_complete_actual_read_precedes_later_business_cancel(pendin
 
 async def test_internal_complete_actual_read_precedes_later_business_cancel(tmp_path):
     flow, source_id = await _real_recording_media_flow(tmp_path)
-    driver = ReadRequests(flow.owned, _MEDIA_CONTENT)
-    flow.sessions = flow.sessions.__class__(flow.owned, driver, None)
+    driver = flow.reader
     try:
-        await _assert_complete_before_business_cancel(flow.owned, flow, driver, 1,
-            lambda: run_recording_media(flow, 1, 1, source_id))
+        await _assert_complete_before_business_cancel(flow.owned, flow.media, driver, 1,
+            lambda: run_recording_media(flow.media, 1, 1, source_id))
     finally:
         flow.owned.connection.close()
 
@@ -1122,7 +1217,7 @@ async def _assert_complete_before_business_cancel(owned, runtime, driver, target
         assert owned.connection.execute(
             "SELECT status,result_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
             (ticket.run_id, ticket.attempt_id)).fetchone() == (int(enum_for("operation_attempts.status").RUNNING), None)
-        _apply_read_business_cancel(owned, target)
+        await _apply_read_business_cancel(owned, target, database=runtime.database)
         assert owned.connection.execute(
             "SELECT status FROM operation_runs WHERE id=?", (ticket.run_id,)).fetchone() == (
                 int(enum_for("operation_runs.status").ACTIVE),)

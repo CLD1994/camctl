@@ -1,333 +1,295 @@
-"""报告处理后继续的失败仍交付完整诊断，文件边界由替身隔离。"""
+"""公开通信和默认会话交付报告故障，实际文件与存储保存未完成责任。"""
 
+import asyncio
+import json
+from threading import Event
+import sqlite3
 from pathlib import Path
-from unittest.mock import create_autospec
 
 import pytest
 
-from camctl.host_files.handoff import HandoffDirectories
+from camctl.acceptance.input import ParsedInput
 from camctl.logging_runtime.diagnostics import error_diagnostics_context, flush_diagnostics
 from camctl.reporting import publication
-from camctl.reporting.messages import MessageProtocolError
-from camctl.reporting.maintenance import MaintenanceLimits, ReportMaintenanceContext, ReportPorts, maintain_reports
-from camctl.persistence.models import DbOutcomeKind
+from camctl.reporting.messages import MessageProtocolError, ReadyMessage
 
-
-async def _inline(function, *args, **kwargs):
-    return function(*args, **kwargs)
+from ..support.reporting import report_world, run_report_session
+from .test_supervisor_transport import _Rig
 
 
 def _error():
+    cause = PermissionError("报告目录拒绝访问")
+    error = OSError("报告文件写入失败")
+    error.__cause__ = cause
+    error.add_note("已知报告生成身份=job-7")
+    return error
+
+
+class _Endpoint:
+    """在真实管道的发送或接收边界交付错误，不接触监督者状态。"""
+
+    def __init__(self, connection):
+        self.connection = connection
+        self.send_error = None
+        self.receive_error = None
+        self.received = 0
+        self.failed = Event()
+
+    def __getattr__(self, name):
+        return getattr(self.connection, name)
+
+    def send_bytes(self, data):
+        if self.send_error is not None:
+            raise self.send_error
+        return self.connection.send_bytes(data)
+
+    def recv_bytes(self, *args):
+        self.received += 1
+        if self.received > 1 and self.receive_error is not None:
+            self.failed.set()
+            raise self.receive_error
+        return self.connection.recv_bytes(*args)
+
+
+@pytest.mark.asyncio
+async def test_supervisor_shutdown_send_failure_has_complete_diagnostic():
+    rig = _Rig()
+    endpoint = _Endpoint(rig.parent_end)
+    rig.parent_end = endpoint
+    rig.peer.send(ReadyMessage())
+    assert (await rig.supervisor.start()).ready
+    endpoint.send_error = _error()
+    diagnostics = []
     try:
-        raise PermissionError("报告目录拒绝访问")
-    except PermissionError as cause:
-        try:
-            raise OSError("报告文件写入失败") from cause
-        except OSError as error:
-            error.add_note("已知报告生成身份=job-7")
-            return error
-
-
-@pytest.mark.asyncio
-async def test_report_write_failure_retains_original_exception_graph(monkeypatch):
-    error = _error()
-    monkeypatch.setattr(publication.asyncio, "to_thread", _inline)
-    monkeypatch.setattr(publication.Path, "mkdir", lambda *args, **kwargs: (_ for _ in ()).throw(error))
-    session = create_autospec(publication.PublicationSession, instance=True)
-    diagnostics = []
-    with error_diagnostics_context(None, diagnostics.append):
-        result = await publication.deliver_report(7, b"payload", HandoffDirectories(Path("/staging"), Path("/ready")), session)
-        await flush_diagnostics()
-
-    assert result.outcome is publication.DeliveryOutcome.WRITE_FAILED
-    assert len(diagnostics) == 1
-    for fact in ("PermissionError", "报告目录拒绝访问", "报告文件写入失败", "job-7", "traceback", '"report_id":7'):
-        assert fact in diagnostics[0]
-    session.prepare.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_simple_report_generation_failure_has_diagnostic():
-    ports = create_autospec(ReportPorts, instance=True)
-    ports.has_new_changes.return_value = True
-    ports.generate.side_effect = _error()
-    diagnostics = []
-    with error_diagnostics_context(None, diagnostics.append):
-        await maintain_reports(ReportMaintenanceContext(MaintenanceLimits.defaults(), ports))
-        await flush_diagnostics()
-
-    assert len(diagnostics) == 1
-    assert "报告目录拒绝访问" in diagnostics[0]
-    assert "traceback" in diagnostics[0]
-
-
-@pytest.mark.asyncio
-async def test_generation_retains_failed_startup_exception_and_message(monkeypatch):
-    from types import SimpleNamespace
-    from unittest.mock import AsyncMock
-    from camctl.reporting.messages import JobMessage, StartupFailedMessage, StartupPhase
-    from camctl.reporting.supervisor import WorkerSupervisor
-    error = _error()
-    message = StartupFailedMessage(StartupPhase.WORK_LOCK, "启动锁失败")
-    supervisor = WorkerSupervisor(limits=MaintenanceLimits.defaults(), lock_path="/work.lock")
-    monkeypatch.setattr(supervisor, "start", AsyncMock(return_value=SimpleNamespace(
-        ready=False, detail="启动失败", failure=message, exception=error, stopped=False)))
-    job = JobMessage("job-7", 7, 0, 1, 1, "a" * 32, "/state.db", "/staging/report.tmp",
-        "/staging", "/ready", "/processing", 1, 1, 1)
-
-    result = await supervisor.generate(job)
-
-    assert result.exception is error
-    assert result.startup_failure is message
-
-
-@pytest.mark.asyncio
-async def test_supervisor_shutdown_send_failure_has_complete_diagnostic(monkeypatch):
-    from unittest.mock import AsyncMock
-    from camctl.reporting.communication import ChannelClosed, WorkerCommunicator
-    from camctl.reporting.supervisor import ProcessHandle, WorkerSupervisor
-    supervisor = WorkerSupervisor(limits=MaintenanceLimits.defaults(), lock_path="/work.lock")
-    supervisor._process = create_autospec(ProcessHandle, instance=True)
-    supervisor._process.is_alive.return_value = True
-    channel = create_autospec(WorkerCommunicator, instance=True)
-    channel.send.side_effect = _error()
-    channel.receive.return_value = ChannelClosed(None)
-    supervisor._communicator = channel
-    monkeypatch.setattr(supervisor, "_join_within", AsyncMock(return_value=True))
-    diagnostics = []
-    with error_diagnostics_context(None, diagnostics.append):
-        await supervisor.stop()
-        await flush_diagnostics()
-
+        with error_diagnostics_context(None, diagnostics.append):
+            await rig.supervisor.stop()
+            await flush_diagnostics()
+    finally:
+        rig.peer.close()
+    assert not rig.process.alive
     assert len(diagnostics) == 1
     for fact in ("report_shutdown_send", "报告目录拒绝访问", "traceback"):
         assert fact in diagnostics[0]
 
 
-@pytest.mark.parametrize("phase", ["receive", "decode", "close"])
-def test_worker_control_channel_errors_are_complete_stderr_diagnostics(mocker, phase):
-    from multiprocessing.connection import Connection
-    from camctl.reporting import worker
-    from camctl.reporting.messages import ShutdownMessage, encode_message
-    channel = create_autospec(Connection, instance=True)
-    channel.recv_bytes.return_value = b"invalid-json" if phase == "decode" else encode_message(ShutdownMessage())
-    if phase == "receive":
-        channel.recv_bytes.side_effect = _error()
-    if phase == "close":
-        channel.close.side_effect = _error()
-    mocker.patch.object(worker, "install_parent_guard", return_value=None)
-    mocker.patch.object(worker, "acquire_work_lock", autospec=True)
-    mocker.patch.object(worker, "ensure_runtime_library", autospec=True)
-    output = bytearray()
-    mocker.patch.object(worker.os, "write", side_effect=lambda fd, data: (output.extend(data), len(data))[1])
-
-    worker.worker_main(channel, 1, "/state.lock", 0)
-
-    assert output
-    decoded = output.decode("utf-8")
-    assert "traceback" in decoded
-    if phase == "decode":
-        assert "MessageProtocolError" in decoded
-    else:
-        assert "PermissionError" in decoded
-        assert "report_worker_" + phase in decoded
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize("error_type", [OSError, MessageProtocolError])
 async def test_explicit_stop_retains_channel_terminal_error_diagnostic(error_type):
-    from camctl.reporting.communication import ChannelClosed, WorkerCommunicator
-    from camctl.reporting.supervisor import WorkerSupervisor
-    supervisor = WorkerSupervisor(limits=MaintenanceLimits.defaults(), lock_path="/work.lock")
-    channel = create_autospec(WorkerCommunicator, instance=True)
+    rig = _Rig()
+    endpoint = _Endpoint(rig.parent_end)
     failure = error_type("收场通道的实际错误")
     failure.__cause__ = PermissionError("完整原因")
-    channel.receive.return_value = ChannelClosed(failure)
-    supervisor._communicator = channel
+    endpoint.receive_error = failure
+    rig.parent_end = endpoint
+    rig.peer.send(ReadyMessage())
+    assert (await rig.supervisor.start()).ready
+    rig.peer.send(ReadyMessage())
+    assert await asyncio.to_thread(endpoint.failed.wait, 2)
+    rig.process.alive = False
+    rig.process.exitcode = 0
     diagnostics = []
-    with error_diagnostics_context(None, diagnostics.append):
-        await supervisor.stop()
-        await flush_diagnostics()
-
+    try:
+        with error_diagnostics_context(None, diagnostics.append):
+            await rig.supervisor.stop()
+            await flush_diagnostics()
+    finally:
+        rig.peer.close()
+    assert not rig.process.alive
     assert len(diagnostics) == 1
     assert "收场通道的实际错误" in diagnostics[0]
     assert "PermissionError" in diagnostics[0]
 
 
+def _input(request_id="1"):
+    # 无效动作仍经真实受理生成一项必须报告的业务事实。
+    return ParsedInput("input.json", {
+        "request_id": request_id, "created_at": "2026-01-15 08:00:00",
+        "name": "reporting", "actions": [{"name": "sync", "type": "report_status",
+            "scheduled_at": "bad", "params": {"scope": "full"}}],
+    })
+
+
+def _rows(world, statement):
+    with sqlite3.connect(world.database_path) as connection:
+        return connection.execute(statement).fetchall()
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("store_kind", [
-    DbOutcomeKind.NOT_EXECUTED,
-    DbOutcomeKind.ROLLED_BACK,
-    DbOutcomeKind.UNKNOWN,
-])
-@pytest.mark.parametrize("moved", [False, True])
-async def test_report_file_failure_requires_reliable_failure_store(monkeypatch, store_kind, moved):
-    import json
-    from unittest.mock import AsyncMock
-    from camctl.host_files.handoff import PublishResult, PublishStage
-    from camctl.host_files.io import DirectorySyncStage
-    from camctl.operations.error_diagnostics import exception_diagnostic
-    from camctl.persistence.models import DbOutcome, DbOutcomeKind
+async def test_generation_failure_preserves_responsibility_until_next_default_session(tmp_path):
+    world = report_world(tmp_path)
+    # 子进程真实写 staging 时遇到目录被普通文件占据。
+    blocker = world.staging / publication.REPORTS_DIRECTORY
+    blocker.write_bytes(b"occupied")
+    first = await run_report_session(world, _input())
+    assert not first.succeeded and first.reason == "report_error", first.details
+    assert _rows(world, "SELECT status,publication_count FROM reports") == [(5, 0)]
+    assert not list(world.ready.glob("status-report-*.json"))
+    assert _rows(world, "SELECT COUNT(*) FROM reports") == [(1,)]
 
-    file_error = _error()
-    store_error = OSError("failure-store-broke")
-    secondary = OSError("failure-store-close-broke")
-    session = create_autospec(publication.PublicationSession, instance=True)
-    session.prepare.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
-    session.record_intent.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
-    session.record_failure.return_value = DbOutcome(store_kind, error=store_error, secondary_errors=(secondary,))
-    monkeypatch.setattr(publication.asyncio, "to_thread", _inline)
-    monkeypatch.setattr(publication, "_list_stale_ready", lambda *args: ((), None))
-    move = AsyncMock(return_value=PublishResult(
-        PublishStage.MOVED if moved else PublishStage.NOT_MOVED,
-        DirectorySyncStage.FAILED if moved else DirectorySyncStage.NOT_ATTEMPTED,
-        moved, "report-file-broke", file_error))
-    monkeypatch.setattr(publication, "_move_staged", move)
-    diagnostics = []
-    with error_diagnostics_context(None, diagnostics.append):
-        result = await publication.deliver_staged_report(7,
-            publication.StagedReport(name=publication.report_file_name(7, "a" * 64), size_bytes=7, sha256="a" * 64),
-            HandoffDirectories(Path("/staging"), Path("/ready")), session,
-            context={"database_id": "b" * 32})
-        await flush_diagnostics()
-
-    assert result.outcome is (publication.DeliveryOutcome.STORE_FAILED
-        if store_kind is DbOutcomeKind.ROLLED_BACK else publication.DeliveryOutcome.UNKNOWN)
-    saved_error = json.dumps(exception_diagnostic(result.exception), ensure_ascii=False)
-    assert "failure-store-broke" in saved_error
-    assert "failure-store-close-broke" in saved_error
-    assert len(diagnostics) == 2
-    assert any("报告目录拒绝访问" in diagnostic for diagnostic in diagnostics)
-    assert any("failure-store-broke" in diagnostic and "failure-store-close-broke" in diagnostic
-        for diagnostic in diagnostics)
-    move.assert_awaited_once()
-    session.record_failure.assert_awaited_once()
-    session.save_publication.assert_not_awaited()
+    blocker.unlink()
+    recovered = await run_report_session(world)
+    assert recovered.succeeded, recovered.details
+    files = list(world.ready.glob("status-report-*.json"))
+    assert len(files) == 1
+    assert json.loads(files[0].read_bytes())["plans"][0]["actions"][0]["status"] == "failed"
+    assert _rows(world, "SELECT status,publication_count FROM reports") == [(4, 1)]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failed_directories", [
     ("processing",), ("staging",), ("ready", "processing", "staging"),
 ])
-async def test_recovery_diagnoses_every_executed_directory_observation(monkeypatch, failed_directories):
-    from types import SimpleNamespace
-    from unittest.mock import AsyncMock
-    from camctl.bootstrap import flows
-    from camctl.logging_runtime.diagnostics import record_error
-    from camctl.persistence.business import BusinessDatabase
-    from camctl.persistence.models import DbOutcome
-    from camctl.reporting.supervisor import WorkerSupervisor
-    from camctl.session.service import StateDbFailure
+async def test_recovery_diagnoses_every_executed_directory_observation(tmp_path, monkeypatch, failed_directories):
+    from camctl.contracts.values import new_operation_key
+    from camctl.persistence.models import DbOutcomeKind
+    from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+    from camctl.acceptance.service import AcceptanceContext, CommandMode
+    from camctl.devices.catalog import DriverDefinitions, build_catalog
+    from camctl.persistence.repositories.acceptance import AcceptanceRepository
+    from camctl.reporting.generation import GenerationSpec, generate_report_file
+    from camctl.reporting.models import ReportBytes
+    from camctl.reporting.policy import ReportingRepository, record_report_bytes
+    from ..support.acceptance import accept_source
 
-    database = create_autospec(BusinessDatabase, instance=True)
-    database.metadata = SimpleNamespace(instance_id="a" * 32)
-    database.read.return_value = (7,)
-    context = SimpleNamespace(database=database, clock=SimpleNamespace(utc_micros=lambda: 1))
-    supervisor = create_autospec(WorkerSupervisor, instance=True)
-    flow = flows.report_flow(state_db=Path("/state.db"), staging=Path("/staging"),
-        ready=Path("/ready"), processing=Path("/processing"), history=None,
-        database=None, supervisor=supervisor, start_actions=False)
-
-    def rows(database, sql, parameters=()):
-        return [(2, 1)] if "SELECT status, to_wm FROM reports" in sql else []
-
-    monkeypatch.setattr(flows, "_query_rows", AsyncMock(side_effect=rows))
-    save = AsyncMock(return_value=DbOutcome(DbOutcomeKind.COMPLETED))
-    monkeypatch.setattr(flows, "_policy_write", save)
-    errors = {name: PermissionError(f"{name}-observation-broke") for name in failed_directories}
-    for name, error in errors.items():
-        error.__cause__ = OSError(f"{name}-original-cause")
+    world = report_world(tmp_path)
+    accepted = await accept_source(_input(), AcceptanceContext(
+        mode=CommandMode.RUN, catalog=build_catalog(world.config, DriverDefinitions({})),
+        repository=AcceptanceRepository(),
+        clock=type("Clock", (), {"utc_micros": staticmethod(lambda: 1)})()), world.database_path)
+    assert accepted.plan_id is not None
+    owned = open_existing(world.database_path, DbOpenMode.EXISTING_RW, DbConfig())
+    try:
+        database_id = owned.metadata.instance_id
+        frozen = ReportingRepository().freeze_report(new_operation_key(), owned, occurred_at=1)
+        assert frozen.kind is DbOutcomeKind.COMPLETED, frozen.error
+        report = frozen.value.report
+        generated = generate_report_file(GenerationSpec(
+            world.database_path, report.report_id, report.from_wm, report.to_wm,
+            report.boundary.last_event_id, world.staging / "reports/prepared.json"))
+        saved = record_report_bytes(new_operation_key(), owned, report.report_id,
+            ReportBytes(generated.size_bytes, generated.sha256))
+        assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+        # 文件已移动但发布事实尚未提交，下一会话必须核对真实目录。
+        generated.path.rename(world.ready / publication.report_file_name(1, generated.sha256))
+    finally:
+        owned.connection.close()
+    original_files = {p.name: p.read_bytes() for p in world.ready.iterdir()}
+    observed = []
+    original_listdir = publication.os.listdir
+    paths = {"ready": world.ready, "processing": world.processing,
+             "staging": world.staging / publication.REPORTS_DIRECTORY}
 
     def list_directory(path):
-        name = "staging" if Path(path) == Path("/staging/reports") else Path(path).name
-        if name in errors:
-            raise errors[name]
-        return [publication.report_file_name(7, "b" * 64)] if name == "ready" else []
+        name = next((name for name, value in paths.items() if Path(path) == value), None)
+        if name in failed_directories:
+            observed.append(name)
+            failure = PermissionError(f"{name}-observation-broke")
+            failure.__cause__ = OSError(f"{name}-original-cause")
+            raise failure
+        return original_listdir(path)
 
     monkeypatch.setattr(publication.os, "listdir", list_directory)
-    diagnostics = []
-    with error_diagnostics_context(None, diagnostics.append):
-        if "ready" in failed_directories:
-            with pytest.raises(StateDbFailure) as caught:
-                await flow(context)
-            record_error(caught.value, stage="outer_session")
-        else:
-            await flow(context)
-        await flush_diagnostics()
-
+    outcome = await run_report_session(world)
+    assert outcome.succeeded is ("ready" not in failed_directories), outcome.details
+    if "ready" in failed_directories:
+        assert outcome.reason == "state_db_error"
+    assert sorted(observed) == sorted(failed_directories)
+    entries = [json.loads(line) for line in (world.home / "camctl.log").read_text().splitlines()
+               if line.startswith("{")]
+    diagnostics = [entry for entry in entries if entry.get("stage") == "report_directory_observe"]
     assert len(diagnostics) == len(failed_directories)
     for name in failed_directories:
-        matched = [diagnostic for diagnostic in diagnostics if f"{name}-observation-broke" in diagnostic]
+        matched = [entry for entry in diagnostics if entry["context"]["directory"] == name]
         assert len(matched) == 1
-        assert f"{name}-original-cause" in matched[0]
-        assert '"report_id":7' in matched[0]
-        assert "a" * 32 in matched[0]
-    supervisor.generate.assert_not_awaited()
-    assert save.await_count == (0 if "ready" in failed_directories else 1)
+        facts = json.dumps(matched[0], ensure_ascii=False)
+        assert f"{name}-observation-broke" in facts
+        assert f"{name}-original-cause" in facts
+        assert matched[0]["context"]["report_id"] == 1
+        assert matched[0]["context"]["database_id"] == database_id
+    monkeypatch.setattr(publication.os, "listdir", original_listdir)
+    assert {p.name: p.read_bytes() for p in world.ready.iterdir()} == original_files
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("store_kind,moved", [
-    (DbOutcomeKind.ROLLED_BACK, True), (DbOutcomeKind.UNKNOWN, False),
-])
-async def test_failure_store_error_stops_real_report_flow_without_duplicate_diagnostic(monkeypatch, store_kind, moved):
-    import json
-    from types import SimpleNamespace
-    from unittest.mock import AsyncMock
-    from camctl.bootstrap import flows
-    from camctl.contracts.history_values import HistoryBoundary
-    from camctl.host_files.handoff import PublishResult, PublishStage
-    from camctl.host_files.io import DirectorySyncStage
-    from camctl.logging_runtime.diagnostics import record_error
-    from camctl.operations.error_diagnostics import exception_diagnostic
-    from camctl.persistence.business import BusinessDatabase
-    from camctl.persistence.models import DbOutcome
-    from camctl.reporting import messages
-    from camctl.reporting.messages import ResultSuccessMessage
-    from camctl.reporting.supervisor import GenerationOutcomeKind, WorkerGeneration, WorkerSupervisor
-    from camctl.session.service import StateDbFailure
+async def test_failure_store_sql_error_stops_default_report_session(tmp_path):
+    world = report_world(tmp_path)
+    with sqlite3.connect(world.database_path) as connection:
+        connection.execute("CREATE TRIGGER report_failure_refused BEFORE UPDATE ON reports "
+            "WHEN NEW.status=5 BEGIN SELECT RAISE(ABORT,'failure-store-broke'); END")
+    blocker = world.staging / publication.REPORTS_DIRECTORY
+    blocker.write_bytes(b"occupied")
+    result = await run_report_session(world, _input())
+    assert not result.succeeded and result.reason == "state_db_error", result.details
+    assert _rows(world, "SELECT status,publication_count FROM reports") == [(1, 0)]
+    assert not list(world.ready.glob("status-report-*.json"))
+    entries = [json.loads(line) for line in (world.home / "camctl.log").read_text().splitlines()
+               if line.startswith("{")]
+    failures = [entry for entry in entries if entry.get("stage") == "report"]
+    assert len(failures) == 1
+    assert "failure-store-broke" in json.dumps(failures[0], ensure_ascii=False)
+    generations = [entry for entry in entries if entry.get("stage") == "report_generate"]
+    assert len(generations) == 1
+    assert "FileExistsError" in json.dumps(generations[0], ensure_ascii=False)
 
-    database = create_autospec(BusinessDatabase, instance=True)
-    database.metadata = SimpleNamespace(instance_id="a" * 32)
-    database.read.side_effect = [(7,), SimpleNamespace(from_wm=0, to_wm=1,
-        boundary=HistoryBoundary(1, 1)), ()]
-    database.write.side_effect = [DbOutcome(DbOutcomeKind.COMPLETED), DbOutcome(DbOutcomeKind.COMPLETED),
-        DbOutcome(store_kind, error=OSError("failure-store-broke"),
-                  secondary_errors=(OSError("failure-store-close-broke"),))]
-    supervisor = create_autospec(WorkerSupervisor, instance=True)
-    supervisor.generate.return_value = WorkerGeneration(GenerationOutcomeKind.SUCCESS, "job-7",
-        success=ResultSuccessMessage("job-7", "a" * 32,
-            "/staging/reports/" + publication.report_file_name(7, "b" * 64), 7, "b" * 64))
-    monkeypatch.setattr(messages, "new_job_id", lambda: "job-7")
-    monkeypatch.setattr(flows, "_query_rows", AsyncMock(side_effect=lambda database, sql, parameters=():
-        [(1, 1)] if "SELECT status, to_wm FROM reports" in sql else []))
-    monkeypatch.setattr(publication.asyncio, "to_thread", _inline)
-    monkeypatch.setattr(publication, "_list_stale_ready", lambda *args: ((), None))
-    move = AsyncMock(return_value=PublishResult(
-        PublishStage.MOVED if moved else PublishStage.NOT_MOVED,
-        DirectorySyncStage.FAILED if moved else DirectorySyncStage.NOT_ATTEMPTED,
-        moved, "report-file-broke", _error()))
-    monkeypatch.setattr(publication, "_move_staged", move)
-    failed_callback = AsyncMock()
-    flow = flows.report_flow(state_db=Path("/state.db"), staging=Path("/staging"),
-        ready=Path("/ready"), processing=Path("/processing"),
-        history=SimpleNamespace(entity_batch_size=1, event_batch_size=1),
-        database=SimpleNamespace(busy_timeout_ms=1), supervisor=supervisor,
-        start_actions=False, on_failure=failed_callback)
-    context = SimpleNamespace(database=database, clock=SimpleNamespace(utc_micros=lambda: 1))
-    diagnostics = []
-    with error_diagnostics_context(None, diagnostics.append):
-        with pytest.raises(StateDbFailure) as caught:
-            await flow(context)
-        record_error(caught.value, stage="outer_session")
-        await flush_diagnostics()
 
-    assert len(diagnostics) == 2
-    assert sum("failure-store-broke" in diagnostic for diagnostic in diagnostics) == 1
-    assert sum("报告目录拒绝访问" in diagnostic for diagnostic in diagnostics) == 1
-    original = json.dumps(exception_diagnostic(caught.value), ensure_ascii=False)
-    assert "failure-store-broke" in original
-    assert "failure-store-close-broke" in original
-    failed_callback.assert_not_awaited()
-    move.assert_awaited_once()
-    assert database.write.await_count == 3
+@pytest.mark.asyncio
+async def test_restricted_default_session_publishes_once_and_exits_with_clock_error(tmp_path):
+    from dataclasses import replace
+    from datetime import date
+    from decimal import Decimal
+    from camctl.acceptance.service import AcceptanceContext, CommandMode
+    from camctl.devices.catalog import DriverDefinitions, build_catalog
+    from camctl.persistence.repositories.acceptance import AcceptanceRepository
+    from ..support.acceptance import accept_source
+
+    world = report_world(tmp_path)
+    accepted = await accept_source(_input(), AcceptanceContext(
+        mode=CommandMode.RUN, catalog=build_catalog(world.config, DriverDefinitions({})),
+        repository=AcceptanceRepository(),
+        clock=type("Clock", (), {"utc_micros": staticmethod(lambda: 1)})()), world.database_path)
+    assert accepted.plan_id is not None
+    restricted = replace(world.config, clock=replace(world.config.clock,
+        min_plausible_date=date.max, recheck_delay_s=Decimal(0), recheck_count=1))
+    outcome = await run_report_session(world, config=restricted)
+    assert not outcome.succeeded and outcome.reason == "clock_invalid", outcome.details
+    assert _rows(world, "SELECT status,publication_count FROM reports") == [(4, 1)]
+    assert len(list(world.ready.glob("status-report-*.json"))) == 1
+
+
+@pytest.mark.asyncio
+async def test_new_committed_input_retries_failed_report_in_same_default_session(tmp_path, monkeypatch):
+    from camctl.acceptance.service import AcceptanceContext, CommandMode
+    from camctl.devices.catalog import DriverDefinitions, build_catalog
+    from camctl.persistence.repositories.acceptance import AcceptanceRepository
+    from ..support.acceptance import accept_source
+
+    world = report_world(tmp_path)
+    original_listdir = publication.os.listdir
+    accepted = []
+
+    def list_directory(path):
+        if Path(path) == world.ready and not accepted:
+            context = AcceptanceContext(CommandMode.RUN,
+                build_catalog(world.config, DriverDefinitions({})), AcceptanceRepository(),
+                clock=type("Clock", (), {"utc_micros": staticmethod(lambda: 2)})())
+            # 文件工作线程中的外部提交，真实受理事务与当前会话并行。
+            accepted.append(asyncio.run(accept_source(_input("2"), context, world.database_path)))
+            raise _error()
+        return original_listdir(path)
+
+    monkeypatch.setattr(publication.os, "listdir", list_directory)
+    result = await run_report_session(world, _input())
+    assert result.succeeded, result.details
+    assert len(accepted) == 1 and accepted[0].plan_id == 2
+    files = list(world.ready.glob("status-report-*.json"))
+    assert len(files) == 1
+    document = json.loads(files[0].read_bytes())
+    assert {plan["request_id"] for plan in document["plans"]} == {"1", "2"}
+    assert document["from_wm"] == 0 and document["to_wm"] == 4
+    assert _rows(world, "SELECT COUNT(*) FROM reports") == [(2,)]
+    entries = [json.loads(line) for line in (world.home / "camctl.log").read_text().splitlines()
+               if line.startswith("{")]
+    failures = [entry for entry in entries if entry.get("stage") == "report_file_list"]
+    assert len(failures) == 1
+    facts = json.dumps(failures[0], ensure_ascii=False)
+    assert "报告文件写入失败" in facts and "报告目录拒绝访问" in facts

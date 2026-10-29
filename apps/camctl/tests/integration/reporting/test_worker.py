@@ -30,7 +30,8 @@ from camctl.reporting.worker import (
     run_job,
 )
 
-from ..history.test_report_scope import _finish_action, _submit
+from ..history.test_report_scope import _submit
+from ..support.reporting import complete_photo as _finish_action
 from ..persistence.test_runtime import DIRECTORIES, _create_valid_database
 from camctl.persistence.directory_switch import canonical_to_path
 from camctl.persistence.runtime import canonical_directory_binding

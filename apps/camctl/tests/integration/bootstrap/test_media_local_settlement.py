@@ -2,105 +2,95 @@
 
 import asyncio
 from dataclasses import replace
-from datetime import datetime, timezone
 
 import pytest
 import pytest_asyncio
 
-from camctl.bootstrap import lifecycle
 from camctl.bootstrap.capture_assembly import session_capture_assembly
-from camctl.capture.files import (
-    FileCompletionSave, FileObservationSave, FilePresenceSave, OwnershipSave,
-)
-from camctl.capture.handlers import _stop_call, capture_handler
-from camctl.capture.media_flow import DriverReadSessions, run_recording_media
-from camctl.capture.models import ActivityConcludeSave
-from camctl.capture.processing import (
-    CheckBasis, CheckDecisionChoice, CheckDecisionSave, CheckPhase, CheckReason,
-    SourceFileSave,
-)
-from camctl.contracts.values import ConsistencyError, new_operation_key
+from camctl.capture.handlers import capture_handler
+from camctl.capture.media_flow import run_recording_media
+from camctl.capture.processing import CheckPhase
+from camctl.contracts.values import ConsistencyError
 from camctl.devices.bindings import DeviceConfigurationError
 from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverStatus
 from camctl.devices.ports import DriverDeclaration
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.acceptance import AcceptanceRepository, ProcessInput
 from camctl.persistence.repositories.capture import CaptureRepository
-from camctl.persistence.repositories.scheduling import (
-    ObserveWindowRequest, SchedulingRepository, StartActionRequest,
-)
 from camctl.session.clock import ClockBecameUntrusted
 from camctl.session.locks import acquire_session, probe_admission
 from camctl.session.service import StateDbFailure, run_session
-from camctl.session.supervision import SupervisionResult, TaskFailure, TaskRecord
 
-from ..capture.media_retry_fixtures import _EVIDENCE, media_pipeline as pipeline  # noqa: F401
+from ..capture.media_retry_fixtures import _Catalog, _EVIDENCE, media_pipeline as pipeline  # noqa: F401
 from ..capture.test_capture_contract import ResultsDouble
 from ..capture.test_input_copy import _CONTENT, _NOW
-from ..capture.test_media_flow import ReadDriverDouble
-from ..capture.test_media_result_retry import _ActualTools
 from ..session.test_session import FixedClock
-from .test_binding_transactions import _CommitFailure
 from .test_media_assembly import _SessionDriver, _config
-from .test_media_saved_result_consumers import _default_factories
 
 
 pytestmark = pytest.mark.asyncio
 
 
 @pytest_asyncio.fixture
-async def held_media(pipeline, monkeypatch):
-    owned, _roots, source_id = pipeline
-    deps, factories, context = await _default_factories(pipeline, monkeypatch)
-    driver, tools = ReadDriverDouble(_CONTENT), _ActualTools("check")
-    flow = factories[0](owned, "cam-1").media
-    assert flow is not None
-    flow.sessions = DriverReadSessions(owned, driver, ticket=None)
-    flow.tools = tools
+async def held_media(pipeline, capture_resources, monkeypatch):
+    from types import SimpleNamespace
+    from camctl.bootstrap.work_file_assembly import WorkFileRuntime
+    from camctl.outputs.work_files import WorkFileLimits
+    from ..support.bootstrap_consumers import consumer_world, TransactionFault
+    from ..support.session import session_context
+
+    pending = {}
+    work = WorkFileRuntime(staging=pipeline[1].staging, limits=WorkFileLimits(32, 1),
+        pending_media_results=pending)
+    world = await consumer_world(pipeline, capture_resources, branch="check",
+        collections={"pending_media_results": pending}, executor_factory=lambda _owner: work.executor)
+    await work.initialize(world.database)
     original_save = CaptureRepository.save_check_result
-    attempts = []
+    attempts, errors = [], []
 
     def save(repository, command, key, current):
         if command.phase is CheckPhase.RUNNING:
             return original_save(repository, command, key, current)
         attempts.append((command, key))
-        return original_save(repository, command, key,
-            replace(current, connection=_CommitFailure(current.connection, True)))
+        fault = TransactionFault(current.connection, after_commit=True)
+        receipt = original_save(repository, command, key, replace(current, connection=fault))
+        assert receipt.kind is DbOutcomeKind.UNKNOWN and fault.commit_calls == 1
+        errors.append(receipt.error)
+        return receipt
 
     monkeypatch.setattr(CaptureRepository, "save_check_result", save)
     try:
         with pytest.raises(ConsistencyError):
-            await run_recording_media(flow, 1, 1, source_id)
-        assert len(attempts) == 1 and tools.probes == 1
-        assert not deps.work_files.executor.unfinished_files()
-        assert len(deps.capture_media_results) == 1
-        assert deps.work_files.pending_media_results is deps.capture_media_results
-        assert deps.work_files.supervisor.outstanding() == ()
-        assert deps.work_files.file_supervisor.outstanding() == ()
-        context.clock = FixedClock(_NOW + 100)
-        yield deps, context, driver, tools, attempts
+            await run_recording_media(world.runtime.media, 1, 1, world.source_id)
+        assert len(attempts) == 1 and world.tools() == ["probe"]
+        assert not work.executor.unfinished_files()
+        assert work.required_settlements() == 1
+        assert work.supervisor.outstanding() == work.file_supervisor.outstanding() == ()
+        context = session_context(world.path, catalog=_Catalog(), clock=FixedClock(_NOW + 100),
+            local_work=work)
+        yield SimpleNamespace(world=world, work=work, context=context, attempts=attempts, errors=errors)
     finally:
-        lifecycle.close_runtime(deps)
+        work.stop_new_work()
+        await world.close()
+        world.owned.connection.close()
 
 
 async def test_media_pending_save_is_required_after_actual_owner_has_ended(held_media):
-    deps, _context, _driver, _tools, _attempts = held_media
-    assert deps.work_files.required_settlements() == 1
+    assert held_media.work.required_settlements() == 1
 
 
 async def test_media_pending_save_cannot_be_declared_settled_or_blindly_retried(held_media):
-    deps, _context, driver, tools, attempts = held_media
+    state = held_media
     with pytest.raises(StateDbFailure) as failed:
-        await deps.work_files.settle()
-    assert "injected commit response failure" in str(failed.value)
-    assert failed.value.__cause__ is not None
-    assert len(attempts) == 1 and len(deps.capture_media_results) == 1
-    assert tools.probes == 1 and len(driver.opens) == 1
+        await state.work.settle()
+    assert str(state.errors[0]) in str(failed.value)
+    assert failed.value.__cause__ is state.errors[0]
+    assert len(state.attempts) == state.work.required_settlements() == 1
+    assert state.world.tools() == ["probe"] and len(state.world.reader.requests) == 1
 
 
 @pytest.mark.parametrize("primary", ["state", "configuration", "clock", "cancel"])
 async def test_media_unconfirmed_save_preserves_fatal_primary_and_secondary_state(held_media, primary):
-    deps, context, driver, tools, attempts = held_media
+    state, context = held_media, held_media.context
     errors = {"state": StateDbFailure("primary-state"),
         "configuration": DeviceConfigurationError("primary-configuration"),
         "clock": ClockBecameUntrusted("primary-clock"),
@@ -121,7 +111,7 @@ async def test_media_unconfirmed_save_preserves_fatal_primary_and_secondary_stat
         with pytest.raises(asyncio.CancelledError) as canceled:
             await run_session(context, None)
         assert canceled.value is original
-        assert "injected commit response failure" in str(getattr(canceled.value, "__notes__", ()))
+        assert str(state.errors[0]) in str(getattr(canceled.value, "__notes__", ()))
     else:
         outcome = await run_session(context, None)
         assert outcome.reason == {"state": "state_db_error", "configuration": "configuration_error",
@@ -129,180 +119,179 @@ async def test_media_unconfirmed_save_preserves_fatal_primary_and_secondary_stat
         assert f"primary-{primary}" in str(outcome.details)
         secondary = outcome.details.get("secondary_errors", ())
         assert any(item["reason"] == "state_db_error" and
-            "injected commit response failure" in str(item["details"]) for item in secondary)
+            str(state.errors[0]) in str(item["details"]) for item in secondary)
     assert not restricted
-    assert len(attempts) == 1 and len(deps.capture_media_results) == 1
-    assert tools.probes == 1 and len(driver.opens) == 1
+    assert len(state.attempts) == state.work.required_settlements() == 1
+    assert state.world.tools() == ["probe"] and len(state.world.reader.requests) == 1
     assert probe_admission(context.paths.admission_lock).is_free
     lease = acquire_session(context.paths.session_lock)
     lease.close()
 
 
-class _RewrittenActivityDriver:
-    """把驱动替身的确认观察身份改写为指定活动（第二录像周期）。"""
+async def _second_recording_cycle(pipeline, capture_resources):
+    """第二个受理动作通过实际START、worker重开和受限STOP取得媒体输入。"""
+    from decimal import Decimal
+    from pathlib import Path
+    from types import SimpleNamespace
+    from camctl.bootstrap.capture_assembly import execution_wait_config
+    from camctl.bootstrap.flows import capture_flow, winddown_flow
+    from ..capture.media_retry_fixtures import original_recording_entry
+    from ..capture.test_capture_contract import _entry
+    from ..support.capture import capture_database
+    from ..support.session import accept_plan
 
-    def __init__(self, driver, identity: str) -> None:
-        self._driver = driver
-        self._identity = identity
+    owned, roots, _first_source = pipeline
+    database = await capture_database(owned)
 
-    def _rewrite(self, result):
-        from dataclasses import replace as _replace
+    class Catalog(_Catalog):
+        def device_exists(self, device_id):
+            return device_id in {"cam-1", "cam-2"}
 
-        return _replace(result, observations=tuple(
-            _replace(observation, data={
-                **observation.data, "activity_id": self._identity})
-            if "activity_id" in observation.data else observation
-            for observation in result.observations))
+        def driver_id(self, device_id):
+            return "camctl-adb" if self.device_exists(device_id) else None
 
-    async def control(self, request):
-        return self._rewrite(await self._driver.control(request))
-
-    async def stop(self, request):
-        return self._rewrite(await self._driver.stop(request))
-
-
-async def _second_recording_cycle(owned, roots) -> tuple[int, int]:
-    """把观察者动作补全为第二个真实录像周期。
-
-    与媒体 pipeline fixture 建立第一个录像的方式一致：真实窗口观
-    察、启动、可靠停止、活动结束、源文件事实与检查决定，返回第二
-    个内部处理的 (processing_id, 源设备文件身份)。
-    """
-    scheduling = SchedulingRepository()
-    second = owned.connection.execute(
-        "SELECT id FROM actions WHERE name=?", ("另一个录像动作",)).fetchone()
-    assert second is not None, "pipeline 须以 observer 参数建立第二动作"
-    action_id = second[0]
+    from datetime import datetime, timezone
+    instant = datetime.fromtimestamp(_NOW // 1_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    await accept_plan(database, roots.staging.parent, Catalog(), {
+        "request_id": "3", "created_at": instant, "name": "第二个真实媒体责任",
+        "actions": [{"name": "第二实际录像", "type": "camera_record", "device_id": "cam-2",
+            "scheduled_at": instant, "params": {"type": "video"},
+            "policy": {"max_delay_ms": 5000}}]}, FixedClock(_NOW))
+    action_id, = owned.connection.execute("SELECT id FROM actions WHERE name='第二实际录像'").fetchone()
     assert action_id != 1
-    for save, command in (
-        (scheduling.observe_window, ObserveWindowRequest(action_id, _NOW, _NOW)),
-        (scheduling.start_action, StartActionRequest(action_id, _NOW, _NOW)),
-    ):
-        outcome = save(command, new_operation_key(), owned)
-        assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
-    activity = owned.connection.execute(
-        "SELECT id FROM device_activities WHERE action_id=?",
-        (action_id,)).fetchone()
-    assert activity is not None
-    driver = _RewrittenActivityDriver(_SessionDriver(_CONTENT), str(activity[0]))
-    registry = DriverRegistry((DriverEntry("camctl-adb", driver, DriverDeclaration(
+
+    class Driver(_SessionDriver):
+        async def read_directory(self, request, *, stop):
+            from camctl.contracts.pages import Page
+            from camctl.devices.directory import DirectoryRead
+            return DirectoryRead(None, None, Page((), None))
+
+        async def control(self, request):
+            result = await super().control(request)
+            return replace(result, observations=tuple(replace(observation,
+                data={**observation.data, "activity_id": request.ticket.target_id})
+                for observation in result.observations))
+
+        async def stop(self, request):
+            result = await super().stop(request)
+            return replace(result, observations=tuple(replace(observation,
+                data={**observation.data, "activity_id": request.ticket.target_id})
+                for observation in result.observations))
+
+    driver = Driver(_CONTENT)
+    entry = DriverEntry("camctl-adb", driver, DriverDeclaration(
         control_supported=True, stop_supported=True, query_supported=False,
-        result_supported=False, read_supported=True, digest_supported=True,
-        delete_supported=False), _EVIDENCE, DriverStatus.SOFTWARE_CONTRACT_VERIFIED),))
-    runtime = session_capture_assembly(
-        devices=_config(roots.staging.parent).devices, drivers=registry,
-        results=ResultsDouble({}), staging=roots.staging,
-        wait_config=lambda _action: None,
-        wall_us=lambda: _NOW, monotonic_ns=lambda: 7_000_000_000)(owned, "cam-1")
-    await capture_handler("camera_record")(action_id, runtime)
-    stopped = await _stop_call(runtime, runtime.action(action_id))
-    assert stopped.phase == "confirmed", stopped
-    repository = CaptureRepository()
-    concluded = repository.conclude_activity(
-        ActivityConcludeSave(action_id, _NOW), new_operation_key(), owned)
-    assert concluded.kind is DbOutcomeKind.COMPLETED, concluded.error
-    source = repository.save_file_observation(FileObservationSave(
-        action_id, "original-recording-2",
-        {"path": "/DCIM/original-2.mp4"}, _NOW, "original-2.mp4", "video/mp4"),
-        new_operation_key(), owned)
-    assert source.kind is DbOutcomeKind.COMPLETED, source.error
-    source_id = source.value.file_id
-    for save, command in (
-        (repository.save_file_presence, FilePresenceSave(
-            source_id, 2, _NOW, locator={"path": "/DCIM/original-2.mp4"})),
-        (repository.save_file_ownership, OwnershipSave(
-            source_id, action_id, 1, 2, {"task": "original-recording-2"}, _NOW)),
-        (repository.save_file_completion, FileCompletionSave(
-            source_id, 3, _NOW, basis=1,
-            observation={"stopped": True}, size_bytes=len(_CONTENT))),
-        (repository.save_source_file, SourceFileSave(action_id, source_id, _NOW)),
-        (repository.save_check_decision, CheckDecisionSave(
-            action_id, CheckDecisionChoice.REQUIRED,
-            CheckBasis(CheckReason.INSUFFICIENT_TIMING, 60000), _NOW)),
-    ):
-        outcome = save(command, new_operation_key(), owned)
-        assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
-    processing_id = owned.connection.execute(
-        "SELECT id FROM recording_processing WHERE action_id=?",
-        (action_id,)).fetchone()[0]
-    assert processing_id != 1
-    return processing_id, source_id
+        result_supported=False, read_supported=False, digest_supported=False,
+        delete_supported=False, directory_supported=True), _EVIDENCE, DriverStatus.SOFTWARE_CONTRACT_VERIFIED)
+    original_config = _config(roots.staging.parent)
+    config = replace(original_config, devices={**original_config.devices,
+        "cam-2": {**original_config.devices["cam-1"]}})
+    results = ResultsDouble({1: (original_recording_entry(),)})
+    clock = {"ns": 7_000_000_000}
+    options = dict(devices=config.devices, drivers=DriverRegistry((entry,)),
+        results=results, staging=roots.staging, wait_config=execution_wait_config,
+        wall_us=lambda: _NOW, monotonic_ns=lambda: clock["ns"], media_enabled=False)
+    factory = session_capture_assembly(**options)
+    # 已停止的首动作释放设备，原检查责任保持等待媒体执行资格。
+    await capture_handler("camera_record")(1, await factory(database, "cam-1"))
+    flow = capture_flow(factory)
+    await flow(SimpleNamespace(database=database, clock=FixedClock(_NOW)))
+    await flow.settle()
+    started_outcome = await capture_handler("camera_record")(action_id, await factory(database, "cam-2"))
+    activity_id, started = owned.connection.execute(
+        "SELECT id,started_at IS NOT NULL FROM device_activities WHERE action_id=?", (action_id,)).fetchone()
+    assert started, started_outcome
+    assert [operation for _kind, operation in driver.calls] == ["start_recording"]
+    results.files_by_action[activity_id] = (_entry("original-recording-2", size=len(_CONTENT)),)
+    database = await capture_resources.restart_database(Path(config.paths.state_db))
+    clock["ns"] = 20_000_000_000
+    cold = session_capture_assembly(**options)
+
+    async def elapsed(seconds):
+        clock["ns"] += int(seconds * 1_000_000_000)
+
+    await winddown_flow(capture_factory=cold, wait_cap_s=Decimal("6"), sleep=elapsed)(
+        SimpleNamespace(database=database, clock=FixedClock(_NOW)))
+    processing_id, source_id, decision = owned.connection.execute(
+        "SELECT id,source_device_file_id,check_decision FROM recording_processing WHERE action_id=?", (action_id,)).fetchone()
+    assert processing_id != 1 and source_id is not None and decision == 3
+    assert [operation for _kind, operation in driver.calls] == ["start_recording", "stop_recording"]
+    return action_id, processing_id, source_id, config
 
 
 @pytest_asyncio.fixture
-async def two_held_media(pipeline, monkeypatch):
-    """两个真实录像的检查观察保存同时失败，两份申请均在待保存集合。"""
-    owned, roots, first_source = pipeline
-    second_processing, second_source = await _second_recording_cycle(owned, roots)
-    deps, factories, context = await _default_factories(pipeline, monkeypatch)
-    driver, tools = ReadDriverDouble(_CONTENT), _ActualTools("check")
+async def two_held_media(pipeline, capture_resources, monkeypatch):
+    from types import SimpleNamespace
+    from camctl.bootstrap.work_file_assembly import WorkFileRuntime
+    from camctl.outputs.work_files import WorkFileLimits
+    from ..support.bootstrap_consumers import consumer_world, TransactionFault
+
+    second_action, second_processing, second_source, configuration = await _second_recording_cycle(pipeline, capture_resources)
+    pending = {}
+    work = WorkFileRuntime(staging=pipeline[1].staging, limits=WorkFileLimits(32, 1),
+        pending_media_results=pending)
+    world = await consumer_world(pipeline, capture_resources, branch="check",
+        collections={"pending_media_results": pending}, executor_factory=lambda _owner: work.executor)
+    world.config = configuration
+    world.factory = world.new_factory()
+    world.runtime = await world.factory(world.database, "cam-1")
+    second_runtime = await world.factory(world.database, "cam-2")
+    await work.initialize(world.database)
     original_save = CaptureRepository.save_check_result
-    attempts = []
+    attempts, errors = [], []
 
     def save(repository, command, key, current):
         if command.phase is CheckPhase.RUNNING:
             return original_save(repository, command, key, current)
         attempts.append((command, key))
-        return original_save(repository, command, key,
-            replace(current, connection=_CommitFailure(current.connection, True)))
+        fault = TransactionFault(current.connection, after_commit=True)
+        receipt = original_save(repository, command, key, replace(current, connection=fault))
+        assert receipt.kind is DbOutcomeKind.UNKNOWN and fault.commit_calls == 1
+        errors.append(receipt.error)
+        return receipt
 
     monkeypatch.setattr(CaptureRepository, "save_check_result", save)
     try:
-        flow = factories[0](owned, "cam-1").media
-        flow.sessions = DriverReadSessions(owned, driver, ticket=None)
-        flow.tools = tools
-        for action_id, processing_id, source_id in (
-            (1, 1, first_source),
-            (owned.connection.execute(
-                "SELECT action_id FROM recording_processing WHERE id=?",
-                (second_processing,)).fetchone()[0],
-             second_processing, second_source),
-        ):
+        for runtime, action_id, processing_id, source_id in ((world.runtime, 1, 1, world.source_id),
+                (second_runtime, second_action, second_processing, second_source)):
             with pytest.raises(ConsistencyError):
-                await run_recording_media(flow, action_id, processing_id, source_id)
-        assert len(attempts) == 2 and tools.probes == 2
-        assert len(deps.capture_media_results) == 2
-        context.clock = FixedClock(_NOW + 100)
-        yield deps, context, driver, tools, attempts, second_processing
+                await run_recording_media(runtime.media, action_id, processing_id, source_id)
+        assert len(attempts) == work.required_settlements() == 2
+        assert world.tools() == ["probe", "probe"] and len(world.reader.requests) == 2
+        yield SimpleNamespace(world=world, work=work, attempts=attempts, errors=errors,
+            second=second_processing)
     finally:
-        lifecycle.close_runtime(deps)
+        work.stop_new_work()
+        await world.close()
+        world.owned.connection.close()
 
 
 @pytest.mark.parametrize("pipeline", [True], indirect=True)
 async def test_settlement_reports_every_unverified_media_reason(two_held_media):
-    """两份未核实媒体申请的已知原因都在收场错误中呈现并保留。"""
-    deps, _context, driver, tools, attempts, second = two_held_media
+    state = two_held_media
     with pytest.raises(StateDbFailure) as failed:
-        await deps.work_files.settle()
-    message = str(failed.value)
-    assert "processing_id=1" in message
-    assert f"processing_id={second}" in message
-    assert failed.value.__cause__ is not None
-    # 两份申请均保留待核实，不盲重试、不再执行工具。
-    assert len(attempts) == 2 and len(deps.capture_media_results) == 2
-    assert tools.probes == 2 and len(driver.opens) == 2
+        await state.work.settle()
+    assert "processing_id=1" in str(failed.value) and f"processing_id={state.second}" in str(failed.value)
+    assert failed.value.__cause__ is state.errors[0]
+    assert len(state.attempts) == state.work.required_settlements() == 2
+    assert state.world.tools() == ["probe", "probe"] and len(state.world.reader.requests) == 2
 
 
 @pytest.mark.parametrize("pipeline", [True], indirect=True)
-async def test_settlement_reports_maintenance_and_media_reasons_together(
-        two_held_media, monkeypatch):
-    """维护收场失败与媒体原保存失败并存时两类原因同时呈现。"""
-    deps, _context, _driver, _tools, _attempts, second = two_held_media
-    failure = TaskFailure(
-        TaskRecord("cleanup/9", "delete", "维护清理", ("state_db",)),
-        "维护清理收场失败: injected")
-    original_drain = deps.work_files.supervisor.drain_required
+async def test_settlement_reports_maintenance_and_media_reasons_together(two_held_media):
+    from camctl.session.supervision import OwnedTask
+    state = two_held_media
 
-    async def drain():
-        result = await original_drain()
-        return SupervisionResult(
-            settled=result.settled, failed=(*result.failed, failure))
+    async def maintenance():
+        raise OSError("维护清理收场失败: injected")
 
-    monkeypatch.setattr(deps.work_files.supervisor, "drain_required", drain)
+    task = asyncio.create_task(maintenance())
+    token = state.work.supervisor.register(state.work)
+    state.work.supervisor.handoff(token, OwnedTask(
+        "cleanup/9", "delete", "维护清理", ("state_db",), task))
     with pytest.raises(StateDbFailure) as failed:
-        await deps.work_files.settle()
+        await state.work.settle()
     message = str(failed.value)
     assert "维护清理收场失败: injected" in message
-    assert "processing_id=1" in message
-    assert f"processing_id={second}" in message
-    assert len(deps.capture_media_results) == 2
+    assert "processing_id=1" in message and f"processing_id={state.second}" in message
+    assert state.work.required_settlements() == 2 and len(state.attempts) == 2

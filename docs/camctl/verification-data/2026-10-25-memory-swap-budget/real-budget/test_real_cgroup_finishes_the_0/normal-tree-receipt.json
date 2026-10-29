@@ -1,0 +1,59 @@
+{
+  "schema": 1,
+  "budget_scope": "memory_and_swap",
+  "status": "completed",
+  "command": [
+    "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+    "-c",
+    "import os,subprocess,sys; hold=bytearray(4*1024**2); print(os.getpid(), flush=True); subprocess.run([sys.executable,'-c',sys.argv[1],sys.argv[2]],check=True); print('complete',flush=True)",
+    "import os,subprocess,sys; hold=bytearray(4*1024**2); print(os.getpid(), flush=True); subprocess.run([sys.executable,'-c',sys.argv[1]],check=True)",
+    "import os; hold=bytearray(4*1024**2); print(os.getpid(), flush=True)"
+  ],
+  "requested_limit": "64MiB",
+  "limit_bytes": 67108864,
+  "configured_root": "/sys/fs/cgroup/memory/camctl-budget-1479829-138314db091548e8bf16ac227c0a1d01",
+  "controller": "cgroup-v1",
+  "group": "/sys/fs/cgroup/memory/camctl-budget-1479829-138314db091548e8bf16ac227c0a1d01/camctl-memory-1479845-21cffcc544f14aca9895bc48ae25f5a2",
+  "owned_root": "/sys/fs/cgroup/memory/camctl-budget-1479829-138314db091548e8bf16ac227c0a1d01",
+  "baseline": {
+    "budget_scope": "memory_and_swap",
+    "limit_bytes": 67108864,
+    "combined_limit_bytes": 67108864,
+    "peak_bytes": 0,
+    "combined_peak_bytes": 0,
+    "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+    "swap_peak_bytes": null,
+    "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+    "host_swap_bytes": 4294967296,
+    "events": {
+      "oom_kill_disable": 0,
+      "under_oom": 0,
+      "oom_kill": 0,
+      "failcnt": 0,
+      "memsw_failcnt": 0
+    }
+  },
+  "pid": 1479862,
+  "evidence": {
+    "budget_scope": "memory_and_swap",
+    "limit_bytes": 67108864,
+    "combined_limit_bytes": 67108864,
+    "peak_bytes": 28884992,
+    "combined_peak_bytes": 28884992,
+    "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+    "swap_peak_bytes": null,
+    "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+    "host_swap_bytes": 4294967296,
+    "events": {
+      "oom_kill_disable": 0,
+      "under_oom": 0,
+      "oom_kill": 0,
+      "failcnt": 0,
+      "memsw_failcnt": 0
+    }
+  },
+  "final_status": "completed",
+  "group_removed": true,
+  "elapsed_seconds": 0.07615469599841163,
+  "returncode": 0
+}
