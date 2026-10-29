@@ -75,6 +75,8 @@ from .responses import (
     parse_devices,
     parse_serial,
     doctor_passed,
+    parse_deleted,
+    parse_images_presence,
 )
 from .files import (CameraFileIdentity, CameraFileLocator, CameraLocatorStatus, DeferredCameraFileIdentity,
                     DownloadVariant, PhotoResultCursor, camera_file_identity_from_source, decide_photo_cache)
@@ -143,6 +145,17 @@ EVIDENCE = EvidenceRegistry((
     _AVAILABILITY, _AVAILABILITY_RETURNED, _AVAILABILITY_NOT_DISPATCHED,
     RESULT_PHOTO_PAGE_CONTRACT, _PHOTO_RESULT_RETURNED, _PHOTO_RESULT_NOT_DISPATCHED,
     _PHOTO_RESULT_ATTEMPT, _PHOTO_RESULT_COMPARISON,
+    EvidenceContract("delete_returned", 1, "delete", frozenset(), max_diagnostic_calls=3),
+    EvidenceContract("query_returned", 1, "query", frozenset(), max_diagnostic_calls=3),
+    EvidenceContract("file_delete_not_dispatched", 1, "delete", frozenset(), max_diagnostic_calls=3),
+    EvidenceContract("file_query_not_dispatched", 1, "query", frozenset(), max_diagnostic_calls=3),
+    EvidenceContract("local_file_recovery", 1, "delete", frozenset()),
+    EvidenceContract("file_absent", 1, "delete", frozenset({"cleanup_item_id"}),
+                     identity_field="cleanup_item_id"),
+    EvidenceContract("file_presence", 1, "query", frozenset({"cleanup_item_id", "present"}),
+                     identity_field="cleanup_item_id"),
+    EvidenceContract("file_presence", 2, "query", frozenset({"obtain_item_id", "present"}),
+                     identity_field="obtain_item_id"),
 ))
 
 _VENDOR_ID = 0x2756
@@ -847,6 +860,7 @@ class HasselbladDriver:
         args: tuple[str, ...],
         timeout_s: Decimal,
         steps: list[dict[str, object]],
+        start_errors: list[BaseException] | None = None,
     ) -> RawToolOutcome | None:
         spec = ToolSpec(
             (config.executable, "--pid", f"0x{config.product_id:04x}", *args),
@@ -861,6 +875,8 @@ class HasselbladDriver:
             finally:
                 elapsed_ms = (diagnostic_monotonic_ns() - call_began) // 1_000_000
         except ToolStartError as failure:
+            if start_errors is not None:
+                start_errors.append(failure)
             steps.append({
                 "name": name,
                 "start_error": f"{type(failure).__name__}: {failure}",
@@ -884,6 +900,133 @@ class HasselbladDriver:
         if raw.exit is None:
             raise RuntimeError(f"{name} transport 未提供本地退出/收场结果")
         return raw
+
+    async def delete(self, request: ControlRequest) -> DeviceCallResult:
+        """按固定原机身和完整路径删除一张相机照片。"""
+        return await self._file_call(request, "delete")
+
+    async def query_file(self, request: ControlRequest) -> DeviceCallResult:
+        """独立核对原照片是否明确出现在相机列表。"""
+        return await self._file_call(request, "query")
+
+    async def _file_call(self, request: ControlRequest, operation: str) -> DeviceCallResult:
+        ticket = request.ticket
+        if (request.operation != operation or ticket is None or ticket.operation != operation
+                or ticket.target_id is None):
+            raise ValueError("文件调用必须携带匹配的原尝试票据")
+        parse_object_id(ticket.target_id)
+        obtain = operation == "query" and ticket.responsibility_key == f"obtain-exists/{ticket.target_id}"
+        owner = "obtain_item_id" if obtain else "cleanup_item_id"
+        responsibility = (f"obtain-exists/{ticket.target_id}" if obtain else
+                          f"{'delete' if operation == 'delete' else 'exists'}/{ticket.target_id}")
+        if (ticket.responsibility_key != responsibility or not isinstance(request.params, Mapping)
+                or request.params.get(owner) != ticket.target_id):
+            raise ValueError("文件调用改变原成员或操作责任")
+        parse_object_id(request.params.get("file_id"))
+        if (not isinstance(request.timeout_s, Decimal) or not request.timeout_s.is_finite()
+                or request.timeout_s <= 0):
+            raise ValueError("文件调用必须携带有限正期限")
+        identity = camera_file_identity_from_source(request.params["identity_key"], request.params["locator"])
+        if identity.binding != request.binding:
+            raise ValueError("文件调用改变原设备绑定")
+        config = self._binding_config(request.binding)
+        began = self.monotonic_ns()
+        if type(began) is not int:
+            raise TypeError("monotonic_ns 必须返回整数纳秒")
+        steps, calls, start_errors = [], [], []
+        last_raw = None
+        target_dispatched = False
+        planned = ("list", "info", "delete" if operation == "delete" else "images")
+
+        def finish(*, reason=None, observations=(), diagnostic=None):
+            returned = target_dispatched
+            basis = SettlementBasis.OBSERVED if returned else SettlementBasis.NOT_DISPATCHED
+            evidence = (operation + "_returned" if returned else f"file_{operation}_not_dispatched")
+            effect = (EffectState.CONFIRMED if observations else
+                      EffectState.UNKNOWN if returned else EffectState.NO_EFFECT)
+            details = {"reason": reason, "steps": deepcopy(steps)}
+            if diagnostic is not None:
+                details["response_error"] = str(diagnostic)
+            if start_errors:
+                details["start_error"] = exception_diagnostic(start_errors[-1])
+            outcome = CallOutcome(
+                status=AttemptStatus.SUCCEEDED if reason is None else AttemptStatus.FAILED,
+                error=None if reason is None else ErrorValue("device_error", operation, details),
+                effect=effect, settlement=Settlement(basis, EvidenceValue(evidence, 1, {})),
+                observations=observations, call_info=self._call_info(last_raw),
+                diagnostics=ToolDiagnostics(3, tuple(calls)))
+            actual_names = tuple(step["name"] for step in steps)
+
+            def check_prefix(original):
+                if (tuple(call.step_name for call in original.diagnostics.calls) != actual_names
+                        or actual_names != planned[:len(actual_names)]):
+                    raise ValueError("原工具诊断与实际文件命令前缀不符")
+            return DeviceCallResult(outcome.observations, DeviceCallResult._error_view(outcome), outcome,
+                                    diagnostics_check=check_prefix,
+                                    diagnostic_error=start_errors[-1] if start_errors else None)
+
+        if (config.serial, config.product_id) != (identity.serial, identity.product_id):
+            return finish(reason="physical_identity_mismatch")
+        for name in planned:
+            scope = current_call_scope()
+            if scope is not None and scope.interrupted is not None:
+                return finish(reason="transport_cancelled")
+            now = self.monotonic_ns()
+            if type(now) is not int:
+                raise TypeError("monotonic_ns 必须返回整数纳秒")
+            budget = request.timeout_s - Decimal(now - began) / _NANOSECONDS_PER_SECOND
+            if budget <= 0:
+                return finish(reason="deadline_elapsed")
+            args = ("delete", identity.camera_path) if name == "delete" else (name,)
+            with log_context(device_id=request.binding.device_id, driver_id=request.binding.driver_id,
+                             run_id=ticket.run_id, attempt_id=ticket.attempt_id,
+                             operation=operation, **{owner: ticket.target_id}):
+                raw = await self._run_step(config=config, name=name, args=args,
+                                           timeout_s=budget, steps=steps, start_errors=start_errors)
+            complete = (raw is not None and raw.output is not None and raw.stderr is not None
+                        and raw.output_failure is None)
+            def stream(data):
+                state = (ToolStreamState.UNAVAILABLE if data is None else
+                         ToolStreamState.COMPLETE if complete else ToolStreamState.UNCONFIRMED)
+                return ToolStream(state, data)
+            calls.append(ToolCallOutput(len(calls) + 1, name,
+                stream(None if raw is None else raw.output), stream(None if raw is None else raw.stderr)))
+            if raw is None:
+                return finish(reason="tool_start_failed")
+            last_raw = raw
+            if name == planned[-1]:
+                target_dispatched = True
+            failure = self._local_return_failure(raw, needs_stdout=True)
+            if failure is not None or raw.stderr is None:
+                return finish(reason=failure or "stderr_unavailable")
+            if name in ("list", "info") and raw.stderr:
+                return finish(reason="identity_stderr_unconfirmed")
+            try:
+                if name == "list":
+                    cameras = parse_devices(raw.output)
+                    matching = tuple(camera for camera in cameras if camera.vendor_id == _VENDOR_ID
+                                     and camera.product_id == identity.product_id)
+                    steps[-1]["matching_count"] = len(matching)
+                    if len(matching) != 1:
+                        return finish(reason="no_matching_device" if not matching else "multiple_matching_devices")
+                elif name == "info":
+                    serial = parse_serial(raw.output)
+                    steps[-1]["observed_serial"] = serial
+                    if serial != identity.serial:
+                        return finish(reason="serial_mismatch")
+                elif operation == "delete":
+                    parse_deleted(raw.output, raw.stderr, camera_path=identity.camera_path)
+                    return finish(observations=(DeviceObservation("file_absent", 1,
+                                          {"cleanup_item_id": ticket.target_id}),))
+                else:
+                    present = parse_images_presence(raw.output, raw.stderr, camera_path=identity.camera_path)
+                    if present is None:
+                        return finish(reason="file_presence_unconfirmed")
+                    return finish(observations=(DeviceObservation("file_presence", 2 if obtain else 1,
+                                          {owner: ticket.target_id, "present": True}),))
+            except CliParseError as error:
+                return finish(reason="response_unconfirmed", diagnostic=error)
+        raise AssertionError("文件调用没有目标步骤")
 
     async def control(self, request: ControlRequest) -> DeviceCallResult:
         if request.start_entry is not None:

@@ -431,3 +431,37 @@ def parse_device_capture(
     return DeviceCaptureResponse(locator, convert(original, description.original_media_type),
         convert(preview, description.preview_media_type), original_error or preview_error,
         original_error, preview_error)
+
+
+def parse_deleted(output: bytes, stderr: bytes, *, camera_path: str) -> None:
+    """只接受完整且唯一指向原机内路径的删除确认。"""
+    CameraFileLocator(CameraLocatorStatus.PATH, camera_path, PurePosixPath(camera_path).name)
+    if type(output) is not bytes or type(stderr) is not bytes or stderr:
+        raise CliParseError("delete 双流不完整或 stderr 包含未知输出")
+    if _lines(_decode(output, "delete")) != [f"deleted {camera_path}"]:
+        raise CliParseError("delete 输出不是原路径的唯一删除确认")
+
+
+def parse_images_presence(output: bytes, stderr: bytes, *, camera_path: str) -> bool | None:
+    """仅已核验的列表条目能确认在场；列表缺项不能确认缺席。"""
+    CameraFileLocator(CameraLocatorStatus.PATH, camera_path, PurePosixPath(camera_path).name)
+    if type(output) is not bytes or type(stderr) is not bytes or stderr:
+        raise CliParseError("images 双流不完整或 stderr 包含未知输出")
+    text = _decode(output, "images")
+    if not text:
+        return None
+    lines = _lines(text)
+    seen = set()
+    for line in lines:
+        match = re.fullmatch(r"3FR ([0-9]+) (/.+)", line)
+        if match is None:
+            raise CliParseError("images 输出包含未经核验的条目")
+        path = match.group(2)
+        try:
+            CameraFileLocator(CameraLocatorStatus.PATH, path, PurePosixPath(path).name)
+        except (TypeError, ValueError) as error:
+            raise CliParseError("images 条目的机内路径无效") from error
+        if path in seen:
+            raise CliParseError("images 输出重复包含同一路径")
+        seen.add(path)
+    return True if camera_path in seen else None
