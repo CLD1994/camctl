@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import datetime
 from decimal import Decimal
 import hashlib
 import json
@@ -15,30 +14,7 @@ import subprocess
 import sys
 import tomllib
 
-
-def toml_value(value):
-    if isinstance(value, str):
-        return json.dumps(value, ensure_ascii=False)
-    if isinstance(value, bool):
-        return str(value).lower()
-    if isinstance(value, int):
-        return str(value)
-    if isinstance(value, Decimal):
-        return str(value)
-    if isinstance(value, (datetime.date, datetime.time, datetime.datetime)):
-        return value.isoformat()
-    if isinstance(value, list):
-        return "[" + ", ".join(map(toml_value, value)) + "]"
-    if isinstance(value, dict):
-        return "{ " + ", ".join(f"{toml_value(k)} = {toml_value(v)}" for k, v in value.items()) + " }"
-    raise ValueError(f"无法序列化 TOML 值: {type(value).__name__}")
-
-
-def write_config(path, config):
-    contents = "\n".join(f"{toml_value(k)} = {toml_value(v)}" for k, v in config.items()) + "\n"
-    if tomllib.loads(contents, parse_float=Decimal) != config:
-        raise ValueError("生成的配置与输入配置不一致")
-    path.write_text(contents, encoding="utf-8")
+from deploy_support import configure_paths, install_host, write_config
 
 
 def sha(path):
@@ -121,9 +97,7 @@ def main():
         for rel in ("apps/camctl", "apps/client", "apps/host-demo", "protocol", "docs/camctl"):
             stage = "复制当前源码 " + rel
             copy_tree(repo / rel, source / rel)
-        config["paths"] = {k: str(target / v) for k, v in {
-            "state_db": "state.db", "log_file": "camctl.log", "staging": "staging",
-            "ready": "ready", "processing": "processing"}.items()}
+        configure_paths(config, target)
         write_config(target / "config.toml", config)
         if environment:
             shutil.copyfile(environment, target / "environment.sh")
@@ -141,9 +115,7 @@ def main():
         run("安装锁定依赖", ["uv", "pip", "install", "--python", venv / "bin/python", "--require-hashes", "-r", dist / "requirements.txt"])
         run("安装 wheel", ["uv", "pip", "install", "--python", venv / "bin/python", "--no-deps", wheels[0]])
         run("检查安装依赖", ["uv", "pip", "check", "--python", venv / "bin/python"])
-        build = target / "host-build"
-        run("配置 host", ["cmake", "-S", source / "apps/host-demo", "-B", build, "-DCMAKE_BUILD_TYPE=Release", f"-DCMAKE_INSTALL_PREFIX={target / 'host'}", "-DCMAKE_INSTALL_LIBDIR=lib"])
-        run("构建安装 host", ["cmake", "--build", build, "--target", "install", "--parallel", "2"])
+        install_host(run, source / "apps/host-demo", target)
         client = source / "apps/client"
         run("安装客户端锁定依赖", ["npm", "ci", "--engine-strict", "--no-audit", "--no-fund"], client)
         run("构建客户端", ["npm", "run", "build"], client)

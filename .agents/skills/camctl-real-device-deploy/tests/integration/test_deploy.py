@@ -1,0 +1,100 @@
+"""部署脚本与真实 TOML 文件、CMake 构建目录的组合验证。"""
+from __future__ import annotations
+
+from copy import deepcopy
+import datetime
+from decimal import Decimal
+import importlib.util
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import tomllib
+import unittest
+
+
+SKILL = Path(__file__).resolve().parents[2]
+SCRIPTS = SKILL / "scripts"
+spec = importlib.util.spec_from_file_location("deploy_support", SCRIPTS / "deploy_support.py")
+support = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(support)
+
+
+class DeploymentFiles(unittest.TestCase):
+    def test_readable_sections_preserve_all_config_values(self):
+        source = tomllib.loads((SKILL / "assets/camctl.toml").read_text(), parse_float=Decimal)
+        source["devices"]["带点.空格 id"] = source["devices"].pop("action6")
+        source["devices"]["带点.空格 id"]["connection"] = {"prepare_lead_s": Decimal("0.1234567890123456789")}
+        source["devices"]["osmo360ii"]["software_recovery"] = {"enabled": True}
+        source["paths"] = {"ready": "/old/ready"}
+        original = deepcopy(source)
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            support.configure_paths(source, target)
+            path = target / "config.toml"
+            support.write_config(path, source)
+            text = path.read_text()
+            actual = tomllib.loads(text, parse_float=Decimal)
+            self.assertEqual(actual, source)
+            self.assertEqual(actual["devices"], original["devices"])
+            self.assertEqual(actual["paths"]["ready"], str(target / "ready"))
+            self.assertEqual(len(actual["paths"]), 5)
+            self.assertIn('[devices."带点.空格 id".adb]', text)
+            self.assertIn('[devices.hasselblad.hasselblad]', text)
+            self.assertNotIn("{", text)
+
+    def test_toml_types_and_empty_tables_round_trip(self):
+        config = {"devices": {}, "空.表": {}, "metadata": {
+            "date": datetime.date(2026, 10, 29), "time": datetime.time(12, 30, 0),
+            "stamp": datetime.datetime(2026, 10, 29, tzinfo=datetime.timezone.utc),
+            "array": ["引号\"和换行\n", {"a.b": True}], "boolean": False}}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.toml"
+            support.write_config(path, config)
+            self.assertEqual(tomllib.loads(path.read_text(), parse_float=Decimal), config)
+
+    def test_cmake_builds_in_new_directory_and_installs(self):
+        # 真实配置/编译/安装，最小 C 工程隔离业务组件的编译成本。
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "源码 with spaces"
+            source.mkdir()
+            (source / "main.c").write_text("int main(void) { return 0; }\n")
+            (source / "CMakeLists.txt").write_text(
+                'cmake_minimum_required(VERSION 3.10.2)\nproject(deploy_test C)\n'
+                'add_executable(host-demo main.c)\ninstall(TARGETS host-demo DESTINATION bin)\n')
+
+            def run(label, argv, *, cwd):
+                result = subprocess.run(list(map(str, argv)), cwd=cwd, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, label + result.stdout + result.stderr)
+
+            support.install_host(run, source, root)
+            subprocess.run([root / "host/bin/host-demo"], check=True)
+
+    def test_installer_rejects_missing_or_invalid_config_without_creating_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / "input.toml"
+            for content in (None, "this is not TOML"):
+                if content is not None:
+                    config.write_text(content)
+                target = root / "deployment"
+                result = subprocess.run([sys.executable, SCRIPTS / "install-host.py",
+                    "--target", target, "--config", config], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertFalse(target.exists())
+
+    def test_installer_preserves_existing_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            marker = target / "state.db"
+            marker.write_bytes(b"existing database")
+            result = subprocess.run([sys.executable, SCRIPTS / "install-host.py",
+                "--target", target, "--config", SKILL / "assets/camctl.toml"],
+                capture_output=True, text=True)
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertEqual(marker.read_bytes(), b"existing database")
+
+
+if __name__ == "__main__":
+    unittest.main()
