@@ -300,13 +300,16 @@ def running_cleanup_attempt(connection, item_id):
     return _read_exact_cleanup_attempt(connection, ticket, item_id, allow_running=True)
 
 
-def latest_possible_cleanup_delete(connection, output_id, *, unresolved_only=False):
+def latest_possible_cleanup_delete(connection, output_id, *, unresolved_only=False, exclude_ticket=None):
     """逐票据核对原完整事实；可靠未派发不形成新的文件阶段。"""
     from camctl.operations.models import SettlementBasis
     before = None
     while True:
         filters = "" if before is None else " AND a.id<?"
         parameters = [output_id] if before is None else [output_id, before]
+        if exclude_ticket is not None:
+            filters += " AND NOT (r.id=? AND a.attempt_no=?)"
+            parameters.extend((exclude_ticket.run_id, exclude_ticket.attempt_id))
         row = connection.execute(
             "SELECT a.id,a.status,a.effect_state,a.result_json,a.error_json,c.id,"
             "a.intent_event_id,a.attempt_no,r.responsibility_key,r.id"

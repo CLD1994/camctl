@@ -743,7 +743,7 @@ def _cancel_requested(connection, action_id: int) -> bool:
     return row is not None and bool(row[0])
 
 
-def _output_delete_facts(connection, output_id: int) -> dict:
+def _output_delete_facts(connection, output_id: int, *, exclude_ticket=None) -> dict:
     """本产物删除调用的可靠事实：缺席、未决删除与晚于删除的在场确认。
 
     尝试编号按保存顺序单调递增，观察的有效性取决于其后的实际操
@@ -765,10 +765,10 @@ def _output_delete_facts(connection, output_id: int) -> dict:
                 "SELECT cleanup_state FROM intermediate_files WHERE id = ?",
                 (intermediate_id,)).fetchone()
             file_absent = cleanup is not None and cleanup[0] == 4
-    unresolved = _latest_possible_delete(connection, output_id, unresolved_only=True)
+    unresolved = _latest_possible_delete(connection, output_id, unresolved_only=True, exclude_ticket=exclude_ticket)
     unresolved_delete = 0 if unresolved is None else unresolved[0]
     confirmed_check = 0
-    delete = _latest_possible_delete(connection, output_id)
+    delete = _latest_possible_delete(connection, output_id, exclude_ticket=exclude_ticket)
     if delete is not None and delete[1] != 1:
         from camctl.contracts.json_values import parse_exact_json
         from camctl.operations.result_format import read_result_document
@@ -815,18 +815,18 @@ def _output_delete_facts(connection, output_id: int) -> dict:
 
 
 
-def _latest_possible_delete(connection, output_id, *, unresolved_only=False):
+def _latest_possible_delete(connection, output_id, *, unresolved_only=False, exclude_ticket=None):
     """普通推进、原结果选择和重试阶段共用完整的可能删除事实。"""
-    value = _group_latest_possible_delete(connection, output_id, unresolved_only=unresolved_only)
+    value = _group_latest_possible_delete(connection, output_id, unresolved_only=unresolved_only, exclude_ticket=exclude_ticket)
     return None if value is None else value[:6]
 
 
-def _group_latest_possible_delete(connection, output_id, *, unresolved_only=False):
+def _group_latest_possible_delete(connection, output_id, *, unresolved_only=False, exclude_ticket=None):
     from camctl.outputs.cleanup_results import latest_possible_cleanup_delete
     from camctl.outputs.cleanup_group import cleanup_group
     from camctl.persistence.repositories.outputs import _ProductReads
     group = cleanup_group(_ProductReads(connection, {}), output_id)
-    values = [latest_possible_cleanup_delete(connection, member, unresolved_only=unresolved_only)
+    values = [latest_possible_cleanup_delete(connection, member, unresolved_only=unresolved_only, exclude_ticket=exclude_ticket)
               for member in group]
     return max((value for value in values if value is not None), default=None,
                key=lambda value: value[0])
@@ -2369,7 +2369,10 @@ def _cleanup_dispatch_allowed(connection, item_id, ticket):
             from camctl.persistence.repositories.outputs import _ProductReads, _cleanup_entry_ready
             reads = _ProductReads(connection, {})
             item = reads.required("cleanup_items", item_id)
-            return _cleanup_entry_ready(reads, item)
+            if not _cleanup_entry_ready(reads, item):
+                return False
+            facts = _output_delete_facts(connection, item["output_id"], exclude_ticket=ticket)
+            return not facts["file_absent"] and not facts["unresolved_delete"]
         return True
     if ticket.operation == "delete":
         return False

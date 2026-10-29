@@ -9481,6 +9481,12 @@ class _BeginCleanupAttemptCommand(_CleanupItemCommandMixin):
         if entry and not _cleanup_entry_ready(reads, item):
             return CommandPlan(events=(), owners=self._owners, state_rows=self._state,
                 read_only=True, result=BeginAttemptResult(BeginDisposition.REJECTED, reason="cleanup_waiting"))
+        if intent.operation == "delete":
+            from camctl.outputs.cleanup_flow import _output_delete_facts
+            facts = _output_delete_facts(connection, item["output_id"])
+            if facts["file_absent"] or facts["unresolved_delete"]:
+                return CommandPlan(events=(), owners=self._owners, state_rows=self._state,
+                    read_only=True, result=BeginAttemptResult(BeginDisposition.REJECTED, reason="cleanup_waiting"))
         sub = _CleanupBindingScope(scope)
         begin = BeginAttemptCommand(intent, self._key).plan(sub)
         if not begin.events:
