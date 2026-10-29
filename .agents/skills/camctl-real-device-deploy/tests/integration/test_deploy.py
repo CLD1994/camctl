@@ -11,6 +11,7 @@ import sys
 import tempfile
 import tomllib
 import unittest
+from unittest.mock import patch
 
 
 SKILL = Path(__file__).resolve().parents[2]
@@ -21,6 +22,42 @@ spec.loader.exec_module(support)
 
 
 class DeploymentFiles(unittest.TestCase):
+    def test_python36_entry_bootstraps_python311_and_preserves_exit_code(self):
+        spec = importlib.util.spec_from_file_location("host_installer", SCRIPTS / "install-host.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        argv = [str(SCRIPTS / "install-host.py"), "--target", "/tmp/installation with spaces",
+            "--hb-cli", "/opt/camera tool/hb_cli"]
+        with patch.object(installer.sys, "version_info", (3, 6, 15)), \
+             patch.object(installer.sys, "argv", argv), \
+             patch.object(installer.shutil, "which", return_value="/tools/uv"), \
+             patch.dict(installer.os.environ, {"PYTHONPATH": "/unrelated", "PYTHONHOME": "/unrelated", "VIRTUAL_ENV": "/unrelated"}), \
+             patch.object(installer.subprocess, "call", return_value=37) as call, \
+             patch("builtins.print"):
+            self.assertEqual(installer.main(), 37)
+        command = call.call_args.args[0]
+        self.assertEqual(command[:9], ["/tools/uv", "run", "--no-project", "--isolated", "--no-config",
+            "--python", "3.11", "--", "python"])
+        self.assertEqual(command[10:], argv[1:])
+        environment = call.call_args.kwargs["env"]
+        for key in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
+            self.assertNotIn(key, environment)
+
+    def test_python36_entry_reports_missing_uv_before_installation(self):
+        spec = importlib.util.spec_from_file_location("host_installer", SCRIPTS / "install-host.py")
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "runtime"
+            with patch.object(installer.sys, "version_info", (3, 6, 15)), \
+                 patch.object(installer.sys, "argv", [str(SCRIPTS / "install-host.py"), "--target", str(target)]), \
+                 patch.object(installer.shutil, "which", return_value=None), \
+                 patch.object(installer.sys, "stderr"), \
+                 self.assertRaises(SystemExit) as error:
+                installer.main()
+            self.assertEqual(error.exception.code, 2)
+            self.assertFalse(target.exists())
+
     def test_readable_sections_preserve_all_config_values(self):
         source = {"devices": {
             "action6": {"kind": "camera", "driver": "dji-action6", "adb": {"serial": "A"}},

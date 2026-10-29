@@ -10,19 +10,32 @@ import subprocess
 import sys
 import tarfile
 
-from deploy_support import configure_paths, install_host, write_config
-from camera_discovery import format_report, resolve_hb_cli
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--target', type=Path, required=True, help='尚不存在的绝对部署目录')
     parser.add_argument('--hb-cli', type=Path, help='hb_cli 可执行文件路径；省略时从 PATH 查找')
     args = parser.parse_args()
+    if sys.platform != 'linux' or sys.version_info[:2] < (3, 6):
+        parser.error('安装入口需要 Linux 和 Python 3.6 或以上')
+    environment = {k: v for k, v in os.environ.items() if k not in ('PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV')}
+    if sys.version_info[:2] != (3, 11):
+        uv = shutil.which('uv')
+        if uv is None:
+            parser.error('缺少部署工具 uv；请先安装 uv，它将自动准备 Python 3.11 运行环境')
+        print('安装入口 Python ' + '.'.join(map(str, sys.version_info[:3])) +
+              '；由 uv 自动查找或下载 Python 3.11 后继续安装。', flush=True)
+        try:
+            return subprocess.call([uv, 'run', '--no-project', '--isolated', '--no-config',
+                '--python', '3.11', '--', 'python', str(Path(__file__).resolve()), *sys.argv[1:]], env=environment)
+        except OSError as error:
+            parser.error(str(error))
+
+    # 仅在 Python 3.11 中导入依赖新语法和 tomllib 的安装实现。
+    from deploy_support import configure_paths, install_host, write_config
+    from camera_discovery import format_report, resolve_hb_cli
+
     bundle = Path(__file__).resolve().parent
     target = args.target
-    if sys.platform != 'linux' or sys.version_info[:2] != (3, 11):
-        parser.error('请在目标 Linux 主机使用 Python 3.11 执行')
     if not target.is_absolute() or target.exists() or target.is_symlink():
         parser.error('--target 必须是尚不存在的绝对路径；已有数据继续保留')
     try:
@@ -42,7 +55,6 @@ def main():
         parser.error(str(error))
     target.mkdir(parents=True)
     receipt = {'status': 'installing', 'release': release, 'steps': []}
-    environment = {k: v for k, v in os.environ.items() if k not in ('PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV')}
     def save():
         (target / 'install-receipt.json').write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + '\n')
     def run(label, argv, *, cwd=None, output=None):
@@ -109,6 +121,9 @@ def main():
         print('安装完成；启动入口：' + str(launcher))
         print('客户端能力说明：' + str(target / 'device-capabilities.json'))
         print('检测报告：' + str(discovery_path))
+        if discovery['placeholder_devices']:
+            print('配置中含待修改占位项：' + ', '.join(discovery['placeholder_devices']) +
+                  '；使用相机前填写 config.toml 中的真实值，并重新导出能力说明。')
         print('安装仅查询设备身份，未启动主程序或执行拍摄。')
     except Exception as error:
         receipt.update(status='failed', error=str(error)); save()

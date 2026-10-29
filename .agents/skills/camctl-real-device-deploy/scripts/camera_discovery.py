@@ -59,6 +59,7 @@ def parse_adb_devices(output):
 def discover_cameras(hb_cli=None, *, query=None):
     """返回身份查询事实及配置；失败通过 report 保留原调用结果。"""
     report = {"status": "running", "tools": {}, "queries": [], "observations": [], "devices": {},
+        "placeholder_devices": {}, "warnings": [],
         "environment": {key: os.environ[key] for key in ("ADB_SERVER_SOCKET",) if key in os.environ}}
     execute = query or subprocess.run
 
@@ -91,6 +92,15 @@ def discover_cameras(hb_cli=None, *, query=None):
         hb = resolve_hb_cli(hb_cli)
         report["tools"]["hb_cli"] = {"path": hb, "source": "--hb-cli" if hb_cli else "PATH",
             "status": "available" if hb else "not_found"}
+
+        def hasselblad_config(serial):
+            from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+            return {"kind": "camera", "driver": DRIVER_ID,
+                "hasselblad": {"executable": hb or "/REPLACE_WITH_HB_CLI_PATH", "serial": serial,
+                    "product_id": HB_PRODUCT, "output_storage": "host"},
+                "recording": {"start_timeout_s": 30}, "connection": {"prepare_lead_s": 30},
+                "result_check": {"call_timeout_s": 180}}
+
         matched = []
         if adb:
             for device in parse_adb_devices(run([adb, "devices", "-l"])):
@@ -113,7 +123,6 @@ def discover_cameras(hb_cli=None, *, query=None):
         if hb:
             # 使用交付 wheel 中已经核验的响应解析器，避免另行维护 hb_cli 格式。
             from camctl.devices.drivers.hasselblad.responses import parse_devices, parse_serial
-            from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
 
             cameras = parse_devices(run([hb, "--pid", f"0x{HB_PRODUCT:04x}", "list"]))
             matching = [camera for camera in cameras
@@ -126,13 +135,22 @@ def discover_cameras(hb_cli=None, *, query=None):
                 raise ValueError(f"发现 {len(matching)} 台 CFV 100C（{locations}），hb_cli 只能按 PID 选择，无法唯一绑定；请只连接本实例使用的相机")
             if matching:
                 serial = parse_serial(run([hb, "--pid", f"0x{HB_PRODUCT:04x}", "info"]))
-                report["devices"]["hasselbla-01"] = {"kind": "camera", "driver": DRIVER_ID,
-                    "hasselblad": {"executable": hb, "serial": serial, "product_id": HB_PRODUCT,
-                        "output_storage": "host"},
-                    "recording": {"start_timeout_s": 30}, "connection": {"prepare_lead_s": 30},
-                    "result_check": {"call_timeout_s": 180}}
-        if not report["devices"]:
-            raise ValueError("未识别到可配置的相机；请核对工具路径、USB/ADB 连接与权限，详见检测报告")
+                report["devices"]["hasselbla-01"] = hasselblad_config(serial)
+
+        detected_drivers = {device["driver"] for device in report["devices"].values()}
+        for prefix, driver in ADB_PRODUCTS.values():
+            if driver not in detected_drivers:
+                device_id = f"{prefix}-01"
+                report["devices"][device_id] = {"kind": "camera", "driver": driver,
+                    "adb": {"serial": f"REPLACE_{prefix.upper()}_SERIAL"}}
+                report["placeholder_devices"][device_id] = ["adb.serial"]
+        if "hasselbla-01" not in report["devices"]:
+            report["devices"]["hasselbla-01"] = hasselblad_config("REPLACE_HASSELBLAD_SERIAL")
+            report["placeholder_devices"]["hasselbla-01"] = ["hasselblad.serial"]
+            if not hb:
+                report["placeholder_devices"]["hasselbla-01"].append("hasselblad.executable")
+        if report["placeholder_devices"]:
+            report["warnings"].append("部分设备尚未识别，已生成待修改的 REPLACE_* 占位配置；使用相机前填写真实值并重新导出能力说明")
         report["status"] = "complete"
     except (OSError, ValueError, ImportError) as error:
         report.update(status="failed", error=str(error))
@@ -147,6 +165,8 @@ def format_report(report):
         lines.append(f"  {name} = {value}")
     for device_id, device in report["devices"].items():
         lines.append(f"  设备 {device_id}：")
+        if device_id in report["placeholder_devices"]:
+            lines.append("    待修改字段：" + ", ".join(report["placeholder_devices"][device_id]))
         for section, value in device.items():
             if isinstance(value, dict):
                 for key, item in value.items():
@@ -156,6 +176,8 @@ def format_report(report):
     for observation in report["observations"]:
         if observation["result"] in ("unavailable", "unknown_product"):
             lines.append("  未配置设备：" + json.dumps(observation, ensure_ascii=False))
+    for warning in report["warnings"]:
+        lines.append("  提示：" + warning)
     if report["status"] == "failed":
         lines.append("  检测失败：" + report["error"])
     return "\n".join(lines)
