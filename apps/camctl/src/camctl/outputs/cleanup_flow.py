@@ -141,6 +141,8 @@ class CleanupItemDisposition(Enum):
     SAVED = "saved"
     #: 已处于该阶段或原键重送：只读复用。
     ALREADY = "already"
+    #: 更早的取回或清理仍有资格，等待后重新检查。
+    WAITING = "waiting"
 
 
 @dataclass(frozen=True)
@@ -780,12 +782,15 @@ def _output_delete_facts(connection, output_id: int) -> dict:
             confirmed_check = delete[0]
         elif present is False:
             file_absent = True
+    from camctl.outputs.cleanup_group import cleanup_group
+    from camctl.persistence.repositories.outputs import _ProductReads
+    group = cleanup_group(_ProductReads(connection, {}), output_id)
     query = connection.execute(
         "SELECT a.id,a.status,a.effect_state,a.result_json,a.error_json,c.id"
         " FROM operation_attempts a JOIN operation_runs r ON a.run_id=r.id"
         " JOIN cleanup_items c ON r.cleanup_item_id=c.id"
-        " WHERE c.output_id=? AND r.kind=5 ORDER BY a.id DESC LIMIT 1",
-        (output_id,)).fetchone()
+        " WHERE c.output_id IN (%s) AND r.kind=5 ORDER BY a.id DESC LIMIT 1"
+        % ",".join("?" * len(group)), group).fetchone()
     if query is not None and query[1] != 1:
         from camctl.contracts.json_values import parse_exact_json
         from camctl.operations.result_format import read_result_document
@@ -812,9 +817,19 @@ def _output_delete_facts(connection, output_id: int) -> dict:
 
 def _latest_possible_delete(connection, output_id, *, unresolved_only=False):
     """普通推进、原结果选择和重试阶段共用完整的可能删除事实。"""
-    from camctl.outputs.cleanup_results import latest_possible_cleanup_delete
-    value = latest_possible_cleanup_delete(connection, output_id, unresolved_only=unresolved_only)
+    value = _group_latest_possible_delete(connection, output_id, unresolved_only=unresolved_only)
     return None if value is None else value[:6]
+
+
+def _group_latest_possible_delete(connection, output_id, *, unresolved_only=False):
+    from camctl.outputs.cleanup_results import latest_possible_cleanup_delete
+    from camctl.outputs.cleanup_group import cleanup_group
+    from camctl.persistence.repositories.outputs import _ProductReads
+    group = cleanup_group(_ProductReads(connection, {}), output_id)
+    values = [latest_possible_cleanup_delete(connection, member, unresolved_only=unresolved_only)
+              for member in group]
+    return max((value for value in values if value is not None), default=None,
+               key=lambda value: value[0])
 
 def _attempts_used(connection, responsibility_key: str) -> int:
     row = connection.execute(
@@ -855,11 +870,9 @@ async def _query_retry_wait_step(
     最新查询意图的保存顺序判定阶段，不能把上一轮的查询等待沿用到
     新删除后的首次核实；查询预算仍归原成员的查询流程。
     """
-    from camctl.outputs.cleanup_results import latest_possible_cleanup_delete
-
     responsibility = f"exists/{item_id}"
     output_id = (await _read_cleanup(runtime, lambda connection: connection.execute('SELECT output_id FROM cleanup_items WHERE id=?', (item_id,)).fetchone()))[0]
-    latest = await _read_cleanup(runtime, lambda connection: latest_possible_cleanup_delete(connection, output_id))
+    latest = await _read_cleanup(runtime, lambda connection: _group_latest_possible_delete(connection, output_id))
     delete_intent = None if latest is None else latest[6]
     query_intent = (await _read_cleanup(runtime, lambda connection: connection.execute('SELECT MAX(a.intent_event_id) FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.responsibility_key=?', (responsibility,)).fetchone()))[0]
     if (query_intent is None
@@ -1016,6 +1029,8 @@ async def delete_source_file(runtime: CleanupRuntime, item_id: int) -> CleanupSt
         if result.kind is not DbOutcomeKind.COMPLETED:
             return CleanupStep("query_rejected", str(result.error))
         if result.value.ticket is None:
+            if result.value.reason == "cleanup_waiting":
+                return CleanupStep("waiting")
             if result.value.reason == "binding_unavailable":
                 return await _finish_binding_failure(runtime, item_id, canceled=await _read_cleanup(runtime, lambda connection: _cancel_requested(connection, original.request.action_id)))
             output_id = (await _read_cleanup(runtime, lambda connection: connection.execute('SELECT output_id FROM cleanup_items WHERE id=?', (item_id,)).fetchone()))[0]
@@ -1095,11 +1110,21 @@ async def delete_source_file(runtime: CleanupRuntime, item_id: int) -> CleanupSt
     restrict = await save_cleanup_request(runtime, 'restrict_cleanup_item', RestrictCleanupItem(item_id, occurred))
     if restrict.kind is not DbOutcomeKind.COMPLETED:
         return CleanupStep("restrict_rejected", str(restrict.error))
+    if restrict.value.disposition is CleanupItemDisposition.WAITING:
+        return CleanupStep("waiting")
     row = await _read_cleanup(runtime, lambda connection: connection.execute('SELECT action_id, status, output_id FROM cleanup_items WHERE id = ?', (item_id,)).fetchone())
     action_id, status, output_id = row
 
     entry = decide_cleanup_entry(await _read_cleanup(runtime, lambda connection: _entry_facts(connection, output_id)))
     if entry is CleanupEntryChoice.USE_COMPLETED:
+        from camctl.outputs.cleanup_group import cleanup_group
+        from camctl.persistence.repositories.outputs import _ProductReads
+        group, own_file = await _read_cleanup(runtime, lambda connection: (
+            cleanup_group(_ProductReads(connection, {}), output_id), connection.execute(
+                "SELECT f.presence_state FROM outputs o JOIN device_files f ON f.id=o.device_file_id WHERE o.id=?",
+                (output_id,)).fetchone()))
+        if len(group) > 1 and own_file is not None and own_file[0] != 3:
+            return CleanupStep("waiting")
         cleaned = await _read_cleanup(runtime, lambda connection: connection.execute('SELECT availability, cleanup_status FROM outputs WHERE id = ?', (output_id,)).fetchone())
         choice = (CleanupOutcomeChoice.ALREADY_CLEANED
                   if cleaned is not None and cleaned[0] == 3
@@ -1112,6 +1137,23 @@ async def delete_source_file(runtime: CleanupRuntime, item_id: int) -> CleanupSt
             return CleanupStep("companion_rejected", rejected)
         return (CleanupStep("already_terminal") if done.value.disposition is CleanupItemDisposition.ALREADY
                 else CleanupStep("succeeded", choice.name))
+    from camctl.persistence.repositories.outputs import cleanup_group_call_owner
+    group_owner = await _read_cleanup(runtime, lambda connection: cleanup_group_call_owner(connection, item_id))
+    if group_owner is not None and group_owner["id"] != item_id:
+        if group_owner["status"] != _ITEM_FAILED:
+            return CleanupStep("waiting")
+        from camctl.contracts.workflow_errors import registered_error_spec
+        code, _ = registered_error_spec("item_error_ids.cleanup_items", group_owner["error_code"])
+        details = dict(group_owner["error_details_json"])
+        if "output_id" in details:
+            details["output_id"] = str(output_id)
+        saved = await save_cleanup_request(runtime, 'fail_cleanup_item',
+            FailCleanupItem(item_id, code, details, runtime.occurred_at()))
+        if saved.kind is not DbOutcomeKind.COMPLETED:
+            return CleanupStep("fail_rejected", str(saved.error))
+        if saved.value.disposition is CleanupItemDisposition.WAITING:
+            return CleanupStep("waiting")
+        return CleanupStep("failed", code)
     # 设备调用目标：主机派生成品经本地文件链路删除，未装配设备或
     # 本地协作者时成员保持等待，不解释为失败。
     failed_binding = await _finish_binding_failure(runtime, item_id)
@@ -1207,6 +1249,8 @@ async def _verify_before_delete(
     if ticket.kind is not DbOutcomeKind.COMPLETED:
         return CleanupStep("query_rejected", str(ticket.error))
     if ticket.value.ticket is None:
+        if ticket.value.reason == "cleanup_waiting":
+            return CleanupStep("waiting")
         if ticket.value.reason == "query_unsupported":
             return await _fail_unsupported(runtime, item_id, output_id)
         if ticket.value.reason == "budget_exhausted":
@@ -1358,24 +1402,25 @@ def _legacy_error(actual, operation):
 def _record_cleanup_actual(pending) -> None:
     """由原结果拥有者准备诊断；取消未派发是正常控制分支。"""
     actual = pending.actual
+    exception = pending.diagnostic_exception or actual.diagnostic_error
     error = actual.outcome.error if actual.outcome is not None else actual.error
     code = (error.code if isinstance(error, ErrorValue) else
             error.get("code") if isinstance(error, Mapping) else None)
-    if (error is None or code == "canceled_before_dispatch") and pending.diagnostic_exception is None:
+    if (error is None or code == "canceled_before_dispatch") and exception is None:
         return
     context = {"database_id": pending.database_id, "cleanup_item_id": pending.item_id}
     if actual.outcome is not None:
         record_call_outcome(actual.outcome, ticket=pending.ticket,
-                            run_error=pending.diagnostic_exception,
+                            run_error=exception,
                             context=context, state=pending.diagnostic_state)
     else:
         stage = (error.stage if isinstance(error, ErrorValue) else
                  error.get("stage", pending.ticket.operation) if isinstance(error, Mapping)
                  else pending.ticket.operation)
-        record_error(error or pending.diagnostic_exception, stage=stage, context=context,
+        record_error(error or exception, stage=stage, context=context,
                      state=pending.diagnostic_state,
                      details={"ticket": pending.ticket, "observations": actual.observations,
-                              "exception": pending.diagnostic_exception})
+                              "exception": exception})
 
 
 def _raise_cleanup_validation(pending, original: BaseException | None = None) -> None:
@@ -1607,6 +1652,8 @@ async def _delete_once(runtime, item_id, action_id, output_id):
         if saved.kind is not DbOutcomeKind.COMPLETED:
             return CleanupStep("delete_budget_rejected", str(saved.error))
         if saved.value.ticket is None:
+            if saved.value.reason == "cleanup_waiting":
+                return CleanupStep("waiting")
             if saved.value.reason == "budget_exhausted":
                 return await _fail_exhausted(runtime, item_id, output_id, 'delete', runtime.delete_config, 'delete_attempts_exhausted')
             if saved.value.reason == "delete_unsupported":
@@ -2310,6 +2357,11 @@ def _cleanup_dispatch_allowed(connection, item_id, ticket):
     if row is None or row[1] in _MEMBER_TERMINAL:
         return False
     if not _cancel_requested(connection, row[0]):
+        if ticket.operation == "delete":
+            from camctl.persistence.repositories.outputs import _ProductReads, _cleanup_entry_ready
+            reads = _ProductReads(connection, {})
+            item = reads.required("cleanup_items", item_id)
+            return _cleanup_entry_ready(reads, item)
         return True
     if ticket.operation == "delete":
         return False

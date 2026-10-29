@@ -1594,6 +1594,12 @@ def _source_error_details(code: int, source_action_id: int) -> dict[str, Any]:
 
 def _output_cleanup_phase(connection, output_id):
     """汇总同产物仍有效的读取限制；已解除限制的历史不参与判断。"""
+    # 共同物理源可由配对成员的可靠删除事实完成；本产物的请求项
+    # 可能仍待消费该事实。
+    row = connection.execute(
+        "SELECT availability,cleanup_status FROM outputs WHERE id=?", (output_id,)).fetchone()
+    if row is not None and row == (int(_AVAILABILITY.CLEANED), int(_OUTPUT_CLEANUP_STATUS.COMPLETED)):
+        return _OUTPUT_CLEANUP_STATUS.COMPLETED
     # 受登记约束的枚举常量内联，使 SQLite 能匹配有效限制的部分索引。
     restrictions = ",".join(str(value) for value in _ACTIVE_RESTRICTIONS)
     with closing(connection.execute(
@@ -1949,6 +1955,17 @@ class _GrantFileCommand:
                 raise ConsistencyError("产物可用性与设备文件存在事实不一致")
 
         details = {"output_id": str(output["id"])}
+        from camctl.outputs.cleanup_group import cleanup_group
+        group_reads = _ProductReads(scope.connection, self._state)
+        for member_id in cleanup_group(group_reads, output["id"]):
+            if member_id == output["id"]:
+                continue
+            member_phase = _output_cleanup_phase(scope.connection, member_id)
+            if member_phase == _OUTPUT_CLEANUP_STATUS.COMPLETED:
+                return self._reject_item(scope, _OUTPUT_UNAVAILABLE_CODE,
+                                         {**details, "availability": "cleaned"})
+            if member_phase is not None:
+                return self._reject_item(scope, _OUTPUT_CLEANUP_STARTED_CODE, details)
         if (self._command.reuse_inspection_id is not None
                 or self._command.reuse_photo_page_event_id is not None
                 or self._command.reuse_photo_start_event_id is not None):
@@ -8378,8 +8395,18 @@ def _target_set_guard(event, context) -> None:
         requested.append(values.get("requested_output_id"))
     if len(set(requested)) != len(requested):
         raise EventValidationError("清理成员的原请求目标不能重复")
-    if explicit is not None and tuple(requested) != explicit:
-        raise EventValidationError("精确清理固定全部原请求 ID 且保持顺序")
+    if explicit is not None:
+        from camctl.outputs.cleanup_group import cleanup_group
+        reads = _CurrentProductReads(context)
+        expected = list(explicit)
+        for identity in explicit:
+            for member in cleanup_group(reads, identity):
+                if member not in expected:
+                    expected.append(member)
+        actual = [row.after.values.get("requested_output_id")
+                  for row in sorted(created, key=lambda row: row.row_id)]
+        if actual != expected:
+            raise EventValidationError("精确清理成员与原请求及机内照片配对不一致")
     if explicit is None:
         dependencies = context.state_rows.get("action_dependencies", {})
         sources = {
@@ -8434,6 +8461,14 @@ def _cleanup_member_guard(event, context) -> None:
             if (confirmed is not None
                     and confirmed != before_facts.get("requested_output_id")):
                 raise EventValidationError("确认的产物必须是原请求目标")
+            output = context.state_rows.get("outputs", {}).get(confirmed)
+            if output is not None:
+                from camctl.outputs.cleanup_group import cleanup_group
+                reads = _CurrentProductReads(context)
+                if any(reads.required("outputs", group_id).get("availability") == int(_AVAILABILITY.AVAILABLE)
+                       and has_product_predecessor(reads, before_facts["action_id"], group_id, event.occurred_at)
+                       for group_id in cleanup_group(reads, confirmed)):
+                    raise EventValidationError("较早的取回或清理尚未取得资格")
 
 
 def _cleanup_guard(event, context) -> None:
@@ -8454,6 +8489,19 @@ def _cleanup_guard(event, context) -> None:
                 raise EventValidationError("清理成员的最终事件必须是本事件")
             if values.get("status") == int(_CLEANUP_ITEM_STATUS.SUCCEEDED):
                 _require_cleanup_success_basis(event, row, context)
+            elif values.get("status") == int(_CLEANUP_ITEM_STATUS.FAILED):
+                item = context.state_rows.get("cleanup_items", {}).get(row.row_id)
+                if (item is not None and item.get("output_id") is not None
+                        and context.read_coverage.covers("cleanup_items", "action_id", item["action_id"])):
+                    owner = _cleanup_group_call_owner(_CurrentProductReads(context), item)
+                    if owner is not None and owner["id"] != row.row_id:
+                        details = dict(owner.get("error_details_json") or {})
+                        if "output_id" in details:
+                            details["output_id"] = str(item["output_id"])
+                        if (owner["status"] != int(_CLEANUP_ITEM_STATUS.FAILED)
+                                or values.get("error_code") != owner.get("error_code")
+                                or not json_equal(values.get("error_details_json"), details)):
+                            raise EventValidationError("共同照片后续成员必须沿原处理者失败事实结束")
             continue
         if values.get("status") == int(_CLEANUP_ITEM_STATUS.DELETING):
             before = context.state_rows.get("cleanup_items", {}).get(
@@ -8461,6 +8509,11 @@ def _cleanup_guard(event, context) -> None:
             target = before.get("output_id") or values.get("output_id")
             if target is None:
                 continue
+            if not _cleanup_entry_ready(_CurrentProductReads(context), before):
+                raise EventValidationError("共同来源仍有读取依赖或其他删除处理者")
+            owner = _cleanup_group_call_owner(_CurrentProductReads(context), before, exclude_self=True)
+            if owner is not None and owner["id"] != row.row_id:
+                raise EventValidationError("同一请求的共同照片已有处理者")
             for identity, facts in context.state_rows.get(
                     "cleanup_items", {}).items():
                 if identity == row.row_id:
@@ -8588,6 +8641,7 @@ class _FixCleanupTargetsCommand:
         # 公开投影路由从清理项走到产物表；装配空范围供解析。
         self._state.setdefault("cleanup_items", {})
         self._state.setdefault("outputs", {})
+        reads = _ProductReads(connection, self._state)
         if requested is None:
             requested = self._scope_targets(connection)
             if requested is None:
@@ -8600,6 +8654,14 @@ class _FixCleanupTargetsCommand:
                 # 范围来源可靠确认没有正式产物：固定空集合并同事务
                 # 保存成功终态（output-cleanup.md 来源及产物状态表）。
                 return self._empty_targets_plan(scope, action)
+        else:
+            from camctl.outputs.cleanup_group import cleanup_group
+            expanded = list(requested)
+            for identity in requested:
+                for member in cleanup_group(reads, identity):
+                    if member not in expanded:
+                        expanded.append(member)
+            requested = tuple(expanded)
         next_item = next_row_id(connection, "cleanup_items")
         members: list[tuple[int, int]] = []
         terminal: list[tuple[int, int]] = []
@@ -8679,6 +8741,7 @@ class _FixCleanupTargetsCommand:
                 _CLEANUP_CHANGED_EVENT, 4, terminal_rows, command.occurred_at))
         return CommandPlan(
             events=tuple(events), owners=self._owners, state_rows=self._state,
+            read_coverage=reads.read_coverage(),
             result=CleanupTargetsSaved(
                 CleanupTargetsDisposition.SAVED,
                 tuple(row_id for row_id, _ in members + terminal),
@@ -8804,6 +8867,16 @@ class _FixCleanupTargetsCommand:
         if expected is None:
             scope = self._scope_targets(connection)
             expected = () if scope is None else scope
+        if _explicit_cleanup_request(action) is not None and created != set(expected):
+            from camctl.outputs.cleanup_group import cleanup_group
+            reads = _ProductReads(connection, self._state)
+            expanded = set(expected)
+            for identity in expected:
+                for member in cleanup_group(reads, identity):
+                    target = reads.optional("outputs", member)
+                    if target is not None and target["created_event_id"] < saved[0]["event_id"]:
+                        expanded.add(member)
+            expected = tuple(expanded)
         if created != set(expected):
             raise TransactionError("目标固定的成员集合与重送输入不同")
         return CommandPlan(
@@ -9037,6 +9110,17 @@ class _RestrictCleanupCommand(_CleanupItemCommandMixin):
                 int(_AVAILABILITY.RESTRICTED),
                 int(_AVAILABILITY.CLEANED)):
             raise ConsistencyError("产物文件事实不允许建立删除限制")
+        if action["scheduled_at"] > command.occurred_at:
+            return CommandPlan(events=(), owners=self._owners, state_rows=self._state,
+                read_only=True, result=CleanupItemSaved(CleanupItemDisposition.WAITING, command.item_id))
+        reads = _ProductReads(connection, self._state)
+        from camctl.outputs.cleanup_group import cleanup_group
+        for group_id in cleanup_group(reads, item["requested_output_id"]):
+            group_output = reads.required("outputs", group_id)
+            if (group_output["availability"] == int(_AVAILABILITY.AVAILABLE)
+                    and has_product_predecessor(reads, item["action_id"], group_id, command.occurred_at)):
+                return CommandPlan(events=(), owners=self._owners, state_rows=self._state,
+                    read_only=True, result=CleanupItemSaved(CleanupItemDisposition.WAITING, command.item_id))
         restrict = _update(
             "cleanup_items", command.item_id,
             {"output_id": item["output_id"],
@@ -9074,6 +9158,7 @@ class _RestrictCleanupCommand(_CleanupItemCommandMixin):
                 command.occurred_at))
         return CommandPlan(
             events=tuple(events), owners=self._owners, state_rows=self._state,
+            read_coverage=reads.read_coverage(),
             result=CleanupItemSaved(
                 CleanupItemDisposition.SAVED, command.item_id))
 
@@ -9164,6 +9249,12 @@ class _ProgressCleanupCommand(_CleanupItemCommandMixin):
         if output is None or output["cleanup_status"] != int(
                 _OUTPUT_CLEANUP_STATUS.PENDING):
             raise ConsistencyError("删除推进要求产物投影处于待删除")
+        reads = _ProductReads(connection, self._state)
+        owner = _cleanup_group_call_owner(reads, item)
+        if (not _cleanup_entry_ready(reads, item)
+                or (owner is not None and owner["id"] != command.item_id)):
+            return CommandPlan(events=(), owners=self._owners, state_rows=self._state,
+                read_only=True, result=CleanupItemSaved(CleanupItemDisposition.WAITING, command.item_id))
         allocation = scope.allocate(2)
         progress = _update(
             "cleanup_items", command.item_id,
@@ -9187,6 +9278,7 @@ class _ProgressCleanupCommand(_CleanupItemCommandMixin):
         )
         return CommandPlan(
             events=events, owners=self._owners, state_rows=self._state,
+            read_coverage=reads.read_coverage(),
             result=CleanupItemSaved(
                 CleanupItemDisposition.SAVED, command.item_id))
 
@@ -9276,6 +9368,65 @@ def _member_delete_dispatch_state(connection, item_id: int) -> tuple[bool, bool]
     return cleanup_member_delete_state(connection,item_id)
 
 
+def _cleanup_entry_ready(reads, item):
+    """读取完整共同来源范围后判断能否取得物理删除责任。"""
+    from camctl.outputs.cleanup_group import cleanup_group
+
+    group = cleanup_group(reads, item["output_id"])
+    own = reads.members("cleanup_items", "action_id", item["action_id"])
+    for output_id in group:
+        if any(row.get("source_dependency") == 1
+               for row in reads.members("obtain_items", "output_id", output_id).values()):
+            return False
+        for identity, row in reads.members("cleanup_items", "output_id", output_id).items():
+            if identity != item["id"] and row.get("status") == int(_CLEANUP_ITEM_STATUS.DELETING):
+                return False
+        # 旧的已固定集合允许没有配对项；新集合的每一项必须先建立限制。
+        for row in own.values():
+            if row.get("requested_output_id") == output_id and row.get("status") == int(_CLEANUP_ITEM_STATUS.UNRESOLVED):
+                return False
+    return True
+
+
+def _cleanup_group_call_owner(reads, item, *, exclude_self=False):
+    """从同请求中最早可能派发的票据取得共同照片处理者。"""
+    from camctl.outputs.cleanup_group import cleanup_group
+    from camctl.operations.result_format import read_result_document
+
+    if item["output_id"] is None:
+        return None
+    group = cleanup_group(reads, item["output_id"])
+    if len(group) == 1:
+        return None
+    attempts = []
+    for identity, member in reads.members("cleanup_items", "action_id", item["action_id"]).items():
+        if exclude_self and identity == item["id"]:
+            continue
+        if member["requested_output_id"] not in group:
+            continue
+        for run_id, run in reads.members("operation_runs", "cleanup_item_id", identity).items():
+            if run["kind"] not in (4, 5):
+                continue
+            for attempt in reads.members("operation_attempts", "run_id", run_id).values():
+                attempts.append((attempt["intent_event_id"], attempt["id"], member, attempt))
+    for _, _, member, attempt in sorted(attempts, key=lambda value: (value[0], value[1])):
+        if attempt["status"] != 1:
+            try:
+                actual = read_result_document(attempt["status"], attempt["effect_state"],
+                    attempt["result_json"], attempt["error_json"])
+            except (TypeError, ValueError) as exc:
+                raise ConsistencyError("共同照片处理尝试无法解释") from exc
+            if actual.settlement.basis is SettlementBasis.NOT_DISPATCHED:
+                continue
+        return member
+    return None
+
+
+def cleanup_group_call_owner(connection, item_id):
+    reads = _ProductReads(connection, {})
+    return _cleanup_group_call_owner(reads, reads.required("cleanup_items", item_id))
+
+
 class _BeginCleanupAttemptCommand(_CleanupItemCommandMixin):
     """清理首次处理归属、操作流程与第一次尝试的共同建档事务。
 
@@ -9322,6 +9473,14 @@ class _BeginCleanupAttemptCommand(_CleanupItemCommandMixin):
             entry = False
         else:
             raise ConsistencyError("清理首次建档要求成员待删除或删除中")
+        reads = _ProductReads(connection, self._state)
+        owner = _cleanup_group_call_owner(reads, item)
+        if owner is not None and owner["id"] != item_id:
+            return CommandPlan(events=(), owners=self._owners, state_rows=self._state,
+                read_only=True, result=BeginAttemptResult(BeginDisposition.REJECTED, reason="cleanup_waiting"))
+        if entry and not _cleanup_entry_ready(reads, item):
+            return CommandPlan(events=(), owners=self._owners, state_rows=self._state,
+                read_only=True, result=BeginAttemptResult(BeginDisposition.REJECTED, reason="cleanup_waiting"))
         sub = _CleanupBindingScope(scope)
         begin = BeginAttemptCommand(intent, self._key).plan(sub)
         if not begin.events:
@@ -9331,12 +9490,12 @@ class _BeginCleanupAttemptCommand(_CleanupItemCommandMixin):
                             state_rows=self._state, result=begin.result),
                 begin,
             ], result=begin.result, read_only=True)
-        plans = [begin]
+        plans = [CommandPlan(events=(), owners=self._owners, state_rows=self._state), begin]
         if entry:
             plans.append(_ProgressCleanupCommand(
                 ProgressCleanupItem(item_id, intent.occurred_at), self._key,
             ).plan(sub))
-        merged = _merge_cleanup_binding_plans(plans, result=begin.result)
+        merged = _merge_cleanup_binding_plans(plans, result=begin.result, coverage=reads.read_coverage())
         allocation = scope.allocate(len(merged.events))
         if (merged.events[0].event_id != allocation.first_event_id
                 or merged.events[-1].event_id != allocation.last_event_id):
@@ -9558,7 +9717,49 @@ class _FinishCleanupItemCommand(_CleanupItemCommandMixin):
                     ("intermediate_file", intermediate_file_id)))
             else:
                 raise ConsistencyError("中间文件清理状态未决，不能确认清理成功")
+        from camctl.outputs.cleanup_group import cleanup_group
+        reads = _ProductReads(connection, self._state)
+        paired_changes = []
+        for paired_id in cleanup_group(reads, output_id):
+            if paired_id == output_id:
+                continue
+            paired = reads.required("outputs", paired_id)
+            paired_file = reads.required("device_files", paired["device_file_id"])
+            if (paired["availability"] == int(_AVAILABILITY.CLEANED)
+                    and paired_file["presence_state"] != int(_FILE_PRESENCE.ABSENT)):
+                raise ConsistencyError("共同照片的清理完成与文件事实矛盾")
+            if paired_file["presence_state"] != int(_FILE_PRESENCE.ABSENT):
+                templates.append((17, 5, (_update("device_files", paired_file["id"],
+                    {"presence_state": paired_file["presence_state"]},
+                    {"presence_state": int(_FILE_PRESENCE.ABSENT)}),),
+                    ("device_file", paired_file["id"])))
+            desired = {"availability": int(_AVAILABILITY.CLEANED),
+                       "cleanup_status": int(_OUTPUT_CLEANUP_STATUS.COMPLETED),
+                       "cleanup_error_json": None}
+            before = {name: paired[name] for name, value in desired.items()
+                      if not json_equal(paired[name], value)}
+            if before:
+                paired_changes.append((paired_id, before, {name: desired[name] for name in before}))
         self._load_delete_basis(connection, command.item_id)
+        paired_source = None
+        if paired_changes:
+            from camctl.outputs.cleanup_results import saved_cleanup_absence
+            candidates = [command.item_id]
+            for member_id in cleanup_group(reads, output_id):
+                candidates.extend(identity for identity in reads.members("cleanup_items", "output_id", member_id)
+                                  if identity != command.item_id)
+            for identity in candidates:
+                candidate = reads.required("cleanup_items", identity)
+                if identity != command.item_id and candidate["status"] not in (4, 5, 6):
+                    continue
+                evidence = saved_cleanup_absence(connection, identity)
+                if evidence is not None:
+                    self._load_delete_basis(connection, identity)
+                    paired_source = {"cleanup_result_source": {"item_id": identity,
+                        "result_event_id": evidence.result_event_id}}
+                    break
+            if paired_source is None:
+                raise ConsistencyError("共同照片缺席缺少可靠原删除结果")
         after_item = {
             "id": item["id"], "action_id": item["action_id"],
             "requested_output_id": item["requested_output_id"],
@@ -9572,7 +9773,7 @@ class _FinishCleanupItemCommand(_CleanupItemCommandMixin):
         derived = self._derive_projection(connection, output_id, after_item)
         change = self._projection_change(output, derived)
         allocation = scope.allocate(
-            len(templates) + 1 + (1 if change else 0))
+            len(templates) + 1 + (1 if change else 0) + len(paired_changes))
         next_event_id = allocation.first_event_id
         events = []
         for event_type, reason, rows, owner in templates:
@@ -9611,8 +9812,16 @@ class _FinishCleanupItemCommand(_CleanupItemCommandMixin):
                 _OUTPUT_REGISTERED_EVENT, _OUTPUT_OBSERVATION_REASON,
                 (_update("outputs", output_id, change[0], change[1]),),
                 command.occurred_at))
+        for paired_id, before, after in paired_changes:
+            self._owners[("outputs", paired_id)] = ("output", paired_id)
+            events.append(_envelope(
+                allocation.first_event_id + len(events), allocation.txn_id,
+                _OUTPUT_REGISTERED_EVENT, _OUTPUT_OBSERVATION_REASON,
+                (_update("outputs", paired_id, before, after),), command.occurred_at,
+                evidence=paired_source))
         return CommandPlan(
             events=tuple(events), owners=self._owners, state_rows=self._state,
+            read_coverage=reads.read_coverage(),
             result=CleanupItemSaved(
                 CleanupItemDisposition.SAVED, command.item_id))
 
@@ -9634,13 +9843,17 @@ class _FinishCleanupItemCommand(_CleanupItemCommandMixin):
                 or after.get("final_event_id") != saved[succeed_index]["event_id"]):
             raise TransactionError("原清理成功的输入与原事务不同")
         # 先行文件缺席事实只指向本产物承载文件；投影事件只指向本产物。
+        from camctl.outputs.cleanup_group import cleanup_group
+        reads = _ProductReads(scope.connection, self._state)
+        group = cleanup_group(reads, item["output_id"])
         output = self._state["outputs"].get(item["output_id"])
         carried = set()
-        if output is not None:
-            if output.get("device_file_id") is not None:
-                carried.add(("device_files", output["device_file_id"]))
-            if output.get("intermediate_file_id") is not None:
-                carried.add(("intermediate_files", output["intermediate_file_id"]))
+        for member in group:
+            target = reads.required("outputs", member)
+            if target.get("device_file_id") is not None:
+                carried.add(("device_files", target["device_file_id"]))
+            if target.get("intermediate_file_id") is not None:
+                carried.add(("intermediate_files", target["intermediate_file_id"]))
         for event in saved[:succeed_index]:
             covered = {
                 (row["table"], row["id"]) for row in event["body"]["rows"]}
@@ -9651,8 +9864,30 @@ class _FinishCleanupItemCommand(_CleanupItemCommandMixin):
             if ((event["type"], event["reason"])
                     != (_OUTPUT_REGISTERED_EVENT, _OUTPUT_OBSERVATION_REASON)
                     or len(projection) != 1 or projection[0]["table"] != "outputs"
-                    or projection[0]["id"] != item["output_id"]):
+                    or projection[0]["id"] not in group):
                 raise TransactionError("原清理成功的投影不属于本产物")
+            if projection[0]["id"] != item["output_id"]:
+                evidence = event["body"].get("evidence", {}).get("cleanup_result_source")
+                if not isinstance(evidence, Mapping):
+                    raise TransactionError("共同照片投影缺少原缺席结果")
+                source_item = reads.required("cleanup_items", evidence.get("item_id"))
+                if (source_item["output_id"] not in group
+                        or reads.required("outputs", projection[0]["id"])["created_event_id"] >= saved[0]["event_id"]):
+                    raise TransactionError("共同照片投影不属于原事务前的配对")
+                from camctl.outputs.cleanup_results import _read_exact_cleanup_attempt
+                from camctl.persistence.repositories.cleanup_absence import _presence
+                from camctl.operations.models import AttemptTicket
+                fact = scope.connection.execute(
+                    "SELECT a.attempt_no,r.kind,r.id,r.responsibility_key FROM operation_attempts a"
+                    " JOIN operation_runs r ON r.id=a.run_id WHERE a.result_event_id=? AND r.cleanup_item_id=?",
+                    (evidence.get("result_event_id"), source_item["id"])).fetchone()
+                if fact is None or fact[1] not in (4, 5):
+                    raise TransactionError("共同照片投影的原缺席结果无法核实")
+                operation = "delete" if fact[1] == 4 else "query"
+                source = _read_exact_cleanup_attempt(scope.connection,
+                    AttemptTicket(fact[0], operation, str(source_item["id"]), fact[3], fact[2]), source_item["id"])
+                if _presence(source.actual, operation, source_item["id"]) is not False:
+                    raise TransactionError("共同照片投影的原结果未确认缺席")
         # 按原完整事务边界核对成员结果，不用后来推进的当前阶段替代。
         boundary = _member_values_at_saved_boundary(scope, saved, item)
         for name, value in (
@@ -9706,6 +9941,19 @@ class _FailCleanupItemCommand(_CleanupItemCommandMixin):
             raise ConsistencyError(f"清理失败要求确认产物身份: {command.item_id}")
         error_id = item_error_id("cleanup_items", command.code)
         validate_error_details(command.code, command.details)
+        reads = _ProductReads(connection, self._state)
+        owner = _cleanup_group_call_owner(reads, item)
+        if owner is not None and owner["id"] != command.item_id:
+            if self._state["actions"][item["action_id"]]["cancel_requested"]:
+                return CommandPlan(events=(), owners=self._owners, state_rows=self._state,
+                    read_only=True, result=CleanupItemSaved(CleanupItemDisposition.WAITING, command.item_id))
+            details = dict(owner.get("error_details_json") or {})
+            if "output_id" in details:
+                details["output_id"] = str(output_id)
+            if (owner["status"] != int(_CLEANUP_ITEM_STATUS.FAILED)
+                    or owner["error_code"] != error_id
+                    or not json_equal(details, command.details)):
+                raise TransactionError("共同照片成员的失败与原处理者不一致")
         fail_before = {
             "status": item["status"],
             "restriction_state": item["restriction_state"],
@@ -9744,6 +9992,7 @@ class _FailCleanupItemCommand(_CleanupItemCommandMixin):
                 command.occurred_at))
         return CommandPlan(
             events=tuple(events), owners=self._owners, state_rows=self._state,
+            read_coverage=reads.read_coverage(),
             result=CleanupItemSaved(
                 CleanupItemDisposition.SAVED, command.item_id))
 

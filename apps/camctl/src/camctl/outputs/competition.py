@@ -234,17 +234,23 @@ def _cleanup_targets(reads: CompetitionReads, identity: int, action: Row, output
         return False
     items = _members(reads, "cleanup_items", "action_id", identity)
     if state == _TARGETS.FIXED:
+        from camctl.outputs.cleanup_group import cleanup_group
+        group = cleanup_group(reads, output_id)
         for _, item in items:
-            if item["requested_output_id"] != output_id:
+            target = item["requested_output_id"]
+            if target not in group:
                 continue
             actual = item["output_id"]
-            if actual not in (None, output_id):
+            if actual not in (None, target):
                 raise ConsistencyError("清理项的已确认产物与原请求不一致")
             stage = _member(_CLEANUP, item["status"])
             restriction = _member(_RESTRICTION, item["restriction_state"])
             if stage in (_CLEANUP.SUCCEEDED, _CLEANUP.FAILED, _CLEANUP.CANCELED):
                 return False
             if stage != _CLEANUP.UNRESOLVED or restriction != _RESTRICTION.NOT_ESTABLISHED:
+                if target != output_id:
+                    # 配对角色已取得资格，后续限制按既有责任协调。
+                    continue
                 raise ConsistencyError("可用产物不能同时存在已开始清理的责任")
             return True
         return False
@@ -252,7 +258,9 @@ def _cleanup_targets(reads: CompetitionReads, identity: int, action: Row, output
         raise ConsistencyError("未固定清理集合不能已有目标明细")
     params = _params(action)
     if "output_ids" in params:
-        return output_id in _requested_ids(params)
+        from camctl.outputs.cleanup_group import cleanup_group
+        return any(member in _requested_ids(params)
+                   for member in cleanup_group(reads, output_id))
     return _source_matches(reads, identity, action, source_id, all_ready=True)
 
 
