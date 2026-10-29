@@ -71,6 +71,7 @@ def driver_type():
         "check_binding": lambda binding, owner: SimpleNamespace(status=matched),
         "read_camera_config": lambda device: device, "ToolSpec": ToolSpec,
         "_NANOSECONDS_PER_SECOND": Decimal(1_000_000_000), "RawToolOutcome": RawToolOutcome,
+        "diagnostic_monotonic_ns": lambda: 0,
         "ToolCallCancelled": ToolCallCancelled, "ToolStartError": ToolStartError,
         "current_call_scope": lambda: None, "log_context": lambda **kwargs: nullcontext(),
         "parse_devices": lambda output: [SimpleNamespace(vendor_id=0x2756, product_id=10)],
@@ -164,7 +165,9 @@ class AvailabilityPortTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(transport.calls), 3)
         actual = result.to_device_result("31").outcome
         self.assertEqual(actual.status, "failed")
-        self.assertEqual(actual.error.details, {"reason": "doctor_not_passed", "step": "doctor"})
+        self.assertEqual(actual.error.details, {"reason": "doctor_not_passed", "step": "doctor", "steps": [
+            {"name": "list", "elapsed_ms": 0}, {"name": "info", "elapsed_ms": 0},
+            {"name": "doctor", "elapsed_ms": 0}]})
         self.assertEqual(actual.diagnostics.calls[-1].stdout.data, b"FAIL")
 
     async def test_binding_mismatch_prevents_every_tool_call(self):

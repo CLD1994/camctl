@@ -94,6 +94,87 @@ async def test_availability_logs_step_names_and_device_context(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_preparation_timeout_error_log_contains_elapsed_for_every_executed_step(host_files, monkeypatch):
+    from camctl.devices.drivers.hasselblad import driver as driver_module
+    from camctl.logging_runtime.diagnostics import (
+        diagnostic_record_for, error_diagnostics_context, record_call_outcome,
+    )
+
+    ticks = iter([0, 2_000_000, 3_000_000, 8_000_000, 9_000_000, 16_000_000,
+                  17_000_000, 28_000_000, 29_000_000, 29_029_000_000])
+    monkeypatch.setattr(driver_module, "diagnostic_monotonic_ns", lambda: next(ticks))
+    timeout = RawToolOutcome(LocalExit(signal=15), b"", "timeout", Decimal("3"), stderr=b"camera busy")
+    driver = _driver(FakeTransport(outcomes={5: timeout}), host_files[0])
+    request = _prepare_request()
+    result = await driver.prepare_capture(request)
+    with error_diagnostics_context(None, lambda message: None):
+        state = record_call_outcome(result.outcome, ticket=request.ticket,
+                                    run_error=result.outcome.error, context={"action_id": 13})
+        record = json.loads(diagnostic_record_for(state).rendered_message())
+    assert record["level"] == "ERROR"
+    assert record["error"]["details"]["reason"] == "timeout"
+    steps = record["error"]["details"]["steps"]
+    assert [step["name"] for step in steps] == [
+        "list", "info", "drive_mode_single", "capture_format", "exposure_mode"]
+    assert [step["elapsed_ms"] for step in steps] == [2, 5, 7, 11, 29000]
+    assert steps[-1]["local_signal"] == 15
+    assert record["outcome"]["error"] == {"$ref": "#/error"}
+
+
+@pytest.mark.asyncio
+async def test_availability_error_log_contains_all_step_durations(monkeypatch):
+    from camctl.devices.drivers.hasselblad import driver as driver_module
+    from camctl.logging_runtime.diagnostics import (
+        diagnostic_record_for, error_diagnostics_context, record_call_outcome,
+    )
+
+    ticks = iter([0, 2_000_000, 3_000_000, 8_000_000, 9_000_000, 29_000_000])
+    monkeypatch.setattr(driver_module, "diagnostic_monotonic_ns", lambda: next(ticks))
+
+    class Transport:
+        async def run(self, spec, stop):
+            if spec.argv[3] == "doctor":
+                return RawToolOutcome(LocalExit(signal=15), b"", "timeout", Decimal("3"), stderr=b"")
+            output = LIST_OUTPUT if spec.argv[3] == "list" else INFO_OUTPUT
+            return RawToolOutcome(LocalExit(exit_code=0), output, None, None, stderr=b"")
+
+    driver = _driver(Transport(), None)
+    result = await driver.check_availability(DeviceBinding("camera-1", DRIVER_ID),
+        expected_serial=SERIAL, expected_product_id=10, timeout_s=Decimal("5"))
+    ticket = AttemptTicket(1, "availability", "31", "availability/31", 9)
+    with error_diagnostics_context(None, lambda message: None):
+        state = record_call_outcome(result.to_device_result("31").outcome, ticket=ticket)
+        record = json.loads(diagnostic_record_for(state).rendered_message())
+    assert record["level"] == "ERROR"
+    assert record["error"]["details"]["reason"] == "timeout"
+    assert record["error"]["details"]["steps"] == [
+        {"name": "list", "elapsed_ms": 2},
+        {"name": "info", "elapsed_ms": 5},
+        {"name": "doctor", "elapsed_ms": 20},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_tool_start_failure_reports_attempt_elapsed_without_claiming_exit(host_files, monkeypatch):
+    from camctl.devices.drivers.hasselblad import driver as driver_module
+    from camctl.logging_runtime.diagnostics import (
+        diagnostic_record_for, error_diagnostics_context, record_call_outcome,
+    )
+
+    ticks = iter([0, 8_000_000])
+    monkeypatch.setattr(driver_module, "diagnostic_monotonic_ns", lambda: next(ticks))
+    request = _prepare_request()
+    result = await _driver(FakeTransport(outcomes={1: ToolStartError("cannot start")}), host_files[0]).prepare_capture(request)
+    with error_diagnostics_context(None, lambda message: None):
+        state = record_call_outcome(result.outcome, ticket=request.ticket)
+        record = json.loads(diagnostic_record_for(state).rendered_message())
+    assert record["error"]["details"]["reason"] == "tool_start_failed"
+    step, = record["error"]["details"]["steps"]
+    assert step["name"] == "list" and step["elapsed_ms"] == 8
+    assert "start_error" in step and "local_exit_code" not in step
+
+
+@pytest.mark.asyncio
 async def test_prepare_settings_without_capture_relative_move_or_start_entry(host_files):
     roots, prepared, verified = host_files
     params = _photo_params()
@@ -123,6 +204,7 @@ async def test_prepare_settings_without_capture_relative_move_or_start_entry(hos
         ("capture_preparation_completed", 1, {"activity_id": ACTIVITY_ID})]
     assert [o.type for o in result.observations] == [
         "capture_preparation_completed", "photo_preparation_steps"]
+    assert all("elapsed_ms" not in step for step in result.observations[1].data["steps"])
     assert result.outcome.settlement.basis is SettlementBasis.OBSERVED
     assert validate_outcome(request.ticket, result.outcome, EVIDENCE)
     assert driver.prepared_capture_matches(_prepared_start(request, params=params))

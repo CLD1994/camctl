@@ -10,6 +10,7 @@ from contextlib import nullcontext
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 from decimal import Decimal
+from time import monotonic_ns as diagnostic_monotonic_ns
 from typing import Callable
 
 from camctl.contracts.values import parse_object_id
@@ -148,12 +149,18 @@ _NANOSECONDS_PER_SECOND = Decimal(1_000_000_000)
 READ_PREPARATION_TIMEOUT_S = Decimal("180")
 
 
+def _steps_without_timing(steps):
+    """成功观察只保存业务事实；计时留给失败诊断。"""
+    return [{key: value for key, value in step.items() if key != "elapsed_ms"} for step in steps]
+
+
 @dataclass(frozen=True)
 class AvailabilityCall:
     name: str
     returned_monotonic_ns: int
     outcome: RawToolOutcome | None = None
     error: BaseException | None = None
+    elapsed_ms: int | None = None
 
 
 @dataclass(frozen=True)
@@ -217,6 +224,7 @@ class AvailabilityResult:
         })
         error = None if self.available else ErrorValue("device_error", "availability", {
             "reason": self.reason, "step": None if not self.calls else self.calls[-1].name,
+            "steps": [{"name": call.name, "elapsed_ms": call.elapsed_ms} for call in self.calls],
         })
         dispatched = any(call.outcome is not None for call in self.calls)
         settlement_contract = _AVAILABILITY_RETURNED if dispatched else _AVAILABILITY_NOT_DISPATCHED
@@ -378,31 +386,35 @@ class HasselbladDriver:
             spec = ToolSpec((config.executable, "--pid", f"0x{expected_product_id:04x}", name),
                             remaining, self.terminate_grace_s)
             interrupted = None
+            call_began = diagnostic_monotonic_ns()
             try:
-                with log_context(device_id=binding.device_id, driver_id=binding.driver_id,
-                                 command=(name,), step_name=name):
-                    raw = await self.transport.run(spec, _NeverStop())
+                try:
+                    with log_context(device_id=binding.device_id, driver_id=binding.driver_id,
+                                     command=(name,), step_name=name):
+                        raw = await self.transport.run(spec, _NeverStop())
+                finally:
+                    elapsed_ms = (diagnostic_monotonic_ns() - call_began) // 1_000_000
             except ToolCallCancelled as error:
                 raw = error.outcome
                 interrupted = error
             except asyncio.CancelledError as error:
                 if isinstance(error.__cause__, ToolStartError):
-                    calls.append(AvailabilityCall(name, now(), error=error.__cause__))
+                    calls.append(AvailabilityCall(name, now(), error=error.__cause__, elapsed_ms=elapsed_ms))
                     raise AvailabilityCancelled(result("tool_start_failed")) from error
-                calls.append(AvailabilityCall(name, now(), error=error))
+                calls.append(AvailabilityCall(name, now(), error=error, elapsed_ms=elapsed_ms))
                 raise AvailabilityCancelled(result("cancelled", settled=False)) from error
             except ToolStartError as error:
-                calls.append(AvailabilityCall(name, now(), error=error))
+                calls.append(AvailabilityCall(name, now(), error=error, elapsed_ms=elapsed_ms))
                 return result("tool_start_failed")
             except Exception as error:
-                calls.append(AvailabilityCall(name, now(), error=error))
+                calls.append(AvailabilityCall(name, now(), error=error, elapsed_ms=elapsed_ms))
                 return result("transport_failed", settled=False)
             if not isinstance(raw, RawToolOutcome):
                 error = TypeError("transport.run 必须返回 RawToolOutcome")
-                calls.append(AvailabilityCall(name, now(), error=error))
+                calls.append(AvailabilityCall(name, now(), error=error, elapsed_ms=elapsed_ms))
                 return result("transport_failed", settled=False)
             returned = now()
-            calls.append(AvailabilityCall(name, returned, raw))
+            calls.append(AvailabilityCall(name, returned, raw, elapsed_ms=elapsed_ms))
 
             def finish(value):
                 if interrupted is not None:
@@ -568,7 +580,8 @@ class HasselbladDriver:
 
         def result(*, error=None, entries=()):
             observed = [DeviceObservation("photo_result_attempt", 2, {
-                "activity_id": ticket.target_id, "role": role.value, "steps": list(steps),
+                "activity_id": ticket.target_id, "role": role.value,
+                "steps": list(steps) if error is not None else _steps_without_timing(steps),
                 "comparison": comparison})]
             if entries:
                 following = (PhotoResultCursor(request.binding, ticket.target_id, DownloadVariant.THUMBNAIL)
@@ -672,19 +685,19 @@ class HasselbladDriver:
                 "device_id": request.binding.device_id,
                 "expected_driver_id": request.binding.driver_id,
                 "actual_driver_id": request.binding.driver_id,
-                "reason": "physical_identity_mismatch"}))
+                "reason": "physical_identity_mismatch", "steps": list(steps)}))
         except CaptureFileError as error:
             pending_error = error
             classification = ("invalid" if error.stage in {
                 "source_file_count", "source_type", "source_size", "source_media"} else "unconfirmed")
             return result(error=ErrorValue("device_error", "result", {
                 "role": role.value, "reason": error.stage, "classification": classification,
-                "diagnostic": exception_diagnostic(error)}))
+                "diagnostic": exception_diagnostic(error), "steps": list(steps)}))
         except (ValueError, OSError) as error:
             pending_error = error
             return result(error=ErrorValue("device_error", "result", {
                 "role": role.value, "reason": str(error), "classification": "unconfirmed",
-                "diagnostic": exception_diagnostic(error)}))
+                "diagnostic": exception_diagnostic(error), "steps": list(steps)}))
         finally:
             # 裸取消或 transport 未交回收场事实时，实际拥有者不得释放。
             if not workspace.files_closed:
@@ -795,13 +808,18 @@ class HasselbladDriver:
             timeout_s,
             self.terminate_grace_s,
         )
+        call_began = diagnostic_monotonic_ns()
         try:
-            with log_context(command=args, step_name=name):
-                raw = await self.transport.run(spec, _NeverStop())
+            try:
+                with log_context(command=args, step_name=name):
+                    raw = await self.transport.run(spec, _NeverStop())
+            finally:
+                elapsed_ms = (diagnostic_monotonic_ns() - call_began) // 1_000_000
         except ToolStartError as failure:
             steps.append({
                 "name": name,
                 "start_error": f"{type(failure).__name__}: {failure}",
+                "elapsed_ms": elapsed_ms,
             })
             return None
         except ToolCallCancelled as failure:
@@ -817,7 +835,7 @@ class HasselbladDriver:
         # 端口契约；不把它伪装成结束结果，保留原 RUNNING 尝试供恢复接手。
         if not isinstance(raw, RawToolOutcome):
             raise TypeError("transport.run 必须返回 RawToolOutcome")
-        steps.append(self._step_fact(name, raw))
+        steps.append({**self._step_fact(name, raw), "elapsed_ms": elapsed_ms})
         if raw.exit is None:
             raise RuntimeError(f"{name} transport 未提供本地退出/收场结果")
         return raw
@@ -977,7 +995,7 @@ class HasselbladDriver:
                 {"activity_id": activity_id})
             preparation_steps = DeviceObservation(
                 _PHOTO_PREPARATION_STEPS.type, _PHOTO_PREPARATION_STEPS.version,
-                {"activity_id": activity_id, "steps": deepcopy(steps)})
+                {"activity_id": activity_id, "steps": deepcopy(_steps_without_timing(steps))})
             result = finish(AttemptStatus.SUCCEEDED, EffectState.CONFIRMED,
                             observations=(observation, preparation_steps))
             self._prepared_captures.remember(request, (serial, config.product_id))
@@ -1000,7 +1018,7 @@ class HasselbladDriver:
                 "preview_error": response.preview_error,
                 "prepared_by": None if request.prepared_by is None else {
                     "run_id": request.prepared_by.run_id, "attempt_no": request.prepared_by.attempt_id},
-                "steps": [dict(fact) for fact in steps],
+                "steps": _steps_without_timing(steps),
             })
             return finish(AttemptStatus.SUCCEEDED, EffectState.CONFIRMED, observations=(observation,))
 
@@ -1027,5 +1045,5 @@ class HasselbladDriver:
             return failed("verify_files", "verified_file_pair_mismatch", effect=EffectState.UNKNOWN)
         observation = DeviceObservation("photo_taken", 1, {
             "activity_id": activity_id, "original": artifacts[0].as_json(), "preview": artifacts[1].as_json(),
-            "steps": [dict(fact) for fact in steps]})
+            "steps": _steps_without_timing(steps)})
         return finish(AttemptStatus.SUCCEEDED, EffectState.CONFIRMED, observations=(observation,))
