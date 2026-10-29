@@ -41,8 +41,8 @@ def main():
         parser.error(f"目标已存在: {target}")
     if not target.parent.is_dir():
         parser.error(f"目标父目录不存在: {target.parent}")
-    if target.resolve().is_relative_to(repo):
-        parser.error("目标不能位于源码仓库内")
+    if target.resolve().is_relative_to(repo) and not target.resolve().is_relative_to(repo / "tmp"):
+        parser.error("仓库内的目标必须位于 tmp 目录下")
     for path in (config_file, *( [environment] if environment else [] )):
         if not path.is_file():
             parser.error(f"输入文件不存在: {path}")

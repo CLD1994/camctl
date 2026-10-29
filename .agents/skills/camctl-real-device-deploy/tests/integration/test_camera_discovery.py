@@ -42,6 +42,8 @@ class CameraDiscovery(unittest.TestCase):
         self.assertEqual(devices["osmo360ii-01"]["adb"]["serial"], "O")
         self.assertEqual(devices["hasselbla-01"]["hasselblad"], {
             "serial": "H123", "executable": "/tools/hb_cli", "product_id": 10, "output_storage": "host"})
+        self.assertEqual(devices["hasselbla-01"]["recording"]["start_timeout_s"], 30)
+        self.assertEqual(devices["hasselbla-01"]["connection"]["prepare_lead_s"], 30)
         self.assertEqual(len(report["queries"]), 3)
         self.assertFalse(report["placeholder_devices"])
         self.assertFalse(report["warnings"])
@@ -77,6 +79,8 @@ class CameraDiscovery(unittest.TestCase):
         self.assertEqual(report["devices"]["action6-01"]["adb"]["serial"], "REPLACE_ACTION6_SERIAL")
         self.assertEqual(report["devices"]["osmo360ii-01"]["adb"]["serial"], "REPLACE_OSMO360II_SERIAL")
         self.assertEqual(report["devices"]["hasselbla-01"]["hasselblad"]["serial"], "REPLACE_HASSELBLAD_SERIAL")
+        self.assertEqual(report["devices"]["hasselbla-01"]["recording"]["start_timeout_s"], 30)
+        self.assertEqual(report["devices"]["hasselbla-01"]["connection"]["prepare_lead_s"], 30)
         self.assertEqual(report["devices"]["hasselbla-01"]["hasselblad"]["executable"], "/tools/hb_cli")
         self.assertEqual(report["placeholder_devices"]["hasselbla-01"], ["hasselblad.serial"])
         self.assertTrue(report["warnings"])

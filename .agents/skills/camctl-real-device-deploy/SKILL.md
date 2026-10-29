@@ -22,7 +22,7 @@ python3.11 .agents/skills/camctl-real-device-deploy/scripts/deploy.py \
   --hasselblad-id hasselbla-01
 ```
 
-`--environment` 和 `--hasselblad-id` 是按需选项；`--python` 可指定 Python 3.11 解释器。目标目录必须不存在。具体参数和前提以 `--help` 为准。脚本构建并安装三组件，依据配置创建独立状态库和交接目录，生成客户端能力说明及启动入口，留下日志和部署收据。脚本不迁移旧状态库、客户端数据或媒体，也不启动 host 或操作真实设备。失败时保留诊断，处理原因后使用新的目标目录。
+`--environment` 和 `--hasselblad-id` 是按需选项；`--python` 可指定 Python 3.11 解释器。目标目录必须不存在；位于仓库内时必须放在 `tmp` 目录下。具体参数和前提以 `--help` 为准。脚本构建并安装三组件，依据配置创建独立状态库和交接目录，生成客户端能力说明及启动入口，留下日志和部署收据。脚本不迁移旧状态库、客户端数据或媒体，也不启动 host 或操作真实设备。失败时保留诊断，处理原因后使用新的目标目录。
 
 部署后根据收据报告源码版本、目标路径、设备配置与额外客户端声明、启动入口及实际执行的检查。用户需要客户端运行时启动 `start-client.sh` 并检查一次网页入口；启动 host 前确认其他环境没有运行中的 host 和 camctl，以免同时操作相同设备。需要 ADB 时报告当前连接结果。构建与初始化不等于集成测试或真实设备验收，不要反复执行已完成的检查。保留原环境的数据库及文件，既有环境更新和目录迁移应遵循仓库部署及目录切换规则，不套用新建流程。
 
@@ -30,7 +30,11 @@ python3.11 .agents/skills/camctl-real-device-deploy/scripts/deploy.py \
 
 交付包的主机安装入口直接复制 [install-host.py](scripts/install-host.py)、[deploy_support.py](scripts/deploy_support.py) 和 [camera_discovery.py](scripts/camera_discovery.py)，三者置于包根目录。包内同时提供 `camctl/` 下的一个 wheel 与锁定的 `requirements.txt`、`host/` 下的一个 CPack `*-Source.tar.gz` 源码包，以及描述实际组件版本与验证范围的 `RELEASE.json`。客户端仍按其组件说明独立交付。
 
-安装器从当前环境自动获取相机绑定，生成 `<target>/config.toml`。`--hb-cli` 指定现场工具的路径；省略时从 PATH 查找 `hb_cli`。识别成功的设备无需手填序列号；未识别型号生成待修改占位项。调用示例为：
+安装器从当前环境自动获取相机绑定，生成 `<target>/config.toml`。`--hb-cli` 指定现场工具的路径；省略时从 PATH 查找 `hb_cli`。识别成功的设备无需手填序列号；未识别型号生成待修改占位项。
+
+自动生成的 Hasselblad 设备配置由 [camera_discovery.py](scripts/camera_discovery.py) 显式设置拍摄准备提前量和启动控制超时，均为 30 秒；已识别设备与占位设备使用同一部署策略。继承已有配置的本地新建环境保留原配置。
+
+调用示例为：
 
 ```bash
 python3 install-host.py \
