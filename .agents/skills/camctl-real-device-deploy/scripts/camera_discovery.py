@@ -104,9 +104,10 @@ def discover_cameras(hb_cli=None, *, query=None):
                     prefix, driver = ADB_PRODUCTS[device["product"]]
                     observation.update(result="identified", driver=driver)
                     matched.append((prefix, driver, device["serial"]))
-        counts = Counter(prefix for prefix, _, _ in matched)
+        counts = Counter()
         for prefix, driver, serial in sorted(matched):
-            device_id = prefix if counts[prefix] == 1 else f"{prefix}-{serial}"
+            counts[prefix] += 1
+            device_id = f"{prefix}-{counts[prefix]:02d}"
             report["devices"][device_id] = {"kind": "camera", "driver": driver, "adb": {"serial": serial}}
 
         if hb:
@@ -125,7 +126,7 @@ def discover_cameras(hb_cli=None, *, query=None):
                 raise ValueError(f"发现 {len(matching)} 台 CFV 100C（{locations}），hb_cli 只能按 PID 选择，无法唯一绑定；请只连接本实例使用的相机")
             if matching:
                 serial = parse_serial(run([hb, "--pid", f"0x{HB_PRODUCT:04x}", "info"]))
-                report["devices"]["hasselblad"] = {"kind": "camera", "driver": DRIVER_ID,
+                report["devices"]["hasselbla-01"] = {"kind": "camera", "driver": DRIVER_ID,
                     "hasselblad": {"executable": hb, "serial": serial, "product_id": HB_PRODUCT,
                         "output_storage": "host"},
                     "recording": {"start_timeout_s": 30}, "connection": {"prepare_lead_s": 30},

@@ -37,10 +37,10 @@ class CameraDiscovery(unittest.TestCase):
         report = self.run_discovery()
         self.assertEqual(report["status"], "complete", report)
         devices = report["devices"]
-        self.assertEqual(set(devices), {"action6", "osmo360ii", "hasselblad"})
-        self.assertEqual(devices["action6"]["adb"]["serial"], "A")
-        self.assertEqual(devices["osmo360ii"]["adb"]["serial"], "O")
-        self.assertEqual(devices["hasselblad"]["hasselblad"], {
+        self.assertEqual(set(devices), {"action6-01", "osmo360ii-01", "hasselbla-01"})
+        self.assertEqual(devices["action6-01"]["adb"]["serial"], "A")
+        self.assertEqual(devices["osmo360ii-01"]["adb"]["serial"], "O")
+        self.assertEqual(devices["hasselbla-01"]["hasselblad"], {
             "serial": "H123", "executable": "/tools/hb_cli", "product_id": 10, "output_storage": "host"})
         self.assertEqual(len(report["queries"]), 3)
         text = discovery.format_report(report)
@@ -48,16 +48,21 @@ class CameraDiscovery(unittest.TestCase):
             self.assertIn(value, text)
 
     def test_multiple_adb_cameras_have_distinct_deterministic_ids(self):
-        report = self.run_discovery(adb=b"List of devices attached\nZ device product:qcs8625_ac206\nA device product:qcs8625_ac206\n")
+        rows = [b"Z device product:qcs8625_ac206\n", b"A device product:qcs8625_ac206\n",
+            b"O device product:eagle4_oq102\n"]
+        report = self.run_discovery(adb=b"List of devices attached\n" + b"".join(rows))
         self.assertEqual(report["status"], "complete", report)
-        self.assertEqual(report["devices"]["action6-A"]["adb"]["serial"], "A")
-        self.assertEqual(report["devices"]["action6-Z"]["adb"]["serial"], "Z")
+        self.assertEqual(report["devices"]["action6-01"]["adb"]["serial"], "A")
+        self.assertEqual(report["devices"]["action6-02"]["adb"]["serial"], "Z")
+        self.assertEqual(report["devices"]["osmo360ii-01"]["adb"]["serial"], "O")
+        reversed_report = self.run_discovery(adb=b"List of devices attached\n" + b"".join(reversed(rows)))
+        self.assertEqual(report["devices"], reversed_report["devices"])
 
     def test_unknown_unavailable_and_missing_product_are_reported_without_guessing(self):
         adb = b"List of devices attached\nX device product:phone\nA offline product:qcs8625_ac206\nU unauthorized\nN device\n"
         report = self.run_discovery(adb=adb)
         self.assertEqual(report["status"], "complete", report)
-        self.assertEqual(set(report["devices"]), {"hasselblad"})
+        self.assertEqual(set(report["devices"]), {"hasselbla-01"})
         self.assertEqual([v["result"] for v in report["observations"][:4]],
             ["unknown_product", "unavailable", "unavailable", "unknown_product"])
 
@@ -74,12 +79,12 @@ class CameraDiscovery(unittest.TestCase):
         with patch.object(discovery.shutil, "which", side_effect=lambda n: "/adb" if n == "adb" else None):
             report = discovery.discover_cameras(query=lambda argv, **kw: subprocess.CompletedProcess(argv, 0, ADB_LIST, b""))
         self.assertEqual(report["status"], "complete", report)
-        self.assertEqual(set(report["devices"]), {"action6", "osmo360ii"})
+        self.assertEqual(set(report["devices"]), {"action6-01", "osmo360ii-01"})
 
     def test_multiple_hasselblads_do_not_query_arbitrary_camera(self):
         report = self.run_discovery(hb=HB_LIST + b"vid=0x2756 pid=0x000a bus=1 addr=3\n")
         self.assertEqual(report["status"], "failed")
-        self.assertNotIn("hasselblad", report["devices"])
+        self.assertNotIn("hasselbla-01", report["devices"])
         self.assertFalse(any(q["argv"][-1] == "info" for q in report["queries"]))
         text = discovery.format_report(report)
         for location in ("bus=1 addr=2", "bus=1 addr=3"):

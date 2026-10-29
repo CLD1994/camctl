@@ -19,7 +19,7 @@ python3.11 .agents/skills/camctl-real-device-deploy/scripts/deploy.py \
   --config /path/to/existing/config.toml \
   --target /path/to/new-environment \
   --environment /path/to/existing/environment.sh \
-  --hasselblad-id hasselblad
+  --hasselblad-id hasselbla-01
 ```
 
 `--environment` 和 `--hasselblad-id` 是按需选项；`--python` 可指定 Python 3.11 解释器。目标目录必须不存在。具体参数和前提以 `--help` 为准。脚本构建并安装三组件，依据配置创建独立状态库和交接目录，生成客户端能力说明及启动入口，留下日志和部署收据。脚本不迁移旧状态库、客户端数据或媒体，也不启动 host 或操作真实设备。失败时保留诊断，处理原因后使用新的目标目录。
@@ -38,15 +38,17 @@ python3.11 install-host.py \
   --hb-cli /path/to/hb_cli
 ```
 
+新建自动配置的设备实例 ID 使用型号前缀和至少两位编号，各型号分别从 01 开始递增。编号只用于设备实例，驱动标识及驱动配置字段不随实例名称改变；继承已有配置时保留原设备 ID。
+
 目标机需要 Linux、Python 3.11、uv、CMake 3.10.2 或以上、C11 编译器及 pthread。配置与构建使用共享脚本中的 CMake 调用，保持组件声明的最低版本兼容。安装器在新虚拟环境安装 wheel 后执行身份发现，复用该发行物的 Hasselblad 响应解析器；仅查询身份，不设置参数、拍摄、删除文件或停止设备。
 
 安装器使用 `adb devices -l` 的精确产品标识匹配相机，映射只在 `camera_discovery.py` 中维护。依据见 [Action6 现场记录](../../../docs/camctl/verification.md#arm-更新包接收与现场状态2026-10-11)及 [OSMO 现场记录](../../../docs/camctl/verification.md#osmo-360-ii-全量真机验证2026-10-17)。Hasselblad 通过 `hb_cli --pid 0x000a list` 核对 USB 身份，再用同一 PID 的 `info` 获取 serial；格式与工具选择边界见[驱动说明](../../../docs/camctl/hasselblad-driver.md)。
 
 | 检测结果 | 安装处理 |
 | --- | --- |
-| ADB 状态为 `device` 且产品标识精确匹配 | 写入完整 serial 及对应驱动；单台使用型号设备 ID，同型号多台时用型号与各自 serial 生成不同 ID，并全部配置。 |
+| ADB 状态为 `device` 且产品标识精确匹配 | 写入完整 serial 及对应驱动；同型号按 serial 排序后从 01 递增编号，实例 ID 采用 `action6-01`、`osmo360ii-01` 等形式，并全部配置。 |
 | ADB 设备离线、未授权、无权限，或产品未知/缺失 | 报告原始设备行与未配置原因，不猜测驱动；其他可识别设备继续检测。 |
-| 单台匹配的 CFV 100C，且 `info` 可解析 | 写入工具绝对路径、实际 serial 和 product ID；正式源与预算由发现脚本中的部署策略提供。 |
+| 单台匹配的 CFV 100C，且 `info` 可解析 | 实例 ID 为 `hasselbla-01`，写入工具绝对路径、实际 serial 和 product ID；正式源与预算由发现脚本中的部署策略提供。 |
 | 多台匹配的 CFV 100C | 停止安装；工具只能按 PID 选择，无法唯一绑定。报告数量与 USB 位置，要求仅连接当前实例所用相机。 |
 | 某种工具未找到 | 明确报告该通道未检测；可以配置其他通道已识别的相机。显式提供的 hb_cli 路径无效时在创建目标前拒绝。 |
 | 查询失败、超时、响应无效，或所有通道均无可识别相机 | 停止安装并保存检测事实与错误，不初始化状态库。 |
