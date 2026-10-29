@@ -2331,8 +2331,8 @@
         },
         "size": {
           "when": {
-            "op": "literal",
-            "value": true
+            "op": "not_null",
+            "column": "file_copies.source_size"
           },
           "value": {
             "op": "read",
