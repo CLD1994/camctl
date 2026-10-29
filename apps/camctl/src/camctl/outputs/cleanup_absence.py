@@ -68,3 +68,25 @@ async def handoff_terminal_absence(runtime, item_id):
     if result.kind is not DbOutcomeKind.COMPLETED:
         return CleanupStep("result_rejected", str(result.error))
     return None
+
+
+async def handoff_group_terminal_absence(runtime, output_ids):
+    """从共同来源的终态成员接回原可靠缺席，逐页查找。"""
+    from camctl.outputs.cleanup_results import saved_cleanup_absence
+
+    after = 0
+    while True:
+        rows = await _read_cleanup(runtime, lambda connection: connection.execute(
+            "SELECT c.id FROM cleanup_items c WHERE c.id>? AND c.status IN (4,5,6)"
+            " AND c.output_id IN (%s) AND NOT EXISTS(SELECT 1 FROM operation_runs r"
+            " JOIN operation_attempts a ON a.run_id=r.id WHERE r.cleanup_item_id=c.id"
+            " AND (a.status=1 OR a.result_event_id IS NULL)) ORDER BY c.id LIMIT ?"
+            % ",".join("?" * len(output_ids)),
+            (after, *output_ids, runtime.discovery_batch_size)).fetchall())
+        if not rows:
+            return None
+        after = rows[-1][0]
+        for (item_id,) in rows:
+            saved = await _read_cleanup(runtime, lambda connection: saved_cleanup_absence(connection, item_id))
+            if saved is not None:
+                return await handoff_terminal_absence(runtime, item_id)

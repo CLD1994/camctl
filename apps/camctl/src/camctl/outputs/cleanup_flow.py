@@ -1124,7 +1124,15 @@ async def delete_source_file(runtime: CleanupRuntime, item_id: int) -> CleanupSt
                 "SELECT f.presence_state FROM outputs o JOIN device_files f ON f.id=o.device_file_id WHERE o.id=?",
                 (output_id,)).fetchone()))
         if len(group) > 1 and own_file is not None and own_file[0] != 3:
-            return CleanupStep("waiting")
+            from camctl.outputs.cleanup_absence import handoff_group_terminal_absence
+            rejected = await handoff_group_terminal_absence(runtime, group)
+            if rejected is not None:
+                return rejected
+            own_file = await _read_cleanup(runtime, lambda connection: connection.execute(
+                "SELECT f.presence_state FROM outputs o JOIN device_files f ON f.id=o.device_file_id WHERE o.id=?",
+                (output_id,)).fetchone())
+            if own_file is None or own_file[0] != 3:
+                return CleanupStep("waiting")
         cleaned = await _read_cleanup(runtime, lambda connection: connection.execute('SELECT availability, cleanup_status FROM outputs WHERE id = ?', (output_id,)).fetchone())
         choice = (CleanupOutcomeChoice.ALREADY_CLEANED
                   if cleaned is not None and cleaned[0] == 3
