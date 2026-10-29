@@ -31,7 +31,7 @@ from camctl.history.events import EventEnvelope, RowChange, RowImage
 from camctl.history.reads import AdmissionSourceReadScope
 from camctl.history.validators import EventValidationError, register_guard
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from camctl.persistence.runtime import OwnedConnection, require_host_photo_format
+from camctl.persistence.runtime import OwnedConnection, require_host_photo_format, require_deferred_photo_format
 from camctl.persistence.repositories.reporting import (
     read_ack_report, read_ack_state, read_outstanding_syncs,
 )
@@ -377,6 +377,12 @@ class ProcessInputCommand:
             for action in prepared.actions
         ):
             require_host_photo_format(self._format_version)
+        if any(
+            action.ok and isinstance(action.execution_spec, Mapping)
+            and action.execution_spec.get("photo_source_policy") == "deferred"
+            for action in prepared.actions
+        ):
+            require_deferred_photo_format(self._format_version)
 
         templates: list[EventEnvelope] = []
         dep_id = self._next_id(connection, "action_dependencies")

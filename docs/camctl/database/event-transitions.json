@@ -435,10 +435,10 @@
         "delivery_id",
         "processing_id",
         "inspection_id",
-        "target_file_id",
-        "source_size"
+        "target_file_id"
       ],
       "mutable": [
+        "source_size",
         "source_device_file_id",
         "source_intermediate_file_id",
         "round",
@@ -1335,7 +1335,12 @@
     },
     "copy": {
       "contract": "file-fields.md#文件拷贝",
-      "rule": "固定源、目标和长度；committed_bytes 在同轮只增且不超长度，先同步后保存；重拷 round 与 recopies_used 同增1、进度归零及重置待办共同保存，实际截断同步后才 READY。匹配/不匹配/源不支持都要求完整目标摘要，不能由查询失败推断不支持。",
+      "rule": "固定源和目标；按需照片为每次下载保存长度并在重读前登记目标重置。committed_bytes 在有效读取内只增且不超长度，先同步后保存；重拷 round 与 recopies_used 同增1、进度归零及重置待办共同保存，实际截断同步后才 READY。匹配、不匹配及源不支持都要求完整目标摘要，不能由查询失败推断不支持。",
+      "scope": "transaction"
+    },
+    "read_end": {
+      "contract": "file-fields.md#当前轮次的完整读取结束依据",
+      "rule": "核对原 READ 票据、完整可靠进度、实际停止结果和同一轮次的源及目标，保存原读取结束事件。",
       "scope": "transaction"
     },
     "read_slot": {
@@ -3250,7 +3255,8 @@
           "from": 1,
           "to": 2,
           "by": [
-            "COPY_CHANGED.RECOPY"
+            "COPY_CHANGED.RECOPY",
+            "COPY_CHANGED.PHOTO_READ_START"
           ],
           "id": "transition_1"
         },
@@ -7711,6 +7717,16 @@
             "before": {}, "after": {}, "required": ["read_end_event_id"], "transitions": {}}],
           "guards": ["row_shape", "transaction", "ownership", "report_impact", "read_end"],
           "evidence": ["read_end"]
+        },
+        "PHOTO_READ_START": {
+          "reason": 10,
+          "title": "固定本次照片下载的读取长度并准备目标",
+          "rows": [{"table": "file_copies", "op": "update",
+            "columns": ["source_size", "committed_bytes", "reset_state"],
+            "before": {}, "after": {}, "required": [],
+            "transitions": {"reset_state": ["transition_1"]}}],
+          "guards": ["row_shape", "transaction", "ownership", "report_impact", "copy"],
+          "evidence": ["photo_read_start"]
         }
       }
     },
@@ -8699,7 +8715,8 @@
             "output"
           ],
           "evidence": [
-            "photo_cache_request"
+            "photo_cache_request",
+            "photo_sync_cache_request"
           ]
         },
         "HOST_PHOTO_COMPLETE": {
@@ -10810,6 +10827,10 @@
     }
   },
   "history_references": {
+    "file_copies.read_end_event_id": {
+      "target": "assigning_event",
+      "exception": "READ_END 建立本轮引用；重拷或换源时清空。"
+    },
     "device_availability_checks.target_boundary_event_id": {
       "target": "prior_event"
     },

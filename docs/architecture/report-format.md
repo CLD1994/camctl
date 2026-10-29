@@ -265,6 +265,8 @@ OSMO 360 II 的分段完成下界属于内部完成依据，不是实测媒体�
 
 每项必填 `output_id`、`source_action_instance_id`、`kind`、`availability`、`cleanup`、`checksum`、`media`。归属关系必须与所在拍摄动作一致。已知时提供原始文件名 `original_name`、内容类型 `media_type` 和完整大小 `size`；无法可靠取得时省略，而非填写空名称或零长度。
 
+Hasselblad DEVICE 新照片依据可靠拍摄返回登记时，来源大小、媒体类型和源摘要尚未取得，报告省略 `size`、`media_type` 并将 `checksum.status` 表达为 `not_obtained`。每次交付独立报告实际大小和 SHA-256，不用交付摘要改写设备来源摘要。
+
 第一版 `original` 是设备生成的原始产物，包括图片和视频，`media_type` 按实际已知的 MIME 内容类型填写；未知时省略。文件类别不能由动作名称或 `kind` 推断。`original` 不要求必须是视频；`repaired` 仍仅用于录像修复。`repaired` 是正式修复成品；后者必须有 `derived_from_output_id` 指向其来源原片。两者各有独立身份，清理不级联。正常修复成品尚未正式登记时，不分配一个可供客户端取回的虚构 output。
 
 产物 `kind: "preview"` 表达预览，并且仅该类别必填 `preview_of_output_id`，关联同一来源动作的原文件；它不填写 `derived_from_output_id`。修复成品继续使用 `kind: "repaired"` 和 `derived_from_output_id`，原文件仍为 `original`。`kind` 表达产物角色，图片或视频类型由 `media_type` 表达。自动预览交付修复成品不改变成品角色，delivery 仍只属于取回动作。

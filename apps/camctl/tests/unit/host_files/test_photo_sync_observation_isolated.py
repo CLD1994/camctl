@@ -121,3 +121,50 @@ def test_cache_archives_only_fixed_selected_workspace(api, monkeypatch, selected
     assert len(calls) == 1 and calls[0][0] is api._archive_capture_file
     assert calls[0][2] == Path(expected_workspace)
     assert calls[0][-2:] == (is_result, owner)
+
+
+def test_sync_cache_passes_original_name_and_target_to_file_task(api):
+    api.photo_file_extension = lambda *args: "3fr"
+    api.relative_file_path = lambda *args: "capture-originals/3.3fr"
+    api.resolve_file = lambda *args: SimpleNamespace(path=Path("/staging/capture-originals/3.3fr"))
+    calls = []
+    async def run(*args): calls.append(args)
+    api._run_file_io = run
+    roots = SimpleNamespace(staging=Path("/staging"))
+    target = SimpleNamespace(file_id=3, purpose=api.FilePurpose.CAPTURE_ORIGINAL,
+                             relative_path="capture-originals/3.3fr")
+    immediate(api.archive_photo_sync_cache(roots, "7", "picture.3FR", target,
+        purpose=target.purpose, capture_format=api.CaptureFormat.RAW, owner=None))
+    assert calls == [(api._archive_photo_sync_cache, roots, Path("/staging/capture-work/7"),
+                      "picture.3FR", Path("/staging/capture-originals/3.3fr"), None)]
+
+
+@pytest.mark.parametrize("target_inode,expected", [(None, "archived"), (10, "conflict")])
+def test_sync_cache_uses_file_identity_without_reading_content(api, target_inode, expected):
+    from contextlib import contextmanager
+    from stat import S_IFREG
+    source = SimpleNamespace(st_mode=S_IFREG, st_dev=1, st_ino=9)
+    target = None if target_inode is None else SimpleNamespace(st_mode=S_IFREG, st_dev=1, st_ino=target_inode)
+    calls = []
+    @contextmanager
+    def workspace(*args, **kwargs): yield 10
+    @contextmanager
+    def target_dir(*args, **kwargs): yield 11
+    api._workspace_directory, api._open_directory = workspace, target_dir
+    api._stat_entry = lambda fd, *args: source if fd == 10 else target
+    api._sync_directory_fd = lambda *args: calls.append("sync")
+    api._unlink_source = lambda *args: calls.append("unlink")
+    api.os = SimpleNamespace(link=lambda *args, **kwargs: calls.append("link"))
+    def no_content_read(*args, **kwargs): raise AssertionError("归档不应读取文件内容")
+    api._read_file_facts_at = no_content_read
+    roots = SimpleNamespace(staging=Path("/staging"))
+    def archive():
+        api._archive_photo_sync_cache(roots, Path("/staging/capture-work/7"),
+                                      "picture.3FR", Path("/staging/capture-originals/3.3fr"), None)
+    if expected == "conflict":
+        with pytest.raises(api.CaptureFileError, match="target_conflict"):
+            archive()
+        assert not calls
+    else:
+        archive()
+        assert calls == ["link", "sync", "unlink", "sync"]

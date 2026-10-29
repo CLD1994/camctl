@@ -38,6 +38,7 @@ HOST_PHOTO_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V2)
 CAPTURE_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V4)
 PHOTO_PREPARATION_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V5)
 OUTPUT_SCOPE_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V6)
+DEFERRED_PHOTO_MINIMUM_FORMAT_VERSION = int(_FORMAT_VERSIONS.V7)
 _ACTION_TYPES = enum_for("actions.type")
 
 _PRAGMA_LIMIT = 2_147_483_647
@@ -252,6 +253,16 @@ def require_host_photo_format(format_version: int | None) -> None:
         )
 
 
+def require_deferred_photo_format(format_version: int | None) -> None:
+    """按需取得照片大小的责任只写入支持未知长度的整体格式。"""
+    if (isinstance(format_version, bool) or not isinstance(format_version, int)
+            or format_version not in SUPPORTED_FORMAT_VERSIONS
+            or format_version < DEFERRED_PHOTO_MINIMUM_FORMAT_VERSION):
+        raise DatabaseUnsupportedFormatError(
+            f"数据库整体格式 {format_version!r} 不支持按需照片来源；"
+            "请先执行 init --upgrade-photo-source")
+
+
 def require_capture_preparation_format(
     format_version: int | None, *, action_type: int | None = None,
 ) -> None:
@@ -406,6 +417,13 @@ def _verify_structure(connection: sqlite3.Connection, format_version: int) -> No
             raise DatabaseInvalidError(f"状态库缺少必要结构: {sorted(missing)}")
         _verify_format_constraints(connection, format_version)
         _verify_read_end_structure(connection)
+        if format_version >= DEFERRED_PHOTO_MINIMUM_FORMAT_VERSION:
+            from camctl.persistence.photo_source_structure import verify_photo_source_structure
+
+            try:
+                verify_photo_source_structure(connection)
+            except (ValueError, sqlite3.Error) as error:
+                raise DatabaseInvalidError(f"照片来源格式结构无效: {error}") from error
         from camctl.persistence.retry_wait_structure import verify_retry_wait_structure
         try:
             verify_retry_wait_structure(connection)

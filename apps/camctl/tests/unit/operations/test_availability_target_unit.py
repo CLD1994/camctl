@@ -428,6 +428,7 @@ def test_device_trigger_fixes_original_copy_and_camera(creation_module, monkeypa
     fixed = SimpleNamespace(binding=SimpleNamespace(device_id="hb0", driver_id="hasselblad_cfv100c"),
                             serial="CAMERA-1", product_id=10)
     files.CameraFileIdentity = SimpleNamespace(from_source=lambda *args: fixed)
+    files.camera_file_identity_from_source = files.CameraFileIdentity.from_source
     monkeypatch.setitem(sys.modules, files.__name__, files)
     discovery = ModuleType("camctl.outputs.read_discovery")
     discovery.first_eligible_read = lambda *args: 8

@@ -20,7 +20,7 @@
 | --- | --- | --- |
 | `UNKNOWN` | `size_bytes`、`completion_evidence_json` 为空 | 尚无完整文件依据 |
 | `WRITING` | 完整大小仍为空；观察证据可以有值 | 驱动可靠观察到文件仍在形成 |
-| `COMPLETE` | `size_bytes` 与完成依据都必填 | 文件已固定且完整大小可靠，后续不因删除清除这些事实 |
+| `COMPLETE` | 完成依据必填；完整大小按来源契约填写 | 文件已固定；按需照片来源的大小在拍摄时未知，其他来源保存可靠完整大小 |
 | `UNCONFIRMED` | 未确认的完整大小为空，实际失败证据及 `last_error_json` 必填 | 有限核实结束仍无法确认，不能按完整文件读取 |
 
 完成依据使用 `basis` 和 `observation`，其中 `observation` 保留对应文件的实际结构化观察。
@@ -63,7 +63,7 @@
 
 `checksum_support` 为 `UNDETERMINED`、`SUPPORTED`、`UNSUPPORTED`。`sha256` 只有完整固定文件真正取得源摘要后才填写，否则为空。摘要查询失败保存 `last_error_json`，不能改成 `UNSUPPORTED`；驱动不支持摘要的合法降级由拷贝流程判定。`last_error_json` 为空表示没有尚待表达的文件观察错误；后续可靠观察可清除当前错误，历史不删除。
 
-文件已经取得可靠完整来源摘要时，CHECKSUM 观察可共同保存 `SUPPORTED` 和该摘要，后续取回直接复用，不要求驱动另外提供摘要查询端口。Hasselblad 的来源依据为[首次可靠相机读取](../hasselblad-source-authority.md#device-首次来源观察)，不以同步主机副本证明相机内容。没有可靠来源摘要的设备仍按实际读取能力声明和摘要查询结果决定，不能用待交付副本的摘要填充源端期望。
+文件已经取得可靠完整来源摘要时，CHECKSUM 观察可共同保存 `SUPPORTED` 和该摘要，后续取回直接复用，不要求驱动另外提供摘要查询端口。Hasselblad 新照片的来源依据为[可靠拍摄返回](../hasselblad-source-authority.md#device-拍摄结果)，设备源大小和摘要保持未知；每次交付另存实际大小及摘要。没有可靠来源摘要的设备按实际读取能力声明和摘要查询结果决定，不能用待交付副本的摘要填充源端期望。
 
 ### 文件事实的形成与消费
 
@@ -85,7 +85,7 @@
 
 两项 `owner_*` 关联保存创建该文件的业务责任，创建后保持。文件提升为正式产物、移入交接目录或完成清理时，保存相应生命周期事实，仍可由原责任查到该文件；不通过更换责任人表达位置或清理资格变化。
 
-`size_bytes`、`sha256` 只表达完整文件的可靠结果，尚未完整时为空；部分拷贝进度由 `file_copies` 保存。完整修复输出或主机拍摄源登记为正式产物时继续使用原文件身份，不复制成另一个中间文件记录。`CAPTURE_ORIGINAL` 与 `CAPTURE_PREVIEW` 属于单张拍摄动作，分别保存主机原图与预览。
+`size_bytes`、`sha256` 表达完整文件的结果，部分拷贝进度由 `file_copies` 保存。按需照片同步缓存按原 CLI 返回保存大小，摘要在未计算时为空；该缓存不是正式源。完整修复输出或主机拍摄源登记为正式产物时继续使用原文件身份，不复制成另一个中间文件记录。`CAPTURE_ORIGINAL` 与 `CAPTURE_PREVIEW` 属于单张拍摄动作，分别保存主机原图与预览。
 
 | `retention_state` | `cleanup_state` | 实际责任 |
 | --- | --- | --- |
@@ -115,7 +115,7 @@
 | `CAPTURE_ORIGINAL` | `capture-originals/` | 单张拍摄的主机原图；启动前保存责任。HOST 完整归档后登记正式源；DEVICE 仅承担有可靠角色依据的临时缓存 |
 | `CAPTURE_PREVIEW` | `capture-previews/` | 单张拍摄的主机配对预览；与原图责任共同创建。HOST 完整归档后登记正式源；DEVICE 缓存按自身角色的可靠观察保存 |
 
-`relative_path` 固定为 `<用途子目录>/<intermediate_files.id>[.<ext>]`。文件 ID 使用无前导零的正整数十进制表示；通用用途 `DELIVERY_COPY`、`RECORDING_INPUT`、`PROCESSING_TEMP`、`REPAIR_OUTPUT` 的扩展名可省略，并由文件生产方按工具或类型契约确定，只含非空 ASCII 字母或数字。单张拍摄在创建文件责任时，从原动作的 `capture_format` 和显式用途选择扩展名；原图与预览格式由 [Hasselblad 文件角色契约](../../superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md#rawjpeg-与产物角色)定义。代码中的格式描述只在 `camctl.host_files.photo_formats.CAPTURE_FORMATS` 维护，驱动参数入口转出同一对象。路径生成与结构校验从该定义派生各用途允许的扩展名；能够读取原动作的准备、完整字节、成功登记、提升及恢复仓储还须核对路径与当时保存格式相符。归档同时接收显式用途和原格式，验证目标责任、路径、媒体类型及实际内容，不能以 JPEG 媒体类型推断预览用途。整个文件名不超过 255 个 ASCII 字节。路径使用 `/` 分隔且恰好两段，不接受绝对路径、空段、`.`、`..`、反斜杠、NUL 或额外层级。目录须与 `purpose` 相符，文件名中的 ID 须与本行相同；不得直接拼入设备路径、用户名称或工具返回的任意路径。无法形成合格名称时，拒绝登记并保留具体错误，不先创建一个无法恢复定位的文件。
+`relative_path` 固定为 `<用途子目录>/<intermediate_files.id>[.<ext>]`。文件 ID 使用无前导零的正整数十进制表示；通用用途 `DELIVERY_COPY`、`RECORDING_INPUT`、`PROCESSING_TEMP`、`REPAIR_OUTPUT` 的扩展名可省略，并由文件生产方按工具或类型契约确定，只含非空 ASCII 字母或数字。单张拍摄在创建文件责任时，从原动作的 `capture_format` 和显式用途选择扩展名；原图与预览格式由 [Hasselblad 文件角色契约](../../superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md#rawjpeg-与产物角色)定义。代码中的格式描述只在 `camctl.host_files.photo_formats.CAPTURE_FORMATS` 维护，驱动参数入口转出同一对象。路径生成与结构校验从该定义派生各用途允许的扩展名；能够读取原动作的准备、完整字节、成功登记、提升及恢复仓储还须核对路径与当时保存格式相符。HOST 正式源归档验证目标责任、路径、媒体类型及实际内容；DEVICE 同步缓存归档核对原用途和路径，按[同步副本责任](../hasselblad-source-authority.md#device-拍摄结果)处理文件，不读取内容。不能以 JPEG 媒体类型推断预览用途。整个文件名不超过 255 个 ASCII 字节。路径使用 `/` 分隔且恰好两段，不接受绝对路径、空段、`.`、`..`、反斜杠、NUL 或额外层级。目录须与 `purpose` 相符，文件名中的 ID 须与本行相同；不得直接拼入设备路径、用户名称或工具返回的任意路径。无法形成合格名称时，拒绝登记并保留具体错误，不先创建一个无法恢复定位的文件。
 
 用途、责任、路径与文件 ID 在创建后保持不变；重试及重拷复用原记录和位置，只有独立的新文件才分配新 ID。修复目标可以在 `derived` 中逐步形成，完整性、后续用途及正式产物资格由记录判定。提升为正式产物只新增产物关联并保存保留状态，不移动文件、不更改路径；失败或取消留下的修复目标按中间文件的保留和清理规则处理。
 
@@ -165,17 +165,17 @@ HOST 原图和预览的完整字节事实共同保存。DEVICE 角色缓存按[�
 
 `file_copies` 通过 `delivery_id` 或 `processing_id` 指定唯一用途，两者恰好一个非空；前者关联普通交付，后者关联录像内部处理。`source_device_file_id` 或 `source_intermediate_file_id` 恰好一个非空，`target_file_id` 必填且不能等于本地主机源文件。唯一读取流程通过 `operation_runs.copy_id` 单向引用该拷贝；读取次数与尝试只由公共操作表保存。
 
-DEVICE 照片的有限复用交付也使用 `source_intermediate_file_id` 指向按角色保存的缓存，正式 `outputs.device_file_id` 仍指向同一原相机文件。资格依据原输出所在完整事务 H、H 时已运行且来源选择待定的取回动作，以及更早的角色缓存事件和原 RESULTS 页重算；不使用视频的 `inspection_id`。本地源实际读取失败且原 READ_FILE 仍有预算时，同一交付拷贝可切回对应 `source_device_file_id`，保留原读取流程、尝试次数及目标文件。缓存读取保持原角色文件的直接普通文件身份检查及受管文件任务资格，交付仍按各自目标大小与摘要完成校验。
+DEVICE 照片的有限复用交付也使用 `source_intermediate_file_id` 指向按角色保存的缓存，正式 `outputs.device_file_id` 仍指向同一原相机文件。资格依据原输出所在完整事务 H、H 时已运行且来源选择待定的取回动作，以及更早的角色缓存事件和原 START 返回重算；不使用视频的 `inspection_id`。本地源实际读取失败且原 READ_FILE 仍有预算时，同一交付拷贝可切回对应 `source_device_file_id`，保留原读取流程、尝试次数及目标文件。缓存读取保持原角色文件的直接普通文件身份检查及受管文件任务资格，交付按各自目标大小与摘要完成。
 
-照片原工作目录维护使用独立的有界续查位置，与 READ 下载维护共用本次工作文件额度。DEVICE 按原 RESULTS 尝试票据确定两个角色的专属下载目录；成功页要求原角色缓存决定可靠，没有成功页的目录须满足原执行收场边界。采集工作文件只按可靠 START 保存的直接文件名清理；已取得来源的角色要求保存原决定，未取得来源的角色要求终态后不存在可继续尝试或原保存及实际操作。HOST 双文件已经正式归档且动作成功时，只按原 START 活动定位并尝试移除空采集目录。未知 START 的采集工作文件保留；清理时核对当前目录和文件类型，并保留尚有实际拥有者的路径。原工作目录的实际删除与正式归档路径是否存在分别判断。
+照片原工作目录维护使用独立的有界续查位置，与 READ 下载维护共用本次工作文件额度。新 DEVICE 拍摄终态且实际操作收场后，只按可靠 START 保存的直接文件名清理工作文件；各角色归档到用途目录的缓存按等待者及文件责任独立清理。HOST 双文件已经正式归档且动作成功时，只按原 START 活动定位并尝试移除空采集目录。未知 START 的采集工作文件保留；清理时核对当前目录和文件类型，并保留尚有实际拥有者的路径。原工作目录的实际删除与正式归档路径是否存在分别判断。
 
 | 字段 | 含义与初始值 |
 | --- | --- |
-| `source_size`、`source_sha256` | 首次形成读取责任时确认的固定源长度和已知源摘要；摘要未知时为空，后来取得后保存实际依据，不能将查询失败当成不支持 |
+| `source_size`、`source_sha256` | 通常为建档时固定源长度及已知源摘要；按需照片设备读取在建档时长度为空，实际下载后保存本次长度，源摘要保持为空 |
 | `round`、`recopies_used` | 初始 1、0；每开始一次额外重拷共同增加 1，始终满足 `round = recopies_used + 1` |
 | `max_recopies_used` | 最近一次实际判定采用的本地上限；允许小于已用次数，不是累计预算的权威值 |
 | `committed_bytes` | 当前轮次可靠进度，初始 0，始终不超过固定长度；分段成功后先同步文件再保存 |
-| `reset_state` | `READY` 或 `RESET_PENDING`；后者表示新轮次已经登记，目标文件尚须可靠截断或重建，不能直接续传 |
+| `reset_state` | `READY` 或 `RESET_PENDING`；后者表示目标须可靠截断或重建，不能直接续传，包括新重拷轮次及按需照片重新下载 |
 | `slot_device_id` | 初始为空；取得后保存已可靠保留的相机读取机会，解除后为空；全库非空值唯一，等候重试时继续保留 |
 | `read_end_event_id` | 初始为空；非空时引用当前拷贝轮次、当前源及原 READ 票据的完整读取结束事件；重拷或合法换源时共同清空，旧事件保留 |
 | `verification_state` | `NOT_PERFORMED`、`RUNNING`、`MATCHED`、`MISMATCHED`、`SOURCE_CHECKSUM_UNAVAILABLE`、`FAILED` |

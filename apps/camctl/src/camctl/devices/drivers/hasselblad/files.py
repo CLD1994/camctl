@@ -190,6 +190,89 @@ class CameraFileIdentity:
         return identity
 
 
+@dataclass(frozen=True, slots=True)
+class DeferredCameraFileIdentity:
+    """原单张活动的相机定位和读取角色，不以任一次交付字节定义来源。"""
+
+    binding: DeviceBinding
+    activity_id: str
+    camera_path: str
+    camera_name: str
+    variant: DownloadVariant
+    serial: str
+    product_id: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.binding, DeviceBinding) or self.binding.driver_id != DRIVER_ID:
+            raise ValueError("相机文件必须属于 Hasselblad 原绑定")
+        parse_object_id(self.activity_id)
+        if (not isinstance(self.camera_name, str)
+                or self.camera_name != _camera_name_from_path(self.camera_path)):
+            raise ValueError("相机下载文件名必须与完整机内路径末段一致")
+        if not isinstance(self.variant, DownloadVariant):
+            raise ValueError("相机文件读取种类无效")
+        CameraIdentity(self.serial, self.product_id)
+
+    @property
+    def file_identity(self) -> str:
+        return json.dumps(
+            ["hb-photo-v4", self.serial, self.product_id, self.activity_id,
+             self.camera_path, self.camera_name, self.variant.value],
+            ensure_ascii=False, separators=(",", ":"),
+        )
+
+    def locator(self) -> dict[str, str | int]:
+        return {"serial": self.serial, "product_id": self.product_id,
+                "activity_id": self.activity_id, "camera_path": self.camera_path,
+                "camera_name": self.camera_name, "variant": self.variant.value}
+
+    @classmethod
+    def from_source(cls, identity_key: str, locator: object) -> "DeferredCameraFileIdentity":
+        value = parse_exact_json(identity_key)
+        if not isinstance(value, list) or len(value) != 3:
+            raise ValueError("相机源身份必须包含原设备、驱动和固定文件身份")
+        opaque = parse_exact_json(value[2])
+        if not isinstance(opaque, list) or len(opaque) != 7 or opaque[0] != "hb-photo-v4":
+            raise ValueError("相机固定文件身份版本或结构无效")
+        identity = cls(DeviceBinding(value[0], value[1]), opaque[3], opaque[4],
+                       opaque[5], DownloadVariant(opaque[6]), opaque[1], opaque[2])
+        if not isinstance(locator, Mapping) or not json_equal(dict(locator), identity.locator()):
+            raise ValueError("相机源定位与原固定身份不一致")
+        return identity
+
+
+def deferred_photo_identities(binding: DeviceBinding, observation: Mapping[str, object]) -> tuple[
+        DeferredCameraFileIdentity, DeferredCameraFileIdentity]:
+    """从原可靠单张响应固定设备原图及其配对预览的逻辑身份。"""
+    if not isinstance(observation, Mapping):
+        raise ValueError("照片观察必须是对象")
+    activity_id = observation.get("activity_id")
+    locator = CameraFileLocator.from_json(observation.get("camera_locator"))
+    camera = observation.get("camera_identity")
+    if locator.status is not CameraLocatorStatus.PATH:
+        raise ValueError("照片观察缺少可靠机内定位")
+    if not isinstance(camera, Mapping) or set(camera) != {"serial", "product_id"}:
+        raise ValueError("照片观察缺少原机身身份")
+    assert locator.camera_path is not None and locator.camera_name is not None
+    return tuple(DeferredCameraFileIdentity(
+        binding, activity_id, locator.camera_path, locator.camera_name,
+        variant, camera["serial"], camera["product_id"])
+        for variant in (DownloadVariant.ORIGINAL, DownloadVariant.THUMBNAIL))
+
+
+def camera_file_identity_from_source(identity_key: str, locator: object) -> CameraFileIdentity | DeferredCameraFileIdentity:
+    """按身份版本解释旧固定内容与按需照片来源。"""
+    value = parse_exact_json(identity_key)
+    if not isinstance(value, list) or len(value) != 3 or not isinstance(value[2], str):
+        raise ValueError("相机源身份必须包含原设备、驱动和固定文件身份")
+    opaque = parse_exact_json(value[2])
+    if not isinstance(opaque, list) or not opaque:
+        raise ValueError("相机固定文件身份结构无效")
+    if opaque[0] == "hb-photo-v4":
+        return DeferredCameraFileIdentity.from_source(identity_key, locator)
+    return CameraFileIdentity.from_source(identity_key, locator)
+
+
 def validate_photo_result_page(data: object, *, activity_id: str,
                                binding: DeviceBinding, cursor: PhotoResultCursor | None):
     """校验一页真实角色观察与原活动、角色及固定读取身份。"""

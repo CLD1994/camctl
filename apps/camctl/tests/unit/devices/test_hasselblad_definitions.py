@@ -47,9 +47,10 @@ def test_same_static_driver_binds_each_device_to_its_own_storage():
     host = catalog.parameter_definition("hb-host", "camera_take_photo", PARAMETER_TYPE)
     device = catalog.parameter_definition("hb-device", "camera_take_photo", PARAMETER_TYPE)
     for parameter, storage in ((device, "device"), (host, "host"), (device, "device")):
-        assert build_capture_spec("camera_take_photo", parameter.task_factory(PHOTO_PARAMS)) == {
-            "output_storage": storage, "start_call_timeout_s": 180,
-        }
+        expected = {"output_storage": storage, "start_call_timeout_s": 180}
+        if storage == "device":
+            expected["photo_source_policy"] = "deferred"
+        assert build_capture_spec("camera_take_photo", parameter.task_factory(PHOTO_PARAMS)) == expected
     assert definition.actions["camera_take_photo"][0].task_factory(PHOTO_PARAMS).output_storage.value == "host"
     assert host.schema == device.schema
 

@@ -143,11 +143,13 @@ class FileCandidate:
     reuse_inspection_id: int | None = None
     #: 照片来源缓存的原 RESULTS 角色页；不是视频检查身份。
     reuse_photo_page_event_id: int | None = None
+    #: 按需照片缓存直接引用原 START 结果。
+    reuse_photo_start_event_id: int | None = None
 
     def __post_init__(self) -> None:
         ObjectId(self.action_id)
         for value in (self.item_id, self.processing_id, self.inspection_id,
-                      self.reuse_inspection_id, self.reuse_photo_page_event_id, self.output_id,
+                      self.reuse_inspection_id, self.reuse_photo_page_event_id, self.reuse_photo_start_event_id, self.output_id,
                       self.source_device_file_id, self.source_intermediate_file_id):
             if value is not None:
                 ObjectId(value)
@@ -180,13 +182,16 @@ class FileCandidate:
                 or self.source_intermediate_file_id is None
                 or self.processing_id is not None or self.inspection_id is not None):
             raise ValueError("检查副本复用只适用于主机源的正式取回项")
-        if self.reuse_photo_page_event_id is not None and (
+        if self.reuse_photo_page_event_id is not None and self.reuse_photo_start_event_id is not None:
+            raise ValueError("照片缓存只能引用一份原来源依据")
+        if (self.reuse_photo_page_event_id is not None or self.reuse_photo_start_event_id is not None) and (
                 self.reuse_inspection_id is not None or self.item_id is None or self.output_id is None
                 or self.source_device_file_id is not None or self.source_intermediate_file_id is None
                 or self.processing_id is not None or self.inspection_id is not None):
             raise ValueError("照片缓存复用只适用于原角色的正式取回项")
         if (self.source_intermediate_file_id is not None and self.config is not None
                 and (self.reuse_inspection_id is None and self.reuse_photo_page_event_id is None
+                     and self.reuse_photo_start_event_id is None
                      or not isinstance(self.config, OperationConfig))):
             raise ValueError("设备读取配置只可冻结在正式取回的检查副本复用流程")
         validate_file_extension(self.target_extension)

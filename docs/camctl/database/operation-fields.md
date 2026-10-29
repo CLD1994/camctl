@@ -176,13 +176,13 @@ DEVICE 单张成功控制结果使用 `photo_taken/v2`。其 `activity_id` 是�
 
 `prepared_by` 为 `null` 或 `{run_id, attempt_no}`。非空时两项都是正整数，引用本活动已可靠完成的 PREPARE_CAPTURE 原尝试；其身份核对和设置步骤必须先于 START 意图。未提前准备时，在 START 自身的实际步骤中核对机身。两种情况都使用原活动固定机身及原控制返回，不从执行时配置重建拍摄事实。
 
-每次实际角色读取保存 `photo_result_attempt/v1`，正文包含原 `activity_id`、`role` 和本次实际 `steps`。角色是 `original` 或 `thumbnail`；步骤按实际调用保存 `list`、`info`、`download` 的前缀，成功下载还保存已核验文件的 `artifact`。三次工具调用的原始双流按本次结果的有界诊断保存，失败可以只包含已经发生的步骤。正常收场使用 `photo_result_returned/v1` 空正文；可靠未派发使用 `photo_result_not_dispatched/v1` 空正文。
+旧 DEVICE 动作的角色来源观察保留原 RESULTS 编码。每次实际角色读取的 `photo_result_attempt/v1` 包含原 `activity_id`、`role` 和本次实际 `steps`。角色是 `original` 或 `thumbnail`；步骤按实际调用保存 `list`、`info`、`download` 的前缀，成功下载还保存已核验文件的 `artifact`。三次工具调用的原始双流按本次结果的有界诊断保存，失败可以只包含已经发生的步骤。正常收场使用 `photo_result_returned/v1` 空正文；可靠未派发使用 `photo_result_not_dispatched/v1` 空正文。
 
-新观察使用 `photo_result_attempt/v2`，保留上述字段并增加 `comparison`。相机来源未完整时该字段为 `null`；成功时为恰含 `status`、`selected`、`sync_artifact` 和 `sync_error` 的对象。`status` 为 `matched`、`mismatch`、`missing`、`invalid` 或 `unconfirmed`；`selected` 为 `sync` 或 `camera`。同步副本完整时 `sync_artifact` 记录原直接文件名、实际大小、SHA-256 和媒体类型，否则为 `null`。读取失败时 `sync_error` 保存实际异常诊断；原 START 没有可信记录时保存其原错误文字；其他情况为 `null`。守卫从原 START、相机来源与该实际观察重算决定。v1 原样解释，不补写比较事实，也不因此获得照片缓存复用资格。
+旧角色观察的 `photo_result_attempt/v2` 保留上述字段并增加 `comparison`；其原状态、选择、摘要及错误继续按保存时的定义解释。新按需动作从可靠 `photo_taken/v2` 固定来源，不创建拍后角色观察。
 
-成功角色页使用 `result_files_listed/v3`，正文恰含 `activity_id`、`binding`、`role`、`entries`、`cursor` 和 `next_cursor`。`binding` 恰含原 `device_id` 和 `driver_id`，`entries` 只含本角色一个完整相机文件观察。原图页的下一游标指向 `thumbnail`，预览页没有下一游标；下一轮从空游标开始时，可以在原图已由先前原页可靠完成后直接观察预览。非空游标恰含 `kind = hasselblad_photo`、`device_id`、`driver_id`、`activity_id` 和 `role = thumbnail`。该游标不表示目录范围，页不声称目录扫描或输出集合完成。跨轮来源引用原已保存页及文件事实，不把前轮角色复制成本轮返回。
+旧 DEVICE 动作的成功角色页使用 `result_files_listed/v3`，正文恰含 `activity_id`、`binding`、`role`、`entries`、`cursor` 和 `next_cursor`。`binding` 恰含原 `device_id` 和 `driver_id`，`entries` 只含本角色一个完整相机文件观察。原图页的下一游标指向 `thumbnail`，预览页没有下一游标；下一轮从空游标开始时，可以在原图已由先前原页可靠完成后直接观察预览。非空游标恰含 `kind = hasselblad_photo`、`device_id`、`driver_id`、`activity_id` 和 `role = thumbnail`。该游标不表示目录范围，页不声称目录扫描或输出集合完成。跨轮来源引用原已保存页及文件事实，不把前轮角色复制成本轮返回。
 
-逐角色文件的归属和完成观察另含 `photo_source`，恰有正整数 `start_result_event_id`、`result_page_event_id` 及角色 `role`。写事务从原连接核对 START、来源页、机身、定位、实际工具步骤、内容事实与该文件身份；保存的摘要和完整大小不能由同步主机副本替换。相关结果页及文件事件的事务关系见[结果页的分批记录](history-formats.md#结果页的分批记录)。
+旧角色页对应的文件归属和完成观察另含 `photo_source`，恰有正整数 `start_result_event_id`、`result_page_event_id` 及角色 `role`。写事务从原连接核对 START、来源页、机身、定位、实际工具步骤、内容事实与该文件身份；保存的摘要和完整大小不能由同步主机副本替换。相关结果页及文件事件的事务关系见[结果页的分批记录](history-formats.md#结果页的分批记录)。
 
 一轮核实是对本次拍摄结果进行的一次检查，按一个尝试保存。例如，100 个文件分五批读取仍是一轮；文件数和批次数不增加尝试次数。集合、文件及已取得证据可以分批保存，但不能用某一批读取成功代替整轮检查完成。
 
@@ -198,7 +198,7 @@ DEVICE 单张成功控制结果使用 `photo_taken/v2`。其 `activity_id` 是�
 
 可靠读取数据库中已保存的检查事实不构成新的设备检查轮次。整轮结果、设备活动的集合核实状态及适用业务结果按原事务规则共同保存；提交未知先核实原事务，不为补写结果重新执行检查。历史恢复保留当时的次数、配置依据与结果，不访问设备重新判定。
 
-Hasselblad DEVICE 的[首次来源观察](../hasselblad-source-authority.md#device-首次来源观察)使用同一原 RESULTS 责任，但核实对象为可靠控制响应已经固定的原图、预览两个角色，不属于目录扫描。每轮每个尚未确认角色至多一次实际调用，调用失败后结束本轮，后续轮次沿原可靠角色引用继续，不重新下载已完成角色。各页、观察及原时刻保存各自实际返回，不能把前轮调用写成本轮新调用。该窄适配不允许其他目录扫描拼接跨轮文件形成完整集合；一次副本比较及缓存决定也沿原可靠申请恢复，不因页消费重入而重算。
+旧 Hasselblad DEVICE 动作的角色来源观察使用原 RESULTS 责任，按已保存的角色页和原累计预算恢复。新按需动作依据[可靠 START 结果](../hasselblad-source-authority.md#device-拍摄结果)登记来源，实际设备取回使用 READ 责任。
 
 分页核实中断后，程序分别读取原尝试结束结果和原可靠页。页中的实际返回与发生时刻保持原事实；它不要求与恢复时保存的整轮未知结果相同。原尝试仍为 RUNNING 且没有当前调用拥有者时，程序先核实原意图位于恢复历史边界内、旧本地执行已收场，以及原驱动声明该操作适用恢复。恢复按下表处理。
 
@@ -518,7 +518,7 @@ Hasselblad 复合 START 的 `effect_state` 描述本次照片采集，设置和�
 
 Hasselblad 下载属于本地前台读取。原读取无法继续且驱动明确支持本地读取恢复时，使用 `settlement.basis = assumed`、`settlement.evidence.type = local_read_recovery`、`version = 1`、`data = {}` 保存原尝试的未知结果。恢复同样要求旧本地执行已经停止，且原读取意图不晚于本次启动固定的历史边界；普通重新启动或发现下载目录均不能单独满足该条件。已保存的实际读取结果保持原证据，不能由恢复记录覆盖。
 
-Hasselblad DEVICE 首次来源观察属于 RESULTS，不使用 READ 的恢复依据。原 RESULTS 实际返回缺失且旧本地执行已可靠收场时，使用 `local_result_recovery/v1` 空正文及 `assumed` 保存原尝试未知；已经可靠保存的角色页先完成原文件子责任，不能作为新轮的实际返回。恢复不退还原尝试次数，也不推断相机文件内容。
+旧 Hasselblad DEVICE 的来源观察属于 RESULTS，不使用 READ 的恢复依据。原 RESULTS 实际返回缺失且旧本地执行已可靠收场时，使用 `local_result_recovery/v1` 空正文及 `assumed` 保存原尝试未知；已经可靠保存的角色页先完成原文件子责任，不能作为新轮的实际返回。恢复不退还原尝试次数，也不推断相机文件内容。新按需照片的实际相机取回使用原 READ 及其恢复依据。
 
 Hasselblad 单张实际进入驱动 `control` 时生成 `hasselblad_start_entered/v1` 观察，正文只含原 `activity_id`，随原调用结果保存。即使首条工具命令尚未执行，该观察也表示整次调用已进入；`NO_EFFECT` 仅描述照片采集效果。框架可靠封住整次未进入调用时，沿原票据使用 `start_call_prevented/v1` 空正文、`not_dispatched` 和空观察保存阻止结果；没有原意图时不创建尝试。缺少这两种独立入口依据时保持入口未知，通用 `dispatch_prevented`、工具步骤或诊断均不能补造未进入事实。
 

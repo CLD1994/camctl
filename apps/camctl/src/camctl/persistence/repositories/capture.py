@@ -526,11 +526,14 @@ def _host_photo_execution_spec(action: Mapping[str, Any]) -> bool:
 
 
 def _device_photo_source_pair(device_rows, temporary_rows, action_id, *, action, terminal=False):
-    """设备单张的两源以各自的完整相机读取事实配对。"""
+    """设备单张按冻结的来源语义核对原图与预览配对。"""
     files = [row for row in device_rows.values() if row.get("source_action_id") == action_id]
-    from camctl.devices.drivers.hasselblad.files import CameraFileIdentity, DownloadVariant
+    from camctl.devices.drivers.hasselblad.files import (
+        CameraFileIdentity, DeferredCameraFileIdentity, DownloadVariant,
+    )
     from camctl.devices.bindings import DeviceBinding
 
+    deferred = read_action_spec(action).get("photo_source_policy") == "deferred"
     capture_format = saved_photo_format(action)
     by_kind = {}
     identities = []
@@ -545,7 +548,7 @@ def _device_photo_source_pair(device_rows, temporary_rows, action_id, *, action,
         completion = parse_exact_json(completion) if isinstance(completion, str) else completion
         if (source.get("observer_action_id") != action_id
                 or source.get("completion_state") != int(_FILE_COMPLETION.COMPLETE)
-                or source.get("checksum_support") != int(_FILE_CHECKSUM.SUPPORTED)
+                or (not deferred and source.get("checksum_support") != int(_FILE_CHECKSUM.SUPPORTED))
                 or not isinstance(ownership, Mapping)
                 or ownership.get("method") != int(_OWNERSHIP_METHOD.DRIVER_TASK_ASSOCIATION)
                 or not isinstance(completion, Mapping)
@@ -555,17 +558,24 @@ def _device_photo_source_pair(device_rows, temporary_rows, action_id, *, action,
         locator = source.get("locator_json")
         try:
             locator = parse_exact_json(locator) if isinstance(locator, str) else locator
-            identity = CameraFileIdentity.from_source(source["identity_key"], locator)
+            identity_type = DeferredCameraFileIdentity if deferred else CameraFileIdentity
+            identity = identity_type.from_source(source["identity_key"], locator)
             expected_variant = (DownloadVariant.ORIGINAL if purpose is FilePurpose.CAPTURE_ORIGINAL
                                 else DownloadVariant.THUMBNAIL)
             if (identity.binding != DeviceBinding(action["device_id"], action["driver_id"])
                     or identity.variant is not expected_variant
-                    or identity.sha256 != source["sha256"]
-                    or identity.size_bytes != source["size_bytes"]
                     or not identity.camera_name.casefold().endswith(
-                        "." + photo_file_extension(FilePurpose.CAPTURE_ORIGINAL, capture_format))
-                    or source.get("media_type") != photo_media_type(purpose, capture_format)):
+                        "." + photo_file_extension(FilePurpose.CAPTURE_ORIGINAL, capture_format))):
                 raise ValueError("设备源身份或媒体类型与原照片责任不一致")
+            if deferred:
+                if (source.get("size_bytes") is not None or source.get("sha256") is not None
+                        or source.get("media_type") is not None
+                        or source.get("checksum_support") not in (
+                            int(_FILE_CHECKSUM.UNDETERMINED), int(_FILE_CHECKSUM.UNSUPPORTED))):
+                    raise ValueError("按需照片来源不能冒充已读取的大小、摘要或媒体类型")
+            elif (identity.sha256 != source["sha256"] or identity.size_bytes != source["size_bytes"]
+                    or source.get("media_type") != photo_media_type(purpose, capture_format)):
+                raise ValueError("设备源固定内容与原照片责任不一致")
         except (KeyError, TypeError, ValueError) as error:
             raise _HostPhotoPairError("相机源定位与原绑定、用途及固定内容不一致") from error
         identities.append(identity)
@@ -573,6 +583,8 @@ def _device_photo_source_pair(device_rows, temporary_rows, action_id, *, action,
     if len({(identity.serial, identity.product_id, identity.camera_path, identity.camera_name)
             for identity in identities}) != 1:
         raise _HostPhotoPairError("相机原图与预览必须指向同一机内照片")
+    if deferred and len({identity.activity_id for identity in identities}) != 1:
+        raise _HostPhotoPairError("相机原图与预览必须属于同一拍摄活动")
     if len(files) != 2:
         raise _HostPhotoPairError("相机单张必须恰有两个设备来源角色")
     original = by_kind[_KIND_CODES[OutputKind.ORIGINAL]]
@@ -659,12 +671,14 @@ def _host_photo_registered_pair(
         source = sources[kind]
         source_column = "device_file_id" if device else "intermediate_file_id"
         other_column = "intermediate_file_id" if device else "device_file_id"
+        media_type = (None if device and read_action_spec(action).get("photo_source_policy") == "deferred"
+                      else photo_media_type(FilePurpose[_HOST_PURPOSE_FOR_KIND[kind].name],
+                                            saved_photo_format(action)))
         if (values.get(source_column) != source["id"]
                 or values.get(other_column) is not None
                 or not isinstance(values.get("original_name"), str)
                 or not values["original_name"]
-                or values.get("media_type") != photo_media_type(
-                    FilePurpose[_HOST_PURPOSE_FOR_KIND[kind].name], saved_photo_format(action))):
+                or values.get("media_type") != media_type):
             raise _HostPhotoPairError("正式产物角色、文件身份或可读元信息与主机责任不一致")
     original_links = [values for values in origins.values()
                       if values.get("output_id") == original_id]
@@ -6663,7 +6677,7 @@ def _photo_source_file_guard(context, event, file_id, observation, *, role=None,
     """照片设备文件从原连接核实 START 和实际角色页。"""
     reads = context.photo_result_reads
     if reads is None:
-        if isinstance(observation, Mapping) and "photo_source" in observation:
+        if isinstance(observation, Mapping) and ("photo_source" in observation or "photo_start" in observation):
             raise EventValidationError("照片来源事实缺少原写连接")
         return
     try:
@@ -6765,14 +6779,19 @@ def _device_file_row_guard(event, row, context) -> None:
         observed = {**facts, **after}
         if state == int(_FILE_COMPLETION.COMPLETE):
             size = observed.get("size_bytes")
-            if not is_json_integer(size) or size < 0:
-                raise EventValidationError(f"完成状态必须携带非负完整大小: {size!r}")
             evidence = observed.get("completion_evidence_json")
+            observation = evidence.get("observation") if isinstance(evidence, dict) else None
+            deferred_photo = (size is None and isinstance(observation, Mapping)
+                              and "photo_start" in observation)
+            if not deferred_photo and (not is_json_integer(size) or size < 0):
+                raise EventValidationError(f"完成状态必须携带非负完整大小: {size!r}")
             if (not isinstance(evidence, dict)
                     or not is_json_integer(evidence.get("basis"))
                     or evidence.get("basis") not in (
                         int(member) for member in _COMPLETION_BASIS)):
                 raise EventValidationError("完成状态缺少登记依据")
+            if deferred_photo and evidence.get("basis") != int(_COMPLETION_BASIS.DEVICE_GUARANTEE):
+                raise EventValidationError("未知大小的照片必须依据原设备完成保证")
             if not isinstance(evidence.get("observation"), dict):
                 raise EventValidationError("完成状态缺少驱动观察依据")
             _photo_source_file_guard(context, event, row.row_id, evidence.get("observation"),

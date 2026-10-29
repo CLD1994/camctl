@@ -18,6 +18,7 @@ files_api = ModuleType("camctl.devices.drivers.hasselblad.files")
 files_api.CameraFileIdentity = SimpleNamespace(from_source=lambda key, locator: SimpleNamespace(
     serial=locator["serial"], product_id=locator["product_id"],
     binding=SimpleNamespace(device_id=locator["device_id"], driver_id=definitions.DRIVER_ID)))
+files_api.camera_file_identity_from_source = files_api.CameraFileIdentity.from_source
 with (patch.object(enums, "resource_bytes", side_effect=AssertionError("单元测试不能读取包资源")),
       patch.dict(sys.modules, {definitions.__name__: definitions, files_api.__name__: files_api})):
     from camctl.contracts.values import ConsistencyError

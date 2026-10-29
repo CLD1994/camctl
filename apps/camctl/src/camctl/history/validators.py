@@ -621,6 +621,18 @@ def _check_evidence_member(event_id: int, member: str, value: Any, reason: int) 
             parse_photo_cache_request(value)
         except (TypeError, ValueError) as error:
             _fail(f"事件 {event_id} 的 evidence.photo_cache_request 非法: {error}")
+    elif member == "photo_sync_cache_request":
+        from camctl.history.photo_cache_request import parse_photo_sync_cache_request
+        try:
+            parse_photo_sync_cache_request(value)
+        except (TypeError, ValueError) as error:
+            _fail(f"事件 {event_id} 的 evidence.photo_sync_cache_request 非法: {error}")
+    elif member == "photo_read_start":
+        from camctl.outputs.photo_read import parse_photo_read_start
+        try:
+            parse_photo_read_start(value, 0)
+        except (TypeError, ValueError) as error:
+            _fail(f"事件 {event_id} 的 evidence.photo_read_start 非法: {error}")
     elif member == "host_photo_request":
         try:
             parse_host_photo_request(value, reason=reason)

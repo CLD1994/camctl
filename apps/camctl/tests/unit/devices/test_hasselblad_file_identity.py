@@ -13,7 +13,10 @@ from camctl.devices.drivers.hasselblad.files import (
     CameraFileIdentity,
     CameraFileLocator,
     CameraLocatorStatus,
+    DeferredCameraFileIdentity,
     DownloadVariant,
+    camera_file_identity_from_source,
+    deferred_photo_identities,
 )
 
 
@@ -57,6 +60,65 @@ def test_camera_locator_is_independent_from_host_filename():
     assert CameraFileLocator.from_json(locator.as_json()) == locator
 
 
+def test_deferred_source_identity_round_trip_has_no_delivery_size_or_checksum():
+    original = DeferredCameraFileIdentity(
+        DeviceBinding("cam-1", DRIVER_ID), "17", "/mnt/media/DCIM/B9996039.JPG",
+        "B9996039.JPG", DownloadVariant.ORIGINAL, "SERIAL", 10)
+    preview = replace(original, variant=DownloadVariant.THUMBNAIL)
+    next_activity = replace(original, activity_id="18")
+    key = file_identity_key("cam-1", DRIVER_ID, original.file_identity)
+    assert DeferredCameraFileIdentity.from_source(key, original.locator()) == original
+    assert camera_file_identity_from_source(key, original.locator()) == original
+    assert len({original.file_identity, preview.file_identity, next_activity.file_identity}) == 3
+    assert "size_bytes" not in original.locator()
+    assert "sha256" not in original.locator()
+
+
+def test_deferred_photo_identities_derive_both_roles_from_one_capture():
+    binding = DeviceBinding("cam-1", DRIVER_ID)
+    observation = {
+        "activity_id": "17",
+        "camera_locator": {"status": "path", "camera_path": "/mnt/DCIM/B1.JPG", "camera_name": "B1.JPG"},
+        "camera_identity": {"serial": "SERIAL", "product_id": 10},
+    }
+    original, preview = deferred_photo_identities(binding, observation)
+    assert original.variant is DownloadVariant.ORIGINAL
+    assert preview.variant is DownloadVariant.THUMBNAIL
+    assert (original.binding, original.activity_id, original.camera_path, original.serial) == (
+        binding, "17", "/mnt/DCIM/B1.JPG", "SERIAL")
+    assert replace(original, variant=DownloadVariant.THUMBNAIL) == preview
+
+
+@pytest.mark.parametrize("change", [
+    {"activity_id": "0"},
+    {"camera_locator": {"status": "explicit_missing", "camera_path": None, "camera_name": None}},
+    {"camera_identity": {"serial": "SERIAL"}},
+])
+def test_deferred_photo_identity_rejects_incomplete_start_observation(change):
+    observation = {
+        "activity_id": "17",
+        "camera_locator": {"status": "path", "camera_path": "/mnt/DCIM/B1.JPG", "camera_name": "B1.JPG"},
+        "camera_identity": {"serial": "SERIAL", "product_id": 10},
+    }
+    with pytest.raises(ValueError):
+        deferred_photo_identities(DeviceBinding("cam-1", DRIVER_ID), dict(observation, **change))
+
+
+@pytest.mark.parametrize("change", [
+    {"activity_id": "18"}, {"serial": "OTHER"}, {"product_id": 11},
+    {"variant": "thumbnail"}, {"camera_name": "other.JPG"},
+    {"size_bytes": 123}, {"sha256": "a" * 64},
+])
+def test_deferred_source_locator_cannot_redefine_original_identity(change):
+    original = DeferredCameraFileIdentity(
+        DeviceBinding("cam-1", DRIVER_ID), "17", "/mnt/media/DCIM/B9996039.JPG",
+        "B9996039.JPG", DownloadVariant.ORIGINAL, "SERIAL", 10)
+    with pytest.raises(ValueError):
+        DeferredCameraFileIdentity.from_source(
+            file_identity_key("cam-1", DRIVER_ID, original.file_identity),
+            dict(original.locator(), **change))
+
+
 def test_camera_locator_distinguishes_explicit_missing_and_invalid():
     explicit_missing = CameraFileLocator(CameraLocatorStatus.EXPLICIT_MISSING)
     assert explicit_missing.as_json() == {
@@ -93,6 +155,7 @@ def test_fixed_identity_round_trip_and_distinct_variant_or_capture_content():
     key = file_identity_key("cam-1", DRIVER_ID, original.file_identity)
 
     assert CameraFileIdentity.from_source(key, original.locator()) == original
+    assert camera_file_identity_from_source(key, original.locator()) == original
     assert len({original.file_identity, preview.file_identity, replaced.file_identity}) == 3
     assert preview.locator()["camera_name"] == "B9996039.JPG"
     assert preview.locator()["camera_path"] == "/mnt/media/DCIM/B9996039.JPG"

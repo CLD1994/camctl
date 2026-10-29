@@ -30,7 +30,7 @@ camctl 是嵌入式主机上的 Python CLI，负责计划受理、调度、设�
 | Action6 与 OSMO 延时参数怎样生成候选命令？ | [延时摄影候选编码](timelapse-command-encoding.md)：完整模板、时间字节替换、历史解释及设备保障边界 |
 | 单文件与多段视频怎样选择，多段处理怎样共用？ | [视频结果模式与公共分段处理](../superpowers/specs/2026-10-23-video-result-modes-and-segmentation-design.md)：每相机部署选择、公共集合、内容检查、固定范围、副本复用及报告；[Action6 特化](../superpowers/specs/2026-10-23-action6-video-segmentation-design.md)与[OSMO 特化](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md)分别提供设备规则 |
 | Hasselblad 如何设置参数并执行单张拍摄？ | [Hasselblad CFV 100C 驱动设计](hasselblad-driver.md)：设备身份、`hb_cli` 调用及正式源部署选择；[单张参数规格](../superpowers/specs/2026-10-20-hasselblad-photo-parameters-design.md)定义格式、曝光、白平衡及对焦；公共生命周期见[相机拍摄](../architecture/camera-capture.md)与[正式产物](../architecture/outputs.md) |
-| Hasselblad 两种来源怎样确定内容和处理同步副本？ | [正式源与同步副本](hasselblad-source-authority.md)：冻结模式、首次相机来源、一次比较、固定等待者有限复用、失败恢复及准确清理。 |
+| Hasselblad 两种来源怎样确定内容和处理同步副本？ | [正式源与同步副本](hasselblad-source-authority.md)：冻结模式、可靠拍摄返回、固定等待者有限复用、按需读取、失败恢复及准确清理。 |
 | Hasselblad 拍摄结果未知后怎样无人值守继续工作？ | [可用性恢复](hasselblad-availability-recovery.md)：原活动与调度限制、固定身份、独立检查、拍摄和 DEVICE 读取、事务恢复及联合验收；[设计前验证](hasselblad-availability-preconditions-2026-10-28.md)单独记录软件证据与缺口。 |
 | 日志满载时怎么办，怎样安全写同一文件？ | [日志执行与适配](logging-runtime.md)：入口、队列水位、采样、取消、多进程轮换及持锁复制 |
 | 报告进程如何启动、复用、停止和回收？ | [报告进程与通信](report-runtime.md)：任务身份、结果确认、超时、管道和工作锁 |

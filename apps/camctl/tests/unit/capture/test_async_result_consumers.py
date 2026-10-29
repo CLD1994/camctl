@@ -65,6 +65,31 @@ async def test_device_photo_drafts_register_finite_pair_with_one_activity_read(m
     activity.assert_awaited_once_with(runtime, 21)
 
 
+async def test_deferred_photo_drafts_use_start_identity_without_content_metadata(mocker):
+    from camctl.capture.host_photo import SavedPhotoReturn, _deferred_device_drafts
+    from camctl.operations.models import AttemptTicket
+
+    runtime = SimpleNamespace(action=AsyncMock(return_value={
+        "device_id": "camera", "driver_id": "hasselblad_cfv100c"}))
+    register = mocker.patch("camctl.capture.handlers._register_observed", autospec=True,
+        return_value=((None, 29), (None, 30)))
+    saved = SavedPhotoReturn(AttemptTicket(1, "control", "7", "start/21", 3), 2, 1, 1000,
+                             {}, None, result_event_id=11)
+    observation = SimpleNamespace(data={"activity_id": "7",
+        "camera_identity": {"serial": "SERIAL", "product_id": 10},
+        "camera_locator": {"status": "path", "camera_path": "/DCIM/photo.3FR", "camera_name": "photo.3FR"}})
+
+    drafts = await _deferred_device_drafts(runtime, 21, saved, observation)
+
+    entries = register.call_args.args[2]
+    assert len(entries) == 2 and entries[1].paired_identity == entries[0].identity
+    assert all(entry.complete and entry.size_bytes is None and entry.media_type is None for entry in entries)
+    assert [entry.evidence["photo_start"]["role"] for entry in entries] == ["original", "thumbnail"]
+    assert all(entry.evidence["photo_start"]["start_result_event_id"] == 11 for entry in entries)
+    assert [draft.file.device_file_id for draft in drafts] == [29, 30]
+    assert all(draft.sha256 is None for draft in drafts)
+
+
 async def test_device_photo_reads_cancellation_after_registering_output_facts(mocker):
     from camctl.persistence.repositories.capture import FinishCanceledCapture
 

@@ -53,7 +53,7 @@ from camctl.capture.processing import (
 from camctl.contracts.json_values import json_equal, parse_exact_json
 from camctl.contracts.values import ConsistencyError, OperationKey, new_operation_key
 from camctl.devices.ports import ReadDriver
-from camctl.devices.read_session import SourceFile
+from camctl.devices.read_session import DeferredSourceFile, SourceFile
 from camctl.host_files.models import BoundDirectories
 from camctl.host_files.tasks import AsyncFileTask, FileTaskExecutor, FileTaskId
 from camctl.outputs.copy import (
@@ -107,7 +107,7 @@ _READ_MAX_ATTEMPTS = 3
 _READ_TIMEOUT_S = Decimal("10")
 
 
-def load_confirmed_source(owned: OwnedConnection, file_id: int) -> SourceFile:
+def load_confirmed_source(owned: OwnedConnection, file_id: int) -> SourceFile | DeferredSourceFile:
     """按身份事实装载已确认写完的设备源文件；未完成不可读取。"""
     with closing(owned.connection.execute(
         "SELECT identity_key, locator_json, size_bytes, completion_state, sha256"
@@ -117,7 +117,7 @@ def load_confirmed_source(owned: OwnedConnection, file_id: int) -> SourceFile:
     if row is None:
         raise ConsistencyError(f"设备文件不存在: {file_id}")
     identity_key, locator_raw, size_bytes, completion, sha256 = row
-    if completion != 3 or size_bytes is None:
+    if completion != 3:
         raise ConsistencyError(
             f"设备文件尚未确认写完，不能读取: {file_id}")
     try:
@@ -126,10 +126,19 @@ def load_confirmed_source(owned: OwnedConnection, file_id: int) -> SourceFile:
         from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
         if (isinstance(identity_parts, list) and len(identity_parts) == 3
                 and identity_parts[1] == DRIVER_ID):
-            from camctl.devices.drivers.hasselblad.files import CameraFileIdentity
-            identity = CameraFileIdentity.from_source(identity_key, locator)
-            if identity.size_bytes != size_bytes or identity.sha256 != sha256:
+            from camctl.devices.drivers.hasselblad.files import (
+                DeferredCameraFileIdentity, camera_file_identity_from_source,
+            )
+            identity = camera_file_identity_from_source(identity_key, locator)
+            if isinstance(identity, DeferredCameraFileIdentity):
+                if size_bytes is not None or sha256 is not None:
+                    raise ValueError("按需照片来源不携带固定内容长度或摘要")
+            elif identity.size_bytes != size_bytes or identity.sha256 != sha256:
                 raise ValueError("源长度或摘要与固定身份不一致")
+        elif size_bytes is None:
+            raise ValueError("该设备源尚无可靠完整长度")
+        if size_bytes is None:
+            return DeferredSourceFile(identity_key, locator)
         return SourceFile(identity_key, locator, int(size_bytes))
     except (TypeError, ValueError, KeyError) as error:
         raise ConsistencyError(f"设备文件的固定身份或定位无效: {file_id}") from error
@@ -138,8 +147,8 @@ def load_confirmed_source(owned: OwnedConnection, file_id: int) -> SourceFile:
 class DriverReadSessions:
     """D4 读取会话绑定：按设备文件完成事实经驱动打开可停止会话。
 
-    源身份使用全库唯一的身份键与驱动定位结构；未完成或缺少完整
-    大小的文件不可读。读取尝试票据由装配层按实际尝试提供。
+    源身份使用全库唯一的身份键与驱动定位结构；按需照片在实际下
+    载后确定读取长度，其他来源必须具有完整大小。读取尝试票据由装配层提供。
     """
 
     def __init__(self, database: BusinessDatabase, driver: ReadDriver,

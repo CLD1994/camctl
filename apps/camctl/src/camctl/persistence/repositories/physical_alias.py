@@ -33,7 +33,7 @@ def physical_alias_conflict(connection, device_id, identity):
             if key != fixed.resource_key:
                 raise ConsistencyError("原活动资源键与固定机身身份不符")
             return True
-    from camctl.devices.drivers.hasselblad.files import CameraFileIdentity
+    from camctl.devices.drivers.hasselblad.files import camera_file_identity_from_source
     select = (
         "SELECT d.expected_identity_json,d.resource_key,f.identity_key,f.locator_json,"
         "a.device_id,a.driver_id,o.device_id,o.driver_id FROM operation_runs r"
@@ -45,7 +45,8 @@ def physical_alias_conflict(connection, device_id, identity):
     )
     read_queries = (
         select + " WHERE d.resource_key=? AND a.driver_id=? AND a.device_id<>?"
-        " AND r.kind=3 AND r.status IN (1,2) AND c.committed_bytes<c.source_size LIMIT 1",
+        " AND r.kind=3 AND r.status IN (1,2)"
+        " AND (c.source_size IS NULL OR c.committed_bytes<c.source_size) LIMIT 1",
         select + " JOIN operation_attempts t ON t.run_id=r.id AND t.status=1"
         " WHERE d.resource_key=? AND a.driver_id=? AND a.device_id<>? AND r.kind=3 LIMIT 1",
     )
@@ -56,7 +57,7 @@ def physical_alias_conflict(connection, device_id, identity):
             raw, key, source_key, locator, source_device, source_driver, origin_device, origin_driver = row
             try:
                 fixed = CameraIdentity(**(parse_exact_json(raw) if isinstance(raw, str) else raw))
-                source = CameraFileIdentity.from_source(
+                source = camera_file_identity_from_source(
                     source_key, parse_exact_json(locator) if isinstance(locator, str) else locator)
             except (TypeError, ValueError) as error:
                 raise ConsistencyError("设备读取缺少可靠固定机身身份") from error
@@ -89,11 +90,11 @@ def action_physical_identity(connection, action_id):
 
 def source_physical_identity(connection, source, observer, origin):
     """核对设备文件原绑定与活动固定机身。"""
-    from camctl.devices.drivers.hasselblad.files import CameraFileIdentity
+    from camctl.devices.drivers.hasselblad.files import camera_file_identity_from_source
 
     try:
         locator = source["locator_json"]
-        file_identity = CameraFileIdentity.from_source(
+        file_identity = camera_file_identity_from_source(
             source["identity_key"], parse_exact_json(locator) if isinstance(locator, str) else locator)
         binding = (observer["device_id"], observer["driver_id"])
         if ((origin["device_id"], origin["driver_id"]) != binding

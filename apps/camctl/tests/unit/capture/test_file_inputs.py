@@ -111,6 +111,23 @@ class TestFileCompletionSave:
         defaults.update(kwargs)
         return FileCompletionSave(**defaults)
 
+    def test_deferred_photo_completion_can_record_unknown_length_from_start(self):
+        observation = {"activity_id": "11", "photo_start": {
+            "start_result_event_id": 7, "role": "thumbnail"}}
+        saved = self._save(basis=1, observation=observation, size_bytes=None)
+        assert saved.size_bytes is None
+        assert saved.completion_evidence()["observation"] == observation
+
+    @pytest.mark.parametrize("observation", [
+        {"activity_id": "11", "photo_start": {"start_result_event_id": 0, "role": "original"}},
+        {"activity_id": "11", "photo_start": {"start_result_event_id": 7, "role": "other"}},
+        {"activity_id": "0", "photo_start": {"start_result_event_id": 7, "role": "original"}},
+        {"activity_id": "11", "photo_start": {"start_result_event_id": 7}},
+    ])
+    def test_unknown_length_requires_a_complete_photo_start_reference(self, observation):
+        with pytest.raises(ValueError):
+            self._save(basis=1, observation=observation, size_bytes=None)
+
     def test_device_guarantee_completion(self):
         save = self._save(basis=1, observation={"stopped": True}, size_bytes=4096)
         assert save.completion_evidence() == {

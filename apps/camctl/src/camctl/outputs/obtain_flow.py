@@ -472,7 +472,8 @@ async def _delivery_candidate(
                 target_extension="part", delivery_extension=extension,
                 delivery_display_name=f"{stem}-{plan_name}-{source_action_name}.{extension}",
                 config=await _inspection_copy_read_config(runtime, int(device_file_id)), occurred_at=now,
-                reuse_photo_page_event_id=photo_bound.result_page_event_id)
+                reuse_photo_page_event_id=photo_bound.result_page_event_id,
+                reuse_photo_start_event_id=photo_bound.start_result_event_id)
         from camctl.outputs.segment_copy_reuse import check_copy_is_locally_usable
         if (bound is not None and runtime.file_executor is not None
                 and await check_copy_is_locally_usable(
@@ -1327,7 +1328,7 @@ async def _resume_local_delivery_end(current, held, original_runtime, assembly):
 def _photo_pending_copy_save(runtime, copy_id):
     """原实际读取、校验、重拷和重置申请先按原键收妥。"""
     return any((copy_id, stage) in runtime.pending_read_business
-               for stage in ("read_end", "copy_verification", "copy_recopy", "copy_reset"))
+               for stage in ("read_end", "copy_verification", "copy_recopy", "copy_reset", "photo_read_start"))
 
 
 async def _copy_delivery(
@@ -1347,19 +1348,65 @@ async def _copy_delivery(
         runtime.occurred_at, max_recopies=max_recopies, file_executor=runtime.file_executor,
         read_runtime=runtime, hold_reset=photo_cache,
         allow_recopy=photo_config is None or photo_ticket.attempt_id < photo_config.max_attempts)
-    state = await copies.copy_state(facts["id"])
-    if (state.verification_state in _VERIFICATION_DONE
-            and state.target_sha256 is not None):
-        return InputStep(InputPhase.INPUT_READY, copy_id=facts["id"])
-    try:
-        prepared = await copies.prepare(facts["id"])
-    except (CopyPreparationError, ConsistencyError) as error:
-        if photo_cache and (_photo_pending_copy_save(runtime, facts["id"])
-                            or db_outcome_for(error) is not None):
-            # 原重置保存尚未可靠确认，保留原申请和 READ 尝试。
+    def read_started():
+        if on_read_start is not None:
+            on_read_start()
+        from camctl.outputs.read_attempts import ReadContinuation
+        original = runtime.continuing_read_tickets.get(facts["id"])
+        if original is not None:
+            runtime.continuing_read_tickets[facts["id"]] = ReadContinuation(original.ticket, False)
+    async def open_session(offset):
+        return await sessions.open_session(_source_file_id(facts), offset, on_start=read_started)
+
+    deferred = False
+    if isinstance(sessions, DriverReadSessions) and facts["source_device_file_id"] is not None:
+        from camctl.persistence.repositories.outputs import _deferred_photo_source
+        from camctl.persistence.transaction import row_facts
+        deferred = await runtime.database.read(lambda owned: _deferred_photo_source(
+            owned.connection, row_facts(owned.connection, "device_files", facts["source_device_file_id"])))
+    session = None
+    # 新照片设备源的长度来自本次下载，必须先打开会话并可靠保存长度。
+    if deferred and read_end is None and facts["verification_state"] not in _VERIFICATION_DONE:
+        try:
+            session = await open_session(0)
+            from camctl.outputs.read_attempts import ReadDispatchPrevented, save_read_business
+            if isinstance(session, ReadDispatchPrevented):
+                return InputStep(InputPhase.READ_NOT_STARTED, copy_id=facts["id"],
+                    reason=session.reason, dispatch_prevented=session)
+        except Exception as error:
+            from camctl.devices.read_session import ReadPreparationError, ReadPreparationSettlement
+            settlement = (error.settlement if isinstance(error, ReadPreparationError)
+                          else ReadPreparationSettlement.SETTLED)
+            return InputStep(InputPhase.WAITING if settlement is ReadPreparationSettlement.WAITING else InputPhase.SEGMENT_FAILED,
+                copy_id=facts["id"], error=error, source_failed=settlement is ReadPreparationSettlement.SETTLED,
+                preparation_settlement=settlement)
+        try:
+            from camctl.outputs.photo_read import PhotoReadStart
+            request = PhotoReadStart(facts["id"], sessions._ticket, session.source_size, runtime.occurred_at())
+            await settle_required(save_read_business(runtime, facts["id"], "photo_read_start", request,
+                                                       runtime.outputs.save_photo_read_start))
+        except BaseException as error:
+            from camctl.capture.input_copy import stop_read_session
+            await stop_read_session(session, original_error=error)
             raise
-        return InputStep(InputPhase.PREPARE_FAILED, copy_id=facts["id"],
-                         error=error)
+
+    try:
+        state = await copies.copy_state(facts["id"])
+        if (state.verification_state in _VERIFICATION_DONE and state.target_sha256 is not None):
+            if session is not None:
+                raise ConsistencyError("已完成的照片读取不能重新打开来源")
+            return InputStep(InputPhase.INPUT_READY, copy_id=facts["id"])
+        prepared = await copies.prepare(facts["id"])
+    except BaseException as error:
+        if session is not None:
+            from camctl.capture.input_copy import stop_read_session
+            await stop_read_session(session, original_error=error)
+        if not isinstance(error, (CopyPreparationError, ConsistencyError)):
+            raise
+        if (photo_cache or deferred) and (_photo_pending_copy_save(runtime, facts["id"])
+                                          or db_outcome_for(error) is not None):
+            raise
+        return InputStep(InputPhase.PREPARE_FAILED, copy_id=facts["id"], error=error)
     # 冷恢复也从原 READ_END 与已保存的重拷事实接回照片缓存失败，不再次读取缓存。
     ticket = getattr(sessions, "_ticket", None)
     if photo_cache and ticket is not None:
@@ -1371,17 +1418,10 @@ async def _copy_delivery(
     if prepared.decision.outcome is ResumeOutcome.VERIFY and (read_end is not None or on_read_end is None):
         return replace(await _complete_copy(copies, facts["id"], digest), read_end=read_end,
                        stop_requested=read_end is not None, content_complete=read_end is not None)
-    def read_started():
-        if on_read_start is not None:
-            on_read_start()
-        from camctl.outputs.read_attempts import ReadContinuation
-        original = runtime.continuing_read_tickets.get(facts["id"])
-        if original is not None:
-            runtime.continuing_read_tickets[facts["id"]] = ReadContinuation(original.ticket, False)
     try:
-        session = await sessions.open_session(
-            _source_file_id(facts), state.source_size if prepared.decision.outcome is ResumeOutcome.VERIFY
-            else prepared.decision.offset, on_start=read_started)
+        if session is None:
+            session = await open_session(state.source_size if prepared.decision.outcome is ResumeOutcome.VERIFY
+                                         else prepared.decision.offset)
         from camctl.outputs.read_attempts import ReadDispatchPrevented
         if isinstance(session, ReadDispatchPrevented):
             return InputStep(InputPhase.READ_NOT_STARTED, copy_id=facts["id"],
@@ -1431,7 +1471,6 @@ async def _copy_delivery(
             import inspect
             saved = on_read_end(end, session.position() == state.source_size, state)
             if inspect.isawaitable(saved):
-                from camctl.persistence.business import settle_required
                 await settle_required(saved)
     if result is not None:
         return replace(result, read_end=end, stop_requested=True, content_complete=session.position() == state.source_size)

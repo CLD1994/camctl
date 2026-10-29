@@ -57,7 +57,7 @@ def assembly(monkeypatch):
          query_attempt_config=lambda value: "query-config")
     stub("camctl.devices.bindings", DeviceBinding=Binding)
     stub("camctl.devices.drivers.hasselblad.definitions", DRIVER_ID="hb")
-    stub("camctl.devices.drivers.hasselblad.files", CameraFileIdentity=Files)
+    stub("camctl.devices.drivers.hasselblad.files", camera_file_identity_from_source=Files.from_source)
     stub("camctl.devices.drivers.hasselblad.identity", CameraIdentity=Identity)
     stub("camctl.operations.availability", AvailabilityProgress=Progress)
     stub("camctl.persistence.repositories.availability_create", CreateAvailabilityCheck=Request)

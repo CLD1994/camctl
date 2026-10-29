@@ -67,7 +67,7 @@
 | 动作类型 | `execution_spec_json` 的内容 | 其他信息的保存位置 |
 | --- | --- | --- |
 | `motor_control` | `{}`；位置由原始参数完整表达，没有额外派生的设备执行定义 | 原始参数随动作保存，窗口策略使用公共列；发送意图及结果按[电机持久化规则](../../architecture/motor-control.md#持久化与报告)保存为专属记录 |
-| `camera_take_photo` | 没有专属任务要求的设备照片保存 `{}`；声明正式源位置的任务保存精确的 `output_storage` 与 `start_call_timeout_s` | 生效参数由 `effective_params_json` 保存；实际采集、设备活动和文件事实按各自记录保存 |
+| `camera_take_photo` | 没有专属任务要求的设备照片保存 `{}`；声明正式源位置的任务保存 `output_storage` 与 `start_call_timeout_s`，按需照片另保存 `photo_source_policy` | 生效参数由 `effective_params_json` 保存；实际采集、设备活动和文件事实按各自记录保存 |
 | `camera_record` | 录像目标时长 `target_duration_ms`、适用的[文件归属声明](#拍摄执行定义的文件归属声明)、[文件完成等待](#录像执行定义的文件完成等待)，以及适用的[启动余量与确认含义](#拍摄执行定义的启动余量) | 启动、停止、实际计时、检查和修复进度按各自执行记录保存 |
 | `camera_timelapse` | 从生效参数和任务契约取得处理模块需要的固定执行依据；按持续时间采集时，两种结束方式都保存 `target_duration_ms` | 完整设备要求由 `effective_params_json` 保存；设备任务关联、实际采集进度、尝试和文件事实另行保存 |
 | `obtain_action_outputs` | 首次受理确定的 [selection_mode](#取回执行定义的选择方式)，区分默认取回、预览取回和精确 ID 取回 | 原输入保留来源描述及显式 ID；来源关联、实际文件选择和处理结果由来源表及取回明细保存；自动预览用途、关联和能力依据由 `auto_preview_links` 保存 |
@@ -93,11 +93,12 @@
 | --- | --- | --- |
 | `output_storage` | 精确字符串 `"host"` 或 `"device"` | 固定正式源位于主机或设备，决定结果登记及后续取回所采用的责任；不表示工具只向该处写入 |
 | `start_call_timeout_s` | 有限、正的 JSON 数字，单位为秒；解析和保存保持精确数值，不先转换为二进制浮点数 | 本次已授予的单张调用完整期限；驱动设置及采集沿同一期限执行，首次受理后保持不变 |
+| `photo_source_policy` | 可选；仅 `output_storage = "device"` 时接受 `"deferred"` | 按可靠拍摄返回建立相机角色，实际取回时再确定本次读取大小 |
 
 Hasselblad CFV 100C 的 `hasselblad_cfv100c` 驱动及 `hasselblad_photo` 参数类型从部署配置绑定正式源位置。例如，相机正式源模式保存以下定义：
 
 ```json
-{"output_storage":"device","start_call_timeout_s":180}
+{"output_storage":"device","start_call_timeout_s":180,"photo_source_policy":"deferred"}
 ```
 
 内部期限按精确 `Decimal('180')` 秒保存和使用，不改写为浮点数。读取合法已受理动作时，必须恰有上述两个字段并通过原精确数字校验；不得按当前驱动定义重算存储位置或期限。部署选择及默认值由[驱动契约](../hasselblad-driver.md#正式源的部署选择)定义，拍摄参数不承载该字段。其他单张任务若使用同一结构，也在首次受理时固定其驱动提供的原值。物理文件责任、主机正式路径、严格结果检查及重启归档行为见[主机单张拍摄文件的登记与恢复](../../architecture/camera-capture.md#主机单张拍摄文件的登记与恢复)，不复制到执行定义字段。
@@ -105,7 +106,7 @@ Hasselblad CFV 100C 的 `hasselblad_cfv100c` 驱动及 `hasselblad_photo` 参数
 | 受理与读取条件 | 保存及恢复规则 |
 | --- | --- |
 | 既有单张驱动没有拍摄任务工厂且动作合法受理 | 保存 `{}`；不能从空对象推导主机输出或完整调用期限 |
-| 声明正式源位置的单张任务合法受理 | 必须保存且只保存首次确定的 `output_storage` 和有限正的 `start_call_timeout_s` |
+| 声明正式源位置的单张任务合法受理 | 保存首次确定的 `output_storage` 和有限正的 `start_call_timeout_s`；新 Hasselblad DEVICE 同时保存 `photo_source_policy = deferred` |
 | 动作受理失败 | 整列保存 SQL `NULL`，不留下局部存储位置或期限 |
 | 期限是字符串、布尔值、JSON `null`、非正值或非有限值，或字段组合不精确 | 拒绝形成合法定义；不得改成短控制调用默认值或空对象 |
 | 重送、重启或历史回放读取既有合法定义 | 沿用首次保存的存储方式与精确期限，不调用相机或重新计算驱动默认值 |

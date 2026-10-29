@@ -234,6 +234,30 @@ class DownloadWorkspace:
         return await settled_file_io(self._open_verified, size, sha256, offset,
                                      dispose=lambda stream: stream.close())
 
+    async def open_current(self):
+        """打开本次完整下载，返回实际长度；不与其他预览字节比较。"""
+        return await settled_file_io(self._open_current, dispose=lambda result: result[0].close())
+
+    def _open_current(self):
+        with os.scandir(self.path) as entries:
+            names = [entry.name for entry in islice(entries, 2)]
+        if len(names) != 1:
+            raise ValueError("指定下载必须恰好生成一个普通文件")
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        fd = os.open(self.path / names[0], flags)
+        self.fd = fd
+        try:
+            observed = os.fstat(fd)
+            if not stat.S_ISREG(observed.st_mode) or observed.st_size <= 0:
+                raise ValueError("下载内容不是非空普通文件")
+            return DownloadStream(self), observed.st_size
+        except BaseException as error:
+            try:
+                self.close_file()
+            except BaseException as close_error:
+                raise BaseExceptionGroup("打开下载与关闭均失败", [error, close_error]) from None
+            raise
+
     def _open_verified(self, size, sha256, offset):
         with os.scandir(self.path) as entries:
             names = [entry.name for entry in islice(entries, 2)]

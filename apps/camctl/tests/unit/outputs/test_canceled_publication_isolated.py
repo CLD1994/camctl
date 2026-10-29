@@ -145,7 +145,7 @@ class CanceledPublicationTests(unittest.TestCase):
 
 
 def load_repository():
-    names = ('camctl.contracts.enums', 'camctl.logging_runtime.diagnostics',
+    names = ('camctl.acceptance.definitions', 'camctl.contracts.enums', 'camctl.logging_runtime.diagnostics',
         'camctl.history.decoding', 'camctl.contracts.json_values', 'camctl.contracts.history_values',
         'camctl.contracts.values', 'camctl.devices.bindings', 'camctl.history.reads',
         'camctl.history.events', 'camctl.history.validators', 'camctl.host_files.models',

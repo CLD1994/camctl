@@ -312,7 +312,7 @@ class ZeroLengthRoundTests(unittest.TestCase):
                         and node.name == "_copy_guard")
         namespace = {"EventValidationError": ValueError, "_COPY_CHANGED_EVENT": 22,
             "_COPY_SOURCE_FALLBACK_REASON": 8, "_RESET_REASON": 1, "_SEGMENT_REASON": 2,
-            "_VERIFY_REASON": 3, "_RECOPY_REASON": 4}
+            "_VERIFY_REASON": 3, "_RECOPY_REASON": 4, "_PHOTO_READ_START_REASON": object()}
         exec(compile(ast.fix_missing_locations(ast.Module(body=[function], type_ignores=[])),
                      str(OUTPUTS_SOURCE), "exec"), namespace)
         before = {"round": 1, "recopies_used": 0, "read_end_event_id": 30}

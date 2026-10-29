@@ -5,7 +5,7 @@ from decimal import Decimal
 from camctl.bootstrap.capture_assembly import _device_attempts, _hasselblad_identity, query_attempt_config
 from camctl.devices.bindings import DeviceBinding
 from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
-from camctl.devices.drivers.hasselblad.files import CameraFileIdentity
+from camctl.devices.drivers.hasselblad.files import camera_file_identity_from_source
 from camctl.devices.drivers.hasselblad.identity import CameraIdentity
 from camctl.operations.availability import AvailabilityProgress
 from camctl.persistence.repositories.availability_create import CreateAvailabilityCheck
@@ -161,7 +161,7 @@ class AvailabilityAssembly:
             if not eligible:
                 return AvailabilityProgress.READY
         source = await runtime.database.read(lambda owned: row_facts(owned.connection, "device_files", candidate.source_file_id))
-        fixed = CameraFileIdentity.from_source(source["identity_key"], source["locator_json"])
+        fixed = camera_file_identity_from_source(source["identity_key"], source["locator_json"])
         if _hasselblad_identity(declaration) != CameraIdentity(fixed.serial, fixed.product_id):
             return AvailabilityProgress.READY
         now = runtime.occurred_at()
@@ -180,7 +180,7 @@ class AvailabilityAssembly:
         if source is None:
             from camctl.contracts.values import ConsistencyError
             raise ConsistencyError("读取绑定失败缺少原设备来源")
-        fixed = CameraFileIdentity.from_source(source["identity_key"], source["locator_json"])
+        fixed = camera_file_identity_from_source(source["identity_key"], source["locator_json"])
         identity = CameraIdentity(fixed.serial, fixed.product_id)
         now = runtime.occurred_at()
         request = CreateAvailabilityCheck(candidate.action_id, identity, now,

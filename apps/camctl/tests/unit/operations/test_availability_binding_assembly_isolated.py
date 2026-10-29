@@ -30,8 +30,8 @@ def assembly_module(monkeypatch):
         @property
         def resource_key(self): return self.serial
     stub("camctl.devices.drivers.hasselblad.identity", CameraIdentity=Identity)
-    stub("camctl.devices.drivers.hasselblad.files", CameraFileIdentity=SimpleNamespace(from_source=lambda *args:
-         SimpleNamespace(serial="source", product_id=10, binding=("camera", "hb"))))
+    stub("camctl.devices.drivers.hasselblad.files", camera_file_identity_from_source=lambda *args:
+         SimpleNamespace(serial="source", product_id=10, binding=("camera", "hb")))
     stub("camctl.operations.availability", AvailabilityProgress=object())
     class Request:
         def __init__(self, action_id, identity, now, lead, occurred, trigger_copy_id=None, **kwargs):

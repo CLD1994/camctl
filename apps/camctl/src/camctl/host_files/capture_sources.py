@@ -312,6 +312,47 @@ async def archive_photo_cache(roots: BoundDirectories, activity_id: str, ticket,
                        selected == "camera", owner)
 
 
+async def archive_photo_sync_cache(roots: BoundDirectories, activity_id: str, name: str,
+                                   target: FileRef, *, purpose: FilePurpose,
+                                   capture_format: CaptureFormat, owner) -> None:
+    """归档 CLI 同步文件；只操作原目录项，不读取或比较文件内容。"""
+    _validate_name(name)
+    if target.purpose is not purpose or purpose not in (FilePurpose.CAPTURE_ORIGINAL, FilePurpose.CAPTURE_PREVIEW):
+        raise CaptureFileError("target_role", detail="照片同步缓存用途无效")
+    if target.relative_path != relative_file_path(purpose, target.file_id,
+            photo_file_extension(purpose, capture_format)):
+        raise CaptureFileError("target_path", detail="照片同步缓存路径与原角色不同")
+    workspace = workspace_path(roots, activity_id)
+    target_path = resolve_file(target, roots).path
+    await _run_file_io(_archive_photo_sync_cache, roots, workspace, name, target_path, owner)
+
+
+def _archive_photo_sync_cache(roots, workspace, name, target_path, owner):
+    with _workspace_directory(roots, workspace, owner=owner) as workspace_fd:
+        with _open_directory(target_path.parent, "target_directory_open", owner=owner) as target_fd:
+            source = _stat_entry(workspace_fd, name, workspace / name, "source_observe")
+            target = _stat_entry(target_fd, target_path.name, target_path, "target_observe")
+            if source is None and target is None:
+                raise CaptureFileError("source_and_target_missing", workspace / name)
+            for observed, path in ((source, workspace / name), (target, target_path)):
+                if observed is not None and not stat.S_ISREG(observed.st_mode):
+                    raise CaptureFileError("source_type", path, detail="同步缓存不是普通文件")
+            if source is not None and target is not None and (
+                    source.st_dev != target.st_dev or source.st_ino != target.st_ino):
+                raise CaptureFileError("target_conflict", target_path, detail="目标不是原同步文件")
+            if source is not None and target is None:
+                try:
+                    os.link(name, target_path.name, src_dir_fd=workspace_fd,
+                            dst_dir_fd=target_fd, follow_symlinks=False)
+                except OSError as error:
+                    raise CaptureFileError("archive_link", target_path, cause=error) from error
+            _sync_directory_fd(target_fd, target_path.parent, "target_directory_sync")
+            if source is not None:
+                _unlink_source(workspace_fd, name, workspace / name,
+                               _FileFacts(0, "", source.st_dev, source.st_ino))
+                _sync_directory_fd(workspace_fd, workspace, "workspace_sync")
+
+
 async def _run_file_io(
     function: Callable[..., _Result], *args: Any
 ) -> _Result:

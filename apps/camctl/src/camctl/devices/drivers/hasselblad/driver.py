@@ -26,7 +26,7 @@ from camctl.devices.evidence import (
 )
 from camctl.devices.ports import ControlRequest, DeviceCallResult
 from camctl.devices.start_entry import ENTERED, PREVENTED, entered_observation
-from camctl.devices.read_session import ReadSession, SourceFile, ReadPreparationError, ReadPreparationSettlement
+from camctl.devices.read_session import DeferredSourceFile, ReadSession, SourceFile, ReadPreparationError, ReadPreparationSettlement
 from camctl.host_files.downloads import DownloadWorkspace, ResultDownloadWorkspace
 from camctl.host_files.capture_sources import (
     CaptureFileError,
@@ -76,7 +76,8 @@ from .responses import (
     parse_serial,
     doctor_passed,
 )
-from .files import CameraFileIdentity, CameraFileLocator, CameraLocatorStatus, DownloadVariant, PhotoResultCursor, decide_photo_cache
+from .files import (CameraFileIdentity, CameraFileLocator, CameraLocatorStatus, DeferredCameraFileIdentity,
+                    DownloadVariant, PhotoResultCursor, camera_file_identity_from_source, decide_photo_cache)
 
 __all__ = ["AvailabilityCall", "AvailabilityCancelled", "AvailabilityResult", "EVIDENCE", "HasselbladDriver"]
 
@@ -450,16 +451,23 @@ class HasselbladDriver:
 
     async def open_read(self, source, offset, ticket, *, idle_timeout_s):
         """下载指定固定源，核验后从偏移读取；工具 stdout 不承载文件定位。"""
-        if not isinstance(source, SourceFile):
+        if not isinstance(source, (SourceFile, DeferredSourceFile)):
             raise ValueError("读取必须携带固定源文件")
-        identity = CameraFileIdentity.from_source(source.file_id, source.locator)
-        if source.size_bytes != identity.size_bytes:
+        identity = camera_file_identity_from_source(source.file_id, source.locator)
+        deferred = isinstance(identity, DeferredCameraFileIdentity)
+        if deferred != isinstance(source, DeferredSourceFile):
+            raise ValueError("相机读取源类型与已保存身份不一致")
+        if not deferred and source.size_bytes != identity.size_bytes:
             raise ValueError("相机源长度与固定文件身份不一致")
+        if deferred and source.size_bytes is not None:
+            raise ValueError("按需照片来源不能预设单次下载长度")
         config = self._binding_config(identity.binding)
         if (config.serial, config.product_id) != (identity.serial, identity.product_id):
             raise PhysicalIdentityMismatch(identity.binding)
         workspace = DownloadWorkspace(self.roots.staging, ticket)
-        if type(offset) is not int or not 0 <= offset <= source.size_bytes:
+        if (type(offset) is not int or offset < 0
+                or (deferred and offset != 0)
+                or (not deferred and offset > source.size_bytes)):
             raise ValueError("读取偏移不在固定长度范围内")
         if (not isinstance(idle_timeout_s, Decimal) or not idle_timeout_s.is_finite()
                 or idle_timeout_s <= 0):
@@ -508,6 +516,9 @@ class HasselbladDriver:
                     raise CameraReadError("serial_mismatch", steps)
                 await run("download", ("download", identity.variant.value, identity.camera_name,
                                        "--output", str(workspace.path)), stdout=False)
+                if deferred:
+                    stream, size = await workspace.open_current()
+                    return ReadSession(SourceFile(source.file_id, source.locator, size), 0, stream, idle_timeout_s)
                 stream = await workspace.open_verified(source.size_bytes, identity.sha256, offset)
                 return ReadSession(source, offset, stream, idle_timeout_s)
         except BaseException as error:

@@ -18,12 +18,13 @@ class BoundPhotoCache:
     source_action_id: int
     source_device_file_id: int
     intermediate_file_id: int
-    result_page_event_id: int
+    result_page_event_id: int | None
     published_boundary: HistoryBoundary
     size_bytes: int
-    sha256: str
+    sha256: str | None
     relative_path: str
     purpose: str
+    start_result_event_id: int | None = None
 
 
 def read_bound_photo_cache(*, output_id, obtain_action_id, selection_id, owned, allow_released=False, historical=False):
@@ -94,10 +95,13 @@ def _read_bound_photo_cache(*, output_id, obtain_action_id, selection_id, owned,
                 and file["cleanup_state"] == int(cleanup.NOT_NEEDED))
     released = (allow_released and file["retention_state"] == int(retention.RELEASABLE)
                 and (historical or file["cleanup_state"] != int(cleanup.COMPLETED)))
+    deferred = action["execution_spec_json"].get("photo_source_policy") == "deferred"
     if (not (retained or released)
             or (not allow_released and file["last_error_json"] is not None)
-            or file["size_bytes"] is None or file["sha256"] is None):
+            or file["size_bytes"] is None or (not deferred and file["sha256"] is None)):
         return None
+    if deferred:
+        return _bound_sync_cache(connection, action, output, file, role, boundary, record)
     with closing(connection.execute(
         "SELECT id FROM history_events WHERE event_type=26"
         " AND json_extract(body_json,'$.rows[0].table')='intermediate_files'"
@@ -160,6 +164,39 @@ def _read_bound_photo_cache(*, output_id, obtain_action_id, selection_id, owned,
     return BoundPhotoCache(action["id"], output["device_file_id"], file["id"],
         request.result_page_event_id, boundary, file["size_bytes"], file["sha256"],
         file["relative_path"], role[0].name)
+
+
+def _bound_sync_cache(connection, action, output, file, role, boundary, record):
+    """从原拍摄返回及归档事件核对指定角色，不比较其他下载。"""
+    from camctl.history.photo_cache_request import parse_photo_sync_cache_request
+    from camctl.persistence.repositories.capture_facts import PhotoResultReads
+
+    with closing(connection.execute(
+        "SELECT id FROM history_events WHERE event_type=26"
+        " AND json_extract(body_json,'$.rows[0].table')='intermediate_files'"
+        " AND json_extract(body_json,'$.rows[0].id')=?"
+        " AND json_extract(body_json,'$.evidence.photo_sync_cache_request') IS NOT NULL"
+        " AND id<? ORDER BY id LIMIT 2", (file["id"], record.transaction.first_event_id))) as cursor:
+        events = cursor.fetchall()
+    if len(events) != 1:
+        raise ConsistencyError("照片同步缓存缺少唯一原归档结果事件")
+    cache = read_event(connection, events[0][0])
+    request = parse_photo_sync_cache_request(cache.event.evidence.get("photo_sync_cache_request"))
+    changes = cache.event.rows
+    if (validate_event_structure(cache.event)[:2] != ("INTERMEDIATE_FILE_CHANGED", "LIFECYCLE")
+            or cache.transaction.last_event_id >= record.transaction.first_event_id
+            or request.archive_error is not None or request.action_id != action["id"]
+            or request.file_id != file["id"] or request.device_file_id != output["device_file_id"]
+            or request.role != role[1] or request.size_bytes != file["size_bytes"]
+            or file["sha256"] is not None or cache.event.occurred_at != request.occurred_at
+            or len(changes) != 1 or changes[0].table != "intermediate_files"
+            or changes[0].row_id != file["id"] or not changes[0].before.exists or not changes[0].after.exists
+            or not json_equal(changes[0].before.values, {"size_bytes": None})
+            or not json_equal(changes[0].after.values, {"size_bytes": request.size_bytes})):
+        raise ConsistencyError("照片同步缓存与原角色、归档事务或文件责任不同")
+    PhotoResultReads(connection).verify_sync_cache(request, before_event_id=cache.event.event_id)
+    return BoundPhotoCache(action["id"], output["device_file_id"], file["id"], None, boundary,
+        file["size_bytes"], None, file["relative_path"], role[0].name, request.start_result_event_id)
 
 
 def verify_photo_cache_binding_failure(connection, copy, *, before_event_id, historical=False):
@@ -255,7 +292,8 @@ def _photo_cache_waiters_settled(file_id, owned):
     purposes, kinds = enum_for("intermediate_files.purpose"), enum_for("outputs.kind")
     kind = {int(purposes.CAPTURE_ORIGINAL): int(kinds.ORIGINAL),
             int(purposes.CAPTURE_PREVIEW): int(kinds.PREVIEW)}.get(file["purpose"])
-    if kind is None or file["size_bytes"] is None or file["sha256"] is None:
+    deferred = action["execution_spec_json"].get("photo_source_policy") == "deferred"
+    if kind is None or file["size_bytes"] is None or (not deferred and file["sha256"] is None):
         return True
     with closing(connection.execute(
         "SELECT id FROM outputs WHERE source_action_id=? AND kind=? ORDER BY id LIMIT 2",

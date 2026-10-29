@@ -129,9 +129,11 @@ Action6 分段普通录像的可靠正常到时 STOP，在原 `ATTEMPT_RESULT` �
 
 单张拍摄的主机原图与预览使用 `INTERMEDIATE_FILE_CHANGED.CREATE` 共同保存两份文件责任。HOST 使用专用 `HOST_PHOTO_COMPLETE` 分支共同保存两份完整大小与 SHA-256。准备申请恰有 `action_id`、`occurred_at`；完整字节申请还包含 `original_file_id`、`original_size_bytes`、`original_sha256`、`preview_file_id`、`preview_size_bytes`、`preview_sha256`。解码器要求专用完成分支携带申请，并按事件自身的时刻、文件身份、大小和摘要核对两行变化。通用 `LIFECYCLE` 分支仍保留原来的用途变化、提升、清理和完整字节变更契约，不根据行数推断主机拍摄。原键重送逐项比较原申请；提交结果未知时，先结束原写连接上的未决事务，再通过启用 `query_only` 的独立只读连接核实原键对应的完整事务，不从写入重试推断提交结果。核实按原完整事务边界恢复两份字节事实；后来已提升的保留状态不能改写原准备或完整字节结果。文件提升仍由同事务先行的正式产物登记授权。
 
-DEVICE 单张的每个缓存角色独立使用 `INTERMEDIATE_FILE_CHANGED.LIFECYCLE`，`photo_cache_request` 恰含 `action_id`、`file_id`、`device_file_id`、`result_page_event_id`、`selected`、`size_bytes`、`sha256`、`occurred_at`、`archive_error`。前四个身份为正整数；`selected` 为原比较决定中的 `sync` 或 `camera`；大小和摘要为原相机来源的完整事实；`archive_error` 为 `null` 或实际归档异常的结构化诊断。成功事件更新该角色的大小和摘要；失败事件只保存该角色的归档错误，不赋予完整缓存资格。事件守卫回查原设备文件完成依据、START、RESULTS 角色页和一次选择；原键重送按原完整事务边界核对，不重新选择同步副本。
+按需 DEVICE 单张的每个同步缓存角色独立使用 `INTERMEDIATE_FILE_CHANGED.LIFECYCLE`，`photo_sync_cache_request` 恰含 `action_id`、`file_id`、`device_file_id`、`start_result_event_id`、`role`、`host_name`、`size_bytes`、`occurred_at` 和 `archive_error`。角色是 `original` 或 `thumbnail`，大小与文件名来自原可靠 START 的 CLI 返回，错误为空或为实际归档异常的结构化诊断。成功事件保存该角色的大小，源摘要保持未知；失败事件只保存归档错误，不赋予缓存资格。事件守卫核对原设备来源、原 START、实际响应及角色；原键重送使用原完整事务核实。
 
-DEVICE 角色缓存沿各自可靠相机观察和一次决定保存完整字节事实及来源引用，不借用 HOST 双文件共同完成申请。已合格原图不要求预览成功才能保存；失败角色保留自己的实际错误，不补造另一份摘要。各角色、原页、缓存及一次决定的历史依据须能独立核验，具体生命周期见[正式源与同步副本](../hasselblad-source-authority.md)。
+旧 DEVICE 动作的 `photo_cache_request`、RESULTS 角色页及既有摘要仍按原保存的历史格式解释。新旧事件均保留原依据，不因部署更新重写。具体生命周期见[正式源与同步副本](../hasselblad-source-authority.md)。
+
+按需照片设备读取使用 `COPY_CHANGED.PHOTO_READ_START` 保存 `photo_read_start` 证据，其中包含原 READ 票据和本次下载的长度。该事件更新本次 `source_size`，重新下载时共同将 `committed_bytes` 归零并登记 `RESET_PENDING`；原事件与操作键用于重送核实。独立守卫核对原按需来源、活动、持槽 READ 尝试及实际更新范围。
 
 拥有者终态后的伴随收场（`OPERATION_CONFIGURED.FINISH` 中由 `finish_stale_runs` 产生的部分）必须使用专属成员 `stale_run_request` 保存完整申请依据，结构恰好为 `{"kind": "stale_run_finish", "responsibility_keys": 唯一非空字符串数组, "status": 流程状态整数编号, "error": 完整结构化错误或显式 null}`。数组保存申请的全部责任键，包含当时已结束或不存在的键；实际结束的流程只是其中当时仍开放的子集。同一申请的每个结束事件携带相同依据；原操作键重送逐项核对依据、时刻、阶段及实际结束集合与原事务边界开放的流程一致，子集、替换或借用的其他结束事务键均整组拒绝。尝试结果事务自带的流程处置事件不携带该成员，也不作为伴随收场重送。该依据不改变流程状态转换，也不进入对外报告。
 
@@ -147,7 +149,7 @@ DEVICE 角色缓存沿各自可靠相机观察和一次决定保存完整字节�
 | 5 `ACTION_STARTED` | 1 开始动作并初始化专属责任 |
 | 6 `RETRY_WAIT_CHANGED` | 1 建立本流程重试间隔；2 保存间隔已完成；3 结束本流程重试责任 |
 | 7 `WINDOW_OBSERVED` | 1 保存首次窗口内观察 |
-| 8 `ACTION_FINISHED` | 1 保存动作成功；2 保存执行失败；3 保存动作过期；4 保存取消收场完成；5 保存拍摄准备失败；6 保存单张准备绑定失败 |
+| 8 `ACTION_FINISHED` | 1 保存动作成功；2 保存执行失败；3 保存动作过期；4 保存取消收场完成；5 保存拍摄准备失败；6 保存单张准备绑定失败；7 保存拍摄准备的设备可用性失败 |
 | 9 `PLAN_STATUS_CHANGED` | 1 计划首次开始；2 计划全部动作结束 |
 | 10 `OPERATION_CONFIGURED` | 1 建立普通操作责任；2 实际采用本次操作配置；3 结束普通操作责任 |
 | 11 `ATTEMPT_STARTED` | 1 保存普通尝试意图及额度 |
@@ -161,7 +163,7 @@ DEVICE 角色缓存沿各自可靠相机观察和一次决定保存完整字节�
 | 19 `RECORDING_PROCESSED` | 1 保存检查阶段及媒体结果；2 保存修复阶段及结果；3 保存取消后文件处理进度 |
 | 20 `OUTPUT_REGISTERED` | 1 登记正式产物及来源；2 登记正式产物及来源；3 登记正式产物及来源；4 更新可靠产物观察及派生状态 |
 | 21 `READ_PERMISSION_CHANGED` | 1 授予文件资格并共同建立副本责任；2 保存建档前目标失败；3 解除原源文件保护；4 核实显式请求的真实产物；5 结束尚未建档的取回项 |
-| 22 `COPY_CHANGED` | 1 建立固定拷贝责任；2 保存已同步的可靠段；3 保存字节校验阶段及依据；4 消耗重拷轮次并登记重置意图；5 保存目标重置完成；6 保存设备读取机会变化；7 保存实际使用的重拷上限；8 保存正式取回读取源切换 |
+| 22 `COPY_CHANGED` | 1 建立固定拷贝责任；2 保存已同步的可靠段；3 保存字节校验阶段及依据；4 消耗重拷轮次并登记重置意图；5 保存目标重置完成；6 保存设备读取机会变化；7 保存实际使用的重拷上限；8 保存正式取回读取源切换；9 保存当前轮次实际读取结束；10 固定本次照片下载的读取长度并准备目标 |
 | 23 `DELIVERY_CHANGED` | 1 建立普通交付；2 保存副本准备阶段；3 保存普通交付移动意图；4 保存可靠交接完成；5 保存交付最终失败；6 取消未完成交付；7 推进原交付撤回责任 |
 | 24 `CLEANUP_CHANGED` | 1 确认目标并建立逐请求限制；2 取得清理归属或保存不可撤销事实；3 保存清理项首次终态；4 保存清理项首次终态；5 保存清理项首次终态 |
 | 25 `CANCEL_CHANGED` | 1 保存目标取消与本请求效果；2 保存目标处理最终结果；3 取消请求结束等待并保留已生效责任 |
@@ -289,7 +291,7 @@ JSON 中的业务依据引用同样保留原整数。例如，文件及活动完
 
 首次页将首末引用共同设为本页事件 E，后续页只推进末引用。范围内允许夹有其他事件；读取按原物理尝试及页分支筛选，核对页号和游标连续。无后续游标或实际调用错误的页不允许继续追加。页保存保持尝试 `RUNNING`，不增加尝试次数，也不虚构整轮的一次本地或远端退出。页或文件发现提交未知时沿原完整申请、key 和时刻核实，可靠回执前不读下一页。
 
-Hasselblad DEVICE 单张的角色页使用同一 APPEND／INDEX_FILES 事件与原尝试边界，但其 v3 角色游标不解释成目录游标，也不声明目录扫描完成。控制观察、角色页、文件事实中的原引用及跨轮含义见[单张控制与角色结果编码](operation-fields.md#hasselblad-单张的控制与角色结果编码)。
+旧 Hasselblad DEVICE 单张动作的角色页使用同一 APPEND／INDEX_FILES 事件与原尝试边界，但其 v3 角色游标不解释成目录游标，也不声明目录扫描完成。控制观察、角色页、文件事实中的原引用及跨轮含义见[单张控制与角色结果编码](operation-fields.md#hasselblad-单张的控制与角色结果编码)。
 
 `RESULT_SET_CONFIRMED.OUTPUTS_FINALIZED` 独立保存本次文件范围确定事实。`evidence` 恰好包含 `attempt_id`（原尝试的实际行 ID）和 `result_page_event_id`（原可靠末页的事件 ID）。两者都是正整数，末页事件必须先于本事件，所属尝试、活动和全部连续页范围必须一致。原末页实际成功、没有错误和后续游标，并提供 `set_finalized=true`；本次新增成员均已可靠归属。事实以实际末页返回时刻记录，活动的 `output_set_finalized_event_id` 设为本事件 ID。原 RESULTS 尚未结束时，与原结果共同保存；原结果已经可靠保存时，沿其原票据、完整页范围和实际结果另存该事实，不重开尝试或重读设备。原键重送完整核实这两个引用及原时刻，改变或省略引用必须拒绝。该分支不保存采集判断、动作终态或虚构设备结束；字段职责及释放组合见[活动字段规则](operation-fields.md#剩余限制与下一动作)。
 

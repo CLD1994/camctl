@@ -47,6 +47,16 @@ def test_photo_cache_preserves_device_fallback_budget(api):
     assert saved.reuse_photo_page_event_id == 5 and saved.config.max_attempts == 3
 
 
+def test_sync_cache_uses_the_original_start_event(api):
+    saved = candidate(api, reuse_photo_page_event_id=None, reuse_photo_start_event_id=8)
+    assert saved.reuse_photo_start_event_id == 8 and saved.config.max_attempts == 3
+
+
+def test_cache_cannot_claim_both_source_events(api):
+    with pytest.raises(ValueError):
+        candidate(api, reuse_photo_start_event_id=8)
+
+
 @pytest.mark.parametrize("changes", [
     {"reuse_photo_page_event_id": None},
     {"reuse_inspection_id": 6},

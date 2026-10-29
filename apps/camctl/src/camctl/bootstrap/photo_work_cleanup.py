@@ -390,12 +390,43 @@ def _host_workspace_candidate(connection, result_event_id):
     return ticket
 
 
-def _cleanup_empty_host_workspace(staging, ticket, owner):
-    roots = BoundDirectories(staging=staging)
-    directory = staging / "capture-work" / ticket.target_id
-    _cleanup_directory(roots, directory, "capture-work", (), owner, remove_empty=True)
-    if not owner.files_closed:
-        raise BaseExceptionGroup("HOST 采集工作目录关闭未确认", list(owner.close_errors))
+def _deferred_workspace_candidate(connection, result_event_id, staging):
+    """终态按需照片仅清理原 START 可信记录的直接文件。"""
+    from camctl.operations.models import AttemptTicket
+
+    with closing(connection.execute(
+        "SELECT r.id,t.attempt_no,r.action_id,r.activity_id,r.responsibility_key,t.status,t.effect_state"
+        " FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id WHERE t.result_event_id=?",
+        (result_event_id,))) as cursor:
+        row = cursor.fetchone()
+    if row is None:
+        raise ConsistencyError("照片采集目录缺少原 START 结果")
+    run_id, attempt_no, action_id, activity_id, responsibility, status, effect = row
+    action = row_facts(connection, "actions", action_id)
+    if action is None or action["execution_spec_json"].get("photo_source_policy") != "deferred":
+        return None
+    terminal = enum_for("actions.status")
+    if action["status"] not in (int(terminal.SUCCEEDED), int(terminal.FAILED),
+                                int(terminal.CANCELED), int(terminal.EXPIRED)):
+        return None
+    if (activity_id is None or responsibility != f"start/{action_id}"
+            or status != int(enum_for("operation_attempts.status").SUCCEEDED)
+            or effect != int(enum_for("operation_attempts.effect_state").CONFIRMED)):
+        return None
+    with closing(connection.execute(
+        "SELECT 1 FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id"
+        " WHERE r.action_id=? AND t.status=? LIMIT 1",
+        (action_id, int(enum_for("operation_attempts.status").RUNNING)))) as cursor:
+        if cursor.fetchone() is not None:
+            return None
+    ticket = AttemptTicket(attempt_no, "control", str(activity_id), responsibility, run_id)
+    start, data, _ = PhotoResultReads(connection).read_device_start(action, activity_id,
+        before_event_id=2**63 - 1, output_directory=str(staging / "capture-work" / str(activity_id)))
+    if start != result_event_id:
+        raise ConsistencyError("照片采集目录改变原 START 结果")
+    names = tuple(candidate["host_name"] for candidate in (data["original"], data["preview"])
+                  if candidate is not None)
+    return ticket, names
 
 
 class HostCaptureWorkCleanup:
@@ -437,13 +468,17 @@ class HostCaptureWorkCleanup:
         for event_id, in rows:
             self.after = event_id
             try:
-                ticket = await database.read(lambda owned: _host_workspace_candidate(owned.connection, event_id),
-                                             description="核对 HOST 采集目录原归档")
-                if ticket is not None:
+                def candidate_for(owned):
+                    ticket = _host_workspace_candidate(owned.connection, event_id)
+                    return ((ticket, ()) if ticket is not None else
+                            _deferred_workspace_candidate(owned.connection, event_id, self.staging))
+                candidate = await database.read(candidate_for, description="核对照片采集目录原归档")
+                if candidate is not None:
+                    ticket, names = candidate
                     owner = CaptureCleanupWorkspace(self.staging, ticket)
                     if owner.claim():
                         try:
-                            await settled_file_io(_cleanup_empty_host_workspace, self.staging, ticket, owner)
+                            await settled_file_io(_cleanup_sync_files, self.staging, ticket, names, True, owner)
                         except BaseException as error:
                             if not owner.files_closed:
                                 attach_diagnostic_facts(error, {"photo_cleanup_close_errors": owner.close_errors})

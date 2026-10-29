@@ -119,10 +119,10 @@ def _qualify(connection, request, boundary, *, existing_check=None, exclude_atte
             raise ConsistencyError("检查触发拷贝缺少原设备来源或取回归属")
         if action["status"] != int(enum_for("actions.status").RUNNING) or action["cancel_requested"]:
             raise AvailabilityTargetBlocked("取回或原拷贝不再具备检查资格")
-        from camctl.devices.drivers.hasselblad.files import CameraFileIdentity
+        from camctl.devices.drivers.hasselblad.files import camera_file_identity_from_source
         from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
         try:
-            fixed = CameraFileIdentity.from_source(source["identity_key"], source["locator_json"])
+            fixed = camera_file_identity_from_source(source["identity_key"], source["locator_json"])
         except (KeyError, TypeError, ValueError) as error:
             raise ConsistencyError("原设备来源缺少固定机身身份") from error
         device_id, driver_id = fixed.binding.device_id, fixed.binding.driver_id
