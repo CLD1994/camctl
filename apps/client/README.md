@@ -5,6 +5,7 @@
 - [运行、Docker、备份与恢复](../../docs/client/running.md)
 - [客户端设计](../../docs/client/README.md)
 - [验证范围](../../docs/client/verification.md)
+- [包含客户端的完整 ZIP 部署包](../../.agents/skills/camctl-real-device-deploy/references/packaging.md)
 
 在本目录执行 `npm ci`、`npm run build`、`npm test`。启动前用 `CAMCTL_DATA_DIR` 明确指定数据目录，再执行 `npm start`；完整命令见运行说明。`src/shared` 是客户端内部共享代码，公共机器协议从根 `protocol` 读取。
 

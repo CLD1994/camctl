@@ -28,7 +28,8 @@ class DeploymentFiles(unittest.TestCase):
         spec.loader.exec_module(installer)
         argv = [str(SCRIPTS / "install-host.py"), "--target", "/tmp/installation with spaces",
             "--hb-cli", "/opt/camera tool/hb_cli"]
-        with patch.object(installer.sys, "version_info", (3, 6, 15)), \
+        with patch.dict(sys.modules, {"deploy_support": support}), \
+             patch.object(installer.sys, "version_info", (3, 6, 15)), \
              patch.object(installer.sys, "argv", argv), \
              patch.object(installer.shutil, "which", return_value="/tools/uv"), \
              patch.dict(installer.os.environ, {"PYTHONPATH": "/unrelated", "PYTHONHOME": "/unrelated", "VIRTUAL_ENV": "/unrelated"}), \
@@ -49,7 +50,8 @@ class DeploymentFiles(unittest.TestCase):
         spec.loader.exec_module(installer)
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "runtime"
-            with patch.object(installer.sys, "version_info", (3, 6, 15)), \
+            with patch.dict(sys.modules, {"deploy_support": support}), \
+                 patch.object(installer.sys, "version_info", (3, 6, 15)), \
                  patch.object(installer.sys, "argv", [str(SCRIPTS / "install-host.py"), "--target", str(target)]), \
                  patch.object(installer.shutil, "which", return_value=None), \
                  patch.object(installer.sys, "stderr"), \

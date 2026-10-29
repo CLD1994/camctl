@@ -11,11 +11,12 @@ import sys
 import tarfile
 
 def main():
-    from deploy_support import add_path_arguments, path_overrides
+    from deploy_support import absolute_path, add_path_arguments, path_overrides
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--target', type=Path, required=True, help='尚不存在的绝对部署目录')
     parser.add_argument('--hb-cli', type=Path, help='hb_cli 可执行文件路径；省略时从 PATH 查找')
+    parser.add_argument('--client-data', type=absolute_path, help='能力说明同步目录；默认 <target>/client-data')
     add_path_arguments(parser)
     args = parser.parse_args()
     if sys.platform != 'linux' or sys.version_info[:2] < (3, 6):
@@ -100,6 +101,10 @@ def main():
         config_path = target / 'config.toml'
         write_config(config_path, configuration)
         run('按实际配置导出客户端能力说明', [target / 'venv/bin/camctl', 'describe', '--config', config_path], output=target / 'device-capabilities.json')
+        client_data = args.client_data or target / 'client-data'
+        client_data.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(target / 'device-capabilities.json', client_data / 'device-capabilities.json')
+        receipt['client_capabilities'] = str(client_data / 'device-capabilities.json')
         source = target / 'source'
         source.mkdir()
         with tarfile.open(archives[0]) as archive:
@@ -126,6 +131,7 @@ def main():
         save()
         print('安装完成；启动入口：' + str(launcher))
         print('客户端能力说明：' + str(target / 'device-capabilities.json'))
+        print('已同步客户端能力说明：' + str(client_data / 'device-capabilities.json'))
         print('检测报告：' + str(discovery_path))
         if discovery['placeholder_devices']:
             print('配置中含待修改占位项：' + ', '.join(discovery['placeholder_devices']) +

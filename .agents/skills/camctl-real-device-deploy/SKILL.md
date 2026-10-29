@@ -1,11 +1,11 @@
 ---
 name: camctl-real-device-deploy
-description: 为 camctl 创建独立的真机验证环境，或准备用户测试部署包的安装入口、配置和说明。构建并安装组件、初始化数据并生成设备能力说明；不用于迁移或覆盖已有环境。
+description: 为 camctl 创建独立的真机验证环境，或构建包含主机和客户端的 ZIP 测试部署包。构建并安装组件、初始化数据并生成设备能力说明；不用于迁移或覆盖已有环境。
 ---
 
 # 准备真机验证部署
 
-本地新建环境使用下面的部署脚本继承已有配置；向用户交付安装包时，使用本文末尾的安装入口自动发现设备并生成 TOML。配置字段以[配置项参考](../../../docs/camctl/configuration-reference.md)为准。
+本地新建环境使用下面的部署脚本继承已有配置；向用户交付安装包时，统一使用打包入口构建和验证 ZIP；目标主机上的安装入口自动发现设备并生成 TOML。配置字段以[配置项参考](../../../docs/camctl/configuration-reference.md)为准。
 
 ## 本地新建环境
 
@@ -46,7 +46,19 @@ python3.11 .agents/skills/camctl-real-device-deploy/scripts/deploy.py \
 
 ## 用户测试部署包
 
-交付包的主机安装入口直接复制 [install-host.py](scripts/install-host.py)、[deploy_support.py](scripts/deploy_support.py) 和 [camera_discovery.py](scripts/camera_discovery.py)，三者置于包根目录。包内同时提供 `camctl/` 下的一个 wheel 与锁定的 `requirements.txt`、`host/` 下的一个 CPack `*-Source.tar.gz` 源码包，以及描述实际组件版本与验证范围的 `RELEASE.json`。客户端仍按其组件说明独立交付。
+使用 [package.py](scripts/package.py) 完成构建、声明导出、仓库外安装验证和 ZIP 交付。先读[打包契约](references/packaging.md)。用户要求“打包”“部署包”时，默认构建当前项目的完整部署包。
+
+```bash
+python3.11 .agents/skills/camctl-real-device-deploy/scripts/package.py \
+  --repo "$(pwd)" \
+  --output "$(pwd)/tmp/deploy-package-new"
+```
+
+`--output` 必须不存在。提供 `--config /path/to/config.toml` 时按该配置生成客户端声明；省略时自动生成占位声明。不从打包机探测相机，不将配置中的私有路径或 serial 复制到包中。设备实例 ID 和驱动能力会出现在声明中。生成的 ZIP 固定包含三组件、`client/data/device-capabilities.json`、README、启动模板、版本及源码记录和校验清单。README 和启动文件从 `assets/bundle` 原样复制，需调整时先修改模板。
+
+包内 README 必须让接收方在没有源码仓库的情况下完成安装、配置和接入。它说明安装器各参数、客户端自定义数据目录、camctl 常用配置与三类日志、C 模块的链接及生命周期接口，以及 C 配置与 TOML 的对应关系。完整配置参考和公开头文件由打包脚本从权威来源导出到包内 `docs/`；配置入口变化时同步核对 README 示例和导出规则。
+
+构建脚本不提供跳过客户端、替换压缩格式或跳过安装验证的选项。任何步骤失败均停止交付并保存日志与收据；使用新输出目录重试。最终交付 `camctl-deploy.zip` 及其 `.sha256`，同时报告验证边界。目标主机按包内 README 调用 `install-host.py`。
 
 安装器从当前环境自动获取相机绑定，生成 `<target>/config.toml`。`--hb-cli` 指定现场工具的路径；省略时从 PATH 查找 `hb_cli`。识别成功的设备无需手填序列号；未识别型号生成待修改占位项。
 
@@ -84,11 +96,11 @@ python3 install-host.py \
 
 生成的 TOML 每台设备使用一个 `[devices.<id>]` 节，设备内部采用 `adb.serial`、`hasselblad.executable`、`recording.start_timeout_s` 等点分键。其他顶层配置各用一个节；字面含点或空格的名称保留引号，空表及精确数值保留原语义。
 
-终端须汇报工具路径、每台相机的驱动、设备 ID、serial、适用设备的正式源选择与所有显式策略，以及未配置设备的原因。未显式写入的策略采用 camctl 内置默认值，身份检测不推断设备的拍摄设置或固件结果模式。`camera-discovery.json` 保留查询参数、stdout/stderr 文本及可还原原字节的 Base64、退出码或超时事实和生成的设备配置；`install-receipt.json` 包含同一份检测结果。安装后将新导出的 `device-capabilities.json` 交给客户端。安装不启动主程序；失败时保留安装日志及收据，使用新的目标目录重试。
+终端须汇报工具路径、每台相机的驱动、设备 ID、serial、适用设备的正式源选择与所有显式策略，以及未配置设备的原因。未显式写入的策略采用 camctl 内置默认值，身份检测不推断设备的拍摄设置或固件结果模式。`camera-discovery.json` 保留查询参数、stdout/stderr 文本及可还原原字节的 Base64、退出码或超时事实和生成的设备配置；`install-receipt.json` 包含同一份检测结果。安装后自动将新导出的 `device-capabilities.json` 复制到 `<target>/client-data`；可用 `--client-data` 指定客户端 data 的绝对路径。两机部署时将它交给客户端并覆盖 `client/data/device-capabilities.json`。安装不启动主程序；失败时保留安装日志及收据，使用新的目标目录重试。
 
 `placeholder_devices` 在检测报告及安装收据中列出占位设备和待修改字段，终端同时展示。包含占位项时可以完成软件安装，能力说明中的这些条目只提供对应驱动的配置结构，不代表现场设备已绑定；使用前须填写真实值并重新执行 `describe --config <target>/config.toml` 导出能力说明，再交给客户端。
 
-交付前在仓库之外解压并实际执行安装入口，检查配置、状态库、能力说明和启动路径；最低 CMake 版本的兼容验证与目标 ARM64 部署分别记录。生成文件校验清单，并将配置方式及实际验证范围写入交付说明。
+打包脚本在仓库之外解压并实际执行安装入口和客户端启动检查；身份查询由受命令输出契约约束的替身提供，不访问真实相机。验证结果自动写入 RELEASE.json。最低 CMake 版本兼容性、Windows、目标 ARM64 部署与真实设备验收分别记录，不计为该检查已通过。
 
 修改共享脚本后，使用已安装 camctl wheel 的 Python 3.11 环境运行技能自身的集成测试，以核对实际发行物的响应解析器：
 

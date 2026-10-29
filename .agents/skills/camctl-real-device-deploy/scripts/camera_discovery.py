@@ -56,6 +56,32 @@ def parse_adb_devices(output):
     return devices
 
 
+def hasselblad_config(serial, hb=None):
+    from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
+    return {"kind": "camera", "driver": DRIVER_ID,
+        "hasselblad": {"executable": hb or "/REPLACE_WITH_HB_CLI_PATH", "serial": serial,
+            "product_id": HB_PRODUCT, "output_storage": "host"},
+        "recording": {"start_timeout_s": 30}, "connection": {"prepare_lead_s": 30},
+        "result_check": {"call_timeout_s": 180}}
+
+
+def add_placeholder_devices(report, hb=None):
+    detected_drivers = {device["driver"] for device in report["devices"].values()}
+    for prefix, driver in ADB_PRODUCTS.values():
+        if driver not in detected_drivers:
+            device_id = f"{prefix}-01"
+            report["devices"][device_id] = {"kind": "camera", "driver": driver,
+                "adb": {"serial": f"REPLACE_{prefix.upper()}_SERIAL"}}
+            report["placeholder_devices"][device_id] = ["adb.serial"]
+    if "hasselbla-01" not in report["devices"]:
+        report["devices"]["hasselbla-01"] = hasselblad_config("REPLACE_HASSELBLAD_SERIAL", hb)
+        report["placeholder_devices"]["hasselbla-01"] = ["hasselblad.serial"]
+        if not hb:
+            report["placeholder_devices"]["hasselbla-01"].append("hasselblad.executable")
+    if report["placeholder_devices"]:
+        report["warnings"].append("部分设备尚未识别，已生成待修改的 REPLACE_* 占位配置；使用相机前填写真实值并重新导出能力说明")
+
+
 def discover_cameras(hb_cli=None, *, query=None):
     """返回身份查询事实及配置；失败通过 report 保留原调用结果。"""
     report = {"status": "running", "tools": {}, "queries": [], "observations": [], "devices": {},
@@ -93,14 +119,6 @@ def discover_cameras(hb_cli=None, *, query=None):
         report["tools"]["hb_cli"] = {"path": hb, "source": "--hb-cli" if hb_cli else "PATH",
             "status": "available" if hb else "not_found"}
 
-        def hasselblad_config(serial):
-            from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
-            return {"kind": "camera", "driver": DRIVER_ID,
-                "hasselblad": {"executable": hb or "/REPLACE_WITH_HB_CLI_PATH", "serial": serial,
-                    "product_id": HB_PRODUCT, "output_storage": "host"},
-                "recording": {"start_timeout_s": 30}, "connection": {"prepare_lead_s": 30},
-                "result_check": {"call_timeout_s": 180}}
-
         matched = []
         if adb:
             for device in parse_adb_devices(run([adb, "devices", "-l"])):
@@ -135,22 +153,9 @@ def discover_cameras(hb_cli=None, *, query=None):
                 raise ValueError(f"发现 {len(matching)} 台 CFV 100C（{locations}），hb_cli 只能按 PID 选择，无法唯一绑定；请只连接本实例使用的相机")
             if matching:
                 serial = parse_serial(run([hb, "--pid", f"0x{HB_PRODUCT:04x}", "info"]))
-                report["devices"]["hasselbla-01"] = hasselblad_config(serial)
+                report["devices"]["hasselbla-01"] = hasselblad_config(serial, hb)
 
-        detected_drivers = {device["driver"] for device in report["devices"].values()}
-        for prefix, driver in ADB_PRODUCTS.values():
-            if driver not in detected_drivers:
-                device_id = f"{prefix}-01"
-                report["devices"][device_id] = {"kind": "camera", "driver": driver,
-                    "adb": {"serial": f"REPLACE_{prefix.upper()}_SERIAL"}}
-                report["placeholder_devices"][device_id] = ["adb.serial"]
-        if "hasselbla-01" not in report["devices"]:
-            report["devices"]["hasselbla-01"] = hasselblad_config("REPLACE_HASSELBLAD_SERIAL")
-            report["placeholder_devices"]["hasselbla-01"] = ["hasselblad.serial"]
-            if not hb:
-                report["placeholder_devices"]["hasselbla-01"].append("hasselblad.executable")
-        if report["placeholder_devices"]:
-            report["warnings"].append("部分设备尚未识别，已生成待修改的 REPLACE_* 占位配置；使用相机前填写真实值并重新导出能力说明")
+        add_placeholder_devices(report, hb)
         report["status"] = "complete"
     except (OSError, ValueError, ImportError) as error:
         report.update(status="failed", error=str(error))

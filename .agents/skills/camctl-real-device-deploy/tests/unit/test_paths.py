@@ -153,6 +153,7 @@ class DeploymentPaths(unittest.TestCase):
                 patch.object(installer.Path, "write_text", write), \
                 patch.object(installer.Path, "glob", glob), \
                 patch.object(installer.shutil, "which", return_value="/tools/tool"), \
+                patch.object(installer.shutil, "copyfile"), \
                 patch.object(installer.subprocess, "run", side_effect=run), \
                 patch.object(installer.tarfile, "open", return_value=archive), patch("builtins.print"):
             self.assertEqual(installer.main(), 0)
