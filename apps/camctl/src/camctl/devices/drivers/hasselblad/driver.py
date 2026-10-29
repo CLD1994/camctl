@@ -61,7 +61,7 @@ from camctl.operations.process import (
 )
 
 from camctl.operations.tool_diagnostics import (
-    ToolDiagnostics, ToolCallOutput, ToolStream, ToolStreamState,
+    ToolDiagnostics, ToolCallOutput, ToolStream, ToolStreamState, encode_diagnostics,
 )
 from .commands import PhotoPhase, PhotoStep, PHOTO_START_CALL_LIMIT, photo_start_commands
 from .configuration import CameraConfig, read_camera_config
@@ -252,7 +252,8 @@ class AvailabilityCancelled(asyncio.CancelledError):
 class CameraReadError(ReadPreparationError, DiagnosticError):
     """下载或身份核对失败；保留各次受管调用与实际收场细节。"""
 
-    def __init__(self, reason, steps, *, causes=(), settlement=ReadPreparationSettlement.SETTLED):
+    def __init__(self, reason, steps, *, causes=(), settlement=ReadPreparationSettlement.SETTLED,
+                 expected_identity=None, tool_calls=None):
         self.reason, self.steps = reason, tuple(dict(step) for step in steps)
         self.causes = tuple(causes)
         # OSError 的 repr 不包含 filename；异常组的 str 则不包含各子错误。
@@ -266,6 +267,15 @@ class CameraReadError(ReadPreparationError, DiagnosticError):
             "causes": [exception_diagnostic(cause) for cause in self.causes],
             "settlement": settlement.value,
         }
+        if expected_identity is not None:
+            self.diagnostic_details["expected_identity"] = dict(expected_identity)
+        if tool_calls is not None:
+            diagnostics = encode_diagnostics(ToolDiagnostics(3, tuple(tool_calls)))
+            for call in diagnostics["calls"]:
+                stderr = call["stderr"]
+                stderr["text"] = (None if stderr["hex"] is None else
+                                  bytes.fromhex(stderr["hex"]).decode("utf-8", "backslashreplace"))
+            self.diagnostic_details["tool_diagnostics"] = diagnostics
 
 
 class PhysicalIdentityMismatch(ValueError):
@@ -463,7 +473,12 @@ class HasselbladDriver:
             raise ValueError("按需照片来源不能预设单次下载长度")
         config = self._binding_config(identity.binding)
         if (config.serial, config.product_id) != (identity.serial, identity.product_id):
-            raise PhysicalIdentityMismatch(identity.binding)
+            error = PhysicalIdentityMismatch(identity.binding)
+            attach_diagnostic_facts(error, {
+                "expected_identity": {"serial": identity.serial, "product_id": identity.product_id},
+                "configured_identity": {"serial": config.serial, "product_id": config.product_id},
+            })
+            raise error
         workspace = DownloadWorkspace(self.roots.staging, ticket)
         if (type(offset) is not int or offset < 0
                 or (deferred and offset != 0)
@@ -472,15 +487,21 @@ class HasselbladDriver:
         if (not isinstance(idle_timeout_s, Decimal) or not idle_timeout_s.is_finite()
                 or idle_timeout_s <= 0):
             raise ValueError("无数据超时必须是有限正 Decimal 秒数")
-        steps = []
+        steps, calls = [], []
         settled = True
         began = self.monotonic_ns()
+
+        def read_error(reason, *, causes=(), settlement=ReadPreparationSettlement.SETTLED,
+                       include_tool_calls=True):
+            return CameraReadError(reason, steps, causes=causes, settlement=settlement,
+                expected_identity={"serial": identity.serial, "product_id": identity.product_id},
+                tool_calls=calls if include_tool_calls else None)
 
         async def run(name, args, *, stdout):
             nonlocal settled
             remaining = READ_PREPARATION_TIMEOUT_S - Decimal(self.monotonic_ns() - began) / _NANOSECONDS_PER_SECOND
             if remaining <= 0:
-                raise CameraReadError("preparation_timeout", steps)
+                raise read_error("preparation_timeout")
             settled = False
             with log_context(device_id=identity.binding.device_id,
                              driver_id=identity.binding.driver_id,
@@ -489,13 +510,19 @@ class HasselbladDriver:
                 raw = await self._run_step(config=config, name=name, args=args,
                                            timeout_s=remaining, steps=steps)
             settled = True
+            complete = raw is not None and raw.output is not None and raw.stderr is not None and raw.output_failure is None
+            def stream(data):
+                return ToolStream(ToolStreamState.UNAVAILABLE if data is None else
+                                  ToolStreamState.COMPLETE if complete else ToolStreamState.UNCONFIRMED, data)
+            calls.append(ToolCallOutput(len(calls) + 1, name,
+                stream(None if raw is None else raw.output), stream(None if raw is None else raw.stderr)))
             if raw is None:
-                raise CameraReadError("tool_start_failed", steps)
+                raise read_error("tool_start_failed")
             failure = self._local_return_failure(raw, needs_stdout=stdout)
             if raw.error == "cancelled":
-                raise asyncio.CancelledError("相机读取已取消，受管工具已退出") from CameraReadError(failure, steps)
+                raise asyncio.CancelledError("相机读取已取消，受管工具已退出") from read_error(failure)
             if failure:
-                raise CameraReadError(failure, steps)
+                raise read_error(failure)
             return raw
 
         try:
@@ -503,17 +530,23 @@ class HasselbladDriver:
                 try:
                     await workspace.prepare()
                 except (OSError, ValueError) as error:
-                    raise CameraReadError("download_maintenance_waiting", steps, causes=(error,),
-                        settlement=ReadPreparationSettlement.WAITING) from error
+                    raise read_error("download_maintenance_waiting", causes=(error,),
+                                     settlement=ReadPreparationSettlement.WAITING) from error
                 raw = await run("list", ("list",), stdout=True)
                 cameras = parse_devices(raw.output)
                 matching = tuple(camera for camera in cameras if camera.vendor_id == _VENDOR_ID
                                  and camera.product_id == config.product_id)
+                steps[-1]["devices"] = [{"vendor_id": camera.vendor_id, "product_id": camera.product_id,
+                                         "bus": camera.bus, "address": camera.address} for camera in cameras]
+                steps[-1]["matching_count"] = len(matching)
                 if len(matching) != 1:
-                    raise CameraReadError("no_matching_device" if not matching else "multiple_matching_devices", steps)
+                    raise read_error("no_matching_device" if not matching else "multiple_matching_devices")
                 raw = await run("info", ("info",), stdout=True)
-                if parse_serial(raw.output) != identity.serial:
-                    raise CameraReadError("serial_mismatch", steps)
+                observed_serial = parse_serial(raw.output)
+                steps[-1]["observed_serial"] = observed_serial
+                if observed_serial != identity.serial:
+                    raise read_error("serial_mismatch")
+                steps[-1]["serial_verified"] = True
                 await run("download", ("download", identity.variant.value, identity.camera_name,
                                        "--output", str(workspace.path)), stdout=False)
                 if deferred:
@@ -524,19 +557,20 @@ class HasselbladDriver:
         except BaseException as error:
             # transport 未交回实际退出事实时，不能删除可能仍被工具使用的目录。
             if not settled or not workspace.files_closed:
-                causes = (error,) if error.__cause__ is None else (error, error.__cause__)
-                raise CameraReadError("preparation_unconfirmed", steps, causes=causes,
-                    settlement=ReadPreparationSettlement.UNCONFIRMED) from error
+                has_calls = isinstance(error, CameraReadError) or isinstance(error.__cause__, CameraReadError)
+                raise read_error("preparation_unconfirmed", settlement=ReadPreparationSettlement.UNCONFIRMED,
+                                 include_tool_calls=not has_calls) from error
             if settled:
                 try:
                     await workspace.cleanup()
                 except BaseException as cleanup_error:
                     if isinstance(error, Exception) and isinstance(cleanup_error, Exception):
-                        raise CameraReadError("preparation_and_cleanup_failed", steps,
-                                              causes=(error, cleanup_error)) from error
+                        failures = ExceptionGroup("相机读取准备与临时下载回收均失败", [error, cleanup_error])
+                        raise read_error("preparation_and_cleanup_failed",
+                                         include_tool_calls=not isinstance(error, CameraReadError)) from failures
                     raise BaseExceptionGroup("相机读取准备与临时下载回收均失败", [error, cleanup_error]) from None
             if isinstance(error, Exception) and not isinstance(error, CameraReadError):
-                raise CameraReadError("preparation_failed", steps, causes=(error,)) from error
+                raise read_error("preparation_failed", causes=(error,)) from error
             raise
 
     async def observe_photo_source(self, request: ControlRequest) -> DeviceCallResult:

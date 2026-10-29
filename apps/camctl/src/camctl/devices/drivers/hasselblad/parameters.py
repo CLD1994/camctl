@@ -6,11 +6,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
+from functools import lru_cache
 from types import MappingProxyType
 
 from camctl.host_files.photo_formats import CAPTURE_FORMATS, CaptureFormat, CaptureFormatDescription
 
-from camctl.acceptance.schema import BodySchemaError, validate_precise
+from camctl.acceptance.schema import BodySchemaError, precise_validator_for, validate_precise_document
 from camctl.contracts.json_values import JsonValue, is_json_integer
 
 __all__ = [
@@ -339,6 +340,12 @@ def photo_schema() -> dict[str, object]:
     return deepcopy(_PHOTO_SCHEMA)
 
 
+@lru_cache(maxsize=1)
+def _photo_validator():
+    """固定照片规则只检查一次；每份参数仍使用精确规则校验。"""
+    return precise_validator_for(_PHOTO_SCHEMA)
+
+
 def _decimal(value: JsonValue, field: str) -> Decimal:
     if isinstance(value, bool) or not isinstance(value, (int, Decimal)):
         raise BodySchemaError(f"Hasselblad 参数 {field} 必须是精确 JSON 数值")
@@ -356,7 +363,7 @@ def parse_photo_settings(params: Mapping[str, JsonValue]) -> PhotoSettings:
     if not isinstance(params, Mapping):
         raise BodySchemaError("Hasselblad 参数必须是对象")
     document = dict(params)
-    validate_precise(_PHOTO_SCHEMA, document, label="Hasselblad 拍摄参数")
+    validate_precise_document(_photo_validator(), document, label="Hasselblad 拍摄参数")
 
     capture_format = CaptureFormat(document["capture_format"])
     exposure_raw = document["exposure"]

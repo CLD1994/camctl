@@ -610,6 +610,22 @@ def test_real_hasselblad_and_copy_error_producers_keep_resolvable_graphs():
             graph = details[path[0]][path[1]]
             assert graph['cause']['message'] == 'specific child'
             assert resolve(doc, graph['context']) == graph['cause']
+        namespace['ToolDiagnostics'] = lambda limit, calls: (limit, calls)
+        namespace['encode_diagnostics'] = lambda value: {'version': 1, 'call_limit': value[0], 'calls': [
+            {'step_index': 1, 'step_name': 'info',
+             'stdout': {'state': 'complete', 'hex': b'serial : other\n'.hex()},
+             'stderr': {'state': 'complete', 'hex': b'detail\n'.hex()}}]}
+        failure = namespace['CameraReadError']('serial_mismatch',
+            [{'name': 'info', 'elapsed_ms': 7, 'observed_serial': 'other'}],
+            expected_identity={'serial': 'expected', 'product_id': 10}, tool_calls=[object()])
+        state, doc = document(m, lambda: m.record_error(failure, stage='read'))
+        details = doc['error']['diagnostic_details']
+        assert state._record.level is m.LogLevel.ERROR
+        assert details['steps'][0]['elapsed_ms'] == 7 and details['steps'][0]['observed_serial'] == 'other'
+        assert details['expected_identity'] == {'serial': 'expected', 'product_id': 10}
+        call = details['tool_diagnostics']['calls'][0]
+        assert bytes.fromhex(call['stdout']['hex']) == b'serial : other\n'
+        assert call['stderr']['text'] == 'detail\n'
 
 
 def test_report_failure_wire_roundtrip_retains_marked_graph_and_business_data():

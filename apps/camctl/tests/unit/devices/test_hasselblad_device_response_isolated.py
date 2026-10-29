@@ -328,7 +328,6 @@ def photo_driver_api(responses, monkeypatch):
             return SimpleNamespace(sha256="a" * 64, size_bytes=100, original_name="downloaded.jpg", media_type=media,
                 as_json=lambda: {"sha256": "a" * 64, "size_bytes": 100, "original_name": "downloaded.jpg", "media_type": media})
         def release(self): self.released = True
-    class CameraReadError(ValueError): pass
     diagnostics_path = Path(__file__).parents[3] / "src/camctl/operations/error_diagnostics.py"
     diagnostics_name = "camctl.operations._isolated_photo_error_diagnostics"
     diagnostics_spec = importlib.util.spec_from_file_location(diagnostics_name, diagnostics_path)
@@ -338,24 +337,6 @@ def photo_driver_api(responses, monkeypatch):
     class RawToolOutcome: pass
     class ToolCallCancelled(Exception): pass
     class ToolStartError(Exception): pass
-    class ToolStreamState(Enum):
-        COMPLETE = "complete"
-        UNAVAILABLE = "unavailable"
-        UNCONFIRMED = "unconfirmed"
-    @dataclass
-    class ToolStream:
-        state: object
-        data: object
-    @dataclass
-    class ToolCallOutput:
-        step_index: int
-        step_name: str
-        stdout: object
-        stderr: object
-    @dataclass
-    class ToolDiagnostics:
-        call_limit: int
-        calls: tuple
     entered = EvidenceContract("start_entered_test", 1, "control", frozenset())
     prevented = EvidenceContract("start_prevented_test", 1, "control", frozenset())
     preparation = EvidenceContract("preparation_test", 1, "control", frozenset())
@@ -364,9 +345,6 @@ def photo_driver_api(responses, monkeypatch):
         "camctl.devices.capture_preparation": {"CAPTURE_PREPARATION_COMPLETED": preparation, "DEFAULT_PREPARE_LEAD_S": Decimal(10), "PreparedCaptureCache": object},
         "camctl.devices.ports": {"ControlRequest": object, "DeviceCallResult": Result},
         "camctl.devices.start_entry": {"ENTERED": entered, "PREVENTED": prevented, "entered_observation": lambda ticket: None},
-        "camctl.devices.read_session": {"ReadSession": object, "SourceFile": object,
-            "DeferredSourceFile": type("DeferredSourceFile", (), {}), "ReadPreparationError": CameraReadError,
-            "ReadPreparationSettlement": SimpleNamespace(SETTLED=SimpleNamespace(value="settled"))},
         "camctl.host_files.downloads": {"DownloadWorkspace": object, "ResultDownloadWorkspace": SourceWorkspace},
         "camctl.host_files.capture_sources": {"CaptureFileError": type("CaptureFileError", (ValueError,), {}), "CaptureFileSpec": object,
             "CapturedArtifact": object, "prepare_capture_workspace": None, "verify_capture_files": None,
@@ -375,15 +353,14 @@ def photo_driver_api(responses, monkeypatch):
         "camctl.logging_runtime.events": {"log_context": lambda **kwargs: nullcontext(), "measure_stage": lambda *args, **kwargs: nullcontext()},
         "camctl.operations.models": {"AttemptStatus": AttemptStatus, "CallInfo": lambda **kwargs: SimpleNamespace(**kwargs), "CallOutcome": CallOutcome,
             "EffectState": EffectState, "ErrorValue": ErrorValue, "EvidenceValue": EvidenceValue,
-            "Settlement": lambda basis, evidence: SimpleNamespace(basis=basis, evidence=evidence), "SettlementBasis": SettlementBasis},
+            "Settlement": lambda basis, evidence: SimpleNamespace(basis=basis, evidence=evidence), "SettlementBasis": SettlementBasis,
+            "AttemptTicket": object},
         "camctl.operations.owned_calls": {"current_call_scope": lambda: None},
         "camctl.operations.error_diagnostics": {"DiagnosticError": diagnostics_api.DiagnosticError,
             "exception_diagnostic": diagnostics_api.exception_diagnostic,
             "attach_diagnostic_facts": diagnostics_api.attach_diagnostic_facts},
-        "camctl.operations.process": {"RawToolOutcome": RawToolOutcome, "StopSignal": object, "ToolCallCancelled": ToolCallCancelled,
+        "camctl.operations.process": {"OUTPUT_LIMIT_BYTES": 1 << 20, "RawToolOutcome": RawToolOutcome, "StopSignal": object, "ToolCallCancelled": ToolCallCancelled,
             "ToolSpec": object, "ToolStartError": ToolStartError, "execute_tool": None},
-        "camctl.operations.tool_diagnostics": {"ToolDiagnostics": ToolDiagnostics, "ToolCallOutput": ToolCallOutput,
-            "ToolStream": ToolStream, "ToolStreamState": ToolStreamState},
         "camctl.devices.drivers.hasselblad.commands": {"PhotoPhase": object, "PhotoStep": object,
             "PHOTO_START_CALL_LIMIT": 20, "photo_start_commands": lambda *args, **kwargs: ()},
         "camctl.devices.drivers.hasselblad.configuration": {"CameraConfig": object, "read_camera_config": lambda value: value},
@@ -393,6 +370,18 @@ def photo_driver_api(responses, monkeypatch):
             stub = ModuleType(name)
             stub.__dict__.update(attributes)
             monkeypatch.setitem(sys.modules, name, stub)
+    read_session_name = "camctl.devices.read_session"
+    read_session_path = Path(__file__).parents[3] / "src/camctl/devices/read_session.py"
+    read_session_spec = importlib.util.spec_from_file_location(read_session_name, read_session_path)
+    read_session = importlib.util.module_from_spec(read_session_spec)
+    monkeypatch.setitem(sys.modules, read_session_name, read_session)
+    read_session_spec.loader.exec_module(read_session)
+    tool_diagnostics_name = "camctl.operations.tool_diagnostics"
+    tool_diagnostics_path = Path(__file__).parents[3] / "src/camctl/operations/tool_diagnostics.py"
+    tool_diagnostics_spec = importlib.util.spec_from_file_location(tool_diagnostics_name, tool_diagnostics_path)
+    tool_diagnostics = importlib.util.module_from_spec(tool_diagnostics_spec)
+    monkeypatch.setitem(sys.modules, tool_diagnostics_name, tool_diagnostics)
+    tool_diagnostics_spec.loader.exec_module(tool_diagnostics)
     source = Path(__file__).parents[3] / "src/camctl/devices/drivers/hasselblad/driver.py"
     name = "camctl.devices.drivers.hasselblad._isolated_driver"
     spec = importlib.util.spec_from_file_location(name, source)
@@ -406,6 +395,192 @@ def _finish_immediate(coroutine):
     with pytest.raises(StopIteration) as finished:
         coroutine.send(None)
     return finished.value.value
+
+
+@pytest.fixture
+def photo_read_api(photo_driver_api, monkeypatch):
+    """读取入口使用内存工具及工作目录替身，保留真实机身与来源身份解析。"""
+    import json
+    from decimal import Decimal
+
+    api, files, _, Raw = photo_driver_api
+
+    class Source:
+        def __init__(self, file_id, locator, size_bytes=None):
+            self.file_id, self.locator, self.size_bytes = file_id, locator, size_bytes
+
+    class Deferred(Source):
+        pass
+
+    class Workspace:
+        files_closed = True
+        path = Path("/staging/read-downloads/9-1")
+        async def prepare(self): return self.path
+        async def cleanup(self): pass
+        async def open_current(self): return object(), 123
+        def __init__(self, staging, ticket): pass
+
+    class Timeout:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): return False
+
+    monkeypatch.setattr(api, "SourceFile", Source)
+    monkeypatch.setattr(api, "DeferredSourceFile", Deferred)
+    monkeypatch.setattr(api, "DownloadWorkspace", Workspace)
+    monkeypatch.setattr(api, "ReadSession", lambda source, offset, stream, timeout: source)
+    monkeypatch.setattr(api.asyncio, "timeout", lambda duration: Timeout())
+
+    binding = files.DeviceBinding("camera", "hasselblad_cfv100c")
+    identity = files.DeferredCameraFileIdentity(binding, "7", "/mnt/DCIM/a.3FR", "a.3FR",
+        files.DownloadVariant.ORIGINAL, "expected", 10)
+    source = Deferred(json.dumps([binding.device_id, binding.driver_id, identity.file_identity],
+                                 separators=(",", ":")), identity.locator())
+    driver = object.__new__(api.HasselbladDriver)
+    driver.roots, driver.monotonic_ns = SimpleNamespace(staging=Path("/staging")), lambda: 0
+    driver._binding_config = lambda binding: SimpleNamespace(serial="expected", product_id=10)
+    ticket = SimpleNamespace(run_id=9, attempt_id=1)
+    calls = []
+
+    def setup(listed, info, *, outcomes=None):
+        async def run(*, config, name, args, timeout_s, steps):
+            calls.append(name)
+            driver.recorded_args.append(args)
+            output = {"list": listed, "info": info, "download": b"downloaded\n"}[name]
+            steps.append({"name": name, "elapsed_ms": 7})
+            raw = Raw()
+            raw.output, raw.stderr, raw.output_failure, raw.error = output, b"detail\n", None, None
+            raw.exit = SimpleNamespace(exit_code=0, signal=None)
+            for field, value in (outcomes or {}).get(name, {}).items():
+                setattr(raw, field, value)
+            return raw
+        driver.recorded_args = []
+        driver._run_step = run
+        return driver.open_read(source, 0, ticket, idle_timeout_s=Decimal(10))
+
+    return api, driver, setup, calls
+
+
+@pytest.mark.parametrize("listed,info,reason,expected_count,observed", [
+    (b"(no Hasselblad USB devices found)\n", b"", "no_matching_device", 0, None),
+    (b"vid=0x2756 pid=0x000a bus=1 addr=2\nvid=0x2756 pid=0x000a bus=1 addr=3\n",
+     b"", "multiple_matching_devices", 2, None),
+    (b"vid=0x2756 pid=0x000a bus=1 addr=2\n", b"serial : other\n", "serial_mismatch", 1, "other"),
+])
+def test_device_read_identity_failure_retains_observed_facts_and_tool_output(
+        photo_read_api, listed, info, reason, expected_count, observed):
+    api, _, setup, calls = photo_read_api
+    with pytest.raises(api.CameraReadError) as captured:
+        _finish_immediate(setup(listed, info))
+    error = captured.value
+    assert error.reason == reason and "download" not in calls
+    assert error.diagnostic_details["expected_identity"] == {"serial": "expected", "product_id": 10}
+    assert error.steps[0]["matching_count"] == expected_count
+    if observed is not None:
+        assert error.steps[1]["observed_serial"] == observed
+    diagnostic_calls = error.diagnostic_details["tool_diagnostics"]["calls"]
+    assert [call["step_name"] for call in diagnostic_calls] == calls
+    assert bytes.fromhex(diagnostic_calls[-1]["stderr"]["hex"]) == b"detail\n"
+    assert diagnostic_calls[-1]["stderr"]["text"] == "detail\n"
+    assert bytes.fromhex(diagnostic_calls[-1]["stdout"]["hex"]) == (info if observed else listed)
+
+
+def test_device_read_changed_configuration_retains_both_camera_identities(photo_read_api):
+    api, driver, setup, calls = photo_read_api
+    driver._binding_config = lambda binding: SimpleNamespace(serial="other", product_id=11)
+    with pytest.raises(api.PhysicalIdentityMismatch) as captured:
+        _finish_immediate(setup(b"", b""))
+    facts = api.exception_diagnostic(captured.value)["diagnostic_facts"]
+    assert facts["expected_identity"] == {"serial": "expected", "product_id": 10}
+    assert facts["configured_identity"] == {"serial": "other", "product_id": 11}
+    assert not calls
+
+
+def test_device_read_uses_original_camera_name_after_verifying_identity(photo_read_api):
+    _, driver, setup, calls = photo_read_api
+    source = _finish_immediate(setup(b"vid=0x2756 pid=0x000a bus=1 addr=2\n", b"serial : expected\n"))
+    assert calls == ["list", "info", "download"]
+    assert driver.recorded_args[-1] == ("download", "original", "a.3FR", "--output", "/staging/read-downloads/9-1")
+    assert source.size_bytes == 123
+
+
+@pytest.mark.parametrize("step,output,reason", [
+    ("info", b"bad response\n", "preparation_failed"),
+    ("download", b"partial download\n", "timeout"),
+])
+def test_device_read_error_retains_calls_and_elapsed_time(photo_read_api, step, output, reason):
+    api, _, setup, calls = photo_read_api
+    outcomes = {step: {"output": output}}
+    if step == "download":
+        outcomes[step]["error"] = "timeout"
+    with pytest.raises(api.CameraReadError) as captured:
+        _finish_immediate(setup(b"vid=0x2756 pid=0x000a bus=1 addr=2\n", b"serial : expected\n",
+                                outcomes=outcomes))
+    error = captured.value
+    assert error.reason == reason
+    assert [item["elapsed_ms"] for item in error.steps] == [7] * len(calls)
+    facts = api.exception_diagnostic(error)["diagnostic_details"]
+    assert facts["expected_identity"] == {"serial": "expected", "product_id": 10}
+    assert facts["steps"][0]["matching_count"] == 1
+    if step == "download":
+        assert facts["steps"][1]["observed_serial"] == "expected"
+    raw = facts["tool_diagnostics"]["calls"][-1]
+    assert raw["step_name"] == step and bytes.fromhex(raw["stdout"]["hex"]) == output
+    assert raw["stderr"]["text"] == "detail\n"
+
+
+@pytest.mark.parametrize("output,stderr,expected_stdout,expected_stderr", [
+    (b"partial", b"\xff\n", "unconfirmed", "unconfirmed"),
+    (None, b"detail", "unavailable", "unconfirmed"),
+    (b"partial", None, "unconfirmed", "unavailable"),
+])
+def test_device_read_unconfirmed_streams_keep_actual_bytes_without_inventing_missing_output(
+        photo_read_api, output, stderr, expected_stdout, expected_stderr):
+    api, _, setup, _ = photo_read_api
+    with pytest.raises(api.CameraReadError) as captured:
+        _finish_immediate(setup(b"", b"", outcomes={"list": {
+            "output": output, "stderr": stderr, "output_failure": "read_error"}}))
+    assert captured.value.reason == "output_incomplete"
+    call = captured.value.diagnostic_details["tool_diagnostics"]["calls"][0]
+    assert call["stdout"] == {"state": expected_stdout, "hex": None if output is None else output.hex()}
+    assert call["stderr"] == {"state": expected_stderr, "hex": None if stderr is None else stderr.hex(),
+                              "text": None if stderr is None else stderr.decode("utf-8", "backslashreplace")}
+
+
+@pytest.mark.parametrize("info,expected", [
+    (b"serial : other\n", "serial_mismatch"),
+    (b"bad response\n", "CliParseError"),
+])
+def test_device_read_cleanup_failure_keeps_original_diagnostics_once(photo_read_api, monkeypatch, info, expected):
+    import json
+
+    api, _, setup, _ = photo_read_api
+    async def fail_cleanup(self):
+        raise OSError("cleanup failed")
+    monkeypatch.setattr(api.DownloadWorkspace, "cleanup", fail_cleanup)
+    with pytest.raises(api.CameraReadError) as captured:
+        _finish_immediate(setup(b"vid=0x2756 pid=0x000a bus=1 addr=2\n", info))
+    document = api.exception_diagnostic(captured.value)
+    encoded = json.dumps(document, ensure_ascii=False)
+    assert captured.value.reason == "preparation_and_cleanup_failed"
+    assert expected in encoded and "cleanup failed" in encoded
+    assert encoded.count(info.hex()) == 1
+
+
+def test_device_read_unconfirmed_cleanup_keeps_original_diagnostics_once(photo_read_api, monkeypatch):
+    import json
+
+    api, _, setup, _ = photo_read_api
+    monkeypatch.setattr(api.DownloadWorkspace, "files_closed", False)
+    async def unexpected_cleanup(self):
+        raise AssertionError("不得清理尚未收场的下载目录")
+    monkeypatch.setattr(api.DownloadWorkspace, "cleanup", unexpected_cleanup)
+    with pytest.raises(api.CameraReadError) as captured:
+        _finish_immediate(setup(b"vid=0x2756 pid=0x000a bus=1 addr=2\n", b"serial : other\n"))
+    encoded = json.dumps(api.exception_diagnostic(captured.value), ensure_ascii=False)
+    assert captured.value.reason == "preparation_unconfirmed"
+    assert captured.value.settlement.value == "unconfirmed"
+    assert "serial_mismatch" in encoded
+    assert encoded.count(b"serial : other\n".hex()) == 1
 
 
 @pytest.mark.parametrize("role", ["original", "thumbnail"])

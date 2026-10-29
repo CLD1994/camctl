@@ -45,6 +45,15 @@ def _options(field_schema):
     return [branch["const"] for branch in field_schema["oneOf"]]
 
 
+def test_repeated_photo_validation_checks_each_input_against_independent_rule():
+    exported = photo_schema()
+    exported["properties"]["capture_format"]["oneOf"].clear()
+    assert parse_photo_settings(_photo()).capture_format is CaptureFormat.RAW
+    with pytest.raises(BodySchemaError):
+        parse_photo_settings({**_photo(), "capture_format": "unsupported"})
+    assert parse_photo_settings({**_photo(), "capture_format": "jpeg"}).capture_format is CaptureFormat.JPEG
+
+
 def test_photo_schema_has_closed_independent_branches():
     schema = photo_schema()
 

@@ -43,6 +43,26 @@ def _require_sync_start_response(response, data):
             raise ConsistencyError("照片同步候选与原 START 实际响应不同")
 
 
+@dataclass(frozen=True)
+class _VerifiedPhotoStart:
+    event_id: int
+    data: Mapping[str, Any]
+    locator: Any
+    stdout: bytes
+    stderr: bytes
+    capture_format: Any
+
+    def require_sync_response(self, output_directory):
+        """在同一已核对的 START 事实内解析原工具的同步文件记录。"""
+        from camctl.devices.drivers.hasselblad.responses import parse_device_capture
+
+        response = parse_device_capture(self.stdout, self.stderr, output_complete=True,
+            capture_format=self.capture_format, output_directory=output_directory)
+        if response.camera_locator != self.locator:
+            raise ConsistencyError("照片 START 的实际机内定位与保存结果不符")
+        _require_sync_start_response(response, self.data)
+
+
 class PhotoResultReads:
     """从原事务连接核对设备双源与可靠 START 结果。"""
 
@@ -72,6 +92,12 @@ class PhotoResultReads:
 
     def read_device_start(self, action, activity_id, *, before_event_id, output_directory=None):
         """从原连接和完整历史核对 DEVICE 单张 START 的真实结果。"""
+        start = self._read_device_start(action, activity_id, before_event_id=before_event_id,
+                                        output_directory=output_directory)
+        return start.event_id, start.data, start.locator
+
+    def _read_device_start(self, action, activity_id, *, before_event_id, output_directory=None):
+        """保留本次核对所得原双流，供同一调用核实同步文件。"""
         import hashlib
         from camctl.contracts.json_values import json_equal
         from camctl.devices.drivers.hasselblad.files import CameraFileLocator, CameraLocatorStatus
@@ -218,13 +244,15 @@ class PhotoResultReads:
         if len(cameras) != 1 or parse_serial(identity_calls[1].stdout.data) != identity["serial"]:
             raise ConsistencyError("照片 START 的实际机身与固定身份不符")
         capture = diagnostics.calls[-1]
+        capture_format = saved_photo_format(action)
         response = parse_device_capture(capture.stdout.data, capture.stderr.data, output_complete=True,
-            capture_format=saved_photo_format(action), output_directory=output_directory or "/unused")
+            capture_format=capture_format, output_directory=output_directory or "/unused")
         if response.camera_locator != locator:
             raise ConsistencyError("照片 START 的实际机内定位与保存结果不符")
         if output_directory is not None:
             _require_sync_start_response(response, data)
-        return attempt["result_event_id"], data, locator
+        return _VerifiedPhotoStart(attempt["result_event_id"], data, locator,
+                                   capture.stdout.data, capture.stderr.data, capture_format)
 
     def verify_device_page(self, action_id, activity_id, attempt_id, page, *, before_page_event_id=None):
         """从原连接核对角色页、原 START、固定机身和实际工具结果。"""
@@ -404,6 +432,12 @@ class PhotoResultReads:
     def verify_device_file(self, file_id, observation, *, before_event_id, role=None, sha256=None,
                            check_sha=False, size_bytes=None, check_size=False):
         """从原 START 和结果页独立核对文件事实；旧照片保持原合同。"""
+        self._verify_device_file(file_id, observation, before_event_id=before_event_id, role=role,
+                                 sha256=sha256, check_sha=check_sha, size_bytes=size_bytes,
+                                 check_size=check_size)
+
+    def _verify_device_file(self, file_id, observation, *, before_event_id, role=None, sha256=None,
+                            check_sha=False, size_bytes=None, check_size=False):
         from camctl.capture.files import file_identity_key
         from camctl.contracts.json_values import json_equal
         from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
@@ -437,7 +471,8 @@ class PhotoResultReads:
                 DeferredCameraFileIdentity, DownloadVariant, deferred_photo_identities,
             )
 
-            start_id, data, _ = self.read_device_start(action, activity_id, before_event_id=before_event_id)
+            start = self._read_device_start(action, activity_id, before_event_id=before_event_id)
+            start_id, data = start.event_id, start.data
             binding = DeviceBinding(action["device_id"], action["driver_id"])
             identities = deferred_photo_identities(binding, data)
             identity = DeferredCameraFileIdentity.from_source(facts["identity_key"], facts["locator_json"])
@@ -451,7 +486,7 @@ class PhotoResultReads:
                     or (check_size and size_bytes is not None)
                     or (check_sha and sha256 is not None)):
                 raise ConsistencyError("按需照片来源与原 START、角色或未知内容不一致")
-            return
+            return start
         outcome = read_result_document(start_attempt["status"], start_attempt["effect_state"],
             start_attempt["result_json"], start_attempt["error_json"])
         photos = [item for item in outcome.observations if item.type == "photo_taken"]
@@ -491,7 +526,6 @@ class PhotoResultReads:
     def verify_sync_cache(self, request, *, before_event_id):
         """核对同步缓存直接属于原 START 返回的同一照片角色。"""
         from pathlib import PurePosixPath
-        from camctl.contracts.json_values import json_equal
         from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
 
         file = row_facts(self.connection, "device_files", request.device_file_id)
@@ -501,16 +535,17 @@ class PhotoResultReads:
         if (action is None or action["driver_id"] != DRIVER_ID
                 or action["execution_spec_json"].get("photo_source_policy") != "deferred"
                 or file is None or file["source_action_id"] != request.action_id
+                or file["observer_action_id"] != request.action_id
                 or file["completion_state"] != 3 or file["size_bytes"] is not None or file["sha256"] is not None):
             raise ConsistencyError("照片同步缓存不属于原按需设备来源")
-        self.verify_device_file(file["id"], observation, before_event_id=before_event_id,
+        start = self._verify_device_file(file["id"], observation, before_event_id=before_event_id,
             role=file["role"], size_bytes=None, check_size=True, sha256=None, check_sha=True)
         reference = observation.get("photo_start") if isinstance(observation, Mapping) else None
         if (not isinstance(reference, Mapping) or reference.get("role") != request.role
                 or reference.get("start_result_event_id") != request.start_result_event_id):
             raise ConsistencyError("照片同步缓存与原 START 角色引用不一致")
         activity_id = int(observation["activity_id"])
-        start_id, data, _ = self.read_device_start(action, activity_id, before_event_id=before_event_id)
+        start_id, data = start.event_id, start.data
         candidate = data["original" if request.role == "original" else "preview"]
         if (start_id != request.start_result_event_id or not isinstance(candidate, Mapping)
                 or set(candidate) != {"host_path", "host_name", "size", "media_type"}
@@ -522,10 +557,7 @@ class PhotoResultReads:
                 or path.parent.name != str(activity_id) or path.parent.parent.name != "capture-work"
                 or str(path) != candidate["host_path"]):
             raise ConsistencyError("照片同步缓存路径不属于原拍摄工作目录")
-        checked_id, checked, _ = self.read_device_start(action, activity_id,
-            before_event_id=before_event_id, output_directory=str(path.parent))
-        if checked_id != start_id or not json_equal(checked, data):
-            raise ConsistencyError("照片同步缓存与原实际拍摄双流不一致")
+        start.require_sync_response(str(path.parent))
         return request.role
 
     def verify_cache(self, request, *, before_event_id):
