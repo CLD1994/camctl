@@ -1,6 +1,7 @@
 """设备长任务不占有后续动作的窗口观察责任。"""
 
 import asyncio
+import json
 import sqlite3
 from dataclasses import dataclass
 from decimal import Decimal
@@ -163,6 +164,26 @@ async def test_repeated_window_checks_save_one_observation(mocker, rounds):
     assert state.repository.observe_window.call_count == 1
     state.repository.expire_action.assert_not_called()
     assert action.first_observed_at == 1000
+
+
+async def test_expiration_records_action_window_and_actual_reason_once(mocker):
+    from camctl.logging_runtime.events import event_logging
+
+    action = _Action(101, 1000, 1)
+    state = _CaptureState(mocker, (action,))
+    state.now = 2001
+    records = []
+    channel = SimpleNamespace(slog=lambda record: records.append(json.loads(record.rendered_message())))
+    with event_logging(channel):
+        await state.flow._observe_windows(state.context, state.database, (101,))
+        await state.flow._observe_windows(state.context, state.database, (101,))
+    assert len(records) == 1
+    assert {key: records[0][key] for key in (
+        'stage', 'event', 'level', 'action_id', 'scheduled_at_us', 'max_delay_ms',
+        'observed_at_us', 'expiration_reason')} == {
+        'stage': 'scheduling.window', 'event': 'expired', 'level': 'INFO',
+        'action_id': 101, 'scheduled_at_us': 1000, 'max_delay_ms': 1,
+        'observed_at_us': 2001, 'expiration_reason': 1}
 
 
 @pytest.mark.parametrize("status,cancel_requested", [

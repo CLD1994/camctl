@@ -4,7 +4,7 @@ import builtins
 import importlib.resources
 import io
 import json
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 import importlib.abc
 import importlib.util
 from pathlib import Path
@@ -76,6 +76,7 @@ def modules():
                 if alias.name != "*":
                     setattr(module, alias.name, type(alias.name, (Exception,), {}))
     dependencies["camctl.logging_runtime.formatting"].encode_record = lambda level, value: json.dumps(value)
+    dependencies["camctl.logging_runtime.events"].monitor_slow_stage = lambda *args, **kwargs: nullcontext()
     dependencies["camctl.logging_runtime.models"].LogLevel = SimpleNamespace(ERROR="error")
     dependencies["camctl.capture.recovery"].RecoveryBoundary = SimpleNamespace(UNCONFIRMED=object())
     dependencies["camctl.persistence.models"].DbOutcomeKind = SimpleNamespace(

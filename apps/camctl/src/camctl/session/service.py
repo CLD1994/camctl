@@ -18,7 +18,7 @@ from contextlib import closing
 from dataclasses import dataclass, field, replace
 from typing import Any, Awaitable, Callable, Mapping, Protocol
 
-from camctl.logging_runtime.events import measure_stage, record_event
+from camctl.logging_runtime.events import measure_stage, monitor_slow_stage, record_event
 from camctl.acceptance.input import InputDiagnostic, ParsedInput
 from camctl.acceptance.notification import notify_acceptance
 from camctl.acceptance.service import AcceptanceResult, CommandMode, accept_input
@@ -1032,10 +1032,12 @@ async def _run_session(
             try:
                 if context.snapshot_owner is not None:
                     try:
-                        await context.snapshot_owner.discover()
+                        with monitor_slow_stage("session.snapshot_discovery"):
+                            await context.snapshot_owner.discover()
                     except Exception as error:
                         return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
-                fatal = await _drive_flows(context)
+                with monitor_slow_stage("session.flow_round"):
+                    fatal = await _drive_flows(context)
             except ClockBecameUntrusted as clock_error:
                 async def transition_to_restricted() -> SessionOutcome:
                     nonlocal admission_lease
@@ -1095,7 +1097,8 @@ async def _run_session(
             try:
                 # 数据库空闲后先交付已有后台轮次，再由关闭事务复核全部
                 # 责任；本地发现任务不能使等待它结束的收场入口永远跳过。
-                decision = classify_work(await _run_work_facts(context, include_local=False))
+                with monitor_slow_stage("session.work_facts"):
+                    decision = classify_work(await _run_work_facts(context, include_local=False))
             except Exception as error:
                 return _outcome_error("state_db_error", {"error": str(error), "exception": exception_diagnostic(error)}, error=error)
             if decision.kind is not WorkDecisionKind.NEEDS_DRIVER:
@@ -1494,10 +1497,11 @@ async def _drive_flows(context: SessionContext) -> SessionOutcome | None:
             from camctl.logging_runtime.diagnostics import diagnostic_scope
 
             async with diagnostic_scope():
-                if name == "report" and not getattr(flow, "owns_report_error_boundary", False):
-                    await _advance_report_flow(context, flow)
-                else:
-                    await flow(context)
+                with monitor_slow_stage("session.flow", flow=name):
+                    if name == "report" and not getattr(flow, "owns_report_error_boundary", False):
+                        await _advance_report_flow(context, flow)
+                    else:
+                        await flow(context)
         except ClockBecameUntrusted:
             raise
         except (DirectoryBindingError, DeviceConfigurationError):
@@ -1982,8 +1986,9 @@ async def _wait_for_more_work(
     """
     wait_s = context.poll_interval_s
     now_us = context.clock.utc_micros()
-    deadline = await database.read(
-        lambda owned: _pending_deadline_seconds(now_us, owned), description="下一业务截止")
+    with monitor_slow_stage("session.wait_deadline"):
+        deadline = await database.read(
+            lambda owned: _pending_deadline_seconds(now_us, owned), description="下一业务截止")
     if deadline is not None:
         wait_s = min(wait_s, deadline)
     loop = asyncio.get_running_loop()
@@ -1995,14 +2000,16 @@ async def _wait_for_more_work(
             if at is not None:
                 wait_s = min(wait_s, max(0, at - now))
     wait_s = max(wait_s, _MIN_IDLE_WAIT_S)
-    if context.wake is None:
-        await asyncio.sleep(wait_s)
-        return
-    # 本轮查询前的版本覆盖流程内安排的下一批，以及查询后到等待前的通知。
-    # 通知已到达时仍交回事件循环，避免连续页面挤占其他设备或取消收场。
-    await asyncio.sleep(0)
-    await context.wake.wait_changed(context.wake.snapshot() if observed is None else observed,
-                                    loop.time() + wait_s)
+    with monitor_slow_stage("session.wait", threshold_s=wait_s + 1.0,
+                            planned_wait_ms=round(wait_s * 1000, 3)):
+        if context.wake is None:
+            await asyncio.sleep(wait_s)
+            return
+        # 本轮查询前的版本覆盖流程内安排的下一批，以及查询后到等待前的通知。
+        # 通知已到达时仍交回事件循环，避免连续页面挤占其他设备或取消收场。
+        await asyncio.sleep(0)
+        await context.wake.wait_changed(context.wake.snapshot() if observed is None else observed,
+                                        loop.time() + wait_s)
 
 
 async def _restricted_session(context: SessionContext) -> SessionOutcome:

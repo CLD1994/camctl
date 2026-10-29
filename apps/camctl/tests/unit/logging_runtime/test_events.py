@@ -137,3 +137,47 @@ def test_context_snapshot_copies_fields_and_restores_channel_and_fallback():
     assert events.current_logging_context().channel is None
     assert events.current_logging_context().fallback is None
     assert events.current_logging_context().fields == {}
+
+
+@pytest.mark.asyncio
+async def test_slow_stage_reports_in_progress_and_actual_completion():
+    channel = channel_stub()
+    with events.event_logging(channel), events.log_context(session_key="session"):
+        with events.monitor_slow_stage("session.flow", threshold_s=0.01, flow="scheduling"):
+            await asyncio.sleep(0.03)
+            assert payloads(channel)[0]["event"] == "started"
+    records = payloads(channel)
+    assert [p["event"] for p in records] == ["started", "returned"]
+    assert all(p["level"] == "INFO" and p["flow"] == "scheduling" for p in records)
+    assert records[0]["started_at_utc"] == records[1]["started_at_utc"]
+    assert records[1]["elapsed_ms"] >= 10
+
+
+@pytest.mark.asyncio
+async def test_fast_stage_is_silent_and_slow_error_preserves_exception():
+    channel = channel_stub()
+    error = ValueError("original")
+    with events.event_logging(channel):
+        with events.monitor_slow_stage("fast", threshold_s=1):
+            await asyncio.sleep(0)
+        with pytest.raises(ValueError) as raised:
+            with events.monitor_slow_stage("slow", threshold_s=0.01):
+                await asyncio.sleep(0.03)
+                raise error
+    assert raised.value is error
+    records = payloads(channel)
+    assert [(p["stage"], p["event"]) for p in records] == [
+        ("slow", "started"), ("slow", "raised")]
+    assert records[-1]["exception_type"] == "ValueError"
+
+
+@pytest.mark.asyncio
+async def test_slow_stage_logs_if_event_loop_could_not_run_the_timer(monkeypatch):
+    channel = channel_stub()
+    ticks = iter((0, 2_000_000_000, 2_000_000_000))
+    monkeypatch.setattr(events, "monotonic_ns", lambda: next(ticks))
+    with events.event_logging(channel):
+        with events.monitor_slow_stage("session.flow"):
+            pass
+    assert [p["event"] for p in payloads(channel)] == ["started", "returned"]
+    assert payloads(channel)[-1]["elapsed_ms"] == 2000

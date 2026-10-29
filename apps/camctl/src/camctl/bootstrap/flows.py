@@ -31,7 +31,7 @@ from camctl.capture.wakeups import RecordingWakeups
 from camctl.capture.residual import residual_flow as _residual_flow_impl
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID as HASSELBLAD_DRIVER_ID
-from camctl.logging_runtime.events import measure_stage, record_event
+from camctl.logging_runtime.events import measure_stage, monitor_slow_stage, record_event
 from camctl.persistence.models import DbEnqueueTimeoutError, DbExecutorError, DbOutcomeKind, db_failure
 from camctl.persistence.business import settle_required
 from camctl.persistence.repositories.scheduling import (
@@ -69,6 +69,14 @@ async def _policy_write(database, method, *args, **kwargs):
     key = new_operation_key()
     return await database.write(
         lambda owned: method(key, owned, *args, **kwargs), key=key)
+
+
+def _log_expiration(outcome, action_id, scheduled_at, max_delay_ms, observed_at):
+    if outcome.value.outcome is ExpireOutcome.EXPIRED:
+        record_event("scheduling.window", event="expired", action_id=action_id,
+                     scheduled_at_us=scheduled_at, max_delay_ms=max_delay_ms,
+                     observed_at_us=observed_at,
+                     expiration_reason=outcome.value.expiration_reason)
 
 
 def residual_flow(capture_factory, *, resume_media_results=None, resume_file_observations=None,
@@ -222,17 +230,19 @@ class CaptureFlow:
         try:
             await _resume_actual_file_facts(database, self._resume_files, self._resume_media, self._resume_reads)
             now = context.clock.utc_micros()
-            await self._discovery.begin_round(database, now)
-            if self._preparation_leads:
-                from camctl.outputs.read_discovery import next_preparation_at
-                page = await self._discovery.captures(database, now, self._preparation_leads)
-                at = await database.read(
-                    lambda owned: next_preparation_at(owned.connection, now, self._preparation_leads))
-                self._preparation_at = (None if at is None else
-                    asyncio.get_running_loop().time() + max(0, at - now) / 1_000_000)
-            else:
-                page = await self._discovery.captures(database, now)
-            await self._observe_windows(context, database, tuple(item[0] for item in page.items))
+            with monitor_slow_stage("scheduling.discovery"):
+                await self._discovery.begin_round(database, now)
+                if self._preparation_leads:
+                    from camctl.outputs.read_discovery import next_preparation_at
+                    page = await self._discovery.captures(database, now, self._preparation_leads)
+                    at = await database.read(
+                        lambda owned: next_preparation_at(owned.connection, now, self._preparation_leads))
+                    self._preparation_at = (None if at is None else
+                        asyncio.get_running_loop().time() + max(0, at - now) / 1_000_000)
+                else:
+                    page = await self._discovery.captures(database, now)
+            with monitor_slow_stage("scheduling.window_check"):
+                await self._observe_windows(context, database, tuple(item[0] for item in page.items))
             device_ids = {}
             for action_id, device_id, *_ in page.items:
                 device_ids.setdefault(device_id, []).append(action_id)
@@ -250,7 +260,9 @@ class CaptureFlow:
             if owner is None:
                 async def advance(context, device_id=device_id):
                     candidates = self._device_candidates[device_id]
-                    return await self._advance_device(context, device_id, candidates)
+                    with monitor_slow_stage("scheduling.device", device_id=device_id,
+                                            action_ids=list(candidates)):
+                        return await self._advance_device(context, device_id, candidates)
                 owner = BackgroundFlow(advance)
                 self._devices[device_id] = owner
             await owner(context)
@@ -288,6 +300,8 @@ class CaptureFlow:
                 continue
             if outcome.kind is not DbOutcomeKind.COMPLETED:
                 raise db_failure(StateDbFailure, f"{operation}事务未完成（{outcome.kind.value}）: {outcome.error}", outcome)
+            if current > scheduled_at + max_delay_ms * 1000:
+                _log_expiration(outcome, action_id, scheduled_at, max_delay_ms, current)
 
     async def _advance_device(self, context, device_id, action_ids):
         database = context.database
@@ -374,6 +388,7 @@ class CaptureFlow:
                         ExpireActionRequest(action_id, current, current))
                     if outcome.kind is not DbOutcomeKind.COMPLETED:
                         raise db_failure(StateDbFailure, f"动作过期事务未完成（{outcome.kind.value}）: {outcome.error}", outcome)
+                    _log_expiration(outcome, action_id, scheduled_at, max_delay_ms, current)
                     wakeup_required |= outcome.value.outcome is ExpireOutcome.EXPIRED
                     continue
                 if runtime is not None:

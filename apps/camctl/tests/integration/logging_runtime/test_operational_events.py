@@ -1,5 +1,6 @@
 """真实日志队列和文件通道共同验证级别过滤及统一逐行 JSON。"""
 
+import asyncio
 from datetime import datetime, timezone
 import json
 import logging
@@ -11,12 +12,36 @@ from camctl.logging_runtime.clh_adapter import FileChannel
 from camctl.logging_runtime.diagnostics import (
     diagnostic_scope, error_diagnostics_context, record_error,
 )
-from camctl.logging_runtime.events import event_logging, log_context, measure_stage
+from camctl.logging_runtime.events import event_logging, log_context, measure_stage, monitor_slow_stage
 from camctl.logging_runtime.lifecycle import LogRuntime, close_logging
 from camctl.logging_runtime.models import LogLevel
 from camctl.logging_runtime.performance import record_performance
 from camctl.logging_runtime.service import LogChannel, LogRecord
 from camctl.logging_runtime.standard_logging import install_standard_logging
+
+
+@pytest.mark.asyncio
+async def test_slow_stage_reaches_real_info_log_without_fast_poll_records(tmp_path):
+    path = tmp_path / "camctl.log"
+    file_channel = FileChannel(path, max_bytes=1 << 20, file_count=1)
+    channel = LogChannel(capacity=64, low_watermark=48, high_watermark=56,
+                         level=LogLevel.INFO,
+                         writer=lambda record: file_channel.write_record(record).appended)
+    runtime = LogRuntime(channel=channel, level=LogLevel.INFO, file_closer=file_channel.close)
+    channel.start()
+    try:
+        with event_logging(channel), log_context(session_key="session"):
+            with monitor_slow_stage("session.flow", threshold_s=1, flow="fast"):
+                await asyncio.sleep(0)
+            with monitor_slow_stage("session.flow", threshold_s=0.01, flow="scheduling"):
+                await asyncio.sleep(0.04)
+    finally:
+        await close_logging(runtime)
+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert [(r["event"], r["flow"]) for r in records] == [
+        ("started", "scheduling"), ("returned", "scheduling")]
+    assert all(r["level"] == "INFO" and r["session_key"] == "session" for r in records)
+    assert records[0]["started_at_utc"] == records[1]["started_at_utc"]
 
 
 @pytest.mark.asyncio

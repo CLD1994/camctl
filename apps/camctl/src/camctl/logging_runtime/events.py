@@ -6,7 +6,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from time import monotonic_ns
 
-from camctl.logging_runtime.formatting import encode_record
+from camctl.logging_runtime.formatting import encode_record, utc_now
 from camctl.logging_runtime.models import LogLevel
 from camctl.logging_runtime.service import LogRecord
 
@@ -84,3 +84,48 @@ def measure_stage(stage: str, *, level: LogLevel | None = LogLevel.INFO, **field
         else:
             record_event(stage, event="returned", level=level,
                 elapsed_ms=round((monotonic_ns() - began) / 1_000_000, 3))
+
+
+@contextmanager
+def monitor_slow_stage(stage: str, *, threshold_s=1.0, progress=None, **fields):
+    """只记录超过阈值的等待；长阶段进行中即可观察，保留实际开始时间。"""
+    if not logging_enabled():
+        yield
+        return
+    loop = asyncio.get_running_loop()
+    began = monotonic_ns()
+    started_at = utc_now()
+    reported = False
+
+    def details():
+        try:
+            return {} if progress is None else progress()
+        except Exception:
+            return {}
+
+    def started():
+        nonlocal reported
+        reported = True
+        record_event(stage, event="started", **{
+            **fields, **details(), "started_at_utc": started_at,
+            "elapsed_ms": round((monotonic_ns() - began) / 1_000_000, 3)})
+
+    timer = loop.call_later(threshold_s, started)
+    error = None
+    try:
+        yield
+    except BaseException as exc:
+        error = exc
+        raise
+    finally:
+        timer.cancel()
+        elapsed_ms = round((monotonic_ns() - began) / 1_000_000, 3)
+        if not reported and elapsed_ms >= threshold_s * 1000:
+            started()
+        if reported:
+            event = ("returned" if error is None else
+                     "cancelled" if isinstance(error, asyncio.CancelledError) else "raised")
+            extra = {} if error is None else {"exception_type": type(error).__name__}
+            record_event(stage, event=event, **{
+                **fields, **details(), **extra, "started_at_utc": started_at,
+                "elapsed_ms": elapsed_ms})

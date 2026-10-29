@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 
 import pytest
@@ -44,6 +45,51 @@ class FakeOwned:
     def __init__(self, connection: FakeConnection) -> None:
         self.connection = connection
         self.metadata = None
+
+
+async def test_slow_business_reads_distinguish_execution_from_queue(monkeypatch):
+    from camctl.logging_runtime.events import event_logging, monitor_slow_stage
+    from camctl.persistence import business
+
+    class Channel:
+        def __init__(self):
+            self.records = []
+
+        def slog(self, record):
+            self.records.append(json.loads(record.rendered_message()))
+
+    def monitor(stage, **kwargs):
+        return monitor_slow_stage(stage, threshold_s=0.3, **kwargs)
+
+    monkeypatch.setattr(business, 'monitor_slow_stage', monitor)
+    channel = Channel()
+    entered, release = threading.Event(), threading.Event()
+    executor = DbExecutor(_fake_factory([]))
+    database = business.BusinessDatabase(executor, None)
+
+    def blocking(owned):
+        entered.set()
+        release.wait(timeout=5)
+        return 1
+
+    try:
+        with event_logging(channel):
+            first = asyncio.create_task(database.read(blocking, description='first'))
+            assert await asyncio.to_thread(entered.wait, 2)
+            second = asyncio.create_task(database.read(lambda owned: 2, description='second'))
+            await asyncio.sleep(0.4)
+            starts = {r['description']: r for r in channel.records if r['event'] == 'started'}
+            assert starts['first']['phase'] == 'executing', channel.records
+            assert starts['second']['phase'] == 'queued'
+            release.set()
+            assert await asyncio.gather(first, second) == [1, 2]
+    finally:
+        release.set()
+        await executor.close()
+    returned = {r['description']: r for r in channel.records if r['event'] == 'returned'}
+    assert returned['first']['execution_ms'] >= 300
+    assert returned['second']['queue_ms'] >= 300
+    assert all(r['level'] == 'INFO' for r in channel.records)
 
 
 class BlockingWrite:
