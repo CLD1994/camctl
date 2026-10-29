@@ -5,7 +5,7 @@ description: 为 camctl 创建独立的真机验证环境，或准备用户测�
 
 # 准备真机验证部署
 
-本地新建环境使用下面的部署脚本；向用户交付安装包时使用本文末尾的安装入口。两种方式均以一份 TOML 文件提供设备绑定与本地策略，新实例只重设独立的数据路径。配置字段及三类相机示例以[配置项参考](../../../docs/camctl/configuration-reference.md)为准。
+本地新建环境使用下面的部署脚本继承已有配置；向用户交付安装包时，使用本文末尾的安装入口自动发现设备并生成 TOML。配置字段以[配置项参考](../../../docs/camctl/configuration-reference.md)为准。
 
 ## 本地新建环境
 
@@ -28,23 +28,38 @@ python3.11 .agents/skills/camctl-real-device-deploy/scripts/deploy.py \
 
 ## 用户测试部署包
 
-交付包的主机安装入口直接复制 [install-host.py](scripts/install-host.py) 和它依赖的 [deploy_support.py](scripts/deploy_support.py)，两者置于包根目录。包内同时提供 `camctl/` 下的一个 wheel 与锁定的 `requirements.txt`、`host/` 下的一个 CPack `*-Source.tar.gz` 源码包，以及描述实际组件版本与验证范围的 `RELEASE.json`。客户端仍按其组件说明独立交付。
+交付包的主机安装入口直接复制 [install-host.py](scripts/install-host.py)、[deploy_support.py](scripts/deploy_support.py) 和 [camera_discovery.py](scripts/camera_discovery.py)，三者置于包根目录。包内同时提供 `camctl/` 下的一个 wheel 与锁定的 `requirements.txt`、`host/` 下的一个 CPack `*-Source.tar.gz` 源码包，以及描述实际组件版本与验证范围的 `RELEASE.json`。客户端仍按其组件说明独立交付。
 
-将 [camctl.toml 配置模板](assets/camctl.toml)复制到包根目录。模板按节列出 Action6、OSMO 360 II 和 Hasselblad；部署人员填入现场序列号、工具路径和策略，只保留实际接入的设备，也可直接使用已有的完整 TOML 配置。安装器统一读取配置文件，调用示例为：
+安装器从当前环境自动获取相机绑定，生成 `<target>/config.toml`。`--hb-cli` 指定现场工具的路径；省略时从 PATH 查找 `hb_cli`。用户无需填写设备序列号。调用示例为：
 
 ```bash
 python3.11 install-host.py \
   --target "$HOME/.camctl/new-device-test" \
-  --config ./camctl.toml
+  --hb-cli /path/to/hb_cli
 ```
 
-目标机需要 Linux、Python 3.11、uv、CMake 3.10.2 或以上、C11 编译器及 pthread。配置与构建必须使用共享脚本中的 CMake 调用，保持组件声明的最低版本兼容。安装器保留输入中的设备绑定和其他策略，把 `paths` 设置到新实例，在 `<target>/config.toml` 写出按节排版的 TOML，再用该文件执行 `describe`、`init` 和生成启动入口。安装后将新导出的 `device-capabilities.json` 交给客户端。安装过程不启动主程序或操作相机；失败时保留安装日志及收据，使用新的目标目录重试。
+目标机需要 Linux、Python 3.11、uv、CMake 3.10.2 或以上、C11 编译器及 pthread。配置与构建使用共享脚本中的 CMake 调用，保持组件声明的最低版本兼容。安装器在新虚拟环境安装 wheel 后执行身份发现，复用该发行物的 Hasselblad 响应解析器；仅查询身份，不设置参数、拍摄、删除文件或停止设备。
+
+安装器使用 `adb devices -l` 的精确产品标识匹配相机，映射只在 `camera_discovery.py` 中维护。依据见 [Action6 现场记录](../../../docs/camctl/verification.md#arm-更新包接收与现场状态2026-10-11)及 [OSMO 现场记录](../../../docs/camctl/verification.md#osmo-360-ii-全量真机验证2026-10-17)。Hasselblad 通过 `hb_cli --pid 0x000a list` 核对 USB 身份，再用同一 PID 的 `info` 获取 serial；格式与工具选择边界见[驱动说明](../../../docs/camctl/hasselblad-driver.md)。
+
+| 检测结果 | 安装处理 |
+| --- | --- |
+| ADB 状态为 `device` 且产品标识精确匹配 | 写入完整 serial 及对应驱动；单台使用型号设备 ID，同型号多台时用型号与各自 serial 生成不同 ID，并全部配置。 |
+| ADB 设备离线、未授权、无权限，或产品未知/缺失 | 报告原始设备行与未配置原因，不猜测驱动；其他可识别设备继续检测。 |
+| 单台匹配的 CFV 100C，且 `info` 可解析 | 写入工具绝对路径、实际 serial 和 product ID；正式源与预算由发现脚本中的部署策略提供。 |
+| 多台匹配的 CFV 100C | 停止安装；工具只能按 PID 选择，无法唯一绑定。报告数量与 USB 位置，要求仅连接当前实例所用相机。 |
+| 某种工具未找到 | 明确报告该通道未检测；可以配置其他通道已识别的相机。显式提供的 hb_cli 路径无效时在创建目标前拒绝。 |
+| 查询失败、超时、响应无效，或所有通道均无可识别相机 | 停止安装并保存检测事实与错误，不初始化状态库。 |
+
+安装器把 `paths` 设置到新实例，并用生成的同一份 TOML 执行 `describe`、`init` 和生成启动入口。检测继承当前 `ADB_SERVER_SOCKET`；已设置时将其保存到检测报告并写入启动脚本，使后续调用使用相同 ADB 服务。
+
+终端须汇报工具路径、每台相机的驱动、设备 ID、serial、适用设备的正式源选择与所有显式策略，以及未配置设备的原因。未显式写入的策略采用 camctl 内置默认值，身份检测不推断设备的拍摄设置或固件结果模式。`camera-discovery.json` 保留查询参数、stdout/stderr 文本及可还原原字节的 Base64、退出码或超时事实和生成的设备配置；`install-receipt.json` 包含同一份检测结果。安装后将新导出的 `device-capabilities.json` 交给客户端。安装不启动主程序；失败时保留安装日志及收据，使用新的目标目录重试。
 
 交付前在仓库之外解压并实际执行安装入口，检查配置、状态库、能力说明和启动路径；最低 CMake 版本的兼容验证与目标 ARM64 部署分别记录。生成文件校验清单，并将配置方式及实际验证范围写入交付说明。
 
-修改共享脚本后可使用 Python 3.11 运行技能自身的集成测试：
+修改共享脚本后，使用已安装 camctl wheel 的 Python 3.11 环境运行技能自身的集成测试，以核对实际发行物的响应解析器：
 
 ```bash
-python3.11 -m unittest discover \
+/path/to/deployment/venv/bin/python -m unittest discover \
   -s .agents/skills/camctl-real-device-deploy/tests/integration -v
 ```

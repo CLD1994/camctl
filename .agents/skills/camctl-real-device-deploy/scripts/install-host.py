@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """在新的 Linux 目录安装测试实例；保留全部已有部署。"""
 import argparse
-from decimal import Decimal
 import json
 import os
 from pathlib import Path
@@ -10,15 +9,15 @@ import shutil
 import subprocess
 import sys
 import tarfile
-import tomllib
 
 from deploy_support import configure_paths, install_host, write_config
+from camera_discovery import format_report, resolve_hb_cli
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--target', type=Path, required=True, help='尚不存在的绝对部署目录')
-    parser.add_argument('--config', type=Path, required=True, help='包含实际设备绑定与本地策略的 TOML 配置')
+    parser.add_argument('--hb-cli', type=Path, help='hb_cli 可执行文件路径；省略时从 PATH 查找')
     args = parser.parse_args()
     bundle = Path(__file__).resolve().parent
     target = args.target
@@ -27,7 +26,7 @@ def main():
     if not target.is_absolute() or target.exists() or target.is_symlink():
         parser.error('--target 必须是尚不存在的绝对路径；已有数据继续保留')
     try:
-        configuration = tomllib.loads(args.config.read_text(encoding='utf-8'), parse_float=Decimal)
+        hb_cli = resolve_hb_cli(args.hb_cli)
     except (OSError, ValueError) as error:
         parser.error(str(error))
     for command in ('uv', 'cmake'):
@@ -42,8 +41,7 @@ def main():
     except (OSError, ValueError) as error:
         parser.error(str(error))
     target.mkdir(parents=True)
-    receipt = {'status': 'installing', 'release': release,
-               'config_source': str(args.config.resolve()), 'steps': []}
+    receipt = {'status': 'installing', 'release': release, 'steps': []}
     environment = {k: v for k, v in os.environ.items() if k not in ('PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV')}
     def save():
         (target / 'install-receipt.json').write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + '\n')
@@ -68,6 +66,19 @@ def main():
         run('安装锁定依赖', ['uv', 'pip', 'install', '--python', target / 'venv/bin/python', '--require-hashes', '-r', bundle / 'camctl/requirements.txt'])
         run('安装 camctl', ['uv', 'pip', 'install', '--python', target / 'venv/bin/python', '--no-deps', wheels[0]])
         run('检查依赖', ['uv', 'pip', 'check', '--python', target / 'venv/bin/python'])
+        discovery_path = target / 'camera-discovery.json'
+        discovery_command = [target / 'venv/bin/python', bundle / 'camera_discovery.py', '--report', discovery_path]
+        if args.hb_cli is not None:
+            discovery_command.extend(['--hb-cli', hb_cli])
+        try:
+            run('自动检测相机设备', discovery_command)
+        finally:
+            if discovery_path.is_file():
+                discovery = json.loads(discovery_path.read_text(encoding='utf-8'))
+                receipt['camera_discovery'] = discovery
+                save()
+                print(format_report(discovery), flush=True)
+        configuration = {'devices': discovery['devices']}
         configure_paths(configuration, target)
         config_path = target / 'config.toml'
         write_config(config_path, configuration)
@@ -88,13 +99,17 @@ def main():
         command = [target / 'host/bin/host-demo', '--camctl', target / 'venv/bin/camctl', '--config', config_path,
                    '--ready', target / 'ready', '--processing', target / 'processing', '--log', target / 'host.log']
         launcher = target / 'start-host-demo.sh'
-        launcher.write_text('#!/usr/bin/env bash\nset -euo pipefail\nexec ' + shlex.join([str(v) for v in command]) + '\n')
+        exports = ''.join('export ' + key + '=' + shlex.quote(value) + '\n'
+            for key, value in discovery['environment'].items())
+        launcher.write_text('#!/usr/bin/env bash\nset -euo pipefail\n' + exports +
+            'exec ' + shlex.join([str(v) for v in command]) + '\n')
         launcher.chmod(0o700)
         receipt['status'] = 'installed_stopped'
         save()
         print('安装完成；启动入口：' + str(launcher))
         print('客户端能力说明：' + str(target / 'device-capabilities.json'))
-        print('相机与主程序尚未启动。')
+        print('检测报告：' + str(discovery_path))
+        print('安装仅查询设备身份，未启动主程序或执行拍摄。')
     except Exception as error:
         receipt.update(status='failed', error=str(error)); save()
         print(str(error) + '；保留该目录和日志，修正后使用新的目标目录。', file=sys.stderr)

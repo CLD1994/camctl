@@ -22,7 +22,11 @@ spec.loader.exec_module(support)
 
 class DeploymentFiles(unittest.TestCase):
     def test_readable_sections_preserve_all_config_values(self):
-        source = tomllib.loads((SKILL / "assets/camctl.toml").read_text(), parse_float=Decimal)
+        source = {"devices": {
+            "action6": {"kind": "camera", "driver": "dji-action6", "adb": {"serial": "A"}},
+            "osmo360ii": {"kind": "camera", "driver": "dji-osmo360-ii", "adb": {"serial": "O"}},
+            "hasselblad": {"kind": "camera", "driver": "hasselblad_cfv100c",
+                "hasselblad": {"executable": "/opt/hb_cli", "serial": "H"}}}}
         source["devices"]["带点.空格 id"] = source["devices"].pop("action6")
         source["devices"]["带点.空格 id"]["connection"] = {"prepare_lead_s": Decimal("0.1234567890123456789")}
         source["devices"]["osmo360ii"]["software_recovery"] = {"enabled": True}
@@ -71,16 +75,16 @@ class DeploymentFiles(unittest.TestCase):
             support.install_host(run, source, root)
             subprocess.run([root / "host/bin/host-demo"], check=True)
 
-    def test_installer_rejects_missing_or_invalid_config_without_creating_target(self):
+    def test_installer_rejects_missing_or_nonexecutable_hb_cli_without_creating_target(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            config = root / "input.toml"
-            for content in (None, "this is not TOML"):
+            tool = root / "hb_cli"
+            for content in (None, "not executable"):
                 if content is not None:
-                    config.write_text(content)
+                    tool.write_text(content)
                 target = root / "deployment"
                 result = subprocess.run([sys.executable, SCRIPTS / "install-host.py",
-                    "--target", target, "--config", config], capture_output=True, text=True)
+                    "--target", target, "--hb-cli", tool], capture_output=True, text=True)
                 self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                 self.assertFalse(target.exists())
 
@@ -90,7 +94,7 @@ class DeploymentFiles(unittest.TestCase):
             marker = target / "state.db"
             marker.write_bytes(b"existing database")
             result = subprocess.run([sys.executable, SCRIPTS / "install-host.py",
-                "--target", target, "--config", SKILL / "assets/camctl.toml"],
+                "--target", target],
                 capture_output=True, text=True)
             self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
             self.assertEqual(marker.read_bytes(), b"existing database")
