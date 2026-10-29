@@ -19,10 +19,28 @@ python3.11 .agents/skills/camctl-real-device-deploy/scripts/deploy.py \
   --config /path/to/existing/config.toml \
   --target /path/to/new-environment \
   --environment /path/to/existing/environment.sh \
-  --hasselblad-id hasselbla-01
+  --hasselblad-id hasselbla-01 \
+  --ready /var/opt/SatService/dt_outbox \
+  --processing /var/opt/SatService/dt_sending
 ```
 
 `--environment` 和 `--hasselblad-id` 是按需选项；`--python` 可指定 Python 3.11 解释器。目标目录必须不存在；位于仓库内时必须放在 `tmp` 目录下。具体参数和前提以 `--help` 为准。脚本构建并安装三组件，依据配置创建独立状态库和交接目录，生成客户端能力说明及启动入口，留下日志和部署收据。脚本不迁移旧状态库、客户端数据或媒体，也不启动 host 或操作真实设备。失败时保留诊断，处理原因后使用新的目标目录。
+
+### 首次部署的路径参数
+
+`deploy.py` 和交付包的 `install-host.py` 都接受以下可选参数。显式参数覆盖对应的新实例默认路径；未指定项继续放在 `target` 下。本地部署继承设备及其他配置，原配置中的 `paths` 由本次部署参数和新实例默认值重新生成。
+
+| 参数 | 配置字段 | 未指定时 |
+| --- | --- | --- |
+| `--state-db PATH` | `paths.state_db` | `<target>/state.db` |
+| `--log-file PATH` | `paths.log_file` | `<target>/camctl.log` |
+| `--staging PATH` | `paths.staging` | `<target>/staging` |
+| `--ready PATH` | `paths.ready` | `<target>/ready` |
+| `--processing PATH` | `paths.processing` | `<target>/processing` |
+
+参数使用绝对路径，含空格时按 shell 规则引用；例如 `--ready "$HOME/待传 文件"`。状态库文件须不存在，以保持新实例独立；其他路径的权限、交接目录之间的独立性及原子移动条件由 `camctl init` 按正式配置契约核验。host 自身日志继续使用 `<target>/host.log`，`--log-file` 配置的是 Python camctl 日志。
+
+最终 `paths` 必须在写出 `config.toml` 时确定，随后能力导出、`init` 和启动入口共同使用这一份配置；部署收据保存最终路径。host 的 `ready`、`processing` 与配置保持一致。通过安装参数确定路径后，首次 `init` 直接建立正确绑定。安装后再修改已绑定的交接目录，仍须遵守项目的[目录切换规则](../../../docs/architecture/configuration.md#文件目录的绑定与变更)。
 
 部署后根据收据报告源码版本、目标路径、设备配置与额外客户端声明、启动入口及实际执行的检查。用户需要客户端运行时启动 `start-client.sh` 并检查一次网页入口；启动 host 前确认其他环境没有运行中的 host 和 camctl，以免同时操作相同设备。需要 ADB 时报告当前连接结果。构建与初始化不等于集成测试或真实设备验收，不要反复执行已完成的检查。保留原环境的数据库及文件，既有环境更新和目录迁移应遵循仓库部署及目录切换规则，不套用新建流程。
 
@@ -39,7 +57,9 @@ python3.11 .agents/skills/camctl-real-device-deploy/scripts/deploy.py \
 ```bash
 python3 install-host.py \
   --target "$HOME/.camctl/new-device-test" \
-  --hb-cli /path/to/hb_cli
+  --hb-cli /path/to/hb_cli \
+  --ready /var/opt/SatService/dt_outbox \
+  --processing /var/opt/SatService/dt_sending
 ```
 
 新建自动配置的设备实例 ID 使用型号前缀和至少两位编号，各型号分别从 01 开始递增。编号只用于设备实例，驱动标识及驱动配置字段不随实例名称改变；继承已有配置时保留原设备 ID。
@@ -60,7 +80,7 @@ python3 install-host.py \
 | 某种相机未识别到，包括工具缺失、设备未连接或只有未知/不可用设备 | 已识别的设备保留真实配置，缺失型号生成编号为 01 的 `REPLACE_*` 占位项；Hasselblad 工具已找到时保留实际路径，否则生成明确的工具路径占位符。继续安装、能力导出与初始化，逐项报告待修改字段。 |
 | 查询失败、超时或响应无效 | 停止安装并保存检测事实与错误，不初始化状态库。 |
 
-安装器把 `paths` 设置到新实例，并用生成的同一份 TOML 执行 `describe`、`init` 和生成启动入口。检测继承当前 `ADB_SERVER_SOCKET`；已设置时将其保存到检测报告并写入启动脚本，使后续调用使用相同 ADB 服务。
+安装器按[路径参数](#首次部署的路径参数)生成最终 `paths`，在导出能力说明和初始化之前写入配置，并用同一份 TOML 执行 `describe`、`init` 和生成启动入口。检测继承当前 `ADB_SERVER_SOCKET`；已设置时将其保存到检测报告并写入启动脚本，使后续调用使用相同 ADB 服务。
 
 生成的 TOML 每台设备使用一个 `[devices.<id>]` 节，设备内部采用 `adb.serial`、`hasselblad.executable`、`recording.start_timeout_s` 等点分键。其他顶层配置各用一个节；字面含点或空格的名称保留引号，空表及精确数值保留原语义。
 

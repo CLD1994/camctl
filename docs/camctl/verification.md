@@ -1,5 +1,15 @@
 # 软件验证与实施顺序
 
+## 部署入口的自定义路径（2026-10-30）
+
+[真机部署 skill](../../.agents/skills/camctl-real-device-deploy/SKILL.md#首次部署的路径参数)的本地部署及交付安装入口共同支持五个 `paths` 参数。默认路径、参数注册和覆盖共用一个映射；显式参数在写出配置前生效，能力导出、初始化及 host 启动入口消费同一组路径，收据保留最终路径。状态库仍要求使用新文件。
+
+Linux 开发容器、Python 3.11.17 中，执行 `apps/camctl/.venv311/bin/python -m unittest discover -s .agents/skills/camctl-real-device-deploy/tests/unit -v`，7 项通过，退出 0。覆盖默认隔离、部分与全部覆盖、含空格与中文的路径、非法路径拒绝、已有状态库保护，以及 Python 3.6 入口保留路径参数。安装入口用例通过内存文件和命令替身，核对 `describe` 与 `init` 读取的最终 TOML 路径相同，启动脚本使用相同 `ready`、`processing`，没有实际安装组件、调用相机或修改状态库。
+
+按 skill 要求，使用现有安装版 camctl 的 `tmp/manual-validation-20261029/venv/bin/python`，设置 `PYTHONPATH=.agents/skills/camctl-real-device-deploy/scripts`，运行既有 `tests/integration` 目录的 unittest，15 项通过，退出 0。该范围使用真实临时 TOML、已安装的机身响应解析器及最小 CMake 工程，设备调用使用替身。没有新增或修改集成测试。两入口帮助、Python 3.6 入口与共用模块的语法检查、差异空白检查通过。
+
+日志为 `tmp/deploy-paths-unit.log`、`tmp/deploy-paths-existing-integration.log`，来源与检查收据为 `tmp/deploy-paths-receipt.json`。本项没有重建交付包、执行完整安装、在真实状态库执行初始化或连接真实相机；没有改写已有部署。
+
 ## ADB 结果扫描与预览失败分类（2026-10-29）
 
 [修复计划](../superpowers/plans/2026-10-29-adb-result-reading-and-preview-diagnostics.md)接通单文件模式的同尝试目录清单与基准筛选、同目录同主干的当前配对查询，以及预览未确认的选择、持久化与客户端消费。元数据失败保留路径、命令、期限、耗时、退出和原始 stdout／stderr。新预览选择使用 V8 约束，V7 的显式升级复用已有完整副本流程；原选择和历史保持原判定。

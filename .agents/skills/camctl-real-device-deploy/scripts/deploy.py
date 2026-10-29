@@ -14,7 +14,8 @@ import subprocess
 import sys
 import tomllib
 
-from deploy_support import configure_paths, install_host, write_config
+from deploy_support import (add_path_arguments, configure_paths, install_host,
+    path_overrides, require_new_state_db, write_config)
 
 
 def sha(path):
@@ -34,6 +35,7 @@ def main():
     parser.add_argument("--environment", type=Path, help="可选的 environment.sh；启动 host 时加载")
     parser.add_argument("--hasselblad-id", help="仅向客户端附加的 Hasselblad 设备 ID")
     parser.add_argument("--python", default="python3.11", help="Python 3.11 解释器")
+    add_path_arguments(parser)
     args = parser.parse_args()
     repo, config_file, target = args.repo.resolve(), args.config.resolve(), args.target.absolute()
     environment = args.environment.resolve() if args.environment else None
@@ -55,6 +57,8 @@ def main():
             raise ValueError("devices 必须为表")
         if args.hasselblad_id in devices and devices[args.hasselblad_id].get("driver") != "hasselblad_cfv100c":
             raise ValueError("Hasselblad 设备 ID 与已有其他设备冲突")
+        configure_paths(config, target, overrides=path_overrides(args))
+        require_new_state_db(config)
         for name in ("uv", "cmake", "npm", "node", "git", args.python):
             if not shutil.which(name):
                 raise ValueError(f"找不到工具: {name}")
@@ -70,6 +74,7 @@ def main():
     log_path = target / "deploy.log"
     receipt = {"status": "running", "repo": str(repo), "config": str(config_file),
                "config_sha256": sha(config_file), "target": str(target), "steps": [],
+               "paths": config["paths"],
                "hasselblad_id": args.hasselblad_id, "initialized": False,
                "not_run": ["host-demo", "client", "真实设备操作", "目标硬件验收"]}
     stage = "准备"
@@ -97,7 +102,6 @@ def main():
         for rel in ("apps/camctl", "apps/client", "apps/host-demo", "protocol", "docs/camctl"):
             stage = "复制当前源码 " + rel
             copy_tree(repo / rel, source / rel)
-        configure_paths(config, target)
         write_config(target / "config.toml", config)
         if environment:
             shutil.copyfile(environment, target / "environment.sh")

@@ -11,9 +11,12 @@ import sys
 import tarfile
 
 def main():
+    from deploy_support import add_path_arguments, path_overrides
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--target', type=Path, required=True, help='尚不存在的绝对部署目录')
     parser.add_argument('--hb-cli', type=Path, help='hb_cli 可执行文件路径；省略时从 PATH 查找')
+    add_path_arguments(parser)
     args = parser.parse_args()
     if sys.platform != 'linux' or sys.version_info[:2] < (3, 6):
         parser.error('安装入口需要 Linux 和 Python 3.6 或以上')
@@ -31,7 +34,7 @@ def main():
             parser.error(str(error))
 
     # 仅在 Python 3.11 中导入依赖新语法和 tomllib 的安装实现。
-    from deploy_support import configure_paths, install_host, write_config
+    from deploy_support import configure_paths, install_host, require_new_state_db, write_config
     from camera_discovery import format_report, resolve_hb_cli
 
     bundle = Path(__file__).resolve().parent
@@ -39,6 +42,9 @@ def main():
     if not target.is_absolute() or target.exists() or target.is_symlink():
         parser.error('--target 必须是尚不存在的绝对路径；已有数据继续保留')
     try:
+        configuration = {}
+        configure_paths(configuration, target, overrides=path_overrides(args))
+        require_new_state_db(configuration)
         hb_cli = resolve_hb_cli(args.hb_cli)
     except (OSError, ValueError) as error:
         parser.error(str(error))
@@ -54,7 +60,7 @@ def main():
     except (OSError, ValueError) as error:
         parser.error(str(error))
     target.mkdir(parents=True)
-    receipt = {'status': 'installing', 'release': release, 'steps': []}
+    receipt = {'status': 'installing', 'release': release, 'steps': [], 'paths': configuration['paths']}
     def save():
         (target / 'install-receipt.json').write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + '\n')
     def run(label, argv, *, cwd=None, output=None):
@@ -90,8 +96,7 @@ def main():
                 receipt['camera_discovery'] = discovery
                 save()
                 print(format_report(discovery), flush=True)
-        configuration = {'devices': discovery['devices']}
-        configure_paths(configuration, target)
+        configuration['devices'] = discovery['devices']
         config_path = target / 'config.toml'
         write_config(config_path, configuration)
         run('按实际配置导出客户端能力说明', [target / 'venv/bin/camctl', 'describe', '--config', config_path], output=target / 'device-capabilities.json')
@@ -109,7 +114,8 @@ def main():
         install_host(run, candidates[0], target)
         run('显式初始化新状态库', [target / 'venv/bin/camctl', 'init', '--config', config_path])
         command = [target / 'host/bin/host-demo', '--camctl', target / 'venv/bin/camctl', '--config', config_path,
-                   '--ready', target / 'ready', '--processing', target / 'processing', '--log', target / 'host.log']
+                   '--ready', configuration['paths']['ready'], '--processing', configuration['paths']['processing'],
+                   '--log', target / 'host.log']
         launcher = target / 'start-host-demo.sh'
         exports = ''.join('export ' + key + '=' + shlex.quote(value) + '\n'
             for key, value in discovery['environment'].items())

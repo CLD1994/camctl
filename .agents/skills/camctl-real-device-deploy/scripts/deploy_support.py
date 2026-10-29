@@ -1,11 +1,41 @@
-"""本地部署与交付安装共用的配置写出及 host 构建。"""
-from __future__ import annotations
+"""本地部署与交付安装共用的参数、配置写出及 host 构建。"""
 
+import argparse
 import datetime
 from decimal import Decimal
 import json
+from pathlib import Path
 import re
-import tomllib
+
+
+# 参数注册、覆盖和新实例默认路径共用此映射；入口须能由 Python 3.6 导入。
+PATH_DEFAULTS = {
+    "state_db": "state.db", "log_file": "camctl.log", "staging": "staging",
+    "ready": "ready", "processing": "processing",
+}
+
+
+def absolute_path(value):
+    path = Path(value)
+    if not path.is_absolute() or "\0" in value:
+        raise argparse.ArgumentTypeError("路径必须是不含空字符的绝对路径")
+    return path
+
+
+def add_path_arguments(parser):
+    for key, default in PATH_DEFAULTS.items():
+        parser.add_argument("--" + key.replace("_", "-"), type=absolute_path, metavar="PATH",
+            help="设置 paths." + key + "；默认 <target>/" + default)
+
+
+def path_overrides(args):
+    return {key: getattr(args, key) for key in PATH_DEFAULTS if getattr(args, key) is not None}
+
+
+def require_new_state_db(config):
+    path = Path(config["paths"]["state_db"])
+    if path.exists() or path.is_symlink():
+        raise ValueError("新实例的状态库路径已存在，请指定新的文件路径: " + str(path))
 
 
 def toml_key(value):
@@ -29,6 +59,8 @@ def toml_value(value):
 
 
 def write_config(path, config):
+    import tomllib
+
     # 每台设备一个节，嵌套字段用点分键；其余顶层表各自一个节。
     lines = []
 
@@ -61,11 +93,10 @@ def write_config(path, config):
     path.write_text(contents, encoding="utf-8")
 
 
-def configure_paths(config, target):
-    """为新实例设置独立目录，保留设备和其他本地策略。"""
-    config["paths"] = {key: str(target / value) for key, value in {
-        "state_db": "state.db", "log_file": "camctl.log", "staging": "staging",
-        "ready": "ready", "processing": "processing"}.items()}
+def configure_paths(config, target, *, overrides=None):
+    """先生成新实例默认路径，再应用显式覆盖；保留其他本地策略。"""
+    config["paths"] = {key: str((overrides or {}).get(key, target / value))
+        for key, value in PATH_DEFAULTS.items()}
 
 
 def install_host(run, source, target):
