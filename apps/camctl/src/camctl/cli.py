@@ -12,6 +12,7 @@ import json
 import sys
 from dataclasses import dataclass
 from enum import Enum
+from functools import partial
 from pathlib import Path
 from typing import Any, Mapping, Sequence, TextIO
 
@@ -64,6 +65,14 @@ class Command:
 class _Parser(argparse.ArgumentParser):
     """参数错误转为 CommandLineError，退出码契约由 CLI 统一处理。"""
 
+    def __init__(self, *args, stdout: TextIO | None = None, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._stdout = stdout
+
+    def print_help(self, file: TextIO | None = None) -> None:
+        output = file if file is not None else self._stdout if self._stdout is not None else sys.stdout
+        output.write(self.format_help())
+
     def error(self, message: str) -> None:
         raise CommandLineError(message)
 
@@ -73,10 +82,11 @@ class _Parser(argparse.ArgumentParser):
         raise SystemExit(status)
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = _Parser(prog="camctl", add_help=True)
+def _build_parser(stdout: TextIO | None = None) -> argparse.ArgumentParser:
+    parser = _Parser(prog="camctl", add_help=True, stdout=stdout)
     parser.add_argument("--version", action="store_true", help="输出版本并退出")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(dest="command", required=True,
+                                    parser_class=partial(_Parser, stdout=stdout))
 
     init_parser = subparsers.add_parser("init")
     init_parser.add_argument("--config", dest="config_path", default=None)
@@ -109,14 +119,16 @@ def _notification_fd(raw: str) -> int:
     return value
 
 
-def parse_command(argv: Sequence[str]) -> Command:
-    """解析命令行；语法与参数错误统一为 CommandLineError。"""
+def parse_command(argv: Sequence[str], *, stdout: TextIO | None = None) -> Command:
+    """解析命令行；帮助输出后以 SystemExit(0) 正常结束，参数错误为 CommandLineError。"""
     arguments = list(argv)
     if "--version" in arguments:
         return Command(kind=CommandKind.VERSION, plan_path=None, config_path=None)
     try:
-        parsed = _build_parser().parse_args(arguments)
+        parsed = _build_parser(stdout=stdout).parse_args(arguments)
     except SystemExit as error:  # --help 等不带命令的退出路径。
+        if error.code == 0:
+            raise
         raise CommandLineError(f"命令行未表达可执行命令: {arguments}") from error
     kind = CommandKind(parsed.command)
     plan_path = getattr(parsed, "plan_path", None)
@@ -190,11 +202,13 @@ def main(
     out = stdout if stdout is not None else sys.stdout
     err = stderr if stderr is not None else sys.stderr
     try:
-        command = parse_command(list(sys.argv[1:] if argv is None else argv))
+        command = parse_command(list(sys.argv[1:] if argv is None else argv), stdout=out)
     except CommandLineError as error:
         _diagnose_error(err, "camctl: 命令解析失败", error)
         return 1
     except BaseException as error:
+        if isinstance(error, SystemExit) and error.code == 0:
+            return 0
         _diagnose_error(err, "camctl: 命令解析异常", error)
         raise
     try:

@@ -1,5 +1,19 @@
 # 软件验证与实施顺序
 
+## CLI 帮助命令的软件验证（2026-10-29）
+
+CLI 解析入口保留帮助的正常退出，并把帮助写入调用方指定的 stdout；真实帮助写入错误继续保留原异常及一次错误诊断。业务命令的错误监督与参数错误退出规则遵守[CLI 契约](../architecture/cli-commands.md#命令与用途)。
+
+Linux 开发容器、Python 3.11.17 下，以下定向单元范围 32 项通过，退出码为 0；覆盖顶层及四个子命令的 `-h`、`--help`、指定输出流、真实写入失败、版本输出，以及既有命令语法和通知描述符校验。
+
+```bash
+env -u PYTHONHOME -u PYTEST_ADDOPTS -u CAMCTL_TIMING_REPO -u CAMCTL_TIMING_DATA PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=apps/camctl/src:apps/camctl/tests apps/camctl/.venv311/bin/python -m pytest -p no:cacheprovider apps/camctl/tests/unit/bootstrap/test_command_output.py::TestParseCommand apps/camctl/tests/unit/bootstrap/test_command_output.py::TestMainSyntaxExitCode apps/camctl/tests/unit/bootstrap/test_notification_argument.py -q --tb=short
+```
+
+仓库之外的独立源码副本构建新 wheel，并在全新虚拟环境按锁定清单安装。安装版的 10 种帮助调用及版本调用均退出 0、stderr 为空；缺命令、未知命令、缺少计划路径和非法通知描述符四种调用均退出 1、stdout 为空，各保留一次参数错误诊断。wheel 与上一部署包逐文件比较，仅 `camctl/cli.py` 及 wheel 的 `RECORD` 清单不同；源码、wheel 和安装后的 CLI 字节一致。
+
+独立评审未发现阻塞问题。构建、依赖检查、进程结果矩阵及文件差异收据随修正版部署包保存于 `build-info/cli-help-verification.json`。本项未运行完整单元或组件集成套件，未运行拍摄业务、真实设备或 ARM64 验收，也未修改用户既有安装环境。
+
 [Hasselblad 真机验证与 H6 部署交接（2026-10-28）](hasselblad-real-device-verification-2026-10-28.md)记录安装版 C host 与真实机身的参数、双源取回、取消、未知活动恢复及有限失败，以及现场暴露的绑定和 JPEG 校验问题。真实媒体、供电见证、软件修复与尚未完成的范围分别列明；客户端不在本次范围。
 
 [关键阶段与命令日志验证（2026-10-26）](operational-logging-validation-2026-10-26.md)记录统一 JSON、INFO 阶段与实际命令、DEBUG 耗时明细的最终单元和定向集成结果，以及现有真机验证环境的安装一致性；扩大检查中的旧测试失配单独保留。

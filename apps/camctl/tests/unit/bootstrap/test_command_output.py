@@ -42,6 +42,14 @@ def isolate_builtin_driver_registration(monkeypatch):
 
 
 class TestParseCommand:
+    @pytest.mark.parametrize("flag", ["-h", "--help"])
+    def test_help_keeps_successful_exit(self, flag, capsys) -> None:
+        with pytest.raises(SystemExit) as result:
+            parse_command([flag])
+        assert result.value.code == 0
+        captured = capsys.readouterr()
+        assert captured.out and captured.err == ""
+
     def test_all_command_forms(self) -> None:
         assert parse_command(["init"]) == Command(CommandKind.INIT, None, None)
         assert parse_command(["init", "--config", "/x/c.toml"]) == Command(
@@ -122,6 +130,36 @@ class TestSessionResultChannel:
 
 
 class TestMainSyntaxExitCode:
+    @pytest.mark.parametrize("prefix", [(), ("init",), ("run",), ("submit",), ("describe",)])
+    @pytest.mark.parametrize("flag", ["-h", "--help"])
+    def test_help_outputs_to_requested_stream_and_exits_zero(self, prefix, flag, capsys) -> None:
+        from camctl.cli import main
+
+        out, err = StringIO(), StringIO()
+        assert main([*prefix, flag], stdout=out, stderr=err) == 0
+        assert "camctl" in out.getvalue()
+        assert err.getvalue() == ""
+        captured = capsys.readouterr()
+        assert captured.out == captured.err == ""
+
+    def test_help_output_failure_preserves_real_error(self, capsys) -> None:
+        from camctl.cli import main
+
+        class UnavailableOutput(StringIO):
+            def write(self, text):
+                raise OSError("help-output-unavailable")
+
+        out, err = UnavailableOutput(), StringIO()
+        with pytest.raises(OSError, match="help-output-unavailable"):
+            main(["--help"], stdout=out, stderr=err)
+        records = [json.loads(line) for line in err.getvalue().splitlines()]
+        assert len(records) == 1
+        assert records[0]["level"] == "ERROR"
+        assert records[0]["exception"]["type"] == "builtins.OSError"
+        assert out.getvalue() == ""
+        captured = capsys.readouterr()
+        assert captured.out == captured.err == ""
+
     def test_syntax_error_exits_one_not_two(self, capsys) -> None:
         from camctl.cli import main
 
@@ -134,7 +172,9 @@ class TestMainSyntaxExitCode:
         from camctl.cli import main
 
         assert main(["--version"]) == 0
-        assert capsys.readouterr().out.endswith("\n")
+        captured = capsys.readouterr()
+        assert captured.out.endswith("\n")
+        assert captured.err == ""
 
     def test_run_not_assembled_exits_one_with_stderr(self, capsys, monkeypatch) -> None:
         from camctl.cli import main
