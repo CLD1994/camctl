@@ -2,6 +2,7 @@
 
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.devices.ports import DeviceCallResult
+from camctl.devices.evidence import EvidenceError
 from camctl.operations.models import (
     AttemptStatus,
     CallOutcome,
@@ -60,11 +61,18 @@ async def recover_cleanup_call(runtime, item_id):
     decision = recover_attempt(RecoveryFacts(True, False, True))
     if not decision.save_basis or decision.redispatch:
         raise ConsistencyError("原清理恢复判定不能结束原调用")
-    kind = (
-        "local_file_recovery"
-        if await runtime.binding_of(item_id) is None
-        else "adb_foreground_recovery"
-    )
+    # 按原驱动提供的恢复登记选择依据；设备绑定也可能使用本地受管工具。
+    kind = None
+    for candidate in ("local_file_recovery", "adb_foreground_recovery"):
+        try:
+            contract = evidence.contract(candidate, 1)
+        except EvidenceError:
+            continue
+        if contract.operation == ticket.operation and not contract.fields and contract.identity_field is None:
+            kind = candidate
+            break
+    if kind is None:
+        raise ConsistencyError("原清理调用恢复登记没有适用的文件收场依据")
     actual = DeviceCallResult.from_outcome(
         CallOutcome(
             status=AttemptStatus.UNKNOWN,

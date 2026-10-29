@@ -82,14 +82,19 @@ class DriverDeclaration:
     os_reboot_recovery_supported: bool = False
     #: 在独立控制尝试中只设置参数，不发送实际 START。
     capture_preparation_supported: bool = False
+    #: 本地受管文件调用的旧进程收场恢复；只适用于删除与独立文件查询。
+    local_file_recovery_operations: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         for name, value in vars(self).items():
-            if name != "adb_foreground_recovery_operations" and type(value) is not bool:
+            if name not in ("adb_foreground_recovery_operations", "local_file_recovery_operations") and type(value) is not bool:
                 raise ValueError(f"驱动声明字段 {name} 必须是布尔值")
         operations = self.adb_foreground_recovery_operations
         if not isinstance(operations, frozenset) or not operations <= OPERATIONS:
             raise ValueError("前台命令恢复适用范围必须是已登记操作的 frozenset")
+        local_files = self.local_file_recovery_operations
+        if not isinstance(local_files, frozenset) or not local_files <= {"delete", "query"}:
+            raise ValueError("本地文件恢复适用范围只能包含 delete 与 query")
         if self.delete_supported and not self.file_query_supported:
             raise ValueError("删除能力声明必须同时支持独立文件查询")
 

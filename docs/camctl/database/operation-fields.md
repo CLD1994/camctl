@@ -550,6 +550,8 @@ camctl A 发出删除命令后中断，数据库只留下调用意图。接入�
 
 主机正式源的 DELETE_FILE 与 CHECK_FILE_EXISTS 使用 `local_file_recovery/v1`，不使用 ADB 恢复类型，也不借用仅用于读取的 `local_read_recovery/v1`。其 `settlement.basis = assumed`、`settlement.evidence.data = {}`，外层沿用版本 1 的统一结构。该类型只确认旧本地主机文件执行责任已停止，不能证明原调用成功、未派发或文件缺席。
 
+Hasselblad 的受管 DELETE 与 FILE_QUERY 同样明确声明 `local_file_recovery_operations`，使用 `local_file_recovery/v1` 结束旧本地工具调用的未知结果。原机身存在性及删除效果仍由后续可靠事实表达，不能把本地工具收场当作相机文件缺席。驱动登记与原操作绑定，设备绑定不自动授予 ADB 恢复依据；旧执行边界、原意图历史上界及有限查询规则继续适用。
+
 本地文件适配器负责登记这一类型对 DELETE 与 FILE_QUERY 的适用性和空正文校验，每次按原票据操作绑定恢复登记，不在同一集合中重复登记同一类型及版本；会话恢复层提供旧执行收场保证及启动固定历史上界，清理流程核对[旧 RUNNING 资格](cleanup-coordination.md#旧-running-尝试的恢复资格)，沿原尝试保存结果，写事务再次核对原目标、操作及意图范围。主机重新上电，或接入模块按[本地进程收场责任](../../host-demo/design.md#接入模块的本地进程收场责任)确认旧执行进程及线程均已停止，可以提供本地边界；普通工厂重建、连接重开或只观察到 CLI 主线程退出不能提供该保证。
 
 | 原主机尝试的事实 | 恢复记录与后续处理 |
