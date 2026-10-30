@@ -18,6 +18,8 @@ UV_PROJECT_ENVIRONMENT="$(pwd)/apps/camctl/.venv311" uv run --project apps/camct
 
 当前集成目录由 `python scripts/run-integration.py --scope camctl --list` 从实际源码发现，不另行维护目录清单。完整回归可以使用[隔离并行入口](../../../scripts/README.md#隔离并行集成测试)，默认覆盖全部目录与容量测试；`--target` 用于窄范围验证，不能替代完整回归。
 
+新工作区直接运行组件集成测试前，以测试使用的 Python 3.11 执行 `apps/camctl/scripts/sync_resources.py`。部分目录的 `conftest.py` 在加载时就导入需要固定定义的模块，早于集成配置的 `pytest_configure` 同步钩子；不能依靠后者准备首次导入所需资源。隔离并行入口已经在启动 pytest 前执行这一步。未完成资源准备导致的收集错误，不计作业务功能失败。
+
 不要用系统 Python 直接跑：系统解释器缺少测试依赖（如 `referencing`），SQLite 版本也不满足运行条件。
 
 ## 运行边界与结果记录
