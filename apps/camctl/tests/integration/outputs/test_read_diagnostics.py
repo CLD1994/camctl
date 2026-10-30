@@ -5,6 +5,8 @@ from dataclasses import replace
 
 import pytest
 
+from support.repository_ports import repository_port
+
 from camctl.capture.media_flow import run_recording_media
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.devices.drivers.hasselblad.driver import CameraReadError, EVIDENCE
@@ -115,20 +117,23 @@ async def test_actual_read_error_is_held_before_result_save(monkeypatch, consume
         monkeypatch.setattr(LocalSourceReader, "__init__", open_source)
     port = SaveReadPort(failed=save_failed)
     channel, fallback = Channel(), []
-    async with read_test_runtime(owned, Driver(), EVIDENCE, staging=tmp_path / "staging",
-            internal=consumer == "internal", occurred_at=lambda: command.occurred_at + 20) as runtime:
-        runtime.operations = port
-        with error_diagnostics_context(channel, fallback.append):
-            async with diagnostic_scope():
-                if save_failed:
-                    with pytest.raises(ConsistencyError) as caught:
+    with repository_port(OperationRepository, port, ("finish_attempt",),
+            matches=lambda _name, args, _kwargs: (
+                args[0].ticket.operation == "read" and
+                args[0].ticket.target_id == str(prepared.copy_id))):
+        async with read_test_runtime(owned, Driver(), EVIDENCE, staging=tmp_path / "staging",
+                internal=consumer == "internal", occurred_at=lambda: command.occurred_at + 20) as runtime:
+            with error_diagnostics_context(channel, fallback.append):
+                async with diagnostic_scope():
+                    if save_failed:
+                        with pytest.raises(ConsistencyError) as caught:
+                            await execute_read(runtime, command)
+                        assert caught.value.__cause__ is port.error
+                    else:
                         await execute_read(runtime, command)
-                    assert caught.value.__cause__ is port.error
-                else:
-                    await execute_read(runtime, command)
-                assert not channel.records
-            await flush_diagnostics()
-            await flush_diagnostics()
+                    assert not channel.records
+                await flush_diagnostics()
+                await flush_diagnostics()
     request, key = port.calls[0]
     assert len(port.calls) == 1
     ticket = request.ticket
@@ -186,13 +191,16 @@ async def test_normal_cancellation_before_dispatch_has_no_error_record(diagnosti
             return result
     port = CancelAtIntent()
     channel = Channel()
-    async with read_test_runtime(owned, driver, EVIDENCE, staging=tmp_path / "staging",
-            occurred_at=lambda: command.occurred_at + 20) as runtime:
-        runtime.operations = port
-        with error_diagnostics_context(channel, lambda _: None):
-            async with diagnostic_scope():
-                await execute_read(runtime, command)
-    assert port.tickets and driver.offsets == []
+    with repository_port(OperationRepository, port, ("begin_attempt",),
+            matches=lambda _name, args, _kwargs: (
+                args[0].operation == "read" and
+                args[0].target.copy_id == prepared.copy_id)):
+        async with read_test_runtime(owned, driver, EVIDENCE, staging=tmp_path / "staging",
+                occurred_at=lambda: command.occurred_at + 20) as runtime:
+            with error_diagnostics_context(channel, lambda _: None):
+                async with diagnostic_scope():
+                    await execute_read(runtime, command)
+    assert len(port.tickets) == 1 and driver.offsets == []
     assert channel.records == []
     assert owned.connection.execute("SELECT attempts_used FROM operation_runs WHERE copy_id=?", (prepared.copy_id,)).fetchone() == (1,)
 
