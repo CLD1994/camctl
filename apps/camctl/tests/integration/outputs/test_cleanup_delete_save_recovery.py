@@ -6,6 +6,8 @@ import sqlite3
 
 import pytest
 
+from support.repository_ports import repository_port
+
 from camctl.contracts.values import ConsistencyError
 from camctl.outputs.cleanup_flow import delete_source_file
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
@@ -116,7 +118,6 @@ async def _prepared(environment, *, query_attempts=3, missing_binding=False,
 async def _resumed(environment, runtime, owned, resources, driver, **options):
     database = await resources.restart_database(database_path(owned))
     resumed = await _configured(environment, owned, driver, database=database, **options)
-    resumed.outputs, resumed.operations = runtime.outputs, runtime.operations
     return resumed
 
 
@@ -126,49 +127,51 @@ async def test_delete_original_request_survives_save_failure(environment, method
     owned, context, runtime, driver, item_id = await _prepared(environment)
     port = _FaultOutputs(method, DbOutcomeKind.ROLLED_BACK if fault == "rollback" else DbOutcomeKind.UNKNOWN,
                          after_commit=fault == "commit_after")
-    runtime.outputs = port
-    try:
-        await delete_source_file(runtime, item_id)
-    except ConsistencyError:
-        pass
-    assert len(port.calls) == 1
-    original = port.calls[0]
-    assert len(driver.deletes) == (0 if method == "begin_cleanup_attempt" else 1)
-    await runtime.database.close()
-    owned.connection.close()
-    fresh = context.open_connection()
-    try:
-        port.enabled = False
-        resumed = await _resumed(environment, runtime, fresh, capture_resources, driver)
-        result = await delete_source_file(resumed, item_id)
-        assert result.phase in ("succeeded", "already_terminal")
-        assert len(driver.deletes) == 1
-        assert port.calls[1] == original
-        assert fresh.connection.execute(
-            "SELECT COUNT(*) FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.cleanup_item_id=?", (item_id,)).fetchone()[0] == 1
-        assert fresh.connection.execute("SELECT status FROM cleanup_items WHERE id=?", (item_id,)).fetchone()[0] == 4
-    finally:
-        fresh.connection.close()
+    with repository_port(OutputsRepository, port, (method,),
+                         matches=lambda _name, args, _kwargs: (args[0].target.cleanup_item_id if _name == "begin_cleanup_attempt" else args[0].ticket.target_id if _name == "finish_cleanup_attempt" else args[0].item_id) in (item_id, str(item_id))):
+        try:
+            await delete_source_file(runtime, item_id)
+        except ConsistencyError:
+            pass
+        assert len(port.calls) == 1
+        original = port.calls[0]
+        assert len(driver.deletes) == (0 if method == "begin_cleanup_attempt" else 1)
+        await runtime.database.close()
+        owned.connection.close()
+        fresh = context.open_connection()
+        try:
+            port.enabled = False
+            resumed = await _resumed(environment, runtime, fresh, capture_resources, driver)
+            result = await delete_source_file(resumed, item_id)
+            assert result.phase in ("succeeded", "already_terminal")
+            assert len(driver.deletes) == 1
+            assert port.calls[1] == original
+            assert fresh.connection.execute(
+                "SELECT COUNT(*) FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.cleanup_item_id=?", (item_id,)).fetchone()[0] == 1
+            assert fresh.connection.execute("SELECT status FROM cleanup_items WHERE id=?", (item_id,)).fetchone()[0] == 4
+        finally:
+            fresh.connection.close()
 
 
 @pytest.mark.parametrize("fault", ["rollback", "commit_before", "commit_after"])
 async def test_delete_companion_failure_keeps_original_request(environment, fault, capture_resources):
     owned, context, runtime, driver, item_id = await _prepared(environment)
     companion = _FaultCompanion(fault)
-    runtime.operations = companion
-    assert (await delete_source_file(runtime, item_id)).phase == "companion_rejected"
-    original = companion.calls[0]
-    companion.enabled = False
-    await runtime.database.close()
-    owned.connection.close()
-    fresh = context.open_connection()
-    try:
-        resumed = await _resumed(environment, runtime, fresh, capture_resources, driver)
-        assert (await delete_source_file(resumed, item_id)).phase in ("succeeded", "already_terminal")
-        assert companion.calls[1] == original
-        assert len(driver.deletes) == 1
-    finally:
-        fresh.connection.close()
+    with repository_port(OperationRepository, companion, ("finish_stale_runs",),
+                         matches=lambda _name, args, _kwargs: f"delete/{item_id}" in args[0].responsibility_keys):
+        assert (await delete_source_file(runtime, item_id)).phase == "companion_rejected"
+        original = companion.calls[0]
+        companion.enabled = False
+        await runtime.database.close()
+        owned.connection.close()
+        fresh = context.open_connection()
+        try:
+            resumed = await _resumed(environment, runtime, fresh, capture_resources, driver)
+            assert (await delete_source_file(resumed, item_id)).phase in ("succeeded", "already_terminal")
+            assert companion.calls[1] == original
+            assert len(driver.deletes) == 1
+        finally:
+            fresh.connection.close()
 
 
 
@@ -178,28 +181,29 @@ async def test_cancel_before_recovered_delete_never_dispatches(environment, faul
     owned, context, runtime, driver, item_id = await _prepared(environment)
     port = _FaultOutputs("begin_cleanup_attempt", DbOutcomeKind.ROLLED_BACK if fault == "rollback" else DbOutcomeKind.UNKNOWN,
                          after_commit=fault == "commit_after")
-    runtime.outputs = port
-    result = await delete_source_file(runtime, item_id)
-    assert result.phase == "delete_budget_rejected"
-    original = port.calls[0]
-    action_id = owned.connection.execute("SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()[0]
-    # 未决连接先关闭，取消以新连接提交，再接回原会话保存集合。
-    await runtime.database.close()
-    owned.connection.close()
-    fresh = context.open_connection()
-    try:
-        _apply_cleanup_cancel(fresh, action_id)
-        port.enabled = False
-        resumed = await _resumed(environment, runtime, fresh, capture_resources, driver)
-        step = await delete_source_file(resumed, item_id)
-        assert step.phase == "canceled"
-        assert not driver.deletes
-        assert fresh.connection.execute("SELECT status,restriction_state,error_code FROM cleanup_items WHERE id=?", (item_id,)).fetchone() == (6, 3, None)
-        if fault == "commit_after":
-            assert port.calls[1] == original
-            assert fresh.connection.execute("SELECT COUNT(*) FROM operation_attempts").fetchone()[0] > 0
-    finally:
-        fresh.connection.close()
+    with repository_port(OutputsRepository, port, (port.method,),
+                         matches=lambda _name, args, _kwargs: (args[0].target.cleanup_item_id if _name == "begin_cleanup_attempt" else args[0].ticket.target_id if _name == "finish_cleanup_attempt" else args[0].item_id) in (item_id, str(item_id))):
+        result = await delete_source_file(runtime, item_id)
+        assert result.phase == "delete_budget_rejected"
+        original = port.calls[0]
+        action_id = owned.connection.execute("SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()[0]
+        # 未决连接先关闭，取消以新连接提交，再接回原会话保存集合。
+        await runtime.database.close()
+        owned.connection.close()
+        fresh = context.open_connection()
+        try:
+            _apply_cleanup_cancel(fresh, action_id)
+            port.enabled = False
+            resumed = await _resumed(environment, runtime, fresh, capture_resources, driver)
+            step = await delete_source_file(resumed, item_id)
+            assert step.phase == "canceled"
+            assert not driver.deletes
+            assert fresh.connection.execute("SELECT status,restriction_state,error_code FROM cleanup_items WHERE id=?", (item_id,)).fetchone() == (6, 3, None)
+            if fault == "commit_after":
+                assert port.calls[1] == original
+                assert fresh.connection.execute("SELECT COUNT(*) FROM operation_attempts").fetchone()[0] > 0
+        finally:
+            fresh.connection.close()
 
 
 async def test_delete_return_validation_failure_keeps_original_actual(environment):
@@ -239,24 +243,24 @@ async def test_new_factory_without_current_driver_completes_original_delete(envi
     from camctl.outputs.cleanup_flow import advance_cleanup
     owned, context, runtime, driver, item_id = await _prepared(environment)
     port = _FaultOutputs(method, DbOutcomeKind.ROLLED_BACK)
-    runtime.outputs = port
-    await delete_source_file(runtime, item_id)
-    original = port.calls[0]
-    factory = cleanup_factory(devices=environment[0].devices, drivers=DriverRegistry(),
-        max_delete_attempts=3, max_query_attempts=3)
-    await runtime.database.close()
-    owned.connection.close()
-    fresh = context.open_connection()
-    try:
-        resumed = await factory(await capture_resources.restart_database(fresh))
-        resumed.outputs = port
-        port.enabled = False
-        await advance_cleanup(resumed)
-        assert port.calls[1] == original
-        assert len(driver.deletes) == 1
-        assert fresh.connection.execute("SELECT status FROM cleanup_items WHERE id=?", (item_id,)).fetchone()[0] == 4
-    finally:
-        fresh.connection.close()
+    with repository_port(OutputsRepository, port, (method,),
+                         matches=lambda _name, args, _kwargs: (args[0].target.cleanup_item_id if _name == "begin_cleanup_attempt" else args[0].ticket.target_id if _name == "finish_cleanup_attempt" else args[0].item_id) in (item_id, str(item_id))):
+        await delete_source_file(runtime, item_id)
+        original = port.calls[0]
+        factory = cleanup_factory(devices=environment[0].devices, drivers=DriverRegistry(),
+            max_delete_attempts=3, max_query_attempts=3)
+        await runtime.database.close()
+        owned.connection.close()
+        fresh = context.open_connection()
+        try:
+            resumed = await factory(await capture_resources.restart_database(fresh))
+            port.enabled = False
+            await advance_cleanup(resumed)
+            assert port.calls[1] == original
+            assert len(driver.deletes) == 1
+            assert fresh.connection.execute("SELECT status FROM cleanup_items WHERE id=?", (item_id,)).fetchone()[0] == 4
+        finally:
+            fresh.connection.close()
 
 
 
@@ -299,10 +303,15 @@ async def test_delete_post_observation_present_avoids_independent_query(environm
                     if not self.entries:
                         return super().begin_cleanup_attempt(intent, key, owned)
                     return OutputsRepository.begin_cleanup_attempt(self, intent, key, owned)
-            runtime.outputs = OnceCancelPort(owned, item_id, action_id, "cancel")
+            port = OnceCancelPort(owned, item_id, action_id, "cancel")
         else:
             _apply_cleanup_cancel(owned, action_id)
-    result = await delete_source_file(runtime, item_id)
+    if cancel_after_observation == "second_ticket":
+        with repository_port(OutputsRepository, port, ("begin_cleanup_attempt",),
+                             matches=lambda _name, args, _kwargs: args[0].target.cleanup_item_id == item_id):
+            result = await delete_source_file(runtime, item_id)
+    else:
+        result = await delete_source_file(runtime, item_id)
     assert (result.phase, result.detail) == (("canceled", "file_delete_failed") if cancel_after_observation
                                             else ("failed", "delete_attempts_exhausted"))
     assert not driver.queries
@@ -313,8 +322,10 @@ async def test_query_ticket_granted_before_cancel_is_saved_not_dispatched(enviro
     owned, _, runtime, driver, item_id = await _prepared(environment, before_query=True)
     action_id, = owned.connection.execute(
         "SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
-    runtime.outputs = _EntryPort(owned, item_id, action_id, "cancel")
-    assert (await delete_source_file(runtime, item_id)).phase == "canceled"
+    port = _EntryPort(owned, item_id, action_id, "cancel")
+    with repository_port(OutputsRepository, port, ("begin_cleanup_attempt",),
+                         matches=lambda _name, args, _kwargs: args[0].target.cleanup_item_id == item_id):
+        assert (await delete_source_file(runtime, item_id)).phase == "canceled"
     assert not driver.queries and not driver.deletes
     import json
     raw = owned.connection.execute(
@@ -340,29 +351,30 @@ async def test_all_terminal_member_saves_keep_original_application(environment, 
         _apply_cleanup_cancel(owned, action_id)
     port = _FaultOutputs(method, DbOutcomeKind.ROLLED_BACK if fault == "rollback" else DbOutcomeKind.UNKNOWN,
                          after_commit=fault == "commit_after")
-    runtime.outputs = port
-    try:
-        await delete_source_file(runtime, item_id)
-    except ConsistencyError:
-        pass
-    assert len(port.calls) == 1
-    original = port.calls[0]
-    original_delete_count, original_query_count = len(driver.deletes), len(driver.queries)
-    await runtime.database.close()
-    owned.connection.close()
-    fresh = context.open_connection()
-    try:
-        port.enabled = False
-        resumed = await _resumed(environment, runtime, fresh, capture_resources, driver)
-        result = await delete_source_file(resumed, item_id)
-        assert result.phase in ("failed", "canceled", "already_terminal")
-        assert port.calls[1] == original
-        assert (len(driver.deletes), len(driver.queries)) == (original_delete_count, original_query_count)
-        assert fresh.connection.execute(
-            "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?",
-            (str(original[1]),)).fetchone() == (1,)
-    finally:
-        fresh.connection.close()
+    with repository_port(OutputsRepository, port, (method,),
+                         matches=lambda _name, args, _kwargs: (args[0].target.cleanup_item_id if _name == "begin_cleanup_attempt" else args[0].ticket.target_id if _name == "finish_cleanup_attempt" else args[0].item_id) in (item_id, str(item_id))):
+        try:
+            await delete_source_file(runtime, item_id)
+        except ConsistencyError:
+            pass
+        assert len(port.calls) == 1
+        original = port.calls[0]
+        original_delete_count, original_query_count = len(driver.deletes), len(driver.queries)
+        await runtime.database.close()
+        owned.connection.close()
+        fresh = context.open_connection()
+        try:
+            port.enabled = False
+            resumed = await _resumed(environment, runtime, fresh, capture_resources, driver)
+            result = await delete_source_file(resumed, item_id)
+            assert result.phase in ("failed", "canceled", "already_terminal")
+            assert port.calls[1] == original
+            assert (len(driver.deletes), len(driver.queries)) == (original_delete_count, original_query_count)
+            assert fresh.connection.execute(
+                "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?",
+                (str(original[1]),)).fetchone() == (1,)
+        finally:
+            fresh.connection.close()
 
 
 @pytest.mark.parametrize("fault", ["rollback", "commit_before", "commit_after"])
@@ -371,54 +383,56 @@ async def test_query_begin_uses_original_request_and_ticket(environment, fault, 
     driver.matrix_enabled, driver.present = True, False
     port = _FaultOutputs("begin_cleanup_attempt", DbOutcomeKind.ROLLED_BACK if fault == "rollback" else DbOutcomeKind.UNKNOWN,
                          after_commit=fault == "commit_after")
-    runtime.outputs = port
-    assert (await delete_source_file(runtime, item_id)).phase == "query_rejected"
-    assert not driver.queries and not driver.deletes
-    original = port.calls[0]
-    assert original[0].operation == "query"
-    await runtime.database.close()
-    owned.connection.close()
-    fresh = context.open_connection()
-    try:
-        port.enabled = False
-        resumed = await _resumed(environment, runtime, fresh, capture_resources, driver)
-        assert (await delete_source_file(resumed, item_id)).phase == "succeeded"
-        assert len(driver.queries) == 1 and not driver.deletes
-        assert port.calls[1] == original
-        assert driver.query_requests[0].ticket.run_id == fresh.connection.execute(
-            "SELECT id FROM operation_runs WHERE cleanup_item_id=?", (item_id,)).fetchone()[0]
-    finally:
-        fresh.connection.close()
+    with repository_port(OutputsRepository, port, (port.method,),
+                         matches=lambda _name, args, _kwargs: (args[0].target.cleanup_item_id if _name == "begin_cleanup_attempt" else args[0].ticket.target_id if _name == "finish_cleanup_attempt" else args[0].item_id) in (item_id, str(item_id))):
+        assert (await delete_source_file(runtime, item_id)).phase == "query_rejected"
+        assert not driver.queries and not driver.deletes
+        original = port.calls[0]
+        assert original[0].operation == "query"
+        await runtime.database.close()
+        owned.connection.close()
+        fresh = context.open_connection()
+        try:
+            port.enabled = False
+            resumed = await _resumed(environment, runtime, fresh, capture_resources, driver)
+            assert (await delete_source_file(resumed, item_id)).phase == "succeeded"
+            assert len(driver.queries) == 1 and not driver.deletes
+            assert port.calls[1] == original
+            assert driver.query_requests[0].ticket.run_id == fresh.connection.execute(
+                "SELECT id FROM operation_runs WHERE cleanup_item_id=?", (item_id,)).fetchone()[0]
+        finally:
+            fresh.connection.close()
 
 
 @pytest.mark.parametrize("method", ["begin_cleanup_attempt", "finish_cleanup_attempt", "finish_cleanup_item"])
 async def test_temporarily_unreadable_original_key_does_not_replace_responsibility(environment, method, capture_resources):
     owned, context, runtime, driver, item_id = await _prepared(environment)
     port = _FaultOutputs(method, DbOutcomeKind.UNKNOWN, after_commit=True)
-    runtime.outputs = port
-    await delete_source_file(runtime, item_id)
-    original = port.calls[0]
-    original_count = len(driver.deletes)
-    await runtime.database.close()
-    owned.connection.close()
-    fresh = context.open_connection()
-    try:
-        port.enabled = False
-        resumed = await _resumed(environment, runtime, fresh, capture_resources, driver)
-        async with sqlite_operation_fault(
-                resumed.database, sqlite3.SQLITE_READ, "history_transactions") as fault:
-            try:
-                blocked = await delete_source_file(resumed, item_id)
-                assert blocked.phase in ("delete_budget_rejected", "finish_rejected", "result_rejected")
-            except (sqlite3.DatabaseError, ConsistencyError):
-                pass
-        assert fault["triggered"]
-        assert len(driver.deletes) == original_count
-        assert (await delete_source_file(resumed, item_id)).phase in ("succeeded", "already_terminal")
-        assert all(call == original for call in port.calls)
-        assert len(driver.deletes) == 1
-    finally:
-        fresh.connection.close()
+    with repository_port(OutputsRepository, port, (method,),
+                         matches=lambda _name, args, _kwargs: (args[0].target.cleanup_item_id if _name == "begin_cleanup_attempt" else args[0].ticket.target_id if _name == "finish_cleanup_attempt" else args[0].item_id) in (item_id, str(item_id))):
+        await delete_source_file(runtime, item_id)
+        original = port.calls[0]
+        original_count = len(driver.deletes)
+        await runtime.database.close()
+        owned.connection.close()
+        fresh = context.open_connection()
+        try:
+            port.enabled = False
+            resumed = await _resumed(environment, runtime, fresh, capture_resources, driver)
+            async with sqlite_operation_fault(
+                    resumed.database, sqlite3.SQLITE_READ, "history_transactions") as fault:
+                try:
+                    blocked = await delete_source_file(resumed, item_id)
+                    assert blocked.phase in ("delete_budget_rejected", "finish_rejected", "result_rejected")
+                except (sqlite3.DatabaseError, ConsistencyError):
+                    pass
+            assert fault["triggered"]
+            assert len(driver.deletes) == original_count
+            assert (await delete_source_file(resumed, item_id)).phase in ("succeeded", "already_terminal")
+            assert all(call == original for call in port.calls)
+            assert len(driver.deletes) == 1
+        finally:
+            fresh.connection.close()
 
 
 async def test_waiter_cancel_keeps_delete_owner_until_actual_return_is_saved(environment):
@@ -523,14 +537,15 @@ async def test_delete_already_ended_consumes_exact_saved_result_instead_of_late_
     runtime = await _configured(environment, owned, driver, evidence=evidence)
     driver.unknown_delete = not saved_present
     port = _AlreadyEndedOutputs(evidence, saved_present)
-    runtime.outputs = port
-    result = await delete_source_file(runtime, item_id)
-    assert result.phase == ("still_present" if saved_present else "succeeded")
-    assert len(driver.deletes) == 1 and not driver.queries
-    row = owned.connection.execute("SELECT a.result_json,e.occurred_at,t.operation_key FROM operation_attempts a JOIN history_events e ON e.id=a.result_event_id JOIN history_transactions t ON t.id=e.transaction_id JOIN operation_runs r ON r.id=a.run_id WHERE r.cleanup_item_id=?", (item_id,)).fetchone()
-    assert json.loads(row[0])["observations"][0]["data"]["present"] is saved_present
-    assert row[1:] == (port.existing_finish.occurred_at, port.existing_key)
-    assert port.late_finish is not port.existing_finish
+    with repository_port(OutputsRepository, port, ("finish_cleanup_attempt",),
+                         matches=lambda _name, args, _kwargs: args[0].ticket.target_id == str(item_id)):
+        result = await delete_source_file(runtime, item_id)
+        assert result.phase == ("still_present" if saved_present else "succeeded")
+        assert len(driver.deletes) == 1 and not driver.queries
+        row = owned.connection.execute("SELECT a.result_json,e.occurred_at,t.operation_key FROM operation_attempts a JOIN history_events e ON e.id=a.result_event_id JOIN history_transactions t ON t.id=e.transaction_id JOIN operation_runs r ON r.id=a.run_id WHERE r.cleanup_item_id=?", (item_id,)).fetchone()
+        assert json.loads(row[0])["observations"][0]["data"]["present"] is saved_present
+        assert row[1:] == (port.existing_finish.occurred_at, port.existing_key)
+        assert port.late_finish is not port.existing_finish
 
 
 class _AlreadyEndedQuery(OperationRepository):
@@ -562,17 +577,18 @@ async def test_query_already_ended_consumes_exact_saved_result_instead_of_late_r
     owned, _, runtime, driver, item_id = await _prepared(environment, before_query=True)
     driver.matrix_enabled, driver.present = True, not saved_present
     port = _AlreadyEndedQuery(_registry(driver).entry("camctl-adb").evidence, saved_present)
-    runtime.operations = port
-    result = await delete_source_file(runtime, item_id)
-    assert result.phase == ("still_present" if saved_present else "succeeded")
-    assert result.diagnostic is not None
-    assert len(driver.queries) == 1 and not driver.deletes
-    row = owned.connection.execute(
-        "SELECT a.result_json,e.occurred_at,t.operation_key FROM operation_attempts a"
-        " JOIN operation_runs r ON r.id=a.run_id JOIN history_events e ON e.id=a.result_event_id"
-        " JOIN history_transactions t ON t.id=e.transaction_id WHERE r.cleanup_item_id=?", (item_id,)).fetchone()
-    assert json.loads(row[0])["observations"][0]["data"]["present"] is saved_present
-    assert row[1:] == (port.existing_finish.occurred_at, port.existing_key)
+    with repository_port(OperationRepository, port, ("finish_attempt",),
+                         matches=lambda _name, args, _kwargs: args[0].ticket.target_id == str(item_id)):
+        result = await delete_source_file(runtime, item_id)
+        assert result.phase == ("still_present" if saved_present else "succeeded")
+        assert result.diagnostic is not None
+        assert len(driver.queries) == 1 and not driver.deletes
+        row = owned.connection.execute(
+            "SELECT a.result_json,e.occurred_at,t.operation_key FROM operation_attempts a"
+            " JOIN operation_runs r ON r.id=a.run_id JOIN history_events e ON e.id=a.result_event_id"
+            " JOIN history_transactions t ON t.id=e.transaction_id WHERE r.cleanup_item_id=?", (item_id,)).fetchone()
+        assert json.loads(row[0])["observations"][0]["data"]["present"] is saved_present
+        assert row[1:] == (port.existing_finish.occurred_at, port.existing_key)
 
 
 async def test_already_ended_unreadable_history_keeps_late_raw_until_handoff(environment):
@@ -598,24 +614,25 @@ async def test_already_ended_unreadable_history_keeps_late_raw_until_handoff(env
                 worker.connection.set_authorizer(authorize)
             return result
     port = UnreadableSavedHistory(evidence, False)
-    runtime.outputs = port
-    try:
-        with pytest.raises(sqlite3.DatabaseError):
-            await delete_source_file(runtime, item_id)
-    finally:
-        await runtime.database.read(lambda worker: worker.connection.set_authorizer(None))
-        port.enabled = False
-    assert port.triggered and len(driver.deletes) == 1
-    original = port.late_calls[0]
-    result = await delete_source_file(runtime, item_id)
-    assert result.phase == "succeeded" and result.diagnostic is not None
-    assert all(call == original for call in port.late_calls)
-    assert len(driver.deletes) == 1
-    row = owned.connection.execute(
-        "SELECT e.occurred_at,t.operation_key FROM operation_attempts a"
-        " JOIN operation_runs r ON r.id=a.run_id JOIN history_events e ON e.id=a.result_event_id"
-        " JOIN history_transactions t ON t.id=e.transaction_id WHERE r.cleanup_item_id=?", (item_id,)).fetchone()
-    assert row == (port.existing_finish.occurred_at, port.existing_key)
+    with repository_port(OutputsRepository, port, ("finish_cleanup_attempt",),
+                         matches=lambda _name, args, _kwargs: args[0].ticket.target_id == str(item_id)):
+        try:
+            with pytest.raises(sqlite3.DatabaseError):
+                await delete_source_file(runtime, item_id)
+        finally:
+            await runtime.database.read(lambda worker: worker.connection.set_authorizer(None))
+            port.enabled = False
+        assert port.triggered and len(driver.deletes) == 1
+        original = port.late_calls[0]
+        result = await delete_source_file(runtime, item_id)
+        assert result.phase == "succeeded" and result.diagnostic is not None
+        assert all(call == original for call in port.late_calls)
+        assert len(driver.deletes) == 1
+        row = owned.connection.execute(
+            "SELECT e.occurred_at,t.operation_key FROM operation_attempts a"
+            " JOIN operation_runs r ON r.id=a.run_id JOIN history_events e ON e.id=a.result_event_id"
+            " JOIN history_transactions t ON t.id=e.transaction_id WHERE r.cleanup_item_id=?", (item_id,)).fetchone()
+        assert row == (port.existing_finish.occurred_at, port.existing_key)
 
 
 @pytest.mark.parametrize("fault", ["rollback", "commit_before", "commit_after"])
@@ -624,30 +641,31 @@ async def test_binding_failure_original_application_can_finish_after_later_cance
     owned, context, runtime, driver, item_id = await _prepared(environment, missing_binding=True)
     port = _FaultOutputs("fail_cleanup_binding", DbOutcomeKind.ROLLED_BACK if fault == "rollback" else DbOutcomeKind.UNKNOWN,
                          after_commit=fault == "commit_after")
-    runtime.outputs = port
-    with pytest.raises(ConsistencyError):
-        await delete_source_file(runtime, item_id)
-    original = port.calls[0]
-    action_id, = owned.connection.execute("SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
-    await runtime.database.close()
-    owned.connection.close()
-    fresh = context.open_connection()
-    try:
-        _apply_cleanup_cancel(fresh, action_id)
-        port.enabled = False
-        resumed = await _resumed(environment, runtime, fresh, capture_resources, driver, devices={})
-        result = await delete_source_file(resumed, item_id)
-        assert result.phase != "result_rejected", result
-        assert original[0].canceled is False
-        assert fresh.connection.execute("SELECT status FROM cleanup_items WHERE id=?", (item_id,)).fetchone()[0] == (5 if fault == "commit_after" else 6)
-        if fault == "commit_after":
-            assert port.calls[1] == original
-        else:
-            assert len(port.calls) == 1
-            assert fresh.connection.execute("SELECT 1 FROM history_transactions WHERE operation_key=?", (str(original[1]),)).fetchone() is None
-        assert not driver.deletes and not driver.queries
-    finally:
-        fresh.connection.close()
+    with repository_port(OutputsRepository, port, (port.method,),
+                         matches=lambda _name, args, _kwargs: (args[0].target.cleanup_item_id if _name == "begin_cleanup_attempt" else args[0].ticket.target_id if _name == "finish_cleanup_attempt" else args[0].item_id) in (item_id, str(item_id))):
+        with pytest.raises(ConsistencyError):
+            await delete_source_file(runtime, item_id)
+        original = port.calls[0]
+        action_id, = owned.connection.execute("SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
+        await runtime.database.close()
+        owned.connection.close()
+        fresh = context.open_connection()
+        try:
+            _apply_cleanup_cancel(fresh, action_id)
+            port.enabled = False
+            resumed = await _resumed(environment, runtime, fresh, capture_resources, driver, devices={})
+            result = await delete_source_file(resumed, item_id)
+            assert result.phase != "result_rejected", result
+            assert original[0].canceled is False
+            assert fresh.connection.execute("SELECT status FROM cleanup_items WHERE id=?", (item_id,)).fetchone()[0] == (5 if fault == "commit_after" else 6)
+            if fault == "commit_after":
+                assert port.calls[1] == original
+            else:
+                assert len(port.calls) == 1
+                assert fresh.connection.execute("SELECT 1 FROM history_transactions WHERE operation_key=?", (str(original[1]),)).fetchone() is None
+            assert not driver.deletes and not driver.queries
+        finally:
+            fresh.connection.close()
 
 
 
@@ -656,20 +674,20 @@ async def test_recovered_intent_dispatch_uses_its_original_adopted_timeout(envir
     from decimal import Decimal
     owned, _, runtime, driver, item_id = await _prepared(environment, before_query=operation == "query")
     port = _FaultOutputs("begin_cleanup_attempt", DbOutcomeKind.ROLLED_BACK)
-    runtime.outputs = port
-    assert (await delete_source_file(runtime, item_id)).phase == ("delete_budget_rejected" if operation == "delete" else "query_rejected")
-    original_config = port.calls[0][0].config
-    if operation == "query":
-        driver.matrix_enabled, driver.present = True, False
-    devices = {name: {**declaration, "cleanup": {"delete_timeout_s": Decimal(1), "query_timeout_s": Decimal(2)}}
-               for name, declaration in environment[0].devices.items()}
-    resumed = await _configured(environment, owned, driver, devices=devices)
-    resumed.outputs = port
-    port.enabled = False
-    assert (await delete_source_file(resumed, item_id)).phase == "succeeded"
-    actual_request = (driver.delete_requests if operation == "delete" else driver.query_requests)[0]
-    assert actual_request.timeout_s == original_config.timeout_s
-    assert port.calls[1] == port.calls[0]
+    with repository_port(OutputsRepository, port, (port.method,),
+                         matches=lambda _name, args, _kwargs: (args[0].target.cleanup_item_id if _name == "begin_cleanup_attempt" else args[0].ticket.target_id if _name == "finish_cleanup_attempt" else args[0].item_id) in (item_id, str(item_id))):
+        assert (await delete_source_file(runtime, item_id)).phase == ("delete_budget_rejected" if operation == "delete" else "query_rejected")
+        original_config = port.calls[0][0].config
+        if operation == "query":
+            driver.matrix_enabled, driver.present = True, False
+        devices = {name: {**declaration, "cleanup": {"delete_timeout_s": Decimal(1), "query_timeout_s": Decimal(2)}}
+                   for name, declaration in environment[0].devices.items()}
+        resumed = await _configured(environment, owned, driver, devices=devices)
+        port.enabled = False
+        assert (await delete_source_file(resumed, item_id)).phase == "succeeded"
+        actual_request = (driver.delete_requests if operation == "delete" else driver.query_requests)[0]
+        assert actual_request.timeout_s == original_config.timeout_s
+        assert port.calls[1] == port.calls[0]
 
 
 @pytest.mark.parametrize("fault", ["rollback", "commit_after"])
@@ -678,43 +696,45 @@ async def test_unissued_original_call_is_not_dispatched_after_binding_disappears
     owned, context, runtime, driver, item_id = await _prepared(environment, before_query=operation == "query")
     port = _FaultOutputs("begin_cleanup_attempt", DbOutcomeKind.ROLLED_BACK if fault == "rollback" else DbOutcomeKind.UNKNOWN,
                          after_commit=fault == "commit_after")
-    runtime.outputs = port
-    assert (await delete_source_file(runtime, item_id)).phase == ("delete_budget_rejected" if operation == "delete" else "query_rejected")
-    original = port.calls[0]
-    await runtime.database.close()
-    owned.connection.close()
-    fresh = context.open_connection()
-    try:
-        port.enabled = False
-        resumed = await _resumed(environment, runtime, fresh, capture_resources, driver, devices={})
-        assert (await delete_source_file(resumed, item_id)).phase == "failed"
-        assert not driver.deletes and not driver.queries
-        attempts, = fresh.connection.execute(
-            "SELECT COUNT(*) FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.cleanup_item_id=?", (item_id,)).fetchone()
-        assert attempts == int(fault == "commit_after")
-        assert all(call == original for call in port.calls)
-    finally:
-        fresh.connection.close()
+    with repository_port(OutputsRepository, port, (port.method,),
+                         matches=lambda _name, args, _kwargs: (args[0].target.cleanup_item_id if _name == "begin_cleanup_attempt" else args[0].ticket.target_id if _name == "finish_cleanup_attempt" else args[0].item_id) in (item_id, str(item_id))):
+        assert (await delete_source_file(runtime, item_id)).phase == ("delete_budget_rejected" if operation == "delete" else "query_rejected")
+        original = port.calls[0]
+        await runtime.database.close()
+        owned.connection.close()
+        fresh = context.open_connection()
+        try:
+            port.enabled = False
+            resumed = await _resumed(environment, runtime, fresh, capture_resources, driver, devices={})
+            assert (await delete_source_file(resumed, item_id)).phase == "failed"
+            assert not driver.deletes and not driver.queries
+            attempts, = fresh.connection.execute(
+                "SELECT COUNT(*) FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.cleanup_item_id=?", (item_id,)).fetchone()
+            assert attempts == int(fault == "commit_after")
+            assert all(call == original for call in port.calls)
+        finally:
+            fresh.connection.close()
 
 
 async def test_unreadable_original_binding_key_does_not_create_cancel_application(environment):
     from .test_cleanup_query_save_recovery import _apply_cleanup_cancel
     owned, _, runtime, driver, item_id = await _prepared(environment, missing_binding=True)
     port = _FaultOutputs("fail_cleanup_binding", DbOutcomeKind.ROLLED_BACK)
-    runtime.outputs = port
-    with pytest.raises(ConsistencyError):
-        await delete_source_file(runtime, item_id)
-    original = port.calls[0]
-    action_id, = owned.connection.execute("SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
-    _apply_cleanup_cancel(owned, action_id)
-    port.enabled = False
-    async with sqlite_operation_fault(runtime.database, sqlite3.SQLITE_READ, "history_transactions") as fault:
-        with pytest.raises(sqlite3.DatabaseError):
+    with repository_port(OutputsRepository, port, ("fail_cleanup_binding",),
+                         matches=lambda _name, args, _kwargs: args[0].item_id == item_id):
+        with pytest.raises(ConsistencyError):
             await delete_source_file(runtime, item_id)
-    assert fault["triggered"] and port.calls == [original]
-    assert owned.connection.execute("SELECT status FROM cleanup_items WHERE id=?", (item_id,)).fetchone()[0] == 2
-    assert (await delete_source_file(runtime, item_id)).phase == "canceled"
-    assert not driver.deletes and not driver.queries
+        original = port.calls[0]
+        action_id, = owned.connection.execute("SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
+        _apply_cleanup_cancel(owned, action_id)
+        port.enabled = False
+        async with sqlite_operation_fault(runtime.database, sqlite3.SQLITE_READ, "history_transactions") as fault:
+            with pytest.raises(sqlite3.DatabaseError):
+                await delete_source_file(runtime, item_id)
+        assert fault["triggered"] and port.calls == [original]
+        assert owned.connection.execute("SELECT status FROM cleanup_items WHERE id=?", (item_id,)).fetchone()[0] == 2
+        assert (await delete_source_file(runtime, item_id)).phase == "canceled"
+        assert not driver.deletes and not driver.queries
 
 
 async def test_plain_save_exception_does_not_dispose_binding_application_as_business_rejection(environment):
@@ -729,24 +749,25 @@ async def test_plain_save_exception_does_not_dispose_binding_application_as_busi
             return super().fail_cleanup_binding(request, key, owned)
     owned, _, runtime, driver, item_id = await _prepared(environment, missing_binding=True)
     port = PlainErrorPort("fail_cleanup_binding", DbOutcomeKind.ROLLED_BACK)
-    runtime.outputs = port
-    with pytest.raises(ConsistencyError) as caught:
-        await delete_source_file(runtime, item_id)
-    assert db_outcome_for(caught.value).kind is DbOutcomeKind.UNKNOWN
-    assert db_outcome_for(caught.value).error is port.error
-    original = port.calls[0]
-    action_id, = owned.connection.execute("SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
-    _apply_cleanup_cancel(owned, action_id)
-    port.enabled = False
-    # 真实执行器分类 UNKNOWN；须可靠核实原键，不能仅凭普通异常转取消。
-    async with sqlite_operation_fault(runtime.database, sqlite3.SQLITE_READ, "history_transactions") as fault:
-        with pytest.raises(sqlite3.DatabaseError):
+    with repository_port(OutputsRepository, port, ("fail_cleanup_binding",),
+                         matches=lambda _name, args, _kwargs: args[0].item_id == item_id):
+        with pytest.raises(ConsistencyError) as caught:
             await delete_source_file(runtime, item_id)
-    assert fault["triggered"] and port.calls == [original]
-    assert owned.connection.execute("SELECT status FROM cleanup_items WHERE id=?", (item_id,)).fetchone() == (2,)
-    assert (await delete_source_file(runtime, item_id)).phase == "canceled"
-    assert owned.connection.execute("SELECT id FROM history_transactions WHERE operation_key=?", (str(original[1]),)).fetchone() is None
-    assert not driver.deletes and not driver.queries
+        assert db_outcome_for(caught.value).kind is DbOutcomeKind.UNKNOWN
+        assert db_outcome_for(caught.value).error is port.error
+        original = port.calls[0]
+        action_id, = owned.connection.execute("SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
+        _apply_cleanup_cancel(owned, action_id)
+        port.enabled = False
+        # 真实执行器分类 UNKNOWN；须可靠核实原键，不能仅凭普通异常转取消。
+        async with sqlite_operation_fault(runtime.database, sqlite3.SQLITE_READ, "history_transactions") as fault:
+            with pytest.raises(sqlite3.DatabaseError):
+                await delete_source_file(runtime, item_id)
+        assert fault["triggered"] and port.calls == [original]
+        assert owned.connection.execute("SELECT status FROM cleanup_items WHERE id=?", (item_id,)).fetchone() == (2,)
+        assert (await delete_source_file(runtime, item_id)).phase == "canceled"
+        assert owned.connection.execute("SELECT id FROM history_transactions WHERE operation_key=?", (str(original[1]),)).fetchone() is None
+        assert not driver.deletes and not driver.queries
 
 
 async def test_cancel_after_binding_prevents_ticket_dispatch_releases_own_restriction(environment):
@@ -760,15 +781,16 @@ async def test_cancel_after_binding_prevents_ticket_dispatch_releases_own_restri
             devices.clear()
             return result
     port = BindingChangesAfterGrant("finish_cleanup_attempt", DbOutcomeKind.ROLLED_BACK)
-    runtime.outputs = port
-    assert (await delete_source_file(runtime, item_id)).phase == "finish_rejected"
-    assert not driver.deletes
-    action_id, = owned.connection.execute("SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
-    _apply_cleanup_cancel(owned, action_id)
-    port.enabled = False
-    assert (await delete_source_file(runtime, item_id)).phase == "canceled"
-    assert owned.connection.execute("SELECT status,restriction_state,error_code FROM cleanup_items WHERE id=?", (item_id,)).fetchone() == (6, 3, None)
-    assert not driver.deletes and not driver.queries
+    with repository_port(OutputsRepository, port, ("begin_cleanup_attempt", "finish_cleanup_attempt"),
+                         matches=lambda _name, args, _kwargs: (args[0].target.cleanup_item_id if _name == "begin_cleanup_attempt" else args[0].ticket.target_id) in (item_id, str(item_id))):
+        assert (await delete_source_file(runtime, item_id)).phase == "finish_rejected"
+        assert not driver.deletes
+        action_id, = owned.connection.execute("SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
+        _apply_cleanup_cancel(owned, action_id)
+        port.enabled = False
+        assert (await delete_source_file(runtime, item_id)).phase == "canceled"
+        assert owned.connection.execute("SELECT status,restriction_state,error_code FROM cleanup_items WHERE id=?", (item_id,)).fetchone() == (6, 3, None)
+        assert not driver.deletes and not driver.queries
 
 
 @pytest.mark.parametrize("present", [True, None])
@@ -780,26 +802,27 @@ async def test_new_factory_completes_original_query_before_parsing_removed_drive
     driver.unknown_delete = True
     driver.matrix_enabled, driver.present = True, present
     port = _QueryFinishPort(DbOutcomeKind.ROLLED_BACK, item_id, driver)
-    runtime.operations = port
-    with pytest.raises(ConsistencyError):
-        await delete_source_file(runtime, item_id)
-    original = port.finishes[0]
-    await runtime.database.close()
-    owned.connection.close()
-    fresh = context.open_connection()
-    try:
-        port.kind = DbOutcomeKind.COMPLETED
-        resumed = await _resumed(environment, runtime, fresh, capture_resources, driver, registry=DriverRegistry())
-        await advance_cleanup(resumed)
-        assert port.finishes == [original, original]
-        assert len(driver.deletes) == len(driver.queries) == 1
-        assert fresh.connection.execute("SELECT status FROM cleanup_items WHERE id=?", (item_id,)).fetchone()[0] == 3
-        from camctl.devices.bindings import DeviceConfigurationError
-        with pytest.raises(DeviceConfigurationError):
+    with repository_port(OperationRepository, port, ("finish_attempt",),
+                         matches=lambda _name, args, _kwargs: args[0].ticket.target_id == str(item_id) and args[0].ticket.operation == "query"):
+        with pytest.raises(ConsistencyError):
+            await delete_source_file(runtime, item_id)
+        original = port.finishes[0]
+        await runtime.database.close()
+        owned.connection.close()
+        fresh = context.open_connection()
+        try:
+            port.kind = DbOutcomeKind.COMPLETED
+            resumed = await _resumed(environment, runtime, fresh, capture_resources, driver, registry=DriverRegistry())
             await advance_cleanup(resumed)
-        assert len(driver.deletes) == len(driver.queries) == 1
-    finally:
-        fresh.connection.close()
+            assert port.finishes == [original, original]
+            assert len(driver.deletes) == len(driver.queries) == 1
+            assert fresh.connection.execute("SELECT status FROM cleanup_items WHERE id=?", (item_id,)).fetchone()[0] == 3
+            from camctl.devices.bindings import DeviceConfigurationError
+            with pytest.raises(DeviceConfigurationError):
+                await advance_cleanup(resumed)
+            assert len(driver.deletes) == len(driver.queries) == 1
+        finally:
+            fresh.connection.close()
 
 
 async def test_unknown_intent_cannot_be_disposed_while_original_transaction_can_still_commit(environment):
@@ -829,25 +852,25 @@ async def test_unknown_intent_cannot_be_disposed_while_original_transaction_can_
     try:
         runtime = await _configured(environment, owned, driver, database=database)
         port = _FaultOutputs("begin_cleanup_attempt", DbOutcomeKind.UNKNOWN, after_commit=False)
-        runtime.outputs = port
-        assert (await delete_source_file(runtime, item_id)).phase == "delete_budget_rejected"
-        original = port.calls[0]
-        assert await database.read(lambda worker: retained["connection"].in_transaction)
-        async with business_database(path, config=DbConfig(busy_timeout_ms=1)) as other:
-            resumed = await _configured(environment, owned, driver, database=other, devices={})
-            resumed.outputs = port
-            with pytest.raises((OperationalError, ConsistencyError)):
-                await delete_source_file(resumed, item_id)
-            assert port.calls == [original] and not driver.deletes
-            # 在原 worker 线程实际提交仍存活的旧事务，不能用别处缺键推断未生效。
-            def late_commit(worker):
-                retained["connection"].execute("COMMIT")
-            await database.read(late_commit)
-            port.enabled = False
-            assert (await delete_source_file(resumed, item_id)).phase == "failed"
-            assert port.calls == [original, original]
-            assert owned.connection.execute("SELECT COUNT(*) FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.cleanup_item_id=?", (item_id,)).fetchone()[0] == 1
-            assert not driver.deletes and not driver.queries
+        with repository_port(OutputsRepository, port, ("begin_cleanup_attempt",),
+                             matches=lambda _name, args, _kwargs: args[0].target.cleanup_item_id == item_id):
+            assert (await delete_source_file(runtime, item_id)).phase == "delete_budget_rejected"
+            original = port.calls[0]
+            assert await database.read(lambda worker: retained["connection"].in_transaction)
+            async with business_database(path, config=DbConfig(busy_timeout_ms=1)) as other:
+                resumed = await _configured(environment, owned, driver, database=other, devices={})
+                with pytest.raises((OperationalError, ConsistencyError)):
+                    await delete_source_file(resumed, item_id)
+                assert port.calls == [original] and not driver.deletes
+                # 在原 worker 线程实际提交仍存活的旧事务，不能用别处缺键推断未生效。
+                def late_commit(worker):
+                    retained["connection"].execute("COMMIT")
+                await database.read(late_commit)
+                port.enabled = False
+                assert (await delete_source_file(resumed, item_id)).phase == "failed"
+                assert port.calls == [original, original]
+                assert owned.connection.execute("SELECT COUNT(*) FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.cleanup_item_id=?", (item_id,)).fetchone()[0] == 1
+                assert not driver.deletes and not driver.queries
     finally:
         def close_original(worker):
             retained["connection"].enabled = False
@@ -862,23 +885,24 @@ async def test_recovered_ticket_does_not_dispatch_after_delete_capability_closes
     owned, context, runtime, driver, item_id = await _prepared(environment)
     port = _FaultOutputs("begin_cleanup_attempt", DbOutcomeKind.ROLLED_BACK if fault == "rollback" else DbOutcomeKind.UNKNOWN,
                          after_commit=fault == "commit_after")
-    runtime.outputs = port
-    assert (await delete_source_file(runtime, item_id)).phase == "delete_budget_rejected"
-    original = port.calls[0]
-    await runtime.database.close()
-    owned.connection.close()
-    fresh = context.open_connection()
-    try:
-        port.enabled = False
-        old = _registry(driver).entry("camctl-adb")
-        registry = DriverRegistry((replace(old, declaration=replace(old.declaration, delete_supported=False)),))
-        resumed = await _resumed(environment, runtime, fresh, capture_resources, driver, registry=registry)
-        assert (await delete_source_file(resumed, item_id)).phase == "failed"
-        assert not driver.deletes and not driver.queries
-        assert fresh.connection.execute("SELECT COUNT(*) FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.cleanup_item_id=?", (item_id,)).fetchone()[0] == int(fault == "commit_after")
-        assert all(call == original for call in port.calls)
-    finally:
-        fresh.connection.close()
+    with repository_port(OutputsRepository, port, (port.method,),
+                         matches=lambda _name, args, _kwargs: (args[0].target.cleanup_item_id if _name == "begin_cleanup_attempt" else args[0].ticket.target_id if _name == "finish_cleanup_attempt" else args[0].item_id) in (item_id, str(item_id))):
+        assert (await delete_source_file(runtime, item_id)).phase == "delete_budget_rejected"
+        original = port.calls[0]
+        await runtime.database.close()
+        owned.connection.close()
+        fresh = context.open_connection()
+        try:
+            port.enabled = False
+            old = _registry(driver).entry("camctl-adb")
+            registry = DriverRegistry((replace(old, declaration=replace(old.declaration, delete_supported=False)),))
+            resumed = await _resumed(environment, runtime, fresh, capture_resources, driver, registry=registry)
+            assert (await delete_source_file(resumed, item_id)).phase == "failed"
+            assert not driver.deletes and not driver.queries
+            assert fresh.connection.execute("SELECT COUNT(*) FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.cleanup_item_id=?", (item_id,)).fetchone()[0] == int(fault == "commit_after")
+            assert all(call == original for call in port.calls)
+        finally:
+            fresh.connection.close()
 
 
 @pytest.mark.parametrize("broken", ["type", "version", "data", "status", "effect"])
@@ -888,8 +912,10 @@ async def test_delete_facts_rejects_incomplete_saved_not_dispatched(environment,
     owned, _, runtime, driver, item_id = await _prepared(environment)
     action_id, output_id = owned.connection.execute(
         "SELECT action_id,output_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
-    runtime.outputs = _EntryPort(owned, item_id, action_id, "cancel")
-    assert (await delete_source_file(runtime, item_id)).phase == "canceled"
+    port = _EntryPort(owned, item_id, action_id, "cancel")
+    with repository_port(OutputsRepository, port, ("begin_cleanup_attempt",),
+                         matches=lambda _name, args, _kwargs: args[0].target.cleanup_item_id == item_id):
+        assert (await delete_source_file(runtime, item_id)).phase == "canceled"
     assert not driver.deletes
     attempt_id, raw = owned.connection.execute(
         "SELECT id,result_json FROM operation_attempts ORDER BY id DESC LIMIT 1").fetchone()
@@ -905,7 +931,6 @@ async def test_delete_facts_rejects_incomplete_saved_not_dispatched(environment,
                                  (json.dumps(document), attempt_id))
     owned.connection.commit()
     _, next_item = _start_cleanup(owned, output_id, "5")
-    runtime.outputs = OutputsRepository()
     with pytest.raises(ConsistencyError):
         await delete_source_file(runtime, next_item)
     assert not driver.deletes and not driver.queries
@@ -916,54 +941,56 @@ async def test_existing_companion_resumes_actual_terminal_member_without_new_cal
     from .test_cleanup_query_save_recovery import _apply_cleanup_cancel
     owned, _, runtime, driver, item_id = await _prepared(environment, delete_attempts=1 if member_status == 5 else 3)
     companion = _FaultCompanion()
-    runtime.operations = companion
-    if member_status == 5:
-        driver.unknown_delete = True
-        driver.matrix_enabled, driver.present = True, True
-        assert (await delete_source_file(runtime, item_id)).phase == "still_present"
-    elif member_status == 6:
-        action_id, = owned.connection.execute(
-            "SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
-        _apply_cleanup_cancel(owned, action_id)
-    assert (await delete_source_file(runtime, item_id)).phase == "companion_rejected"
-    original = companion.calls[0]
-    member_before = owned.connection.execute("SELECT * FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
-    assert owned.connection.execute("SELECT status FROM cleanup_items WHERE id=?", (item_id,)).fetchone()[0] == member_status
-    attempts_before = tuple(owned.connection.execute(
-        "SELECT a.* FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id"
-        " WHERE r.cleanup_item_id=? ORDER BY a.id", (item_id,)))
-    calls_before = len(driver.deletes), len(driver.queries)
-    companion.enabled = False
-    assert (await delete_source_file(runtime, item_id)).phase == "already_terminal"
-    assert companion.calls == [original, original]
-    assert owned.connection.execute("SELECT * FROM cleanup_items WHERE id=?", (item_id,)).fetchone() == member_before
-    assert tuple(owned.connection.execute(
-        "SELECT a.* FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id"
-        " WHERE r.cleanup_item_id=? ORDER BY a.id", (item_id,))) == attempts_before
-    assert (len(driver.deletes), len(driver.queries)) == calls_before
+    with repository_port(OperationRepository, companion, ("finish_stale_runs",),
+                         matches=lambda _name, args, _kwargs: f"delete/{item_id}" in args[0].responsibility_keys):
+        if member_status == 5:
+            driver.unknown_delete = True
+            driver.matrix_enabled, driver.present = True, True
+            assert (await delete_source_file(runtime, item_id)).phase == "still_present"
+        elif member_status == 6:
+            action_id, = owned.connection.execute(
+                "SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
+            _apply_cleanup_cancel(owned, action_id)
+        assert (await delete_source_file(runtime, item_id)).phase == "companion_rejected"
+        original = companion.calls[0]
+        member_before = owned.connection.execute("SELECT * FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
+        assert owned.connection.execute("SELECT status FROM cleanup_items WHERE id=?", (item_id,)).fetchone()[0] == member_status
+        attempts_before = tuple(owned.connection.execute(
+            "SELECT a.* FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id"
+            " WHERE r.cleanup_item_id=? ORDER BY a.id", (item_id,)))
+        calls_before = len(driver.deletes), len(driver.queries)
+        companion.enabled = False
+        assert (await delete_source_file(runtime, item_id)).phase == "already_terminal"
+        assert companion.calls == [original, original]
+        assert owned.connection.execute("SELECT * FROM cleanup_items WHERE id=?", (item_id,)).fetchone() == member_before
+        assert tuple(owned.connection.execute(
+            "SELECT a.* FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id"
+            " WHERE r.cleanup_item_id=? ORDER BY a.id", (item_id,))) == attempts_before
+        assert (len(driver.deletes), len(driver.queries)) == calls_before
 
 
 @pytest.mark.parametrize("member_status", [None, 1, 2, 3])
 async def test_pending_companion_nonterminal_preserves_database_and_calls(environment, monkeypatch, member_status):
     owned, _, runtime, driver, item_id = await _prepared(environment)
     companion = _FaultCompanion()
-    runtime.operations = companion
-    assert (await delete_source_file(runtime, item_id)).phase == "companion_rejected"
-    original = companion.calls[0]
-    calls_before = len(driver.deletes), len(driver.queries)
-    # 先取得真实成员终态和伴随保存责任，再损坏其持久投影验证一致性检查。
-    if member_status is None:
-        owned.connection.execute("PRAGMA foreign_keys=OFF")
-        owned.connection.execute("DELETE FROM cleanup_items WHERE id=?", (item_id,))
-    else:
-        owned.connection.execute(
-            "UPDATE cleanup_items SET status=?,restriction_state=?,outcome=NULL,final_event_id=NULL WHERE id=?",
-            (member_status, min(member_status, 2), item_id))
-    owned.connection.commit()
-    before = tuple(owned.connection.iterdump())
-    companion.enabled = False
-    with pytest.raises(ConsistencyError, match="待存伴随流程没有可靠成员终态"):
-        await delete_source_file(runtime, item_id)
-    assert tuple(owned.connection.iterdump()) == before
-    assert companion.calls == [original]
-    assert (len(driver.deletes), len(driver.queries)) == calls_before
+    with repository_port(OperationRepository, companion, ("finish_stale_runs",),
+                         matches=lambda _name, args, _kwargs: f"delete/{item_id}" in args[0].responsibility_keys):
+        assert (await delete_source_file(runtime, item_id)).phase == "companion_rejected"
+        original = companion.calls[0]
+        calls_before = len(driver.deletes), len(driver.queries)
+        # 先取得真实成员终态和伴随保存责任，再损坏其持久投影验证一致性检查。
+        if member_status is None:
+            owned.connection.execute("PRAGMA foreign_keys=OFF")
+            owned.connection.execute("DELETE FROM cleanup_items WHERE id=?", (item_id,))
+        else:
+            owned.connection.execute(
+                "UPDATE cleanup_items SET status=?,restriction_state=?,outcome=NULL,final_event_id=NULL WHERE id=?",
+                (member_status, min(member_status, 2), item_id))
+        owned.connection.commit()
+        before = tuple(owned.connection.iterdump())
+        companion.enabled = False
+        with pytest.raises(ConsistencyError, match="待存伴随流程没有可靠成员终态"):
+            await delete_source_file(runtime, item_id)
+        assert tuple(owned.connection.iterdump()) == before
+        assert companion.calls == [original]
+        assert (len(driver.deletes), len(driver.queries)) == calls_before
