@@ -113,11 +113,12 @@ def result_driver(case, outcome=None, *, side_effect=None):
     return driver
 
 
-async def complete_natural_wait(runtime, action_id):
-    """按已由处理器安排的等待，公开保存当前可靠 UTC 到期事实。"""
-    request = WaitCompletedSave(action_id, runtime.wall_us())
+async def complete_natural_wait(owned, action_id, occurred_at):
+    """按已由处理器安排的等待，使用调用方提供的时刻保存到期事实。"""
+    database = await capture_database(owned)
+    request = WaitCompletedSave(action_id, occurred_at)
     key = new_operation_key()
-    receipt = await runtime.database.write(
+    receipt = await database.write(
         lambda owned: TimelapseRepository().complete_wait(request, key, owned),
         key=key, description="保存测试等待完成事实")
     assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error

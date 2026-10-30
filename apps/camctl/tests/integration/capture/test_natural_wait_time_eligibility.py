@@ -419,7 +419,7 @@ async def test_saved_page_registration_waits_for_current_source_qualification(tm
     try:
         wall[0] = due
         mono[0] += (startup+1200)*1000000
-        await complete_natural_wait(runtime, action_id)
+        await complete_natural_wait(owned, action_id, wall[0])
         wall[0] = due+100
         with monkeypatch.context() as fault:
             fault.setattr(CaptureRepository, 'save_result_page', boundary)

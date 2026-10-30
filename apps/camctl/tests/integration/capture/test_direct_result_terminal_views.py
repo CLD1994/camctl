@@ -58,7 +58,7 @@ async def _original_direct_history(tmp_path):
     port = ResultsDouble({activity_id: (_entry('clip'),)})
     page = await save_historical_source_page(owned, aid, ticket, port, _PAGE_EVIDENCE, case.clock.wall)
     save_historical_direct_files(owned, aid, page)
-    wait_id = await complete_natural_wait(runtime, aid)
+    wait_id = await complete_natural_wait(owned, aid, case.clock.wall)
     assert CaptureRepository().read_result_source(ticket, owned).kind.value == 'direct'
     observation = {'first_page_event_id': page.ref.event_id,
         'last_page_event_id': page.ref.event_id, 'file_count': 1}
@@ -207,7 +207,7 @@ async def _v1_world(tmp_path, consumer, *, catalog=None, start=True, result_page
     owned, runtime, aid, handler = await case.world(tmp_path, consumer, catalog=catalog,
         start=start, result_page_contract=result_page_contract, assembly_options={'check_config': config})
     if consumer == 'timelapse':
-        await complete_natural_wait(runtime, aid)
+        await complete_natural_wait(owned, aid, case.clock.wall)
     return case, owned, runtime, aid, handler, config
 
 

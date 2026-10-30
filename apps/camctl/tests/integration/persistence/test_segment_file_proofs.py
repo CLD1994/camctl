@@ -22,7 +22,7 @@ from camctl.persistence.transaction import BoundedCommandPlan, commit_operation
 
 from .test_segment_storage import SegmentedCatalog
 from .test_segment_file_pairing import _entry, _ok
-from ..capture.result_consumer_fixtures import complete_natural_wait, consumer_world
+from ..capture.result_consumer_fixtures import _NOW, complete_natural_wait, consumer_world
 from ..capture.test_record_file_completion_wait import (
     _REGISTRY, _completion, _stop_context,
 )
@@ -212,7 +212,7 @@ async def test_unpaired_preview_can_use_its_original_natural_wait(tmp_path):
     owned, runtime, source, _ = await consumer_world(
         tmp_path, "timelapse", catalog=WaitSegmentedCatalog())
     try:
-        wait_id = await complete_natural_wait(runtime, source)
+        wait_id = await complete_natural_wait(owned, source, _NOW + 700_000_000)
         ticket = begin_result_check(owned,runtime, source).ticket
         actual = _actual(ticket, entries=[_entry("natural.LRF")], finalized=True)
         page = _ok(runtime.capture.save_result_page(ResultPageSave(

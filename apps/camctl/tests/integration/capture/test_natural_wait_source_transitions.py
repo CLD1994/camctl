@@ -138,7 +138,7 @@ async def test_real_stop_source_keeps_independent_wait_even_when_natural_wait_ex
     try:
         wall[0] = due+100
         mono[0] += (startup+1200)*1000000
-        assert await complete_natural_wait(runtime, aid) is not None
+        assert await complete_natural_wait(owned, aid, wall[0]) is not None
         await _request_cancel(runtime, aid, wall)
         await _prepare_through_handler(runtime, aid, 'camera_timelapse', 'stop')
         async def actual(request, batch):
@@ -473,7 +473,7 @@ async def test_intent_before_wait_cannot_gain_natural_source_from_later_wait_or_
         assert CaptureRepository().read_result_source(ticket, owned).kind.value == 'unconfirmed'
         wall[0] = due+100
         mono[0] += (startup+1200)*1000000
-        assert await complete_natural_wait(runtime, aid) is not None
+        assert await complete_natural_wait(owned, aid, wall[0]) is not None
         await _request_cancel(runtime, aid, wall)
         await advance(aid, runtime)
         await save_historical_source_page(owned, aid, ticket,

@@ -56,7 +56,7 @@ async def _completed_world(tmp_path, startup, size, opaque, result_first, save_m
     port.list_round.side_effect = actual
     wall[0] = case.clock.wall = due + 100
     case.clock.monotonic += (startup + 1200) * 1_000_000
-    assert await complete_natural_wait(runtime, aid) is not None
+    assert await complete_natural_wait(owned, aid, wall[0]) is not None
     runtime, first = await save_v1_round(owned, runtime, aid, port, config, wall[0])
     incomplete = CaptureRepository().read_result_sources(calls[-1], None, 1, owned)
     assert not incomplete.items[0][1].complete
