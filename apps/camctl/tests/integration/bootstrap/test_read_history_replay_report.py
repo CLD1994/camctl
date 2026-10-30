@@ -63,7 +63,7 @@ def _events_of(connection, entity_type: int, entity_id: int):
     return events
 
 
-async def test_replay_and_fixed_report_ignore_changed_read_configuration(
+async def test_replay_and_fixed_report_do_not_recheck_binding_or_read_sources(
         pipeline, monkeypatch):
     """读取责任回放与固定报告不重查设备绑定或执行读取。"""
     owned, roots, source_id = pipeline
