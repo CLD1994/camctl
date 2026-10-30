@@ -5,11 +5,12 @@ from pathlib import Path
 import pytest
 
 from camctl.contracts.values import ConsistencyError, new_operation_key
-from camctl.persistence.repositories import result_pages
+from camctl.persistence.repositories import capture as capture_repository, result_pages
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.transaction import commit_operation
 
 from .result_page_fixtures import begin_result_check
+from .transaction_fixtures import capture_operation_command
 from ..capture.result_consumer_fixtures import consumer_world
 from ..capture.test_result_page_history import _actual, _entry, _request
 
@@ -100,9 +101,14 @@ async def test_uncommitted_page_never_gains_committed_read_qualification(tmp_pat
     key = new_operation_key()
     observed = []
 
+    command = capture_operation_command(
+        capture_repository,
+        lambda: runtime.capture.save_result_page(request, key, owned),
+    )
+
     class DamagedPageCompletion:
         def plan(self, scope):
-            plan = result_pages.SaveResultPageCommand(request, key).plan(scope)
+            plan = command.plan(scope)
 
             def complete(db, ref):
                 with pytest.raises(ConsistencyError):

@@ -18,13 +18,14 @@ from camctl.operations.models import ErrorValue
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository, file_discovery_row
 from camctl.persistence.repositories.operations import register_operation_guards
-from camctl.persistence.repositories.result_pages import SaveResultPageCommand
+from camctl.persistence.repositories import capture as capture_repository
 from camctl.persistence.transaction import (BoundedCommandPlan, CommandPlan,
     commit_operation, event_envelope, next_row_id, row_change, row_facts)
 from camctl.history.reads import ResultPageWriteScope
 from camctl.capture.files import FileObservationSave, file_identity_key
 from camctl.contracts.values import ConsistencyError
 
+from .transaction_fixtures import capture_operation_command
 from ..capture.test_baseline_start import owned, _SCHEDULED
 from ..capture.test_capture_contract import register_capture_guards
 from ..capture.test_result_page_history import _actual, _baseline_world, _REGISTRY
@@ -453,9 +454,14 @@ async def test_bounded_zero_difference_preserves_raw_page_without_index(
     key = new_operation_key()
     completed = []
 
+    command = capture_operation_command(
+        capture_repository,
+        lambda: CaptureRepository().save_result_page(request, key, owned),
+    )
+
     class BoundedEmptyDifference:
         def plan(self, scope):
-            finite = SaveResultPageCommand(request, key).plan(scope)
+            finite = command.plan(scope)
             assert len(finite.events) == 1
             current = deepcopy(finite.state_rows)
             previous = None
@@ -514,9 +520,14 @@ async def test_atomic_page_guard_recomputes_the_difference_and_index_rows(owned,
         ticket, entries=[_osmo_entry(identity, size=0)], finalized=True))
     key = new_operation_key()
 
+    command = capture_operation_command(
+        capture_repository,
+        lambda: CaptureRepository().save_result_page(request, key, owned),
+    )
+
     class TamperedSave:
         def plan(self, scope):
-            plan = SaveResultPageCommand(request, key).plan(scope)
+            plan = command.plan(scope)
             events = list(plan.events)
             event_specs = load_event_registry()["events"]
             page_type = event_specs["RESULT_PAGE"]["id"]
@@ -569,9 +580,14 @@ async def test_bounded_entry_accepts_only_actual_append_then_index(owned, tmp_pa
     key = new_operation_key()
     completed = []
 
+    command = capture_operation_command(
+        capture_repository,
+        lambda: CaptureRepository().save_result_page(request, key, owned),
+    )
+
     class BoundedSave:
         def plan(self, scope):
-            finite = SaveResultPageCommand(request, key).plan(scope)
+            finite = command.plan(scope)
             current = deepcopy(finite.state_rows)
             created_ids = [event.rows[0].row_id for event in finite.events
                            if event.event_type == load_event_registry()["events"]["DEVICE_FILE_OBSERVED"]["id"]]
@@ -646,9 +662,14 @@ async def test_bounded_entry_rejects_mutated_page_group(owned, tmp_path, tamper)
     append_reason = registry["RESULT_PAGE"]["branches"]["APPEND"]["reason"]
     index_reason = registry["RESULT_PAGE"]["branches"]["INDEX_FILES"]["reason"]
 
+    command = capture_operation_command(
+        capture_repository,
+        lambda: CaptureRepository().save_result_page(request, key, owned),
+    )
+
     class TamperedBoundedSave:
         def plan(self, scope):
-            finite = SaveResultPageCommand(request, key).plan(scope)
+            finite = command.plan(scope)
             current = deepcopy(finite.state_rows)
             create_type = registry["DEVICE_FILE_OBSERVED"]["id"]
             for event in finite.events:
@@ -864,9 +885,14 @@ async def test_fix1_i1_mismatched_caller_state_is_rejected_as_consistency_contro
         ticket, entries=[_osmo_entry(identity, size=0)], finalized=True))
     key = new_operation_key()
 
+    command = capture_operation_command(
+        capture_repository,
+        lambda: CaptureRepository().save_result_page(request, key, owned),
+    )
+
     class CallerState:
         def plan(self, scope):
-            plan = SaveResultPageCommand(request, key).plan(scope)
+            plan = command.plan(scope)
             _alter_page_context(plan.state_rows, plan.result_page_write_scope, caller_fact)
             return _bounded_from_finite(plan) if bounded else plan
 
@@ -894,11 +920,16 @@ async def test_fix1_i1_real_baseline_rejects_caller_task_scope_and_common_extra(
     ], finalized=True))
     key = new_operation_key()
 
+    command = capture_operation_command(
+        capture_repository,
+        lambda: CaptureRepository().save_result_page(request, key, owned),
+    )
+
     class CallerTaskScope:
         def plan(self, scope):
             from camctl.persistence.repositories import result_pages as rp
 
-            plan = SaveResultPageCommand(request, key).plan(scope)
+            plan = command.plan(scope)
             original_state = deepcopy(plan.state_rows)
             state = deepcopy(plan.state_rows)
             activity_id = plan.result_page_write_scope.activity_id
