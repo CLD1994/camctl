@@ -585,6 +585,9 @@ class BeginAttemptCommand:
         action = _load_row(connection, "actions", intent.action_id)
         if action is None:
             raise TransactionError(f"动作不存在: {intent.action_id}")
+        from .file_batch_reads import FileBatchReads
+        if not FileBatchReads(connection).operation_permitted(action, _intent_identity(intent)):
+            return self._rejected("file_batch_waiting")
         self._state["actions"] = {intent.action_id: action}
         _load_flow_context(
             connection,
@@ -1980,6 +1983,12 @@ def _attempt_intent_guard(event, context) -> None:
             _fail("意图阶段的尝试必须为运行中且效果未知")
     run_row = run_rows[0]
     run_after = _row_after_facts(context, run_row)
+    from .file_batch_reads import FileBatchReads
+    batch_reads = context.file_batch_reads
+    action = _guard_facts(context, "actions", run_after["action_id"])
+    if (type(batch_reads) is not FileBatchReads
+            or not batch_reads.operation_permitted(action, run_after)):
+        _fail("设备尝试没有取得所属同机文件批次的执行资格")
     if run_after.get("kind") == int(_RUN_KIND.CHECK_DEVICE_AVAILABILITY):
         from .availability_intent import AvailabilityIntentReads
         reads = context.availability_reads

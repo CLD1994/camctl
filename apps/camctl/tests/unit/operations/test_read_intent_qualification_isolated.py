@@ -56,6 +56,18 @@ def output_stubs():
     return outputs
 
 
+def batch_stubs():
+    """本组以已取得合法批次为前提，分别验证原动作和尝试归属。"""
+    module = ModuleType("camctl.persistence.repositories.file_batch_reads")
+    class Reads:
+        def __init__(self, connection=None):
+            self.connection = connection
+        def operation_permitted(self, action, run):
+            return True
+    module.FileBatchReads = Reads
+    return module
+
+
 class ReadPlanTests(unittest.TestCase):
     def test_original_intent_replay_is_consumed_before_new_qualification(self):
         namespace = {"_saved_transaction_events": lambda connection, key: [{"saved": True}],
@@ -104,7 +116,8 @@ class ReadPlanTests(unittest.TestCase):
             self.assertEqual(command._state[parent_table][8]["action_id"], intent.action_id)
         command._verify_existing_run = verify_existing
         scope = SimpleNamespace(connection=None, allocate=lambda count: self.fail("不合格动作不能分配事件"))
-        with patch.dict(sys.modules, {outputs.__name__: outputs}):
+        batches = batch_stubs()
+        with patch.dict(sys.modules, {outputs.__name__: outputs, batches.__name__: batches}):
             result = command.plan(scope)
         return result, run
 
@@ -173,6 +186,11 @@ class ReadGuardTests(unittest.TestCase):
         event = SimpleNamespace(event_id=20, rows=(attempt, run_row), evidence={}, occurred_at=10)
         context = SimpleNamespace(state_rows=state, preparation_reads=PreparationReads(), obtain_check_reads=None,
                                   transaction=SimpleNamespace(first_event_id=20))
+        def current_facts(context, table, identity):
+            try:
+                return context.state_rows[table][identity]
+            except KeyError as error:
+                raise GuardError("原事实缺失") from error
         namespace = {"__name__": "isolated.operations", "__package__": "camctl.persistence.repositories",
             "_ATTEMPT_STATUS": SimpleNamespace(RUNNING=1), "_EFFECT_STATE": SimpleNamespace(UNKNOWN=1),
             "_RUN_KIND": SimpleNamespace(READ_FILE=3, RESOLVE_OUTPUT_SCOPE=11, CHECK_CAPTURE_RESULTS=7,
@@ -180,11 +198,15 @@ class ReadGuardTests(unittest.TestCase):
             "_row_after_facts": lambda context, row: {"id": 11, "kind": 3, "copy_id": 9,
                                                        "action_id": run_action_id, "attempts_used": 1},
             "_fixed_reference": lambda state, table, identity: state[table][identity],
+            "_guard_facts": current_facts,
             "_read_attempt_has_slot": lambda state, copy_id, round: True,
             "_fail": fail, "ConsistencyError": ValueError, "TransactionError": ValueError,
             "EventValidationError": GuardError}
         guard = extract("_attempt_intent_guard", namespace)
+        batches = batch_stubs()
+        context.file_batch_reads = batches.FileBatchReads()
         with patch.dict(sys.modules, {outputs.__name__: outputs, preparation.__name__: preparation,
+                                      batches.__name__: batches,
                                       definitions.__name__: definitions, alias.__name__: alias,
                                       scheduling.__name__: scheduling, selection.__name__: selection}):
             guard(event, context)
@@ -221,6 +243,33 @@ class ReadGuardTests(unittest.TestCase):
 
 
 class ReadConsumerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_original_running_ticket_resumes_even_on_last_allowed_attempt(self):
+        source = SOURCE.parents[2] / "outputs" / "read_attempts.py"
+        for used in (1, 3):
+            with self.subTest(attempts_used=used):
+                ticket = SimpleNamespace(run_id=11, attempt_id=used, target_id="9")
+                calls = []
+                resume_port = object()
+                async def save(runtime, copy_id, operation, request, repository, *, retry):
+                    calls.append((copy_id, operation, request.ticket, repository, retry))
+                    return SimpleNamespace(value=SimpleNamespace(disposition="resumed"))
+                class Database:
+                    async def read(self, callback): return callback(None)
+                runtime = SimpleNamespace(database=Database(), pending_read_business={},
+                    continuing_read_tickets={}, last_recovery_diagnostic="old",
+                    operations=SimpleNamespace(resume_read=resume_port,
+                        begin_attempt=lambda *_: self.fail("原票据续传不能增加尝试")))
+                intent = SimpleNamespace(target=SimpleNamespace(copy_id=9),
+                    config=SimpleNamespace(max_attempts=3), occurred_at=10)
+                namespace = {"running_read_ticket": lambda *_: (ticket, 5),
+                    "read_host_boundary": lambda *_: True, "save_read_business": save,
+                    "ReadResumeRequest": lambda original, config, at: SimpleNamespace(ticket=original, config=config, at=at),
+                    "ReadResumeDisposition": SimpleNamespace(NOT_RUNNING="not_running")}
+                acquire = extract("acquire_read_attempt", namespace, source)
+                self.assertEqual(await acquire(runtime, intent), (ticket, None))
+                self.assertEqual(calls, [(9, "read_resume", ticket, resume_port, True)])
+                self.assertEqual(runtime.continuing_read_tickets, {})
+
     async def test_rejected_intent_does_not_produce_ticket_or_continuation(self):
         source = SOURCE.parents[2] / "outputs" / "read_attempts.py"
         async def save(runtime, copy_id, operation, intent, repository, *, on_completed, retry):

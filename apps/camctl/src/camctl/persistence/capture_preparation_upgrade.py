@@ -81,10 +81,25 @@ def _with_format(rows, table: str, names: tuple[str, ...], target_format: int):
     return [(*row[:index], target_format, *row[index + 1:]) for row in rows]
 
 
-def _copy_tables(source: sqlite3.Connection, target: sqlite3.Connection) -> None:
+def _upgrade_tables(source, target, target_format):
+    from camctl.history.events import business_tables_for_format
+    original = _one(source, "SELECT format_version FROM database_metadata WHERE id=1")[0]
     tables = _tables(source)
-    if tables != _tables(target):
-        raise StateDatabaseError("原状态库的全部表与权威目标结构不一致，停止升级")
+    added = set(business_tables_for_format(target_format)) - set(business_tables_for_format(original))
+    target_tables = _tables(target)
+    nonempty = {table for table in added & set(target_tables)
+        if _one(target, f"SELECT COUNT(*) FROM {_quote(table)}") != (0,)}
+    from camctl.persistence.upgrade_tables import validate_upgrade_tables
+    try:
+        validate_upgrade_tables(original=tables, target=target_tables,
+            declared_added=added, nonempty_added=nonempty)
+    except ValueError as error:
+        raise StateDatabaseError(str(error)) from error
+    return tables
+
+
+def _copy_tables(source: sqlite3.Connection, target: sqlite3.Connection) -> None:
+    tables = _upgrade_tables(source, target, CURRENT_FORMAT_VERSION)
     for table in tables:
         columns = _checked_columns(source, target, table)
         names = tuple(column[1] for column in columns if column[6] == 0)
@@ -100,9 +115,7 @@ def _copy_tables(source: sqlite3.Connection, target: sqlite3.Connection) -> None
 
 
 def _verify_contents(source, target, *, target_format: int) -> None:
-    tables = _tables(source)
-    if tables != _tables(target):
-        raise StateDatabaseError("升级副本没有保留原状态库的全部表")
+    tables = _upgrade_tables(source, target, target_format)
     for table in tables:
         columns = _checked_columns(source, target, table)
         names = tuple(column[1] for column in columns)

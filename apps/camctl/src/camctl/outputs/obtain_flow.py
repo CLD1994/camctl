@@ -165,6 +165,7 @@ class ObtainRuntime:
     discovery: ReadDiscoveryOwner = field(default_factory=ReadDiscoveryOwner)
     availability: Any = None
     on_read_retry_deadline: Callable[[int, int], None] | None = None
+    pending_file_batches: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -229,6 +230,8 @@ async def advance_obtain(runtime: ObtainRuntime) -> None:
     await _settle_canceled_read_ends(runtime, now)
     await _settle_ready_read_ends(runtime, now)
     await _settle_failed_reads(runtime)
+    from camctl.outputs.batches import release_finished_batches
+    await release_finished_batches(runtime.database, now, pending=runtime.pending_file_batches)
     await _start_due(runtime, now)
     for (action_id,) in (await runtime.discovery.rows(runtime.database, "actions", now,
             "SELECT id FROM actions WHERE status=2 AND cancel_requested=0 AND type=4"
@@ -246,6 +249,7 @@ async def advance_obtain(runtime: ObtainRuntime) -> None:
         publish_remaining -= await _publish_and_finish(runtime, action_id, now, publish_limit=publish_remaining)
     await _advance_reads(runtime, now)
     await _advance_local_reads(runtime, now)
+    await release_finished_batches(runtime.database, runtime.occurred_at(), pending=runtime.pending_file_batches)
 
 
 async def _save_repository(runtime, save, request, key):
@@ -876,6 +880,17 @@ async def _advance_reads(runtime: ObtainRuntime, now: int) -> None:
     candidates = tuple(item for item in page.items
                        if item.copy_id not in binding_blocked and item.copy_id not in exhausted_reads
                        and item.copy_id not in local_end and item.copy_id not in digest_end)
+    from camctl.outputs.batches import BatchRequest, acquire_file_batch
+    batch_ready = []
+    for candidate in candidates:
+        from camctl.persistence.repositories.file_batch_reads import FileBatchReads
+        legacy = await runtime.database.read(lambda owned: FileBatchReads(owned.connection).legacy_read_held(
+            candidate.copy_id, candidate.action_id, candidate.device_id))
+        if legacy or await acquire_file_batch(runtime.database,
+                BatchRequest(candidate.action_id, candidate.device_id, runtime.occurred_at()),
+                pending=runtime.pending_file_batches):
+            batch_ready.append(candidate)
+    candidates = tuple(batch_ready)
     if getattr(runtime, "availability", None) is not None:
         from camctl.operations.availability import AvailabilityProgress
         ready = []
@@ -948,6 +963,10 @@ async def _advance_read(
     from camctl.persistence.repositories.read_end import load_read_end
     saved = await runtime.database.read(lambda owned: load_read_end(copy_id, owned))
     if saved is not None:
+        from camctl.persistence.repositories.file_batch_reads import FileBatchReads
+        if not await runtime.database.read(lambda owned: FileBatchReads(owned.connection).permits(
+                facts["action_id"], assembly.binding.device_id)):
+            return False
         ticket, end, occurred_at, _ = saved
         from camctl.outputs.read_attempts import HeldReadEnd
         runtime.pending_read_ends[copy_id] = HeldReadEnd(ticket, end, occurred_at,
@@ -955,6 +974,14 @@ async def _advance_read(
             evidence=assembly.evidence)
         await _run_read(runtime, assembly, facts, ticket, now)
         return True
+    from camctl.outputs.batches import BatchRequest, acquire_file_batch
+    from camctl.persistence.repositories.file_batch_reads import FileBatchReads
+    legacy = await runtime.database.read(lambda owned: FileBatchReads(owned.connection).legacy_read_held(
+        copy_id, facts["action_id"], assembly.binding.device_id))
+    if not legacy and not await acquire_file_batch(runtime.database,
+            BatchRequest(facts["action_id"], assembly.binding.device_id, runtime.occurred_at()),
+            pending=runtime.pending_file_batches):
+        return False
     if await _read_wait_remaining(runtime, copy_id, assembly.retry_interval_s, assembly.max_read_attempts) \
             is not None:
         return False

@@ -149,10 +149,16 @@ def device_holder(connection, device_id):
     return rows[0][0] if rows else None
 
 
-def first_eligible_read(connection, device_id, now_us, *, retry_wait_copy_id=None):
+def first_eligible_read(connection, device_id, now_us, *, retry_wait_copy_id=None, internal_only=False):
     validate_read_basis(connection, device_id)
     eligibility = _ELIGIBLE
+    if internal_only:
+        eligibility += " AND (fc.processing_id IS NOT NULL OR fc.inspection_id IS NOT NULL)"
     parameters = [device_id, now_us]
+    from camctl.persistence.repositories.file_batch_reads import FileBatchReads
+    batch = FileBatchReads(connection).holder(device_id)
+    if batch is not None:
+        eligibility += " AND a.id=?"
     if retry_wait_copy_id is not None:
         ObjectId(retry_wait_copy_id)
         # A caller may include only the one persisted local-to-device
@@ -164,6 +170,8 @@ def first_eligible_read(connection, device_id, now_us, *, retry_wait_copy_id=Non
             " AND (r.retry_wait_required=0 OR fc.id=?)",
         )
         parameters.append(retry_wait_copy_id)
+    if batch is not None:
+        parameters.append(batch[1])
     with closing(connection.execute(
         "SELECT fc.id" + _READ_FROM + " WHERE ob.device_id=? AND " + eligibility
         + " ORDER BY " + _READ_ORDER + " LIMIT 1", parameters,

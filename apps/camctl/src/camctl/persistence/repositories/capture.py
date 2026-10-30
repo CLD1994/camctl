@@ -7241,6 +7241,10 @@ def _activity_guard(event, context) -> None:
         _validate_activity_result(row, context)
         if not row.before.exists:
             action = context.state_rows.get("actions", {}).get(row.after.values.get("action_id"), {})
+            from .file_batch_reads import FileBatchReads
+            if (type(context.file_batch_reads) is not FileBatchReads
+                    or not context.file_batch_reads.permits(action["id"], action["device_id"])):
+                raise EventValidationError("新拍摄活动不能越过同机文件批次")
             from .scheduling import _fixed_identity
             from camctl.devices.drivers.hasselblad.identity import CameraIdentity
             raw_identity = row.after.values.get("expected_identity_json")

@@ -11,6 +11,7 @@ import pytest
 
 from camctl import resources
 from camctl.contracts import enums
+from camctl.persistence.repositories.file_batch_reads import FileBatchReads
 
 
 class _ActionType(IntEnum):
@@ -75,6 +76,9 @@ class _FormatVersion(IntEnum):
     V4 = 4
     V5 = 5
     V6 = 6
+    V7 = 7
+    V8 = 8
+    V9 = 9
 
 
 class _FilePurpose(IntEnum):
@@ -112,6 +116,7 @@ class _GuardContext:
         self.state_rows = state_rows
         self.preparation_reads = preparation_reads
         self.retry_wait_reads = _SettledReads()
+        self.file_batch_reads = FileBatchReads(None)
         self.validated_events = ()
 
     def complete_rows(self, table, column, identity):
@@ -139,6 +144,9 @@ def production(monkeypatch):
 
     monkeypatch.setattr(resources, "resource_bytes", forbidden_resource)
     monkeypatch.setattr(enums, "resource_bytes", forbidden_resource)
+    # 本组验证 START 与单文件机会的互斥，前提为动作已持有合法批次。
+    monkeypatch.setattr(FileBatchReads, "permits", lambda self, action_id, device_id,
+        require_owned=False: action_id == 21 and device_id == "camera-a")
     monkeypatch.setattr(enums, "enum_for", lambda column: _ENUMS.get(column, SimpleNamespace()))
     monkeypatch.setattr(enums, "load_registry", lambda: {
         "enums": {}, "json_enums": {},
@@ -282,6 +290,7 @@ def _grant_inputs(outputs, connection, *, slot=None):
         "retry_wait_required": 0,
     }
     action = {
+        "id": 21, "type": int(outputs._ACTION_TYPE.OBTAIN_ACTION_OUTPUTS),
         "status": int(outputs._ACTION_STATUS.RUNNING), "cancel_requested": 0,
         "scheduled_at": 0,
     }
@@ -414,6 +423,7 @@ def _guard_context(outputs, *, slot=None, source_device_file_id=41, reads=None):
         "device_files": {41: {"observer_action_id": 22, "source_action_id": 23}},
         "actions": {
             21: {"id": 21, "status": int(outputs._ACTION_STATUS.RUNNING),
+                "type": int(outputs._ACTION_TYPE.OBTAIN_ACTION_OUTPUTS),
                 "cancel_requested": 0, "scheduled_at": 0},
             22: {"device_id": "camera-a", "driver_id": "driver-a"},
             23: {"device_id": "camera-a", "driver_id": "driver-a"},

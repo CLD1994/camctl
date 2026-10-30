@@ -193,6 +193,9 @@ class PreparationReads:
                    if projected[(table, identity)].get(column) == device_id)
 
     def can_prepare(self, action, activity, occurred_at):
+        from .file_batch_reads import FileBatchReads
+        if not FileBatchReads(self.connection).permits(action["id"], action["device_id"]):
+            return False
         from contextlib import closing
         from camctl.scheduling.resources import capture_scope_blocked
         from camctl.devices.drivers.hasselblad.definitions import DRIVER_ID
@@ -245,6 +248,9 @@ class PreparationReads:
             raise ConsistencyError("准备活动不属于原pending拍摄动作")
         if photo_start_recorded(self.connection, action):
             raise ConsistencyError("已有照片START责任不能建立准备活动")
+        from .file_batch_reads import FileBatchReads
+        if not FileBatchReads(self.connection).permits(action["id"], action["device_id"]):
+            raise ConsistencyError("准备活动不能越过同机文件批次")
         if not (Decimal(action["scheduled_at"]) - request.prepare_lead_s * 1_000_000
                 <= request.trusted_wall_now <= action["scheduled_at"] + action["max_delay_ms"] * 1000):
             raise ConsistencyError("准备活动没有原提前区间的时间资格")

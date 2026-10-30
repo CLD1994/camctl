@@ -429,6 +429,12 @@ def _verify_structure(connection: sqlite3.Connection, format_version: int) -> No
             raise DatabaseInvalidError(f"状态库缺少必要结构: {sorted(missing)}")
         _verify_format_constraints(connection, format_version)
         _verify_read_end_structure(connection)
+        if format_version >= int(_FORMAT_VERSIONS.V9):
+            from camctl.persistence.file_batch_structure import verify_file_batch_structure
+            try:
+                verify_file_batch_structure(connection)
+            except (ValueError, sqlite3.Error) as error:
+                raise DatabaseInvalidError(f"同机文件批次结构无效: {error}") from error
         if format_version >= PREVIEW_SELECTION_MINIMUM_FORMAT_VERSION:
             from camctl.persistence.preview_selection_structure import verify_preview_selection_structure
 

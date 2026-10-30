@@ -1062,3 +1062,32 @@ def test_photo_comparison_rejects_unreliable_or_contradictory_content(responses,
         "/mnt/a.3FR", "a.3FR", files.DownloadVariant.ORIGINAL, "a" * 64, "serial", 10, 100)
     with pytest.raises(ValueError):
         files.decide_photo_cache(source, status=status, size_bytes=size, sha256=digest)
+
+
+@pytest.mark.parametrize("output,path", [
+    (b"3FR     211906560  /SSD/100HASBL/B0000001.3FR\n", "/SSD/100HASBL/B0000001.3FR"),
+    (b"JPEG      6508544  /SSD/100HASBL/B0000333.JPG\n", "/SSD/100HASBL/B0000333.JPG"),
+    (b"3FR 20 /SSD/a.3FR\nJPEG   10  /SSD/b.JPG\n", "/SSD/b.JPG"),
+])
+def test_images_accepts_aligned_raw_and_jpeg_rows(responses, output, path):
+    api, _ = responses
+    assert api.parse_images_presence(output, b"", camera_path=path) is True
+
+
+def test_images_keeps_distinct_camera_paths_unconfirmed(responses):
+    api, _ = responses
+    assert api.parse_images_presence(
+        b"JPEG      6508544  /SSD/100HASBL/B0000333.JPG\n", b"",
+        camera_path="/mnt/media_rw/ssd/DCIM/106HASBL/B0000333.JPG") is None
+
+
+@pytest.mark.parametrize("output", [
+    b"PNG 10 /SSD/a.JPG\n", b"JPEG -1 /SSD/a.JPG\n",
+    b"JPEG 10 relative.JPG\n", b"JPEG 10 /SSD/../a.JPG\n",
+    b"JPEG 10 /SSD/a.JPG\nJPEG 10 /SSD/a.JPG\n",
+    b"JPEG 10 /SSD/a.JPG\nunknown\n",
+])
+def test_images_rejects_unverified_or_ambiguous_rows(responses, output):
+    api, _ = responses
+    with pytest.raises(api.CliParseError):
+        api.parse_images_presence(output, b"", camera_path="/SSD/a.JPG")

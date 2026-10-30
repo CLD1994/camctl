@@ -13,6 +13,9 @@ from decimal import Decimal
 from time import monotonic_ns as diagnostic_monotonic_ns
 from typing import Callable
 
+from .tool_gate import CameraToolGate
+from .identity import CameraIdentity
+
 from camctl.contracts.values import parse_object_id
 from camctl.devices.bindings import BindingStatus, DeviceConfigurationError, check_binding
 from camctl.devices.capture_preparation import (
@@ -352,10 +355,12 @@ class HasselbladDriver:
             raise TypeError("transport 必须提供 run(ToolSpec, StopSignal)")
         self.declaration = DRIVER_DECLARATION
         self._prepared_captures = PreparedCaptureCache()
+        self._tool_gate = CameraToolGate(monotonic_ns=monotonic_ns, start_error=ToolStartError)
 
     def begin_session(self) -> None:
         """新执行会话清空准备凭据，不向相机派发命令。"""
         self._prepared_captures.clear()
+        self._tool_gate = CameraToolGate(monotonic_ns=self.monotonic_ns, start_error=ToolStartError)
 
     def prepared_capture_matches(self, request: ControlRequest) -> bool:
         """只检查本会话凭据及本地绑定，不读取或设置机身。"""
@@ -416,7 +421,10 @@ class HasselbladDriver:
                 try:
                     with log_context(device_id=binding.device_id, driver_id=binding.driver_id,
                                      command=(name,), step_name=name):
-                        raw = await self.transport.run(spec, _NeverStop())
+                        raw = await self._tool_gate.run(
+                            CameraIdentity(config.serial, config.product_id).resource_key,
+                            self.transport, spec, _NeverStop(),
+                            interrupted=lambda: getattr(current_call_scope(), "interrupted", None))
                 finally:
                     elapsed_ms = (diagnostic_monotonic_ns() - call_began) // 1_000_000
             except ToolCallCancelled as error:
@@ -872,7 +880,10 @@ class HasselbladDriver:
         try:
             try:
                 with log_context(command=args, step_name=name):
-                    raw = await self.transport.run(spec, _NeverStop())
+                    raw = await self._tool_gate.run(
+                        CameraIdentity(config.serial, config.product_id).resource_key,
+                        self.transport, spec, _NeverStop(),
+                        interrupted=lambda: getattr(current_call_scope(), "interrupted", None))
             finally:
                 elapsed_ms = (diagnostic_monotonic_ns() - call_began) // 1_000_000
         except ToolStartError as failure:
@@ -887,6 +898,15 @@ class HasselbladDriver:
         except ToolCallCancelled as failure:
             raw = failure.outcome
         except asyncio.CancelledError as failure:
+            if isinstance(failure.__cause__, ToolStartError):
+                if start_errors is not None:
+                    start_errors.append(failure.__cause__)
+                steps.append({"name": name, "start_error": str(failure.__cause__), "elapsed_ms": elapsed_ms})
+                scope = current_call_scope()
+                if scope is None:
+                    raise
+                scope.interrupted = failure
+                return None
             # 真实 execute_tool 在拥有范围内交回收场后的 RawToolOutcome；
             # 裸取消没有该事实，保留未收场责任并由外层拥有者恢复。
             scope = current_call_scope()

@@ -699,6 +699,7 @@ class CleanupRuntime:
     pending_saves: dict[tuple[str, int], PendingCleanupSave] = field(default_factory=dict)
     pending_queries: dict[tuple[int, int], PendingCleanupQuery] = field(default_factory=dict)
     pending_companions: dict[int, PendingCleanupCompanion] = field(default_factory=dict)
+    pending_file_batches: dict = field(default_factory=dict)
     #: 每个活动成员只保留最近一次普通交接身份，避免逐轮重置等待。
     consumed_queries: dict[int, CleanupConsumption] = field(default_factory=dict)
     recovery_boundary: RecoveryBoundary = RecoveryBoundary.UNCONFIRMED
@@ -1322,6 +1323,17 @@ async def _begin_cleanup_intent(runtime, request, consumer):
             del runtime.pending_intents[item_id]
             return DbOutcome(DbOutcomeKind.COMPLETED,
                 BeginAttemptResult(BeginDisposition.REJECTED, reason=reason))
+        device = await _read_cleanup(runtime, lambda connection: connection.execute(
+            "SELECT a.device_id FROM cleanup_items c JOIN outputs o ON o.id=c.output_id"
+            " JOIN device_files f ON f.id=o.device_file_id JOIN actions a ON a.id=f.observer_action_id"
+            " WHERE c.id=?", (item_id,),
+        ).fetchone())
+        if device is not None:
+            from camctl.outputs.batches import BatchRequest, acquire_file_batch
+            if not await acquire_file_batch(runtime.database,
+                    BatchRequest(request.action_id, device[0], runtime.occurred_at()),
+                    pending=runtime.pending_file_batches):
+                return CleanupStep("waiting")
     def apply_completed(result):
         if not isinstance(result.value, BeginAttemptResult):
             raise ConsistencyError("清理意图回执类型不对应")
@@ -2364,6 +2376,12 @@ def _cleanup_dispatch_allowed(connection, item_id, ticket):
         "SELECT action_id,status FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
     if row is None or row[1] in _MEMBER_TERMINAL:
         return False
+    from camctl.persistence.repositories.file_batch_reads import FileBatchReads
+    from camctl.persistence.transaction import row_facts
+    run = row_facts(connection, "operation_runs", ticket.run_id)
+    action = row_facts(connection, "actions", row[0])
+    if run is None or action is None or not FileBatchReads(connection).operation_permitted(action, run):
+        return False
     if not _cancel_requested(connection, row[0]):
         if ticket.operation == "delete":
             from camctl.persistence.repositories.outputs import _ProductReads, _cleanup_entry_ready
@@ -2554,6 +2572,8 @@ async def _advance_cleanup_round(runtime: CleanupRuntime) -> bool:
     finally:
         runtime.last_recovery_diagnostic = local.last_recovery_diagnostic
     now = runtime.occurred_at()
+    from camctl.outputs.batches import release_finished_batches
+    await release_finished_batches(runtime.database, now, pending=runtime.pending_file_batches)
     wakeup_required |= await _start_due(runtime, now)
     async for action_id in _running_cleanup_actions(runtime):
         await _advance_cleanup_action(runtime, action_id, now)
@@ -2571,6 +2591,7 @@ async def _advance_cleanup_round(runtime: CleanupRuntime) -> bool:
     async for action_id in _running_cleanup_actions(runtime):
         await _advance_cleanup_action(runtime, action_id, now)
         wakeup_required = True
+    await release_finished_batches(runtime.database, runtime.occurred_at(), pending=runtime.pending_file_batches)
     return wakeup_required
 
 

@@ -76,6 +76,7 @@ class EventContext:
     availability_reads: object | None = None
     availability_finish_reads: object | None = None
     retry_wait_reads: object | None = None
+    file_batch_reads: object | None = None
     read_end_reads: object | None = None
     validated_events: Sequence[ValidatedEvent] = ()
 

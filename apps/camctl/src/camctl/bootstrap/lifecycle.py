@@ -277,6 +277,8 @@ def build_runtime(
     register_capture_guards()
     register_timelapse_guards()
     register_outputs_guards()
+    from camctl.persistence.repositories.file_batches import register_file_batch_guards
+    register_file_batch_guards()
     register_cancellation_guards()
     register_report_guards()
     register_window_guard()

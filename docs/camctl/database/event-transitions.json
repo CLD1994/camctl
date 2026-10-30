@@ -1138,6 +1138,29 @@
         "phase"
       ],
       "minimum_format": 3
+    },
+    "device_file_batches": {
+      "minimum_format": 9,
+      "immutable": [
+        "action_id",
+        "device_id",
+        "acquired_event_id"
+      ],
+      "mutable": [
+        "released_event_id"
+      ],
+      "derived": [
+        "id"
+      ],
+      "write_once": [
+        "released_event_id"
+      ],
+      "owner": {
+        "entity": "action",
+        "id": "action_id",
+        "via": []
+      },
+      "state_columns": []
     }
   },
   "guards": {
@@ -1552,6 +1575,11 @@
     "software_recovery": {
       "contract": "operation-fields.md#无人值守的软件重启责任",
       "rule": "原活动唯一的独立责任，可靠意图先于派发，累计预算和期限不可重置；同绑定新boot及驱动重启合同证明设备结束；完整分页范围和会话准备分别判定。",
+      "scope": "transaction"
+    },
+    "file_batch": {
+      "contract": "../../architecture/file-batches.md",
+      "rule": "根据同一事务的原持有者、完整来源和成员、旧读取依赖及实际调用收场核对整批取得与释放。",
       "scope": "transaction"
     }
   },
@@ -10825,6 +10853,66 @@
           "evidence": []
         }
       }
+    },
+    "FILE_BATCH_CHANGED": {
+      "id": 40,
+      "version": 1,
+      "branches": {
+        "GRANT": {
+          "reason": 1,
+          "title": "取得同机文件批次",
+          "rows": [
+            {
+              "table": "device_file_batches",
+              "op": "create",
+              "after": {
+                "released_event_id": [
+                  null
+                ]
+              }
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "file_batch"
+          ],
+          "evidence": []
+        },
+        "RELEASE": {
+          "reason": 2,
+          "title": "释放同机文件批次",
+          "rows": [
+            {
+              "table": "device_file_batches",
+              "op": "update",
+              "columns": [
+                "released_event_id"
+              ],
+              "before": {
+                "released_event_id": [
+                  null
+                ]
+              },
+              "after": {},
+              "required": [
+                "released_event_id"
+              ],
+              "transitions": {}
+            }
+          ],
+          "guards": [
+            "row_shape",
+            "transaction",
+            "ownership",
+            "report_impact",
+            "file_batch"
+          ],
+          "evidence": []
+        }
+      }
     }
   },
   "history_references": {
@@ -10993,6 +11081,12 @@
     "segment_sets.cancel_event_id": {
       "target": "prior_event",
       "exception": "同原动作实际取消请求事件。"
+    },
+    "device_file_batches.acquired_event_id": {
+      "target": "creating_event"
+    },
+    "device_file_batches.released_event_id": {
+      "target": "assigning_event"
     }
   },
   "non_event_tables": {

@@ -453,7 +453,7 @@ def parse_images_presence(output: bytes, stderr: bytes, *, camera_path: str) -> 
     lines = _lines(text)
     seen = set()
     for line in lines:
-        match = re.fullmatch(r"3FR ([0-9]+) (/.+)", line)
+        match = re.fullmatch(r"(?:3FR|JPEG) +([0-9]+) +(/.+)", line)
         if match is None:
             raise CliParseError("images 输出包含未经核验的条目")
         path = match.group(2)

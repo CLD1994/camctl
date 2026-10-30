@@ -11,6 +11,8 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 
+from camctl.devices.drivers.hasselblad.tool_gate import CameraToolGate
+
 
 SOURCE = Path(__file__).parents[3] / "src" / "camctl" / "devices" / "drivers" / "hasselblad" / "driver.py"
 
@@ -67,6 +69,8 @@ def driver_type():
     matched = object()
     namespace = {"__name__": __name__, "dataclass": dataclass, "replace": replace, "Decimal": Decimal, "asyncio": asyncio,
         "Mapping": dict, "DRIVER_DECLARATION": object(), "PreparedCaptureCache": lambda: object(),
+        "CameraToolGate": CameraToolGate,
+        "CameraIdentity": lambda serial, product_id: SimpleNamespace(resource_key=serial),
         "DeviceConfigurationError": ValueError, "BindingStatus": SimpleNamespace(MATCHED=matched),
         "check_binding": lambda binding, owner: SimpleNamespace(status=matched),
         "read_camera_config": lambda device: device, "ToolSpec": ToolSpec,
@@ -207,6 +211,37 @@ class AvailabilityPortTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(diagnostics.calls[1].stdout.state, "unavailable")
         with self.assertRaises(ValueError):
             result.to_device_result("31")
+
+    async def test_canceling_usb_wait_is_reliably_not_dispatched(self):
+        driver, binding, transport, cancelled = self.setup_driver([])
+        entered, release, queued = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        calls = []
+        async def run(spec, stop):
+            calls.append(spec)
+            if len(calls) == 1:
+                entered.set()
+                await release.wait()
+            return raw({"list": b"list", "info": b"SERIAL", "doctor": b"PASS"}[spec.argv[-1]])
+        transport.run = run
+        async def check():
+            return await driver.check_availability(binding, expected_serial="SERIAL", expected_product_id=10,
+                timeout_s=Decimal(5))
+        first = asyncio.create_task(check())
+        await entered.wait()
+        async def waiting_check():
+            queued.set()
+            return await check()
+        waiting = asyncio.create_task(waiting_check())
+        await queued.wait()
+        waiting.cancel()
+        with self.assertRaises(cancelled) as caught:
+            await waiting
+        self.assertTrue(caught.exception.result.settled)
+        self.assertEqual(len(caught.exception.result.calls), 1)
+        self.assertIsInstance(caught.exception.result.calls[0].error, ToolStartError)
+        self.assertEqual(len(calls), 1)
+        release.set()
+        self.assertTrue((await first).available)
 
 
 if __name__ == "__main__":

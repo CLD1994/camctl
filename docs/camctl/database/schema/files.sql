@@ -157,3 +157,16 @@ CREATE TABLE file_copies (
     CHECK (verification_state <> 5 OR source_sha256 IS NULL),
     CHECK (verification_state <> 6 OR verification_error_json IS NOT NULL)
 ) STRICT;
+
+-- 格式 9：取得时登记整批，单文件机会释放不改变该归属。
+CREATE TABLE device_file_batches (
+    id INTEGER PRIMARY KEY CHECK (id > 0),
+    action_id INTEGER NOT NULL REFERENCES actions(id) DEFERRABLE INITIALLY DEFERRED,
+    device_id TEXT NOT NULL CHECK (length(device_id) > 0),
+    acquired_event_id INTEGER NOT NULL REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    released_event_id INTEGER REFERENCES history_events(id) DEFERRABLE INITIALLY DEFERRED,
+    UNIQUE (action_id, device_id),
+    CHECK (released_event_id IS NULL OR released_event_id > acquired_event_id)
+) STRICT;
+CREATE UNIQUE INDEX one_device_file_batch ON device_file_batches(device_id)
+    WHERE released_event_id IS NULL;

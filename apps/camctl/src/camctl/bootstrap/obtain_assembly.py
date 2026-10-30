@@ -79,6 +79,7 @@ def session_obtain_assembly(
     pending_read_ends: dict = {}
     pending_segment_selections: dict = {}
     pending_segment_queries: dict = {}
+    pending_file_batches: dict = {}
     discovery = ReadDiscoveryOwner(read_discovery_batch_size)
 
     def factory(database: Any) -> ObtainRuntime:
@@ -170,6 +171,7 @@ def session_obtain_assembly(
             pending_read_ends=pending_read_ends,
             pending_segment_selections=pending_segment_selections,
             pending_segment_queries=pending_segment_queries,
+            pending_file_batches=pending_file_batches,
             file_executor=file_executor,
             discovery=discovery,
             availability=availability,
@@ -206,7 +208,10 @@ def obtain_flow(factory: Callable[[Any], ObtainRuntime]):
                 notifier.mark_changed(WakeReason.READ_OPPORTUNITY)
 
     async def settle_diagnostics(context: Any) -> None:
-        await settle_obtain_diagnostics(factory(context.database))
+        from camctl.outputs.batches import retry_file_batches
+        runtime = factory(context.database)
+        await retry_file_batches(context.database, runtime.pending_file_batches)
+        await settle_obtain_diagnostics(runtime)
 
     flow.settle_diagnostics = settle_diagnostics
     flow.next_wakeup_at = wakeup.next_at

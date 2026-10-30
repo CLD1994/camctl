@@ -118,6 +118,8 @@ def plan_device_work(connection, now_us: int, capture_read_parallel: Container[s
     from camctl.scheduling.resources import current_preparation_holder
     work = []
     for device_id in devices:
+        from camctl.persistence.repositories.file_batch_reads import FileBatchReads
+        batch = FileBatchReads(connection).holder(device_id)
         # 读取消费者只需要知道是否存在拍摄阻挡，不加载该设备所有活动。
         with closing(connection.execute(
             "SELECT a.id FROM actions a JOIN device_activities d ON d.action_id=a.id"
@@ -154,6 +156,13 @@ def plan_device_work(connection, now_us: int, capture_read_parallel: Container[s
                 if cursor.fetchone()[0] is not None:
                     delivery_holder = holder
         reads = tuple(candidate.copy_id for candidate in candidates if candidate.device_id == device_id and not candidate.held)
+        if batch is not None:
+            due = None
+        elif delivery_holder is not None:
+            owner = connection.execute("SELECT action_id FROM deliveries WHERE id=(SELECT delivery_id FROM file_copies WHERE id=?)",
+                (delivery_holder,)).fetchone()
+            if owner is not None and FileBatchReads(connection).legacy_read_held(delivery_holder, owner[0], device_id):
+                due = None
         work.append(decide_device_work(DeviceFacts(
             device_id, () if due is None else (due[0],),
             () if held_capture is None else (held_capture[0],), reads if holder is None else (),

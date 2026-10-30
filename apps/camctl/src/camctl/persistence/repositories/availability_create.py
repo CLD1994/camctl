@@ -148,6 +148,11 @@ def _qualify(connection, request, boundary, *, existing_check=None, exclude_atte
             from camctl.outputs.read_discovery import first_eligible_read
             if first_eligible_read(connection, device_id, request.trusted_wall_now) != request.trigger_copy_id:
                 raise AvailabilityTargetBlocked("拷贝没有当前读取候选顺序资格")
+    from .file_batch_reads import FileBatchReads
+    batches = FileBatchReads(connection)
+    if not batches.permits(action["id"], device_id, require_owned=request.trigger_copy_id is not None):
+        if request.trigger_copy_id is None or not batches.legacy_read_held(request.trigger_copy_id, action["id"], device_id):
+            raise AvailabilityTargetBlocked("设备由其他文件批次持有或读取尚未取得批次")
     if logical_held_identity_mismatch(connection, device_id, request.identity, batch_size=request.batch_size):
         raise AvailabilityTargetIdentityMismatch("逻辑设备旧活动的固定机身身份不同")
     if check_candidate_order:

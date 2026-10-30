@@ -138,10 +138,13 @@ async def _prepare_dispatch(runtime, pending):
     """按原票据复核派发资格；本地未派发结果沿原尝试可靠保存。"""
     facts = await _read_facts(runtime, pending, ticket=pending.ticket)
     item, _dependency, _output, _file, _binding, owner, last, _present = facts
+    from camctl.persistence.repositories.file_batch_reads import FileBatchReads
+    permitted = (_binding is None or await runtime.database.read(lambda owned:
+        FileBatchReads(owned.connection).permits(owner["id"], _binding.device_id, require_owned=True)))
     if last[6] != 1:
         return None
     if (item["status"] == 1 and owner["status"] == 2
-            and not owner["cancel_requested"] and last[1] in (1, 2)):
+            and not owner["cancel_requested"] and last[1] in (1, 2) and permitted):
         return facts
     outcome = CallOutcome(
         status=AttemptStatus.FAILED,
@@ -373,7 +376,13 @@ async def _advance_one(runtime, pending):
     local_unsent = pending.intent is not None and not pending.dispatched
     if ((item["status"] != 1 or owner["status"] != 2 or owner["cancel_requested"])
             and not (local_unsent and last is not None and last[6] == 1)):
-        return True
+        if last is None or last[1] not in (1, 2):
+            return True
+        if last[6] == 1:
+            if not await _recover(runtime, pending, last, binding):
+                return False
+            facts = await _read_facts(runtime, pending)
+        return await _consume(runtime, pending, facts)
     owns_unsent = False
     if last is not None:
         if last[6] == 1:
@@ -452,6 +461,11 @@ async def _advance_one(runtime, pending):
         )
         pending.intent_key = new_operation_key()
     if not owns_unsent:
+        from camctl.outputs.batches import BatchRequest, acquire_file_batch
+        if not await acquire_file_batch(runtime.database,
+                BatchRequest(owner["id"], binding.device_id, runtime.occurred_at()),
+                pending=runtime.pending_file_batches):
+            return False
         begun = await _begin(runtime, pending)
         if begun.disposition is not BeginDisposition.GRANTED:
             await _failed(
@@ -532,7 +546,9 @@ async def advance_segment_queries(runtime, now):
         "SELECT i.id,d.depends_on_action_id FROM obtain_items i"
         " JOIN obtain_source_selections s ON s.id=i.selection_id"
         " JOIN action_dependencies d ON d.id=s.dependency_id JOIN actions a ON a.id=d.action_id"
-        " WHERE i.status=1 AND i.basis=5 AND a.status=2 AND a.cancel_requested=0",
+        " WHERE i.basis=5 AND ((i.status=1 AND a.status=2 AND a.cancel_requested=0)"
+        " OR EXISTS(SELECT 1 FROM operation_runs r WHERE r.obtain_item_id=i.id"
+        " AND r.kind=5 AND r.status IN (1,2)))",
         identity="i.id",
     )
     candidates = tuple((identity, source) for identity, source in page.items

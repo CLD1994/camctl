@@ -2653,6 +2653,12 @@ class _SlotChangeCommand:
     # ---- 授予 ----
 
     def _grant(self, scope, copy, device_id: str, run, action) -> CommandPlan:
+        from .file_batch_reads import FileBatchReads
+        batches = FileBatchReads(scope.connection)
+        if not batches.permits(
+                action["id"], device_id, require_owned=action["type"] == int(_ACTION_TYPE.OBTAIN_ACTION_OUTPUTS)):
+            if copy["slot_device_id"] != device_id or not batches.legacy_read_held(copy["id"], action["id"], device_id):
+                return self._decision(SlotOutcome.WAIT, "file_batch_waiting")
         holder = self._device_holder(scope.connection, device_id)
         slot = copy["slot_device_id"]
         if slot == device_id:
@@ -7931,6 +7937,12 @@ def _read_slot_guard(event, context) -> None:
             raise EventValidationError("读取源观察者与可靠来源的原设备绑定不一致")
         after_slot = row.after.values["slot_device_id"]
         if after_slot is not None:
+            from .file_batch_reads import FileBatchReads
+            action = _slot_owner_action(context, copy)
+            if (type(context.file_batch_reads) is not FileBatchReads
+                    or not context.file_batch_reads.permits(action["id"], binding[0],
+                        require_owned=action["type"] == int(_ACTION_TYPE.OBTAIN_ACTION_OUTPUTS))):
+                raise EventValidationError("读取机会未持有原动作的同机文件批次")
             if copy.get("read_end_event_id") is not None:
                 raise EventValidationError("当前轮读取已经结束，不能再次授予相机机会")
             before_slot = row.before.values.get("slot_device_id") if row.before.exists else None

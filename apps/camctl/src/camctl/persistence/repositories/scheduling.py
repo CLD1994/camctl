@@ -273,6 +273,9 @@ class StartActionCommand:
         if action["execution_started"] != 0:
             raise TransactionError(
                 f"开始事务要求未开始的动作: {request.action_id}")
+        from .file_batch_reads import FileBatchReads
+        if not FileBatchReads(connection).permits(action["id"], action["device_id"]):
+            return self._rejected("device_busy")
         prepared_activity = (None if activity_id is None else
                              row_facts(connection, "device_activities", activity_id))
         if action["cancel_requested"]:
@@ -883,6 +886,9 @@ class GrantStartCommand:
         self._state["actions"] = {request.action_id: action}
         if action["device_id"] != request.device_id:
             raise TransactionError("启动授予的设备与动作保存的设备不符")
+        from .file_batch_reads import FileBatchReads
+        if not FileBatchReads(connection).permits(action["id"], request.device_id):
+            return self._rejected("device_busy")
         if action["type"] not in CAPTURE_ACTION_TYPES:
             raise TransactionError(
                 f"启动授予只适用于拍摄动作: {request.action_id}"
@@ -1359,6 +1365,9 @@ class ReservePreparationCommand:
             return result(ReservePreparationOutcome.ALREADY, activity["id"])
         if action["status"] in _ACTION_TERMINAL:
             return result(ReservePreparationOutcome.REJECTED, reason="terminal")
+        from .file_batch_reads import FileBatchReads
+        if not FileBatchReads(connection).permits(action["id"], action["device_id"]):
+            return result(ReservePreparationOutcome.REJECTED, reason="device_busy")
         if action["cancel_requested"]:
             return result(ReservePreparationOutcome.REJECTED, reason="canceled")
         if action["status"] != 1 or action["execution_started"] != 0:

@@ -1841,6 +1841,10 @@ async def _capture_dispatch_check(runtime, action_id):
     from camctl.scheduling.resources import recheck_dispatch
 
     current = (await runtime.action(action_id))
+    from camctl.persistence.repositories.file_batch_reads import FileBatchReads
+    if not await runtime.database.read(lambda owned: FileBatchReads(owned.connection).permits(
+            action_id, current["device_id"])):
+        return "file_batch_waiting"
     _preflight_capture_timing(runtime, current)
     now = runtime.wall_us()
     if current["cancel_requested"]:

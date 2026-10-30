@@ -114,6 +114,13 @@ def read_dispatch_qualification(owned, ticket, source_id, *, device_source,
         origin = row_facts(owned.connection, "actions", source["source_action_id"])
         if observer is None or origin is None:
             raise ConsistencyError("实际读取缺少原设备绑定")
+        from camctl.persistence.repositories.file_batch_reads import FileBatchReads
+        run = row_facts(owned.connection, "operation_runs", ticket.run_id)
+        action = None if run is None else row_facts(owned.connection, "actions", run["action_id"])
+        if action is None:
+            raise ConsistencyError("实际读取缺少所属动作")
+        if not FileBatchReads(owned.connection).operation_permitted(action, run):
+            return ReadDispatchPrevented("file_batch_waiting")
         if slot != observer["device_id"] or (observer["device_id"], observer["driver_id"]) != (
                 origin["device_id"], origin["driver_id"]):
             raise ConsistencyError("实际读取机会与原来源绑定不一致")

@@ -88,6 +88,7 @@ camctl 与驱动开发者|全部行为规格，重点核对持久化、会话接
 [OSMO 360 II 视频结果特化](../superpowers/specs/2026-10-20-osmo360ii-record-segmentation-design.md)|CAM 命名、分段下界、保守选段、空尾分类及双路媒体验收|相机与产物
 [取回正式产物](obtaining-outputs.md)|来源选择、等待、逐项结果、发布条件、半成品及取消|产物
 [文件拷贝、校验与断点续传](file-copy.md)|拷贝调度、进度、续传、读取重试与摘要校验|产物
+[同机文件批次](file-batches.md)|取回与清理的整批连续执行、完整来源等待、设备占用与恢复|产物与调度
 [清理正式产物](output-cleanup.md)|删除范围、旧取回保护、恢复与取消|产物
 [本地配置与通信策略](configuration.md)|默认值、覆盖、加载更新、超时和重试|调度与部署
 [主机时间检查与受限恢复](clock-recovery.md)|时间可信性、受限执行和恢复边界|调度

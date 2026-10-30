@@ -114,6 +114,9 @@ def pending_capture_candidates(connection, request, *, batch_size=128):
 def selected_pending_capture(connection, request, boundary, *, exclude_attempt_id=None,
                              exclude_read_attempt_id=None):
     """从原连接逐项核对无活动拍摄的检查或普通准备资格。"""
+    from .file_batch_reads import FileBatchReads
+    if FileBatchReads(connection).holder(request.device_id) is not None:
+        return None
     from camctl.persistence.transaction import row_facts
     from .availability_create import CreateAvailabilityCheck, _qualify
     from .availability_target import (AvailabilityTargetBlocked, AvailabilityTargetIdentityMismatch,
