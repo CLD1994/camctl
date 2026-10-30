@@ -1,0 +1,413 @@
+{
+  "schema_version": 1,
+  "source_commit": "c289da4b1c7bcf69627f2b40b54eba91cd7279ff",
+  "scope": "只归档 HBF 主库只读判据探针与文件结果责任两次代表性诊断；归档过程未运行测试。",
+  "evidence_groups": [
+    {
+      "id": "hbf-readonly-assertion",
+      "source_roots": [
+        "/tmp/camctl-resume-20261031/evidence/hbf-readonly-assertions",
+        "/tmp/camctl-resume-20261031/hbf-installed-isolated",
+        "/tmp/camctl-resume-20261031/hbf-installed-isolated-2"
+      ],
+      "source_identity": {
+        "head_at_run": "c289da4b1c7bcf69627f2b40b54eba91cd7279ff",
+        "component_run_tracked_patch": {
+          "member": "hbf-readonly-assertions/initial.diff",
+          "sha256": "1ec0cb6de61a0f1ec3273b73bfcecbd2eea77e9dd06398446659062dc8f2916c",
+          "tracked_paths": [
+            "apps/camctl/tests/integration/capture/test_host_photo_flow.py",
+            "tests/integration/_hasselblad_photo_entry.py",
+            "tests/integration/test_hasselblad_photo_roundtrip.py"
+          ],
+          "identity_check": "已与 c289da4b..661e4087 这三路径的 Git 差异逐字节相同。"
+        },
+        "component_run_untracked_probe": {
+          "member": "hbf-readonly-assertions/probe-initial.py",
+          "sha256": "609578b138b0ce014720a36cb9fa26c72f8ee6f414a09adcdf4a0a52408c7dd3",
+          "identity_check": "已与 661e4087 新增的 tests/integration/_hbf_readonly_probe.py 字节相同。"
+        },
+        "timing_limit": "组件运行早于 661e4087 提交；身份以当时保存的 initial.diff 与 probe-initial.py 为准，不能仅用事后 HEAD 指代运行源码。安装隔离运行的 summary 另记 c289 HEAD、状态与快照摘要。"
+      },
+      "observations": {
+        "component_probe": {
+          "nodeids": [
+            "apps/camctl/tests/integration/capture/test_host_photo_flow.py::test_jpeg_photo_unknown_complete_reuses_original_request_and_pair[raw]",
+            "apps/camctl/tests/integration/capture/test_host_photo_flow.py::test_jpeg_photo_unknown_complete_reuses_original_request_and_pair[jpeg]"
+          ],
+          "result": "2 个节点均在 observer 的 main_database_readonly 断言处失败；写连接已由所属者关闭，核实连接是另一条 native SQLite 连接，但核实连接的主库可以写入。"
+        },
+        "direct_installed_attempt": {
+          "member_pair": [
+            "hbf-readonly-assertions/installed.log",
+            "hbf-readonly-assertions/installed.xml"
+          ],
+          "result": "两个参数节点在 pytest setup 建立专属 cgroup 时遇到 Permission denied，未进入业务调用；不计作业务失败。"
+        },
+        "first_budget_launcher_attempt": {
+          "launcher_member": "hbf-readonly-assertions/budget-launcher/launcher.json",
+          "result_members": [
+            "hbf-readonly-assertions/isolated.log",
+            "hbf-installed-isolated-first/summary.json",
+            "hbf-installed-isolated-first/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/result.json"
+          ],
+          "result": "runner 未传 --node-modules，准备阶段报告需要提供已准备的客户端 node_modules；退出码 2，没有业务节点执行，不计作业务失败。"
+        },
+        "isolated_installed_attempt": {
+          "summary_member": "hbf-installed-isolated-2/summary.json",
+          "plan_member": "hbf-installed-isolated-2/plan.json",
+          "artifact_prefix": "hbf-installed-isolated-2/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/",
+          "target_nodeids": [
+            "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_complete_commit_receipt_loss_reuses_request[jpeg-host-0.000667]",
+            "tests/integration/test_hasselblad_photo_roundtrip.py::test_installed_hasselblad_complete_commit_receipt_loss_reuses_request[jpeg-device-0.000333]"
+          ],
+          "result": "node_modules 指定后准备成功；两个节点 setup/teardown 通过，call 阶段均在 observer 的 main_database_readonly 断言处失败。",
+          "observable_facts": "complete-verifier-input.json 记录 query_only=0、main_readonly=false、writer_closed=true；核实连接与原写连接不同。observer 断言在调用 delegate/real_verify 之前终止，因此不能声称原 key、完整申请或事务 H 已经完成此次核查；后续照片发布/取回断言未执行。",
+          "temp_members": "只归档 comp0 与 comp1 各自的 complete-commit.json、complete-verifier-input.json 和 hb-cli-argv.jsonl；不归档其余临时资源。"
+        },
+        "three_mode_idle_connection_probe": {
+          "log_member": "hbf-readonly-assertions/sqlite-diagnostic.log",
+          "results": [
+            "URI mode=ro: query_only=0, readonly=true, unchanged=true。",
+            "PRAGMA query_only: query_only=1, readonly=true, unchanged=true。",
+            "普通 rw: query_only=0, readonly=false, unchanged=true。"
+          ],
+          "limit": "仅验证空闲连接模式与可写性，未覆盖已有读事务中的透明只读行为。sqlite-diagnostic.py 是事后按原 heredoc 补存的转录，不是运行时 argv；实际 heredoc 从工作区 helper 路径加载，probe-initial.py 是运行前留存副本。"
+        }
+      }
+    },
+    {
+      "id": "file-result-ownership-diagnostic",
+      "source_root": "/tmp/camctl-resume-20261031/evidence/file-result-ownership-check",
+      "source_identity": {
+        "head_at_collection": "c289da4b1c7bcf69627f2b40b54eba91cd7279ff",
+        "first_and_diagnostic_process_records": [
+          "file-result-ownership-check/first-process.json",
+          "file-result-ownership-check/diagnostic-process.json"
+        ],
+        "run_script_member": "file-result-ownership-check/run.py",
+        "patch_members": [
+          "file-result-ownership-check/first.patch",
+          "file-result-ownership-check/diagnostic.patch"
+        ],
+        "limit": "process records保留命令、cwd与 PYTHONPATH，但没有运行时源码指纹；两份实际保存的 patch 用于说明各轮的测试侧差异。"
+      },
+      "observations": {
+        "target_nodeid": "apps/camctl/tests/integration/bootstrap/test_file_fact_consumers.py::test_default_file_consumers_confirm_original_stage_before_filters[discovery-normal-True]",
+        "attempts": [
+          {
+            "members": [
+              "file-result-ownership-check/first.patch",
+              "file-result-ownership-check/first.log",
+              "file-result-ownership-check/first.xml",
+              "file-result-ownership-check/first-process.json",
+              "file-result-ownership-check/first-exit.json"
+            ],
+            "result": "1 个节点失败，断言需要 attempt 状态 3 且 result_json/error_json 非空，实际为 (1, None, None)。首个补丁只把 pending_result_scans 加入测试 ConsumerWorld 可接受的 collections 名单。"
+          },
+          {
+            "members": [
+              "file-result-ownership-check/diagnostic.patch",
+              "file-result-ownership-check/diagnostic.log",
+              "file-result-ownership-check/diagnostic.xml",
+              "file-result-ownership-check/diagnostic-process.json",
+              "file-result-ownership-check/diagnostic-exit.json"
+            ],
+            "result": "同一节点仍失败，最终事实仍为 (1, None, None)；诊断只增加观察代码，没有替代原断言。"
+          }
+        ],
+        "diagnostic_log_observation": "held、after_replay、after_handler 三个检查点均显示 pending_result_scans 为空；pending_call_results 的 key (3,1) 项仍引用原返回 listing（类型为 tuple），result_disposition_ready=false，factory_shared=true。日志没有打印 tuple 内容。",
+        "scope_limit": "只跑一个 discovery-normal-True 代表节点的两次诊断，没有运行 28 个 file_fact 消费者节点；该非分页 v1 用例没有待处理 pending_result_scans 项，不能据此推断扫描完整性。",
+        "database_members": "两个轮次各只保存该目标用例的 state.db、input.json 和 consumer-probe.py、consumer-probe.sh、consumer-repair.py；不含锁文件、WAL/SHM 或其余资源目录。"
+      }
+    }
+  ],
+  "excluded_material": [
+    "未归档 hbf-installed-isolated-2/source.json 或任一完整源代码快照。",
+    "未归档 node_modules、构建产物、wheel、全部 pytest 临时资源目录或数据库锁文件。",
+    "HBF 只保留指定的安装两个参数节点 comp0/comp1 的定位输入；其他临时目录不包含在本归档。"
+  ],
+  "archive": {
+    "file": "diagnostics.tar.gz",
+    "bytes": 91445,
+    "sha256": "9621aa28bed6a8f40c5a7621e6b604e12b36d707f8147a2aa89dba3624f98ba8",
+    "member_count": 55,
+    "members": [
+      {
+        "path": "hbf-readonly-assertions/component.log",
+        "bytes": 16494,
+        "sha256": "9e37f762148320e7cc55428179badedaf467b4319caaa4d86e26ebf049c8aae2"
+      },
+      {
+        "path": "hbf-readonly-assertions/component.meta",
+        "bytes": 512,
+        "sha256": "f20fc470fe5d5da8c6bc267d7f7ad8b766dfa026c8b95874db2cbc746ce2dd27"
+      },
+      {
+        "path": "hbf-readonly-assertions/component.xml",
+        "bytes": 18112,
+        "sha256": "3cd3647ce9c0b0562d8db12a9c9d675d020d55b8c263e5fe6e46b0da301e9ed4"
+      },
+      {
+        "path": "hbf-readonly-assertions/installed.log",
+        "bytes": 16957,
+        "sha256": "a74130ace4f8c63ab374ea8b62e42ffd105cd9c0a9b83f3be495b34dbf42e8a0"
+      },
+      {
+        "path": "hbf-readonly-assertions/installed.meta",
+        "bytes": 508,
+        "sha256": "64bd20777f64f58b028f1103b57447519a243b9b93fdb54627cf133a20fbe91b"
+      },
+      {
+        "path": "hbf-readonly-assertions/installed.xml",
+        "bytes": 17370,
+        "sha256": "91f36c73da7a28b8693e5a3acefa08fbc86e2ee56dfd999d4beab8e9ca314274"
+      },
+      {
+        "path": "hbf-readonly-assertions/initial.diff",
+        "bytes": 7755,
+        "sha256": "1ec0cb6de61a0f1ec3273b73bfcecbd2eea77e9dd06398446659062dc8f2916c"
+      },
+      {
+        "path": "hbf-readonly-assertions/isolated.log",
+        "bytes": 400,
+        "sha256": "5249df77472a72928bdfc40e35a01d0bfa367ab3e7f212a6b2b317a2a5a9d050"
+      },
+      {
+        "path": "hbf-readonly-assertions/isolated-2.log",
+        "bytes": 1045,
+        "sha256": "dba661ed2eed044eaa5f556174daa944734e6df7e3516ca011096c421de1bdf6"
+      },
+      {
+        "path": "hbf-readonly-assertions/probe-initial.py",
+        "bytes": 1254,
+        "sha256": "609578b138b0ce014720a36cb9fa26c72f8ee6f414a09adcdf4a0a52408c7dd3"
+      },
+      {
+        "path": "hbf-readonly-assertions/sqlite-diagnostic.log",
+        "bytes": 157,
+        "sha256": "99ce0db2434631e41c761dd4a31cd78f5d58cb4fde4bc34e68bf75d148be5b5f"
+      },
+      {
+        "path": "hbf-readonly-assertions/sqlite-diagnostic.meta",
+        "bytes": 308,
+        "sha256": "d2af79c2cdb71d58472ee6e5b7c8e2d304b1855131eeb215689d129fc96b251d"
+      },
+      {
+        "path": "hbf-readonly-assertions/sqlite-diagnostic.py",
+        "bytes": 1048,
+        "sha256": "67da7c1ad78f87ba1b941cae7df93b32c5f30af04de71427f99cae180e4dc85b"
+      },
+      {
+        "path": "hbf-readonly-assertions/budget-launcher/launcher.json",
+        "bytes": 2448,
+        "sha256": "03da261b40a4642278a5e29eb8ddebd52bb998c89e5179e44a86f908cf724925"
+      },
+      {
+        "path": "hbf-readonly-assertions/budget-launcher-2/launcher.json",
+        "bytes": 2613,
+        "sha256": "6fa6375243c970f9ba40f01d0ce2a67bdad6777b43156dd203a2cddd80b41901"
+      },
+      {
+        "path": "hbf-installed-isolated-first/summary.json",
+        "bytes": 2409,
+        "sha256": "5ce07bf4ab7d36dca0d879ebc62b6bf3933055c3746bbf7ee018b577af82ee34"
+      },
+      {
+        "path": "hbf-installed-isolated-first/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/result.json",
+        "bytes": 945,
+        "sha256": "204e12498f4259d8039e52b550da52ea838aed05f7087485816924fedab6b7bc"
+      },
+      {
+        "path": "hbf-installed-isolated-2/summary.json",
+        "bytes": 6002,
+        "sha256": "f9b9dbc1fdee6babaf8bacb88cdf807628b720a3e4deda73225327940e71a970"
+      },
+      {
+        "path": "hbf-installed-isolated-2/plan.json",
+        "bytes": 393,
+        "sha256": "a12bbe79d323d28f9e67f7247202a9dd15e83aeee77f516e81b91474e743efb4"
+      },
+      {
+        "path": "hbf-installed-isolated-2/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/cases.json",
+        "bytes": 1139,
+        "sha256": "08252680e8c1971af7834923fd64e89aa125ad32d1a6ca7ae2d9a344482089d2"
+      },
+      {
+        "path": "hbf-installed-isolated-2/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/command.json",
+        "bytes": 4526,
+        "sha256": "924af353b209e7ea2d8bb7bd6fa894d6bbd73d70786d14d6693a68b8acf467f9"
+      },
+      {
+        "path": "hbf-installed-isolated-2/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/events.jsonl",
+        "bytes": 5043,
+        "sha256": "398be2fd9e39be13d388c56a877685c604d500f4b7a5658ef5c4aa9c10d3ef53"
+      },
+      {
+        "path": "hbf-installed-isolated-2/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/inventory.json",
+        "bytes": 303,
+        "sha256": "29993ab04345b2c9e30930ff8827876cc06f0df01b5668e239996a6649c8f1f5"
+      },
+      {
+        "path": "hbf-installed-isolated-2/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/output.log",
+        "bytes": 27491,
+        "sha256": "5a27fe5de38227bc3ccf191c09ca56bcb7e0eb59cf181fae47582cae8a7642f4"
+      },
+      {
+        "path": "hbf-installed-isolated-2/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/preparations.json",
+        "bytes": 1036,
+        "sha256": "5de65a428dadc2016567f4477c235bb66926aff083bfea5c0a353bf88b69223c"
+      },
+      {
+        "path": "hbf-installed-isolated-2/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/prepare.log",
+        "bytes": 184234,
+        "sha256": "ae2e82928d8ba8f1f7a625b338a0e63d18761172f38cac153e35520a3a555a79"
+      },
+      {
+        "path": "hbf-installed-isolated-2/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/progress.json",
+        "bytes": 221,
+        "sha256": "7535028e69e131f77c1c3d9e8e2bf973c7290c410cedbbcae4c2ed3b2753bb10"
+      },
+      {
+        "path": "hbf-installed-isolated-2/tasks/001-root-test_hasselblad_photo_roundtrip/artifacts/result.json",
+        "bytes": 4242,
+        "sha256": "ab52cdad46c9afc70bb29fd405232f5ff6b5b21c132c81ef989f662265743c91"
+      },
+      {
+        "path": "hbf-installed-isolated-2/tmp/pytest/test_installed_hasselblad_comp0/complete-commit.json",
+        "bytes": 763,
+        "sha256": "614bd493eb83ff156f257dc66e4dd77f4dcc98f32eb98e0a8941314db4ca040b"
+      },
+      {
+        "path": "hbf-installed-isolated-2/tmp/pytest/test_installed_hasselblad_comp0/complete-verifier-input.json",
+        "bytes": 565,
+        "sha256": "b73d92d1653ab2bae6c7a80d24f90c86b20297d9424dd70269af9d1ac1f07f7d"
+      },
+      {
+        "path": "hbf-installed-isolated-2/tmp/pytest/test_installed_hasselblad_comp0/hb-cli-argv.jsonl",
+        "bytes": 2728,
+        "sha256": "18d3757082519e4738482cb3358d5c2a3d169545575c793227da2289648b116f"
+      },
+      {
+        "path": "hbf-installed-isolated-2/tmp/pytest/test_installed_hasselblad_comp1/complete-commit.json",
+        "bytes": 763,
+        "sha256": "e7b5149e14b407d5c325dd131c10f17a673e28536f2124418a2721192c0102c6"
+      },
+      {
+        "path": "hbf-installed-isolated-2/tmp/pytest/test_installed_hasselblad_comp1/complete-verifier-input.json",
+        "bytes": 565,
+        "sha256": "4eeaae9e9ad2dbefa149219c0a9ec2d7bf86512fc5fc0707638a59173fa4fb54"
+      },
+      {
+        "path": "hbf-installed-isolated-2/tmp/pytest/test_installed_hasselblad_comp1/hb-cli-argv.jsonl",
+        "bytes": 2334,
+        "sha256": "e9f03e17bc3e68753b22906f6db7fb72da910c5879fb08771938b25f4590d921"
+      },
+      {
+        "path": "file-result-ownership-check/first.patch",
+        "bytes": 925,
+        "sha256": "aa4265f42405a0eea50f77a9a97f31f303fefcef8843719d03b0c3556355cd66"
+      },
+      {
+        "path": "file-result-ownership-check/first.log",
+        "bytes": 5796,
+        "sha256": "fc68c999156719dd4bfabbce2a20d8932988f8aed7575e0d1399e8c34441b7df"
+      },
+      {
+        "path": "file-result-ownership-check/first.xml",
+        "bytes": 4431,
+        "sha256": "74dc1c901253cac6201239eb0aff1b71ee634ec124099312f6525f5edc275d64"
+      },
+      {
+        "path": "file-result-ownership-check/first-process.json",
+        "bytes": 733,
+        "sha256": "a01b69f5e69d2c843b9553f7dd3eef411064501f4ce215c5902fe7b934409595"
+      },
+      {
+        "path": "file-result-ownership-check/first-exit.json",
+        "bytes": 47,
+        "sha256": "152d764347e0d7ff3d1b36648e56e171db1abf8c6f15d11a293508220605cca0"
+      },
+      {
+        "path": "file-result-ownership-check/diagnostic.patch",
+        "bytes": 3285,
+        "sha256": "315052652355bdb04ecc405a740bc081cfd2c64eb6b2114c84babb0ba6fd5740"
+      },
+      {
+        "path": "file-result-ownership-check/diagnostic.log",
+        "bytes": 6673,
+        "sha256": "6d56873013aee9ae4575f45ee874f035322131052024248df40266f8de66f143"
+      },
+      {
+        "path": "file-result-ownership-check/diagnostic.xml",
+        "bytes": 5059,
+        "sha256": "656b9e2ca7cd745241c6e4e12a2c9060ade850161c961fc59dcd39f9e5d0380f"
+      },
+      {
+        "path": "file-result-ownership-check/diagnostic-process.json",
+        "bytes": 753,
+        "sha256": "475eb2f0c5bf2601939e09f6a9194ea9581c44fff2456d304887c41a362dfa45"
+      },
+      {
+        "path": "file-result-ownership-check/diagnostic-exit.json",
+        "bytes": 48,
+        "sha256": "bd4475d33605a99da169a2ccd810c345116cfefe652fadf72b2a71c788c85f45"
+      },
+      {
+        "path": "file-result-ownership-check/run.py",
+        "bytes": 1030,
+        "sha256": "0399c7e72c482827473c80c6beca982e833660a2c0bccc945ee7070483835c63"
+      },
+      {
+        "path": "file-result-ownership-check/first-temp/test_default_file_consumers_co0/state.db",
+        "bytes": 823296,
+        "sha256": "0d536ce7773bcd6156c99db05ce72d627b69846c49c3ef2f9e2e1a01c1ea6d85"
+      },
+      {
+        "path": "file-result-ownership-check/first-temp/test_default_file_consumers_co0/input.json",
+        "bytes": 182,
+        "sha256": "cd8759b82b81f533a1b3ef75729a443e14443e623f57432b2fc0d06c7dd12c1e"
+      },
+      {
+        "path": "file-result-ownership-check/first-temp/test_default_file_consumers_co0/consumer-probe.py",
+        "bytes": 303,
+        "sha256": "00b51f1bb16e1e2bd857de3a8ec3e3f3247dbdfbfe38c3acde365749f27e9dda"
+      },
+      {
+        "path": "file-result-ownership-check/first-temp/test_default_file_consumers_co0/consumer-probe.sh",
+        "bytes": 201,
+        "sha256": "0f356e675f206ff7884ea9292ffd86f2e408231ffdd6a93f1467e3cb2f87cbc7"
+      },
+      {
+        "path": "file-result-ownership-check/first-temp/test_default_file_consumers_co0/consumer-repair.py",
+        "bytes": 284,
+        "sha256": "e46e4f3b5eb541067d96e3b56332792f2ade756584bdd211c7f9354ba6a19afc"
+      },
+      {
+        "path": "file-result-ownership-check/diagnostic-temp/test_default_file_consumers_co0/state.db",
+        "bytes": 823296,
+        "sha256": "0f556aa6e3ac5426ae8e97b83fdfe755185857120eeeca281740acf237dd8acc"
+      },
+      {
+        "path": "file-result-ownership-check/diagnostic-temp/test_default_file_consumers_co0/input.json",
+        "bytes": 182,
+        "sha256": "cd8759b82b81f533a1b3ef75729a443e14443e623f57432b2fc0d06c7dd12c1e"
+      },
+      {
+        "path": "file-result-ownership-check/diagnostic-temp/test_default_file_consumers_co0/consumer-probe.py",
+        "bytes": 308,
+        "sha256": "27f9590c8276721f140c89fdefa481107c484018d8e2d375567decb4873ff208"
+      },
+      {
+        "path": "file-result-ownership-check/diagnostic-temp/test_default_file_consumers_co0/consumer-probe.sh",
+        "bytes": 206,
+        "sha256": "01a8645c350616634f54c5b9467089a47e8487f244ec740c3ef355742dbe24d5"
+      },
+      {
+        "path": "file-result-ownership-check/diagnostic-temp/test_default_file_consumers_co0/consumer-repair.py",
+        "bytes": 289,
+        "sha256": "8b8ebb37f2d78df195a54faf648a26521bdd38e1216e73982671503427fcd3ed"
+      }
+    ]
+  }
+}
