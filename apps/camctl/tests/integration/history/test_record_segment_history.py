@@ -243,19 +243,75 @@ async def _assert_same_s_snapshot_bytes(
     finally:prepared.close()
 
 
+def _observe_derived_database(tmp_path, monkeypatch):
+    """只接管测试专用临时目录里的 SQLite 文件，不拦截业务状态库。"""
+    import sqlite3
+    import tempfile
+    from pathlib import Path
+
+    directory = tmp_path / 'history-temporary'
+    directory.mkdir()
+    monkeypatch.setattr(tempfile, 'tempdir', str(directory))
+    original_connect = sqlite3.connect
+    observed = []
+    failure = sqlite3.OperationalError('database or disk is full')
+
+    class ObservedConnection(sqlite3.Connection):
+        fail_next_read = False
+        fail_after_write = False
+        successful_writes = 0
+
+        def execute(self, sql, *args, **kwargs):
+            operation = sql.lstrip().split(None, 1)[0].upper()
+            if self.fail_next_read and operation == 'SELECT':
+                raise failure
+            if self.fail_after_write and operation == 'INSERT' and self.successful_writes:
+                assert Path(self.database_path).is_file()
+                assert Path(self.database_path).stat().st_size > 0
+                raise failure
+            cursor = super().execute(sql, *args, **kwargs)
+            if operation == 'INSERT':
+                self.successful_writes += 1
+            return cursor
+
+    def connect(database, *args, **kwargs):
+        path = Path(database) if isinstance(database, (str, Path)) else None
+        if path is not None and path.is_absolute() and path.is_relative_to(directory):
+            assert 'factory' not in kwargs
+            kwargs['factory'] = ObservedConnection
+            connection = original_connect(database, *args, **kwargs)
+            connection.database_path = str(path)
+            observed.append(connection)
+            return connection
+        return original_connect(database, *args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, 'connect', connect)
+    return observed, failure
+
+
 @pytest.mark.asyncio
-async def test_empty_filtered_page_continues_and_query_failure_is_not_eof(tmp_path):
+async def test_empty_filtered_page_continues_and_query_failure_is_not_eof(tmp_path, monkeypatch):
     import sqlite3
     owned,runtime,repo,ref,history = await _fixture(tmp_path)
     try:
         other=_version(owned,runtime,repo,ref,2)
+        observed, failure = _observe_derived_database(tmp_path, monkeypatch)
         with history.open_segment_history(ref.action_id,history.current_boundary(),batch_size=2) as handle:
             page=handle.read_page('segment_sets',ref=other,limit=1)
             assert page.items == () and page.next_cursor is not None
             assert handle.read_page('segment_sets',ref=other,cursor=page.next_cursor,limit=1).items[0].values['version'] == 2
-            handle._db.execute('DROP TABLE rows').close()
-            with pytest.raises(sqlite3.Error):
+            active = []
+            for connection in observed:
+                try:
+                    connection.execute('SELECT 1').close()
+                except sqlite3.ProgrammingError:
+                    continue
+                active.append(connection)
+            assert len(active) == 1
+            active[0].fail_next_read = True
+            with pytest.raises(sqlite3.OperationalError) as caught:
                 handle.read_page('segment_members',ref=ref,limit=2)
+            assert caught.value is failure
     finally:owned.connection.close()
 
 
@@ -451,19 +507,26 @@ async def test_snapshot_validation_detects_missing_owned_rows_at_responsible_bou
 async def test_disk_failure_closes_partial_handle_and_does_not_change_business(tmp_path,monkeypatch):
     import sqlite3
     from pathlib import Path
-    from camctl.history.bounded import SegmentHistoryHandle
     owned,runtime,repo,ref,history=await _fixture(tmp_path)
     try:
         boundary=history.current_boundary()
-        opened=[]
-        original=SegmentHistoryHandle._put
-        def fail(self,*args):
-            opened.append((self,Path(self._temporary.name)))
-            raise sqlite3.OperationalError('database or disk is full')
-        monkeypatch.setattr(SegmentHistoryHandle,'_put',fail)
-        with pytest.raises(sqlite3.OperationalError):
+        observed, failure = _observe_derived_database(tmp_path, monkeypatch)
+        # 注入的是派生库的写错误，业务库连接不受影响。
+        original_connect = sqlite3.connect
+        def connect(database, *args, **kwargs):
+            connection = original_connect(database, *args, **kwargs)
+            if connection in observed:
+                connection.fail_after_write = True
+            return connection
+        monkeypatch.setattr(sqlite3, 'connect', connect)
+        with pytest.raises(sqlite3.OperationalError) as caught:
             history.open_segment_history(ref.action_id,boundary,strategy='initial',batch_size=1)
-        assert opened and all(handle._db is None and not path.exists() for handle,path in opened)
+        assert caught.value is failure
+        assert len(observed) == 1 and observed[0].successful_writes >= 1
+        with pytest.raises(sqlite3.ProgrammingError):
+            observed[0].execute('SELECT 1')
+        assert not Path(observed[0].database_path).exists()
+        assert not Path(observed[0].database_path).parent.exists()
         assert history.current_boundary() == boundary
         assert owned.connection.execute('SELECT COUNT(*) FROM segment_members').fetchone() == (5,)
     finally:owned.connection.close()
