@@ -9,11 +9,13 @@ from camctl.contracts.history_values import INITIAL_BOUNDARY
 from camctl.contracts.values import new_operation_key
 from camctl.devices.bindings import DeviceBinding
 from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.repositories import capture as capture_repository
 from camctl.persistence.repositories.capture import CaptureRepository, register_capture_guards
 from camctl.persistence.repositories.operations import register_operation_guards
 from camctl.history.validators import EventContext
 from camctl.persistence.transaction import BoundedCommandPlan, commit_operation
 
+from .transaction_fixtures import capture_operation_command
 from ..capture.test_baseline_history import _activity, _fix, _ref
 from ..scheduling.test_start_action import _SCHEDULED, owned
 
@@ -100,12 +102,13 @@ async def test_one_pending_call_keeps_its_original_double_keys(owned, tmp_path):
 @pytest.mark.parametrize('foreign', [False, True])
 async def test_kernel_checks_actual_binding_in_both_entrypoints(owned, tmp_path, bounded, foreign):
     # 即使事件和上下文一起自报其他设备，原SQL绑定仍须决定是否接受。
-    from camctl.persistence.repositories.baseline_reads import SaveBaselineReadIntent
     request = await _intent(owned, tmp_path)
+    command = capture_operation_command(capture_repository, lambda:
+        CaptureRepository().save_baseline_read_intent(request, request.call_key, owned))
 
     class Command:
         def plan(self, scope):
-            plan = SaveBaselineReadIntent(request, request.call_key).plan(scope)
+            plan = command.plan(scope)
             if foreign:
                 event = plan.events[0]
                 row = event.rows[0]
@@ -245,7 +248,6 @@ async def test_return_group_is_complete_in_both_entrypoints(owned,tmp_path,bound
     from camctl.capture import baseline_models as models
     from camctl.contracts.pages import Page
     from camctl.devices.directory import DirectoryCursor, DirectoryRead
-    from camctl.persistence.repositories.baseline_reads import SaveBaselineReadReturn
     from ..capture.test_baseline_history import _entries
     intent=await _intent(owned,tmp_path)
     capture=CaptureRepository()
@@ -255,10 +257,12 @@ async def test_return_group_is_complete_in_both_entrypoints(owned,tmp_path,bound
         DirectoryRead(None,None,Page(_entries('a.OSV'),
             DirectoryCursor(intent.binding,intent.directories,1,None))))
     before=owned.connection.execute('SELECT COUNT(*) FROM history_events').fetchone()
+    command=capture_operation_command(capture_repository, lambda:
+        capture.save_baseline_read_return(request,intent.result_save_key,owned))
 
     class Command:
         def plan(self,scope):
-            plan=SaveBaselineReadReturn(request,intent.result_save_key).plan(scope)
+            plan=command.plan(scope)
             events=plan.events
             write_scope=plan.baseline_read_write_scope
             if mutation=='chunk_only':
@@ -442,10 +446,11 @@ async def test_unknown_result_preserves_original_inputs_and_has_no_return_time(o
     first=capture.save_baseline_read_intent(intent,intent.call_key,owned)
     request=models.BaselineReadUnconfirmedSave(first.value.call_id,_SCHEDULED+5)
     if bounded:
-        from camctl.persistence.repositories.baseline_reads import SaveBaselineReadUnconfirmed
+        command=capture_operation_command(capture_repository, lambda:
+            capture.save_baseline_read_unconfirmed(request,intent.result_save_key,owned))
         class Command:
             def plan(self,scope):
-                plan=SaveBaselineReadUnconfirmed(request,intent.result_save_key).plan(scope)
+                plan=command.plan(scope)
                 return BoundedCommandPlan(plan.events,
                     lambda event,transaction:EventContext(transaction,plan.owners,plan.state_rows),
                     plan.result,lambda connection:None,baseline_read_write_scope=plan.baseline_read_write_scope)
@@ -503,7 +508,6 @@ async def test_unknown_cannot_replace_an_actual_return(owned,tmp_path):
 async def test_unknown_guard_checks_original_call_and_unique_group(owned,tmp_path,bounded,mutation):
     from camctl.capture import baseline_models as models
     from camctl.history.validators import validate_event_structure
-    from camctl.persistence.repositories.baseline_reads import SaveBaselineReadUnconfirmed
     from camctl.persistence.transaction import row_facts
     intent=await _intent(owned,tmp_path)
     capture=CaptureRepository()
@@ -521,9 +525,11 @@ async def test_unknown_guard_checks_original_call_and_unique_group(owned,tmp_pat
     def snapshot():
         return tuple(tuple(owned.connection.execute(f'SELECT * FROM {table} ORDER BY id')) for table in tables)
     before=snapshot()
+    command=capture_operation_command(capture_repository, lambda:
+        capture.save_baseline_read_unconfirmed(request,intent.result_save_key,owned))
     class Command:
         def plan(self,scope):
-            plan=SaveBaselineReadUnconfirmed(request,intent.result_save_key).plan(scope)
+            plan=command.plan(scope)
             event=plan.events[0]
             if mutation in ('call','time'):
                 original=event.evidence['baseline_read_request']
