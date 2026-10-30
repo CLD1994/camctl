@@ -14,6 +14,8 @@ from camctl.operations.validation import validate_outcome
 from camctl.persistence.event_reads import SqlEventReads
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.segments import SegmentRepository
+from camctl.persistence.repositories import segments as segment_storage
+from .transaction_fixtures import capture_operation_command
 from camctl.persistence.transaction import BoundedCommandPlan,commit_operation
 
 from .test_segment_check_conclusions import _ok
@@ -60,11 +62,10 @@ async def _partial_result_world(tmp_path,*,maximum=3,retained=False):
         raise
 
 
-def _command(request,key,bounded):
-    from camctl.persistence.repositories.segment_check_conclusions import ConcludeResultCheckCommand
+def _command(request,key,bounded,owned):
     class Command:
         def plan(self,scope):
-            plan=ConcludeResultCheckCommand(request,key).plan(scope)
+            plan=capture_operation_command(segment_storage,lambda: SegmentRepository().conclude_result_check(request,key,owned)).plan(scope)
             if not bounded or plan.read_only:return plan
             return BoundedCommandPlan(plan.events,
                 lambda event,transaction:EventContext(transaction,plan.owners,plan.state_rows,
@@ -85,7 +86,7 @@ async def test_actual_exhaustion_adopts_config_closes_run_and_saves_decision_tog
         key=new_operation_key()
         attempts=owned.connection.execute('SELECT * FROM operation_attempts ORDER BY id').fetchall()
         calls=(runtime.driver.control.await_count,runtime.stopper.stop.await_count)
-        receipt=commit_operation(_command(request,key,bounded),key,owned)
+        receipt=commit_operation(_command(request,key,bounded,owned),key,owned)
         assert receipt.kind=='completed',receipt.error
         saved=receipt.result
         assert saved.ref==ref
@@ -131,7 +132,7 @@ async def test_failed_latest_scan_keeps_retained_files_without_reusing_prior_com
         request=models.ResultCheckConclusionSave(ref,models.ResultCheckEndReason.RESULT_BUDGET_EXHAUSTED,
             result_event,None,AttemptConfig(1,Decimal('1.25'),Decimal('2')),None,None,runtime.wall_us())
         key=new_operation_key()
-        receipt=commit_operation(_command(request,key,bounded),key,owned)
+        receipt=commit_operation(_command(request,key,bounded,owned),key,owned)
         assert receipt.kind=='completed',receipt.error
         assert owned.connection.execute('SELECT current_result,current_failure_json FROM segment_check_conclusions').fetchone()==(1,None)
         assert owned.connection.execute('SELECT attempts_used,max_attempts_used,status FROM operation_runs WHERE id=?',
@@ -145,7 +146,6 @@ async def test_failed_latest_scan_keeps_retained_files_without_reusing_prior_com
 @pytest.mark.parametrize('bounded',[False,True])
 @pytest.mark.parametrize('damage',['omit_config','omit_close','omit_decision','close_only_no_scope','no_scope','wrong_config','false_range'])
 async def test_kernel_rejects_incomplete_or_changed_result_decision_groups(tmp_path,bounded,damage):
-    from camctl.persistence.repositories.segment_check_conclusions import ConcludeResultCheckCommand
     from .test_segment_transaction_batches import _fingerprint
     owned,runtime,repository,ref,run_id,result_event=await _partial_result_world(tmp_path)
     try:
@@ -155,7 +155,7 @@ async def test_kernel_rejects_incomplete_or_changed_result_decision_groups(tmp_p
         run=owned.connection.execute('SELECT * FROM operation_runs WHERE id=?',(run_id,)).fetchone()
         class Command:
             def plan(self,scope):
-                plan=ConcludeResultCheckCommand(request,key).plan(scope)
+                plan=capture_operation_command(segment_storage,lambda: SegmentRepository().conclude_result_check(request,key,owned)).plan(scope)
                 events=plan.events
                 if damage.startswith('omit_'):
                     index={'omit_config':0,'omit_close':1,'omit_decision':2}[damage]
@@ -208,7 +208,7 @@ async def test_result_decision_unknown_restores_original_complete_group_from_fre
         key=new_operation_key()
         def hook(stage,statement,parameters):
             if statement=='COMMIT' and stage==cut:raise sqlite3.OperationalError('决定完整组提交回执未知')
-        receipt=commit_operation(_command(request,key,bounded),key,
+        receipt=commit_operation(_command(request,key,bounded,owned),key,
             replace(owned,connection=ConnectionProbe(owned.connection,hook)))
         assert receipt.kind=='unknown',receipt.error
         owned.connection.close();closed=True
@@ -284,7 +284,7 @@ async def test_exhaustion_requires_actual_last_result_and_complete_adopted_budge
         elif damage=='missing_interval':request=replace(request,check_config=replace(request.check_config,retry_interval_s=None))
         else:request=replace(request,ref=replace(ref,version=ref.version+1))
         key=new_operation_key()
-        receipt=commit_operation(_command(request,key,bounded),key,owned)
+        receipt=commit_operation(_command(request,key,bounded,owned),key,owned)
         assert receipt.kind=='rolled_back',receipt.error
         assert owned.connection.execute('SELECT COUNT(*) FROM segment_check_conclusions').fetchone()==(0,)
     finally:

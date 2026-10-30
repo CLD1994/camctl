@@ -6,6 +6,8 @@ import pytest
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.segments import SegmentRepository,register_segment_guards
+from camctl.persistence.repositories import segments as segment_storage
+from .transaction_fixtures import capture_operation_command
 from camctl.persistence.transaction import BoundedCommandPlan,commit_operation
 from camctl.history.validators import EventContext
 
@@ -28,7 +30,6 @@ def _request(runtime,owned,action_id):
 @pytest.mark.parametrize('bounded',[False,True])
 async def test_no_results_has_actual_set_identity_and_original_boundary(tmp_path,bounded):
     from camctl.capture.segment_storage import SegmentResultRef
-    from camctl.persistence.repositories.segment_result_sets import CreateResultSetCommand
     owned,runtime,action_id,_=await consumer_world(tmp_path,'record',catalog=SegmentedCatalog())
     try:
         request=_request(runtime,owned,action_id)
@@ -37,7 +38,7 @@ async def test_no_results_has_actual_set_identity_and_original_boundary(tmp_path
         if bounded:
             class Command:
                 def plan(self,scope):
-                    plan=CreateResultSetCommand(request,key).plan(scope)
+                    plan=capture_operation_command(segment_storage,lambda: SegmentRepository().create_result_set(request,key,owned)).plan(scope)
                     from camctl.persistence.event_reads import SqlEventReads
                     return BoundedCommandPlan(plan.events,
                         lambda event,transaction:EventContext(transaction,plan.owners,plan.state_rows,
@@ -194,8 +195,9 @@ async def test_saved_result_set_prevents_another_actual_results_attempt(tmp_path
             assert decision.ticket is None
         else:
             from camctl.operations.attempts import AttemptIntent,AttemptTarget,OperationKind
-            from camctl.persistence.repositories.operations import BeginAttemptCommand
             from camctl.persistence.repositories import segment_result_sets
+            from camctl.persistence.repositories import operations as operations_storage
+            from camctl.persistence.repositories.operations import OperationRepository
             from camctl.persistence.event_reads import SqlEventReads
             intent=AttemptIntent(operation='result',action_id=action_id,
                 kind=OperationKind.CHECK_CAPTURE_RESULTS,
@@ -207,7 +209,7 @@ async def test_saved_result_set_prevents_another_actual_results_attempt(tmp_path
                     # 仅跳过命令的预检；内核具名守卫仍读取真实已固定集合。
                     with monkeypatch.context() as patch:
                         patch.setattr(segment_result_sets,'result_run_has_set',lambda *args:False)
-                        plan=BeginAttemptCommand(intent,key).plan(scope)
+                        plan=capture_operation_command(operations_storage,lambda: OperationRepository().begin_attempt(intent,key,owned)).plan(scope)
                     if bypass=='bounded':
                         return BoundedCommandPlan(plan.events,
                             lambda event,transaction:EventContext(transaction,plan.owners,plan.state_rows,
@@ -225,7 +227,6 @@ async def test_saved_result_set_prevents_another_actual_results_attempt(tmp_path
 @pytest.mark.parametrize('mutation',['source','identity','no_scope'])
 async def test_create_guard_rechecks_self_reported_values(tmp_path,bounded,mutation):
     from camctl.capture.segment_storage import document
-    from camctl.persistence.repositories.segment_result_sets import CreateResultSetCommand
     from camctl.persistence.event_reads import SqlEventReads
     owned,runtime,action_id,_=await consumer_world(tmp_path,'record',catalog=SegmentedCatalog())
     try:
@@ -234,7 +235,7 @@ async def test_create_guard_rechecks_self_reported_values(tmp_path,bounded,mutat
         before=owned.connection.execute('SELECT COUNT(*) FROM history_events').fetchone()
         class Command:
             def plan(self,scope):
-                plan=CreateResultSetCommand(request,key).plan(scope)
+                plan=capture_operation_command(segment_storage,lambda: SegmentRepository().create_result_set(request,key,owned)).plan(scope)
                 event=plan.events[0]
                 ref=plan.result
                 if mutation=='identity':
@@ -442,11 +443,10 @@ async def test_canonical_members_fix_exact_original_sources(tmp_path,bounded):
             assert refused.kind is DbOutcomeKind.ROLLED_BACK
         key=new_operation_key()
         def save(kind,payload,key):
-            from camctl.persistence.repositories.segment_result_members import ResultMembersCommand
             if bounded:
                 class Command:
                     def plan(self,scope):
-                        plan=ResultMembersCommand(kind,ref,payload,runtime.wall_us(),key).plan(scope)
+                        plan=capture_operation_command(segment_storage,lambda: (repository.append_result_members(ref,payload,runtime.wall_us(),key,owned) if kind=='MEMBERS' else repository.fix_result_members(ref,runtime.wall_us(),key,owned))).plan(scope)
                         if plan.read_only:return plan
                         from camctl.persistence.event_reads import SqlEventReads
                         return BoundedCommandPlan(plan.events,
@@ -497,7 +497,6 @@ async def test_canonical_members_fix_exact_original_sources(tmp_path,bounded):
 @pytest.mark.parametrize('mutation',['member','identity','fixed_count','no_scope'])
 async def test_canonical_member_guard_does_not_trust_plan_rows(tmp_path,bounded,mutation):
     from camctl.capture.segment_storage import ResultSetCreate,SegmentSourceKind,PublicationKind,document
-    from camctl.persistence.repositories.segment_result_members import ResultMembersCommand
     from camctl.persistence.event_reads import SqlEventReads
     from .test_segment_scan_pairing import _ready
     from .test_segment_file_pairing import _entry
@@ -520,7 +519,7 @@ async def test_canonical_member_guard_does_not_trust_plan_rows(tmp_path,bounded,
         class Command:
             def plan(self,scope):
                 kind='FIX_RESULT_MEMBERS' if mutation=='fixed_count' else 'MEMBERS'
-                plan=ResultMembersCommand(kind,ref,None if mutation=='fixed_count' else inputs,runtime.wall_us(),key).plan(scope)
+                plan=capture_operation_command(segment_storage,lambda: (repository.fix_result_members(ref,runtime.wall_us(),key,owned) if mutation=='fixed_count' else repository.append_result_members(ref,inputs,runtime.wall_us(),key,owned))).plan(scope)
                 event=plan.events[0]
                 row=event.rows[0]
                 values=dict(row.after.values)

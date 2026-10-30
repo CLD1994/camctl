@@ -8,6 +8,8 @@ from camctl.devices.bindings import DeviceBinding
 from camctl.devices.directory import DirectoryCursor
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.segments import SegmentRepository
+from camctl.persistence.repositories import segments as segment_storage
+from .transaction_fixtures import capture_operation_command
 
 from .test_segment_file_proofs import _boundary
 from .test_segment_result_sets import _finish_scan
@@ -21,7 +23,6 @@ pytestmark=pytest.mark.asyncio
 
 @pytest.mark.parametrize('bounded',[False,True])
 async def test_full_member_batch_and_following_page_fix_all_129_actual_sources(tmp_path,bounded):
-    from camctl.persistence.repositories.segment_result_members import ResultMembersCommand
     owned,runtime,action_id,_=await consumer_world(tmp_path,'record',catalog=SegmentedCatalog())
     try:
         ticket=begin_result_check(owned,runtime,action_id).ticket
@@ -53,9 +54,9 @@ async def test_full_member_batch_and_following_page_fix_all_129_actual_sources(t
         assert len(last.items)==1 and last.next_cursor is None
         for page in (first,last):
             key=new_operation_key()
-            _commit(ResultMembersCommand('MEMBERS',ref,page.items,runtime.wall_us(),key),key,owned,bounded)
+            _commit(capture_operation_command(segment_storage,lambda: repository.append_result_members(ref,page.items,runtime.wall_us(),key,owned)),key,owned,bounded)
         key=new_operation_key()
-        _commit(ResultMembersCommand('FIX_RESULT_MEMBERS',ref,None,runtime.wall_us(),key),key,owned,bounded)
+        _commit(capture_operation_command(segment_storage,lambda: repository.fix_result_members(ref,runtime.wall_us(),key,owned)),key,owned,bounded)
         assert repository.read_result_set(ref,owned)['member_count']==129
         assert owned.connection.execute('SELECT COUNT(DISTINCT file_id) FROM segment_members WHERE set_id=?',
             (ref.set_id,)).fetchone()==(129,)

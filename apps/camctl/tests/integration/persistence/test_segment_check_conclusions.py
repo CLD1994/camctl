@@ -13,6 +13,8 @@ from camctl.devices.directory import DirectoryRead
 from camctl.operations.models import ErrorValue
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.segments import SegmentRepository
+from camctl.persistence.repositories import segments as segment_storage
+from .transaction_fixtures import capture_operation_command
 
 from .test_segment_file_proofs import _boundary
 from .test_segment_result_versions import _commit
@@ -85,8 +87,7 @@ async def test_no_result_decision_anchors_saved_baseline_end_and_keeps_action_ru
             actual.result_event_id,None,None,None,None,runtime.wall_us())
         key=new_operation_key()
         if bounded:
-            from camctl.persistence.repositories.segment_check_conclusions import ConcludeResultCheckCommand
-            result=_commit(ConcludeResultCheckCommand(request,key),key,owned,True)
+            result=_commit(capture_operation_command(segment_storage,lambda: repository.conclude_result_check(request,key,owned)),key,owned,True)
         else:
             result=_ok(repository.conclude_result_check(request,key,owned))
         assert isinstance(result,models.ResultCheckConclusionRef) and result.ref==ref
@@ -116,7 +117,6 @@ async def test_decision_cannot_share_actual_transaction_with_another_legal_decis
     from camctl.history.validators import EventContext
     from camctl.persistence.event_reads import SqlEventReads
     from camctl.persistence.transaction import BoundedCommandPlan,TransactionScope,commit_operation
-    from camctl.persistence.repositories.segment_check_conclusions import ConcludeResultCheckCommand
     from .test_segment_transaction_batches import _fingerprint
     class Catalog(_BaselineCatalog):
         def device_exists(self,device_id):return device_id in ('cam-1','cam-2')
@@ -144,7 +144,7 @@ async def test_decision_cannot_share_actual_transaction_with_another_legal_decis
         class Command:
             def plan(self,scope):
                 allocation=scope.allocate(2)
-                plans=tuple(ConcludeResultCheckCommand(request,key).plan(TransactionScope(
+                plans=tuple(capture_operation_command(segment_storage,lambda: repository.conclude_result_check(request,key,owned)).plan(TransactionScope(
                     scope.connection,scope.max_txn_id,scope.max_event_id)) for request in requests)
                 events=[]
                 for index,plan in enumerate(plans):
@@ -175,7 +175,6 @@ async def test_decision_guard_rechecks_actual_source_and_fields(tmp_path,bounded
     from camctl.history.validators import EventContext
     from camctl.persistence.event_reads import SqlEventReads
     from camctl.persistence.transaction import BoundedCommandPlan,commit_operation
-    from camctl.persistence.repositories.segment_check_conclusions import ConcludeResultCheckCommand
     owned,runtime,repository,ref,actual=await _baseline_end_world(tmp_path)
     try:
         request=models.ResultCheckConclusionSave(ref,models.ResultCheckEndReason.NO_RESULT_WORK,
@@ -184,7 +183,7 @@ async def test_decision_guard_rechecks_actual_source_and_fields(tmp_path,bounded
         before=owned.connection.execute('SELECT COUNT(*) FROM history_events').fetchone()
         class Command:
             def plan(self,scope):
-                plan=ConcludeResultCheckCommand(request,key).plan(scope)
+                plan=capture_operation_command(segment_storage,lambda: SegmentRepository().conclude_result_check(request,key,owned)).plan(scope)
                 event=plan.events[0];row=event.rows[0];values=dict(row.after.values)
                 if damage=='anchor':
                     changed=replace(request,anchor_event_id=actual.intent_event_id)
@@ -290,7 +289,7 @@ async def test_decision_commit_unknown_recovers_original_only_after_save_closes(
         path=Path(owned.connection.execute('PRAGMA database_list').fetchone()[2])
         class Command:
             def plan(self,scope):
-                plan=storage.ConcludeResultCheckCommand(request,key).plan(scope)
+                plan=capture_operation_command(segment_storage,lambda: SegmentRepository().conclude_result_check(request,key,owned)).plan(scope)
                 if not bounded:return plan
                 return BoundedCommandPlan(plan.events,
                     lambda event,transaction:EventContext(transaction,plan.owners,plan.state_rows,

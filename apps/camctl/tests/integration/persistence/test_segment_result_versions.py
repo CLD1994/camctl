@@ -13,6 +13,8 @@ from camctl.history.validators import EventContext
 from camctl.persistence.event_reads import SqlEventReads
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.segments import SegmentRepository
+from camctl.persistence.repositories import segments as segment_storage
+from .transaction_fixtures import capture_operation_command
 from camctl.persistence.transaction import BoundedCommandPlan,commit_operation
 
 from .test_segment_result_sets import _two_scan_result
@@ -111,8 +113,6 @@ def _history_members(handle,ref):
 @pytest.mark.parametrize('bounded',[False,True])
 @pytest.mark.parametrize('previous_state',['collecting_prefix','fixed'])
 async def test_canceled_result_rebuilds_all_original_inputs_and_recovers_exact_version(tmp_path,bounded,previous_state):
-    from camctl.persistence.repositories.segment_result_members import ResultMembersCommand
-    from camctl.persistence.repositories.segment_result_sets import CreateResultSetCommand
     from camctl.persistence.repositories.history import HistoryRepository
     from camctl.persistence.runtime import DbConfig,DbOpenMode,open_existing
     from camctl.contracts.values import ConsistencyError
@@ -133,19 +133,19 @@ async def test_canceled_result_rebuilds_all_original_inputs_and_recovers_exact_v
         cancel=_cancel(owned,runtime,previous.action_id)
         request=_request(repository,previous,owned,runtime,cancel)
         key=new_operation_key()
-        ref=_commit(CreateResultSetCommand(request,key),key,owned,bounded)
+        ref=_commit(capture_operation_command(segment_storage,lambda: repository.create_result_set(request,key,owned)),key,owned,bounded)
         assert ref.version==previous.version+1 and ref.set_id!=previous.set_id
         pending=None
         while True:
             page=repository.read_result_member_inputs(ref,pending,1,owned)
             for item in page.items:
                 member_key=new_operation_key()
-                _commit(ResultMembersCommand('MEMBERS',ref,(item,),runtime.wall_us(),member_key),
+                _commit(capture_operation_command(segment_storage,lambda: repository.append_result_members(ref,(item,),runtime.wall_us(),member_key,owned)),
                     member_key,owned,bounded)
             if page.next_cursor is None:break
             pending=page.next_cursor
         fix_key=new_operation_key()
-        _commit(ResultMembersCommand('FIX_RESULT_MEMBERS',ref,None,runtime.wall_us(),fix_key),
+        _commit(capture_operation_command(segment_storage,lambda: repository.fix_result_members(ref,runtime.wall_us(),fix_key,owned)),
             fix_key,owned,bounded)
         assert repository.read_result_set(ref,owned)['member_count']==2
         assert tuple(owned.connection.execute('SELECT * FROM segment_members WHERE set_id=?',
@@ -203,7 +203,7 @@ async def test_cancel_create_guard_requires_original_unpublished_predecessor(tmp
             def plan(self,scope):
                 with monkeypatch.context() as patch:
                     patch.setattr(storage,'_publication',lambda *args:None)
-                    plan=storage.CreateResultSetCommand(request,key).plan(scope)
+                    plan=capture_operation_command(segment_storage,lambda: SegmentRepository().create_result_set(request,key,owned)).plan(scope)
                 if not bounded:return plan
                 return BoundedCommandPlan(plan.events,
                     lambda event,transaction:EventContext(transaction,plan.owners,plan.state_rows,
@@ -262,7 +262,7 @@ async def test_unknown_cancel_create_closes_original_and_reuses_same_request_key
         calls=(runtime.driver.control.await_count,runtime.stopper.stop.await_count)
         class Command:
             def plan(self,scope):
-                plan=storage.CreateResultSetCommand(request,key).plan(scope)
+                plan=capture_operation_command(segment_storage,lambda: SegmentRepository().create_result_set(request,key,owned)).plan(scope)
                 if not bounded:return plan
                 return BoundedCommandPlan(plan.events,
                     lambda event,transaction:EventContext(transaction,plan.owners,plan.state_rows,
