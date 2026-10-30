@@ -106,7 +106,7 @@ class _ProbeTools:
         raise AssertionError("Action6 覆盖检查不能启动修复")
 
 
-async def _attach_media(runtime, owned, tmp_path: Path, values) -> _ProbeTools:
+async def _attach_media(runtime, owned, tmp_path: Path, values, *, occurred_at=None) -> _ProbeTools:
     staging = tmp_path / "staging"
     staging.mkdir(exist_ok=True)
     tools = _ProbeTools(owned, values)
@@ -116,7 +116,7 @@ async def _attach_media(runtime, owned, tmp_path: Path, values) -> _ProbeTools:
         sessions=DriverReadSessions(await capture_database(owned), _ReadDriver(_CONTENT), ticket=None),
         tools=tools,
         policy=MediaPolicy(repair_margin_s=Decimal("2")),
-        occurred_at=runtime.wall_us,
+        occurred_at=runtime.wall_us if occurred_at is None else occurred_at,
         digest_supported=True,
         digest=_Digest(),
     )

@@ -24,6 +24,7 @@ from .test_record_file_completion_wait import (
     _result_port,
 )
 from ..outputs.test_segment_default_scope import _obtain
+from ..support.result_cases import CaseClock
 
 pytestmark = pytest.mark.asyncio
 
@@ -49,8 +50,11 @@ pytestmark = pytest.mark.asyncio
 async def test_action6_native_cancel_defaults_to_all_qualified_videos_and_photo(
     tmp_path, video_identities
 ):
+    clock = CaseClock(_NOW, 5_000_000_000)
+    stopper = create_autospec(StopDriver, instance=True)
     owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, "timelapse", catalog=Action6NativeCatalog(0), start=False
+        tmp_path, "timelapse", catalog=Action6NativeCatalog(0), start=False, clock=clock,
+        runtime_options={"stopper": stopper},
     )
     try:
         (activity_id,) = owned.connection.execute(
@@ -62,16 +66,13 @@ async def test_action6_native_cancel_defaults_to_all_qualified_videos_and_photo(
         assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
 
         await capture_handler(handler)(action_id, runtime)
-        wall = [_NOW + 100_000]
-        runtime.wall_us = lambda: wall[0]
-        runtime.monotonic_ns = lambda: 6_000_000_000
-        _apply_public_cancel(owned, action_id, wall[0])
+        clock.wall = _NOW + 100_000
+        clock.monotonic = 6_000_000_000
+        _apply_public_cancel(owned, action_id, clock.wall)
 
-        stopper = create_autospec(StopDriver, instance=True)
         stopper.stop.return_value = DeviceCallResult.from_outcome(
             returned("stop", "stop_confirmed", activity_id)
         )
-        runtime.stopper = stopper
 
         entries = [
             _entry(identity) for identity in video_identities

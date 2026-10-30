@@ -6,6 +6,7 @@ from unittest.mock import create_autospec
 import pytest
 
 from ..support.capture import capture_database
+from ..support.result_cases import CaseClock
 
 from camctl.capture.baseline_models import BaselineFixSave
 from camctl.capture.handlers import capture_handler
@@ -26,7 +27,7 @@ from .test_action6_segmented_recovery import (
     _publish_ordinary_result,
 )
 from .test_action6_segmented_normal import Action6NativeCatalog, Action6RecordCatalog
-from .test_call_result_save import ReturnedCall, _outcome
+from .test_call_result_save import _outcome
 from .test_cancel_timelapse_exhaustion_files import _apply_public_cancel
 from .test_capture_contract import _NOW
 from .result_consumer_fixtures import returned
@@ -136,10 +137,14 @@ async def test_action6_stop_budget_exhaustion_publishes_unconfirmed_without_rele
 ):
     from .test_action6_segmented_recovery import Action6RecordCatalog
 
+    clock = CaseClock(_NOW, 5_000_000_000)
+    stopper = create_autospec(StopDriver, instance=True)
+    stopper.stop.return_value = DeviceCallResult.from_outcome(_outcome("stop"))
     task_catalog = Action6RecordCatalog()
     task_catalog.duration_s = Decimal("60")
     owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, "record", catalog=task_catalog, start=False
+        tmp_path, "record", catalog=task_catalog, start=False, clock=clock,
+        runtime_options={"stopper": stopper},
     )
     try:
         (activity_id,) = owned.connection.execute(
@@ -157,9 +162,8 @@ async def test_action6_stop_budget_exhaustion_publishes_unconfirmed_without_rele
         )
 
         runtime.stop_config = AttemptConfig(1, Decimal("1"), Decimal(0))
-        runtime.wall_us = lambda: _NOW + 75_000_000
-        runtime.monotonic_ns = lambda: 80_000_000_000
-        runtime.stopper = ReturnedCall(_outcome("stop"))
+        clock.wall = _NOW + 75_000_000
+        clock.monotonic = 80_000_000_000
         await capture_handler(handler)(action_id, runtime)
         await capture_handler(handler)(action_id, runtime)
 
@@ -215,8 +219,10 @@ async def test_action6_binding_failure_uses_external_segment_terminal(tmp_path):
 async def test_action6_native_required_photo_failure_reaches_recovery_through_real_handler(
     tmp_path,
 ):
+    clock = CaseClock(_NOW, 5_000_000_000)
+    media_clock = CaseClock(_NOW, 5_000_000_000)
     owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, "timelapse", catalog=_Action6Native151Catalog(0), start=False
+        tmp_path, "timelapse", catalog=_Action6Native151Catalog(0), start=False, clock=clock
     )
     try:
         (activity_id,) = owned.connection.execute(
@@ -234,11 +240,8 @@ async def test_action6_native_required_photo_failure_reaches_recovery_through_re
         await capture_handler(handler)(action_id, runtime)
         tools = (await _attach_media(
             runtime, owned, tmp_path,
-            (60, 60, 31, 20),
+            (60, 60, 31, 20), occurred_at=media_clock.wall_us,
         ))
-        wall, mono = [_NOW], [5_000_000_000]
-        runtime.wall_us = lambda: wall[0]
-        runtime.monotonic_ns = lambda: mono[0]
         runtime.wait_config = lambda action: CaptureWaitConfig(300_000, 200, 0, 0)
         await capture_handler(handler)(action_id, runtime)
 
@@ -248,8 +251,8 @@ async def test_action6_native_required_photo_failure_reaches_recovery_through_re
             )
 
         driver = _result_port(runtime, read)
-        wall[0] = _NOW + 300_200_000
-        mono[0] += 300_200_000_000
+        clock.wall = _NOW + 300_200_000
+        clock.monotonic += 300_200_000_000
         await capture_handler(handler)(action_id, runtime)
 
         assert driver.list_results.await_count == 1
@@ -351,8 +354,11 @@ async def test_action6_pending_inspection_waits_for_full_session_then_cancels_wi
 async def test_action6_native_cancel_retains_qualified_videos_and_required_photo(
     tmp_path,
 ):
+    clock = CaseClock(_NOW, 5_000_000_000)
+    stopper = create_autospec(StopDriver, instance=True)
     owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, "timelapse", catalog=Action6NativeCatalog(0), start=False
+        tmp_path, "timelapse", catalog=Action6NativeCatalog(0), start=False, clock=clock,
+        runtime_options={"stopper": stopper},
     )
     try:
         (activity_id,) = owned.connection.execute(
@@ -365,15 +371,12 @@ async def test_action6_native_cancel_retains_qualified_videos_and_required_photo
         from .test_record_file_completion_wait import _completed_result, _result_port
 
         await capture_handler(handler)(action_id, runtime)
-        wall = [_NOW + 100_000]
-        runtime.wall_us = lambda: wall[0]
-        runtime.monotonic_ns = lambda: 6_000_000_000
-        _apply_public_cancel(owned, action_id, wall[0])
-        stopper = create_autospec(StopDriver, instance=True)
+        clock.wall = _NOW + 100_000
+        clock.monotonic = 6_000_000_000
+        _apply_public_cancel(owned, action_id, clock.wall)
         stopper.stop.return_value = DeviceCallResult.from_outcome(
             returned("stop", "stop_confirmed", activity_id)
         )
-        runtime.stopper = stopper
 
         async def read(request, batch):
             context = request.params["completion_context"]
