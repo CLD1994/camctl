@@ -693,6 +693,7 @@ async def test_cancelled_run_with_queued_sweep_advances_business_and_withdraws(
 async def test_cancel_during_local_drain_withdraws_queued_startup_sweep(
         tmp_path: Path, monkeypatch) -> None:
     from contextvars import ContextVar
+    import sys
     from camctl.logging_runtime.models import LogFileStage
     from camctl.logging_runtime.ownership import LoggingOwner
     from camctl.persistence.business import BusinessDatabase
@@ -724,6 +725,16 @@ async def test_cancel_during_local_drain_withdraws_queued_startup_sweep(
     blocker = loop.run_in_executor(pool, occupy_worker)
 
     startup_submission = ContextVar("startup_submission", default=False)
+    physical_scans = []
+    original_submit = pool.submit
+
+    def observe_pool_submit(function, *args, **kwargs):
+        future = original_submit(function, *args, **kwargs)
+        if startup_submission.get():
+            physical_scans.append(future)
+        return future
+
+    monkeypatch.setattr(pool, "submit", observe_pool_submit)
     original_run_in_executor = loop.run_in_executor
 
     def observe_submission(executor, function, *args):
@@ -779,6 +790,7 @@ async def test_cancel_during_local_drain_withdraws_queued_startup_sweep(
         await _wait_event(worker_entered)
         await _wait_event(startup_call_queued)
         await _wait_event(database_open_attempted)
+        assert len(physical_scans) == 1
         assert len(database_threads) == 1
         def observe_database_stopped():
             database_threads[0].join()
@@ -820,19 +832,41 @@ async def test_cancel_during_local_drain_withdraws_queued_startup_sweep(
         else:
             assert not outcome.succeeded and outcome.reason == "state_db_error"
             assert "controlled locked open failure" in str(outcome.details)
+        await _wait_task(asyncio.gather(
+            asyncio.wrap_future(physical_scans[0]), return_exceptions=True))
+        assert physical_scans[0].done() and not physical_scans[0].running()
+        if not physical_scans[0].cancelled():
+            physical_scans[0].result()
         assert scans == [], "true cancellation must withdraw queued startup scan"
         assert old_copy.exists()
         lease = acquire_session(deps.session_lock)
         lease.close()
     finally:
+        failure = sys.exception()
         release_worker.set()
         await asyncio.gather(blocker, return_exceptions=True)
+        settlement_error = None
+        if physical_scans:
+            try:
+                await _wait_task(asyncio.gather(
+                    asyncio.wrap_future(physical_scans[0]), return_exceptions=True))
+            except BaseException as error:
+                settlement_error = error
+            if failure is not None:
+                future = physical_scans[0]
+                failure.add_note(
+                    f"启动扫描实际任务：done={future.done()}, "
+                    f"cancelled={future.cancelled()}, running={future.running()}, "
+                    f"scans={scans!r}, old_copy_exists={old_copy.exists()}, "
+                    f"settlement_error={settlement_error!r}")
         if observer_thread is not None:
             observer_thread.join()
         if not run_task.done():
             run_task.cancel("test cleanup")
         await _wait_task(asyncio.gather(run_task, return_exceptions=True))
         close_runtime(deps)
+        if failure is None and settlement_error is not None:
+            raise settlement_error
 
 
 async def test_late_clock_winddown_stops_before_blocked_log_settlement(
