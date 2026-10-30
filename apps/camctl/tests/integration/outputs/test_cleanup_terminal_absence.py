@@ -142,7 +142,7 @@ def _facts(owned, item_id, action_id):
 async def test_terminal_absence_is_discovered_with_no_current_ports(
     environment, query, with_error
 ):
-    (output_id, action_id), (owned, _, _, driver, item_id) = await _terminal(
+    (output_id, action_id), (owned, _, prior_runtime, driver, item_id) = await _terminal(
         environment, query=query, with_error=with_error
     )
     from camctl.outputs.cleanup_discovery import (
@@ -155,14 +155,14 @@ async def test_terminal_absence_is_discovered_with_no_current_ports(
         "SELECT * FROM outputs WHERE id<>?", (output_id,)
     ).fetchall()
     assert extra_cleanup_settlements(owned.connection) == 1
-    assert tuple(cleanup_item_batches(owned.connection, batch_size=1)) == ((item_id,),)
-    runtime = session_cleanup_assembly(
+    assert tuple([batch async for batch in cleanup_item_batches(prior_runtime.database, batch_size=1)]) == ((item_id,),)
+    runtime = await session_cleanup_assembly(
         devices={},
         drivers=DriverRegistry(),
         max_delete_attempts=1,
         max_query_attempts=1,
         occurred_at=lambda: _NOW + 4,
-    )(owned)
+    )(prior_runtime.database)
     await advance_cleanup(runtime)
     assert _facts(owned, item_id, action_id) == original
     assert owned.connection.execute(
@@ -176,7 +176,7 @@ async def test_terminal_absence_is_discovered_with_no_current_ports(
         == sibling
     )
     assert extra_cleanup_settlements(owned.connection) == 0
-    assert tuple(cleanup_item_batches(owned.connection, batch_size=1)) == ()
+    assert tuple([batch async for batch in cleanup_item_batches(prior_runtime.database, batch_size=1)]) == ()
     history = tuple(owned.connection.execute("SELECT * FROM history_events"))
     await advance_cleanup(runtime)
     assert tuple(owned.connection.execute("SELECT * FROM history_events")) == history
@@ -222,7 +222,7 @@ async def test_partial_file_facts_only_write_actual_changes(environment, partial
 
 @pytest.mark.parametrize("fault", ["rollback", "commit_before", "commit_after"])
 async def test_handoff_original_application_survives_save_failure_and_factory_rebuild(
-    environment, fault
+    environment, fault, capture_resources
 ):
     (_, action_id), (owned, context, runtime, _, item_id) = await _terminal(environment)
     from .test_cleanup_query_commit_recovery import _CommitFaultConnection
@@ -263,17 +263,19 @@ async def test_handoff_original_application_survives_save_failure_and_factory_re
     assert (await delete_source_file(runtime, item_id)).phase == "result_rejected"
     request, key = port.calls[0]
     # 保存边界的控制取消不会换掉原文件事实申请。
+    from ..support.database import database_path
+    database = await capture_resources.restart_database(database_path(owned))
     owned.connection.close()
     fresh = context.open_connection()
     try:
-        resumed = session_cleanup_assembly(
+        resumed = await session_cleanup_assembly(
             devices={},
             drivers=DriverRegistry(),
             max_delete_attempts=1,
             max_query_attempts=1,
             pending_saves=runtime.pending_saves,
             occurred_at=lambda: _NOW + 999,
-        )(fresh)
+        )(database)
         port.enabled = False
         port.cancel_once = True
         resumed.outputs = port
@@ -368,6 +370,8 @@ async def test_real_promoted_host_source_handoff_preserves_preview_and_original_
     from camctl.outputs.work_files import WorkFileLimits
 
     cfg, owned, driver, capture_runtime, _ = await _world(tmp_path)
+    from ..support.capture import capture_database
+    database = await capture_database(owned)
     work_files = WorkFileRuntime(staging=Path(cfg.paths.staging),
         limits=WorkFileLimits(batch_size=100, limit_per_run=100))
     try:
@@ -376,7 +380,7 @@ async def test_real_promoted_host_source_handoff_preserves_preview_and_original_
             "SELECT id FROM outputs WHERE kind=1"
         ).fetchone()[0]
         action_id, item_id = _start_cleanup(owned, output_id, "2")
-        runtime = session_cleanup_assembly(
+        runtime = await session_cleanup_assembly(
             devices={},
             drivers=DriverRegistry(),
             staging=Path(cfg.paths.staging),
@@ -384,7 +388,7 @@ async def test_real_promoted_host_source_handoff_preserves_preview_and_original_
             max_delete_attempts=1,
             max_query_attempts=1,
             occurred_at=lambda: _NOW,
-        )(owned)
+        )(database)
         runtime.outputs = _FaultOutputs(
             "finish_cleanup_item", DbOutcomeKind.ROLLED_BACK
         )
@@ -405,7 +409,7 @@ async def test_real_promoted_host_source_handoff_preserves_preview_and_original_
 
         monkeypatch.setattr(HostArtifacts, "delete", forbidden)
         monkeypatch.setattr(HostArtifacts, "query_file", forbidden)
-        resumed = session_cleanup_assembly(
+        resumed = await session_cleanup_assembly(
             devices={},
             drivers=DriverRegistry(),
             staging=Path(cfg.paths.staging),
@@ -413,7 +417,7 @@ async def test_real_promoted_host_source_handoff_preserves_preview_and_original_
             max_delete_attempts=1,
             max_query_attempts=1,
             occurred_at=lambda: _NOW + 4,
-        )(owned)
+        )(database)
         await advance_cleanup(resumed)
         assert _facts(owned, item_id, action_id) == original
         assert owned.connection.execute(

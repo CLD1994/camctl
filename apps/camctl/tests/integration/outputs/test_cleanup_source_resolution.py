@@ -1,12 +1,10 @@
 """范围清理的来源事务与原申请保存责任共同恢复。"""
 
 import json
-from types import SimpleNamespace
 
 import pytest
 
 from camctl.contracts.values import new_operation_key
-from camctl.outputs.cleanup_ownership import save_cleanup_request
 from camctl.outputs.sources import SourceSpec
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.outputs import OutputsRepository, ResolveSources
@@ -25,56 +23,65 @@ def _environment(tmp_path):
     return target, owned
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize('fault', ['rollback', 'unknown_before_commit', 'unknown_after_commit'])
-def test_cleanup_source_save_rebuild_keeps_original_request_and_key(tmp_path, fault):
-    target, owned, request = _real_environment(tmp_path,cleanup=True,captures=1)
+async def test_cleanup_source_save_rebuild_keeps_original_request_and_key(tmp_path, capture_resources, monkeypatch, fault):
+    from dataclasses import replace
+    from camctl.bootstrap.cleanup_assembly import session_cleanup_assembly
+    from camctl.contracts.values import ConsistencyError
+    from camctl.devices.drivers.registry import DriverRegistry
+    from camctl.outputs.cleanup_flow import advance_cleanup
+    from .test_cleanup_query_commit_recovery import _CommitFaultConnection
+
+    target, owned, request = await _real_environment(tmp_path, cleanup=True, captures=1)
     owner_id = request.action_id
-    member_id = owned.connection.execute("SELECT id FROM actions WHERE plan_id=1").fetchone()[0]
-    calls = []
-    repository = OutputsRepository()
-
-    class InterruptedRepository:
-        def resolve_sources(self, request, key, connection):
-            calls.append((request, key))
-            if len(calls) == 1:
-                if fault == 'unknown_after_commit':
-                    saved = repository.resolve_sources(request, key, connection)
-                    assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
-                kind = DbOutcomeKind.ROLLED_BACK if fault == 'rollback' else DbOutcomeKind.UNKNOWN
-                return DbOutcome(kind, error=RuntimeError('保存结果中断'))
-            return repository.resolve_sources(request, key, connection)
-
-    pending = {}
-    port = InterruptedRepository()
-    runtime = SimpleNamespace(owned=owned, outputs=port, pending_saves=pending)
-    first = save_cleanup_request(runtime, 'resolve_sources', request, action=True)
-    assert first.kind is not DbOutcomeKind.COMPLETED
-    assert len(pending) == 1
-    original = pending[('resolve_sources', owner_id)]
-    owned.connection.close()
-    owned = open_existing(target, DbOpenMode.EXISTING_RW, DbConfig())
+    member_id = owned.connection.execute('SELECT id FROM actions WHERE plan_id=1').fetchone()[0]
+    database = await capture_resources.database(target)
+    pending, calls = {}, []
+    actual = OutputsRepository.resolve_sources
+    def resolve(repository, current_request, key, current):
+        calls.append((current_request, key))
+        if len(calls) == 1:
+            if fault == 'rollback':
+                return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=RuntimeError('保存结果中断'))
+            current = replace(current, connection=_CommitFaultConnection(
+                current.connection, after_commit=fault == 'unknown_after_commit'))
+        return actual(repository, current_request, key, current)
+    monkeypatch.setattr(OutputsRepository, 'resolve_sources', resolve)
+    factory = session_cleanup_assembly(devices={}, drivers=DriverRegistry(),
+        max_delete_attempts=1, max_query_attempts=1, pending_saves=pending, occurred_at=lambda: _NOW)
     try:
-        resumed = SimpleNamespace(owned=owned, outputs=port, pending_saves=pending)
-        result = save_cleanup_request(resumed, 'resolve_sources',
-            ResolveSources(owner_id, request.spec, _NOW + 100), action=True)
-        assert result.kind is DbOutcomeKind.COMPLETED, result.error
-        assert result.value.fixed and result.value.member_count == 1
-        assert result.value.selection_count == 0
-        assert calls == [(request, original.key), (request, original.key)]
-        assert pending == {}
+        runtime = await factory(database)
+        with pytest.raises(ConsistencyError):
+            await advance_cleanup(runtime)
+        assert len(calls) == 1
+        first_request, first_key = calls[0]
+        assert first_request == request
+        database = await capture_resources.restart_database(target)
+        owned.connection.close()
+        owned = open_existing(target, DbOpenMode.EXISTING_RW, DbConfig())
+        resumed = await session_cleanup_assembly(devices={}, drivers=DriverRegistry(),
+            max_delete_attempts=1, max_query_attempts=1, pending_saves=pending,
+            occurred_at=lambda: _NOW + 100)(database)
+        await advance_cleanup(resumed)
+        assert calls[:2] == [(request, first_key), (request, first_key)]
+        assert len(calls) == 2 and not pending
         assert owned.connection.execute(
             'SELECT source_resolution_state,resolved_source_plan_id FROM actions WHERE id=?', (owner_id,)).fetchone() == (2, 1)
         assert owned.connection.execute(
             'SELECT depends_on_action_id FROM action_dependencies WHERE action_id=?', (owner_id,)).fetchall() == [(member_id,)]
         assert owned.connection.execute('SELECT COUNT(*) FROM obtain_source_selections').fetchone() == (0,)
+        assert owned.connection.execute('SELECT COUNT(*) FROM history_transactions WHERE operation_key=?',
+            (str(first_key),)).fetchone() == (1,)
         assert owned.connection.execute(
             'SELECT DISTINCT occurred_at FROM history_events WHERE event_type=3').fetchall() == [(_NOW,)]
     finally:
         owned.connection.close()
 
 
-def test_fixed_cleanup_source_is_reused_without_new_dependencies(tmp_path):
-    _, owned, request = _real_environment(tmp_path,cleanup=True,captures=1)
+@pytest.mark.asyncio
+async def test_fixed_cleanup_source_is_reused_without_new_dependencies(tmp_path):
+    _, owned, request = await _real_environment(tmp_path, cleanup=True, captures=1)
     repository = OutputsRepository()
     key = new_operation_key()
     try:
