@@ -15,6 +15,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 
 from camctl.capture.input_copy import (
     InputContext,
@@ -46,6 +47,7 @@ from camctl.persistence.repositories.outputs import (
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..persistence.test_runtime import _create_valid_database
+from ..support.database import business_database
 
 register_capture_guards()
 register_operation_guards()
@@ -89,8 +91,10 @@ class _Sessions:
         self.on_open = on_open
         self.opens: list[int] = []
 
-    async def open_session(self, source_device_file_id: int, offset: int):
+    async def open_session(self, source_device_file_id: int, offset: int, *, on_start=None):
         self.opens.append(offset)
+        if on_start is not None:
+            on_start()
         if self.on_open is not None:
             self.on_open()
         stream = _ByteStream(self.content[offset:], fail_after=self.fail_after)
@@ -113,9 +117,9 @@ class _Digest:
 class _Copies:
     """把真实资格与拷贝事务适配成编排端口。"""
 
-    def __init__(self, owned, roots: BoundDirectories, occurred_at: int,
+    def __init__(self, database, roots: BoundDirectories, occurred_at: int,
                  *, max_recopies: int = 1) -> None:
-        self.owned = owned
+        self.database = database
         self.roots = roots
         self.occurred_at = occurred_at
         self.max_recopies = max_recopies
@@ -128,33 +132,34 @@ class _Copies:
             return SaveReceipt(SaveDisposition.REJECTED, error=outcome.error)
         return SaveReceipt(SaveDisposition.UNKNOWN, error=outcome.error)
 
-    def qualify(self, candidate):
-        return self._receipt(self.repository.grant_file(
-            candidate, new_operation_key(), self.owned))
+    async def qualify(self, candidate):
+        key = new_operation_key()
+        return self._receipt(await self.database.write(
+            lambda owned: self.repository.grant_file(candidate, key, owned), key=key))
 
-    def copy_state(self, copy_id: int):
-        return self.repository.load_copy_state(copy_id, self.owned)
+    async def copy_state(self, copy_id: int):
+        return await self.database.read(lambda owned: self.repository.load_copy_state(copy_id, owned))
 
     async def prepare(self, copy_id: int):
         return await prepare_copy(copy_id, CopyContext(
-            repository=self.repository, owned=self.owned, roots=self.roots,
+            repository=self.repository, database=self.database, roots=self.roots,
             occurred_at=self.occurred_at))
 
     async def transfer(self, copy_id: int, session, segment_size: int):
         return await copy_next_segment(copy_id, SegmentContext(
-            repository=self.repository, owned=self.owned, roots=self.roots,
+            repository=self.repository, database=self.database, roots=self.roots,
             occurred_at=self.occurred_at, segment_size=segment_size,
             session=session))
 
     async def complete(self, copy_id: int, digest):
         return await complete_copy(copy_id, CompletionContext(
-            repository=self.repository, owned=self.owned, roots=self.roots,
+            repository=self.repository, database=self.database, roots=self.roots,
             occurred_at=self.occurred_at, digest=digest,
             max_recopies=self.max_recopies))
 
 
-@pytest.fixture
-def pipeline(tmp_path: Path):
+@pytest_asyncio.fixture
+async def pipeline(tmp_path: Path):
     """检查决定固定为需要检查的处理行、可靠原片与真实目录绑定。"""
     target = tmp_path / "state.db"
     _create_valid_database(target)
@@ -183,20 +188,24 @@ def pipeline(tmp_path: Path):
         (staging / name).mkdir(parents=True)
     roots = BoundDirectories(staging=staging)
     sessions = _Sessions(_CONTENT)
-    copies = _Copies(owned, roots, _NOW + 10)
+    async with business_database(target) as database:
+        copies = _Copies(database, roots, _NOW + 10)
 
-    def context(**overrides):
-        values = dict(
-            action_id=1, processing_id=1, source_device_file_id=11,
-            target_extension="mp4", config=_CONFIG, segment_size=4,
-            staging=staging, copies=copies, sessions=sessions,
-            digest=_Digest(hashlib.sha256(_CONTENT).hexdigest()),
-            occurred_at=_NOW + 10,
-        )
-        values.update(overrides)
-        return InputContext(**values)
+        def context(**overrides):
+            values = dict(
+                action_id=1, processing_id=1, source_device_file_id=11,
+                target_extension="mp4", config=_CONFIG, segment_size=4,
+                staging=staging, copies=copies, sessions=sessions,
+                digest=_Digest(hashlib.sha256(_CONTENT).hexdigest()),
+                occurred_at=_NOW + 10,
+            )
+            values.update(overrides)
+            return InputContext(**values)
 
-    return owned, roots, sessions, copies, context
+        try:
+            yield owned, roots, sessions, copies, context
+        finally:
+            owned.connection.close()
 
 
 def _seed_plan(connection, plan_id: int) -> None:

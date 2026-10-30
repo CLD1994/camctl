@@ -50,6 +50,7 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.scheduling.rules import LaunchWindow
 
 from ..persistence.test_runtime import _create_valid_database
+from ..support.database import business_database
 from ..scheduling.test_resources import (
     _seed_activity,
     _seed_plan,
@@ -91,12 +92,12 @@ class WallStub:
 class StoreAdapter:
     """把 Q4 授予与 O2 结果事务接到启动编排端口。"""
 
-    def __init__(self, scheduling: SchedulingRepository, operations: OperationRepository, owned) -> None:
+    def __init__(self, scheduling: SchedulingRepository, operations: OperationRepository, database) -> None:
         self._scheduling = scheduling
         self._operations = operations
-        self._owned = owned
+        self._database = database
 
-    def grant(self, request) -> GrantDecision:
+    async def grant(self, request) -> GrantDecision:
         grant_request = GrantRequest(
             device_id=request.device_id,
             action_id=request.action_id,
@@ -105,8 +106,9 @@ class StoreAdapter:
             config=request.config,
             occurred_at=request.trusted_wall_now,
         )
-        outcome = self._scheduling.grant_start(
-            grant_request, new_operation_key(), self._owned
+        key = new_operation_key()
+        outcome = await self._database.write(
+            lambda owned: self._scheduling.grant_start(grant_request, key, owned), key=key
         )
         if outcome.kind is not DbOutcomeKind.COMPLETED:
             return GrantDecision(outcome="error", reason=str(outcome.kind))
@@ -115,18 +117,19 @@ class StoreAdapter:
             return GrantDecision(outcome="rejected", reason=result.reason)
         return GrantDecision(outcome="granted", ticket=result.ticket)
 
-    def finish(self, ticket, outcome: CallOutcome) -> None:
+    async def finish(self, ticket, outcome: CallOutcome) -> None:
         attempt = AttemptFinish(
             ticket=ticket,
             outcome=_validated(ticket, outcome),
             occurred_at=_NOW,
         )
-        receipt = self._operations.finish_attempt(
-            attempt, new_operation_key(), self._owned
+        key = new_operation_key()
+        receipt = await self._database.write(
+            lambda owned: self._operations.finish_attempt(attempt, key, owned), key=key
         )
         assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
 
-    def finish_prevented(self, ticket, reason: str) -> None:
+    async def finish_prevented(self, ticket, reason: str) -> None:
         outcome = CallOutcome(
             status=AttemptStatus.FAILED,
             error=ErrorValue(code=reason, stage="dispatch"),
@@ -137,7 +140,7 @@ class StoreAdapter:
             ),
             observations=(),
         )
-        self.finish(ticket, outcome)
+        await self.finish(ticket, outcome)
 
 
 def _validated(ticket, outcome: CallOutcome):
@@ -194,7 +197,7 @@ def _environment(tmp_path: Path):
     return owned
 
 
-def _context(owned, *, driver: DriverStub, wall: WallStub, canceled: bool = False):
+def _context(database, *, driver: DriverStub, wall: WallStub, canceled: bool = False):
     return CaptureContext(
         device_id="cam-1",
         action_id=1,
@@ -203,9 +206,9 @@ def _context(owned, *, driver: DriverStub, wall: WallStub, canceled: bool = Fals
         duration=_DURATION_MS,
         trusted_wall_now=_NOW,
         wall=wall,
-        grants=StoreAdapter(SchedulingRepository(), OperationRepository(), owned),
+        grants=StoreAdapter(SchedulingRepository(), OperationRepository(), database),
         driver=driver,
-        finishes=StoreAdapter(SchedulingRepository(), OperationRepository(), owned),
+        finishes=StoreAdapter(SchedulingRepository(), OperationRepository(), database),
         canceled=canceled,
     )
 
@@ -229,28 +232,29 @@ async def test_confirmed_start_persists_facts_and_anchor(tmp_path: Path) -> None
         )
     )
     try:
-        step = await start_recording(
-            _context(owned, driver=driver, wall=WallStub(_NOW))
-        )
-        assert step.phase is RecordingPhase.START_CONFIRMED
-        assert step.stop_target_ns == _ANCHOR_NS + 60_000 * 1_000_000
+        async with business_database(tmp_path / "state.db") as database:
+            step = await start_recording(
+                _context(database, driver=driver, wall=WallStub(_NOW))
+            )
+            assert step.phase is RecordingPhase.START_CONFIRMED
+            assert step.stop_target_ns == _ANCHOR_NS + 60_000 * 1_000_000
 
-        attempt = _value(
-            owned,
-            "SELECT a.status, a.effect_state, a.result_json FROM operation_attempts a"
-            " JOIN operation_runs r ON a.run_id = r.id"
-            " WHERE r.responsibility_key = 'start/1' AND a.attempt_no = 1",
-        )
-        assert attempt[0] == 2  # SUCCEEDED
-        assert attempt[1] == 3  # CONFIRMED
-        document = json.loads(attempt[2])
-        assert document["settlement"]["basis"] == "observed"
-        assert document["observations"][0]["type"] == "start_confirmed"
-        used = _value(
-            owned,
-            "SELECT attempts_used FROM operation_runs WHERE responsibility_key = 'start/1'",
-        )
-        assert used[0] == 1
+            attempt = _value(
+                owned,
+                "SELECT a.status, a.effect_state, a.result_json FROM operation_attempts a"
+                " JOIN operation_runs r ON a.run_id = r.id"
+                " WHERE r.responsibility_key = 'start/1' AND a.attempt_no = 1",
+            )
+            assert attempt[0] == 2  # SUCCEEDED
+            assert attempt[1] == 3  # CONFIRMED
+            document = json.loads(attempt[2])
+            assert document["settlement"]["basis"] == "observed"
+            assert document["observations"][0]["type"] == "start_confirmed"
+            used = _value(
+                owned,
+                "SELECT attempts_used FROM operation_runs WHERE responsibility_key = 'start/1'",
+            )
+            assert used[0] == 1
     finally:
         owned.connection.close()
 
@@ -261,27 +265,28 @@ async def test_prevented_dispatch_persists_without_driver_call(tmp_path: Path) -
         StartDispatch(confirmed=True, anchor_ns=_ANCHOR_NS)
     )
     try:
-        step = await start_recording(
-            _context(owned, driver=driver, wall=WallStub(_WINDOW.window_end + 1))
-        )
-        assert step.phase is RecordingPhase.DISPATCH_PREVENTED
-        assert driver.calls == []
+        async with business_database(tmp_path / "state.db") as database:
+            step = await start_recording(
+                _context(database, driver=driver, wall=WallStub(_WINDOW.window_end + 1))
+            )
+            assert step.phase is RecordingPhase.DISPATCH_PREVENTED
+            assert driver.calls == []
 
-        attempt = _value(
-            owned,
-            "SELECT a.status, a.effect_state, a.result_json FROM operation_attempts a"
-            " JOIN operation_runs r ON a.run_id = r.id"
-            " WHERE r.responsibility_key = 'start/1' AND a.attempt_no = 1",
-        )
-        assert attempt[0] == 3  # FAILED
-        assert attempt[1] == 2  # NO_EFFECT
-        document = json.loads(attempt[2])
-        assert document["settlement"]["basis"] == "not_dispatched"
-        used = _value(
-            owned,
-            "SELECT attempts_used FROM operation_runs WHERE responsibility_key = 'start/1'",
-        )
-        assert used[0] == 1  # 次数不退还
+            attempt = _value(
+                owned,
+                "SELECT a.status, a.effect_state, a.result_json FROM operation_attempts a"
+                " JOIN operation_runs r ON a.run_id = r.id"
+                " WHERE r.responsibility_key = 'start/1' AND a.attempt_no = 1",
+            )
+            assert attempt[0] == 3  # FAILED
+            assert attempt[1] == 2  # NO_EFFECT
+            document = json.loads(attempt[2])
+            assert document["settlement"]["basis"] == "not_dispatched"
+            used = _value(
+                owned,
+                "SELECT attempts_used FROM operation_runs WHERE responsibility_key = 'start/1'",
+            )
+            assert used[0] == 1  # 次数不退还
     finally:
         owned.connection.close()
 
@@ -302,10 +307,11 @@ async def test_late_confirmation_after_window_is_accepted(tmp_path: Path) -> Non
             )
 
     try:
-        step = await start_recording(
-            _context(owned, driver=LateDriver(), wall=WallStub(_NOW))
-        )
-        assert step.phase is RecordingPhase.START_CONFIRMED
-        assert step.stop_target_ns == late_anchor + 60_000 * 1_000_000
+        async with business_database(tmp_path / "state.db") as database:
+            step = await start_recording(
+                _context(database, driver=LateDriver(), wall=WallStub(_NOW))
+            )
+            assert step.phase is RecordingPhase.START_CONFIRMED
+            assert step.stop_target_ns == late_anchor + 60_000 * 1_000_000
     finally:
         owned.connection.close()
