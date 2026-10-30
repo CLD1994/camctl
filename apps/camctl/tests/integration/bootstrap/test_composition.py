@@ -276,19 +276,33 @@ class TestFailureLogComposition:
             copies = self._copies(ready)
             assert len(copies) == 1
             content = copies[0].read_bytes()
-            # 副本包含触发记录（真实装配的错误文本）。
-            assert "报告处理失败: RuntimeError: 生成通道意外损坏".encode() in content
+            # 副本如实包含触发复制的报告异常及完整异常诊断。
+            records = [json.loads(line) for line in content.splitlines()]
+            triggering = [record for record in records
+                if record.get("level") == "ERROR" and record.get("stage") == "report"
+                and record.get("error", {}).get("type") == "builtins.RuntimeError"
+                and record["error"].get("message") == "生成通道意外损坏"]
+            assert len(triggering) == 1
+            error = triggering[0]["error"]
+            assert any(frame.get("function") == "report_crashes" for frame in error["traceback"])
+            assert error["cause"] is None and error["context"] is None
+            assert error["suppress_context"] is False
             # 标记可靠存在；原日志留在配置路径。
             from camctl.logging_runtime.copies import MARKER_NAME
 
             assert (logs_dir / MARKER_NAME).exists()
-            assert Path(cfg.paths.log_file).exists()
+            original_log = Path(cfg.paths.log_file)
+            assert original_log.exists()
+            original_content = original_log.read_bytes()
+            assert content in original_content
 
             # 同一部署再次报告失败：标记抑制另一份副本（无递归复制）。
             again = await execute_command(
                 deps, None, flows={"report": report_crashes})
             assert again.succeeded is True
             assert self._copies(ready) == copies
+            assert copies[0].read_bytes() == content
+            assert original_log.read_bytes().startswith(original_content)
         finally:
             close_runtime(deps)
 

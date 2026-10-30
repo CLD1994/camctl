@@ -1077,9 +1077,24 @@ async def test_body_success_keeps_first_worker_close_control(
     assert all(observation[1] is not None for observation in stop_observations)
     assert generation_calls == []
     notes = tuple(getattr(raised.value, "__notes__", ()))
-    rendered_notes = "\n".join(notes)
-    assert "original first worker close marker" in rendered_notes
-    assert rendered_notes.count("later worker close marker") == 1
+    structured = []
+    readable = []
+    for note in notes:
+        start = note.find('{"type":')
+        if start < 0:
+            readable.append(note)
+        else:
+            structured.append(json.loads(note[start:]))
+    assert sum("original first worker close marker" in note for note in readable) == 1
+    assert sum("later worker close marker" in note for note in readable) == 1
+    secondary = first_control if ordinary_first else later_control
+    diagnostic, = [item for item in structured
+        if item.get("message") == str(secondary)]
+    assert diagnostic["type"] == f"{type(secondary).__module__}.{type(secondary).__qualname__}"
+    assert diagnostic["notes"] == list(secondary.__notes__)
+    assert any(frame.get("function") == "close_then_control" for frame in diagnostic["traceback"])
+    assert diagnostic["cause"] is None and diagnostic["context"] is None
+    assert diagnostic["suppress_context"] is False
     assert len(notes) <= 6
     assert deps.closed is True
     assert runtime.close_attempts == 1
