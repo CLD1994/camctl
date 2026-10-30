@@ -336,6 +336,7 @@ async def default_work_session(world, monkeypatch, *, limit, batch=32, on_initia
     """完整默认会话只在公开读取/保存边界安排后来获得的文件资格。"""
     from camctl.acceptance.service import CommandMode
     from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
+    from camctl.devices.definitions_runtime import reset_driver_definitions
     from camctl.devices.drivers.runtime import register_drivers, reset_drivers
     from camctl.persistence.business import BusinessDatabase
     from camctl.persistence.repositories.outputs import OutputsRepository
@@ -375,6 +376,7 @@ async def default_work_session(world, monkeypatch, *, limit, batch=32, on_initia
         return result
 
     reset_drivers()
+    reset_driver_definitions()
     register_drivers(world.idle_entry)
     try:
         with monkeypatch.context() as observe:
@@ -390,6 +392,7 @@ async def default_work_session(world, monkeypatch, *, limit, batch=32, on_initia
                 close_runtime(deps)
     finally:
         reset_drivers()
+        reset_driver_definitions()
     return state
 
 

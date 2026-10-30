@@ -13,6 +13,7 @@ from camctl.acceptance.input import FileInputReader, parse_input, read_input
 from camctl.acceptance.service import CommandMode
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
+from camctl.devices.definitions_runtime import reset_driver_definitions
 from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverStatus
 from camctl.devices.drivers.runtime import register_drivers, reset_drivers
 from camctl.devices.ports import DeviceCallResult, DriverDeclaration
@@ -135,11 +136,13 @@ def capture_factory(config, driver, results, evidence, *, stopper=None,
 async def run_default_session(deps, source, entry, **options):
     """登记端口后运行完整生产会话；execute_command 使用默认流程。"""
     reset_drivers()
+    reset_driver_definitions()
     register_drivers(entry)
     try:
         return await execute_command(deps, source, **options)
     finally:
         reset_drivers()
+        reset_driver_definitions()
 
 
 async def cancel_session(task):
