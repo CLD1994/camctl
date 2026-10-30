@@ -134,13 +134,15 @@ class _PreparationBoundary(CaptureRepository):
     def __init__(self, boundary):
         self.boundary = boundary
         self.saved = False
+        self.interruption = None
 
     def _after(self, boundary, receipt):
         if (self.boundary == boundary and receipt.kind is DbOutcomeKind.COMPLETED
                 and receipt.handoff_error is None):
             self.saved = True
             self.boundary = None
-            return replace(receipt, handoff_error=_SavedPreparation(boundary))
+            self.interruption = _SavedPreparation(boundary)
+            return replace(receipt, handoff_error=self.interruption)
         return receipt
 
     def finish_start_result(self, *args, **kwargs):
@@ -177,7 +179,9 @@ async def _prepare_through_handler(runtime, action_id, handler, boundary):
     with repository_port(CaptureRepository, repository, (method,), matches=matches):
         try:
             await capture_handler(handler)(action_id, runtime)
-        except _SavedPreparation:
+        except _SavedPreparation as error:
+            if error is not repository.interruption:
+                raise
             assert repository.saved
         else:
             assert False, "处理器必须实际保存指定准备事实"
