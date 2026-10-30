@@ -260,44 +260,61 @@ def _submit_many(owned, count, request_id):
 
 
 class _QueryProbe:
-    """真实 SQLite 进度/SQL 观测；候选行仅加不持有成员的弱引用。"""
+    """在目标状态库的只读 SQLite 连接上观察分页与资源收场。"""
     def __init__(self, repository, monkeypatch):
         import sqlite3
         import weakref
+        path = repository.path.resolve()
+        stat = path.stat()
+        identity = (stat.st_dev, stat.st_ino)
+        target_uri = f"{path.as_uri()}?mode=ro"
+        original_connect = sqlite3.connect
         self.steps = 0
         self.connections = []
         self.sql = []
         self.candidates = []
-        original = repository._connect
         probe = self
+
         class Record:
             def __init__(self, row):
                 self.row = row
             def __getitem__(self, key):
                 return self.row[key]
-        def connect():
-            connection = original()
-            probe.connections.append(connection)
-            candidate_query = False
-            def trace(statement):
-                nonlocal candidate_query
-                candidate_query = statement.startswith('SELECT ') and 'FROM report_entity_changes c INDEXED BY report_changes_by_sequence' in statement
-                if 'report_entity_changes' in statement:
-                    probe.sql.append(statement)
-            def row_factory(cursor, row):
-                value = sqlite3.Row(cursor, row)
-                if candidate_query:
-                    value = Record(value)
-                    probe.candidates.append(weakref.ref(value))
-                return value
-            def advance():
-                probe.steps += 100
-                return 0
-            connection.set_trace_callback(trace)
-            connection.set_progress_handler(advance, 100)
-            connection.row_factory = row_factory
-            return connection
-        monkeypatch.setattr(repository, '_connect', connect)
+
+        class ObservedConnection(sqlite3.Connection):
+            def execute(self, sql, *args, **kwargs):
+                if sql == 'BEGIN' and not hasattr(self, '_probe_attached'):
+                    # 状态库打开及结构核验完成后，才开始观察业务短读。
+                    self._probe_attached = True
+                    probe.connections.append(self)
+                    candidate_query = [False]
+                    def trace(statement):
+                        candidate_query[0] = statement.startswith('SELECT ') and 'FROM report_entity_changes c INDEXED BY report_changes_by_sequence' in statement
+                        if 'report_entity_changes' in statement:
+                            probe.sql.append(statement)
+                    def row_factory(cursor, row):
+                        value = sqlite3.Row(cursor, row)
+                        if candidate_query[0]:
+                            value = Record(value)
+                            probe.candidates.append(weakref.ref(value))
+                        return value
+                    def advance():
+                        probe.steps += 100
+                        return 0
+                    self.set_trace_callback(trace)
+                    self.set_progress_handler(advance, 100)
+                    self.row_factory = row_factory
+                return super().execute(sql, *args, **kwargs)
+
+        def connect(database, *args, **kwargs):
+            if database == target_uri and kwargs.get('uri') is True:
+                current = path.stat()
+                assert (current.st_dev, current.st_ino) == identity
+                assert 'factory' not in kwargs
+                kwargs['factory'] = ObservedConnection
+            return original_connect(database, *args, **kwargs)
+
+        monkeypatch.setattr(sqlite3, 'connect', connect)
 
 
 @pytest.mark.asyncio
@@ -350,7 +367,11 @@ async def test_large_window_releases_overflow_once_and_keyset_pages_do_not_resca
         page_sql = [sql for sql in probe.sql if sql.startswith('SELECT r')]
         assert all(' IN (' not in sql for sql in page_sql)
         assert max(vm_pages) < preflight_steps // 8
-        with repository._read_connection() as connection:
+        from contextlib import closing
+        import sqlite3
+        with closing(sqlite3.connect(f"{repository.path.resolve().as_uri()}?mode=ro", uri=True,
+                                     isolation_level=None)) as connection:
+            connection.execute('BEGIN').close()
             plans = tuple(row[3] for row in connection.execute('EXPLAIN QUERY PLAN ' + page_sql[0]))
             candidate_plan = tuple(row[3] for row in connection.execute('EXPLAIN QUERY PLAN ' + candidate_sql[1]))
         assert any('actions_plan_members' in row for row in plans)
