@@ -203,10 +203,33 @@ async def test_actual_goal_completion_after_unknown_duration_still_carries_its_g
         owned.connection.close()
 
 
+async def reopen_fault_database(world, capture_resources):
+    """先等待文件责任并关闭故障 worker，再用原工厂连接新 worker。"""
+    from camctl.persistence.business import BusinessDatabase
+
+    previous = world.database
+    previous_thread = previous.executor._thread
+    assert previous_thread is not None and previous_thread.is_alive()
+    await capture_resources.close()
+    await previous.close()
+    assert not previous_thread.is_alive()
+    world.database = await BusinessDatabase.open(world.connect)
+    assert world.database.executor._thread is not previous_thread
+    return await world.factory(world.database)
+
+
 @pytest.mark.parametrize("binding", [BindingStatus.DEVICE_MISSING, BindingStatus.DRIVER_MISMATCH])
-async def test_held_stop_is_saved_before_new_binding_failure(tmp_path, binding, capture_resources):
+async def test_held_stop_is_saved_before_new_binding_failure(tmp_path, binding, capture_resources, monkeypatch):
     from camctl.contracts.workflow_errors import registered_error
     from camctl.operations.result_format import result_document
+    original_save = CaptureRepository.finish_host_timer_stop
+    saves = []
+
+    def record_save(repository, finish, stop, key, owned):
+        saves.append((finish, stop, key))
+        return original_save(repository, finish, stop, key, owned)
+
+    monkeypatch.setattr(CaptureRepository, "finish_host_timer_stop", record_save)
     world = await native_fault_world(tmp_path, HostCatalog())
     owned, action_id = world.owned, world.action_id
     try:
@@ -222,8 +245,11 @@ async def test_held_stop_is_saved_before_new_binding_failure(tmp_path, binding, 
             world.devices.pop("cam-1")
         else:
             world.devices["cam-1"]["driver"] = "other"
-        runtime = await world.factory(world.database)
+        saves_before_reopen = len(saves)
+        assert saves_before_reopen > 0
+        runtime = await reopen_fault_database(world, capture_resources)
         await capture_handler(world.handler)(action_id, runtime)
+        assert len(saves) > saves_before_reopen and all(save == saves[0] for save in saves)
         assert owned.connection.execute("SELECT activity_state,control_elapsed_ns FROM device_activities").fetchone() == (3, 10_000_000_000)
         assert owned.connection.execute("SELECT status,error_code FROM actions WHERE id=?", (action_id,)).fetchone() == (4, registered_error("device_binding_unavailable")["action_error_id"])
         result_event, = owned.connection.execute("SELECT result_event_id FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.responsibility_key=?", (f"stop/{action_id}",)).fetchone()
@@ -322,8 +348,11 @@ async def test_unknown_stop_save_preserves_original_result_time_and_duration(tmp
         world.mono[0] = 99_000_000_000
         world.devices["cam-1"]["recording"] = {"max_stop_attempts": 1,
             "stop_timeout_s": Decimal("0.01"), "stop_retry_interval_s": Decimal("0")}
-        runtime = await world.factory(world.database)
+        saves_before_reopen = len(saves)
+        assert saves_before_reopen > 0
+        runtime = await reopen_fault_database(world, capture_resources)
         await capture_handler(world.handler)(action_id, runtime)
+        assert len(saves) > saves_before_reopen and all(save == saves[0] for save in saves)
         assert owned.connection.execute("SELECT status FROM actions WHERE id=?", (action_id,)).fetchone() == (3 if duration_known else 4,)
         result_event, result_json = owned.connection.execute("SELECT a.result_event_id,a.result_json FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.responsibility_key=?", (f"stop/{action_id}",)).fetchone()
         assert json.loads(result_json) == result_document(world.stopper.actual[0])
@@ -469,8 +498,11 @@ async def test_unknown_output_finalization_keeps_original_page_and_failed_goal(t
         world.wall[0] = 1_750_009_000_000_000
         world.devices["cam-1"]["result_check"] = {"max_attempts": 1,
             "call_timeout_s": Decimal("0.01"), "retry_interval_s": Decimal("0")}
-        runtime = await world.factory(world.database)
+        saves_before_reopen = len(saves)
+        assert saves_before_reopen > 0
+        runtime = await reopen_fault_database(world, capture_resources)
         await capture_handler(world.handler)(action_id, runtime)
+        assert len(saves) > saves_before_reopen and all(save == saves[0] for save in saves)
         status, details = owned.connection.execute("SELECT status,error_details_json FROM actions WHERE id=?", (action_id,)).fetchone()
         assert status == 4 and json.loads(details)["reason"] == "duration_unknown"
         finalized, occupancy, basis = owned.connection.execute(
