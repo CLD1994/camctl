@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from camctl.acceptance.service import CommandMode
-from camctl.bootstrap.capture_assembly import session_capture_assembly
+from camctl.bootstrap.capture_assembly import execution_wait_config, session_capture_assembly
 from camctl.bootstrap.config import ConfigDefaults, load_config
 from camctl.bootstrap.flows import cancel_flow, capture_flow
 from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
@@ -41,6 +41,7 @@ from camctl.devices.ports import DeviceCallResult, DriverDeclaration
 from camctl.devices.read_session import ReadSession, SourceFile
 from camctl.host_files.media import ProbeRequest, RepairRequest
 from camctl.host_files.tasks import FileTaskExecutor
+from camctl.operations.attempts import OperationKind
 from camctl.session.supervision import Supervisor
 from camctl.persistence.initialization import InitOutcome, initialize_state
 
@@ -241,14 +242,15 @@ def _registry(driver, *, read_supported: bool = True) -> DriverRegistry:
     ))
 
 
-def _factory(cfg, registry, results, tools_dir: Path, clock, *, osv=False, executor=None):
+def _factory(cfg, registry, results, tools_dir: Path, clock, *, osv=False, executor=None, wall_us=None):
     return session_capture_assembly(
         devices=cfg.devices,
         drivers=registry,
         results=results,
         staging=Path(cfg.paths.staging),
-        wait_config=lambda params: None,
+        wait_config=execution_wait_config,
         monotonic_ns=lambda: clock["ns"],
+        wall_us=wall_us,
         file_executor=executor,
         probe_request=ProbeRequest(
             ffprobe=_tool(tools_dir, "ffprobe", _OSV_PROBE_BODY if osv else _PROBE_BODY)),
@@ -461,15 +463,80 @@ class TestMissingDriverDefinition:
 class TestRetryIntervalInjection:
     """设备级重试间隔随装配进入运行时预算与媒体链。"""
 
-    @staticmethod
-    def _open(cfg):
-        from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+    async def _saved_attempt_intervals(self, tmp_path, monkeypatch, cfg):
+        """以真实START/STOP/RESULTS/READ尝试核对本次配置的实际采用值。"""
+        from contextlib import closing
+        from datetime import datetime, timezone
+        import sqlite3
+        from types import SimpleNamespace
+        from camctl.bootstrap import lifecycle
+        from camctl.contracts.json_values import parse_exact_json
+        from camctl.contracts.enums import decode_member
 
-        return open_existing(
-            Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
+        assert initialize_state(cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
+        wall = [int(time.time() * 1_000_000)]
+        instant = datetime.fromtimestamp(wall[0] // 1_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        await _submit_plan(tmp_path, cfg, _ShortRecordCatalog(), _record_plan("1", instant))
+        tools = tmp_path / "interval-tools"
+        tools.mkdir()
+        driver = _SessionDriver(_CONTENT)
+        clock = {"ns": time.monotonic_ns()}
+        executor = FileTaskExecutor(Supervisor())
+        results = ResultsDouble({1: (_entry("interval-source", size=len(_CONTENT)),)})
+        actual_session = lifecycle.run_session
+
+        async def session(context, source):
+            context.clock = SimpleNamespace(utc_micros=lambda: wall[0])
+            return await actual_session(context, source)
+
+        deps = task = None
+        try:
+            with monkeypatch.context() as patch:
+                patch.setattr(lifecycle, "run_session", session)
+                deps = build_runtime(CommandMode.RUN, cfg, catalog=_ShortRecordCatalog())
+                task = _run_session(deps, cfg, _factory(cfg, _registry(driver), results,
+                    tools, clock, executor=executor, wall_us=lambda: wall[0]))
+                db = Path(cfg.paths.state_db)
+                await _await_query(db, "SELECT started_at IS NOT NULL FROM device_activities WHERE id=1",
+                    (1,), task=task)
+                await _cancel(task)
+                close_runtime(deps)
+                # 新会话没有旧单调钟锚点；可信UTC超过目标与显式修复余量。
+                wall[0] += 4_000_000
+                deps = build_runtime(CommandMode.RUN, cfg, catalog=_ShortRecordCatalog())
+                task = _run_session(deps, cfg, _factory(cfg, _registry(driver), results,
+                    tools, clock, executor=executor, wall_us=lambda: wall[0]))
+                await _await_query(db, "SELECT status FROM actions WHERE id=1", (3,), task=task)
+                with closing(sqlite3.connect(db)) as connection:
+                    attempts = connection.execute("SELECT r.kind,t.retry_interval_s_json FROM operation_attempts t"
+                        " JOIN operation_runs r ON r.id=t.run_id ORDER BY t.id").fetchall()
+                return {OperationKind[decode_member("operation_runs.kind", kind).name]: parse_exact_json(interval)
+                    for kind, interval in attempts}
+        finally:
+            original = sys.exception()
+            errors = []
+            try:
+                if task is not None:
+                    await _cancel(task)
+            except BaseException as error:
+                errors.append(error)
+            try:
+                settled = await executor.drain_required()
+                errors.extend(failure.exception or RuntimeError(failure.error) for failure in settled.failed)
+            except BaseException as error:
+                errors.append(error)
+            try:
+                if deps is not None:
+                    close_runtime(deps)
+            except BaseException as error:
+                errors.append(error)
+            if errors:
+                if original is not None:
+                    errors.insert(0, original)
+                raise BaseExceptionGroup("媒体间隔测试及实际资源收场失败", errors)
 
     async def test_device_intervals_reach_runtime_configs(
-            self, tmp_path: Path) -> None:
+            self, tmp_path: Path, monkeypatch) -> None:
         home = tmp_path / "intervals"
         home.mkdir()
         cfg = load_config(
@@ -486,6 +553,7 @@ class TestRetryIntervalInjection:
                         "kind": "camera",
                         "driver": "camctl-adb",
                         "recording": {
+                            "repair_margin_s": "2",
                             "start_retry_interval_s": "4",
                             "stop_retry_interval_s": "0.5",
                         },
@@ -496,50 +564,15 @@ class TestRetryIntervalInjection:
             },
             ConfigDefaults(),
         )
-        assert initialize_state(
-            cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
-        factory = session_capture_assembly(
-            devices=cfg.devices,
-            drivers=_registry(_SessionDriver(_CONTENT)),
-            results=ResultsDouble({}),
-            staging=Path(cfg.paths.staging),
-            wait_config=lambda params: None,
-            monotonic_ns=time.monotonic_ns,
-        )
-        owned = self._open(cfg)
-        try:
-            runtime = factory(owned, "cam-1")
-            assert runtime is not None
-            assert runtime.stop_config.retry_interval_s == Decimal("0.5")
-            assert runtime.check_config.retry_interval_s == Decimal("2")
-            assert runtime.media is not None
-            assert runtime.media.retry_interval_s == Decimal("1")
-        finally:
-            owned.connection.close()
+        intervals = await self._saved_attempt_intervals(tmp_path, monkeypatch, cfg)
+        assert intervals == {OperationKind.START: Decimal("4"), OperationKind.STOP: Decimal("0.5"),
+            OperationKind.READ_FILE: Decimal("1"), OperationKind.CHECK_CAPTURE_RESULTS: Decimal("2")}
 
     async def test_spec_defaults_apply_without_device_overrides(
-            self, tmp_path: Path) -> None:
+            self, tmp_path: Path, monkeypatch) -> None:
         home = tmp_path / "defaults"
         home.mkdir()
         cfg = _config(home)
-        assert initialize_state(
-            cfg, Path(cfg.paths.state_db)).outcome is InitOutcome.CREATED
-        factory = session_capture_assembly(
-            devices=cfg.devices,
-            drivers=_registry(_SessionDriver(_CONTENT)),
-            results=ResultsDouble({}),
-            staging=Path(cfg.paths.staging),
-            wait_config=lambda params: None,
-            monotonic_ns=time.monotonic_ns,
-        )
-        owned = self._open(cfg)
-        try:
-            runtime = factory(owned, "cam-1")
-            assert runtime is not None
-            # 未覆盖时采用规格默认：停止与核实间隔 3 秒。
-            assert runtime.stop_config.retry_interval_s == Decimal("3")
-            assert runtime.check_config.retry_interval_s == Decimal("3")
-            assert runtime.media is not None
-            assert runtime.media.retry_interval_s == Decimal("3")
-        finally:
-            owned.connection.close()
+        intervals = await self._saved_attempt_intervals(tmp_path, monkeypatch, cfg)
+        assert intervals == {OperationKind.START: Decimal("3"), OperationKind.STOP: Decimal("3"),
+            OperationKind.READ_FILE: Decimal("3"), OperationKind.CHECK_CAPTURE_RESULTS: Decimal("3")}
