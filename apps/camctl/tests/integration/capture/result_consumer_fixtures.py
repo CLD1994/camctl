@@ -38,6 +38,7 @@ from ..bootstrap.test_recording_stop import _RecordCatalog
 from ..bootstrap.test_timelapse_finish import _TimelapseCatalog
 from .test_capture_contract import _NOW, _runtime
 from ..support.capture import capture_database, restart_capture_database
+from support.repository_ports import repository_port
 
 register_acceptance_guards()
 register_cancellation_guards()
@@ -135,7 +136,8 @@ class _PreparationBoundary(CaptureRepository):
         self.saved = False
 
     def _after(self, boundary, receipt):
-        if self.boundary == boundary and receipt.kind is DbOutcomeKind.COMPLETED:
+        if (self.boundary == boundary and receipt.kind is DbOutcomeKind.COMPLETED
+                and receipt.handoff_error is None):
             self.saved = True
             self.boundary = None
             return replace(receipt, handoff_error=_SavedPreparation(boundary))
@@ -155,17 +157,30 @@ class _PreparationBoundary(CaptureRepository):
 
 
 async def _prepare_through_handler(runtime, action_id, handler, boundary):
+    if boundary is None:
+        await capture_handler(handler)(action_id, runtime)
+        return
+    methods = {
+        "start": "finish_start_result", "stop": "finish_capture_stop",
+        "conclude": "conclude_activity", "release": "release_occupancy",
+    }
+    method = methods[boundary]
     repository = _PreparationBoundary(boundary)
-    runtime.capture = repository
-    try:
+
+    def matches(name, args, kwargs):
+        request = args[0]
+        if name in ("finish_start_result", "finish_capture_stop"):
+            operation = "start" if name == "finish_start_result" else "stop"
+            return request.ticket.responsibility_key == f"{operation}/{action_id}"
+        return request.action_id == action_id
+
+    with repository_port(CaptureRepository, repository, (method,), matches=matches):
         try:
             await capture_handler(handler)(action_id, runtime)
         except _SavedPreparation:
             assert repository.saved
         else:
-            assert boundary is None, "处理器必须实际保存指定准备事实"
-    finally:
-        runtime.capture = CaptureRepository()
+            assert False, "处理器必须实际保存指定准备事实"
 
 
 async def consumer_world(
@@ -241,6 +256,11 @@ async def consumer_world(
             "check_config": AttemptConfig(3, Decimal("1.25"), Decimal("2")),
             "directory": Directory([lambda request: DirectoryRead(None, None, Page((), None))])}
         options.update({} if runtime_options is None else runtime_options)
+        if start and consumer in ("record", "winddown", "cancel") and runtime_factory is None:
+            stop = create_autospec(StopDriver, instance=True)
+            stop.stop.return_value = DeviceCallResult.from_outcome(
+                returned("stop", "stop_confirmed", activity_id))
+            options.setdefault("stopper", stop)
         runtime = (await _runtime(owned, driver=control, **options)
             if runtime_factory is None else await runtime_factory(owned, driver=control))
         if not start:
@@ -252,9 +272,6 @@ async def consumer_world(
         if consumer in ("record", "winddown"):
             clock.wall = _NOW + 60_000_000
             clock.monotonic = 5_000_000_000 + (60_000_000_000 if record_control_elapsed_ns is None else record_control_elapsed_ns)
-            stop = create_autospec(StopDriver, instance=True)
-            stop.stop.return_value = DeviceCallResult.from_outcome(returned("stop", "stop_confirmed", activity_id))
-            runtime.stopper = stop
             await _prepare_through_handler(runtime, action_id, handler, "conclude")
         if handler == "camera_record":
             processing_id, = owned.connection.execute(
@@ -277,9 +294,6 @@ async def consumer_world(
             assert applied.kind is DbOutcomeKind.COMPLETED, applied.error
             clock.wall = _NOW + 60_000_000
             clock.monotonic = 65_000_000_000
-            stop = create_autospec(StopDriver, instance=True)
-            stop.stop.return_value = DeviceCallResult.from_outcome(returned("stop", "stop_confirmed", activity_id))
-            runtime.stopper = stop
             await _prepare_through_handler(runtime, action_id, handler, "stop")
         if consumer == "timelapse":
             # 前次 START 会话的文件责任和 worker 实际结束；新工厂只消费

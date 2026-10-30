@@ -541,13 +541,21 @@ async def _large_fixture(tmp_path,count):
     from ..support.capture import capture_test_session
     from ..support.result_cases import CaseClock
     from ..capture.test_capture_contract import _NOW, _PAGE_EVIDENCE, ResultsDouble
+    from ..capture.result_consumer_fixtures import returned
+    from camctl.devices.ports import DeviceCallResult, StopDriver
+    from unittest.mock import create_autospec
 
     clock = CaseClock(_NOW, 5_000_000_000)
     async with capture_test_session() as session:
         async def runtime_factory(owned, *, driver):
+            activity_id, = owned.connection.execute(
+                "SELECT id FROM device_activities").fetchone()
+            stop = create_autospec(StopDriver, instance=True)
+            stop.stop.return_value = DeviceCallResult.from_outcome(
+                returned("stop", "stop_confirmed", activity_id))
             return await session.runtime(
                 owned, driver=driver, evidence=_PAGE_EVIDENCE, results=ResultsDouble({}),
-                wall_us=clock.wall_us, monotonic_ns=clock.monotonic_ns)
+                stopper=stop, wall_us=clock.wall_us, monotonic_ns=clock.monotonic_ns)
         return await _prepare_large_fixture(tmp_path, count, runtime_factory, clock)
 
 
