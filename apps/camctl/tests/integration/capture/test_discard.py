@@ -16,6 +16,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 
 from camctl.capture.media import (
     DiscardContext,
@@ -53,6 +54,7 @@ from camctl.persistence.repositories.outputs import (
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..persistence.test_runtime import _create_valid_database
+from ..support.database import business_database
 
 register_capture_guards()
 register_operation_guards()
@@ -64,8 +66,8 @@ _NOW = 1_750_000_000_000_000
 class _Saves:
     """把真实仓储适配成取消收场保存端口。"""
 
-    def __init__(self, owned) -> None:
-        self.owned = owned
+    def __init__(self, database) -> None:
+        self.database = database
         self.repository = CaptureRepository()
 
     def _commit(self, outcome) -> SaveReceipt:
@@ -75,16 +77,19 @@ class _Saves:
             return SaveReceipt(SaveDisposition.REJECTED, error=outcome.error)
         return SaveReceipt(SaveDisposition.UNKNOWN, error=outcome.error)
 
-    def save_discard_progress(self, command):
-        return self._commit(self.repository.save_discard_progress(
-            command, new_operation_key(), self.owned))
+    async def save_discard_progress(self, command):
+        key = new_operation_key()
+        outcome = await self.database.write(
+            lambda owned: self.repository.save_discard_progress(command, key, owned), key=key)
+        return self._commit(outcome)
 
 
 class _Cleaning:
     """把 X11 定向清理适配成编排端口。"""
 
-    def __init__(self, owned, roots: BoundDirectories) -> None:
+    def __init__(self, owned, database, roots: BoundDirectories) -> None:
         self.owned = owned
+        self.database = database
         self.roots = roots
 
     def action_work_files(self, action_id: int) -> tuple[int, ...]:
@@ -97,7 +102,7 @@ class _Cleaning:
 
     async def clean(self, file_id: int):
         return await clean_one_work_file(file_id, WorkFileContext(
-            repository=OutputsRepository(), owned=self.owned,
+            repository=OutputsRepository(), database=self.database,
             staging=self.roots.staging, occurred_at=_NOW + 30,
             limits=WorkFileLimits(batch_size=32, limit_per_run=128)))
 
@@ -138,6 +143,18 @@ def environment(tmp_path: Path):
     (staging / "derived" / "702.mp4").write_bytes(b"y" * 64)
     roots = BoundDirectories(staging=staging)
     return owned, roots
+
+
+@pytest_asyncio.fixture
+async def discard_environment(environment):
+    owned, roots = environment
+    with closing(owned.connection.execute("PRAGMA database_list")) as cursor:
+        path = Path(next(row[2] for row in cursor if row[1] == "main"))
+    try:
+        async with business_database(path) as database:
+            yield owned, roots, database
+    finally:
+        owned.connection.close()
 
 
 def _seed_plan(connection, plan_id: int) -> None:
@@ -215,10 +232,10 @@ def _cancel_action(owned) -> None:
     owned.connection.commit()
 
 
-def _discard_context(owned, roots, *, discard_state: int = 2) -> DiscardContext:
+def _discard_context(owned, roots, database, *, discard_state: int = 2) -> DiscardContext:
     return DiscardContext(
         processing_id=1, action_id=1, discard_state=discard_state,
-        saves=_Saves(owned), cleaning=_Cleaning(owned, roots),
+        saves=_Saves(database), cleaning=_Cleaning(owned, database, roots),
         occurred_at=_NOW + 30)
 
 
@@ -226,10 +243,10 @@ def _discard_context(owned, roots, *, discard_state: int = 2) -> DiscardContext:
 
 
 @pytest.mark.asyncio
-async def test_discard_releases_and_deletes_action_files(environment) -> None:
-    owned, roots = environment
+async def test_discard_releases_and_deletes_action_files(discard_environment) -> None:
+    owned, roots, database = discard_environment
     _cancel_action(owned)
-    step = await execute_discard(_discard_context(owned, roots))
+    step = await execute_discard(_discard_context(owned, roots, database))
     assert step.phase is DiscardExecutionPhase.CLEANED, step.error
     assert (step.cleaned, step.failed) == (2, 0)
     assert not (roots.staging / "recording-inputs" / "701.mp4").exists()
@@ -246,9 +263,9 @@ async def test_discard_releases_and_deletes_action_files(environment) -> None:
 
 @pytest.mark.asyncio
 async def test_discard_delete_failure_saves_registered_error(
-        environment) -> None:
+        discard_environment) -> None:
     """删除失败：文件保存登记错误详情，收场保存失败终态。"""
-    owned, roots = environment
+    owned, roots, database = discard_environment
     _cancel_action(owned)
     # 以操作系统拒绝删除的机制注入明确失败：Windows 打开句柄即拒绝
     # 删除，POSIX 句柄不阻止 unlink，改为收回目录写权限。
@@ -257,13 +274,14 @@ async def test_discard_delete_failure_saves_registered_error(
         directory_mode = inputs_dir.stat().st_mode
         inputs_dir.chmod(0o500)
         try:
-            step = await execute_discard(_discard_context(owned, roots))
+            assert not os.access(inputs_dir, os.W_OK), "目录写权限未被实际撤销"
+            step = await execute_discard(_discard_context(owned, roots, database))
         finally:
             inputs_dir.chmod(stat.S_IMODE(directory_mode))
     else:
         handle = open(roots.staging / "recording-inputs" / "701.mp4", "rb")
         try:
-            step = await execute_discard(_discard_context(owned, roots))
+            step = await execute_discard(_discard_context(owned, roots, database))
         finally:
             handle.close()
     assert step.phase is DiscardExecutionPhase.CLEANUP_FAILED
@@ -288,9 +306,9 @@ async def test_discard_delete_failure_saves_registered_error(
 
 
 @pytest.mark.asyncio
-async def test_discard_resumes_and_finishes(environment) -> None:
+async def test_discard_resumes_and_finishes(discard_environment) -> None:
     """执行中恢复入口：沿用既有进度重新核实并完成。"""
-    owned, roots = environment
+    owned, roots, database = discard_environment
     _cancel_action(owned)
     repository = CaptureRepository()
     started = repository.save_discard_progress(
@@ -298,7 +316,7 @@ async def test_discard_resumes_and_finishes(environment) -> None:
         new_operation_key(), owned)
     assert started.kind is DbOutcomeKind.COMPLETED, started.error
     step = await execute_discard(
-        _discard_context(owned, roots, discard_state=3))
+        _discard_context(owned, roots, database, discard_state=3))
     assert step.phase is DiscardExecutionPhase.CLEANED, step.error
     assert _row(
         owned, "SELECT discard_state FROM recording_processing"

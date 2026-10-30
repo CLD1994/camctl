@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import sqlite3
 import subprocess
 import sys
@@ -672,10 +673,13 @@ async def main():
 
 asyncio.run(main())
 """
+    root = Path(__file__).resolve().parents[5]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join((str(root / "apps/camctl/src"),
+                                       str(root / "apps/camctl/tests")))
     result = subprocess.run(
         [sys.executable, "-O", "-c", script, receipt_kind.value],
-        cwd=Path(__file__).resolve().parents[5],
-        capture_output=True, text=True, timeout=30)
+        cwd=root, env=env, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert result.stdout.strip() == "noncompleted receipt rejected"
 
