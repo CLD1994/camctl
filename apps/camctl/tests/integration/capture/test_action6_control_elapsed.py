@@ -33,12 +33,16 @@ async def test_action6_recording_handler_persists_current_session_elapsed_and_in
     clock = {"wall_us": _NOW, "monotonic_ns": 5_000_000_000}
     catalog = Action6RecordCatalog()
     catalog.duration_s = Decimal("60")
+    stopper = create_autospec(StopDriver, instance=True)
+    stopper.stop.side_effect = lambda request: DeviceCallResult.from_outcome(
+        returned("stop", "stop_confirmed", request.ticket.target_id))
     owned, runtime, action_id, handler = await consumer_world(
         tmp_path, "record", catalog=catalog, start=False,
         runtime_options={"wall_us": lambda: clock["wall_us"],
-            "monotonic_ns": lambda: clock["monotonic_ns"]},
+            "monotonic_ns": lambda: clock["monotonic_ns"], "stopper": stopper,
+            "devices": {"cam-1": {"driver": "camctl-adb",
+                "recording": {"repair_margin_s": Decimal("2")}}}},
     )
-    runtime.repair_margin_s = Decimal("2")
 
     (activity_id,) = owned.connection.execute(
         "SELECT id FROM device_activities WHERE action_id=?", (action_id,)
@@ -63,11 +67,6 @@ async def test_action6_recording_handler_persists_current_session_elapsed_and_in
         tmp_path,
         (Decimal("18"), Decimal("27"), Decimal("22"), Decimal("40")),
     ))
-    stopper = create_autospec(StopDriver, instance=True)
-    stopper.stop.return_value = DeviceCallResult.from_outcome(
-        returned("stop", "stop_confirmed", activity_id)
-    )
-    runtime.stopper = stopper
 
     try:
         await capture_handler(handler)(action_id, runtime)

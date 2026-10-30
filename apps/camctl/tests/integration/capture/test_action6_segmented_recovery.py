@@ -128,8 +128,14 @@ async def _overrun_recording(
 ):
     catalog = Action6RecordCatalog() if catalog is None else catalog
     catalog.duration_s = Decimal("60")
+    wall, mono = [_NOW], [5_000_000_000]
+    stopper = create_autospec(StopDriver, instance=True)
+    stopper.stop.side_effect = lambda request: DeviceCallResult.from_outcome(
+        returned("stop", "stop_confirmed", request.ticket.target_id))
     owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, "record", catalog=catalog, start=False
+        tmp_path, "record", catalog=catalog, start=False,
+        runtime_options={"wall_us": lambda: wall[0], "monotonic_ns": lambda: mono[0],
+            "stopper": stopper},
     )
     (activity_id,) = owned.connection.execute(
         "SELECT id FROM device_activities WHERE action_id=?", (action_id,)
@@ -141,20 +147,14 @@ async def _overrun_recording(
         assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
     await capture_handler(handler)(action_id, runtime)
 
-    runtime.wall_us = lambda: _NOW + 75_000_000
-    runtime.monotonic_ns = lambda: 80_000_000_000
-    stopper = create_autospec(StopDriver, instance=True)
-    stopper.stop.return_value = DeviceCallResult.from_outcome(
-        returned("stop", "stop_confirmed", activity_id)
-    )
-    runtime.stopper = stopper
+    wall[0], mono[0] = _NOW + 75_000_000, 80_000_000_000
     await _prepare_through_handler(runtime, action_id, handler, "conclude")
     assert owned.connection.execute(
         "SELECT control_elapsed_ns FROM device_activities WHERE action_id=?", (action_id,)
     ).fetchone() == (75_000_000_000,)
-    runtime.wall_us = lambda: _NOW + 80_000_000
-    runtime.monotonic_ns = lambda: 85_000_000_000
-    tools = (await _attach_media(runtime, owned, tmp_path, values))
+    wall[0], mono[0] = _NOW + 80_000_000, 85_000_000_000
+    tools = (await _attach_media(runtime, owned, tmp_path, values,
+                                 occurred_at=lambda: _NOW + 80_000_000))
     return owned, runtime, action_id, handler, tools
 
 
@@ -456,14 +456,17 @@ async def test_action6_native_recovery_reports_actual_frame_coverage(
     expected_checked_count,
     action_status,
 ):
+    from camctl.capture.timelapse import CaptureWaitConfig
+
+    wall, mono = [_NOW], [5_000_000_000]
     owned, runtime, action_id, handler = await consumer_world(
         tmp_path,
         "timelapse",
         catalog=_Action6Native151Catalog(0),
         start=False,
+        runtime_options={"wall_us": lambda: wall[0], "monotonic_ns": lambda: mono[0],
+            "wait_config": lambda action: CaptureWaitConfig(300_000, 200, 0, 0)},
     )
-    from camctl.capture.timelapse import CaptureWaitConfig
-
     try:
         (activity_id,) = owned.connection.execute(
             "SELECT id FROM device_activities WHERE action_id=?", (action_id,)
@@ -474,11 +477,7 @@ async def test_action6_native_recovery_reports_actual_frame_coverage(
         assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
 
         await capture_handler(handler)(action_id, runtime)
-        tools = (await _attach_media(runtime, owned, tmp_path, values))
-        wall, mono = [_NOW], [5_000_000_000]
-        runtime.wall_us = lambda: wall[0]
-        runtime.monotonic_ns = lambda: mono[0]
-        runtime.wait_config = lambda action: CaptureWaitConfig(300_000, 200, 0, 0)
+        tools = (await _attach_media(runtime, owned, tmp_path, values, occurred_at=lambda: _NOW))
         await capture_handler(handler)(action_id, runtime)
 
         async def read(request, batch):
@@ -553,11 +552,17 @@ async def test_action6_native_recovery_reports_actual_frame_coverage(
 async def _native_action6_recovery_with_unknown_video_scope(
     tmp_path, monkeypatch, *, start_unknown: bool, probe_values
 ):
+    from camctl.capture.timelapse import CaptureWaitConfig
+
+    wall, mono = [_NOW], [5_000_000_000]
     owned, runtime, action_id, handler = await consumer_world(
         tmp_path,
         "timelapse",
         catalog=_Action6Native151Catalog(0),
         start=False,
+        runtime_options={"wall_us": lambda: wall[0], "monotonic_ns": lambda: mono[0],
+            "wait_config": lambda action: CaptureWaitConfig(300_000, 200, 0, 0),
+            "check_config": AttemptConfig(1, Decimal("1"), Decimal(0))},
     )
     (activity_id,) = owned.connection.execute(
         "SELECT id FROM device_activities WHERE action_id=?", (action_id,)
@@ -568,12 +573,7 @@ async def _native_action6_recovery_with_unknown_video_scope(
     assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
 
     await capture_handler(handler)(action_id, runtime)
-    tools = (await _attach_media(runtime, owned, tmp_path, probe_values))
-    wall, mono = [_NOW], [5_000_000_000]
-    runtime.wall_us = lambda: wall[0]
-    runtime.monotonic_ns = lambda: mono[0]
-    runtime.wait_config = lambda action: CaptureWaitConfig(300_000, 200, 0, 0)
-    runtime.check_config = AttemptConfig(1, Decimal("1"), Decimal(0))
+    tools = (await _attach_media(runtime, owned, tmp_path, probe_values, occurred_at=lambda: _NOW))
     await capture_handler(handler)(action_id, runtime)
 
     async def read(request, batch):

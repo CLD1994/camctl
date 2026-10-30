@@ -152,8 +152,8 @@ async def test_action6_partial_result_exhaustion_finishes_without_another_device
     from camctl.devices.bindings import DeviceBinding
     from camctl.devices.directory import DirectoryCursor
 
-    owned, runtime, action_id, handler, stopper = await _stopped_action6_record(tmp_path)
-    runtime.check_config = AttemptConfig(3, Decimal("1"), Decimal(0))
+    owned, runtime, action_id, handler, stopper = await _stopped_action6_record(
+        tmp_path, runtime_options={"check_config": AttemptConfig(3, Decimal("1"), Decimal(0))})
     try:
         context = _stop_context(owned, action_id)
         entry = _entry("DJI_001/DJI_20261022100000_0007_D.MP4")
@@ -255,14 +255,13 @@ async def test_action6_ordinary_normal_publishes_all_mp4_lrf_and_photo_without_m
 async def test_action6_native_normal_publishes_all_video_and_required_photo_separately(
     tmp_path,
 ):
-    owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, "timelapse", catalog=Action6NativeCatalog(0), start=False
-    )
     wall, mono = [_NOW], [5_000_000_000]
-    runtime.wall_us = lambda: wall[0]
-    runtime.monotonic_ns = lambda: mono[0]
-    runtime.wait_config = lambda action: CaptureWaitConfig(1000, 200, 0, 0)
-    runtime.check_config = AttemptConfig(1, Decimal("1"), Decimal(0))
+    owned, runtime, action_id, handler = await consumer_world(
+        tmp_path, "timelapse", catalog=Action6NativeCatalog(0), start=False,
+        runtime_options={"wall_us": lambda: wall[0], "monotonic_ns": lambda: mono[0],
+            "wait_config": lambda action: CaptureWaitConfig(1000, 200, 0, 0),
+            "check_config": AttemptConfig(1, Decimal("1"), Decimal(0))},
+    )
     try:
         await capture_handler(handler)(action_id, runtime)
         entries = [
