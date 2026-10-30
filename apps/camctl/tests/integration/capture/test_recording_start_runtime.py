@@ -24,6 +24,8 @@ from camctl.persistence.repositories.scheduling import SchedulingRepository
 
 from .test_capture_contract import _NOW, _RECORD, _environment, _runtime
 
+from .recording_start_fixtures import start_case
+
 pytestmark = pytest.mark.asyncio
 _ANCHOR = 7_000_000_000
 
@@ -51,8 +53,8 @@ def _world(tmp_path):
     return owned
 
 
-def _result(*, confirmed=False, no_effect=False, assumed=False, error=None):
-    observations = (DeviceObservation("start_confirmed", 1, {"activity_id": "12"}),) \
+def _result(*, confirmed=False, no_effect=False, assumed=False, error=None, activity_id="12"):
+    observations = (DeviceObservation("start_confirmed", 1, {"activity_id": activity_id}),) \
         if confirmed else ()
     return CallOutcome(
         status=AttemptStatus.FAILED if error is not None else AttemptStatus.SUCCEEDED,
@@ -82,8 +84,9 @@ class StartDriver:
 
 
 class StateQuery:
-    def __init__(self, *, active=False):
+    def __init__(self, *, active=False, activity_id="12"):
         self.active = active
+        self.activity_id = activity_id
         self.calls = []
 
     async def query_state(self, request):
@@ -94,7 +97,7 @@ class StateQuery:
             effect=EffectState.CONFIRMED if self.active else EffectState.UNKNOWN,
             settlement=Settlement(SettlementBasis.OBSERVED,
                                   EvidenceValue("query_returned", 1, {})),
-            observations=(DeviceObservation("activity_status", 1, {"activity_id": "12"}),)
+            observations=(DeviceObservation("activity_status", 1, {"activity_id": self.activity_id}),)
                          if self.active else (),
         ))
 
@@ -112,23 +115,23 @@ async def _configured(owned, driver, *, wall=None, mono=None, maximum=3,
     return runtime
 
 
-def _start(owned):
+def _start(owned, action_id=12):
     return owned.connection.execute(
         "SELECT id, status, attempts_used, retry_wait_required FROM operation_runs"
-        " WHERE responsibility_key = 'start/12'").fetchone()
+        " WHERE responsibility_key = ?", (f"start/{action_id}",)).fetchone()
 
 
-async def test_confirmed_with_error_keeps_start_success_and_actual_confirmation(tmp_path):
-    owned = _world(tmp_path)
+async def test_confirmed_with_error_keeps_start_success_and_actual_confirmation(tmp_path, start_case):
+    owned = await start_case.world(tmp_path)
     try:
-        outcome = _result(confirmed=True, error=ErrorValue(
+        outcome = _result(activity_id="1", confirmed=True, error=ErrorValue(
             "transport_timeout", "transport", {"response_received": True}))
         driver = StartDriver(outcome)
-        runtime = (await _configured(owned, driver))
-        await capture_handler("camera_record")(12, runtime)
-        assert _start(owned)[1:] == (3, 1, 0)
+        runtime = (await start_case.runtime(owned, driver))
+        await capture_handler("camera_record")(1, runtime)
+        assert _start(owned, start_case.aid)[1:] == (3, 1, 0)
         assert owned.connection.execute(
-            "SELECT activity_state, started_at FROM device_activities WHERE action_id = 12"
+            "SELECT activity_state, started_at FROM device_activities WHERE action_id = 1"
         ).fetchone() == (2, _NOW)
         attempt = owned.connection.execute(
             "SELECT status, effect_state, error_json FROM operation_attempts"
@@ -137,61 +140,61 @@ async def test_confirmed_with_error_keeps_start_success_and_actual_confirmation(
         assert json.loads(attempt[2]) == {
             "code": "transport_timeout", "stage": "transport",
             "details": {"response_received": True}}
-        state = runtime.recording_state.recording_state(12)
-        assert state.started_confirmed and state.stop_target_ns == _ANCHOR + 60_000_000_000
-        await capture_handler("camera_record")(12, runtime)
+        await start_case.assert_stop_deadline(runtime, _ANCHOR + 60_000_000_000)
+        await capture_handler("camera_record")(1, runtime)
         assert len(driver.calls) == 1
     finally:
         owned.connection.close()
 
 
-async def test_reliable_permanent_start_rejection_finishes_without_using_remaining_attempts(tmp_path):
-    owned = _world(tmp_path)
+async def test_reliable_permanent_start_rejection_finishes_without_using_remaining_attempts(tmp_path, start_case):
+    owned = await start_case.world(tmp_path)
     try:
-        driver = StartDriver(_result(no_effect=True, error=ErrorValue(
+        driver = StartDriver(_result(activity_id="1", no_effect=True, error=ErrorValue(
             "device_start_failed", "execution", {"operation_run_id": "1"})))
-        runtime = (await _configured(owned, driver))
-        await capture_handler("camera_record")(12, runtime)
-        assert _start(owned)[1:] == (4, 1, 0)
+        runtime = (await start_case.runtime(owned, driver))
+        await capture_handler("camera_record")(1, runtime)
+        assert _start(owned, start_case.aid)[1:] == (4, 1, 0)
         assert owned.connection.execute(
-            "SELECT status, error_code FROM actions WHERE id = 12").fetchone() == (4, 11)
+            "SELECT status, error_code FROM actions WHERE id = 1").fetchone() == (4, 11)
         assert owned.connection.execute(
             "SELECT status, effect_state FROM operation_attempts").fetchone() == (3, 2)
-        await capture_handler("camera_record")(12, runtime)
+        await capture_handler("camera_record")(1, runtime)
         assert len(driver.calls) == 1
     finally:
         owned.connection.close()
 
 
-async def test_confirmation_anchor_precedes_database_commit_delay(tmp_path):
-    owned = _world(tmp_path)
+async def test_confirmation_anchor_precedes_database_commit_delay(tmp_path, start_case):
+    owned = await start_case.world(tmp_path)
     try:
         wall, mono, returned = [_NOW], [_ANCHOR], [False]
-        driver = StartDriver(_result(confirmed=True), returned=lambda: returned.__setitem__(0, True))
-        runtime = (await _configured(owned, driver, wall=wall, mono=mono))
+        driver = StartDriver(_result(activity_id="1", confirmed=True), returned=lambda: returned.__setitem__(0, True))
+        runtime = (await start_case.runtime(owned, driver, wall=wall, mono=mono))
 
         def delay_commits(statement):
             if returned[0] and statement == "COMMIT":
+                returned[0] = False
                 wall[0] += 5_000_000
                 mono[0] += 5_000_000_000
 
-        owned.connection.set_trace_callback(delay_commits)
-        await capture_handler("camera_record")(12, runtime)
+        await runtime.database.read(lambda current: current.connection.set_trace_callback(delay_commits))
+        await capture_handler("camera_record")(1, runtime)
         assert owned.connection.execute(
-            "SELECT started_at FROM device_activities WHERE action_id = 12"
+            "SELECT started_at FROM device_activities WHERE action_id = 1"
         ).fetchone() == (_NOW,)
-        assert runtime.recording_state.recording_state(12).stop_target_ns == \
-            _ANCHOR + 60_000_000_000
+        await runtime.database.read(lambda current: current.connection.set_trace_callback(None))
+        await start_case.assert_stop_deadline(runtime, _ANCHOR + 60_000_000_000)
     finally:
-        owned.connection.set_trace_callback(None)
+        await runtime.database.read(lambda current: current.connection.set_trace_callback(None))
         owned.connection.close()
 
 
-async def test_attempt_result_and_start_observation_share_complete_transaction(tmp_path):
-    owned = _world(tmp_path)
+async def test_attempt_result_and_start_observation_share_complete_transaction(tmp_path, start_case):
+    owned = await start_case.world(tmp_path)
     try:
-        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
-        await capture_handler("camera_record")(12, runtime)
+        runtime = (await start_case.runtime(owned, StartDriver(_result(activity_id="1", confirmed=True))))
+        await capture_handler("camera_record")(1, runtime)
         attempt_txn = owned.connection.execute(
             "SELECT e.transaction_id FROM operation_attempts a"
             " JOIN history_events e ON e.id = a.result_event_id").fetchone()[0]
@@ -206,44 +209,44 @@ async def test_attempt_result_and_start_observation_share_complete_transaction(t
         owned.connection.close()
 
 
-async def test_start_passes_original_ticket_and_current_timeout_to_driver(tmp_path):
-    owned = _world(tmp_path)
+async def test_start_passes_original_ticket_and_current_timeout_to_driver(tmp_path, start_case):
+    owned = await start_case.world(tmp_path)
     try:
-        driver = StartDriver(_result(confirmed=True))
-        await capture_handler("camera_record")(12, (await _configured(owned, driver)))
+        driver = StartDriver(_result(activity_id="1", confirmed=True))
+        await capture_handler("camera_record")(1, (await start_case.runtime(owned, driver)))
         request, = driver.calls
         assert request.ticket is not None
-        assert request.ticket.responsibility_key == "start/12"
+        assert request.ticket.responsibility_key == "start/1"
         assert request.timeout_s == Decimal("0.75")
     finally:
         owned.connection.close()
 
 
-async def test_two_runs_deliver_their_own_current_timeout_to_start_calls(tmp_path):
+async def test_two_runs_deliver_their_own_current_timeout_to_start_calls(tmp_path, start_case):
     """两次运行各自的精确超时值分别到达实际调用并保存本次依据。
 
     旧尝试的期限与结果不被改写；跨运行超时变化与跨运行限额变化
     同规则（见运行配置计划 RC3）。
     """
-    owned = _world(tmp_path)
+    owned = await start_case.world(tmp_path)
     try:
         wall, mono = [_NOW], [_ANCHOR]
-        driver = StartDriver(_result(no_effect=True, error=ErrorValue("device_rejected", "device")))
-        first = (await _configured(owned, driver, wall=wall, mono=mono))
+        driver = StartDriver(_result(activity_id="1", no_effect=True, error=ErrorValue("device_rejected", "device")))
+        first = (await start_case.runtime(owned, driver, wall=wall, mono=mono))
         handler = capture_handler("camera_record")
-        await handler(12, first)
+        await handler(1, first)
         assert [call.timeout_s for call in driver.calls] == [Decimal("0.75")]
         original = owned.connection.execute(
             "SELECT id, attempt_no, result_json, timeout_s_json FROM operation_attempts"
             " ORDER BY id").fetchall()
         assert Decimal(original[0][3]) == Decimal("0.75")
-        second = (await _configured(owned, driver, wall=wall, mono=mono, timeout=Decimal("2.5")))
+        second = (await start_case.reopen(owned, driver, wall=wall, mono=mono, timeout=Decimal("2.5")))
         # 跨会话恢复的等待按本次间隔从本会话首次观察重新计时。
-        await handler(12, second)
+        await handler(1, second)
         assert len(driver.calls) == 1
         mono[0] += 1_000_000_000
         wall[0] += 1_000_000
-        await handler(12, second)
+        await handler(1, second)
 
         assert [call.timeout_s for call in driver.calls] == [Decimal("0.75"), Decimal("2.5")]
         resumed = owned.connection.execute(
@@ -255,12 +258,12 @@ async def test_two_runs_deliver_their_own_current_timeout_to_start_calls(tmp_pat
         owned.connection.close()
 
 
-async def test_assumed_result_preserves_original_settlement_and_call_info(tmp_path):
-    owned = _world(tmp_path)
+async def test_assumed_result_preserves_original_settlement_and_call_info(tmp_path, start_case):
+    owned = await start_case.world(tmp_path)
     try:
-        driver = StartDriver(_result(assumed=True, error=ErrorValue(
+        driver = StartDriver(_result(activity_id="1", assumed=True, error=ErrorValue(
             "transport_timeout", "transport", {"timeout_s": Decimal("0.75")})))
-        await capture_handler("camera_record")(12, (await _configured(owned, driver)))
+        await capture_handler("camera_record")(1, (await start_case.runtime(owned, driver)))
         result_json, error_json = owned.connection.execute(
             "SELECT result_json, error_json FROM operation_attempts").fetchone()
         saved = json.loads(result_json)
@@ -270,65 +273,65 @@ async def test_assumed_result_preserves_original_settlement_and_call_info(tmp_pa
         assert saved["call_info"] == {"local_exit": {"signal": 9}}
         assert json.loads(error_json) == {"code": "transport_timeout", "stage": "transport",
                                   "details": {"timeout_s": 0.75}}
-        assert _start(owned)[1:] == (2, 1, 0)
+        assert _start(owned, start_case.aid)[1:] == (2, 1, 0)
     finally:
         owned.connection.close()
 
 
-async def test_no_effect_retries_same_run_and_activity_after_current_interval(tmp_path):
-    owned = _world(tmp_path)
+async def test_no_effect_retries_same_run_and_activity_after_current_interval(tmp_path, start_case):
+    owned = await start_case.world(tmp_path)
     try:
         wall, mono = [_NOW], [_ANCHOR]
-        driver = StartDriver(_result(no_effect=True, error=ErrorValue("device_rejected", "device")))
-        runtime = (await _configured(owned, driver, wall=wall, mono=mono))
+        driver = StartDriver(_result(activity_id="1", no_effect=True, error=ErrorValue("device_rejected", "device")))
+        runtime = (await start_case.runtime(owned, driver, wall=wall, mono=mono))
         handler = capture_handler("camera_record")
-        await handler(12, runtime)
-        run_id = _start(owned)[0]
-        assert _start(owned)[1:] == (2, 1, 1)
+        await handler(1, runtime)
+        run_id = _start(owned, start_case.aid)[0]
+        assert _start(owned, start_case.aid)[1:] == (2, 1, 1)
         assert owned.connection.execute(
             "SELECT dispatch_state, activity_state, occupancy_state FROM device_activities"
-            " WHERE action_id = 12").fetchone() == (4, 1, 1)
-        await handler(12, runtime)
+            " WHERE action_id = 1").fetchone() == (4, 1, 1)
+        await handler(1, runtime)
         assert len(driver.calls) == 1
         for count in (2, 3):
             mono[0] += 1_000_000_000
             wall[0] += 1_000_000
-            await handler(12, runtime)
-            assert _start(owned)[0] == run_id
-            assert _start(owned)[2] == count
+            await handler(1, runtime)
+            assert _start(owned, start_case.aid)[0] == run_id
+            assert _start(owned, start_case.aid)[2] == count
         assert len(driver.calls) == 3
-        assert _start(owned)[1:] == (4, 3, 0)
-        assert owned.connection.execute("SELECT status FROM actions WHERE id = 12").fetchone() == (4,)
+        assert _start(owned, start_case.aid)[1:] == (4, 3, 0)
+        assert owned.connection.execute("SELECT status FROM actions WHERE id = 1").fetchone() == (4,)
         assert owned.connection.execute("SELECT COUNT(*) FROM device_activities").fetchone() == (1,)
         before = tuple(owned.connection.iterdump())
-        await handler(12, runtime)
+        await handler(1, runtime)
         assert tuple(owned.connection.iterdump()) == before
     finally:
         owned.connection.close()
 
 
 @pytest.mark.parametrize("new_limit,final_count", [(5, 5), (1, 2)])
-async def test_new_session_limit_preserves_original_attempts(tmp_path, new_limit, final_count):
-    owned = _world(tmp_path)
+async def test_new_session_limit_preserves_original_attempts(tmp_path, start_case, new_limit, final_count):
+    owned = await start_case.world(tmp_path)
     try:
         wall, mono = [_NOW], [_ANCHOR]
-        driver = StartDriver(_result(no_effect=True, error=ErrorValue("device_rejected", "device")))
-        first = (await _configured(owned, driver, wall=wall, mono=mono, maximum=3))
+        driver = StartDriver(_result(activity_id="1", no_effect=True, error=ErrorValue("device_rejected", "device")))
+        first = (await start_case.runtime(owned, driver, wall=wall, mono=mono, maximum=3))
         handler = capture_handler("camera_record")
-        await handler(12, first)
+        await handler(1, first)
         mono[0] += 1_000_000_000
         wall[0] += 1_000_000
-        await handler(12, first)
+        await handler(1, first)
         original = owned.connection.execute(
             "SELECT id, attempt_no, result_json FROM operation_attempts ORDER BY id").fetchall()
         assert len(original) == 2
-        second = (await _configured(owned, driver, wall=wall, mono=mono, maximum=new_limit))
-        await handler(12, second)
+        second = (await start_case.reopen(owned, driver, wall=wall, mono=mono, maximum=new_limit))
+        await handler(1, second)
         for _ in range(4):
             mono[0] += 1_000_000_000
             wall[0] += 1_000_000
-            await handler(12, second)
-        assert _start(owned)[1:] == (4, final_count, 0)
+            await handler(1, second)
+        assert _start(owned, start_case.aid)[1:] == (4, final_count, 0)
         assert len(driver.calls) == final_count
         assert owned.connection.execute(
             "SELECT id, attempt_no, result_json FROM operation_attempts ORDER BY id LIMIT 2"
@@ -337,24 +340,23 @@ async def test_new_session_limit_preserves_original_attempts(tmp_path, new_limit
         owned.connection.close()
 
 
-async def test_window_end_after_intent_prevents_dispatch_and_keeps_consumed_attempt(tmp_path):
-    owned = _world(tmp_path)
+async def test_window_end_after_intent_prevents_dispatch_and_keeps_consumed_attempt(tmp_path, start_case, monkeypatch):
+    owned = await start_case.world(tmp_path)
     try:
         wall = [_NOW]
-        driver = StartDriver(_result(confirmed=True))
-        runtime = (await _configured(owned, driver, wall=wall))
+        driver = StartDriver(_result(activity_id="1", confirmed=True))
+        runtime = (await start_case.runtime(owned, driver, wall=wall))
 
-        class EndWindowAfterGrant(SchedulingRepository):
-            def grant_start(self, *args, **kwargs):
-                receipt = super().grant_start(*args, **kwargs)
-                wall[0] += 60_000_001
-                return receipt
-
-        runtime.scheduling = EndWindowAfterGrant()
-        await capture_handler("camera_record")(12, runtime)
+        grant = SchedulingRepository.grant_start
+        def end_window(repository, *args, **kwargs):
+            receipt = grant(repository, *args, **kwargs)
+            wall[0] += 60_000_001
+            return receipt
+        monkeypatch.setattr(SchedulingRepository, "grant_start", end_window)
+        await capture_handler("camera_record")(1, runtime)
         assert driver.calls == []
-        assert _start(owned)[1:] == (7, 1, 0)
-        assert owned.connection.execute("SELECT status FROM actions WHERE id = 12").fetchone() == (5,)
+        assert _start(owned, start_case.aid)[1:] == (7, 1, 0)
+        assert owned.connection.execute("SELECT status FROM actions WHERE id = 1").fetchone() == (5,)
         effect, result_json = owned.connection.execute(
             "SELECT effect_state, result_json FROM operation_attempts").fetchone()
         saved = json.loads(result_json)
@@ -364,62 +366,8 @@ async def test_window_end_after_intent_prevents_dispatch_and_keeps_consumed_atte
         owned.connection.close()
 
 
-async def test_unknown_start_uses_start_confirmation_before_any_resend(tmp_path):
-    owned = _world(tmp_path)
-    try:
-        driver = StartDriver(_result(error=ErrorValue("transport_timeout", "transport")))
-        runtime = (await _configured(owned, driver))
-        query = StateQuery(active=True)
-        runtime.state_query = query
-        handler = capture_handler("camera_record")
-        await handler(12, runtime)
-        await handler(12, runtime)
-        assert len(driver.calls) == 1
-        assert len(query.calls) == 1
-        assert owned.connection.execute(
-            "SELECT query_purpose, attempts_used, status FROM operation_runs"
-            " WHERE responsibility_key = 'query/start/12/12'").fetchone() == (2, 1, 3)
-        assert _start(owned)[1:] == (3, 1, 0)
-        assert owned.connection.execute(
-            "SELECT activity_state, started_at FROM device_activities WHERE action_id = 12"
-        ).fetchone() == (2, _NOW)
-        assert query.calls[0].ticket.responsibility_key == "query/start/12/12"
-        assert query.calls[0].timeout_s == Decimal("0.5")
-    finally:
-        owned.connection.close()
-
-
-async def test_start_confirmation_exhaustion_keeps_unknown_occupancy_and_original_start(tmp_path):
-    owned = _world(tmp_path)
-    try:
-        wall, mono = [_NOW], [_ANCHOR]
-        driver = StartDriver(_result(error=ErrorValue("transport_timeout", "transport")))
-        query = StateQuery()
-        runtime = (await _configured(owned, driver, wall=wall, mono=mono))
-        runtime.state_query = query
-        handler = capture_handler("camera_record")
-        await handler(12, runtime)
-        for _ in range(4):
-            await handler(12, runtime)
-            wall[0] += 1_000_000
-            mono[0] += 1_000_000_000
-        assert len(driver.calls) == 1
-        assert len(query.calls) == 2
-        assert _start(owned)[1:] == (6, 1, 0)
-        assert owned.connection.execute(
-            "SELECT status FROM operation_runs WHERE responsibility_key = 'query/start/12/12'"
-        ).fetchone() == (6,)
-        assert owned.connection.execute(
-            "SELECT status, error_code FROM actions WHERE id = 12").fetchone() == (4, 12)
-        assert owned.connection.execute(
-            "SELECT activity_state, occupancy_state, started_at FROM device_activities"
-            " WHERE action_id = 12").fetchone() == (1, 1, None)
-    finally:
-        owned.connection.close()
-
-
-async def test_original_start_stays_in_flight_without_second_dispatch_or_early_terminal(tmp_path):
-    owned = _world(tmp_path)
+async def test_original_start_stays_in_flight_without_second_dispatch_or_early_terminal(tmp_path, start_case):
+    owned = await start_case.world(tmp_path)
     entered, released = asyncio.Event(), asyncio.Event()
     pending = None
     try:
@@ -432,20 +380,20 @@ async def test_original_start_stays_in_flight_without_second_dispatch_or_early_t
                 await released.wait()
                 return DeviceCallResult.from_outcome(self.outcome)
 
-        driver = PendingDriver(_result(confirmed=True))
-        runtime = (await _configured(owned, driver, wall=wall))
+        driver = PendingDriver(_result(activity_id="1", confirmed=True))
+        runtime = (await start_case.runtime(owned, driver, wall=wall))
         handler = capture_handler("camera_record")
-        pending = asyncio.create_task(handler(12, runtime))
+        pending = asyncio.create_task(handler(1, runtime))
         await entered.wait()
         wall[0] += 60_000_001
-        await handler(12, runtime)
+        await handler(1, runtime)
         assert len(driver.calls) == 1
-        assert _start(owned)[1:] == (2, 1, 0)
+        assert _start(owned, start_case.aid)[1:] == (2, 1, 0)
         assert owned.connection.execute("SELECT status FROM operation_attempts").fetchone() == (1,)
-        assert owned.connection.execute("SELECT status FROM actions WHERE id = 12").fetchone() == (2,)
+        assert owned.connection.execute("SELECT status FROM actions WHERE id = 1").fetchone() == (2,)
         released.set()
         await pending
-        assert _start(owned)[1:] == (3, 1, 0)
+        assert _start(owned, start_case.aid)[1:] == (3, 1, 0)
     finally:
         released.set()
         if pending is not None:
@@ -461,10 +409,10 @@ def _sent_world(tmp_path, duration_ms=10000, *, startup_margin_ms=1000):
     return owned
 
 
-def _sent_result():
+def _sent_result(activity_id="12"):
     from dataclasses import replace
-    return replace(_result(confirmed=True), observations=(
-        DeviceObservation("recording_sent", 1, {"activity_id": "12"}),))
+    return replace(_result(confirmed=True, activity_id=activity_id), observations=(
+        DeviceObservation("recording_sent", 1, {"activity_id": activity_id}),))
 
 
 async def _sent_runtime(owned, driver, **kwargs):
@@ -479,22 +427,19 @@ async def _sent_runtime(owned, driver, **kwargs):
     ('dji-action6', 'action6_record', 18_000_000_000),
 ])
 async def test_builtin_record_stops_at_its_frozen_deadline_without_claiming_actual_start(
-        tmp_path, model, parameter_type, deadline_ns):
+        tmp_path, start_case, model, parameter_type, deadline_ns):
     from camctl.capture.models import build_capture_spec
     from camctl.devices.drivers.adb_cameras.registration import builtin_camera_contracts
 
     contract = next(item for item in builtin_camera_contracts() if item.driver_id == model)
     spec = build_capture_spec('camera_record',
         contract.task_factories[parameter_type]({'duration_s': 10}))
-    owned = _world(tmp_path)
+    owned = await start_case.world(tmp_path, task_factory=lambda params:
+        contract.task_factories[parameter_type]({'duration_s': 10}))
     try:
-        owned.connection.execute('UPDATE actions SET execution_spec_json=? WHERE id=12',
-                                 (json.dumps(spec),))
         wall, mono = [_NOW], [_ANCHOR]
-        driver = StartDriver(_sent_result())
-        runtime = (await _sent_runtime(owned, driver, wall=wall, mono=mono))
-        runtime.evidence = runtime.evidence.with_contract(EvidenceContract(
-            'stop_returned', 1, 'stop', frozenset()))
+        driver = StartDriver(_sent_result("1"))
+        runtime = (await start_case.runtime(owned, driver, wall=wall, mono=mono))
 
         class Stop:
             def __init__(self):
@@ -504,174 +449,165 @@ async def test_builtin_record_stops_at_its_frozen_deadline_without_claiming_actu
                 self.calls.append(request)
                 return DeviceCallResult((), {'code': 'transport_timeout'})
 
-        runtime.stopper = Stop()
-        deadlines = []
-        runtime.on_recording_deadline = lambda action_id, deadline: deadlines.append((action_id, deadline))
+        start_case.stopper.delegate = Stop()
         handler = capture_handler('camera_record')
-        await handler(12, runtime)
-        assert runtime.recording_state.recording_state(12).stop_target_ns == deadline_ns
-        assert deadlines == [(12, deadline_ns)]
+        await handler(1, runtime)
+        assert start_case.stopper.calls == []
         mono[0] = deadline_ns - 1
-        await handler(12, runtime)
-        assert runtime.stopper.calls == []
+        await handler(1, runtime)
+        assert start_case.stopper.calls == []
         mono[0] = deadline_ns
-        await handler(12, runtime)
-        assert len(runtime.stopper.calls) == 1
+        await handler(1, runtime)
+        assert len(start_case.stopper.calls) == 1
+        assert start_case.stopper.times == [deadline_ns]
         assert len(driver.calls) == 1
         assert owned.connection.execute(
-            'SELECT sent_at,started_at FROM device_activities WHERE action_id=12'
+            'SELECT sent_at,started_at FROM device_activities WHERE action_id=1'
         ).fetchone() == (_NOW, None)
         assert json.loads(owned.connection.execute(
-            'SELECT execution_spec_json FROM actions WHERE id=12').fetchone()[0]) == spec
+            'SELECT execution_spec_json FROM actions WHERE id=1').fetchone()[0]) == spec
     finally:
         owned.connection.close()
 
 
-async def test_sent_ack_has_no_actual_started_time_and_waits_eleven_seconds(tmp_path):
-    owned = _sent_world(tmp_path)
+async def test_sent_ack_has_no_actual_started_time_and_waits_eleven_seconds(tmp_path, start_case):
+    owned = await start_case.world(tmp_path, duration_ms=10000, startup=1000, sent=True)
     try:
         wall, mono = [_NOW], [_ANCHOR]
-        driver = StartDriver(_sent_result())
-        runtime = (await _sent_runtime(owned, driver, wall=wall, mono=mono))
-        await capture_handler("camera_record")(12, runtime)
-        assert owned.connection.execute("SELECT sent_at, started_at, occupancy_state FROM device_activities WHERE action_id=12").fetchone() == (_NOW, None, 1)
+        driver = StartDriver(_sent_result("1"))
+        runtime = (await start_case.runtime(owned, driver, wall=wall, mono=mono))
+        await capture_handler("camera_record")(1, runtime)
+        assert owned.connection.execute("SELECT sent_at, started_at, occupancy_state FROM device_activities WHERE action_id=1").fetchone() == (_NOW, None, 1)
         assert driver.calls[0].start_return_meaning == 1
-        assert runtime.recording_state.recording_state(12).stop_target_ns == 18000000000
         mono[0] += 10000000000
-        assert runtime.recording_state.recording_state(12).monotonic_now_ns < 18000000000
+        await capture_handler("camera_record")(1, runtime)
+        assert start_case.stopper.calls == []
         mono[0] += 1000000000
-        from camctl.capture.recording import decide_recording_next, RecordingFacts, RecordingPhase
-        assert decide_recording_next(runtime.recording_state.recording_state(12), RecordingFacts()).phase is RecordingPhase.READY_TO_STOP
+        await capture_handler("camera_record")(1, runtime)
+        assert len(start_case.stopper.calls) == 1
+        assert start_case.stopper.times == [18000000000]
     finally:
         owned.connection.close()
 
 
-async def test_legacy_unstarted_action_passes_original_started_contract_to_current_driver(tmp_path):
-    owned = _world(tmp_path)
+async def test_legacy_unstarted_action_passes_original_started_contract_to_current_driver(tmp_path, start_case):
+    owned = await start_case.world(tmp_path)
     try:
-        driver = StartDriver(_result(confirmed=True))
-        await capture_handler("camera_record")(12, (await _configured(owned, driver)))
+        driver = StartDriver(_result(confirmed=True, activity_id="1"))
+        await capture_handler("camera_record")(1, (await start_case.runtime(owned, driver)))
         assert driver.calls[0].start_return_meaning == 2
-        assert owned.connection.execute("SELECT started_at FROM device_activities WHERE action_id=12").fetchone() == (_NOW,)
+        assert owned.connection.execute("SELECT started_at FROM device_activities WHERE action_id=1").fetchone() == (_NOW,)
     finally:
         owned.connection.close()
 
 
 @pytest.mark.parametrize('margin_ms', [0, 1000])
-async def test_sent_unknown_result_does_not_create_confirmation_anchor(tmp_path, margin_ms):
-    owned = _sent_world(tmp_path, startup_margin_ms=margin_ms)
+async def test_sent_unknown_result_does_not_create_confirmation_anchor(tmp_path, start_case, margin_ms):
+    owned = await start_case.world(tmp_path, duration_ms=10000, startup=margin_ms, sent=True)
     try:
-        driver = StartDriver(_result())
-        runtime = (await _sent_runtime(owned, driver))
-        deadlines = []
-        runtime.on_recording_deadline = lambda action_id, deadline: deadlines.append((action_id, deadline))
-        await capture_handler("camera_record")(12, runtime)
-        assert owned.connection.execute("SELECT sent_at, started_at, occupancy_state FROM device_activities WHERE action_id=12").fetchone() == (None, None, 1)
-        assert runtime.recording_state is None or not runtime.recording_state.has_session_anchor(12)
-        assert deadlines == []
+        driver = StartDriver(_result(activity_id="1"))
+        runtime = (await start_case.runtime(owned, driver))
+        await capture_handler("camera_record")(1, runtime)
+        assert owned.connection.execute("SELECT sent_at, started_at, occupancy_state FROM device_activities WHERE action_id=1").fetchone() == (None, None, 1)
+        start_case.mono[0] += 60_000_000_000
+        await capture_handler("camera_record")(1, runtime)
+        assert start_case.stopper.calls == []
+        assert len(driver.calls) == 1
     finally:
         owned.connection.close()
 
 
 @pytest.mark.parametrize('margin_ms', [0, 1000])
-async def test_cancel_after_sent_stops_immediately_with_original_budget(tmp_path, margin_ms):
-    from camctl.contracts.values import new_operation_key
-    owned = _sent_world(tmp_path, startup_margin_ms=margin_ms)
+async def test_cancel_after_sent_stops_immediately_with_original_budget(tmp_path, start_case, margin_ms):
+    owned = await start_case.world(tmp_path, duration_ms=10000, startup=margin_ms, sent=True)
     try:
-        driver = StartDriver(_sent_result())
-        runtime = (await _sent_runtime(owned, driver))
-        deadlines = []
-        runtime.on_recording_deadline = lambda action_id, deadline: deadlines.append((action_id, deadline))
-        runtime.evidence = runtime.evidence.with_contract(EvidenceContract(
-            "stop_returned", 1, "stop", frozenset())).with_contract(EvidenceContract(
-            "stop_confirmed", 1, "stop", frozenset({"activity_id"}), identity_field="activity_id"))
+        driver = StartDriver(_sent_result("1"))
+        runtime = (await start_case.runtime(owned, driver))
         class Stop:
             calls = []
             async def stop(self, request):
-                assert deadlines[-1] == (12, None)
+                assert start_case.mono[0] == _ANCHOR
                 self.calls.append(request)
-                return DeviceCallResult((DeviceObservation("stop_confirmed", 1, {"activity_id": "12"}),), None)
-        runtime.stopper = Stop()
-        await capture_handler("camera_record")(12, runtime)
-        owned.connection.execute("UPDATE actions SET cancel_requested=1 WHERE id=12")
-        await capture_handler("camera_record")(12, runtime)
-        assert len(runtime.stopper.calls) == 1
-        assert owned.connection.execute("SELECT attempts_used FROM operation_runs WHERE responsibility_key='stop/12'").fetchone() == (1,)
+                return DeviceCallResult((DeviceObservation("stop_confirmed", 1, {"activity_id": "1"}),), None)
+        start_case.stopper.delegate = Stop()
+        await capture_handler("camera_record")(1, runtime)
+        from .test_natural_wait_time_eligibility import _request_cancel
+        await _request_cancel(runtime, start_case.aid, start_case.wall)
+        await capture_handler("camera_record")(1, runtime)
+        assert len(start_case.stopper.calls) == 1
+        assert owned.connection.execute("SELECT attempts_used FROM operation_runs WHERE responsibility_key='stop/1'").fetchone() == (1,)
         assert len(driver.calls) == 1
     finally:
         owned.connection.close()
 
 
 @pytest.mark.parametrize('margin_ms,deadline_ns', [(0, 17_000_000_000), (1000, 18_000_000_000)])
-async def test_sent_response_anchor_precedes_commit_delay(tmp_path, margin_ms, deadline_ns):
-    owned = _sent_world(tmp_path, startup_margin_ms=margin_ms)
+async def test_sent_response_anchor_precedes_commit_delay(tmp_path, start_case, margin_ms, deadline_ns):
+    owned = await start_case.world(tmp_path, duration_ms=10000, startup=margin_ms, sent=True)
     try:
         wall, mono, returned = [_NOW], [_ANCHOR], [False]
-        driver = StartDriver(_sent_result(), returned=lambda: returned.__setitem__(0, True))
-        runtime = (await _sent_runtime(owned, driver, wall=wall, mono=mono))
-        deadlines = []
-        runtime.on_recording_deadline = lambda action_id, deadline: deadlines.append((action_id, deadline))
+        driver = StartDriver(_sent_result("1"), returned=lambda: returned.__setitem__(0, True))
+        runtime = (await start_case.runtime(owned, driver, wall=wall, mono=mono))
         def delay_commits(statement):
             if returned[0] and statement == "COMMIT":
+                returned[0] = False
                 wall[0] += 5000000
                 mono[0] += 5000000000
-        owned.connection.set_trace_callback(delay_commits)
-        await capture_handler("camera_record")(12, runtime)
-        assert owned.connection.execute("SELECT sent_at, started_at FROM device_activities WHERE action_id=12").fetchone() == (_NOW, None)
-        assert runtime.recording_state.recording_state(12).stop_target_ns == deadline_ns
-        assert deadlines == [(12, deadline_ns)]
+        await runtime.database.read(lambda current: current.connection.set_trace_callback(delay_commits))
+        await capture_handler("camera_record")(1, runtime)
+        assert owned.connection.execute("SELECT sent_at, started_at FROM device_activities WHERE action_id=1").fetchone() == (_NOW, None)
+        await runtime.database.read(lambda current: current.connection.set_trace_callback(None))
+        await start_case.assert_stop_deadline(runtime, deadline_ns)
     finally:
-        owned.connection.set_trace_callback(None)
+        await runtime.database.read(lambda current: current.connection.set_trace_callback(None))
         owned.connection.close()
 
 
 @pytest.mark.parametrize('margin_ms,before_stop_us', [(0, 9_000_000), (1000, 10_000_000)])
-async def test_sent_restart_uses_original_confirmation_and_only_remaining_wait(tmp_path, margin_ms, before_stop_us):
-    owned = _sent_world(tmp_path, startup_margin_ms=margin_ms)
+async def test_sent_restart_uses_original_confirmation_and_only_remaining_wait(tmp_path, start_case, margin_ms, before_stop_us):
+    owned = await start_case.world(tmp_path, duration_ms=10000, startup=margin_ms, sent=True)
     try:
-        first = (await _sent_runtime(owned, StartDriver(_sent_result())))
-        await capture_handler("camera_record")(12, first)
+        first = (await start_case.runtime(owned, StartDriver(_sent_result("1"))))
+        await capture_handler("camera_record")(1, first)
         wall, mono = [_NOW + before_stop_us], [1]
-        second = (await _sent_runtime(owned, StartDriver(_sent_result()), wall=wall, mono=mono))
-        second.evidence = second.evidence.with_contract(EvidenceContract("stop_returned", 1, "stop", frozenset()))
+        second_driver = StartDriver(_sent_result("1"))
+        second = (await start_case.reopen(owned, second_driver, wall=wall, mono=mono))
         class Stop:
             calls = []
             async def stop(self, request):
                 self.calls.append(request)
                 return DeviceCallResult((), {"code": "transport_timeout"})
-        second.stopper = Stop()
-        await capture_handler("camera_record")(12, second)
-        assert second.stopper.calls == []
+        start_case.stopper.delegate = Stop()
+        await capture_handler("camera_record")(1, second)
+        assert start_case.stopper.calls == []
         wall[0] += 1000000
-        await capture_handler("camera_record")(12, second)
-        assert len(second.stopper.calls) == 1
-        assert second.driver.calls == []
-        assert owned.connection.execute("SELECT sent_at, started_at FROM device_activities WHERE action_id=12").fetchone() == (_NOW, None)
+        await capture_handler("camera_record")(1, second)
+        assert len(start_case.stopper.calls) == 1
+        assert second_driver.calls == []
+        assert owned.connection.execute("SELECT sent_at, started_at FROM device_activities WHERE action_id=1").fetchone() == (_NOW, None)
     finally:
         owned.connection.close()
 
 
 @pytest.mark.parametrize('boundary', ['total_duration', 'utc_deadline', 'monotonic_deadline'])
 @pytest.mark.parametrize('legacy', [False, True])
-async def test_unrepresentable_recording_timing_is_rejected_before_any_start(tmp_path, boundary, legacy):
+async def test_unrepresentable_recording_timing_is_rejected_before_any_start(tmp_path, start_case, boundary, legacy):
     from camctl.contracts.values import MAX_OBJECT_ID
-    owned = _sent_world(tmp_path, duration_ms=MAX_OBJECT_ID if boundary == 'total_duration' else 10000)
-    driver = StartDriver(_sent_result())
-    if legacy:
-        spec = json.loads(owned.connection.execute('SELECT execution_spec_json FROM actions WHERE id=12').fetchone()[0])
-        spec.pop('startup_margin_ms')
-        spec.pop('start_return_meaning')
-        owned.connection.execute('UPDATE actions SET execution_spec_json=? WHERE id=12', (json.dumps(spec),))
-    wall = [(MAX_OBJECT_ID//1000000)*1000000 if boundary == 'utc_deadline' else _NOW]
-    mono = [MAX_OBJECT_ID-1000 if boundary == 'monotonic_deadline' else _ANCHOR]
-    runtime = (await _sent_runtime(owned, driver, wall=wall, mono=mono))
-    if boundary == 'utc_deadline':
-        owned.connection.execute('UPDATE actions SET scheduled_at=?,max_delay_ms=0 WHERE id=12', (wall[0],))
+    initial_utc = 253370764800000000 if boundary == 'utc_deadline' else _NOW
+    limit_utc = (MAX_OBJECT_ID // 1000000) * 1000000
+    owned = await start_case.world(tmp_path,
+        duration_ms=MAX_OBJECT_ID if boundary == 'total_duration' else 10000,
+        sent=not legacy, startup=None if legacy else 1000, now_us=initial_utc,
+        max_delay_ms=(limit_utc - initial_utc) // 1000 if boundary == 'utc_deadline' else 60000)
+    driver = StartDriver(_sent_result("1"))
+    wall = [limit_utc if boundary == 'utc_deadline' else _NOW]
+    mono = [MAX_OBJECT_ID - 1000 if boundary == 'monotonic_deadline' else _ANCHOR]
+    runtime = await start_case.runtime(owned, driver, wall=wall, mono=mono)
     try:
         with pytest.raises(ValueError, match='精确整数范围'):
-            await capture_handler('camera_record')(12, runtime)
+            await capture_handler('camera_record')(1, runtime)
         assert driver.calls == []
-        assert owned.connection.execute("SELECT COUNT(*) FROM operation_runs WHERE responsibility_key='start/12'").fetchone() == (0,)
-        assert owned.connection.execute('SELECT sent_at,started_at FROM device_activities WHERE action_id=12').fetchone() == (None, None)
+        assert owned.connection.execute("SELECT COUNT(*) FROM operation_runs WHERE responsibility_key='start/1'").fetchone() == (0,)
+        assert owned.connection.execute('SELECT sent_at,started_at FROM device_activities WHERE action_id=1').fetchone() == (None, None)
     finally:
         owned.connection.close()

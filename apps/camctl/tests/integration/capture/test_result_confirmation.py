@@ -9,10 +9,6 @@
 
 from __future__ import annotations
 
-from ..support.capture import capture_runtime
-from unittest.mock import create_autospec
-from camctl.devices.ports import ControlDriver
-
 import json
 from decimal import Decimal
 from pathlib import Path
@@ -58,14 +54,13 @@ from camctl.persistence.repositories.operations import (
     OperationRepository,
     register_operation_guards,
 )
-from camctl.persistence.repositories.scheduling import SchedulingRepository
 from camctl.persistence.repositories.timelapse import (
     TimelapseRepository,
     register_timelapse_guards,
 )
-from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from .test_capture_contract import ResultsDouble, _entry
+from ..support.result_cases import result_case, result_case_for
 
 register_capture_guards()
 register_operation_guards()
@@ -86,31 +81,28 @@ def _unconfirmed_error():
 
 
 async def _environment(
-    tmp_path: Path,
-    *,
-    action_type: int = 3,
-    completion_mode: int = 2,
+    tmp_path: Path, *, action_type: int = 3, completion_mode: int = 2,
     scheduled: bool = True,
 ) -> object:
-    """从真实受理与原 START 结果安排等待，完成时刻使用实际截止。"""
-    from .result_consumer_fixtures import consumer_world
-    from camctl.capture.handlers import _control_call
-    from camctl.capture.timelapse import WaitKind, WaitPlan
-    from camctl.persistence.repositories.timelapse import ScheduleWait
-
-    owned, runtime, aid, _ = await consumer_world(
-        tmp_path, "record" if action_type == 2 else "timelapse", start=False)
-    await _control_call(runtime, runtime.action(aid),
-        "start_recording" if action_type == 2 else "start_timelapse",
-        "start_confirmed" if action_type == 2 else "timelapse_sent")
-    if scheduled and action_type == 3:
-        receipt = runtime.timelapse.schedule_wait(ScheduleWait(aid,
-            WaitPlan(WaitKind.WAIT_THEN_CHECK, _NOW), 0, 0, _SENT),
-            new_operation_key(), owned)
-        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-    if completion_mode != 2:
-        # 本反例只改变拟消费的活动方式；原有限自然定义及发送来源保持合法。
-        owned.connection.execute('UPDATE device_activities SET completion_mode=? WHERE action_id=?', (completion_mode, aid))
+    """正式受理冻结活动能力，真实START后由C1安排自然等待。"""
+    from dataclasses import replace
+    from .result_consumer_fixtures import ResultCatalog
+    from ..support.result_cases import result_case_for
+    class Catalog(ResultCatalog):
+        def parameter_definition(self, device_id, action_type, parameter_type):
+            definition = super().parameter_definition(device_id, action_type, parameter_type)
+            if definition is None or action_type != 'camera_timelapse':
+                return definition
+            return replace(definition, task_factory=lambda params: replace(
+                definition.task_factory(params), completion_mode=completion_mode))
+    case = result_case_for()
+    prepare_only = not scheduled or completion_mode != 2
+    owned, runtime, aid, handler = await case.world(tmp_path,
+        'record' if action_type == 2 else 'timelapse', catalog=Catalog(),
+        start=prepare_only, prepare_start_only=prepare_only)
+    if not prepare_only:
+        await capture_handler(handler)(aid, runtime)
+    case.clock.wall = _NOW
     return owned
 
 
@@ -303,9 +295,9 @@ class TestResultSetConfirmation:
         """固定完成方式为设备证据的活动不能按时间与产物判定。"""
         owned = await _environment(tmp_path, completion_mode=1)
         try:
-            wait_id = _complete_wait(owned)
-            outcome = _confirm(owned, _satisfied(wait_id))
+            outcome = _confirm(owned, _satisfied(1))
             assert outcome.kind is DbOutcomeKind.ROLLED_BACK
+            assert "固定完成方式不是时间与产物" in str(outcome.error)
         finally:
             owned.connection.close()
 
@@ -658,79 +650,64 @@ class TestConclusionRecovery:
 
     async def _concluded(self, tmp_path: Path, *, satisfied: bool, independent_activity: bool):
         from dataclasses import replace
-        from camctl.capture.handlers import (
-            _close_check_unconfirmed, _finish_listing_result,
-            _listing_round, _register_listing,
-        )
-        from camctl.capture.timelapse import WaitKind, WaitPlan
-        from camctl.persistence.repositories.timelapse import ScheduleWait
-
-        from .result_consumer_fixtures import consumer_world
-
-        owned, runtime, action_id, _ = await consumer_world(
-            tmp_path, "timelapse", independent_activity=independent_activity)
+        case = result_case_for()
+        owned, runtime, action_id, handler = await case.world(tmp_path, 'timelapse',
+            start=False, independent_activity=independent_activity,
+            assembly_options={'check_config': AttemptConfig(1, Decimal('1.25'), Decimal(0))})
+        await capture_handler(handler)(action_id, runtime)
         activity_id, = owned.connection.execute(
-            "SELECT id FROM device_activities WHERE action_id=?", (action_id,)).fetchone()
-        runtime.check_config = AttemptConfig(1, Decimal("1.25"), Decimal(0))
-        scheduled = runtime.timelapse.schedule_wait(ScheduleWait(
-            action_id, WaitPlan(WaitKind.WAIT_THEN_CHECK,
-                               check_at_utc=_SENT + 600_000_000),
-            driver_margin_ms=0, extra_wait_ms=0, occurred_at=_NOW),
-            new_operation_key(), owned)
-        assert scheduled.kind is DbOutcomeKind.COMPLETED, scheduled.error
-        waited = runtime.timelapse.complete_wait(
-            WaitCompletedSave(action_id, runtime.wall_us()), new_operation_key(), owned)
-        assert waited.kind is DbOutcomeKind.COMPLETED, waited.error
-        results = ResultsDouble({activity_id: (_entry("clip-1"),)})
-        runtime.results = results
-        listing = await _listing_round(runtime, action_id)
-        _register_listing(runtime, action_id, listing)
+            'SELECT id FROM device_activities WHERE action_id=?', (action_id,)).fetchone()
+        case.results.delegate = ResultsDouble({activity_id: (_entry('clip-1'),)}, set_finalized=satisfied)
+        case.clock.wall = _NOW
+        case.clock.monotonic += 600_000_000_000
+        class ConclusionSaved(Exception):
+            pass
+        saved_inputs = []
+        original_finish = CaptureRepository.finish_result_check
+        original_close = CaptureRepository.close_result_check_unconfirmed
+        def finish(repository, request, confirm, key, current, **options):
+            receipt = original_finish(repository, request, confirm, key, current, **options)
+            assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+            if satisfied:
+                saved_inputs.append((request, confirm, key))
+                return replace(receipt, handoff_error=ConclusionSaved())
+            return receipt
+        def close(repository, request, key, current):
+            receipt = original_close(repository, request, key, current)
+            assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+            saved_inputs.append((request, key))
+            return replace(receipt, handoff_error=ConclusionSaved())
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(CaptureRepository, 'finish_result_check', finish)
+            patch.setattr(CaptureRepository, 'close_result_check_unconfirmed', close)
+            with pytest.raises(ConclusionSaved):
+                await capture_handler(handler)(action_id, runtime)
+                if not satisfied:
+                    await capture_handler(handler)(action_id, runtime)
         if satisfied:
-            # 本用例消费独立保存的正式结论。v1 只承载文件输入，
-            # 不由其条目、大小或扫描次数推导集合已经确定。
-            _finish_listing_result(runtime, listing, end_run=RunOutcome.SUCCEEDED,
-                                   result_set=replace(_satisfied(waited.value.event_id),
-                                                      action_id=action_id,
-                                                      occurred_at=listing.occurred_at))
+            finish, confirm, key = saved_inputs[0]
             fact = owned.connection.execute(
-                "SELECT occurred_at,body_json FROM history_events ORDER BY id DESC LIMIT 1"
-            ).fetchone()
-            assert fact[0] == listing.occurred_at
-            activity_row, = json.loads(fact[1])["rows"]
-            assert activity_row["table"] == "device_activities"
-            saved_evidence = activity_row["after"]["values"]["completion_evidence_json"]
-            assert saved_evidence["wait_completed_event_id"] == waited.value.event_id
-        else:
-            _finish_listing_result(runtime, listing, retry_wait=True)
-            _close_check_unconfirmed(runtime, action_id)
-        assert runtime.action(action_id)["status"] == 2
+                'SELECT occurred_at,body_json FROM history_events ORDER BY id DESC LIMIT 1').fetchone()
+            assert fact[0] == finish.occurred_at
+            activity_row, = json.loads(fact[1])['rows']
+            assert activity_row['table'] == 'device_activities'
+            saved_evidence = activity_row['after']['values']['completion_evidence_json']
+            assert saved_evidence['wait_completed_event_id'] == confirm.evidence['wait_completed_event_id']
+        assert (await runtime.action(action_id))['status'] == 2
         original = owned.connection.execute(
-            "SELECT id,run_id,attempt_no,status,result_event_id,result_json,error_json"
-            " FROM operation_attempts ORDER BY id").fetchall()
-        path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
-        metadata = owned.metadata
-        owned.connection.close()
-        reopened = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-        assert reopened.metadata == metadata
-        return reopened, original, action_id, activity_id
+            'SELECT id,run_id,attempt_no,status,result_event_id,result_json,error_json'
+            ' FROM operation_attempts ORDER BY id').fetchall()
+        return owned, original, action_id, activity_id
 
     async def _advance(self, owned, files: dict, action_id: int = 1) -> CaptureRuntime:
-        from camctl.capture.timelapse import CaptureWaitConfig
-        from camctl.scheduling.rules import LaunchWindow
-
-        driver = create_autospec(ControlDriver, instance=True)
-        driver.control.side_effect = AssertionError("已保存集合的本地消费不能重新START")
-        runtime = (await capture_runtime(
-            owned,
-            driver=driver,
-            results=ResultsDouble(files),
-            evidence=EvidenceRegistry(()),
-            wall_us=lambda: _NOW + 700_000_000,
-            monotonic_ns=lambda: 5_000_000_000,
-            wait_config=lambda params: CaptureWaitConfig(
-                target_duration_ms=600_000, driver_margin_ms=0),
-        ))
-        await capture_handler("camera_timelapse")(action_id, runtime)
+        case = result_case_for()
+        case.results.delegate = ResultsDouble(files)
+        case.driver.control.side_effect = AssertionError('已保存集合的本地消费不能重新START')
+        case.clock.wall = _NOW + 700_000_000
+        metadata = owned.metadata
+        runtime = await case.reopen(owned, cold=True)
+        assert runtime.database.metadata == metadata
+        await capture_handler('camera_timelapse')(action_id, runtime)
         return runtime
 
     @pytest.mark.parametrize("independent_activity", [False, True])
@@ -741,7 +718,7 @@ class TestConclusionRecovery:
             tmp_path, satisfied=True, independent_activity=independent_activity)
         try:
             runtime = await self._advance(owned, {}, action_id)
-            assert runtime.results.calls == []
+            assert result_case_for().results.delegate.calls == []
             assert _value(
                 owned, "SELECT status FROM actions WHERE id=?", action_id) == (3,)
             assert _value(
@@ -767,7 +744,7 @@ class TestConclusionRecovery:
             tmp_path, satisfied=False, independent_activity=independent_activity)
         try:
             runtime = await self._advance(owned, {}, action_id)
-            assert runtime.results.calls == []
+            assert result_case_for().results.delegate.calls == []
             failure = _value(
                 owned,
                 "SELECT status, error_code,"

@@ -14,22 +14,24 @@ from decimal import Decimal
 import pytest
 
 from camctl.capture.handlers import (
-    SessionRecordingState, advance_winddown, capture_handler,
+    advance_winddown, capture_handler,
 )
 from camctl.devices.evidence import DeviceObservation
 from camctl.devices.ports import DeviceCallResult
-from camctl.operations.attempts import AttemptConfig, RunOutcome
+from camctl.operations.attempts import AttemptConfig
 from camctl.operations.models import (
     AttemptStatus, CallInfo, CallOutcome, EffectState, ErrorValue, EvidenceValue,
     Settlement, SettlementBasis,
 )
 from camctl.persistence.transaction import row_facts
 
-from .test_call_result_save import _CALL_EVIDENCE, _started
-from .test_capture_contract import _NOW, _environment, _runtime
+from .test_capture_contract import _NOW
 from .test_recording_start_runtime import (
-    _ANCHOR, StartDriver, _configured, _result, _world,
+    _ANCHOR, StartDriver, _result,
 )
+
+from .recording_start_fixtures import start_case
+from ..support.result_cases import result_case
 
 pytestmark = pytest.mark.asyncio
 
@@ -66,14 +68,14 @@ class StopWithError:
         return _stop_confirmed_with_error(self.activity_id)
 
 
-def _stop_run(owned):
+def _stop_run(owned, action_id=12):
     return owned.connection.execute(
         "SELECT id, status, attempts_used FROM operation_runs"
-        " WHERE responsibility_key = 'stop/12'").fetchone()
+        " WHERE responsibility_key = ?", (f"stop/{action_id}",)).fetchone()
 
 
-def _stop_attempt(owned):
-    run_id = _stop_run(owned)[0]
+def _stop_attempt(owned, action_id=12):
+    run_id = _stop_run(owned, action_id)[0]
     return owned.connection.execute(
         "SELECT status, effect_state, error_json, result_json"
         " FROM operation_attempts WHERE run_id = ?", (run_id,)).fetchone()
@@ -91,9 +93,9 @@ def _assert_stop_fact(owned, action_id=12):
     停止流程以 SUCCEEDED 收场（run status 3，预算一次用尽），
     尝试保持 FAILED（3）与 CONFIRMED（3）效果及原错误。
     """
-    run_id, run_status, used = _stop_run(owned)
+    run_id, run_status, used = _stop_run(owned, action_id)
     assert (run_status, used) == (3, 1)
-    status, effect, error_json, result_json = _stop_attempt(owned)
+    status, effect, error_json, result_json = _stop_attempt(owned, action_id)
     assert (status, effect) == (3, 3)
     assert json.loads(error_json) == _STOP_ERROR
     assert json.loads(result_json)["settlement"] == {
@@ -128,21 +130,18 @@ def _assert_settle_transactions(owned, run_id, activity_id):
     assert transactions["activity"] <= transactions["run"]
 
 
-async def test_normal_record_stop_confirmed_with_error_completes_stop_fact(tmp_path):
+async def test_normal_record_stop_confirmed_with_error_completes_stop_fact(tmp_path, start_case):
     """正常录像路径：确认带错误时停止责任按停止事实完成。"""
-    owned = _world(tmp_path)
+    owned, runtime = await _confirmed_world(tmp_path, start_case)
     try:
-        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
-        runtime.evidence = _CALL_EVIDENCE
-        await _started_driver_ready(owned, runtime)
-        stopper = StopWithError()
-        runtime.stopper = stopper
-        await capture_handler("camera_record")(12, runtime)
+        stopper = StopWithError("1")
+        start_case.stopper.delegate = stopper
+        await capture_handler("camera_record")(1, runtime)
 
         # 可靠停止事实被录像状态机识别：不重新停止、不补发。
         assert stopper.calls == ["stop_recording"]
-        assert runtime.recording_state.recording_state(12).stop_confirmed
-        run_id, activity_id = _assert_stop_fact(owned)
+        assert _stop_run(owned, 1)[1] == 3
+        run_id, activity_id = _assert_stop_fact(owned, 1)
         # 普通录像停止后释放占用。
         assert row_facts(owned.connection, "device_activities",
                          activity_id)["occupancy_state"] == 2
@@ -151,30 +150,30 @@ async def test_normal_record_stop_confirmed_with_error_completes_stop_fact(tmp_p
         owned.connection.close()
 
 
-async def _started_driver_ready(owned, runtime):
-    """真实确认启动后到达停止时点；沿用 _started 的世界与预算。"""
-    await capture_handler("camera_record")(12, runtime)
-    runtime.stop_config = AttemptConfig(1, Decimal("0.125"), Decimal("1"))
-    runtime.wall_us = lambda: _NOW + 61_000_000
-    runtime.monotonic_ns = lambda: _ANCHOR + 61_000_000_000
-    return runtime
+async def _confirmed_world(tmp_path, case, *, cold=False, query=None):
+    owned = await case.world(tmp_path)
+    driver = StartDriver(_result(confirmed=True, activity_id='1'))
+    options = dict(stop_config=AttemptConfig(1, Decimal('.125'), Decimal('1')), query=query)
+    runtime = await case.runtime(owned, driver, **options)
+    await capture_handler('camera_record')(case.aid, runtime)
+    case.wall[0] = _NOW + 61_000_000
+    case.mono[0] = _ANCHOR + 61_000_000_000
+    if cold:
+        runtime = await case.reopen(owned, driver, wall=case.wall, mono=case.mono, **options)
+    return owned, runtime
 
 
-async def test_reconcile_entry_stop_confirmed_with_error_completes_stop_fact(tmp_path):
+async def test_reconcile_entry_stop_confirmed_with_error_completes_stop_fact(tmp_path, start_case):
     """跨会话对账路径：计时满足即停止，确认带错误不影响收场。"""
-    owned = _world(tmp_path)
+    owned, runtime = await _confirmed_world(tmp_path, start_case, cold=True)
     try:
-        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
-        runtime.evidence = _CALL_EVIDENCE
-        await _started_driver_ready(owned, runtime)
-        stopper = StopWithError()
-        runtime.stopper = stopper
+        stopper = StopWithError("1")
+        start_case.stopper.delegate = stopper
         # 新会话不继承单调锚点：进入按已保存启动墙钟的对账。
-        runtime.recording_state = SessionRecordingState(runtime)
-        await capture_handler("camera_record")(12, runtime)
+        await capture_handler("camera_record")(1, runtime)
 
         assert stopper.calls == ["stop_recording"]
-        run_id, activity_id = _assert_stop_fact(owned)
+        run_id, activity_id = _assert_stop_fact(owned, 1)
         assert row_facts(owned.connection, "device_activities",
                          activity_id)["occupancy_state"] == 2
         _assert_settle_transactions(owned, run_id, activity_id)
@@ -182,22 +181,18 @@ async def test_reconcile_entry_stop_confirmed_with_error_completes_stop_fact(tmp
         owned.connection.close()
 
 
-async def test_winddown_stop_confirmed_with_error_completes_stop_fact(tmp_path):
+async def test_winddown_stop_confirmed_with_error_completes_stop_fact(tmp_path, start_case):
     """保守收场路径：放弃计时停止，确认带错误时按停止事实收场。"""
-    owned = _world(tmp_path)
+    owned, runtime = await _confirmed_world(tmp_path, start_case, cold=True)
     try:
-        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
-        runtime.evidence = _CALL_EVIDENCE
-        await _started_driver_ready(owned, runtime)
-        stopper = StopWithError()
-        runtime.stopper = stopper
-        runtime.recording_state = SessionRecordingState(runtime)
+        stopper = StopWithError("1")
+        start_case.stopper.delegate = stopper
         outcome = await advance_winddown(
-            12, runtime, {}, wait_cap_s=Decimal("0"), sleep=_no_sleep)
+            start_case.aid, runtime, {}, wait_cap_s=Decimal("0"), sleep=_no_sleep)
 
         assert outcome.phase == "progress_deferred"
         assert stopper.calls == ["stop_recording"]
-        run_id, activity_id = _assert_stop_fact(owned)
+        run_id, activity_id = _assert_stop_fact(owned, 1)
         # 保守会话只保存等待阶段；活动已结束且不提前释放占用。
         assert row_facts(owned.connection, "device_activities",
                          activity_id)["occupancy_state"] == 2
@@ -210,65 +205,87 @@ async def _no_sleep(_seconds):
     raise AssertionError("等待上限为零，不应再等待计时或重试间隔")
 
 
-async def test_canceled_capture_stop_confirmed_with_error_completes_stop_fact(tmp_path):
-    """取消收场路径：可靠停止带错误仍按停止事实收取消终态。"""
-    from camctl.cancellation.models import CancelApplyMode
-
-    from .test_cancel_late_start import _cancel
-
-    owned = _environment(tmp_path, ((12, 2),))
+async def test_canceled_capture_stop_confirmed_with_error_completes_stop_fact(tmp_path, start_case):
+    """取消收场路径：实际START仍在途时不停止，迟结果保存后可靠停止。"""
+    import asyncio
+    from .test_natural_wait_time_eligibility import _request_cancel
+    owned = await start_case.world(tmp_path)
+    entered, release = asyncio.Event(), asyncio.Event()
+    pending = None
+    outcome = CallOutcome(status=AttemptStatus.UNKNOWN,
+        error=ErrorValue('result_unconfirmed', 'device'), effect=EffectState.UNKNOWN,
+        settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue('operation_returned', 1, {})))
+    class HeldStart(StartDriver):
+        async def control(self, request):
+            self.calls.append(request)
+            entered.set()
+            await release.wait()
+            return DeviceCallResult.from_outcome(self.outcome)
+    driver = HeldStart(outcome)
+    stopper = StopWithError('1')
+    start_case.stopper.delegate = stopper
     try:
-        config = AttemptConfig(1, Decimal("10"), Decimal("1"))
-        runtime = (await _runtime(owned, stop_config=config))
-        ticket, reason = runtime.grant(runtime.action(12))
-        assert ticket is not None, reason
-        _cancel(owned, 12)
-        _cancel(owned, 12, origin_id=60, mode=CancelApplyMode.ALREADY)
-        stopper = StopWithError()
-        runtime.stopper = stopper
-        # 启动仍在途时取消不能派发停止；迟到启动结果未知后收场。
-        await capture_handler("camera_record")(12, runtime)
+        config = AttemptConfig(1, Decimal('10'), Decimal('1'))
+        runtime = await start_case.runtime(owned, driver, stop_config=config)
+        pending = asyncio.create_task(capture_handler('camera_record')(start_case.aid, runtime))
+        await entered.wait()
+        assert driver.calls[0].ticket is not None
+        await _request_cancel(runtime, start_case.aid, start_case.wall)
+        await _request_second_cancel(runtime, start_case.aid, start_case.wall)
+        await capture_handler('camera_record')(start_case.aid, runtime)
         assert stopper.calls == []
-        runtime.finish(ticket, CallOutcome(
-            status=AttemptStatus.UNKNOWN,
-            error=ErrorValue("result_unconfirmed", "device"),
-            effect=EffectState.UNKNOWN,
-            settlement=Settlement(
-                SettlementBasis.OBSERVED, EvidenceValue("operation_returned", 1, {})),
-            observations=()), end_run=RunOutcome.UNCONFIRMED,
-            run_error=ErrorValue("result_unconfirmed", "device"))
-        resumed = (await _runtime(owned, stop_config=config))
-        resumed.evidence = _CALL_EVIDENCE
-        resumed.stopper = stopper
-        await capture_handler("camera_record")(12, resumed)
-
-        assert stopper.calls == ["stop_recording"]
-        run_id, activity_id = _assert_stop_fact(owned)
-        # 取消按停止事实收终态并释放占用，不再依赖启动确认。
-        action = owned.connection.execute(
-            "SELECT status, cancel_requested FROM actions WHERE id = 12").fetchone()
+        release.set()
+        await pending
+        resumed = await start_case.reopen(owned, driver, stop_config=config)
+        await capture_handler('camera_record')(start_case.aid, resumed)
+        assert stopper.calls == ['stop_recording']
+        run_id, activity_id = _assert_stop_fact(owned, start_case.aid)
+        action = owned.connection.execute('SELECT status,cancel_requested FROM actions WHERE id=1').fetchone()
         assert action == (6, 1)
-        assert row_facts(owned.connection, "device_activities",
-                         activity_id)["occupancy_state"] == 2
+        assert row_facts(owned.connection, 'device_activities', activity_id)['occupancy_state'] == 2
         _assert_settle_transactions(owned, run_id, activity_id)
         before = tuple(owned.connection.iterdump())
-        await capture_handler("camera_record")(12, resumed)
+        await capture_handler('camera_record')(start_case.aid, resumed)
         assert tuple(owned.connection.iterdump()) == before
-        assert stopper.calls == ["stop_recording"]
+        assert stopper.calls == ['stop_recording']
     finally:
+        release.set()
+        if pending is not None and not pending.done():
+            await pending
         owned.connection.close()
 
 
-async def test_host_timer_stop_confirmed_with_error_completes_stop_fact(tmp_path):
-    """主机到期停止路径：stop_timelapse 确认带错误时同事务保存控制时长。"""
-    from .test_timelapse_host_timer import world as host_world
+async def _request_second_cancel(runtime, action_id, wall):
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+    from camctl.acceptance.input import ParsedInput
+    from camctl.acceptance.service import accept_input, AcceptanceContext, CommandMode
+    from camctl.contracts.values import new_operation_key
+    from camctl.persistence.repositories.acceptance import AcceptanceRepository
+    from .result_consumer_fixtures import ResultCatalog
+    from .test_natural_wait_time_eligibility import _progress_cancel
+    instant = datetime.fromtimestamp(wall[0] // 1_000_000, timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    accepted = await accept_input(ParsedInput('cancel-again.json', {
+        'request_id': '3', 'created_at': instant, 'name': '再次取消', 'actions': [
+            {'name': '取消', 'type': 'cancel_task', 'params': {'target': {'action_instance_id': str(action_id)}}}]}),
+        AcceptanceContext(CommandMode.RUN, ResultCatalog(), AcceptanceRepository(),
+            clock=SimpleNamespace(utc_micros=lambda: wall[0])), new_operation_key(), runtime.database)
+    assert accepted.plan_id is not None, accepted
+    await _progress_cancel(runtime, wall)
 
-    owned, runtime, action_id, handler, _results, clock = await host_world(tmp_path)
+
+async def test_host_timer_stop_confirmed_with_error_completes_stop_fact(tmp_path, result_case):
+    """主机到期停止路径：stop_timelapse 确认带错误时同事务保存控制时长。"""
+    from .test_timelapse_host_timer import HostCatalog
+    from .test_result_device_completion import device_pages, _COMPLETION
+    owned, runtime, action_id, handler = await result_case.world(tmp_path, 'timelapse',
+        independent_activity=True, start=False, catalog=HostCatalog(), evidence_contracts=(_COMPLETION,))
+    device_pages(runtime)
     try:
         stopper = StopWithError("1")
-        runtime.stopper = stopper
+        result_case.stopper.stop.side_effect = stopper.stop
         await capture_handler(handler)(action_id, runtime)
-        clock[0] = 15_000_000_000
+        result_case.clock.monotonic = 15_000_000_000
         await capture_handler(handler)(action_id, runtime)
 
         assert stopper.calls == ["stop_timelapse"]
@@ -305,8 +322,7 @@ async def test_host_timer_stop_confirmed_with_error_completes_stop_fact(tmp_path
         owned.connection.close()
 
 
-
-async def test_residual_stop_confirmed_with_error_settles_in_one_transaction(tmp_path):
+async def test_residual_stop_confirmed_with_error_settles_in_one_transaction(tmp_path, start_case):
     """残留停止分区：确认带错误时结果、流程结束与活动收场同事务。
 
     原录像停止预算耗尽后，后续动作建立的残留收场流程取得可靠停
@@ -315,37 +331,26 @@ async def test_residual_stop_confirmed_with_error_settles_in_one_transaction(tmp
     """
     import json as _json
 
-    from camctl.capture.handlers import _settle_stop_exhausted, _stop_call
-    from camctl.capture.residual import ResidualCandidate, _stop_residual
-    from camctl.devices.ports import DeviceCallResult
-    from camctl.operations.models import AttemptStatus, CallOutcome, EffectState
-
     from .test_call_result_save import ReturnedCall, _outcome
-    from .test_capture_contract import _seed_action
-    from ..scheduling.test_resources import _seed_activity
+    from .test_recording_queries import RecordingQuery
 
-    owned = _world(tmp_path)
+    owned, runtime = await _confirmed_world(tmp_path, start_case, query=RecordingQuery('1'))
     try:
-        runtime = await _started(owned)
-        # 原录像停止未确认且预算耗尽：活动保持执行中与占用。
-        runtime.stopper = ReturnedCall(_outcome("stop"))
-        await _stop_call(runtime, runtime.action(12))
-        _settle_stop_exhausted(runtime, runtime.action(12))
-        assert owned.connection.execute(
-            "SELECT status FROM actions WHERE id = 12").fetchone() == (4,)
-        activity = row_facts(owned.connection, "device_activities",
-                             _activity_id(owned))
-        assert (activity["activity_state"], activity["occupancy_state"]) == (2, 1)
-        _seed_action(owned.connection, 13, 2)
-        _seed_activity(owned.connection, 13)
-        stopper = StopWithError()
-        runtime.stopper = stopper
-        await _stop_residual(runtime, 13, ResidualCandidate(12, 12, 1, 1))
+        start_case.stopper.delegate = ReturnedCall(_outcome('stop'))
+        await capture_handler('camera_record')(start_case.aid, runtime)
+        await capture_handler('camera_record')(start_case.aid, runtime)
+        assert owned.connection.execute('SELECT status FROM actions WHERE id=1').fetchone() == (4,)
+        activity = row_facts(owned.connection, 'device_activities', _activity_id(owned, 1))
+        assert (activity['activity_state'], activity['occupancy_state']) == (2, 1)
+        followup = await _accept_followup(runtime, start_case.wall)
+        stopper = StopWithError('1')
+        start_case.stopper.delegate = stopper
+        await capture_handler('camera_record')(followup, runtime)
 
         assert stopper.calls == ["stop_recording"]
         run = owned.connection.execute(
             "SELECT id, status, attempts_used FROM operation_runs"
-            " WHERE responsibility_key = 'followup/13/12'").fetchone()
+            " WHERE responsibility_key = 'followup/2/1'").fetchone()
         assert run[1:] == (3, 1)
         attempt = owned.connection.execute(
             "SELECT status, effect_state, error_json FROM operation_attempts"
@@ -353,7 +358,7 @@ async def test_residual_stop_confirmed_with_error_settles_in_one_transaction(tmp
         assert attempt[:2] == (3, 3)
         assert _json.loads(attempt[2]) == _STOP_ERROR
         ended = row_facts(owned.connection, "device_activities",
-                          _activity_id(owned))
+                          _activity_id(owned, 1))
         assert (ended["activity_state"], ended["occupancy_state"]) == (3, 2)
         # 尝试结果、流程结束、活动 ENDED 与释放必须同事务。
         attempt_id = owned.connection.execute(
@@ -402,38 +407,35 @@ class StopNoEffect:
         ))
 
 
-async def test_stop_no_effect_keeps_activity_and_waits_for_retry(tmp_path):
+async def test_stop_no_effect_keeps_activity_and_waits_for_retry(tmp_path, start_case):
     """无效果分区：可靠无效果的停止不结束活动，沿原预算等待重试。"""
-    owned = _world(tmp_path)
+    owned, runtime = await _confirmed_world(tmp_path, start_case)
     try:
-        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
-        runtime.evidence = _CALL_EVIDENCE
-        await _started_driver_ready(owned, runtime)
         stopper = StopNoEffect()
-        runtime.stopper = stopper
-        await capture_handler("camera_record")(12, runtime)
+        start_case.stopper.delegate = stopper
+        await capture_handler("camera_record")(1, runtime)
 
         assert stopper.calls == ["stop_recording"]
         run = owned.connection.execute(
             "SELECT status, attempts_used, retry_wait_required"
-            " FROM operation_runs WHERE responsibility_key = 'stop/12'").fetchone()
+            " FROM operation_runs WHERE responsibility_key = 'stop/1'").fetchone()
         assert run == (2, 1, 1)
-        attempt = _stop_attempt(owned)
+        attempt = _stop_attempt(owned, 1)
         assert attempt[:2] == (3, 2)
         # 没有可靠停止事实：活动保持执行中且占用。
         activity = row_facts(owned.connection, "device_activities",
-                             _activity_id(owned))
+                             _activity_id(owned, 1))
         assert (activity["activity_state"], activity["occupancy_state"]) == (2, 1)
         assert owned.connection.execute(
-            "SELECT status FROM actions WHERE id = 12").fetchone() == (2,)
+            "SELECT status FROM actions WHERE id = 1").fetchone() == (2,)
         # 重试间隔未到时重入不补发停止。
-        await capture_handler("camera_record")(12, runtime)
+        await capture_handler("camera_record")(1, runtime)
         assert stopper.calls == ["stop_recording"]
     finally:
         owned.connection.close()
 
 
-async def test_cancel_during_in_flight_stop_waits_for_actual_result(tmp_path):
+async def test_cancel_during_in_flight_stop_waits_for_actual_result(tmp_path, start_case):
     """在途取消分区：停止调用未返回前取消不能提前结束活动。
 
     实际返回后按返回事实收场：可靠停止同时带错误时活动结束与条
@@ -441,14 +443,12 @@ async def test_cancel_during_in_flight_stop_waits_for_actual_result(tmp_path):
     """
     import asyncio
 
-    from .test_cancel_late_start import _cancel
+    from .test_natural_wait_time_eligibility import _request_cancel
 
-    owned = _world(tmp_path)
+    owned, runtime = await _confirmed_world(tmp_path, start_case)
+    entered, released = asyncio.Event(), asyncio.Event()
+    pending = None
     try:
-        runtime = (await _configured(owned, StartDriver(_result(confirmed=True))))
-        runtime.evidence = _CALL_EVIDENCE
-        await _started_driver_ready(owned, runtime)
-        entered, released = asyncio.Event(), asyncio.Event()
 
         class PendingStopWithError(StopWithError):
             async def stop(self, request):
@@ -457,30 +457,54 @@ async def test_cancel_during_in_flight_stop_waits_for_actual_result(tmp_path):
                 await released.wait()
                 return _stop_confirmed_with_error(self.activity_id)
 
-        stopper = PendingStopWithError()
-        runtime.stopper = stopper
+        stopper = PendingStopWithError("1")
+        start_case.stopper.delegate = stopper
         pending = asyncio.create_task(
-            capture_handler("camera_record")(12, runtime))
+            capture_handler("camera_record")(1, runtime))
         await asyncio.wait_for(entered.wait(), 1)
         # 取消生效时停止在途：不派发新停止，不提前结束活动。
-        _cancel(owned, 12)
-        await capture_handler("camera_record")(12, runtime)
+        await _request_cancel(runtime, start_case.aid, start_case.wall)
+        await capture_handler("camera_record")(1, runtime)
         assert stopper.calls == ["stop_recording"]
         activity = row_facts(owned.connection, "device_activities",
-                             _activity_id(owned))
+                             _activity_id(owned, 1))
         assert (activity["activity_state"], activity["occupancy_state"]) == (2, 1)
 
         released.set()
         await asyncio.wait_for(pending, 1)
         # 实际返回按停止事实保存并收场，重入按取消终态收尾。
-        await capture_handler("camera_record")(12, runtime)
+        await capture_handler("camera_record")(1, runtime)
         assert stopper.calls == ["stop_recording"]
-        run_id, activity_id = _assert_stop_fact(owned)
+        run_id, activity_id = _assert_stop_fact(owned, 1)
         assert row_facts(owned.connection, "device_activities",
                          activity_id)["occupancy_state"] == 2
         assert owned.connection.execute(
-            "SELECT status, cancel_requested FROM actions WHERE id = 12"
+            "SELECT status, cancel_requested FROM actions WHERE id = 1"
         ).fetchone() == (6, 1)
         _assert_settle_transactions(owned, run_id, activity_id)
     finally:
+        released.set()
+        if pending is not None and not pending.done():
+            await pending
         owned.connection.close()
+
+
+async def _accept_followup(runtime, wall):
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+    from camctl.acceptance.input import ParsedInput
+    from camctl.acceptance.service import accept_input, AcceptanceContext, CommandMode
+    from camctl.persistence.repositories.acceptance import AcceptanceRepository
+    from camctl.contracts.values import new_operation_key
+    from .result_consumer_fixtures import ResultCatalog
+    instant = datetime.fromtimestamp(wall[0] // 1_000_000, timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    accepted = await accept_input(ParsedInput('followup.json', {'request_id': '2',
+        'created_at': instant, 'name': '后续录像', 'actions': [{'name': '拍摄', 'type': 'camera_record',
+            'device_id': 'cam-1', 'scheduled_at': instant, 'params': {'type': 'video'},
+            'policy': {'max_delay_ms': 60000}}]}),
+        AcceptanceContext(CommandMode.RUN, ResultCatalog(), AcceptanceRepository(),
+            clock=SimpleNamespace(utc_micros=lambda: wall[0])), new_operation_key(), runtime.database)
+    assert accepted.plan_id is not None, accepted
+    identity, = await runtime.database.read(lambda current: current.connection.execute(
+        'SELECT id FROM actions WHERE plan_id=?', (accepted.plan_id,)).fetchone())
+    return identity

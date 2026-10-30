@@ -20,9 +20,9 @@ from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.transaction import saved_transaction_events
 
-from .result_consumer_fixtures import RESULT_EVIDENCE, consumer_world
-from .test_capture_contract import _runtime
-from .test_result_consumer_saves import _actual, _result_port
+from .result_consumer_fixtures import result_driver
+from ..support.result_cases import result_case, result_case_for
+from .test_result_consumer_saves import _actual
 
 
 pytestmark = pytest.mark.asyncio
@@ -34,8 +34,11 @@ def _rows(owned, table):
 
 async def _exercise_first_exhaustion(tmp_path, monkeypatch, *, kind="video",
                                      later_failed=False, empty=False, complete=True):
-    owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, "timelapse", independent_activity=True)
+    case = result_case_for()
+    maximum = 2 if later_failed else 1
+    owned, runtime, action_id, handler = await case.world(
+        tmp_path, "timelapse", independent_activity=True,
+        assembly_options={"check_config": AttemptConfig(maximum, Decimal("1.25"), Decimal(0))})
     reopened = None
     try:
         activity_id, = owned.connection.execute(
@@ -54,9 +57,7 @@ async def _exercise_first_exhaustion(tmp_path, monkeypatch, *, kind="video",
             settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("results_returned", 1, {})),
             observations=(DeviceObservation("result_files_listed", 1, {
                 "activity_id": str(activity_id), "entries": entries}),))
-        driver = _result_port(runtime, actual)
-        maximum = 2 if later_failed else 1
-        runtime.check_config = AttemptConfig(maximum, Decimal("1.25"), Decimal(0))
+        driver = result_driver(case, actual)
         advance = capture_handler(handler)
         await advance(action_id, runtime)
         responsibility = f"results/{activity_id}"
@@ -64,7 +65,7 @@ async def _exercise_first_exhaustion(tmp_path, monkeypatch, *, kind="video",
             "SELECT id,status,attempts_used,retry_wait_required FROM operation_runs"
             " WHERE responsibility_key=?", (responsibility,)).fetchone()
         assert (status, used, retry) == (2, 1, 1)
-        assert runtime.action(action_id)["status"] == 2
+        assert (await runtime.action(action_id))["status"] == 2
         wait_id, expected_check_at = owned.connection.execute(
             "SELECT wait_completed_event_id,expected_check_at FROM device_activities WHERE id=?",
             (activity_id,)).fetchone()
@@ -103,7 +104,7 @@ async def _exercise_first_exhaustion(tmp_path, monkeypatch, *, kind="video",
         assert owned.connection.execute(
             "SELECT status,attempts_used,retry_wait_required FROM operation_runs WHERE id=?",
             (run_id,)).fetchone() == (2, maximum, 1)
-        assert runtime.action(action_id)["status"] == 2
+        assert (await runtime.action(action_id))["status"] == 2
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (0,)
         attempts, files = _rows(owned, "operation_attempts"), _rows(owned, "device_files")
         prefix = _rows(owned, "history_events")
@@ -128,7 +129,7 @@ async def _exercise_first_exhaustion(tmp_path, monkeypatch, *, kind="video",
 
         monkeypatch.setattr(CaptureRepository, "close_result_check_unconfirmed", close)
         formed_at = runtime.wall_us() + 10
-        runtime.wall_us = lambda: formed_at
+        case.clock.wall = formed_at
         # G 正常返回，不截停；本次 EXHAUSTED 必须把文件与失败终态一并保存。
         await advance(action_id, runtime)
         assert len(closes) == len(receipts) == 1
@@ -143,7 +144,6 @@ async def _exercise_first_exhaustion(tmp_path, monkeypatch, *, kind="video",
         group = saved_transaction_events(owned.connection, key)
         assert group is not None and len(group) == 2
         assert all(event["occurred_at"] == formed_at for event in group)
-        assert not runtime.pending_result_closes
         action_status, error_code, error_details = owned.connection.execute(
             "SELECT status,error_code,error_details_json FROM actions WHERE id=?", (action_id,)).fetchone()
         assert (action_status, error_code) == (4, action_error_id("capture_result_unconfirmed"))
@@ -176,14 +176,11 @@ async def _exercise_first_exhaustion(tmp_path, monkeypatch, *, kind="video",
         assert tuple(owned.connection.iterdump()) == final_dump
         path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
         metadata = owned.metadata
+        case.clock.wall = formed_at + 5_000_000
+        fresh_runtime = await case.reopen(owned, cold=True)
         owned.connection.close()
         reopened = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
         assert reopened.metadata == metadata
-        fresh_runtime = (await _runtime(reopened, driver=runtime.driver, results=runtime.results,
-            wall=formed_at + 5_000_000))
-        fresh_runtime.evidence = RESULT_EVIDENCE
-        assert not fresh_runtime.pending_result_closes and not fresh_runtime.pending_start_results
-        assert fresh_runtime.listing_cache is None and not fresh_runtime.timelapse_deadlines
         await advance(action_id, fresh_runtime)
         assert tuple(reopened.connection.iterdump()) == final_dump
         assert saved_transaction_events(reopened.connection, key) == group

@@ -10,60 +10,85 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
-from datetime import datetime, timezone
 from decimal import Decimal
 import json
-from pathlib import Path
 from unittest.mock import create_autospec
 
 import pytest
 
-from camctl.acceptance.input import ParsedInput
-from camctl.acceptance.service import CommandMode
-from camctl.capture.handlers import (
-    SessionRecordingState, _stop_call, advance_winddown, capture_handler,
-)
-from camctl.capture.media import MediaPolicy, MediaTools
-from camctl.capture.media_flow import DriverReadSessions, MediaFlow
-from camctl.contracts.values import new_operation_key
+from camctl.capture.handlers import advance_winddown, capture_handler
 from camctl.devices.evidence import DeviceObservation
 from camctl.devices.ports import DeviceCallResult
-from camctl.host_files.models import BoundDirectories
 from camctl.operations.models import AttemptStatus
-from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.acceptance import AcceptanceRepository, ProcessInput
 from camctl.persistence.repositories.outputs import register_outputs_guards
-from camctl.persistence.repositories.scheduling import (
-    ObserveWindowRequest, SchedulingRepository, StartActionRequest,
-)
-from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
-from .result_consumer_fixtures import RESULT_EVIDENCE, ResultCatalog, returned
-from .test_call_result_save import ReturnedCall, _outcome, _started
-from .test_capture_contract import ResultsDouble, _NOW, _entry
-from .test_recording_start_runtime import StartDriver, _ANCHOR, _configured, _world
-from ..bootstrap.test_media_assembly import _config
+from .test_call_result_save import ReturnedCall, _outcome
+from .test_capture_contract import _NOW, _entry
+from .test_recording_start_runtime import StartDriver, _ANCHOR, _result
+from .recording_start_fixtures import start_case
 
 register_outputs_guards()
 
 pytestmark = pytest.mark.asyncio
 
 
-async def _ready(owned, maximum):
-    """先真实确认启动，再让已保存的 60 秒录像到达正常停止时点。"""
-    runtime = await _started(owned)
-    runtime.stop_config = replace(runtime.stop_config, max_attempts=maximum)
-    wall, mono = [_NOW + 60_000_000], [_ANCHOR + 60_000_000_000]
-    runtime.wall_us = lambda: wall[0]
-    runtime.monotonic_ns = lambda: mono[0]
-    return runtime, wall, mono
+async def _ready(tmp_path, case, maximum, *, max_delay_ms=60000):
+    """当前配置属于会话工厂的显式输入；正常轮次保留同一工厂锚点。"""
+    owned = await case.world(tmp_path, max_delay_ms=max_delay_ms)
+    devices = {'cam-1': {'driver': 'camctl-adb', 'recording': {
+        'max_start_attempts': 3, 'start_timeout_s': Decimal('.75'), 'start_retry_interval_s': Decimal('1'),
+        'max_stop_attempts': maximum, 'stop_timeout_s': Decimal('.125'), 'stop_retry_interval_s': Decimal('1'),
+        'repair_margin_s': Decimal('10')},
+        'query': {'max_attempts': 2, 'timeout_s': Decimal('.5'), 'retry_interval_s': Decimal('1')}}}
+    case.budget_devices = devices
+    driver = StartDriver(_result(confirmed=True, activity_id='1'))
+    runtime = await case.runtime(owned, driver, assembly_options={
+        'devices': devices, 'start_config': None, 'stop_config': None, 'query_config': None})
+    await capture_handler('camera_record')(case.aid, runtime)
+    case.wall[0] = _NOW + 60_000_000
+    case.mono[0] = _ANCHOR + 60_000_000_000
+    return owned, runtime, case.wall, case.mono
+
+
+async def _with_limit(case, owned, maximum, *, cold=False):
+    # 模块装配输入变化；不宣称CLI运行中会重载配置。
+    case.budget_devices['cam-1']['recording']['max_stop_attempts'] = maximum
+    if cold:
+        return await case.reopen(owned, case.options['driver'], wall=case.wall, mono=case.mono,
+            assembly_options=dict(case.options))
+    return await case.factory(owned)
+
+
+async def _save_actual_stop(runtime, action_id):
+    """真实C1保存STOP后交回仓储回执，后续本地业务尚未运行。"""
+    from camctl.persistence.repositories.capture import CaptureRepository
+    from camctl.persistence.repositories.operations import OperationRepository
+    original = CaptureRepository.finish_capture_stop
+    original_attempt = OperationRepository.finish_attempt
+    class StopSaved(Exception):
+        pass
+    def saved(repository, *args, **options):
+        receipt = original(repository, *args, **options)
+        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+        return replace(receipt, handoff_error=StopSaved())
+    def attempt_saved(repository, request, key, current, **options):
+        receipt = original_attempt(repository, request, key, current, **options)
+        if request.ticket.operation == 'stop':
+            assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+            return replace(receipt, handoff_error=StopSaved())
+        return receipt
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(CaptureRepository, 'finish_capture_stop', saved)
+        patch.setattr(OperationRepository, 'finish_attempt', attempt_saved)
+        with pytest.raises(StopSaved):
+            await capture_handler('camera_record')(action_id, runtime)
 
 
 def _stop_run(owned):
     row = owned.connection.execute(
         "SELECT id, status, attempts_used, retry_wait_required, error_json"
-        " FROM operation_runs WHERE responsibility_key = 'stop/12'"
+        " FROM operation_runs WHERE responsibility_key = 'stop/1'"
     ).fetchone()
     assert row is not None
     return row
@@ -74,26 +99,26 @@ def _stop_attempts(owned):
         "SELECT a.id, a.attempt_no, a.max_attempts_used, a.status, a.effect_state,"
         " a.result_event_id, a.result_json, a.error_json"
         " FROM operation_attempts a JOIN operation_runs r ON r.id = a.run_id"
-        " WHERE r.responsibility_key = 'stop/12' ORDER BY a.attempt_no"
+        " WHERE r.responsibility_key = 'stop/1' ORDER BY a.attempt_no"
     ).fetchall()
 
 
 def _activity(owned):
     return owned.connection.execute(
         "SELECT activity_state, occupancy_state, started_at"
-        " FROM device_activities WHERE action_id = 12"
+        " FROM device_activities WHERE action_id = 1"
     ).fetchone()
 
 
 def _assert_exhausted(owned, run_id, attempts_used):
     run = _stop_run(owned)
     assert run[:4] == (run_id, 6, attempts_used, 0)
-    details = {"activity_id": "12", "operation_run_id": str(run_id)}
+    details = {"activity_id": "1", "operation_run_id": str(run_id)}
     assert json.loads(run[4]) == {
         "code": "recording_stop_failed", "stage": "device_stop", "details": details,
     }
     action = owned.connection.execute(
-        "SELECT status, error_code, error_details_json FROM actions WHERE id = 12"
+        "SELECT status, error_code, error_details_json FROM actions WHERE id = 1"
     ).fetchone()
     assert action[:2] == (4, 14)
     assert json.loads(action[2]) == details
@@ -108,22 +133,21 @@ async def _no_retry_sleep(_seconds):
 async def _advance(runtime, entry):
     if entry == "restricted-winddown":
         await advance_winddown(
-            12, runtime, {}, wait_cap_s=Decimal("0"), sleep=_no_retry_sleep,
+            1, runtime, {}, wait_cap_s=Decimal("0"), sleep=_no_retry_sleep,
         )
     else:
-        await capture_handler("camera_record")(12, runtime)
+        await capture_handler("camera_record")(1, runtime)
 
 
 @pytest.mark.parametrize("entry", [
     "normal-anchor", "reconcile-no-anchor", "restricted-winddown",
 ])
-async def test_lower_current_limit_closes_unconfirmed_stop_without_new_attempt(tmp_path, entry):
-    owned = _world(tmp_path)
+async def test_lower_current_limit_closes_unconfirmed_stop_without_new_attempt(tmp_path, start_case, entry):
+    owned, runtime, wall, mono = await _ready(tmp_path, start_case, 3)
     try:
-        runtime, wall, mono = await _ready(owned, 3)
         stopper = ReturnedCall(_outcome("stop"))
-        runtime.stopper = stopper
-        await capture_handler("camera_record")(12, runtime)
+        start_case.stopper.delegate = stopper
+        await capture_handler("camera_record")(1, runtime)
         run_id = _stop_run(owned)[0]
         assert _stop_run(owned)[1:4] == (2, 1, 1)
         original = _stop_attempts(owned)
@@ -131,9 +155,9 @@ async def test_lower_current_limit_closes_unconfirmed_stop_without_new_attempt(t
         assert original[0][5] is not None
         assert _activity(owned) == (2, 1, _NOW)
 
-        runtime.stop_config = replace(runtime.stop_config, max_attempts=1)
+        runtime = await _with_limit(start_case, owned, 1)
         if entry != "normal-anchor":
-            runtime.recording_state = SessionRecordingState(runtime)
+            runtime = await _with_limit(start_case, owned, 1, cold=True)
         # 旧等待已到，普通入口可直接到达新意图的预算判定。
         wall[0] += 1_000_000
         mono[0] += 1_000_000_000
@@ -146,28 +170,27 @@ async def test_lower_current_limit_closes_unconfirmed_stop_without_new_attempt(t
         owned.connection.close()
 
 
-async def test_higher_current_limit_retries_unfinished_stop_after_actual_return_and_wait(tmp_path):
-    owned = _world(tmp_path)
+async def test_higher_current_limit_retries_unfinished_stop_after_actual_return_and_wait(tmp_path, start_case):
+    owned, runtime, wall, mono = await _ready(tmp_path, start_case, 1)
     try:
-        runtime, wall, mono = await _ready(owned, 1)
         stopper = ReturnedCall(_outcome("stop"))
-        runtime.stopper = stopper
+        start_case.stopper.delegate = stopper
         handler = capture_handler("camera_record")
-        await handler(12, runtime)
+        await handler(1, runtime)
         run_id = _stop_run(owned)[0]
         original = _stop_attempts(owned)
         assert _stop_run(owned)[1:4] == (2, 1, 1)
         assert len(original) == 1 and original[0][5] is not None
 
-        runtime.stop_config = replace(runtime.stop_config, max_attempts=3)
-        await handler(12, runtime)
+        runtime = await _with_limit(start_case, owned, 3)
+        await handler(1, runtime)
         assert len(stopper.calls) == 1
         assert _stop_run(owned)[:4] == (run_id, 2, 1, 1)
-        assert runtime.action(12)["status"] == 2
+        assert (await runtime.action(1))["status"] == 2
 
         wall[0] += 1_000_000
         mono[0] += 1_000_000_000
-        await handler(12, runtime)
+        await handler(1, runtime)
         assert len(stopper.calls) == 2
         assert _stop_run(owned)[:4] == (run_id, 2, 2, 1)
         assert _stop_attempts(owned)[:1] == original
@@ -178,18 +201,17 @@ async def test_higher_current_limit_retries_unfinished_stop_after_actual_return_
         owned.connection.close()
 
 
-async def test_higher_current_limit_allows_only_remaining_winddown_attempts(tmp_path):
-    owned = _world(tmp_path)
+async def test_higher_current_limit_allows_only_remaining_winddown_attempts(tmp_path, start_case):
+    owned, runtime, wall, mono = await _ready(tmp_path, start_case, 1)
     try:
-        runtime, wall, mono = await _ready(owned, 1)
         stopper = ReturnedCall(_outcome("stop"))
-        runtime.stopper = stopper
-        await capture_handler("camera_record")(12, runtime)
+        start_case.stopper.delegate = stopper
+        await capture_handler("camera_record")(1, runtime)
         run_id = _stop_run(owned)[0]
         original = _stop_attempts(owned)
         assert _stop_run(owned)[1:4] == (2, 1, 1)
-        runtime.stop_config = replace(runtime.stop_config, max_attempts=3)
-        runtime.recording_state = SessionRecordingState(runtime)
+        runtime = await _with_limit(start_case, owned, 3)
+        runtime = await _with_limit(start_case, owned, 3, cold=True)
         sleeps = []
 
         async def retry_sleep(seconds):
@@ -200,7 +222,7 @@ async def test_higher_current_limit_allows_only_remaining_winddown_attempts(tmp_
             mono[0] += 1_000_000_000
 
         await advance_winddown(
-            12, runtime, {}, wait_cap_s=Decimal("0"), sleep=retry_sleep,
+            1, runtime, {}, wait_cap_s=Decimal("0"), sleep=retry_sleep,
         )
 
         assert len(stopper.calls) == 3
@@ -213,13 +235,12 @@ async def test_higher_current_limit_allows_only_remaining_winddown_attempts(tmp_
 
 
 @pytest.mark.parametrize("confirmed", [False, True])
-async def test_lower_limit_waits_for_in_flight_stop_actual_result(tmp_path, confirmed):
-    owned = _world(tmp_path)
+async def test_lower_limit_waits_for_in_flight_stop_actual_result(tmp_path, start_case, confirmed):
     entered, released = asyncio.Event(), asyncio.Event()
     pending = None
+    owned, runtime, wall, mono = await _ready(tmp_path, start_case, 3)
     try:
-        runtime, wall, mono = await _ready(owned, 3)
-        actual = _outcome("stop", confirmed=confirmed)
+        actual = _confirmed_stop_error(1) if confirmed else _outcome("stop")
         if confirmed:
             actual = replace(actual, status=AttemptStatus.SUCCEEDED, error=None)
 
@@ -231,16 +252,16 @@ async def test_lower_limit_waits_for_in_flight_stop_actual_result(tmp_path, conf
                 return DeviceCallResult.from_outcome(self.outcome)
 
         stopper = PendingStop(actual)
-        runtime.stopper = stopper
-        pending = asyncio.create_task(_stop_call(runtime, runtime.action(12)))
+        start_case.stopper.delegate = stopper
+        pending = asyncio.create_task(_save_actual_stop(runtime, start_case.aid))
         await entered.wait()
         run_id = _stop_run(owned)[0]
-        runtime.stop_config = replace(runtime.stop_config, max_attempts=1)
-        await capture_handler("camera_record")(12, runtime)
+        runtime = await _with_limit(start_case, owned, 1)
+        await capture_handler("camera_record")(1, runtime)
         assert len(stopper.calls) == 1
         assert _stop_run(owned)[:4] == (run_id, 2, 1, 0)
         assert _stop_attempts(owned)[0][3:7] == (1, 1, None, None)
-        assert runtime.action(12)["status"] == 2
+        assert (await runtime.action(1))["status"] == 2
         assert _activity(owned) == (2, 1, _NOW)
 
         released.set()
@@ -250,7 +271,7 @@ async def test_lower_limit_waits_for_in_flight_stop_actual_result(tmp_path, conf
         assert attempt[5] is not None
         saved = json.loads(attempt[6])
         assert saved["observations"] == ([{
-            "type": "stop_confirmed", "version": 1, "data": {"activity_id": "12"},
+            "type": "stop_confirmed", "version": 1, "data": {"activity_id": "1"},
         }] if confirmed else [])
         assert saved["call_info"] == {"local_exit": {"exit_code": 0}}
         assert len(stopper.calls) == 1
@@ -259,7 +280,7 @@ async def test_lower_limit_waits_for_in_flight_stop_actual_result(tmp_path, conf
         else:
             wall[0] += 1_000_000
             mono[0] += 1_000_000_000
-            await capture_handler("camera_record")(12, runtime)
+            await capture_handler("camera_record")(1, runtime)
             _assert_exhausted(owned, run_id, 1)
     finally:
         released.set()
@@ -269,82 +290,46 @@ async def test_lower_limit_waits_for_in_flight_stop_actual_result(tmp_path, conf
 
 
 @pytest.mark.parametrize("confirmed", [False, True])
-async def test_higher_limit_preserves_original_stop_terminal_result(tmp_path, confirmed):
-    owned = _world(tmp_path)
+async def test_higher_limit_preserves_original_stop_terminal_result(tmp_path, start_case, confirmed):
+    owned, runtime, _wall, _mono = await _ready(tmp_path, start_case, 1)
     try:
-        runtime, _wall, _mono = await _ready(owned, 1)
-        actual = _outcome("stop", confirmed=confirmed)
+        actual = _confirmed_stop_error(1) if confirmed else _outcome("stop")
         if confirmed:
             actual = replace(actual, status=AttemptStatus.SUCCEEDED, error=None)
         stopper = ReturnedCall(actual)
-        runtime.stopper = stopper
+        start_case.stopper.delegate = stopper
         handler = capture_handler("camera_record")
-        await handler(12, runtime)
+        await handler(1, runtime)
         if not confirmed:
-            await handler(12, runtime)
+            await handler(1, runtime)
         original_run = _stop_run(owned)
         original_attempts = _stop_attempts(owned)
-        original_action = runtime.action(12)
+        original_action = (await runtime.action(1))
         original_activity = _activity(owned)
         assert original_run[1] == (3 if confirmed else 6)
 
-        runtime.stop_config = replace(runtime.stop_config, max_attempts=3)
-        await handler(12, runtime)
-        await handler(12, runtime)
+        runtime = await _with_limit(start_case, owned, 3)
+        await handler(1, runtime)
+        await handler(1, runtime)
 
         assert len(stopper.calls) == 1
         assert _stop_run(owned) == original_run
         assert _stop_attempts(owned) == original_attempts
-        assert runtime.action(12) == original_action
+        assert (await runtime.action(1)) == original_action
         assert _activity(owned) == original_activity
     finally:
         owned.connection.close()
 
 
-async def _recording_consumer(tmp_path):
-    """受理和调度自然建立未决定处理行，再通过真实入口确认 START。"""
-    config = _config(tmp_path, repair_margin_s="10")
-    path = Path(config.paths.state_db)
-    assert initialize_state(config, path).outcome is InitOutcome.CREATED
-    owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-    instant = datetime.fromtimestamp(_NOW // 1_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    try:
-        accepted = AcceptanceRepository().process_input(ProcessInput(ParsedInput("record.json", {
-            "request_id": "1", "created_at": instant, "name": "停止确认消费", "actions": [{
-                "name": "录像", "type": "camera_record", "device_id": "cam-1",
-                "scheduled_at": instant, "params": {"type": "video"},
-                "policy": {"max_delay_ms": 5000},
-            }],
-        }), ResultCatalog(), CommandMode.RUN, _NOW), new_operation_key(), owned)
-        assert accepted.kind is DbOutcomeKind.COMPLETED, accepted.error
-        action_id, = owned.connection.execute(
-            "SELECT id FROM actions"
-        ).fetchone()
-        scheduling = SchedulingRepository()
-        for save, request in (
-            (scheduling.observe_window, ObserveWindowRequest(action_id, _NOW, _NOW)),
-            (scheduling.start_action, StartActionRequest(action_id, _NOW, _NOW)),
-        ):
-            receipt = save(request, new_operation_key(), owned)
-            assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-        activity_id, = owned.connection.execute(
-            "SELECT id FROM device_activities WHERE action_id=?", (action_id,),
-        ).fetchone()
-        runtime = (await _configured(owned, StartDriver(returned("operation", "start_confirmed", activity_id))))
-        runtime.evidence = RESULT_EVIDENCE
-        runtime.stop_config = replace(
-            runtime.stop_config, timeout_s=Decimal("0.125"), retry_interval_s=Decimal("1"),
-        )
-        await capture_handler("camera_record")(action_id, runtime)
-        assert owned.connection.execute(
-            "SELECT check_decision,repair_state,source_device_file_id"
-            " FROM recording_processing WHERE action_id=?", (action_id,),
-        ).fetchone() == (1, 1, None)
-        runtime.results = ResultsDouble({action_id: (_entry("original", size=41),)})
-        return owned, runtime, action_id, activity_id
-    except BaseException:
-        owned.connection.close()
-        raise
+async def _recording_consumer(tmp_path, case):
+    owned, runtime, wall, mono = await _ready(tmp_path, case, 3, max_delay_ms=5000)
+    action_id = case.aid
+    activity_id, = owned.connection.execute('SELECT id FROM device_activities').fetchone()
+    assert owned.connection.execute(
+        'SELECT check_decision,repair_state,source_device_file_id FROM recording_processing WHERE action_id=?',
+        (action_id,)).fetchone() == (1, 1, None)
+    case.options['results'].files_by_action[activity_id] = (_entry('original', size=41),)
+    return owned, runtime, action_id, activity_id
 
 
 def _confirmed_stop_error(activity_id):
@@ -377,23 +362,21 @@ def _assert_confirmed_stop_error(owned, action_id, activity_id, occurred_at):
 
 
 @pytest.mark.parametrize("elapsed_s", [60, 75])
-async def test_recovered_control_uses_failed_confirmed_stop_original_time(tmp_path, elapsed_s):
-    owned, runtime, action_id, activity_id = await _recording_consumer(tmp_path)
+async def test_recovered_control_uses_failed_confirmed_stop_original_time(tmp_path, start_case, elapsed_s):
+    owned, runtime, action_id, activity_id = await _recording_consumer(tmp_path, start_case)
     try:
         returned_at = _NOW + elapsed_s * 1_000_000
-        runtime.wall_us = lambda: returned_at
-        runtime.monotonic_ns = lambda: _ANCHOR + elapsed_s * 1_000_000_000
+        start_case.wall[0] = returned_at
+        start_case.mono[0] = _ANCHOR + elapsed_s * 1_000_000_000
         stopper = ReturnedCall(_confirmed_stop_error(activity_id))
-        runtime.stopper = stopper
-        await _stop_call(runtime, runtime.action(action_id))
+        start_case.stopper.delegate = stopper
+        await _save_actual_stop(runtime, action_id)
         original = _saved_consumer_stop(owned, action_id)
         _assert_confirmed_stop_error(owned, action_id, activity_id, returned_at)
 
-        runtime.recording_state = SessionRecordingState(runtime)
-        runtime.wall_us = lambda: _NOW + 200_000_000
-        runtime.monotonic_ns = lambda: 1_000_000_000
-        # 媒体端口未装配；多录决定保存后等待后续具备媒体能力的会话。
-        runtime.media = None
+        start_case.wall[0] = _NOW + 200_000_000
+        start_case.mono[0] = 1_000_000_000
+        runtime = await _with_limit(start_case, owned, 3, cold=True)
         await capture_handler("camera_record")(action_id, runtime)
 
         decision, check_basis, repair, repair_basis = owned.connection.execute(
@@ -424,27 +407,18 @@ async def test_recovered_control_uses_failed_confirmed_stop_original_time(tmp_pa
 
 @pytest.mark.parametrize("confirmation_saved_before_entry", [False, True])
 async def test_winddown_saves_progress_once_after_failed_confirmed_stop(
-        tmp_path, confirmation_saved_before_entry):
-    owned, runtime, action_id, activity_id = await _recording_consumer(tmp_path)
+        tmp_path, start_case, monkeypatch, confirmation_saved_before_entry):
+    owned, runtime, action_id, activity_id = await _recording_consumer(tmp_path, start_case)
     try:
         returned_at = _NOW + 60_000_000
-        runtime.wall_us = lambda: returned_at
-        runtime.monotonic_ns = lambda: _ANCHOR + 60_000_000_000
+        start_case.wall[0] = returned_at
+        start_case.mono[0] = _ANCHOR + 60_000_000_000
         stopper = ReturnedCall(_confirmed_stop_error(activity_id))
-        runtime.stopper = stopper
+        start_case.stopper.delegate = stopper
         if confirmation_saved_before_entry:
-            await _stop_call(runtime, runtime.action(action_id))
-        runtime.recording_state = SessionRecordingState(runtime)
-        sessions = create_autospec(DriverReadSessions, instance=True)
-        tools = create_autospec(MediaTools, instance=True)
-        sessions.open_session.side_effect = AssertionError("受限会话不能读取媒体输入")
-        tools.probe.side_effect = AssertionError("受限会话不能检查媒体")
-        tools.repair.side_effect = AssertionError("受限会话不能修复媒体")
-        runtime.media = MediaFlow(
-            owned=owned, roots=BoundDirectories(staging=tmp_path), sessions=sessions,
-            tools=tools, policy=MediaPolicy(repair_margin_s=Decimal("10")),
-            occurred_at=runtime.wall_us, digest_supported=False,
-        )
+            await _save_actual_stop(runtime, action_id)
+        sessions, tools = _declare_media(start_case, monkeypatch)
+        runtime = await _with_limit(start_case, owned, 3, cold=True)
 
         step = await advance_winddown(
             action_id, runtime, {}, wait_cap_s=Decimal("0"), sleep=_no_retry_sleep,
@@ -461,7 +435,7 @@ async def test_winddown_saves_progress_once_after_failed_confirmed_stop(
         assert json.loads(row[2]) == {"reason": 2, "target_duration_ms": 60000}
         assert row[3] == 1 and row[4] is not None
         assert row[5:] == (3, action_id)
-        assert runtime.action(action_id)["status"] == 2
+        assert (await runtime.action(action_id))["status"] == 2
         assert owned.connection.execute(
             "SELECT activity_state,occupancy_state FROM device_activities WHERE id=?", (activity_id,),
         ).fetchone() == (3, 2)
@@ -469,26 +443,46 @@ async def test_winddown_saves_progress_once_after_failed_confirmed_stop(
         assert owned.connection.execute("SELECT COUNT(*) FROM file_copies").fetchone() == (0,)
         assert len(stopper.calls) == 1
         _assert_confirmed_stop_error(owned, action_id, activity_id, returned_at)
-        sessions.open_session.assert_not_awaited()
+        sessions.open_read.assert_not_awaited()
         tools.probe.assert_not_awaited()
         tools.repair.assert_not_awaited()
     finally:
         owned.connection.close()
 
 
-async def test_actual_stop_confirmation_survives_the_call_error(tmp_path):
-    owned = _world(tmp_path)
+async def test_actual_stop_confirmation_survives_the_call_error(tmp_path, start_case):
+    owned, runtime, _wall, _mono = await _ready(tmp_path, start_case, 1)
     try:
-        runtime, _wall, _mono = await _ready(owned, 1)
-        stopper = ReturnedCall(_outcome("stop", confirmed=True))
-        runtime.stopper = stopper
-        await _stop_call(runtime, runtime.action(12))
+        stopper = ReturnedCall(_confirmed_stop_error(1))
+        start_case.stopper.delegate = stopper
+        await _save_actual_stop(runtime, start_case.aid)
         attempt, = _stop_attempts(owned)
         assert attempt[3:5] == (3, 3)
         assert json.loads(attempt[7])["code"] == "transport_timeout"
         assert _stop_run(owned)[1] == 3
         # 实际停止确认与调用错误分别保存，错误不抹去已取得的确认。
-        state = runtime.recording_state.recording_state(12)
-        assert state.stop_confirmed and state.file_complete_guaranteed
+        assert owned.connection.execute("SELECT activity_state FROM device_activities WHERE action_id=1").fetchone() == (3,)
     finally:
         owned.connection.close()
+
+
+def _declare_media(case, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from camctl.bootstrap.capture_assembly import HostMediaTools
+    from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverStatus
+    from camctl.devices.ports import DriverDeclaration, ReadDriver
+    sessions = create_autospec(ReadDriver, instance=True)
+    sessions.open_read.side_effect = AssertionError('受限会话不能读取媒体输入')
+    tools = SimpleNamespace(probe=AsyncMock(side_effect=AssertionError('受限会话不能检查媒体')),
+        repair=AsyncMock(side_effect=AssertionError('受限会话不能修复媒体')))
+    monkeypatch.setattr(HostMediaTools, 'probe', tools.probe)
+    monkeypatch.setattr(HostMediaTools, 'repair', tools.repair)
+    driver = case.options['driver']
+    ports = SimpleNamespace(control=driver.control, stop=case.stopper.stop, open_read=sessions.open_read)
+    declaration = DriverDeclaration(control_supported=True, stop_supported=True, query_supported=False,
+        result_supported=False, read_supported=True, digest_supported=False, delete_supported=False)
+    case.options['drivers'] = DriverRegistry((DriverEntry('camctl-adb', ports, declaration,
+        case.options['evidence'], DriverStatus.SOFTWARE_CONTRACT_VERIFIED),))
+    case.options['media_enabled'] = True
+    return sessions, tools
