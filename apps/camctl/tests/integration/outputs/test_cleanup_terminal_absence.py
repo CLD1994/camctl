@@ -222,81 +222,54 @@ async def test_partial_file_facts_only_write_actual_changes(environment, partial
 
 @pytest.mark.parametrize("fault", ["rollback", "commit_before", "commit_after"])
 async def test_handoff_original_application_survives_save_failure_and_factory_rebuild(
-    environment, fault, capture_resources
+    environment, fault, capture_resources, monkeypatch
 ):
-    (_, action_id), (owned, context, runtime, _, item_id) = await _terminal(environment)
+    (_, action_id), (owned, context, previous, _, item_id) = await _terminal(environment)
     from .test_cleanup_query_commit_recovery import _CommitFaultConnection
     from camctl.persistence.models import DbOutcome
     from sqlite3 import OperationalError
+    import asyncio
 
-    class Fault(OutputsRepository):
-        def __init__(self):
-            self.enabled = True
-            self.calls = []
-            self.cancel_once = False
-
-        def handoff_cleanup_absence(self, request, key, owned):
-            self.calls.append((request, key))
-            if self.cancel_once:
-                self.cancel_once = False
-                import asyncio
-
-                raise asyncio.CancelledError
-            if self.enabled:
-                if fault == "rollback":
-                    return DbOutcome(
-                        DbOutcomeKind.ROLLED_BACK,
-                        error=OperationalError("原交接确认回滚"),
-                    )
-                owned = replace(
-                    owned,
-                    connection=_CommitFaultConnection(
-                        owned.connection, after_commit=fault == "commit_after"
-                    ),
-                )
-            return super().handoff_cleanup_absence(request, key, owned)
-
-    port = Fault()
-    runtime.outputs = port
-    runtime.pending_saves.clear()
+    enabled, cancel_once, calls = [True], [False], []
+    actual = OutputsRepository.handoff_cleanup_absence
+    def handoff(repository, request, key, current):
+        calls.append((request, key))
+        if cancel_once[0]:
+            cancel_once[0] = False
+            raise asyncio.CancelledError
+        if enabled[0]:
+            if fault == "rollback":
+                return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=OperationalError("原交接确认回滚"))
+            current = replace(current, connection=_CommitFaultConnection(
+                current.connection, after_commit=fault == "commit_after"))
+        return actual(repository, request, key, current)
+    monkeypatch.setattr(OutputsRepository, 'handoff_cleanup_absence', handoff)
+    pending = {}
+    runtime = await session_cleanup_assembly(devices={}, drivers=DriverRegistry(),
+        max_delete_attempts=1, max_query_attempts=1, pending_saves=pending,
+        occurred_at=lambda: _NOW + 4)(previous.database)
     original = _facts(owned, item_id, action_id)
     assert (await delete_source_file(runtime, item_id)).phase == "result_rejected"
-    request, key = port.calls[0]
-    # 保存边界的控制取消不会换掉原文件事实申请。
+    request, key = calls[0]
     from ..support.database import database_path
     database = await capture_resources.restart_database(database_path(owned))
     owned.connection.close()
     fresh = context.open_connection()
     try:
-        resumed = await session_cleanup_assembly(
-            devices={},
-            drivers=DriverRegistry(),
-            max_delete_attempts=1,
-            max_query_attempts=1,
-            pending_saves=runtime.pending_saves,
-            occurred_at=lambda: _NOW + 999,
-        )(database)
-        port.enabled = False
-        port.cancel_once = True
-        resumed.outputs = port
-        import asyncio
-
+        resumed = await session_cleanup_assembly(devices={}, drivers=DriverRegistry(),
+            max_delete_attempts=1, max_query_attempts=1, pending_saves=pending,
+            occurred_at=lambda: _NOW + 999)(database)
+        enabled[0], cancel_once[0] = False, True
         with pytest.raises(asyncio.CancelledError):
             await advance_cleanup(resumed)
-        assert runtime.pending_saves
+        assert pending
         await advance_cleanup(resumed)
-        assert port.calls[1] == port.calls[2] == (request, key)
-        assert not runtime.pending_saves
+        assert calls[:3] == [(request, key)] * 3
+        assert not pending
         assert fresh.connection.execute(
-            "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?",
-            (str(key),),
-        ).fetchone() == (1,)
-        assert (
-            fresh.connection.execute(
-                "SELECT * FROM cleanup_items WHERE id=?", (item_id,)
-            ).fetchone()
-            == original[1]
-        )
+            "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?", (str(key),)).fetchone() == (1,)
+        assert fresh.connection.execute(
+            "SELECT * FROM cleanup_items WHERE id=?", (item_id,)).fetchone() == original[1]
     finally:
         fresh.connection.close()
 
