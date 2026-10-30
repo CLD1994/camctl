@@ -388,12 +388,14 @@ async def test_large_window_releases_overflow_once_and_keyset_pages_do_not_resca
 
 async def _finish_many(owned, count, *, action_id=1):
     import time
-    from camctl.capture.dispatch import dispatch_ready, ready_capture_actions
+    from camctl.capture.handlers import capture_handler
     from camctl.capture.results import FileKind
     from camctl.contracts.values import new_operation_key
     from camctl.persistence.models import DbOutcomeKind
     from camctl.persistence.repositories.scheduling import SchedulingRepository, StartActionRequest
-    from .test_report_scope import _ActivityDriver, _runtime
+    from .test_report_scope import _ActivityDriver, _PAGE_EVIDENCE
+    from ..support.capture import capture_runtime
+    from camctl.capture.timelapse import CaptureWaitConfig
     from ..capture.test_capture_contract import ResultsDouble, _entry
     now = int(time.time() * 1_000_000)
     started = SchedulingRepository().start_action(StartActionRequest(action_id, now, now), new_operation_key(), owned)
@@ -401,11 +403,12 @@ async def _finish_many(owned, count, *, action_id=1):
     from camctl.persistence.repositories.scheduling import StartOutcome
     assert started.value.outcome is StartOutcome.STARTED, started.value
     activity_id = owned.connection.execute('SELECT id FROM device_activities WHERE action_id=?', (action_id,)).fetchone()[0]
-    async with _runtime(owned) as runtime:
-        runtime.driver = _ActivityDriver(activity_target=str(activity_id))
-        runtime.results = ResultsDouble({activity_id: tuple(_entry(f'photo-{action_id}-{index}', kind=FileKind.PHOTO) for index in range(count))})
-        dispatched = await dispatch_ready(runtime, ready_capture_actions(owned.connection, now))
-        assert all(not isinstance(outcome, BaseException) for _, outcome in dispatched), dispatched
+    runtime = await capture_runtime(
+        owned, driver=_ActivityDriver(activity_target=str(activity_id)), evidence=_PAGE_EVIDENCE,
+        results=ResultsDouble({activity_id: tuple(_entry(f'photo-{action_id}-{index}', kind=FileKind.PHOTO) for index in range(count))}),
+        wall_us=lambda: int(time.time() * 1_000_000), monotonic_ns=time.monotonic_ns,
+        wait_config=lambda params: CaptureWaitConfig(target_duration_ms=600_000, driver_margin_ms=0))
+    await capture_handler("camera_take_photo")(action_id, runtime)
     assert owned.connection.execute('SELECT COUNT(*) FROM outputs WHERE source_action_id=?', (action_id,)).fetchone()[0] == count
 
 
