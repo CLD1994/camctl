@@ -286,7 +286,7 @@ async def _retry_original_actual(world, item_id, request, actual, calls, saves, 
     before = list(world.channel.operations)
     rejected.clear()
     runtime = await _factory(world)(world.owned)
-    await delete_source_file(runtime, item_id)
+    await advance_cleanup(runtime)
     assert len(calls) == 1 and len(saves) == 2 and saves[0] == saves[1]
     assert not after_actual_reads and world.channel.operations == before
     saved = saved_cleanup_attempt(world.owned, request.ticket,
