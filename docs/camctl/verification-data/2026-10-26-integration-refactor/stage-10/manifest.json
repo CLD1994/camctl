@@ -1,0 +1,208 @@
+{
+  "schema": "camctl-stage-10-evidence-v1",
+  "created_utc": "2026-10-30T12:10:03Z",
+  "meaning": "保存公开 SQLite 报告分页观测的单次43项结果、精确测试源快照和该文件差异；这不是另一次主树测试，也不表示同一文件其他私有边界或故障分区已经迁移。",
+  "workspace": {
+    "path": "/tmp/camctl-resume-20261030/archive-stage10",
+    "branch": "docs/resume-evidence-stage10-20261030",
+    "base_head": "ed671b11e0d3cf4096a8b8560febd1970d6f6655",
+    "only_stage10_written": true,
+    "initially_clean": true
+  },
+  "run_group": {
+    "id": "report-public-sqlite-43",
+    "kind": "pytest_run",
+    "source_root": "/tmp/camctl-resume-20261030/evidence/history-cost-audit/report-public-sqlite-1",
+    "source_head": "c5a257769449bd0d109b8d709f66f3abe6879325",
+    "dirty_source_paths": [
+      "apps/camctl/tests/integration/history/test_report_selection.py"
+    ],
+    "run_identity": {
+      "pid": 73504,
+      "exit_code": 0,
+      "wall_seconds": 55.40302840099321
+    },
+    "scope": {
+      "argv": [
+        "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+        "-m",
+        "pytest",
+        "apps/camctl/tests/integration/history/test_report_selection.py",
+        "-q",
+        "-s",
+        "--basetemp",
+        "/tmp/camctl-resume-20261030/evidence/history-cost-audit/report-public-sqlite-1/temp",
+        "--junitxml",
+        "/tmp/camctl-resume-20261030/evidence/history-cost-audit/report-public-sqlite-1/result.xml"
+      ],
+      "cwd": "/tmp/camctl-resume-20261030/history-cost-audit",
+      "pythonpath": "/tmp/camctl-resume-20261030/history-cost-audit/apps/camctl/src:/tmp/camctl-resume-20261030/history-cost-audit/apps/camctl/tests",
+      "import": "/tmp/camctl-resume-20261030/history-cost-audit/apps/camctl/src/camctl/__init__.py"
+    },
+    "run_source_sha256": {
+      "apps/camctl/tests/integration/history/test_report_selection.py": "8248ed499e195b2671abb3726e09dd63c22317b2ceb282ea05f7d80ebb873f0b"
+    },
+    "result": {
+      "junit_tests": 43,
+      "passed": 43,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "suite_time_seconds": 54.723,
+      "testcase_time_seconds_sum": 54.509,
+      "junit_suite_count": 1,
+      "junit_testcase_count": 43,
+      "pytest_log_summary": "43 passed in 54.72s",
+      "pytest_log_reported_seconds": 54.72,
+      "wall_seconds": 55.40302840099321
+    },
+    "interpretation": "该43项来自 c5a257769449bd0d109b8d709f66f3abe6879325 基线加一个 dirty 目标测试文件的作者工作树；归档没有运行测试。"
+  },
+  "source_snapshot": {
+    "commit": "5a4c6061470756fdafbd6550dc1337bda5d4b8c8",
+    "path": "apps/camctl/tests/integration/history/test_report_selection.py",
+    "sha256": "8248ed499e195b2671abb3726e09dd63c22317b2ceb282ea05f7d80ebb873f0b",
+    "materialized_with": "git show 5a4c6061470756fdafbd6550dc1337bda5d4b8c8:apps/camctl/tests/integration/history/test_report_selection.py",
+    "matches_process_json_sha256": true
+  },
+  "change_patch": {
+    "from": "c5a257769449bd0d109b8d709f66f3abe6879325",
+    "to": "5a4c6061470756fdafbd6550dc1337bda5d4b8c8",
+    "path_scope": [
+      "apps/camctl/tests/integration/history/test_report_selection.py"
+    ],
+    "changed_paths": [
+      "apps/camctl/tests/integration/history/test_report_selection.py"
+    ],
+    "insertions": 47,
+    "deletions": 26,
+    "sha256": "b4d0231ca9dbbd187eaacc8415bd76322bfd56674a1e1f8a5764ece9bfd99cd8",
+    "meaning": "由 Git 对两个提交执行单文件 diff 生成；完整范围的 name-only 核对仅返回此测试文件。"
+  },
+  "root_integration_identity": {
+    "commit": "4b607a8b79e732562d3cf6bdc9374762aeafab3e",
+    "source_tree": "9c2b982aa4050c25646e40b6500ebad3a84a8661",
+    "tests_tree": "8aa2d1537d87f2efbfefb508a9aacf816b769fb8",
+    "matches_author_5a4c6061_source_tree": true,
+    "matches_author_5a4c6061_tests_tree": true,
+    "main_tree_pytest_run_in_this_evidence": false,
+    "scope_note": "树身份相同不等于 root 在主树另跑了该命令；本次只记录作者工作树中的43项运行。"
+  },
+  "observation_boundary": {
+    "uri_begin_observation": "测试中的 _QueryProbe 对 sqlite3.connect 做局部 monkeypatch，只在 database 参数等于 repository.path.resolve().as_uri()+\"?mode=ro\" 且 uri=True 时注入 ObservedConnection；观测从该连接首次精确 execute(\"BEGIN\") 时附加 trace、progress 与 row factory。它记录匹配该 URI/BEGIN 的连接行为，不是 HistoryRepository 的稳定公开观测端口，也不能外推到等价但不同的 URI 参数、连接工厂或事务启动形式。",
+    "remaining_internal_contracts": "test_report_selection.py 仍访问 selection._cache、monkeypatch 私有 _CACHE_LIMIT，并在其他失败节点替换 repository._connect；这些缓存限制、故障注入和其它内部目标没有因本次43项通过而迁移或完成。",
+    "query_detail": "本节点仍观察 report_entity_changes、显式索引名称、SQL 文本、EXPLAIN QUERY PLAN 与 SQLite VM 步数。它支持本次文件中的分页/资源观察，不证明所有旧目标均已成为纯公开契约测试。"
+  },
+  "timing_semantics": {
+    "suite_time_seconds": "JUnit testsuite time 属性。",
+    "testcase_time_seconds_sum": "所有 testcase time 属性之和。",
+    "pytest_log_reported_seconds": "pytest.log 最后一行报告的时间。",
+    "wall_seconds": "process.json 记录的外层进程墙钟。"
+  },
+  "archive": {
+    "format": "gzip",
+    "gzip_mtime_seconds": 0,
+    "compression_level": 9,
+    "all_raw_sha256_and_compressed_sha256_verified": true,
+    "decompression_byte_identity_verified": true,
+    "json_and_xml_parsed_after_decompression": true,
+    "tests_run_by_archiver": false,
+    "database_copied": false,
+    "source_test_file_taken_from_git_object_not_dirty_worktree": true
+  },
+  "summary": {
+    "payload_count": 5,
+    "uncompressed_bytes_total": 40071,
+    "compressed_bytes_total": 9559,
+    "pytest_passed": 43,
+    "pytest_failed": 0,
+    "pytest_skipped": 0
+  },
+  "payloads": [
+    {
+      "archive_path": "run/process.json.gz",
+      "original_name": "process.json",
+      "source_path": "/tmp/camctl-resume-20261030/evidence/history-cost-audit/report-public-sqlite-1/process.json",
+      "role": "run process receipt",
+      "raw_bytes": 1076,
+      "raw_sha256": "e0352154a32f67b5f67300249bb0781f93391892d7b85716cbe0a946de566c5d",
+      "gzip_bytes": 427,
+      "gzip_sha256": "ea85a9c92352fe4724219b8737ea9a8a2b28bdb710ef08a1e25662e3acd2b6f7",
+      "gzip_mtime_seconds": 0,
+      "source_stat": {
+        "size_bytes": 1076,
+        "mtime_ns": 1793361867139845032
+      },
+      "raw_bytes_match_source": true
+    },
+    {
+      "archive_path": "run/log.gz",
+      "original_name": "log",
+      "source_path": "/tmp/camctl-resume-20261030/evidence/history-cost-audit/report-public-sqlite-1/log",
+      "role": "pytest log output",
+      "raw_bytes": 1908,
+      "raw_sha256": "5e6c8f3255f96a65f04878576e60757f2f5d03524b778acad76d5dcf5e3bbac1",
+      "gzip_bytes": 495,
+      "gzip_sha256": "c3dbc9e5b6bd7e9a311e003d23537a898a3a21b618a1064f8b2dcb1e5bcd5679",
+      "gzip_mtime_seconds": 0,
+      "source_stat": {
+        "size_bytes": 1908,
+        "mtime_ns": 1793361867030049755
+      },
+      "raw_bytes_match_source": true
+    },
+    {
+      "archive_path": "run/result.xml.gz",
+      "original_name": "result.xml",
+      "source_path": "/tmp/camctl-resume-20261030/evidence/history-cost-audit/report-public-sqlite-1/result.xml",
+      "role": "JUnit result",
+      "raw_bytes": 7680,
+      "raw_sha256": "fd9e965947a636ea463099d6da777efae88704183e8e53e8a761d5fecb68fd7e",
+      "gzip_bytes": 1011,
+      "gzip_sha256": "d97f62b2afb02f8008c8e07f7349abf9bedd5b785eac45e0da177153ce2fc848",
+      "gzip_mtime_seconds": 0,
+      "source_stat": {
+        "size_bytes": 7680,
+        "mtime_ns": 1793361866980137807
+      },
+      "raw_bytes_match_source": true
+    },
+    {
+      "archive_path": "source/test_report_selection.py.gz",
+      "original_name": "stage10-test_report_selection.py",
+      "source_path": "git-object:5a4c6061470756fdafbd6550dc1337bda5d4b8c8:apps/camctl/tests/integration/history/test_report_selection.py",
+      "role": "target test source from Git object 5a4c6061470756fdafbd6550dc1337bda5d4b8c8",
+      "raw_bytes": 24254,
+      "raw_sha256": "8248ed499e195b2671abb3726e09dd63c22317b2ceb282ea05f7d80ebb873f0b",
+      "gzip_bytes": 5911,
+      "gzip_sha256": "d1ae040ff0d10d4d60f6c1ead9a167c8f7b9055db6d631fe7a1141e7b0633bb0",
+      "gzip_mtime_seconds": 0,
+      "source_stat": {
+        "size_bytes": 24254,
+        "mtime_ns": 1793362148945439401
+      },
+      "raw_bytes_match_source": true
+    },
+    {
+      "archive_path": "source/c5a-to-5a-test_report_selection.patch.gz",
+      "original_name": "stage10-c5a-to-5a-test_report_selection.patch",
+      "source_path": "git-diff:c5a257769449bd0d109b8d709f66f3abe6879325..5a4c6061470756fdafbd6550dc1337bda5d4b8c8 -- apps/camctl/tests/integration/history/test_report_selection.py",
+      "role": "git diff patch from c5a257769449bd0d109b8d709f66f3abe6879325 to 5a4c6061470756fdafbd6550dc1337bda5d4b8c8, limited to the target test file",
+      "raw_bytes": 5153,
+      "raw_sha256": "b4d0231ca9dbbd187eaacc8415bd76322bfd56674a1e1f8a5764ece9bfd99cd8",
+      "gzip_bytes": 1715,
+      "gzip_sha256": "3fd601ef4e5776abf6736bb5a57c210389d2ba96b4423236cdd5550dcff6d588",
+      "gzip_mtime_seconds": 0,
+      "source_stat": {
+        "size_bytes": 5153,
+        "mtime_ns": 1793362148945439401
+      },
+      "raw_bytes_match_source": true
+    }
+  ],
+  "limitations": [
+    "URI/BEGIN observation only attaches to the exact URI and exact first BEGIN matching described above.",
+    "_cache/_CACHE_LIMIT and the existing private connection failure injection remain outside this migration evidence.",
+    "The root integration commit has matching source/tests tree identities, but this package contains no separate main-tree pytest result."
+  ]
+}
