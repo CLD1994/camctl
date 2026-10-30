@@ -8,7 +8,6 @@ import pytest
 from pathlib import Path
 
 from camctl.capture.files import FileCompletionSave, OwnershipSave
-from camctl.capture.handlers import _finish_listing_result, _listing_round, _register_listing
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.contracts.history_values import TransactionRange
 from camctl.history.validators import EventContext, EventValidationError, validate_event
@@ -19,16 +18,32 @@ from camctl.persistence.repositories.history import HistoryRepository
 from camctl.persistence.transaction import event_envelope, row_facts, update_change
 
 from .test_record_file_completion_wait import (
-    _completed_result, _completion, _result_port, _stop_context, _wait_world,
+    _completed_result, _completion, _stop_context,
 )
+from .result_consumer_fixtures import result_driver
+from ..support.result_cases import result_case, result_case_for, current_result_ticket
+from camctl.capture.handlers import capture_handler
+from camctl.persistence.repositories.capture import CaptureRepository
+from camctl.capture.recovery import RecoveryBoundary
+from camctl.devices.evidence import EvidenceContract
+from .test_record_file_completion_wait import WaitCatalog, _REGISTRY
 from .test_result_page_history import _entry
-from .test_result_file_fact_saves import FileFactFault, FileFactSpy
+from .test_result_file_fact_saves import FileFactSpy
 
 pytestmark = pytest.mark.asyncio
 
 
+class _PageSaved(Exception):
+    pass
+
+
 async def _page_world(tmp_path, *, completion_changes=None, entry_changes=None, error=None):
-    owned, runtime, action_id, _ = await _wait_world(tmp_path)
+    case = result_case_for()
+    owned, runtime, action_id, handler = await case.world(
+        tmp_path, "record", catalog=WaitCatalog(),
+        assembly_options={"check_config": AttemptConfig(3, Decimal("10"), Decimal("2"))},
+        evidence_contracts=(_REGISTRY.contract("results_returned", 1),
+            EvidenceContract("adb_foreground_recovery", 1, "result", frozenset())))
     context = _stop_context(owned, action_id)
     entry = {**_entry("a"), **(entry_changes or {})}
 
@@ -37,11 +52,20 @@ async def _page_world(tmp_path, *, completion_changes=None, entry_changes=None, 
             finalized=error is None, error=error,
             completion=_completion(context, **(completion_changes or {})))
 
-    driver = _result_port(runtime, read)
-    listing = await _listing_round(runtime, action_id)
-    saved = runtime.capture.read_last_result_page(listing.ticket, owned)
+    driver = result_driver(case, side_effect=read)
+    original = CaptureRepository.save_result_page
+    def stop_after_page(repository, request, key, current):
+        receipt = original(repository, request, key, current)
+        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+        return replace(receipt, handoff_error=_PageSaved())
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(CaptureRepository, "save_result_page", stop_after_page)
+        with pytest.raises(_PageSaved):
+            await capture_handler(handler)(action_id, runtime)
+    ticket = current_result_ticket(owned, action_id)
+    saved = CaptureRepository().read_last_result_page(ticket, owned)
     file_id = dict(saved.file_ids)[entry["identity"]]
-    return owned, runtime, action_id, context, entry, driver, listing, saved, file_id
+    return owned, runtime, action_id, context, entry, driver, ticket, saved, file_id
 
 
 def _completion_command(file_id, context, entry, saved, **changes):
@@ -62,7 +86,7 @@ def _own(owned, runtime, action_id, file_id, entry, saved):
 async def test_registered_wait_record_file_keeps_assumption_basis_and_original_sources(tmp_path):
     owned, runtime, action_id, context, entry, driver, listing, saved, file_id = await _page_world(tmp_path)
     try:
-        _register_listing(runtime, action_id, listing)
+        await capture_handler("camera_record")(action_id, runtime)
         facts = row_facts(owned.connection, "device_files", file_id)
         assert facts["completion_state"] == 3 and facts["size_bytes"] == 50
         assert facts["completion_evidence_json"] == {
@@ -84,7 +108,7 @@ async def test_page_error_preserves_already_complete_single_file_with_completed_
     owned, runtime, action_id, context, entry, _, listing, saved, file_id = await _page_world(
         tmp_path, error=ErrorValue("metadata_failed", "result", {"path": "/DCIM/b.mp4"}))
     try:
-        _register_listing(runtime, action_id, listing)
+        await capture_handler("camera_record")(action_id, runtime)
         facts = row_facts(owned.connection, "device_files", file_id)
         assert facts["completion_state"] == 3
         assert facts["completion_evidence_json"] == _completion_command(
@@ -94,30 +118,32 @@ async def test_page_error_preserves_already_complete_single_file_with_completed_
 
 
 async def test_completed_file_keeps_current_entry_page_and_actual_original_wait_page(tmp_path):
-    owned, runtime, action_id, _ = await _wait_world(tmp_path)
-    runtime.check_config = AttemptConfig(3, Decimal("10"), Decimal("0"))
+    case = result_case_for()
+    owned, runtime, action_id, handler = await case.world(
+        tmp_path, "record", catalog=WaitCatalog(),
+        assembly_options={"check_config": AttemptConfig(3, Decimal("10"), Decimal("0"))},
+        evidence_contracts=(_REGISTRY.contract("results_returned", 1),
+            EvidenceContract("adb_foreground_recovery", 1, "result", frozenset())))
     context = _stop_context(owned, action_id)
+    entry = _entry("a")
+    calls = []
 
-    async def actual_wait(request, batch):
-        return _completed_result(request.ticket, context,
-            error=ErrorValue("metadata_failed", "result", {"path": "/DCIM/a.mp4"}))
+    async def read(request, batch):
+        calls.append(request.ticket)
+        if len(calls) == 1:
+            return _completed_result(request.ticket, context,
+                error=ErrorValue("metadata_failed", "result", {"path": "/DCIM/a.mp4"}))
+        original = CaptureRepository().read_last_result_page(calls[0], owned)
+        return _completed_result(request.ticket, context, entries=[entry], finalized=True,
+            source_page_event_id=original.ref.event_id)
 
-    first_driver = _result_port(runtime, actual_wait)
+    driver = result_driver(case, side_effect=read)
     try:
-        first = await _listing_round(runtime, action_id)
-        _finish_listing_result(runtime, first, retry_wait=True)
-        original = runtime.capture.read_last_result_page(first.ticket, owned)
-        entry = _entry("a")
-
-        async def completed_file(request, batch):
-            return _completed_result(request.ticket, context, entries=[entry], finalized=True,
-                source_page_event_id=original.ref.event_id)
-
-        last_driver = _result_port(runtime, completed_file)
-        final = await _listing_round(runtime, action_id)
-        current = runtime.capture.read_last_result_page(final.ticket, owned)
+        await capture_handler(handler)(action_id, runtime)
+        original = CaptureRepository().read_last_result_page(calls[0], owned)
+        await capture_handler(handler)(action_id, runtime)
+        current = CaptureRepository().read_last_result_page(calls[1], owned)
         file_id = dict(current.file_ids)[entry["identity"]]
-        _register_listing(runtime, action_id, final)
         evidence = row_facts(owned.connection, "device_files", file_id)["completion_evidence_json"]
         assert evidence == _completion_command(file_id, context, entry, current).completion_evidence()
         assert evidence["result_page_event_id"] == current.ref.event_id > original.ref.event_id
@@ -125,9 +151,8 @@ async def test_completed_file_keeps_current_entry_page_and_actual_original_wait_
         assert data["file_completion_source_page_event_id"] == original.ref.event_id
         assert original.page.outcome.settlement.evidence.data["file_completion_source_page_event_id"] is None
         assert data["file_completion"] == original.page.outcome.settlement.evidence.data["file_completion"]
-        first_driver.list_results.assert_awaited_once()
-        last_driver.list_results.assert_awaited_once()
-        runtime.stopper.stop.assert_awaited_once()
+        assert driver.list_results.await_count == 2
+        case.stopper.stop.assert_awaited_once()
     finally:
         owned.connection.close()
 
@@ -354,21 +379,30 @@ async def test_original_completion_key_rejects_changed_complete_request(tmp_path
 
 @pytest.mark.parametrize("mode", ["projection", "commit_before", "commit_after"])
 async def test_wait_file_completion_fault_keeps_original_request_and_key(tmp_path, mode):
-    owned, runtime, action_id, context, entry, driver, listing, saved, file_id = await _page_world(tmp_path)
-    spy = FileFactSpy("completion")
-    proxy = FileFactFault(owned.connection, "completion", mode)
+    owned, runtime, action_id, context, entry, driver, _, saved, file_id = await _page_world(tmp_path)
+    case = result_case_for()
+    spy = FileFactSpy("completion", mode)
     runtime.capture = spy
-    runtime.owned = replace(owned, connection=proxy)
     try:
-        _register_listing(runtime, action_id, listing)
-        assert not proxy.armed
+        try:
+            await capture_handler("camera_record")(action_id, runtime)
+        except ConsistencyError:
+            pass
+        assert spy.fault is not None and not spy.fault.armed
         original, key = spy.requests[0]
         assert original.basis == 3
         assert original.result_page_event_id == saved.ref.event_id
         assert original.stop_result_event_id == context["stop_result_event_id"]
+        horizon, = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()
+        runtime = await case.reopen(owned, cold=True, assembly_options={
+            "recovery_boundary": RecoveryBoundary.HOST_LOCAL_SETTLED,
+            "recovery_max_event_id": lambda: horizon, "result_recovery": True})
+        runtime.capture = spy
+        await capture_handler("camera_record")(action_id, runtime)
+        assert len(spy.requests) >= 2
         assert all(command == original and request_key == key for command, request_key in spy.requests)
         assert row_facts(owned.connection, "device_files", file_id)["completion_evidence_json"] == original.completion_evidence()
         driver.list_results.assert_awaited_once()
-        runtime.stopper.stop.assert_awaited_once()
+        case.stopper.stop.assert_awaited_once()
     finally:
         owned.connection.close()
