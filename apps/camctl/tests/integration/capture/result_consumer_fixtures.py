@@ -203,6 +203,7 @@ async def consumer_world(
     max_delay_ms=5000,
     now_us=_NOW,
     clock=None,
+    control=None,
 ):
     """只执行本地公开事务和真实拍摄处理器，不补写历史或投影。"""
     from ..support.result_cases import CaseClock
@@ -250,8 +251,9 @@ async def consumer_world(
             assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
         activity_id, = owned.connection.execute(
             "SELECT id FROM device_activities WHERE action_id=?", (action_id,)).fetchone()
-        control = create_autospec(ControlDriver, instance=True)
-        control.control.return_value = DeviceCallResult.from_outcome(returned("operation", observation, activity_id))
+        if control is None:
+            control = create_autospec(ControlDriver, instance=True)
+            control.control.return_value = DeviceCallResult.from_outcome(returned("operation", observation, activity_id))
         from camctl.contracts.pages import Page
         from camctl.devices.directory import DirectoryRead
         from .test_baseline_prepare import Directory

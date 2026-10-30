@@ -2,22 +2,21 @@
 
 from decimal import Decimal
 import json
+from types import SimpleNamespace
 from unittest.mock import create_autospec
 
 import pytest
 
-from camctl.bootstrap.capture_assembly import DriverResultListing
 from camctl.capture.handlers import (
     advance_winddown,
     capture_handler,
 )
 from camctl.capture.models import ResultSetPhase, ResultSetSave
 from camctl.contracts.values import new_operation_key
-from camctl.devices.bindings import DeviceBinding
 from camctl.devices.evidence import DeviceObservation
-from camctl.devices.ports import DeviceCallResult, ResultDriver
+from camctl.devices.ports import ControlDriver, DeviceCallResult
 from camctl.operations.attempts import (
-    AttemptFinish, AttemptIntent, AttemptTarget, OperationKind, RunFinish, RunOutcome,
+    AttemptConfig, AttemptFinish, AttemptIntent, AttemptTarget, OperationKind, RunFinish, RunOutcome,
 )
 from camctl.operations.validation import validate_outcome
 from camctl.persistence.repositories.operations import OperationRepository
@@ -28,13 +27,15 @@ from camctl.operations.models import (
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.outputs import register_outputs_guards
 
-from .test_capture_contract import _runtime
+from ..support.capture import capture_factory
+from ..support.result_cases import CaseClock, ResultPort
+from .test_capture_contract import ResultsDouble, _NOW
 
 pytestmark = pytest.mark.asyncio
 register_outputs_guards()
 
 from .result_consumer_fixtures import (
-    CASES as _CASES, RESULT_EVIDENCE as _EVIDENCE, consumer_world as _consumer_world,
+    CASES as _CASES, RESULT_EVIDENCE as _EVIDENCE, consumer_world, result_driver, returned,
 )
 
 
@@ -53,11 +54,15 @@ def _actual(activity_id, *, with_files, complete=False):
     )
 
 
-def _result_port(runtime, actual):
-    driver = create_autospec(ResultDriver, instance=True)
-    driver.list_results.return_value = DeviceCallResult.from_outcome(actual)
-    runtime.results = DriverResultListing(driver, DeviceBinding("cam-1", "camctl-adb"), _EVIDENCE)
-    return driver
+async def _world(tmp_path, consumer):
+    clock = CaseClock(_NOW, 5_000_000_000)
+    port = ResultPort(ResultsDouble({}))
+    control = create_autospec(ControlDriver, instance=True)
+    control.control.return_value = DeviceCallResult.from_outcome(
+        returned("operation", _CASES[consumer][3], 1))
+    world = await consumer_world(tmp_path, consumer, clock=clock,
+        runtime_options={"results": port}, control=control)
+    return world, clock, port, control
 
 
 async def _consume(runtime, consumer, action_id, handler):
@@ -90,9 +95,9 @@ def _assert_actual_saved(owned, action_id, actual, *, attempts_used=1):
 @pytest.mark.parametrize("consumer", tuple(_CASES))
 @pytest.mark.parametrize("with_files", [False, True])
 async def test_real_result_consumers_save_original_outcome_and_file_input(tmp_path, consumer, with_files):
-    owned, runtime, action_id, handler = await _consumer_world(tmp_path, consumer)
+    (owned, runtime, action_id, handler), clock, port, control = await _world(tmp_path, consumer)
     actual = _actual(action_id, with_files=with_files, complete=consumer == "winddown")
-    driver = _result_port(runtime, actual)
+    driver = result_driver(SimpleNamespace(results=port, evidence=_EVIDENCE), actual)
     try:
         await _consume(runtime, consumer, action_id, handler)
 
@@ -115,7 +120,8 @@ async def test_real_result_consumers_save_original_outcome_and_file_input(tmp_pa
 
 @pytest.mark.parametrize("consumer", ["photo", "record", "cancel", "timelapse"])
 async def test_closed_result_consumers_use_saved_input_without_device_query(tmp_path, consumer):
-    owned, runtime, action_id, handler = await _consumer_world(tmp_path, consumer)
+    (owned, runtime, action_id, handler), clock, port, control = await _world(tmp_path, consumer)
+    check_config = AttemptConfig(3, Decimal("1.25"), Decimal("2"))
     actual = _actual(action_id, with_files=True, complete=True)
     try:
         # 模拟结果已可靠提交、文件登记和动作收尾尚未完成的中断。
@@ -124,17 +130,17 @@ async def test_closed_result_consumers_use_saved_input_without_device_query(tmp_
         operations = OperationRepository()
         begun = operations.begin_attempt(AttemptIntent("result", action_id,
             OperationKind.CHECK_CAPTURE_RESULTS, AttemptTarget(activity_id=activity_id),
-            None, runtime.check_config, runtime.wall_us()), new_operation_key(), owned)
+            None, check_config, clock.wall_us()), new_operation_key(), owned)
         assert begun.kind is DbOutcomeKind.COMPLETED, begun.error
         ticket = begun.value.ticket
         saved = operations.finish_attempt(AttemptFinish(ticket,
-            validate_outcome(ticket, actual, _EVIDENCE), runtime.wall_us(),
+            validate_outcome(ticket, actual, _EVIDENCE), clock.wall_us(),
             run_finish=RunFinish(RunOutcome.SUCCEEDED)), new_operation_key(), owned)
         assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
         if consumer == "timelapse":
             # 集合结论由已保存的独立正式事实提供；v1 观察不提供扫描结束依据。
             receipt = runtime.capture.confirm_result_set(ResultSetSave(
-                action_id=action_id, occurred_at=runtime.wall_us(),
+                action_id=action_id, occurred_at=clock.wall_us(),
                 phase=ResultSetPhase.UNSATISFIED, contract="task_scope_files",
                 observation={"reason": "known_failure"},
                 capture={"status": "failed", "error": {"code": "capture_failed", "stage": "execution",
@@ -143,11 +149,12 @@ async def test_closed_result_consumers_use_saved_input_without_device_query(tmp_
             ), new_operation_key(), owned)
             assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
         # 新运行时没有列举缓存，也没有旧结果对象；只能消费持久化原输入。
-        resumed = await _runtime(owned, driver=runtime.driver)
-        resumed.evidence = _EVIDENCE
-        resumed.check_config = runtime.check_config
-        resumed.wall_us = runtime.wall_us
-        driver = _result_port(resumed, actual)
+        resumed_port = ResultPort(ResultsDouble({}))
+        factory = await capture_factory(owned, driver=control, evidence=_EVIDENCE,
+            results=resumed_port, check_config=check_config, wall_us=clock.wall_us,
+            monotonic_ns=lambda: 5_000_000_000)
+        resumed = await factory(owned)
+        driver = result_driver(SimpleNamespace(results=resumed_port, evidence=_EVIDENCE), actual)
         driver.list_results.side_effect = AssertionError("本地恢复不能再次查询设备")
 
         await _consume(resumed, consumer, action_id, handler)

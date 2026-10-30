@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from support.repository_ports import repository_port
+
 from ..support.capture import capture_database, capture_runtime
 
 from camctl.acceptance.input import ParsedInput
@@ -919,13 +921,14 @@ async def test_jpeg_photo_unknown_complete_reuses_original_request_and_pair(tmp_
             self.saved = []
             self.verified = []
             self.verifier_connections = []
+            self.delegate = real
 
         def prepare_host_photo(self, *args):
-            return real.prepare_host_photo(*args)
+            return self.delegate.prepare_host_photo(*args)
 
         def save_host_photo_complete(self, request, key, current_owned):
             self.saved.append((request, key))
-            receipt = real.save_host_photo_complete(request, key, current_owned)
+            receipt = self.delegate.save_host_photo_complete(request, key, current_owned)
             assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
             current_owned.connection.execute("BEGIN").close()
             return DbOutcome(DbOutcomeKind.UNKNOWN, error=RuntimeError("模拟提交后回执丢失"))
@@ -936,12 +939,14 @@ async def test_jpeg_photo_unknown_complete_reuses_original_request_and_pair(tmp_
             self.verifier_connections.append(verifier.connection)
             assert owned.connection.in_transaction is False
             assert verifier.connection.execute("PRAGMA query_only").fetchone() == (1,)
-            return real.verify_operation(request, key, verifier)
+            return self.delegate.verify_operation(request, key, verifier)
 
     uncertain = UnknownCommittedReceipt()
-    runtime.host_capture = uncertain
     try:
-        await capture_handler("camera_take_photo")(1, runtime)
+        with repository_port(HostCaptureRepository, uncertain,
+                ("save_host_photo_complete", "verify_operation"),
+                matches=lambda _name, args, _kwargs: args[0].action_id == 1):
+            await capture_handler("camera_take_photo")(1, runtime)
         assert len(driver.requests) == 1
         assert owned.connection.execute("SELECT COUNT(*) FROM intermediate_files").fetchone() == (2,)
         assert owned.connection.execute("SELECT COUNT(*) FROM output_origins").fetchone() == (1,)
@@ -991,14 +996,15 @@ async def test_unknown_host_photo_verification_error_retains_original_request_an
         class UnknownCommittedReceipt:
             def __init__(self):
                 self.saved, self.verified = [], []
+                self.delegate = real
                 self.fail_verification = True
 
             def prepare_host_photo(self, *args):
-                return real.prepare_host_photo(*args)
+                return self.delegate.prepare_host_photo(*args)
 
             def save_host_photo_complete(self, request, key, current_owned):
                 self.saved.append((request, key))
-                receipt = real.save_host_photo_complete(request, key, current_owned)
+                receipt = self.delegate.save_host_photo_complete(request, key, current_owned)
                 assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
                 current_owned.connection.execute("BEGIN").close()
                 return DbOutcome(DbOutcomeKind.UNKNOWN, error=RuntimeError("提交回执未知"))
@@ -1007,13 +1013,15 @@ async def test_unknown_host_photo_verification_error_retains_original_request_an
                 self.verified.append((request, key))
                 if self.fail_verification:
                     raise OSError("测试仓储核实错误")
-                return real.verify_operation(request, key, verifier)
+                return self.delegate.verify_operation(request, key, verifier)
 
         uncertain = UnknownCommittedReceipt()
-        runtime.host_capture = uncertain
         try:
-            with pytest.raises(OSError, match="测试仓储核实错误"):
-                await capture_handler("camera_take_photo")(1, runtime)
+            with repository_port(HostCaptureRepository, uncertain,
+                    ("save_host_photo_complete", "verify_operation"),
+                    matches=lambda _name, args, _kwargs: args[0].action_id == 1):
+                with pytest.raises(OSError, match="测试仓储核实错误"):
+                    await capture_handler("camera_take_photo")(1, runtime)
             assert len(driver.requests) == 1
             assert len(uncertain.saved) == len(uncertain.verified) == 1
             assert uncertain.saved[0] == uncertain.verified[0]
@@ -1027,7 +1035,10 @@ async def test_unknown_host_photo_verification_error_retains_original_request_an
             ]
             assert _saved_output_rows(owned) == []
             uncertain.fail_verification = False
-            await capture_handler("camera_take_photo")(1, runtime)
+            with repository_port(HostCaptureRepository, uncertain,
+                    ("save_host_photo_complete", "verify_operation"),
+                    matches=lambda _name, args, _kwargs: args[0].action_id == 1):
+                await capture_handler("camera_take_photo")(1, runtime)
             assert len(driver.requests) == 1
             assert uncertain.saved == [uncertain.saved[0]] * 2
             assert uncertain.verified == uncertain.saved
