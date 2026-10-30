@@ -3,7 +3,6 @@
 from dataclasses import replace
 from pathlib import Path
 from sqlite3 import OperationalError
-from unittest.mock import patch
 import json
 
 import pytest
@@ -22,11 +21,23 @@ from camctl.outputs.cleanup_results import saved_cleanup_absence
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.outputs import OutputsRepository
 
+from support.repository_ports import repository_port
 from .test_cleanup_delete_save_recovery import _prepared
 from .test_cleanup_query_save_recovery import _start_cleanup, _original_member_rows
 from ..bootstrap.test_output_binding_changes import _NOW, environment
+from ..support.outputs import cleanup_factory
 
 pytestmark = pytest.mark.asyncio
+
+
+class _RejectFinish(OutputsRepository):
+    def __init__(self):
+        self.calls = []
+
+    def finish_cleanup_item(self, request, key, owned):
+        self.calls.append((request, key))
+        return DbOutcome(DbOutcomeKind.ROLLED_BACK,
+                         error=OperationalError("保存确认回滚"))
 
 
 async def _terminal(environment, *, query=False, with_error=False):
@@ -69,11 +80,11 @@ async def _terminal(environment, *, query=False, with_error=False):
             )
 
         driver.delete = failed_absence
-    with patch.object(OutputsRepository, "finish_cleanup_item", autospec=True,
-                      return_value=DbOutcome(DbOutcomeKind.ROLLED_BACK,
-                          error=OperationalError("保存确认回滚"))) as failed_save:
+    failed_save = _RejectFinish()
+    with repository_port(OutputsRepository, failed_save, ("finish_cleanup_item",),
+            matches=lambda name, args, kwargs: args[0].item_id == item_id):
         assert (await delete_source_file(runtime, item_id)).phase == "result_rejected"
-    assert failed_save.call_count == 1
+    assert len(failed_save.calls) == 1
     return _finish_original(owned, item_id), (owned, context, runtime, driver, item_id)
 
 
@@ -147,7 +158,7 @@ def _facts(owned, item_id, action_id):
 async def test_terminal_absence_is_discovered_with_no_current_ports(
     environment, query, with_error
 ):
-    (output_id, action_id), (owned, _, prior_runtime, driver, item_id) = await _terminal(
+    (output_id, action_id), (owned, context, prior_runtime, driver, item_id) = await _terminal(
         environment, query=query, with_error=with_error
     )
     from camctl.outputs.cleanup_discovery import (
@@ -160,14 +171,14 @@ async def test_terminal_absence_is_discovered_with_no_current_ports(
         "SELECT * FROM outputs WHERE id<>?", (output_id,)
     ).fetchall()
     assert extra_cleanup_settlements(owned.connection) == 1
-    assert tuple([batch async for batch in cleanup_item_batches(prior_runtime.database, batch_size=1)]) == ((item_id,),)
+    assert tuple([batch async for batch in cleanup_item_batches(context.database, batch_size=1)]) == ((item_id,),)
     runtime = await session_cleanup_assembly(
         devices={},
         drivers=DriverRegistry(),
         max_delete_attempts=1,
         max_query_attempts=1,
         occurred_at=lambda: _NOW + 4,
-    )(prior_runtime.database)
+    )(context.database)
     await advance_cleanup(runtime)
     assert _facts(owned, item_id, action_id) == original
     assert owned.connection.execute(
@@ -181,7 +192,7 @@ async def test_terminal_absence_is_discovered_with_no_current_ports(
         == sibling
     )
     assert extra_cleanup_settlements(owned.connection) == 0
-    assert tuple([batch async for batch in cleanup_item_batches(prior_runtime.database, batch_size=1)]) == ()
+    assert tuple([batch async for batch in cleanup_item_batches(context.database, batch_size=1)]) == ()
     history = tuple(owned.connection.execute("SELECT * FROM history_events"))
     await advance_cleanup(runtime)
     assert tuple(owned.connection.execute("SELECT * FROM history_events")) == history
@@ -227,7 +238,7 @@ async def test_partial_file_facts_only_write_actual_changes(environment, partial
 
 @pytest.mark.parametrize("fault", ["rollback", "commit_before", "commit_after"])
 async def test_handoff_original_application_survives_save_failure_and_factory_rebuild(
-    environment, fault, capture_resources, monkeypatch
+    environment, fault, capture_resources
 ):
     (_, action_id), (owned, context, previous, _, item_id) = await _terminal(environment)
     from .test_cleanup_query_commit_recovery import _CommitFaultConnection
@@ -235,48 +246,54 @@ async def test_handoff_original_application_survives_save_failure_and_factory_re
     from sqlite3 import OperationalError
     import asyncio
 
-    enabled, cancel_once, calls = [True], [False], []
-    actual = OutputsRepository.handoff_cleanup_absence
-    def handoff(repository, request, key, current):
-        calls.append((request, key))
-        if cancel_once[0]:
-            cancel_once[0] = False
-            raise asyncio.CancelledError
-        if enabled[0]:
-            if fault == "rollback":
-                return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=OperationalError("原交接确认回滚"))
-            current = replace(current, connection=_CommitFaultConnection(
-                current.connection, after_commit=fault == "commit_after"))
-        return actual(repository, request, key, current)
-    monkeypatch.setattr(OutputsRepository, 'handoff_cleanup_absence', handoff)
-    pending = {}
-    runtime = await session_cleanup_assembly(devices={}, drivers=DriverRegistry(),
-        max_delete_attempts=1, max_query_attempts=1, pending_saves=pending,
-        occurred_at=lambda: _NOW + 4)(previous.database)
+    class HandoffPort(OutputsRepository):
+        enabled = True
+        cancel_once = False
+        calls = []
+
+        def handoff_cleanup_absence(self, request, key, current):
+            self.calls.append((request, key))
+            if self.cancel_once:
+                self.cancel_once = False
+                raise asyncio.CancelledError
+            if self.enabled:
+                if fault == "rollback":
+                    return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=OperationalError("原交接确认回滚"))
+                current = replace(current, connection=_CommitFaultConnection(
+                    current.connection, after_commit=fault == "commit_after"))
+            return super().handoff_cleanup_absence(request, key, current)
+
+    port = HandoffPort()
+    factory = cleanup_factory(devices={}, drivers=DriverRegistry(),
+        max_delete_attempts=1, max_query_attempts=1, occurred_at=lambda: _NOW + 4)
+    runtime = await factory(context.database)
     original = _facts(owned, item_id, action_id)
-    assert (await delete_source_file(runtime, item_id)).phase == "result_rejected"
-    request, key = calls[0]
-    from ..support.database import database_path
-    database = await capture_resources.restart_database(database_path(owned))
-    owned.connection.close()
-    fresh = context.open_connection()
-    try:
-        resumed = await session_cleanup_assembly(devices={}, drivers=DriverRegistry(),
-            max_delete_attempts=1, max_query_attempts=1, pending_saves=pending,
-            occurred_at=lambda: _NOW + 999)(database)
-        enabled[0], cancel_once[0] = False, True
-        with pytest.raises(asyncio.CancelledError):
+    with repository_port(OutputsRepository, port, ("handoff_cleanup_absence",),
+            matches=lambda name, args, kwargs: args[0].item_id == item_id):
+        assert (await delete_source_file(runtime, item_id)).phase == "result_rejected"
+        request, key = port.calls[0]
+        from ..support.database import database_path
+        database = await capture_resources.restart_database(database_path(owned))
+        owned.connection.close()
+        fresh = context.open_connection()
+        try:
+            resumed = await cleanup_factory(devices={}, drivers=DriverRegistry(),
+                max_delete_attempts=1, max_query_attempts=1,
+                occurred_at=lambda: _NOW + 999)(database)
+            port.enabled, port.cancel_once = False, True
+            before_cancel = tuple(fresh.connection.iterdump())
+            with pytest.raises(asyncio.CancelledError):
+                await advance_cleanup(resumed)
+            assert port.calls[:2] == [(request, key)] * 2
+            assert tuple(fresh.connection.iterdump()) == before_cancel
             await advance_cleanup(resumed)
-        assert pending
-        await advance_cleanup(resumed)
-        assert calls[:3] == [(request, key)] * 3
-        assert not pending
-        assert fresh.connection.execute(
-            "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?", (str(key),)).fetchone() == (1,)
-        assert fresh.connection.execute(
-            "SELECT * FROM cleanup_items WHERE id=?", (item_id,)).fetchone() == original[1]
-    finally:
-        fresh.connection.close()
+            assert port.calls[:3] == [(request, key)] * 3
+            assert fresh.connection.execute(
+                "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?", (str(key),)).fetchone() == (1,)
+            assert fresh.connection.execute(
+                "SELECT * FROM cleanup_items WHERE id=?", (item_id,)).fetchone() == original[1]
+        finally:
+            fresh.connection.close()
 
 
 @pytest.mark.parametrize(
@@ -344,14 +361,14 @@ async def test_real_promoted_host_source_handoff_preserves_preview_and_original_
     from ..capture.test_host_photo_flow import _world
     from camctl.capture.handlers import capture_handler
     from camctl.bootstrap.cleanup_assembly import HostArtifacts
-    from camctl.bootstrap.work_file_assembly import WorkFileRuntime
-    from camctl.outputs.work_files import WorkFileLimits
+    from camctl.host_files.tasks import FileTaskExecutor
+    from camctl.session.supervision import Supervisor
 
     cfg, owned, driver, capture_runtime, _ = await _world(tmp_path)
     from ..support.capture import capture_database
     database = await capture_database(owned)
-    work_files = WorkFileRuntime(staging=Path(cfg.paths.staging),
-        limits=WorkFileLimits(batch_size=100, limit_per_run=100))
+    supervisor = Supervisor()
+    executor = FileTaskExecutor(supervisor)
     try:
         await capture_handler("camera_take_photo")(1, capture_runtime)
         output_id = owned.connection.execute(
@@ -362,16 +379,16 @@ async def test_real_promoted_host_source_handoff_preserves_preview_and_original_
             devices={},
             drivers=DriverRegistry(),
             staging=Path(cfg.paths.staging),
-            file_executor=work_files.executor,
+            file_executor=executor,
             max_delete_attempts=1,
             max_query_attempts=1,
             occurred_at=lambda: _NOW,
         )(database)
-        with patch.object(OutputsRepository, "finish_cleanup_item", autospec=True,
-                          return_value=DbOutcome(DbOutcomeKind.ROLLED_BACK,
-                              error=OperationalError("保存确认回滚"))) as failed_save:
+        failed_save = _RejectFinish()
+        with repository_port(OutputsRepository, failed_save, ("finish_cleanup_item",),
+                matches=lambda name, args, kwargs: args[0].item_id == item_id):
             assert (await delete_source_file(runtime, item_id)).phase == "result_rejected"
-        assert failed_save.call_count == 1
+        assert len(failed_save.calls) == 1
         _finish_original(owned, item_id)
         original = _facts(owned, item_id, action_id)
         source = _request(owned, item_id)
@@ -392,7 +409,7 @@ async def test_real_promoted_host_source_handoff_preserves_preview_and_original_
             devices={},
             drivers=DriverRegistry(),
             staging=Path(cfg.paths.staging),
-            file_executor=work_files.executor,
+            file_executor=executor,
             max_delete_attempts=1,
             max_query_attempts=1,
             occurred_at=lambda: _NOW + 4,
@@ -431,8 +448,9 @@ async def test_real_promoted_host_source_handoff_preserves_preview_and_original_
                 "result_event_id": source.result_event_id,
             }
         }
-        assert not work_files.executor.unfinished_files()
+        assert not executor.unfinished_files()
     finally:
+        await supervisor.drain_required()
         owned.connection.close()
 
 
@@ -568,69 +586,51 @@ async def test_handoff_history_replays_and_preserves_frozen_report_bytes(
 async def test_source_observation_guard_rejects_unmatched_complete_fact_proposal(
     environment, fault
 ):
+    """真实交接事件的静态守卫拒绝错误来源；不声明写事务回滚。"""
     (_, _), (owned, _, _, _, item_id) = await _terminal(environment)
-    from camctl.persistence.repositories.cleanup_absence import (
-        HandoffCleanupAbsenceCommand,
-    )
-    from camctl.persistence.transaction import commit_operation
+    from camctl.contracts.history_values import TransactionRange
+    from camctl.history.decoding import decode_event_row
+    from camctl.history.reads import ReadCoverage
+    from camctl.history.validators import EventContext, EventValidationError, validate_event
+    from camctl.persistence.transaction import row_facts
 
     request = _request(owned, item_id)
-    key = new_operation_key()
-
-    class InvalidProposal:
-        def plan(self, scope):
-            plan = HandoffCleanupAbsenceCommand(request, key).plan(scope)
-            output = plan.events[-1]
-            if fault == "source_item":
-                output = replace(
-                    output,
-                    evidence={
-                        "cleanup_result_source": {
-                            "item_id": item_id + 1,
-                            "result_event_id": request.result_event_id,
-                        }
-                    },
-                )
-            elif fault == "source_result":
-                output = replace(
-                    output,
-                    evidence={
-                        "cleanup_result_source": {
-                            "item_id": item_id,
-                            "result_event_id": request.result_event_id + 1,
-                        }
-                    },
-                )
-            elif fault == "extra_column":
-                row = output.rows[0]
-                before = dict(row.before.values, original_name="photo-1.jpg")
-                after = dict(row.after.values, original_name="other.jpg")
-                output = replace(
-                    output,
-                    rows=(
-                        replace(
-                            row,
-                            before=replace(row.before, values=before),
-                            after=replace(row.after, values=after),
-                        ),
-                    ),
-                )
-            else:
-                # 合法分配一个事件，单独的产物完成仍缺少前序文件完成。
-                scope.allocation = replace(
-                    scope.allocation, last_event_id=scope.allocation.first_event_id
-                )
-                return replace(
-                    plan,
-                    events=(replace(output, event_id=scope.allocation.first_event_id),),
-                )
-            return replace(plan, events=(*plan.events[:-1], output))
-
-    before = tuple(owned.connection.iterdump())
-    result = commit_operation(InvalidProposal(), key, owned)
-    assert result.kind == "rolled_back"
-    assert "缺席来源" in str(result.error)
-    assert tuple(owned.connection.iterdump()) == before
+    file_before = row_facts(owned.connection, "device_files", request.device_file_id)
+    result = OutputsRepository().handoff_cleanup_absence(request, new_operation_key(), owned)
+    assert result.kind is DbOutcomeKind.COMPLETED, result.error
+    raw = owned.connection.execute(
+        "SELECT id,transaction_id,event_type,event_version,occurred_at,clock_status,change_seq,body_json "
+        "FROM history_events WHERE event_type=20 ORDER BY id DESC LIMIT 1").fetchone()
+    event = decode_event_row(raw)
+    first, last = owned.connection.execute(
+        "SELECT first_event_id,last_event_id FROM history_transactions WHERE id=?",
+        (event.transaction_id,)).fetchone()
+    tables = ("outputs", "device_files", "intermediate_files", "cleanup_items",
+              "operation_runs", "operation_attempts", "actions")
+    state = {table: {identity: row_facts(owned.connection, table, identity)
+                     for (identity,) in owned.connection.execute(f"SELECT id FROM {table}")}
+             for table in tables}
+    output_id = event.rows[0].row_id
+    state["outputs"][output_id].update(event.rows[0].before.values)
+    context = EventContext(TransactionRange(event.transaction_id, first, last),
+        {("outputs", output_id): ("output", output_id)}, state,
+        read_coverage=ReadCoverage())
+    assert validate_event(event, context).envelope == event
+    if fault == "source_item":
+        event = replace(event, evidence={"cleanup_result_source": {
+            "item_id": item_id + 1, "result_event_id": request.result_event_id}})
+    elif fault == "source_result":
+        event = replace(event, evidence={"cleanup_result_source": {
+            "item_id": item_id, "result_event_id": request.result_event_id + 1}})
+    elif fault == "output_only":
+        state["device_files"][request.device_file_id] = file_before
+    else:
+        row = event.rows[0]
+        event = replace(event, rows=(replace(row,
+            before=replace(row.before, values=dict(row.before.values, original_name="photo-1.jpg")),
+            after=replace(row.after, values=dict(row.after.values, original_name="other.jpg"))),))
+    with pytest.raises(EventValidationError, match="缺席来源"):
+        validate_event(event, context)
 
 
 async def test_pending_companion_precondition_is_checked_before_terminal_file_save(
@@ -666,6 +666,7 @@ async def test_saved_unknown_then_late_absence_does_not_grant_terminal_file_hand
         EvidenceValue,
     )
     from camctl.operations.validation import validate_outcome
+    from ..bootstrap.test_output_binding_changes import _registry
 
     class SavedUnknown(OutputsRepository):
         def finish_cleanup_attempt(self, finish, key, owned):
@@ -680,7 +681,7 @@ async def test_saved_unknown_then_late_absence_does_not_grant_terminal_file_hand
             self.original_key = new_operation_key()
             original = replace(
                 finish,
-                outcome=validate_outcome(finish.ticket, actual, runtime.evidence),
+                outcome=validate_outcome(finish.ticket, actual, _registry(driver).entry("camctl-adb").evidence),
                 occurred_at=finish.occurred_at - 1,
             )
             result = super().finish_cleanup_attempt(original, self.original_key, owned)
@@ -693,8 +694,9 @@ async def test_saved_unknown_then_late_absence_does_not_grant_terminal_file_hand
             return super().finish_cleanup_attempt(finish, key, owned)
 
     port = SavedUnknown()
-    runtime.outputs = port
-    result = await delete_source_file(runtime, item_id)
+    with repository_port(OutputsRepository, port, ("finish_cleanup_attempt",),
+            matches=lambda name, args, kwargs: args[0].ticket.target_id == str(item_id)):
+        result = await delete_source_file(runtime, item_id)
     assert result.phase == "already_terminal"
     assert result.diagnostic is not None
     assert saved_cleanup_absence(owned.connection, item_id) is None
