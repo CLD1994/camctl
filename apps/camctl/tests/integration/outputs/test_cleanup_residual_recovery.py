@@ -4,6 +4,9 @@ from pathlib import Path
 
 import pytest
 
+from support.repository_ports import repository_port
+from camctl.persistence.repositories.operations import OperationRepository
+
 from camctl.bootstrap.cleanup_assembly import session_cleanup_assembly
 from camctl.devices.drivers.registry import DriverRegistry
 from camctl.outputs.cleanup_flow import advance_cleanup, delete_source_file
@@ -79,8 +82,10 @@ async def test_saved_delete_absence_handoff_precedes_current_ports(
         )
     if observation == "file_delete_presence":
         runtime = await _configured(environment, owned, driver, evidence=evidence)
-    runtime.outputs = _FaultOutputs("finish_cleanup_item", DbOutcomeKind.ROLLED_BACK)
-    assert (await delete_source_file(runtime, item_id)).phase == "result_rejected"
+    port = _FaultOutputs("finish_cleanup_item", DbOutcomeKind.ROLLED_BACK)
+    with repository_port(OutputsRepository, port, ("finish_cleanup_item",),
+                         matches=lambda _name, args, _kwargs: args[0].item_id == item_id):
+        assert (await delete_source_file(runtime, item_id)).phase == "result_rejected"
     attempts = tuple(owned.connection.execute("SELECT * FROM operation_attempts"))
     history = tuple(owned.connection.execute("SELECT * FROM history_events"))
     assert len(driver.deletes) == 1
@@ -125,8 +130,10 @@ async def test_terminal_action_does_not_hide_open_cleanup_companion(environment,
 
     cfg = environment[0]
     owned, context, runtime, driver, item_id = await _prepared(environment)
-    runtime.operations = _FaultCompanion()
-    assert (await delete_source_file(runtime, item_id)).phase == "companion_rejected"
+    port = _FaultCompanion()
+    with repository_port(OperationRepository, port, ("finish_stale_runs",),
+                         matches=lambda _name, args, _kwargs: f"delete/{item_id}" in args[0].responsibility_keys):
+        assert (await delete_source_file(runtime, item_id)).phase == "companion_rejected"
     action_id = owned.connection.execute(
         "SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)
     ).fetchone()[0]
@@ -472,8 +479,10 @@ async def test_all_saved_local_handoffs_precede_any_current_port_resolution(
         "SELECT id FROM outputs ORDER BY id DESC LIMIT 1"
     ).fetchone()[0]
     _, second_item = _start_cleanup(owned, second_output, "3")
-    runtime.outputs = _FaultOutputs("finish_cleanup_item", DbOutcomeKind.ROLLED_BACK)
-    assert (await delete_source_file(runtime, second_item)).phase == "result_rejected"
+    port = _FaultOutputs("finish_cleanup_item", DbOutcomeKind.ROLLED_BACK)
+    with repository_port(OutputsRepository, port, ("finish_cleanup_item",),
+                         matches=lambda _name, args, _kwargs: args[0].item_id == second_item):
+        assert (await delete_source_file(runtime, second_item)).phase == "result_rejected"
     owned.connection.close()
     fresh = context.open_connection()
     try:
@@ -552,8 +561,9 @@ async def test_cancel_query_grant_reserves_unique_slot_before_dispatch_and_after
                 devices.clear()
             return result
     port = CancelGrantPort()
-    runtime.outputs = port
-    await delete_source_file(runtime, item_id)
+    with repository_port(OutputsRepository, port, ("begin_cleanup_attempt",),
+                         matches=lambda _name, args, _kwargs: args[0].target.cleanup_item_id == item_id):
+        await delete_source_file(runtime, item_id)
     assert port.ticket is not None
     assert not cleanup_cancel_query_available(owned.connection, item_id)
     assert not cleanup_cancel_query_available(owned.connection, item_id, ticket=port.ticket)
@@ -624,8 +634,10 @@ async def test_cancel_waits_original_pending_application_before_member_save(envi
     from camctl.persistence.repositories.cancellation import CancellationRepository
     from .test_cleanup_query_save_recovery import _apply_cleanup_cancel
     owned, _, runtime, _, item_id = await _prepared(environment)
-    runtime.outputs = _FaultOutputs("begin_cleanup_attempt", DbOutcomeKind.ROLLED_BACK)
-    assert (await delete_source_file(runtime, item_id)).phase == "delete_budget_rejected"
+    port = _FaultOutputs("begin_cleanup_attempt", DbOutcomeKind.ROLLED_BACK)
+    with repository_port(OutputsRepository, port, ("begin_cleanup_attempt",),
+                         matches=lambda _name, args, _kwargs: args[0].target.cleanup_item_id == item_id):
+        assert (await delete_source_file(runtime, item_id)).phase == "delete_budget_rejected"
     action_id, = owned.connection.execute("SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
     _apply_cleanup_cancel(owned, action_id)
     owner = cleanup_flow(cleanup_factory(devices={}, drivers=DriverRegistry(),
@@ -652,30 +664,30 @@ async def test_pending_query_with_original_intent_is_saved_before_other_member_p
     driver.unknown_delete = True
     driver.matrix_enabled, driver.present = True, False
     port = _QueryFinishPort(DbOutcomeKind.ROLLED_BACK, second_item, driver)
-    runtime.operations = port
-    from camctl.contracts.values import ConsistencyError
-    with pytest.raises(ConsistencyError):
-        await delete_source_file(runtime, second_item)
-    original = port.finishes[0]
-    assert original[0].ticket.target_id == str(second_item)
-    await runtime.database.close()
-    owned.connection.close()
-    fresh = context.open_connection()
-    try:
-        port.kind = DbOutcomeKind.COMPLETED
-        factory = cleanup_factory(devices=cfg.devices, drivers=DriverRegistry(),
-            max_delete_attempts=1, max_query_attempts=1, occurred_at=lambda: _NOW)
-        resumed = await _stored_runtime(factory, fresh, capture_resources)
-        resumed.operations = port
-        with pytest.raises(DeviceConfigurationError):
-            await advance_cleanup(resumed)
-        assert port.finishes == [original, original]
-        assert fresh.connection.execute("SELECT status FROM cleanup_items WHERE id=?", (second_item,)).fetchone() == (4,)
-        assert fresh.connection.execute("SELECT operation_key FROM history_transactions WHERE operation_key=?",
-            (str(original[1]),)).fetchone() == (str(original[1]),)
-        assert len(driver.deletes) == len(driver.queries) == 1
-    finally:
-        fresh.connection.close()
+    with repository_port(OperationRepository, port, ("finish_attempt",),
+                         matches=lambda _name, args, _kwargs: (args[0].ticket.operation == "query" and args[0].ticket.target_id == str(second_item))):
+        from camctl.contracts.values import ConsistencyError
+        with pytest.raises(ConsistencyError):
+            await delete_source_file(runtime, second_item)
+        original = port.finishes[0]
+        assert original[0].ticket.target_id == str(second_item)
+        await runtime.database.close()
+        owned.connection.close()
+        fresh = context.open_connection()
+        try:
+            port.kind = DbOutcomeKind.COMPLETED
+            factory = cleanup_factory(devices=cfg.devices, drivers=DriverRegistry(),
+                max_delete_attempts=1, max_query_attempts=1, occurred_at=lambda: _NOW)
+            resumed = await _stored_runtime(factory, fresh, capture_resources)
+            with pytest.raises(DeviceConfigurationError):
+                await advance_cleanup(resumed)
+            assert port.finishes == [original, original]
+            assert fresh.connection.execute("SELECT status FROM cleanup_items WHERE id=?", (second_item,)).fetchone() == (4,)
+            assert fresh.connection.execute("SELECT operation_key FROM history_transactions WHERE operation_key=?",
+                (str(original[1]),)).fetchone() == (str(original[1]),)
+            assert len(driver.deletes) == len(driver.queries) == 1
+        finally:
+            fresh.connection.close()
 
 
 async def test_historical_binding_failure_after_saved_absence_keeps_file_handoff(
@@ -692,8 +704,10 @@ async def test_historical_binding_failure_after_saved_absence_keeps_file_handoff
     from camctl.contracts.values import new_operation_key
 
     owned, context, runtime, _, item_id = await _prepared(environment)
-    runtime.outputs = _FaultOutputs("finish_cleanup_item", DbOutcomeKind.ROLLED_BACK)
-    assert (await delete_source_file(runtime, item_id)).phase == "result_rejected"
+    port = _FaultOutputs("finish_cleanup_item", DbOutcomeKind.ROLLED_BACK)
+    with repository_port(OutputsRepository, port, ("finish_cleanup_item",),
+                         matches=lambda _name, args, _kwargs: args[0].item_id == item_id):
+        assert (await delete_source_file(runtime, item_id)).phase == "result_rejected"
     file_id, output_id, action_id = owned.connection.execute(
         "SELECT o.device_file_id,o.id,c.action_id FROM cleanup_items c JOIN outputs o ON o.id=c.output_id WHERE c.id=?",
         (item_id,),
@@ -760,8 +774,9 @@ async def test_saved_result_wins_over_late_recovery_horizon_request(environment,
             return result
     owned, _, runtime, _, item_id = await _prepared(environment)
     port = FinishedDeletePort("finish_cleanup_item", DbOutcomeKind.ROLLED_BACK)
-    runtime.outputs = port
-    assert (await delete_source_file(runtime, item_id)).phase == "result_rejected"
+    with repository_port(OutputsRepository, port, ("finish_cleanup_attempt", "finish_cleanup_item"),
+                         matches=lambda _name, args, _kwargs: (args[0].ticket.target_id == str(item_id) if _name == "finish_cleanup_attempt" else args[0].item_id == item_id)):
+        assert (await delete_source_file(runtime, item_id)).phase == "result_rejected"
     assert port.finish is not None
     before = tuple(owned.connection.iterdump())
     result = OperationRepository().finish_attempt(
