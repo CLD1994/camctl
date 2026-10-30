@@ -286,19 +286,9 @@ async def test_action6_pending_inspection_waits_for_full_session_then_cancels_wi
     from camctl.persistence.repositories.segment_inspections import read_inspection_for_member
     from .test_segment_inspections import _CONTENT, _ReadDriver
 
-    from camctl.operations.attempts import RetryWaitGate
-    shared = {name: {} for name in (
-        "pending_call_results", "pending_capture_completions", "pending_result_closes",
-        "recording_anchors", "pending_media_results", "pending_file_observations",
-        "continuing_read_tickets", "pending_read_results", "pending_read_business",
-        "pending_read_ends", "pending_baselines", "pending_result_scans",
-        "pending_segment_writes", "pending_segment_inspection_results",
-        "pending_host_photo_prepares", "pending_host_photo_completions",
-    )}
-    shared["retry_wait_gate"] = RetryWaitGate()
     owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
         tmp_path, monkeypatch, (Decimal("18"), Decimal("27"), Decimal("22")),
-        read_driver=_ReadDriver(_CONTENT, fail_after=4), segment_size=4, assembly_shared=shared,
+        read_driver=_ReadDriver(_CONTENT, fail_after=4), segment_size=4,
     )
     try:
         await _publish_ordinary_result(runtime, owned, action_id, handler, _entries(3), result_port, evidence)
@@ -317,10 +307,10 @@ async def test_action6_pending_inspection_waits_for_full_session_then_cancels_wi
         assert output_count_before_cancel == (0,)
 
         # 受限媒体会话可以继续保存已有状态，但不重开输入或启动媒体工具。
-        options = _media_options(tools, results=result_port, wall_us=runtime.wall_us,
-            monotonic_ns=runtime.monotonic_ns, media_enabled=False, **shared)(
-                owned, runtime.driver, {"evidence": runtime.evidence})
-        runtime = await capture_resources.runtime(owned, driver=runtime.driver, **options)
+        # READ 已失败结束，部分拷贝和结果均已可靠保存；受限会话
+        # 从该持久事实恢复，复用原装配输入，只关闭媒体能力。
+        runtime = await capture_resources.runtime(owned, driver=tools.assembly_driver,
+            **{**tools.assembly_options, "media_enabled": False})
         event_count = owned.connection.execute(
             "SELECT COUNT(*) FROM history_events"
         ).fetchone()

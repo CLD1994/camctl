@@ -128,12 +128,14 @@ def _media_options(tools, *, read_driver=None, segment_size=None, **overrides):
             "devices": {"cam-1": {"driver": "camctl-adb", "recording": {"repair_margin_s": Decimal("2")}}}}
         if segment_size is not None:
             result["segment_size"] = segment_size
+        tools.assembly_driver = control
+        tools.assembly_options = {**defaults, **result}
         return result
     return options
 
 
 async def _overrun_recording(
-    tmp_path, monkeypatch, values, *, catalog=None, fix_baseline=True, read_driver=None, segment_size=None, assembly_shared=None,
+    tmp_path, monkeypatch, values, *, catalog=None, fix_baseline=True, read_driver=None, segment_size=None,
 ):
     catalog = Action6RecordCatalog() if catalog is None else catalog
     catalog.duration_s = Decimal("60")
@@ -147,8 +149,7 @@ async def _overrun_recording(
         tmp_path, "record", catalog=catalog, start=False,
         runtime_options=_media_options(tools, read_driver=read_driver, segment_size=segment_size,
             results=result_port, evidence=evidence, wall_us=lambda: wall[0],
-            monotonic_ns=lambda: mono[0], stopper=stopper,
-            **({} if assembly_shared is None else assembly_shared)),
+            monotonic_ns=lambda: mono[0], stopper=stopper),
     )
     (activity_id,) = owned.connection.execute(
         "SELECT id FROM device_activities WHERE action_id=?", (action_id,)
