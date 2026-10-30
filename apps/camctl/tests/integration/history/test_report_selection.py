@@ -513,24 +513,32 @@ async def test_read_failure_and_database_replacement_close_bound_session(finishe
     import os
     state_path = path / 'state.db'
     replacement_path = path / 'replacement.db'
-    _create_valid_database(replacement_path)
-    replacement = open_existing(replacement_path, DbOpenMode.EXISTING_RW, DbConfig())
-    replacement_id = replacement.metadata.instance_id
-    assert replacement_id != owned.metadata.instance_id
-    replacement_checkpoint = replacement.connection.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()
-    assert replacement_checkpoint == (0, 0, 0)
-    replacement.connection.close()
-    with repository.open_report_selection(request) as selection:
-        cursor = selection.read_page('plan').next_cursor
-        checkpoint = owned.connection.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()
-        assert checkpoint == (0, 0, 0)
+    from contextlib import closing
+    try:
+        _create_valid_database(replacement_path)
+        replacement = open_existing(replacement_path, DbOpenMode.EXISTING_RW, DbConfig())
+        with closing(replacement.connection):
+            replacement_id = replacement.metadata.instance_id
+            assert replacement_id != owned.metadata.instance_id
+            replacement_checkpoint = replacement.connection.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()
+            assert replacement_checkpoint == (0, 0, 0)
+        with repository.open_report_selection(request) as selection:
+            cursor = selection.read_page('plan').next_cursor
+            assert cursor is not None
+            assert selection.instance_id == owned.metadata.instance_id
+            assert cursor.instance_id == owned.metadata.instance_id
+            assert selection.read_page('plan', cursor=cursor).items == (2,)
+            checkpoint = owned.connection.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()
+            assert checkpoint == (0, 0, 0)
+            owned.connection.close()
+            for database in (state_path, replacement_path):
+                assert not database.with_name(database.name + '-wal').exists()
+                assert not database.with_name(database.name + '-shm').exists()
+            os.replace(replacement_path, state_path)
+            with pytest.raises(ConsistencyError):
+                selection.read_page('plan', cursor=cursor)
+            assert selection._cache == {}
+            with pytest.raises(ConsistencyError):
+                selection.read_page('plan', cursor=cursor)
+    finally:
         owned.connection.close()
-        for database in (state_path, replacement_path):
-            assert not database.with_name(database.name + '-wal').exists()
-            assert not database.with_name(database.name + '-shm').exists()
-        os.replace(replacement_path, state_path)
-        with pytest.raises(ConsistencyError):
-            selection.read_page('plan', cursor=cursor)
-        assert selection._cache == {}
-        with pytest.raises(ConsistencyError):
-            selection.read_page('plan', cursor=cursor)
