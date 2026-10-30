@@ -12,7 +12,8 @@ from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.transaction import commit_operation
-from camctl.persistence.repositories.result_file_pairing import PairResultFilesCommand
+from camctl.persistence.repositories import capture as capture_storage
+from .transaction_fixtures import capture_operation_command
 
 from .test_segment_file_pairing import _bounded, _entry, _ok, _snapshot
 from .test_segment_file_proofs import _boundary, _proof_world
@@ -95,11 +96,12 @@ async def test_unknown_family_never_allocates_fact_event_or_key(tmp_path, case):
 
 
 class _AlteredPair:
-    def __init__(self, request, key, bounded, damage=None):
+    def __init__(self, owned, request, key, bounded, damage=None):
         self.request, self.key, self.bounded, self.damage = request, key, bounded, damage
+        self.command = capture_operation_command(capture_storage, lambda: capture_storage.CaptureRepository().save_result_file_pairing(request, key, owned))
 
     def plan(self, scope):
-        plan = PairResultFilesCommand(self.request, self.key).plan(scope)
+        plan = self.command.plan(scope)
         if self.damage:
             event = plan.events[0]
             row = event.rows[0]
@@ -131,7 +133,7 @@ async def test_real_transaction_guard_derives_all_pair_facts(tmp_path, bounded, 
         request = _request(owned, runtime, saved, ids['/DCIM/raw.LRF'])
         before = _snapshot(owned)
         key = new_operation_key()
-        receipt = commit_operation(_AlteredPair(request, key, bounded, damage), key, owned)
+        receipt = commit_operation(_AlteredPair(owned, request, key, bounded, damage), key, owned)
         if damage:
             assert receipt.kind == 'rolled_back', receipt.error
             assert _snapshot(owned) == before
@@ -429,10 +431,9 @@ async def test_member_uses_frozen_pair_fact_and_candidates_share_strict_proof(tm
             from camctl.persistence.event_reads import SqlEventReads
             from camctl.persistence.transaction import BoundedCommandPlan
             from camctl.persistence.repositories import segments as segment_storage
-            from .transaction_fixtures import plan_operation
             class BoundedMembers:
                 def plan(self, scope):
-                    plan = plan_operation(scope,segment_storage,lambda: repo.append_members(ref,(member,original_input),member_at,key,owned))
+                    plan = capture_operation_command(segment_storage,lambda: repo.append_members(ref,(member,original_input),member_at,key,owned)).plan(scope)
                     return BoundedCommandPlan(iter(plan.events),
                         lambda event, transaction: EventContext(transaction, plan.owners,
                             deepcopy(plan.state_rows),
@@ -502,7 +503,7 @@ async def test_actual_pair_save_guard_and_verify_do_not_replay_unrelated_pages(t
             owned.connection.set_progress_handler(lambda: steps.__setitem__(0, steps[0] + 100) or 0, 100)
             owned.connection.set_trace_callback(statements.append)
             if bounded:
-                receipt = commit_operation(_AlteredPair(request, key, True), key, owned)
+                receipt = commit_operation(_AlteredPair(owned, request, key, True), key, owned)
                 assert receipt.kind == 'completed', receipt.error
                 fact = receipt.result
             else:
@@ -614,8 +615,7 @@ async def test_member_guard_rederives_fixed_pair_input(tmp_path, bounded, damage
         class ForgedMembers:
             def plan(self, scope):
                 from camctl.persistence.repositories import segments as segment_storage
-                from .transaction_fixtures import plan_operation
-                plan = plan_operation(scope,segment_storage,lambda: repo.append_members(ref,(member,),runtime.wall_us(),key,owned))
+                plan = capture_operation_command(segment_storage,lambda: repo.append_members(ref,(member,),runtime.wall_us(),key,owned)).plan(scope)
                 event = plan.events[0]
                 row = event.rows[0]
                 after = dict(row.after.values)

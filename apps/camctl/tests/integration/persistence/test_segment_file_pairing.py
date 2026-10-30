@@ -19,7 +19,7 @@ from camctl.persistence.event_reads import SqlEventReads
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.transaction import BoundedCommandPlan, commit_operation, row_facts
 from camctl.persistence.repositories import capture as capture_storage
-from .transaction_fixtures import plan_operation
+from .transaction_fixtures import capture_operation_command
 from camctl.persistence.repositories import result_pages
 from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.operations import register_operation_guards
@@ -121,9 +121,10 @@ class _AlteredCommand:
                  context_transform=lambda context: context):
         self.owned, self.request, self.key = owned, request, key
         self.bounded, self.alter, self.context_transform = bounded, alter, context_transform
+        self.command = capture_operation_command(capture_storage, lambda: capture_storage.CaptureRepository().save_ownership_from_result_page(request, key, owned))
 
     def plan(self, scope):
-        plan = self.alter(plan_operation(scope,capture_storage,lambda: capture_storage.CaptureRepository().save_ownership_from_result_page(self.request,self.key,self.owned)))
+        plan = self.alter(self.command.plan(scope))
         return (_bounded(plan, scope.connection, context_transform=self.context_transform)
                 if self.bounded else plan)
 
@@ -348,8 +349,8 @@ async def test_real_legal_file_prefix_cannot_join_single_ownership_group(tmp_pat
     class PrefixCommand:
         def plan(self, scope):
             # 两个公开仓储交付的单事件提案组合后由真实scope分配完整范围。
-            prefix = plan_operation(TransactionScope(scope.connection,scope.max_txn_id,scope.max_event_id),capture_storage,lambda: runtime.capture.save_file_presence(files.FilePresenceSave(request.file_id,2,request.occurred_at),new_operation_key(),owned))
-            ownership = plan_operation(TransactionScope(scope.connection,scope.max_txn_id,scope.max_event_id),capture_storage,lambda: runtime.capture.save_ownership_from_result_page(request,key,owned))
+            prefix = capture_operation_command(capture_storage,lambda: runtime.capture.save_file_presence(files.FilePresenceSave(request.file_id,2,request.occurred_at),new_operation_key(),owned)).plan(TransactionScope(scope.connection,scope.max_txn_id,scope.max_event_id))
+            ownership = capture_operation_command(capture_storage,lambda: runtime.capture.save_ownership_from_result_page(request,key,owned)).plan(TransactionScope(scope.connection,scope.max_txn_id,scope.max_event_id))
             allocation = scope.allocate(2)
             first, = prefix.events; second, = ownership.events
             second = replace(second, event_id=allocation.last_event_id)

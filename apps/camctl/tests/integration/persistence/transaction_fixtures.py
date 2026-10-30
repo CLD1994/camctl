@@ -28,3 +28,20 @@ def plan_operation(scope, repository_module, operation):
         except Planned as captured:
             return captured.plan
     raise AssertionError('公开仓储没有交付本次完整事务命令')
+
+
+def capture_operation_command(repository_module, operation):
+    """取得仓储交付的不透明命令；不执行计划、不写库，也不返回虚假结果。"""
+    class Delivered(BaseException):
+        def __init__(self, command):
+            self.command = command
+
+    def receive(command, key, owned):
+        raise Delivered(command)
+
+    with patch.object(repository_module, 'commit_operation', receive):
+        try:
+            operation()
+        except Delivered as delivered:
+            return delivered.command
+    raise AssertionError('仓储没有交付事务命令')

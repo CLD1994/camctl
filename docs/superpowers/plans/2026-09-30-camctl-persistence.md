@@ -112,7 +112,7 @@ P1、P2 在首阶段完成；P3 与 H1/H2 联合建立首批事件事务；P4 �
 
 **预计文件：** `apps/camctl/src/camctl/persistence/transaction.py`；测试为 `apps/camctl/tests/integration/persistence/test_transactions.py`。
 
-**接口与依赖：** 提供私有 `commit_operation(command: AtomicCommand, key: OperationKey, rules: WriteRules) -> WriteReceipt`；AtomicCommand/WriteRules 由所属仓储的具体类型实现，不对业务暴露表操作。前置交付：H1/H2、K3、P1/P2。
+**接口与依赖：** 仓储与事务写入模块的当前调用约定见[持久化运行契约](../../camctl/persistence-runtime.md#仓储与事务写入模块的协作约定)；不对业务暴露表操作。前置交付：H1/H2、K3、P1/P2。
 
 - [x] 编写失败用例。建立 `test_write_uses_current_transaction_state`，并发 ACK 与动作结果提交，`assert ack_after >= ack_before` 且动作事实保留；逐个中断事件、投影、两类目录和进度保存，断言整组回滚。最终事件数变化时核对引用 L 及首尾，事务内中间边界不得冻结报告。
 - [x] 运行 `uv run --project apps/camctl --group test pytest apps/camctl/tests/integration/persistence/test_transactions.py -q`，确认 FAIL 来自本任务的目标行为缺失；依赖缺失或测试准备错误不能算有效失败。
