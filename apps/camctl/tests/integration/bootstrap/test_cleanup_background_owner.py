@@ -51,7 +51,7 @@ async def test_real_session_applies_cancel_before_device_call_returns(tmp_path, 
     output_id = await _run_photo_session(tmp_path, cfg)
     await _submit(tmp_path, cfg, _cleanup_plan('2', {'output_ids': [str(output_id)]}))
     entered, release = asyncio.Event(), asyncio.Event()
-    invocations, snapshots = [], []
+    invocations, returns, snapshots = [], [], []
 
     class Driver(_CleanupDriver):
         async def delete(self, request):
@@ -59,14 +59,18 @@ async def test_real_session_applies_cancel_before_device_call_returns(tmp_path, 
             if operation == 'delete':
                 entered.set()
                 await release.wait()
-            return await super().delete(request)
+            result = await super().delete(request)
+            returns.append(('delete', request.ticket, result))
+            return result
 
         async def query_file(self, request):
             invocations.append(('query', request.ticket))
             if operation == 'query':
                 entered.set()
                 await release.wait()
-            return await super().query_file(request)
+            result = await super().query_file(request)
+            returns.append(('query', request.ticket, result))
+            return result
 
     driver = Driver(delete_results=((None, None),), query_results=(('present', None),))
     cleanup = cleanup_flow(session_cleanup_assembly(
@@ -125,7 +129,26 @@ async def test_real_session_applies_cancel_before_device_call_returns(tmp_path, 
         assert [kind for kind, _ in invocations] == (['delete'] if operation == 'delete' else ['delete', 'query'])
         assert cleanup.required_settlements() > 0
         release.set()
-        await _until(lambda: _rows(db, 'SELECT status FROM actions WHERE type=5') == [(6,)], task=task)
+        try:
+            await _until(lambda: _rows(db, 'SELECT status FROM actions WHERE type=5') == [(6,)], task=task)
+        except (TimeoutError, AssertionError) as error:
+            if entry == 'default' and operation == 'delete':
+                import json
+                def task_facts(item):
+                    return {'repr': repr(item), 'done': item.done(), 'cancelled': item.cancelled(),
+                        'coroutine': repr(item.get_coro()), 'stack': [
+                            {'file': frame.f_code.co_filename, 'line': frame.f_lineno,
+                             'function': frame.f_code.co_name} for frame in item.get_stack()]}
+                log = Path(cfg.paths.log_file)
+                evidence = {'failure': repr(error), 'session_task': task_facts(task),
+                    'tasks': [task_facts(item) for item in asyncio.all_tasks()],
+                    'database': runtime_database_facts(db, 'before_session_cancellation'),
+                    'invocations': invocations, 'returns': returns,
+                    'required_settlements': cleanup.required_settlements(),
+                    'log': log.read_text() if log.exists() else None}
+                (tmp_path / 'pre-cancel-evidence.json').write_text(
+                    json.dumps(evidence, default=repr, ensure_ascii=False, indent=2))
+            raise
         assert [kind for kind, _ in invocations] == ['delete', 'query']
         assert _rows(db, 'SELECT COUNT(*) FROM operation_attempts WHERE result_event_id IS NULL') == [(0,)]
     finally:
