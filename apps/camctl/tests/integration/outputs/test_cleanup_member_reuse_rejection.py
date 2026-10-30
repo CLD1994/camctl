@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import pytest
 
+from support.repository_ports import repository_port
+
 from camctl.contracts.values import new_operation_key
 from camctl.operations.attempts import RunOutcome, StaleRunFinish
 from camctl.operations.models import ErrorValue
@@ -84,8 +86,9 @@ async def test_member_success_reuse_rejects_changed_outcome_and_target(environme
     action_id, item_id = _start_cleanup(owned, output_id, "2")
     recorder = _RecordingOutputs("finish_cleanup_item")
     runtime = await _new_runtime(cfg, owned, driver)
-    runtime.outputs = recorder
-    step = await delete_source_file(await runtime.for_item(item_id), item_id)
+    with repository_port(OutputsRepository, recorder, (recorder.method,),
+                         matches=lambda _name, args, _kwargs: args[0].item_id == item_id):
+        step = await delete_source_file(await runtime.for_item(item_id), item_id)
     assert step.phase == "succeeded", step
     assert len(recorder.calls) == 1
     request, key = recorder.calls[0]
@@ -136,8 +139,9 @@ async def test_member_failure_reuse_rejects_changed_details(environment):
     assert first.phase == "query_unknown", first
     recorder = _RecordingOutputs("fail_cleanup_item")
     runtime = await _new_runtime(cfg, owned, driver, query_attempts=1)
-    runtime.outputs = recorder
-    exhausted = await delete_source_file(await runtime.for_item(item_id), item_id)
+    with repository_port(OutputsRepository, recorder, (recorder.method,),
+                         matches=lambda _name, args, _kwargs: args[0].item_id == item_id):
+        exhausted = await delete_source_file(await runtime.for_item(item_id), item_id)
     assert (exhausted.phase, exhausted.detail) == (
         "failed", "file_query_attempts_exhausted"), exhausted
     assert len(recorder.calls) == 1
@@ -213,8 +217,9 @@ async def _dispatched_cancel_member(cfg, owned, output_id, driver):
     driver.on_delete_return = lambda: _apply_cleanup_cancel(owned, action_id)
     recorder = _RecordingOutputs("cancel_cleanup_item")
     runtime = await _new_runtime(cfg, owned, driver)
-    runtime.outputs = recorder
-    step = await delete_source_file(await runtime.for_item(item_id), item_id)
+    with repository_port(OutputsRepository, recorder, (recorder.method,),
+                         matches=lambda _name, args, _kwargs: args[0].item_id == item_id):
+        step = await delete_source_file(await runtime.for_item(item_id), item_id)
     assert step.phase == "canceled", step
     assert recorder.calls, "收场取消事务未被记录"
     return action_id, item_id, recorder.calls[-1]
