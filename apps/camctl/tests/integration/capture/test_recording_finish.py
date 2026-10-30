@@ -21,6 +21,7 @@ from camctl.outputs.catalog import (
     OutputKind,
 )
 from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.transaction import TransactionError
 from camctl.persistence.repositories.capture import (
     CaptureRepository,
     FinishCanceledCapture,
@@ -375,6 +376,8 @@ async def test_canceled_record_finish_discards_complete_files(tmp_path: Path) ->
         rejected = await _save_finish(case, method, replace(command,
             drafts=(_original_draft(1),), catalog_facts=OutputCatalogFacts(1, ownership_confirmed=True)))
         assert rejected.kind is DbOutcomeKind.ROLLED_BACK
+        assert type(rejected.error) is TransactionError
+        assert '录像取消' in str(rejected.error) and '不登记正式产物' in str(rejected.error)
         assert _image(case) == before
         assert case.row('SELECT status FROM actions WHERE id=1') == (2,)
         assert case.row('SELECT COUNT(*) FROM outputs') == (0,)
@@ -400,6 +403,13 @@ async def test_canceled_finish_rejects_incomplete_draft(tmp_path: Path, consumer
             drafts=(_original_draft(1, complete=False),),
             catalog_facts=OutputCatalogFacts(1, ownership_confirmed=True)))
         assert outcome.kind is DbOutcomeKind.ROLLED_BACK
+        if consumer == 'record':
+            assert type(outcome.error) is TransactionError
+            assert '录像取消' in str(outcome.error) and '不登记正式产物' in str(outcome.error)
+        else:
+            assert type(outcome.error) is ValueError
+            assert '文件尚未完成' in str(outcome.error)
+            assert 'device_file_id=1' in str(outcome.error)
         assert case.row('SELECT COUNT(*) FROM outputs') == (0,)
         assert case.row('SELECT status FROM actions WHERE id=1') == (2,)
         assert _image(case) == before
