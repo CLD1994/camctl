@@ -7,6 +7,8 @@ import sqlite3
 
 import pytest
 
+from support.repository_ports import repository_port
+
 from camctl.capture.models import ResultSetPhase, ResultSetSave
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.operations.attempts import AttemptFinish, RunFinish, RunOutcome
@@ -177,13 +179,14 @@ async def test_file_discovery_fault_resumes_original_request_key_without_listing
     actual = _actual(action_id, with_files=True, complete=False)
     driver = _result_driver(actual)
     spy = FileObservationSpy(mode)
-    runtime.capture = spy
     original_wall = case.clock.wall
     database_path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
     metadata = owned.metadata
     try:
         try:
-            await _consume(runtime, consumer, action_id, handler)
+            with repository_port(CaptureRepository, spy, ("save_file_observation",),
+                    matches=lambda _name, args, _kwargs: args[0].observer_action_id == action_id and args[0].file_identity == "original"):
+                await _consume(runtime, consumer, action_id, handler)
         except ConsistencyError:
             # 正式处理器可在本次停止，原工厂继续拥有完整保存申请。
             pass
@@ -199,9 +202,10 @@ async def test_file_discovery_fault_resumes_original_request_key_without_listing
         owned = open_existing(database_path, DbOpenMode.EXISTING_RW, DbConfig())
         assert owned.metadata == metadata
         resumed = (await _fresh_runtime(owned, runtime))
-        resumed.capture = spy
         case.clock.wall = original_wall + 5_000_000
-        await _consume(resumed, consumer, action_id, handler)
+        with repository_port(CaptureRepository, spy, ("save_file_observation",),
+                matches=lambda _name, args, _kwargs: args[0].observer_action_id == action_id and args[0].file_identity == "original"):
+            await _consume(resumed, consumer, action_id, handler)
 
         driver.list_results.assert_awaited_once()
         # 同一完整发现请求的原 key 是未知提交的核实依据。

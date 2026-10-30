@@ -5,6 +5,8 @@ from unittest.mock import create_autospec
 
 import pytest
 
+from support.repository_ports import repository_port
+
 from camctl.bootstrap.capture_assembly import DriverResultListing
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.models import DbOutcome
@@ -58,9 +60,10 @@ async def test_runtime_reads_and_saves_two_pages_in_one_results_attempt(tmp_path
     owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "record")
     driver = _pages(runtime)
     observer = ObserveConclusion()
-    runtime.capture = observer
     try:
-        await capture_handler(handler)(action_id, runtime)
+        with repository_port(CaptureRepository, observer, ("finish_result_check",),
+                matches=lambda _name, args, _kwargs: args[0].ticket.responsibility_key == f"results/{action_id}"):
+            await capture_handler(handler)(action_id, runtime)
         pages = saved_result_pages(owned, action_id)
         assert [entry.identity for page in pages for entry in page.page.entries] == ["/DCIM/a.mp4", "/DCIM/b.mp4"]
         assert pages[-1].page.scan_complete and pages[-1].page.set_finalized
@@ -85,10 +88,11 @@ async def test_runtime_reopens_unknown_first_page_before_reading_second_page(tmp
     path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
     driver = _pages(runtime)
     repository = UnknownPage()
-    runtime.capture = repository
     try:
-        with pytest.raises(ConsistencyError):
-            await capture_handler(handler)(action_id, runtime)
+        with repository_port(CaptureRepository, repository, ("save_result_page",),
+                matches=lambda _name, args, _kwargs: args[0].ticket.responsibility_key == f"results/{action_id}"):
+            with pytest.raises(ConsistencyError):
+                await capture_handler(handler)(action_id, runtime)
         driver.list_results.assert_awaited_once()
         original, key = repository.requests[0]
         assert all(request == original and saved_key == key for request, saved_key in repository.requests)
@@ -320,23 +324,33 @@ async def test_source_file_consumer_continues_after_its_first_batch(tmp_path):
 @pytest.mark.parametrize("registered", [False, True])
 async def test_completed_scan_pending_disposition_uses_reopened_database(tmp_path, registered):
     class UnknownDisposition(CaptureRepository):
+        def __init__(self):
+            self.faults = []
         def finish_result_check(self, finish, confirm, key, owned, **options):
             saved = super().finish_result_check(finish, confirm, key, owned, **options)
             if not registered:
                 assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+                self.faults.append("finish_result_check")
                 return DbOutcome(DbOutcomeKind.UNKNOWN, error=ConsistencyError("原结果交接回执未知"))
             return saved
         def finish_capture(self, request, key, owned):
             saved = super().finish_capture(request, key, owned)
             assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+            self.faults.append("finish_capture")
             return DbOutcome(DbOutcomeKind.UNKNOWN, error=ConsistencyError("已登记文件的完成回执未知"))
     owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "record")
     path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
     driver = _pages(runtime)
-    runtime.capture = UnknownDisposition()
+    observer = UnknownDisposition()
     try:
-        with pytest.raises(ConsistencyError):
-            await capture_handler(handler)(action_id, runtime)
+        with repository_port(CaptureRepository, observer, ("finish_result_check", "finish_capture"),
+                matches=lambda name, args, _kwargs: (
+                    args[0].ticket.responsibility_key == f"results/{action_id}"
+                    if name == "finish_result_check" else args[0].action_id == action_id)):
+            with pytest.raises(ConsistencyError):
+                await capture_handler(handler)(action_id, runtime)
+        assert observer.faults and set(observer.faults) == {
+            "finish_capture" if registered else "finish_result_check"}
         original = saved_result_pages(owned, action_id)
         owned.connection.close()
         owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())

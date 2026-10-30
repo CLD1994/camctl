@@ -9,6 +9,8 @@ from unittest.mock import create_autospec
 
 import pytest
 
+from support.repository_ports import repository_port
+
 from camctl.bootstrap.capture_assembly import DriverResultListing
 from camctl.capture.handlers import capture_handler
 from ..support.result_cases import result_case, result_case_for, current_result_ticket
@@ -76,14 +78,19 @@ async def _interrupted(tmp_path, *, maximum=1, terminal=False, finalized=None,
     try:
         if terminal:
             class InterruptedPage(CaptureRepository):
+                hits = 0
                 def save_result_page(self, request, key, owned):
                     saved = super().save_result_page(request, key, owned)
                     assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
+                    self.hits += 1
                     return DbOutcome(DbOutcomeKind.UNKNOWN,
                         error=ConsistencyError("测试在实际末页可靠保存后中断"))
-            runtime.capture = InterruptedPage()
-            with pytest.raises(ConsistencyError, match="测试"):
-                await capture_handler(handler)(action_id, runtime)
+            observer = InterruptedPage()
+            with repository_port(CaptureRepository, observer, ("save_result_page",),
+                    matches=lambda _name, args, _kwargs: args[0].ticket.responsibility_key == f"results/{action_id}"):
+                with pytest.raises(ConsistencyError, match="测试"):
+                    await capture_handler(handler)(action_id, runtime)
+            assert observer.hits > 0
         else:
             task = asyncio.create_task(capture_handler(handler)(action_id, runtime))
             try:
@@ -215,10 +222,11 @@ async def test_unknown_recovery_save_keeps_original_key_and_input_across_connect
     owned, runtime, action_id, handler, driver, original = await _interrupted(tmp_path)
     path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
     repository = UnknownRecovery()
-    runtime.operations = repository
     try:
-        with pytest.raises(ConsistencyError):
-            await capture_handler(handler)(action_id, runtime)
+        with repository_port(OperationRepository, repository, ("finish_attempt",),
+                matches=lambda _name, args, _kwargs: args[0].ticket == original.ref.ticket):
+            with pytest.raises(ConsistencyError):
+                await capture_handler(handler)(action_id, runtime)
         assert len(repository.requests) == 2 and repository.requests[0] == repository.requests[1]
         finish, key = repository.requests[0]
         assert finish.outcome.outcome.observations == ()
@@ -245,21 +253,22 @@ async def test_unknown_partial_completion_save_keeps_same_end_reference_and_key(
     class UnknownCompletion(CaptureRepository):
         def __init__(self):
             self.requests = []
-        def finish_result_check(self, finish, confirm, key, owned, *, completion_page=None):
+        def finish_result_check(self, finish, confirm, key, owned, *, completion_page=None, **options):
             self.requests.append((finish, confirm, key, completion_page))
             if committed:
                 receipt = super().finish_result_check(finish, confirm, key, owned,
-                    completion_page=completion_page)
+                    completion_page=completion_page, **options)
                 assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
             return DbOutcome(DbOutcomeKind.UNKNOWN, error=ConsistencyError("原恢复与结束回执未知"))
     owned, runtime, action_id, handler, driver, original = await _interrupted(tmp_path,
         consumer="timelapse", completion=True)
     path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
     repository = UnknownCompletion()
-    runtime.capture = repository
     try:
-        with pytest.raises(ConsistencyError):
-            await capture_handler(handler)(action_id, runtime)
+        with repository_port(CaptureRepository, repository, ("finish_result_check",),
+                matches=lambda _name, args, _kwargs: args[0].ticket == original.ref.ticket):
+            with pytest.raises(ConsistencyError):
+                await capture_handler(handler)(action_id, runtime)
         assert len(repository.requests) == 2 and repository.requests[0] == repository.requests[1]
         finish, result_set, key, completion_page = repository.requests[0]
         assert completion_page == original.ref and result_set is None
@@ -410,14 +419,19 @@ async def test_new_round_interrupted_before_first_return_keeps_previous_v2_files
 
 async def test_committed_attempt_without_file_facts_restores_pages_before_new_query(tmp_path):
     class InterruptedFileSave(CaptureRepository):
+        hits = 0
         def save_file_ownership(self, request, key, owned):
+            self.hits += 1
             raise ConsistencyError("原文件事实保存前中断")
     owned, runtime, action_id, handler, driver, original = await _interrupted(tmp_path, maximum=2)
     path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
-    runtime.capture = InterruptedFileSave()
     try:
-        with pytest.raises(ConsistencyError):
-            await asyncio.wait_for(capture_handler(handler)(action_id, runtime), 5)
+        observer = InterruptedFileSave()
+        with repository_port(CaptureRepository, observer, ("save_file_ownership",),
+                matches=lambda _name, args, _kwargs: args[0].source_action_id == action_id):
+            with pytest.raises(ConsistencyError):
+                await asyncio.wait_for(capture_handler(handler)(action_id, runtime), 5)
+        assert observer.hits > 0
         assert owned.connection.execute("SELECT status FROM operation_attempts WHERE run_id=?",
             (original.ref.ticket.run_id,)).fetchone() == (int(enum_for("operation_attempts.status").UNKNOWN),)
         assert owned.connection.execute("SELECT source_action_id FROM device_files").fetchone() == (None,)

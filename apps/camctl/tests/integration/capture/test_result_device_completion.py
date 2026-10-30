@@ -5,6 +5,8 @@ from unittest.mock import create_autospec
 
 import pytest
 
+from support.repository_ports import repository_port
+
 from camctl.bootstrap.capture_assembly import DriverResultListing
 from camctl.capture.handlers import capture_handler
 from camctl.capture.result_inputs import RESULT_PAGE_CONTRACT
@@ -179,21 +181,22 @@ async def test_unknown_result_end_save_reopens_original_complete_request(tmp_pat
     class UnknownConclusion(CaptureRepository):
         def __init__(self):
             self.requests = []
-        def finish_result_check(self, finish, confirm, key, owned, *, completion_page=None):
+        def finish_result_check(self, finish, confirm, key, owned, *, completion_page=None, **options):
             self.requests.append((finish, confirm, key, completion_page))
             if committed:
                 receipt = super().finish_result_check(finish, confirm, key, owned,
-                    completion_page=completion_page)
+                    completion_page=completion_page, **options)
                 assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
             return DbOutcome(DbOutcomeKind.UNKNOWN, error=ConsistencyError("结论提交回执未知"))
     owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "timelapse", catalog=DeviceCompletionCatalog(), prepare_start_only=True, evidence_contracts=(_COMPLETION,))
     driver = device_pages(runtime)
     repository = UnknownConclusion()
-    runtime.capture = repository
     path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
     try:
-        with pytest.raises(ConsistencyError):
-            await capture_handler(handler)(action_id, runtime)
+        with repository_port(CaptureRepository, repository, ("finish_result_check",),
+                matches=lambda _name, args, _kwargs: args[0].ticket.responsibility_key == f"results/{action_id}"):
+            with pytest.raises(ConsistencyError):
+                await capture_handler(handler)(action_id, runtime)
         assert len(repository.requests) == 2 and repository.requests[0] == repository.requests[1]
         assert owned.connection.execute("SELECT activity_state,completion_basis FROM device_activities").fetchone() == ((3, 2) if committed else (1, 1))
         finish, result_set, key, completion_page = repository.requests[0]
