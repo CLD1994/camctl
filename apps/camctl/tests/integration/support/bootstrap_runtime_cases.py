@@ -139,13 +139,14 @@ class HostFileWorld:
     owned: object
     context: object
     driver: object
-    work_files: object
+    executor: object
+    supervisor: object
     thread_runner: ThreadRunnerInput
     diagnostics: list = field(default_factory=list)
     port_failures: list = field(default_factory=list)
 
     def __iter__(self):
-        yield from (self.config, self.owned, self.context, self.driver, self.work_files)
+        yield from (self.config, self.owned, self.context, self.driver, self.executor, self.supervisor)
 
 
 def observe_host_failures(monkeypatch, world):
@@ -201,11 +202,11 @@ async def check_unknown_cleanup_supervision(world, monkeypatch, operation, facto
     from camctl.persistence.repositories.outputs import OutputsRepository
     from ..bootstrap.cleanup_helpers import cleanup_failure, finish_cleanup_round
 
-    cfg, owned, context, driver, work_files = world
+    cfg, owned, context, driver, executor, supervisor = world
     target = Path(cfg.paths.staging) / 'derived/900.jpg'
     original_runner = world.thread_runner.call
     submitted, finishes = [], []
-    original_run = work_files.executor.run_file_task
+    original_run = executor.run_file_task
     repository = OutputsRepository if operation == 'delete' else OperationRepository
     method = 'finish_cleanup_attempt' if operation == 'delete' else 'finish_attempt'
     original_finish = getattr(repository, method)
@@ -237,7 +238,7 @@ async def check_unknown_cleanup_supervision(world, monkeypatch, operation, facto
         return receipt
 
     monkeypatch.setattr(repository, method, save)
-    monkeypatch.setattr(work_files.executor, 'run_file_task', track)
+    monkeypatch.setattr(executor, 'run_file_task', track)
     if operation == 'query':
         unlink = Path.unlink
         def keep_present(path, *args, **kwargs):
@@ -291,8 +292,8 @@ async def check_unknown_cleanup_supervision(world, monkeypatch, operation, facto
     identity = FileTaskId(f'cleanup:{owned.metadata.instance_id}:{operation}:{ticket.run_id}:{ticket.attempt_id}')
     assert [task.task_id for task in submitted].count(identity) == 1
     assert owner.required_settlements() == 0
-    assert work_files.executor.unfinished_files() == ()
-    assert work_files.executor.lease_of(identity) is None
+    assert executor.unfinished_files() == ()
+    assert executor.lease_of(identity) is None
     assert target.exists() is (operation == 'query')
 
 
@@ -310,7 +311,7 @@ async def check_host_port_control(world, monkeypatch, factory, *, scope_inside=F
     from camctl.operations.owned_calls import current_call_scope, owned_tool_call
     from camctl.outputs.cleanup_flow import LocalArtifactRequest, LocalArtifactTaskFailure
 
-    cfg, owned, context, driver, work_files = world
+    cfg, owned, context, driver, executor, supervisor = world
     staging = Path(cfg.paths.staging)
     target = staging / 'derived/900.jpg'
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -329,8 +330,8 @@ async def check_host_port_control(world, monkeypatch, factory, *, scope_inside=F
     runner_error = RuntimeError(runner_message)
     drain_error = RuntimeError('PROBE shared drain failed after cancellation')
     cancel_cause = RuntimeError('PROBE original cancellation cause')
-    original_run = work_files.executor.run_file_task
-    original_drain, original_wait, original_shield = work_files.executor.drain_required, FileTaskHandle.wait, asyncio.shield
+    original_run = executor.run_file_task
+    original_drain, original_wait, original_shield = executor.drain_required, FileTaskHandle.wait, asyncio.shield
 
     def remember(error):
         if any(error is item for item in cancellations):
@@ -402,8 +403,8 @@ async def check_host_port_control(world, monkeypatch, factory, *, scope_inside=F
         return observe()
 
     identity = f'cleanup:{request.database_id}:delete:{ticket.run_id}:{ticket.attempt_id}'
-    monkeypatch.setattr(work_files.executor, 'run_file_task', run)
-    monkeypatch.setattr(work_files.executor, 'drain_required', drain)
+    monkeypatch.setattr(executor, 'run_file_task', run)
+    monkeypatch.setattr(executor, 'drain_required', drain)
     monkeypatch.setattr(FileTaskHandle, 'wait', wait)
     monkeypatch.setattr(asyncio, 'shield', shield)
     if runner_failure:
@@ -417,7 +418,7 @@ async def check_host_port_control(world, monkeypatch, factory, *, scope_inside=F
     outcome = None
     try:
         await asyncio.wait_for(body_started.wait(), 5)
-        assert work_files.executor.unfinished_files() == (900,)
+        assert executor.unfinished_files() == (900,)
         assert not target.exists()
         if runner_failure:
             await asyncio.wait_for(collecting.wait(), 5)
@@ -512,8 +513,8 @@ async def check_host_port_control(world, monkeypatch, factory, *, scope_inside=F
                 assert isinstance(outcome, LocalArtifactTaskFailure)
                 assert outcome.__cause__ is interruption
                 assert len(cancellations) == 2
-    assert work_files.executor.unfinished_files() == ()
-    assert work_files.file_supervisor.outstanding() == ()
+    assert executor.unfinished_files() == ()
+    assert supervisor.outstanding() == ()
 
 
 def runtime_database_facts(path, stage):

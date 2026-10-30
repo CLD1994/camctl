@@ -13,6 +13,7 @@ from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_com
 from camctl.persistence.initialization import initialize_state, InitOutcome
 from camctl.devices.ports import DeviceCallResult
 from .test_cleanup_host_file_tasks import host_environment
+from ..support.recording_consumer_cases import reconciliation_case, recording_cases
 from ..support.bootstrap_runtime_cases import (
     original_host_calls, observe_host_calls, direct_session_context, wait_session_event,
     runtime_database_facts, save_runtime_evidence,
@@ -144,25 +145,25 @@ async def test_real_session_applies_cancel_before_device_call_returns(tmp_path, 
 
 
 @pytest.mark.parametrize('operation', ['delete', 'query'])
-async def test_real_session_applies_cancel_while_shared_host_file_task_is_running(tmp_path, monkeypatch, operation):
+async def test_real_session_applies_cancel_while_shared_host_file_task_is_running(tmp_path, monkeypatch, operation, capture_resources):
     """真实 unlink/stat 在默认池运行时仍保存取消，原文件资格和结果保持。"""
     import os
     import threading
     from camctl.bootstrap.cleanup_assembly import HostArtifacts
-    from camctl.bootstrap.work_file_assembly import WorkFileRuntime
     from camctl.host_files import paths as host_paths
-    from camctl.outputs.work_files import WorkFileLimits
-    from .test_cleanup_flow import _seed_repaired_artifact
-
-    cfg = _config(tmp_path)
-    db = Path(cfg.paths.state_db)
-    assert initialize_state(cfg, db).outcome is InitOutcome.CREATED
-    await _submit(tmp_path, cfg, _photo_plan('1'))
-    output_id = await _run_photo_session(tmp_path, cfg)
-    _seed_repaired_artifact(db, cfg, output_id)
+    case = await reconciliation_case(tmp_path, started_at_offset_s=120, repair=True)
+    await case.advance()
+    cfg, db = case.config, case.path
+    output_id, file_id, relative_path = case.owned.connection.execute(
+        'SELECT o.id,i.id,i.relative_path FROM outputs o JOIN intermediate_files i'
+        ' ON i.id=o.intermediate_file_id WHERE o.kind=2').fetchone()
+    target = Path(cfg.paths.staging) / relative_path
+    assert target.is_file()
+    assert case.stop_calls == ['stop_recording'] and case.tools.calls == ['repair']
+    await case.close()
+    await capture_resources.close()
     await _submit(tmp_path, cfg, _cleanup_plan('2', {'output_ids': [str(output_id)]}))
-    target = Path(cfg.paths.staging) / 'derived/900.jpg'
-    entered, release = asyncio.Event(), threading.Event()
+    entered, release, finished = asyncio.Event(), threading.Event(), threading.Event()
     query_enabled = threading.Event()
     loop = asyncio.get_running_loop()
     main_thread = threading.get_ident()
@@ -172,7 +173,10 @@ async def test_real_session_applies_cancel_while_shared_host_file_task_is_runnin
     def gate():
         actual_threads.append(threading.get_ident())
         loop.call_soon_threadsafe(entered.set)
-        release.wait()
+        try:
+            release.wait()
+        finally:
+            finished.set()
 
     def unlink(path, *args, **kwargs):
         if path == target:
@@ -201,18 +205,14 @@ async def test_real_session_applies_cancel_while_shared_host_file_task_is_runnin
     monkeypatch.setattr(host_paths.os, 'stat', stat)
     observe_host_calls(monkeypatch, track_run)
     driver = _CleanupDriver()
-    work_files = WorkFileRuntime(staging=Path(cfg.paths.staging), limits=WorkFileLimits(batch_size=100, limit_per_run=100))
-    cleanup = cleanup_flow(session_cleanup_assembly(
-        devices=cfg.devices, drivers=_registry(driver), max_delete_attempts=2,
-        max_query_attempts=1, staging=Path(cfg.paths.staging), file_executor=work_files.executor), state_db_errors=True)
+    from ..support.session import run_default_session
     deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
-    deps.work_files = work_files
-    task = asyncio.create_task(execute_command(deps, None, flows={
-        'cancel': cancel_flow(ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing), work_files=work_files),
-        'cleanup': cleanup}, poll_interval_s=0.005))
+    task = asyncio.create_task(run_default_session(deps, None,
+        _registry(driver).entry('camctl-adb'), poll_interval_s=0.005))
     try:
         await wait_session_event(entered, task)
-        assert 900 in work_files.executor.unfinished_files()
+        assert originals[-1].file_ref.file_id == file_id
+        assert originals[-1].file_ref.relative_path == relative_path
         assert actual_threads == [actual_threads[0]] and actual_threads[0] != main_thread
         attempts = _rows(db, 'SELECT id,run_id,intent_event_id FROM operation_attempts WHERE result_event_id IS NULL')
         assert len(attempts) == 1
@@ -221,14 +221,13 @@ async def test_real_session_applies_cancel_while_shared_host_file_task_is_runnin
             'params': {'target': {'request_id': '2'}}}]})
         await _until(lambda: _rows(db, 'SELECT cancel_requested FROM actions WHERE type=5') == [(1,)], task=task)
         assert not release.is_set() and not task.done()
-        assert 900 in work_files.executor.unfinished_files()
         assert _rows(db, 'SELECT id,run_id,intent_event_id FROM operation_attempts WHERE result_event_id IS NULL') == attempts
         release.set()
         await _until(lambda: _rows(db, 'SELECT status FROM actions WHERE type=5') == [(6,)], task=task)
+        assert finished.is_set()
         assert operations == (['delete'] if operation == 'delete' else ['delete', 'query'])
         assert not driver.delete_calls and not driver.query_calls
         assert _rows(db, 'SELECT COUNT(*) FROM operation_attempts WHERE result_event_id IS NULL') == [(0,)]
-        assert work_files.executor.unfinished_files() == ()
         assert target.exists() is (operation == 'query')
     finally:
         release.set()
@@ -259,7 +258,7 @@ async def test_cleanup_stop_retains_started_host_result_and_original_pending(
     from .test_cleanup_host_file_tasks import _seed_repaired_file, _accept_cleanup, _cleanup_factory
     from .test_output_binding_changes import Catalog, _save_photos
 
-    cfg, owned, context, driver, work_files = host_environment
+    cfg, owned, context, driver, executor, supervisor = host_environment
     await _save_photos(cfg, owned, context, driver)
     output_id, target = _seed_repaired_file(cfg, owned)
     await _accept_cleanup(owned, output_id)
@@ -319,7 +318,7 @@ async def test_cleanup_stop_retains_started_host_result_and_original_pending(
     monkeypatch.setattr(HostArtifacts, 'query_file', query)
     monkeypatch.setattr(OperationRepository, 'finish_attempt', finish_query)
     monkeypatch.setattr(OutputsRepository, 'finish_cleanup_attempt', finish)
-    original_factory = _cleanup_factory(cfg, driver, work_files)
+    original_factory = _cleanup_factory(cfg, driver, executor)
 
     async def factory(database):
         opened.append(database)
@@ -329,14 +328,14 @@ async def test_cleanup_stop_retains_started_host_result_and_original_pending(
     owner = cleanup_flow(factory, state_db_errors=True)
     if control == 'parent_cancel':
         session = direct_session_context(cfg, Catalog(), flows={'cleanup': owner},
-            local_work=CombinedLocalWork((owner, work_files)), poll_interval_s=0.005)
+            local_work=CombinedLocalWork((owner,)), poll_interval_s=0.005)
         task = asyncio.create_task(run_session(session, None))
     else:
         await owner(context)
         task = None
     try:
         await wait_session_event(entered, task)
-        assert work_files.executor.unfinished_files() == (900,)
+        assert executor.unfinished_files() == (900,)
         if task is None:
             owner.stop_new_work()
             owner.stop_new_work()
@@ -348,7 +347,7 @@ async def test_cleanup_stop_retains_started_host_result_and_original_pending(
         for _ in range(5):
             await asyncio.sleep(0)
         assert not task.done() and owner.required_settlements() > 0
-        assert work_files.executor.unfinished_files() == (900,)
+        assert executor.unfinished_files() == (900,)
         assert len(opened) == 1
         assert await opened[0].read(lambda current: current.connection.execute('SELECT 1').fetchone()) == (1,)
         release.set()
@@ -366,7 +365,7 @@ async def test_cleanup_stop_retains_started_host_result_and_original_pending(
         assert operations == (['delete'] if operation == 'delete' else ['delete', 'query'])
         assert len(results) == 1
         assert len(saves) == (1 if operation == 'delete' else 2)
-        assert work_files.executor.unfinished_files() == ()
+        assert executor.unfinished_files() == ()
         if control == 'parent_cancel':
             from camctl.persistence.models import DbExecutorError
             with pytest.raises(DbExecutorError):
