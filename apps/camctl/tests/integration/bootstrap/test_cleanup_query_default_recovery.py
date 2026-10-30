@@ -479,8 +479,13 @@ async def test_host_artifact_query_recovers_after_save_fault(
 
         first = _LocalProbe.instances[-1]
         assert len(first.delete_calls) == 1 and len(first.query_calls) == 1
+        assert len(fault.calls) == len(fault.receipts) == 1
         assert fault.receipts[0].kind is DbOutcomeKind.UNKNOWN
+        assert fault.fault.commit_calls == fault.fault.actual_commits == 1
         _finish, first_key = fault.calls[0][0], fault.calls[0][1]
+        assert owned.connection.execute(
+            "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?",
+            (str(first_key),)).fetchone() == (1,)
         item_id = int(fault.calls[0][0].ticket.target_id)
         member_before = _member_facts(owned, item_id)
         assert member_before[0] == 3
@@ -494,6 +499,9 @@ async def test_host_artifact_query_recovers_after_save_fault(
         second = _LocalProbe.instances[-1]
         assert second is not first
         assert len(second.delete_calls) == 0 and len(second.query_calls) == 0
+        assert len(fault.calls) == len(fault.receipts) == 2
+        assert fault.calls[1] == fault.calls[0]
+        assert fault.receipts[1].kind is DbOutcomeKind.COMPLETED, fault.receipts[1].error
         member = _member_facts(owned, item_id)
         assert member[:4] == (4, 4, 3, None) and member[4] is not None
         assert owned.connection.execute(

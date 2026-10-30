@@ -142,11 +142,14 @@ async def test_device_registration_resumes_original_request_without_camera(tmp_p
         wait_config=lambda _: None, wall_us=lambda: _NOW, monotonic_ns=lambda: 9_000_000_000)
     runtime = await factory(owned)
     saved_calls=[]
+    first_receipts=[]
+    archive_completed=[]
     try:
         if interruption == "archive":
             original=host_photo.archive_capture_file
             async def interrupted(*args, **kwargs):
-                await original(*args, **kwargs)
+                result = await original(*args, **kwargs)
+                archive_completed.append(result)
                 raise OSError("归档中断")
             monkeypatch.setattr(host_photo,"archive_capture_file",interrupted)
         else:
@@ -160,13 +163,33 @@ async def test_device_registration_resumes_original_request_without_camera(tmp_p
                 if committed:
                     result=original(repository,request,key,owned)
                     assert result.kind is DbOutcomeKind.COMPLETED,result.error
-                return DbOutcome(DbOutcomeKind.UNKNOWN,error=OSError("回执未知"))
+                    first_receipts.append(result)
+                unknown = DbOutcome(DbOutcomeKind.UNKNOWN,error=OSError("回执未知"))
+                first_receipts.append(unknown)
+                return unknown
             monkeypatch.setattr(CaptureRepository,method,interrupted)
         with pytest.raises((OSError,ConsistencyError)):
             await capture_handler("camera_take_photo")(1,runtime)
         assert len(driver.requests)==1
+        if interruption == "archive":
+            # 归档中断不涉及仓储提交，committed 仅区分下面两种保存故障。
+            assert len(archive_completed) == 1
+            assert saved_calls == []
+        else:
+            assert saved_calls
+            assert all(call == saved_calls[0] for call in saved_calls)
+            assert first_receipts[-1].kind is DbOutcomeKind.UNKNOWN
+            assert len(first_receipts) == len(saved_calls) * (2 if committed else 1)
+            initial_key = saved_calls[0][1]
+            assert owned.connection.execute(
+                "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?",
+                (str(initial_key),)).fetchone() == (int(committed),)
         paths=[Path(cfg.paths.staging)/r[0] for r in owned.connection.execute("SELECT relative_path FROM intermediate_files")]
         assert any(p.exists() for p in paths)
+        original_call_count = len(saved_calls)
+        if interruption == "archive":
+            archived, = (path for path in paths if path.exists())
+            before_archive = (archived.read_bytes(), archived.stat().st_ino, archived.stat().st_mtime_ns)
         devices.pop("cam-1")
         runtime = await factory(owned)
         if interruption == "archive":
@@ -182,10 +205,17 @@ async def test_device_registration_resumes_original_request_without_camera(tmp_p
         assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone()==(3,)
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone()==(2,)
         assert len(driver.requests)==1
-        if saved_calls:
+        if interruption == "archive":
+            assert (archived.read_bytes(), archived.stat().st_ino, archived.stat().st_mtime_ns) == before_archive
+        else:
             first=saved_calls[0]
             same=[call for call in saved_calls if call[0].__class__ is first[0].__class__ and getattr(call[0],"file_id",None)==getattr(first[0],"file_id",None)]
+            assert len(same) >= 2
+            assert len(same) > original_call_count
             assert all(call==first for call in same)
+            assert owned.connection.execute(
+                "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?",
+                (str(first[1]),)).fetchone() == (1,)
     finally:
         owned.connection.close()
 
