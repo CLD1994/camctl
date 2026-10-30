@@ -2977,7 +2977,7 @@
       "interpretation": "与其他运行分开记录；不得合并成一次回归。"
     },
     {
-      "id": "log-settlement-c597",
+      "id": "log-settlement-physicalfull",
       "kind": "pytest_run",
       "source_root": "/tmp/camctl-resume-20261030/evidence-log-settlement",
       "source_head": "8cce607753dfddeef15496d1ba9f8509c0cef88c",
@@ -3018,7 +3018,7 @@
         "pytest_log_reported_seconds": 17.17,
         "receipt_wall_seconds": 17.794462830002885
       },
-      "interpretation": "完整组件集成范围的独立失败运行；仅描述该测试场景，不推及设备或其他负载。"
+      "interpretation": "作者工作区 physicalfull 完整文件测试运行；与 root 的另一来源 c597 运行分别保存。"
     },
     {
       "id": "log-settlement-diagnostic3",
@@ -3225,12 +3225,12 @@
     {
       "id": "work-files-media-6-review",
       "kind": "read_only_diagnostic",
-      "interpretation": "原失败 DB 的只读事实摘录与解释；原 DB 未由该摘录修改。时钟 pair 仍待统一复核。UNKNOWN 是较晚的收场保存结果，不是首次文件冲突。"
+      "interpretation": "media-6 原快照的两个正式时钟入口读取了不同单调时间；后续独立 media-race 运行以同一受控时钟读数连接两个入口，但在 probe/检查保存完成后的 media_repair 窗口失败，不能视为对原 media_check 窗口的精确重现。UNKNOWN 是较晚的收场保存结果，不是首次文件冲突。只读事实摘录没有修改原失败数据库。"
     },
     {
       "id": "log-settlement-handoffs",
       "kind": "handoff_documents",
-      "interpretation": "production-handoff 对 c597 实际失败做边界解释；diagnostic3 是另一个有独立 source digest/命令/输出的窄运行。"
+      "interpretation": "production-handoff 对作者工作区 physicalfull 实际失败做边界解释；diagnostic3 是另一个有独立 source digest/命令/输出的窄运行。"
     },
     {
       "id": "history-cost-audit-static",
@@ -4521,8 +4521,8 @@
       "raw_bytes_match_source": true
     },
     {
-      "group": "log-settlement-c597",
-      "archive_path": "log-settlement-c597/production-handoff.md.gz",
+      "group": "log-settlement-physicalfull",
+      "archive_path": "log-settlement-physicalfull/production-handoff.md.gz",
       "original_name": "production-handoff.md",
       "source_path": "/tmp/camctl-resume-20261030/evidence-log-settlement/production-handoff.md",
       "role": "production boundary handoff",
@@ -4538,8 +4538,8 @@
       "raw_bytes_match_source": true
     },
     {
-      "group": "log-settlement-c597",
-      "archive_path": "log-settlement-c597/physicalfull.json.gz",
+      "group": "log-settlement-physicalfull",
+      "archive_path": "log-settlement-physicalfull/physicalfull.json.gz",
       "original_name": "physicalfull.json",
       "source_path": "/tmp/camctl-resume-20261030/evidence-log-settlement/physicalfull.json",
       "role": "c597 complete-run command and digest metadata",
@@ -4555,8 +4555,8 @@
       "raw_bytes_match_source": true
     },
     {
-      "group": "log-settlement-c597",
-      "archive_path": "log-settlement-c597/physicalfull.xml.gz",
+      "group": "log-settlement-physicalfull",
+      "archive_path": "log-settlement-physicalfull/physicalfull.xml.gz",
       "original_name": "physicalfull.xml",
       "source_path": "/tmp/camctl-resume-20261030/evidence-log-settlement/physicalfull.xml",
       "role": "c597 complete-run JUnit result",
@@ -4572,8 +4572,8 @@
       "raw_bytes_match_source": true
     },
     {
-      "group": "log-settlement-c597",
-      "archive_path": "log-settlement-c597/physicalfull.log.gz",
+      "group": "log-settlement-physicalfull",
+      "archive_path": "log-settlement-physicalfull/physicalfull.log.gz",
       "original_name": "physicalfull.log",
       "source_path": "/tmp/camctl-resume-20261030/evidence-log-settlement/physicalfull.log",
       "role": "c597 complete-run pytest output",
@@ -4589,8 +4589,8 @@
       "raw_bytes_match_source": true
     },
     {
-      "group": "log-settlement-c597",
-      "archive_path": "log-settlement-c597/run.py.gz",
+      "group": "log-settlement-physicalfull",
+      "archive_path": "log-settlement-physicalfull/run.py.gz",
       "original_name": "run.py",
       "source_path": "/tmp/camctl-resume-20261030/evidence-log-settlement/run.py",
       "role": "generic exact launcher used by this evidence directory",
@@ -4606,8 +4606,8 @@
       "raw_bytes_match_source": true
     },
     {
-      "group": "log-settlement-c597",
-      "archive_path": "log-settlement-c597/tmp/test_cancel_during_local_drain0/camctl.log.gz",
+      "group": "log-settlement-physicalfull",
+      "archive_path": "log-settlement-physicalfull/tmp/test_cancel_during_local_drain0/camctl.log.gz",
       "original_name": "camctl.log",
       "source_path": "/tmp/camctl-resume-20261030/evidence-log-settlement/physicalfull-tmp/test_cancel_during_local_drain0/camctl.log",
       "role": "c597 failing case application log",
@@ -5299,7 +5299,8 @@
     "work-files-media-8 没有 source-sha256.txt，未从同一 Git HEAD 的其他运行推定。",
     "work-files-media-6 的 source-sha256.txt 与 test.patch 一起保留；实际工作树测试文件是打补丁后的版本。",
     "work-files-media-6 的 state.db、state.db-wal、state.db-shm 按原始字节复制；复制前确认 fuser 无打开者，未通过 SQLite 读取或写入。",
-    "c597 完整失败与 diagnostic3 窄诊断分别记录。media-6 原始时钟 pair 仍待统一核对；该次 UNKNOWN 不作为首次文件冲突原因。"
+    "physicalfull 作者工作区完整失败与 diagnostic3 窄诊断分别记录。media-6 原快照两个时钟入口读数不一致，后续 media-race 样本已用同一受控读数连接两个入口，但覆盖的是不同冲突窗口；该次 UNKNOWN 不作为首次文件冲突原因。",
+    "media-race 运行有未执行且对普通 MP4 不适用的输出 probe 断言，因此不把整节点结果称为完整合法验收；后补导入来源检查来自 pytest 后的新解释器，不代表 pytest 运行时 support 模块导入路径。"
   ],
   "history_cost_scope": {
     "report_4200_acceptance_batch_action_counts": [
@@ -5311,13 +5312,14 @@
       256,
       2048
     ],
-    "interpretation": "report 节点经三次 AcceptanceRepository.process_input 分别受理 3、4200、3 个动作；这不是 SQL 数或每次受理计时。segment-growth 节点覆盖 256、2048 个成员。4100 是先前口头记录笔误。PHASE_TIMING 有 preparation、target、verification_and_observer、close 四阶段；target 包含原 SQLite trace/progress/fetch 或 tracemalloc 观测器，fixturesetup 不计入节点函数计时。此处是容量准备和测量范围记录，不是提速结果。"
+    "interpretation": "report 节点经三次 AcceptanceRepository.process_input 分别受理 3、4200、3 个动作；这不是 SQL 数或每次受理计时。segment-growth 节点覆盖 256、2048 个成员。PHASE_TIMING 有 preparation、target、verification_and_observer、close 四阶段；target 包含原 SQLite trace/progress/fetch 或 tracemalloc 观测器，fixturesetup 不计入节点函数计时。此处是容量准备和测量范围记录，不是提速结果。"
   },
   "media_race_scope": {
     "poll_interval_seconds": 0.001,
     "injected_save_fault": false,
     "result_summary": "1 failed; pytest 4.96 seconds; process wall 6.682367425994016 seconds",
     "production_tree": "9c2b982aa4050c25646e40b6500ebad3a84a8661",
-    "separation": "该运行中原片 READ/probe/检查保存成功，repair 已启动；之后默认 cancel 恢复为仍占 file1 的 media_repair 再申请资格而失败。其首次冲突是 media_repair 运行阶段，与 media-6 的 scheduling/media_check 早期冲突不同。"
+    "separation": "该运行中原片 READ/probe/检查保存成功，repair 已启动；之后默认 cancel 恢复为仍占 file1 的 media_repair 再申请资格而失败。其首次冲突是 media_repair 运行阶段，与 media-6 的 scheduling/media_check 早期冲突不同。",
+    "interpretation_limit": "临时测试源码末尾还有一个未执行到的输出 probe 断言；该额外输出 probe 对普通 MP4 不适用。本运行不能当作整节点合法验收；root 只据已执行的 FileTaskError 和此前媒体事实链确认并发协作缺口。receipt 的 import.txt 记录运行前解释器和 camctl 来源，但未实测 pytest 进程中 support 模块 sys.path/__file__；post-run-import-origin.json 是 pytest 结束后另启解释器的 src+tests 导入核对，不是 pytest 现场导入证据。"
   }
 }
