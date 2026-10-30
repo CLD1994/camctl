@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import json
-from decimal import Decimal
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -29,24 +29,7 @@ from camctl.persistence.repositories.capture import (
     register_capture_guards,
 )
 from camctl.persistence.repositories.operations import (
-    OperationRepository,
     register_operation_guards,
-)
-from camctl.operations.attempts import (
-    AttemptConfig,
-    AttemptFinish,
-    AttemptIntent,
-    AttemptTarget,
-    OperationKind,
-)
-from camctl.operations.models import (
-    AttemptStatus,
-    CallOutcome,
-    EffectState,
-    ErrorValue,
-    EvidenceValue,
-    Settlement,
-    SettlementBasis,
 )
 from camctl.persistence.runtime import (
     CURRENT_FORMAT_VERSION,
@@ -196,355 +179,229 @@ def _finish(action_id: int = 1, drafts=None) -> FinishCapture:
 pytestmark = pytest.mark.asyncio
 
 
-async def test_finish_registers_outputs_action_and_plan_together(tmp_path: Path) -> None:
-    owned = _environment(tmp_path)
-    repository = CaptureRepository()
-    try:
-        outcome = repository.finish_capture(_finish(), new_operation_key(), owned)
-        assert outcome.kind is DbOutcomeKind.COMPLETED
-        result = outcome.value
-        assert result.action_status == 3
-        assert result.plan_status == 3
+from ..support.recording_consumer_cases import (
+    NOW, RecordingCase, capture_request, finish_case, with_capture, recording_cases,
+)
 
-        output = _value(
-            owned,
-            "SELECT kind, device_file_id, availability, cleanup_status, source_action_id"
-            " FROM outputs WHERE id = ?",
-            result.output_ids[0],
-        )
-        assert output[0] == 1  # ORIGINAL
-        assert output[1] == 11  # 文件身份保留
-        assert output[2] == 1 and output[3] == 1
-        assert output[4] == 1
-        action = _value(owned, "SELECT status FROM actions WHERE id = 1")
-        assert action[0] == 3
-        plan = _value(owned, "SELECT status FROM plans WHERE id = 1")
-        assert plan[0] == 3
+
+async def _save_finish(case, method, request, key=None):
+    return await case.write(getattr(CaptureRepository(), method), request, key)
+
+
+def _image(case):
+    return tuple(case.owned.connection.iterdump())
+
+
+async def test_finish_registers_outputs_action_and_plan_together(tmp_path: Path) -> None:
+    case = await finish_case(tmp_path)
+    try:
+        method, request, key = await case.finish_input()
+        boundary = case.row('SELECT MAX(id) FROM history_events')[0]
+        outcome = await _save_finish(case, method, request, key)
+        assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+        result = outcome.value
+        assert (result.action_status, result.plan_status) == (3, 3)
+        file_id = capture_request(request).drafts[0].file.device_file_id
+        assert case.row('SELECT kind,device_file_id,availability,cleanup_status,source_action_id'
+            ' FROM outputs WHERE id=?', result.output_ids[0]) == (1, file_id, 1, 1, 1)
+        assert case.row('SELECT status FROM actions WHERE id=1') == (3,)
+        assert case.row('SELECT status FROM plans WHERE id=1') == (3,)
+        txns = case.owned.connection.execute(
+            'SELECT DISTINCT transaction_id FROM history_events WHERE id>?', (boundary,)).fetchall()
+        assert len(txns) == 1
+        assert case.stop_calls == ['stop_recording']
     finally:
-        owned.connection.close()
+        await case.close()
 
 
 async def test_invalid_draft_rolls_back_whole_group(tmp_path: Path) -> None:
-    """未完成文件混入草稿：产物与终态整组回滚。"""
-    owned = _environment(tmp_path)
-    repository = CaptureRepository()
+    """真实原页的两份文件中，一项草稿不完整则整组拒绝。"""
+    case = await finish_case(tmp_path, second_file=True)
     try:
-        outcome = repository.finish_capture(
-            _finish(drafts=(_original_draft(11), _original_draft(12, complete=False))),
-            new_operation_key(),
-            owned,
-        )
+        method, request, _key = await case.finish_input()
+        capture = capture_request(request)
+        assert len(capture.drafts) == 2
+        invalid = with_capture(request, replace(capture, drafts=(
+            capture.drafts[0], replace(capture.drafts[1], file_complete=False))))
+        before = _image(case)
+        outcome = await _save_finish(case, method, invalid)
         assert outcome.kind is DbOutcomeKind.ROLLED_BACK
-        assert _value(owned, "SELECT COUNT(*) FROM outputs")[0] == 0
-        action = _value(owned, "SELECT status FROM actions WHERE id = 1")
-        assert action[0] == 2
-        plan = _value(owned, "SELECT status FROM plans WHERE id = 1")
-        assert plan[0] == 1
+        assert _image(case) == before
+        assert case.row('SELECT COUNT(*) FROM outputs') == (0,)
+        assert case.row('SELECT status FROM actions WHERE id=1') == (2,)
+        assert case.row('SELECT status FROM plans WHERE id=1') == (2,)
     finally:
-        owned.connection.close()
+        await case.close()
 
 
 async def test_stop_uses_original_budget_across_cancel_and_restart(tmp_path: Path) -> None:
-    """停止预算沿原流程累计：普通、取消与恢复入口共用同一责任。"""
-    owned = _environment(tmp_path)
-    operations = OperationRepository()
+    """正常、已生效取消和实际 worker 重开沿用同一个停止流程。"""
+    case = await RecordingCase(tmp_path, stop_failures=3).start()
+    stages = []
     try:
-        used = 0
-        for _entry in ("normal", "cancel", "restart"):
-            outcome = operations.begin_attempt(_stop_intent(), new_operation_key(), owned)
-            assert outcome.kind is DbOutcomeKind.COMPLETED
-            ticket = outcome.value.ticket
-            used += 1
-            failed = _stop_failed(ticket)
-            receipt = operations.finish_attempt(
-                AttemptFinish(
-                    ticket=ticket, outcome=failed, occurred_at=_NOW, retry_wait=True
-                ),
-                new_operation_key(),
-                owned,
-            )
-            assert receipt.kind is DbOutcomeKind.COMPLETED
-        row = _value(
-            owned,
-            "SELECT attempts_used FROM operation_runs WHERE responsibility_key = 'stop/1'",
-        )
-        assert row[0] == 3
-        assert used == 3
+        case.wall[0], case.mono[0] = NOW + 60_000_000, 65_000_000_000
+        await case.advance()
+        stages.append(('normal', case.row('SELECT id,attempts_used FROM operation_runs'
+            " WHERE responsibility_key='stop/1'")))
+        await case.cancel()
+        case.wall[0] += 2_000_000
+        case.mono[0] += 2_000_000_000
+        await case.advance()
+        stages.append(('cancel', case.row('SELECT id,attempts_used FROM operation_runs'
+            " WHERE responsibility_key='stop/1'")))
+        await case.restart(wall=case.wall[0] + 2_000_000)
+        await case.advance()
+        assert len(case.stop_calls) == 2
+        case.wall[0] += 1_000_000
+        case.mono[0] += 1_000_000_000
+        await case.advance()
+        stages.append(('restart', case.row('SELECT id,attempts_used FROM operation_runs'
+            " WHERE responsibility_key='stop/1'")))
+        facts = {'stages': stages, 'calls': case.driver.calls,
+            'actions': case.owned.connection.execute('SELECT id,status,cancel_requested,error_code,error_details_json FROM actions').fetchall(),
+            'runs': case.owned.connection.execute('SELECT id,responsibility_key,status,attempts_used,max_attempts_used,error_json FROM operation_runs').fetchall(),
+            'attempts': case.owned.connection.execute('SELECT run_id,attempt_no,status,effect_state,result_json,error_json FROM operation_attempts').fetchall()}
+        (tmp_path / 'stop-budget-facts.json').write_text(json.dumps(facts,ensure_ascii=False,indent=2))
+        assert len({value[0] for _stage,value in stages}) == 1
+        assert [value[1] for _stage,value in stages] == [1, 2, 3]
+        failures = case.owned.connection.execute(
+            "SELECT json_extract(error_json,'$.code'),json_extract(error_json,'$.stage')"
+            " FROM operation_attempts WHERE run_id=? ORDER BY attempt_no", (stages[0][1][0],)).fetchall()
+        assert failures == [('transport_timeout', 'transport')] * 3
+        assert case.stop_calls == ['stop_recording'] * 3
+        case.wall[0] += 2_000_000
+        case.mono[0] += 2_000_000_000
+        await case.advance()
+        assert case.stop_calls == ['stop_recording'] * 3
+        assert case.row('SELECT COUNT(*) FROM outputs') == (0,)
     finally:
-        owned.connection.close()
+        await case.close()
 
 
 async def test_canceled_finish_ends_action_without_outputs(tmp_path: Path) -> None:
-    """取消终态：放弃内容不登记产物，动作与父计划同事务收场。"""
-    owned = _environment(tmp_path)
-    connection = owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    connection.execute(
-        "UPDATE actions SET cancel_requested = 1 WHERE id = 1")
-    connection.commit()
-    repository = CaptureRepository()
+    case = await finish_case(tmp_path, complete_files=False, canceled=True)
     try:
-        outcome = repository.finish_canceled_capture(
-            FinishCanceledCapture(action_id=1, occurred_at=_NOW),
-            new_operation_key(), owned)
-        assert outcome.kind is DbOutcomeKind.COMPLETED
-        assert outcome.value.action_status == 6
-        assert outcome.value.plan_status == 3
-        assert outcome.value.output_ids == ()
-        action = _value(owned, "SELECT status FROM actions WHERE id = 1")
-        assert action[0] == 6
-        plan = _value(owned, "SELECT status FROM plans WHERE id = 1")
-        assert plan[0] == 3
-        outputs = _value(owned, "SELECT COUNT(*) FROM outputs")
-        assert outputs[0] == 0
+        method, request, key = await case.finish_input()
+        assert request.drafts == ()
+        outcome = await _save_finish(case, method, request, key)
+        assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
+        assert (outcome.value.action_status, outcome.value.plan_status, outcome.value.output_ids) == (6, 3, ())
+        assert case.row('SELECT status FROM actions WHERE id=1') == (6,)
+        assert case.row('SELECT status FROM plans WHERE id=1') == (3,)
+        assert case.row('SELECT COUNT(*) FROM outputs') == (0,)
     finally:
-        owned.connection.close()
+        await case.close()
 
 
 async def test_canceled_finish_requires_saved_cancel_mark(tmp_path: Path) -> None:
-    """取消标记未保存的执行中动作不能按取消终态收场。"""
-    owned = _environment(tmp_path)
-    repository = CaptureRepository()
+    case = await finish_case(tmp_path, complete_files=False)
     try:
-        outcome = repository.finish_canceled_capture(
-            FinishCanceledCapture(action_id=1, occurred_at=_NOW),
-            new_operation_key(), owned)
+        before = _image(case)
+        outcome = await _save_finish(case, 'finish_canceled_capture', FinishCanceledCapture(1, NOW))
         assert outcome.kind is DbOutcomeKind.ROLLED_BACK
-        action = _value(owned, "SELECT status FROM actions WHERE id = 1")
-        assert action[0] == 2
+        assert case.row('SELECT status,cancel_requested FROM actions WHERE id=1') == (2, 0)
+        assert _image(case) == before
     finally:
-        owned.connection.close()
+        await case.close()
 
 
 async def test_canceled_finish_reuse_and_recovery(tmp_path: Path) -> None:
-    """同键重送与终态新键都只读恢复首次结果；其他终态拒绝。"""
-    owned = _environment(tmp_path)
-    connection = owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    connection.execute(
-        "UPDATE actions SET cancel_requested = 1 WHERE id = 1")
-    connection.commit()
-    repository = CaptureRepository()
+    case = await finish_case(tmp_path, complete_files=False, canceled=True)
     try:
-        command = FinishCanceledCapture(action_id=1, occurred_at=_NOW)
-        first = repository.finish_canceled_capture(
-            command, new_operation_key(), owned)
-        assert first.kind is DbOutcomeKind.COMPLETED
-        again = repository.finish_canceled_capture(
-            command, new_operation_key(), owned)
-        assert again.kind is DbOutcomeKind.COMPLETED, again.error
-        assert again.value.disposition is FinishDisposition.ALREADY
-        assert again.value.action_status == 6
-        new_key = repository.finish_canceled_capture(
-            FinishCanceledCapture(action_id=1, occurred_at=_NOW + 1),
-            new_operation_key(), owned)
-        assert new_key.kind is DbOutcomeKind.COMPLETED
-        assert new_key.value.disposition is FinishDisposition.ALREADY
-        assert new_key.value.action_status == 6
+        method, command, key = await case.finish_input()
+        first = await _save_finish(case, method, command, key)
+        assert first.kind is DbOutcomeKind.COMPLETED, first.error
+        await case.restart(wall=NOW + 100_000_000)
+        before = _image(case)
+        for resend_key, request in ((key, command), (new_operation_key(), command),
+            (new_operation_key(), replace(command, occurred_at=command.occurred_at + 1))):
+            again = await _save_finish(case, method, request, resend_key)
+            assert again.kind is DbOutcomeKind.COMPLETED, again.error
+            assert again.value.disposition is FinishDisposition.ALREADY
+            assert (again.value.action_status, again.value.plan_status, again.value.output_ids) == (6, 3, ())
+            assert _image(case) == before
     finally:
-        owned.connection.close()
+        await case.close()
 
 
 async def _complete_files_then_cancel(tmp_path: Path, consumer: str):
-    from unittest.mock import create_autospec
-
-    from camctl.capture.handlers import (
-        _finish_listing_result, _listing_round, _register_listing, _stop_call,
-    )
-    from camctl.capture.models import ActivityConcludeSave
-    from camctl.devices.ports import DeviceCallResult, StopDriver
-
-    from ..bootstrap.test_recording_results_cancellation import _apply_cancellation
-    from .result_consumer_fixtures import consumer_world, returned
-    from .test_capture_contract import ResultsDouble, _entry
-
-    owned, runtime, action_id, _handler = await consumer_world(tmp_path, consumer)
-    try:
-        activity_id, = _value(
-            owned, "SELECT id FROM device_activities WHERE action_id=?", action_id)
-        runtime.results = ResultsDouble({activity_id: (_entry("complete-file"),)})
-        if consumer == "timelapse":
-            from .result_consumer_fixtures import complete_natural_wait
-            complete_natural_wait(runtime, action_id)
-        listing = await _listing_round(runtime, action_id)
-        registered = _register_listing(runtime, action_id, listing)
-        _finish_listing_result(runtime, listing)
-        (_file, file_id), = registered
-        assert _value(owned,
-            "SELECT source_action_id,presence_state,completion_state,size_bytes"
-            " FROM device_files WHERE id=?", file_id) == (action_id, 2, 3, 4096)
-        assert runtime.results.calls == [activity_id]
-        if consumer == "timelapse":
-            stopper = create_autospec(StopDriver, instance=True)
-            stopper.stop.return_value = DeviceCallResult.from_outcome(
-                returned("stop", "stop_confirmed", activity_id))
-            runtime.stopper = stopper
-            stopped = await _stop_call(runtime, runtime.action(action_id), "stop_timelapse")
-            assert stopped.phase == "confirmed", stopped
-            concluded = runtime.capture.conclude_activity(
-                ActivityConcludeSave(action_id, runtime.wall_us()),
-                new_operation_key(), owned)
-            assert concluded.kind is DbOutcomeKind.COMPLETED, concluded.error
-        # consumer_world 的单动作受理对应此公共取消 helper 的原目标。
-        assert action_id == 1
-        _apply_cancellation(owned, terminal=False)
-        assert _value(owned, "SELECT status,cancel_requested FROM actions WHERE id=?",
-                      action_id) == (2, 1)
-        return owned, action_id, file_id, runtime.wall_us()
-    except BaseException:
-        owned.connection.close()
-        raise
+    case = await finish_case(tmp_path, consumer=consumer, canceled=True)
+    assert case.row('SELECT source_action_id,presence_state,completion_state,size_bytes'
+        ' FROM device_files WHERE id=1') == (1, 2, 3, 4096)
+    assert case.row('SELECT status,cancel_requested FROM actions WHERE id=1') == (2, 1)
+    assert case.results.delegate.calls == [1]
+    return case
 
 
 async def test_canceled_finish_registers_complete_files(tmp_path: Path) -> None:
-    """延时摄影取消保留已确认完整文件，产物与取消终态原子登记。"""
-    owned, action_id, file_id, occurred_at = await _complete_files_then_cancel(
-        tmp_path, "timelapse")
-    repository = CaptureRepository()
+    """延时摄影取消保留真实原页的完整文件，并与终态同事务登记。"""
+    case = await _complete_files_then_cancel(tmp_path, 'timelapse')
     try:
-        boundary, = _value(owned, "SELECT MAX(id) FROM history_events")
-        command = FinishCanceledCapture(
-            action_id=action_id,
-            occurred_at=occurred_at,
-            drafts=(_original_draft(file_id),),
-            catalog_facts=OutputCatalogFacts(
-                action_id=action_id, ownership_confirmed=True),
-        )
-        key = new_operation_key()
-        outcome = repository.finish_canceled_capture(
-            command, key, owned)
+        method, command, key = await case.finish_input()
+        assert len(command.drafts) == 1
+        boundary = case.row('SELECT MAX(id) FROM history_events')[0]
+        outcome = await _save_finish(case, method, command, key)
         assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
-        assert outcome.value.action_status == 6
-        assert outcome.value.plan_status == 3
+        assert (outcome.value.action_status, outcome.value.plan_status) == (6, 3)
         assert len(outcome.value.output_ids) == 1
-        output = _value(
-            owned,
-            "SELECT kind, device_file_id, availability, source_action_id"
-            " FROM outputs WHERE id = ?",
-            outcome.value.output_ids[0])
-        assert output == (1, file_id, 1, action_id)
-        assert _value(owned, "SELECT status FROM actions WHERE id=?", action_id)[0] == 6
-        # 取消终态与产物登记同事务保存：本命令的全部事件共用一个事务号。
-        txns = {row[0] for row in owned.connection.execute(
-            "SELECT DISTINCT transaction_id FROM history_events"
-            " WHERE id > ?", (boundary,)).fetchall()}
-        assert len(txns) == 1
-        # 同键重送恢复首次结果与产物身份。
-        again = repository.finish_canceled_capture(
-            command, key, owned)
-        assert again.kind is DbOutcomeKind.COMPLETED, again.error
-        assert again.value.disposition is FinishDisposition.ALREADY
-        assert again.value.output_ids == outcome.value.output_ids
-        new_key = repository.finish_canceled_capture(
-            command, new_operation_key(), owned)
-        assert new_key.kind is DbOutcomeKind.COMPLETED, new_key.error
-        assert new_key.value.disposition is FinishDisposition.ALREADY
-        assert new_key.value.output_ids == outcome.value.output_ids
-        # 与既有登记不一致的新键输入（空草稿）不能改写首次产物集合。
-        discard = repository.finish_canceled_capture(
-            FinishCanceledCapture(action_id=action_id, occurred_at=occurred_at + 1),
-            new_operation_key(), owned)
+        assert case.row('SELECT kind,device_file_id,availability,source_action_id FROM outputs WHERE id=?',
+            outcome.value.output_ids[0]) == (1, 1, 1, 1)
+        assert case.row('SELECT status FROM actions WHERE id=1') == (6,)
+        assert len(case.owned.connection.execute('SELECT DISTINCT transaction_id FROM history_events WHERE id>?',
+            (boundary,)).fetchall()) == 1
+        before = _image(case)
+        for resend in (key, new_operation_key()):
+            again = await _save_finish(case, method, command, resend)
+            assert again.kind is DbOutcomeKind.COMPLETED, again.error
+            assert again.value.disposition is FinishDisposition.ALREADY
+            assert again.value.output_ids == outcome.value.output_ids
+            assert _image(case) == before
+        assert case.results.delegate.calls == [1]
+        discard = await _save_finish(case, method,
+            FinishCanceledCapture(1, command.occurred_at + 1))
         assert discard.kind is DbOutcomeKind.ROLLED_BACK
+        assert _image(case) == before
     finally:
-        owned.connection.close()
+        await case.close()
 
 
 async def test_canceled_record_finish_discards_complete_files(tmp_path: Path) -> None:
-    """录像取消放弃内容，拒绝产物草稿并保留原完整文件事实。"""
-    owned, action_id, file_id, occurred_at = await _complete_files_then_cancel(
-        tmp_path, "record")
-    repository = CaptureRepository()
+    """录像取消拒绝产物草稿，保留已经可靠保存的完整文件和原页。"""
+    case = await _complete_files_then_cancel(tmp_path, 'record')
     try:
-        files = owned.connection.execute("SELECT * FROM device_files ORDER BY id").fetchall()
-        history = owned.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall()
-        rejected = repository.finish_canceled_capture(FinishCanceledCapture(
-            action_id, occurred_at, drafts=(_original_draft(file_id),),
-            catalog_facts=OutputCatalogFacts(action_id, ownership_confirmed=True)),
-            new_operation_key(), owned)
-        assert rejected.kind is DbOutcomeKind.ROLLED_BACK, rejected.error
-        assert owned.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall() == history
-        assert _value(owned, "SELECT status FROM actions WHERE id=?", action_id) == (2,)
-        assert _value(owned, "SELECT COUNT(*) FROM outputs") == (0,)
-
-        result = repository.finish_canceled_capture(
-            FinishCanceledCapture(action_id, occurred_at), new_operation_key(), owned)
+        method, command, key = await case.finish_input()
+        files = case.owned.connection.execute('SELECT * FROM device_files ORDER BY id').fetchall()
+        before = _image(case)
+        rejected = await _save_finish(case, method, replace(command,
+            drafts=(_original_draft(1),), catalog_facts=OutputCatalogFacts(1, ownership_confirmed=True)))
+        assert rejected.kind is DbOutcomeKind.ROLLED_BACK
+        assert _image(case) == before
+        assert case.row('SELECT status FROM actions WHERE id=1') == (2,)
+        assert case.row('SELECT COUNT(*) FROM outputs') == (0,)
+        result = await _save_finish(case, method, command, key)
         assert result.kind is DbOutcomeKind.COMPLETED, result.error
-        assert result.value.action_status == 6
-        assert result.value.output_ids == ()
-        assert _value(owned, "SELECT status FROM actions WHERE id=?", action_id) == (6,)
-        assert _value(owned, "SELECT COUNT(*) FROM outputs") == (0,)
-        assert owned.connection.execute("SELECT * FROM device_files ORDER BY id").fetchall() == files
+        assert (result.value.action_status, result.value.output_ids) == (6, ())
+        assert case.row('SELECT status FROM actions WHERE id=1') == (6,)
+        assert case.row('SELECT COUNT(*) FROM outputs') == (0,)
+        assert case.owned.connection.execute('SELECT * FROM device_files ORDER BY id').fetchall() == files
+        assert case.results.delegate.calls == [1]
     finally:
-        owned.connection.close()
+        await case.close()
 
 
-async def test_canceled_finish_rejects_incomplete_draft(tmp_path: Path) -> None:
-    """写入未完成的文件不能借取消收场登记为正式产物：整组拒绝。"""
-    owned = _environment(tmp_path)
-    connection = owned.connection
-    connection.execute("BEGIN IMMEDIATE")
-    connection.execute(
-        "UPDATE actions SET cancel_requested = 1 WHERE id = 1")
-    connection.commit()
-    repository = CaptureRepository()
+@pytest.mark.parametrize('consumer', ['record', 'timelapse'])
+async def test_canceled_finish_rejects_incomplete_draft(tmp_path: Path, consumer) -> None:
+    """取消录像禁止草稿；允许保留文件的延时分支也拒绝不完整草稿。"""
+    case = await finish_case(tmp_path, consumer=consumer, canceled=True)
     try:
-        command = FinishCanceledCapture(
-            action_id=1,
-            occurred_at=_NOW,
-            drafts=(_original_draft(12, complete=False),),
-            catalog_facts=OutputCatalogFacts(
-                action_id=1, ownership_confirmed=True),
-        )
-        outcome = repository.finish_canceled_capture(
-            command, new_operation_key(), owned)
+        method, command, _key = await case.finish_input()
+        before = _image(case)
+        outcome = await _save_finish(case, method, replace(command,
+            drafts=(_original_draft(1, complete=False),),
+            catalog_facts=OutputCatalogFacts(1, ownership_confirmed=True)))
         assert outcome.kind is DbOutcomeKind.ROLLED_BACK
-        assert _value(owned, "SELECT COUNT(*) FROM outputs")[0] == 0
-        assert _value(owned, "SELECT status FROM actions WHERE id = 1")[0] == 2
+        assert case.row('SELECT COUNT(*) FROM outputs') == (0,)
+        assert case.row('SELECT status FROM actions WHERE id=1') == (2,)
+        assert _image(case) == before
     finally:
-        owned.connection.close()
-
-
-def _stop_intent() -> AttemptIntent:
-    return AttemptIntent(
-        operation="stop",
-        action_id=1,
-        kind=OperationKind.STOP,
-        target=AttemptTarget(activity_id=1),
-        query_purpose=None,
-        config=AttemptConfig(
-            max_attempts=3, timeout_s=Decimal("10"), retry_interval_s=Decimal("1")
-        ),
-        occurred_at=_NOW,
-    )
-
-
-def _stop_failed(ticket):
-    from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
-    from camctl.operations.validation import validate_outcome
-
-    registry = EvidenceRegistry(
-        (
-            EvidenceContract(
-                type="adb_foreground_assumption",
-                version=1,
-                operation="stop",
-                fields=frozenset(),
-            ),
-        )
-    )
-    return validate_outcome(
-        ticket,
-        CallOutcome(
-            status=AttemptStatus.FAILED,
-            error=ErrorValue(code="transport_timeout", stage="transport"),
-            effect=EffectState.UNKNOWN,
-            settlement=Settlement(
-                basis=SettlementBasis.ASSUMED,
-                evidence=EvidenceValue(
-                    type="adb_foreground_assumption", version=1, data={}
-                ),
-            ),
-            observations=(),
-        ),
-        registry,
-    )
+        await case.close()
