@@ -1,5 +1,6 @@
 """RESULTS 页事实沿一次原尝试逐页可靠保存；当前状态与历史一致。"""
 from dataclasses import replace
+from decimal import Decimal
 import json
 from pathlib import Path
 
@@ -23,7 +24,7 @@ from .test_baseline_start import _prepared, owned, _SCHEDULED
 from .test_baseline_history import _append, _fix, _entries
 from .test_capture_contract import _runtime, DriverDouble
 from camctl.operations.attempts import (
-    AttemptFinish, AttemptIntent, AttemptTarget, OperationKind,
+    AttemptConfig, AttemptFinish, AttemptIntent, AttemptTarget, OperationKind,
 )
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
@@ -40,6 +41,7 @@ pytestmark = pytest.mark.asyncio
 _BINDING = DeviceBinding("cam-1", "camctl-adb")
 _CURSOR = DirectoryCursor(_BINDING, ("/DCIM",), 0, "/DCIM/a.mp4")
 _REGISTRY = EvidenceRegistry((RESULT_PAGE_CONTRACT, RESULT_EVIDENCE.contract("results_returned", 1)))
+_BASELINE_RESULT_CONFIG = AttemptConfig(3, Decimal("10"), Decimal("3"))
 
 
 def _actual(ticket, *, entries=(), cursor=None, next_cursor=None, finalized=False, error=None):
@@ -133,14 +135,14 @@ async def _baseline_world(owned, tmp_path, names):
     fixed = _fix(owned, activity_id, chunks=(len(names) + 127) // 128, entries=len(names))
     assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
     runtime = await _runtime(owned, driver=DriverDouble(identity_override=str(activity_id)),
-        driver_id="dji-action6", wall=_SCHEDULED)
+        driver_id="dji-action6", wall=_SCHEDULED, check_config=_BASELINE_RESULT_CONFIG)
     await capture_handler("camera_record")(1, runtime)
     assert owned.connection.execute(
         "SELECT status FROM operation_runs WHERE responsibility_key='start/1'").fetchone() == (3,)
     begun = OperationRepository().begin_attempt(AttemptIntent(
         operation="result", action_id=1, kind=OperationKind.CHECK_CAPTURE_RESULTS,
         target=AttemptTarget(activity_id=activity_id), query_purpose=None,
-        config=runtime.check_config, occurred_at=runtime.wall_us()), new_operation_key(), owned)
+        config=_BASELINE_RESULT_CONFIG, occurred_at=_SCHEDULED), new_operation_key(), owned)
     assert begun.kind is DbOutcomeKind.COMPLETED, begun.error
     assert begun.value.ticket is not None
     return runtime, begun.value.ticket, fixed.value
