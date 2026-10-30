@@ -14,6 +14,7 @@ from camctl.cancellation.models import (
 )
 from camctl.capture.handlers import capture_handler
 from camctl.contracts.values import new_operation_key
+from support.repository_ports import repository_port
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.acceptance import AcceptanceRepository, ProcessInput
 from camctl.persistence.repositories.cancellation import CancellationRepository
@@ -83,11 +84,12 @@ async def test_original_results_read_failure_preserves_binding_finish_responsibi
         fault = _ClosedInputFault(world.activity_id)
         runtime, methods = await fresh_binding_runtime(owned, world, binding, fault=fault)
         saves = _BindingSaveSpy()
-        runtime.capture = saves
         advance = capture_handler(world.handler)
 
-        with pytest.raises(sqlite3.OperationalError) as caught:
-            await advance(world.action_id, runtime)
+        with repository_port(CaptureRepository, saves, ("finish_binding_failure",),
+                             matches=lambda _name, args, _kwargs: args[0].action_id == world.action_id):
+            with pytest.raises(sqlite3.OperationalError) as caught:
+                await advance(world.action_id, runtime)
 
         assert caught.value is fault.error
         assert fault.hits == 1 and not fault.armed
@@ -104,7 +106,9 @@ async def test_original_results_read_failure_preserves_binding_finish_responsibi
         _assert_original_facts(owned, world, methods)
 
         # 读取恢复后仍由原实际处理器形成完整文件申请，一次事务结束必要 STOP 和目标。
-        await advance(world.action_id, runtime)
+        with repository_port(CaptureRepository, saves, ("finish_binding_failure",),
+                             matches=lambda _name, args, _kwargs: args[0].action_id == world.action_id):
+            await advance(world.action_id, runtime)
 
         (request, key, saved_owned), = saves.calls
         receipt, = saves.receipts
@@ -144,9 +148,10 @@ async def test_binding_finish_original_key_returns_original_parent_plan_result(
             "SELECT status FROM plans WHERE id=?", (plan_id,)).fetchone() == (2,)
         runtime, methods = (await fresh_binding_runtime(owned, world, "missing"))
         saves = _BindingSaveSpy()
-        runtime.capture = saves
 
-        await capture_handler(world.handler)(world.action_id, runtime)
+        with repository_port(CaptureRepository, saves, ("finish_binding_failure",),
+                             matches=lambda _name, args, _kwargs: args[0].action_id == world.action_id):
+            await capture_handler(world.handler)(world.action_id, runtime)
 
         (request, key, saved_owned), = saves.calls
         receipt, = saves.receipts
@@ -211,9 +216,10 @@ async def _saved_binding_with_completed_parent(tmp_path, monkeypatch):
         assert (sibling_type, sibling_status) == (7, 1)
         runtime, methods = (await fresh_binding_runtime(owned, world, "missing"))
         saves = _BindingSaveSpy()
-        runtime.capture = saves
 
-        await capture_handler(world.handler)(world.action_id, runtime)
+        with repository_port(CaptureRepository, saves, ("finish_binding_failure",),
+                             matches=lambda _name, args, _kwargs: args[0].action_id == world.action_id):
+            await capture_handler(world.handler)(world.action_id, runtime)
 
         (request, key, saved_owned), = saves.calls
         receipt, = saves.receipts
