@@ -21,6 +21,12 @@ JUnit 套件时间、单个 testcase 时间总和、pytest 日志摘要和收据
 
 `boundary-output-handoff/handoff.json.gz` 保存五个文件的旧目标与新公开边界映射。交接文件还保留一个尚未迁移的节点：`test_cleanup_terminal_absence.py::test_pending_companion_precondition_is_checked_before_terminal_file_save`，它仍直接构造 `PendingCleanupCompanion` 并写入 `runtime.pending_companions`。交接明确说明总体目标未完成；因此五文件映射和这些窄范围通过结果都不能作为完成结论。
 
+## 冻结的静态边界候选清单
+
+`boundary-inventory/public-boundary-inventory.json.gz` 与 `.md.gz` 保存主工作区的两份原报告字节，SHA-256 分别为 `cf24782424f7860199307c3953efa84b374d38717793c68bf53b8e8dbcd3ba01` 和 `0a7f3b18eab7711243b6c65ebc94a7bbb6d4c8abd09125fc5cf86df1942e959d`。JSON 可解析。该静态调查固定在基准 `dbea9317ba2821111e0069cfe3e9d1ebb3c99ace`，并记录调查时工作区 HEAD 为 `47cb7c6b302def953bab5c5d4709c8b6311823fe`；这是历史快照信息，不说明后续改动是否已解决候选。
+
+清单覆盖 650 个 Python 集成测试文件和 329 个受跟踪生产 Python 文件。JSON `candidate_locations` 各类位置共 687 条结构候选，表示需要逐目标复核的静态命中，不是 687 项违规。P3/P4 明确点名的事务/提交恢复范围有 31 次 `commit_operation` 调用（29+2）；其他 148 次尚未按各测试目标逐项判定。`LocalWorkPort.required_settlements()` 与 `settle()` 是正式生产契约，不按违规候选处理。根集成目录的 2 个 TypeScript、4 个 JavaScript 和 1 个 C 文件仅登记摘要，未做 AST 分类。此组是 `not_run` 静态调查材料，不是新增测试结果。
+
 ## 归档与校验
 
-清单有 19 条证据记录：18 条运行文件记录和 1 份 handoff；其中 3 个 diagnostics54 文件引用 stage-6 已有 payload，未重复压缩。本目录新增 16 个 gzip payload，压缩前 66,775 字节、压缩后 13,546 字节。所有新 payload 均以 mtime=0 gzip 保存；原始和压缩 SHA-256、字节数及运行来源见 [manifest.json](manifest.json)。JSON 与 XML 解压后解析通过。归档过程未运行测试，也未读取运行中的 work-files 分支目录、临时目录或数据库。
+清单现有 21 条证据记录：18 条运行文件记录、1 份 handoff 和 2 份静态调查报告；其中 3 个 diagnostics54 文件引用 stage-6 已有 payload，未重复压缩。本目录新增 18 个 gzip payload，其中 16 个运行/交接 payload 和 2 个静态调查报告；压缩前 1,029,223 字节、压缩后 141,131 字节。所有新 payload 均以 mtime=0 gzip 保存；原始和压缩 SHA-256、字节数及运行来源见 [manifest.json](manifest.json)。JSON 与 XML 解压后解析通过。归档过程未运行测试，也未读取运行中的 work-files 分支目录、临时目录或数据库。

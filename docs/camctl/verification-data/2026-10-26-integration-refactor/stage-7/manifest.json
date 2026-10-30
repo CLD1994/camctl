@@ -9,25 +9,28 @@
     "new_payload_full_decompression_byte_identity_and_sha256_verified": true,
     "stage6_references_checked_against_source_and_stage6_manifest": true,
     "json_and_xml_payloads_parsed_after_decompression": true,
-    "tests_run_by_archiver": false
+    "tests_run_by_archiver": false,
+    "static_survey_json_parsed_after_decompression": true
   },
   "workspace": {
     "path": "/tmp/camctl-resume-20261030/archive-stage7",
     "branch": "docs/resume-evidence-stage7-20261030",
     "source_head": "32819074ddbbc2bd48bd71bb1bd994e5f1a5e46b",
     "initially_clean": true,
-    "only_stage7_written": true
+    "only_stage7_written": true,
+    "supplemental_archive_base": "d7d814e139fb3a9756620b1f184dca038cc5708a"
   },
   "summary": {
-    "evidence_entry_count": 19,
+    "evidence_entry_count": 21,
     "run_artifact_count": 18,
     "handoff_mapping_artifacts": 1,
-    "new_gzip_payload_count": 16,
+    "new_gzip_payload_count": 18,
     "stage6_reference_count": 3,
-    "new_payload_uncompressed_bytes_total": 66775,
-    "new_payload_compressed_bytes_total": 13546,
+    "new_payload_uncompressed_bytes_total": 1029223,
+    "new_payload_compressed_bytes_total": 141131,
     "referenced_uncompressed_bytes_total": 11958,
-    "referenced_compressed_bytes_total": 2491
+    "referenced_compressed_bytes_total": 2491,
+    "static_survey_artifacts": 2
   },
   "timing_semantics": {
     "suite_time_seconds": "JUnit 所有 <testsuite> 节点 time 属性之和。",
@@ -339,6 +342,138 @@
           }
         ],
         "limits": "未修改生产代码或产品配置；未执行真实设备验收。run7 通过不代表未迁移 pending 节点满足公开边界。"
+      }
+    },
+    {
+      "id": "public-boundary-inventory-static-survey",
+      "source_root": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030",
+      "source_head": "dbea9317ba2821111e0069cfe3e9d1ebb3c99ace",
+      "source_workspace_head_observed": "47cb7c6b302def953bab5c5d4709c8b6311823fe",
+      "archived_utc": "2026-10-30T10:54:15Z",
+      "run_identity": "not_run; static survey artifacts only; no test command was executed for this evidence group.",
+      "scope": {
+        "kind": "static_survey",
+        "summary": "camctl 集成测试公开边界 AST 候选清单；此组不是测试运行。",
+        "python_integration_test_files": 650,
+        "python_integration_test_files_by_root": {
+          "apps/camctl/tests/integration": 595,
+          "tests/integration": 55
+        },
+        "tracked_production_python_files": 329,
+        "candidate_observations": 687,
+        "candidate_observations_are_violations": false,
+        "candidate_observation_source": "candidate_locations 中各类别位置数之和；同一文件/语句可在不同类别分别出现，须按目标复核。",
+        "P3_named_transaction_kernel_commit_operation_calls": 29,
+        "P4_named_commit_recovery_commit_operation_calls": 2,
+        "other_commit_operation_calls_unclassified_per_target": 148,
+        "LocalWorkPort_status": "正式生产契约，不按违规候选处理。",
+        "non_python_integration_sources": {
+          "count": 7,
+          "counts_by_extension": {
+            "ts": 2,
+            "mjs": 4,
+            "c": 1
+          },
+          "status": "按 dbea blob 哈希登记；因无 TS/JS/C AST 解析器，未作语法树分类。"
+        },
+        "tests_run": false,
+        "open_questions": [
+          "未落在 P3/P4 明确范围的 persistence 测试，逐例确认公开仓储契约、事件事实验证或事务内核目标。",
+          "177 个 runtime 属性写候选需确认真实对象类型和正式测试入口，不能按变量名推断。",
+          "8 个 pending 写入/清空候选需对应公开恢复输入、重新打开流程或外部触发边界。",
+          "13 个私有 helper/runtime 引用需按 AST 使用次数、正式 consumer 与等价公开入口逐个定性。",
+          "TS/JS/C integration 源需用对应 AST 工具补齐。"
+        ],
+        "snapshot_caveat": "调查基准为 dbea9317ba2821111e0069cfe3e9d1ebb3c99ace；报告记录调查时工作区 HEAD 为 47cb7c6b302def953bab5c5d4709c8b6311823fe。此归档不判断这些候选在后续快照中是否已处理。"
+      },
+      "source_sha256": {
+        "public-boundary-inventory.json": "cf24782424f7860199307c3953efa84b374d38717793c68bf53b8e8dbcd3ba01",
+        "public-boundary-inventory.md": "0a7f3b18eab7711243b6c65ebc94a7bbb6d4c8abd09125fc5cf86df1942e959d"
+      },
+      "source_artifacts": [
+        {
+          "archive_path": "boundary-inventory/public-boundary-inventory.json.gz",
+          "storage_kind": "new-gzip-payload",
+          "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/public-boundary-inventory.json",
+          "source_head": "dbea9317ba2821111e0069cfe3e9d1ebb3c99ace",
+          "source_workspace_head_observed": "47cb7c6b302def953bab5c5d4709c8b6311823fe",
+          "run_identity": "not_run; 冻结的静态 AST 候选调查，不是测试运行。",
+          "scope": {
+            "kind": "static_survey",
+            "snapshot_base_commit": "dbea9317ba2821111e0069cfe3e9d1ebb3c99ace",
+            "workspace_head_observed_at_survey": "47cb7c6b302def953bab5c5d4709c8b6311823fe",
+            "python_integration_test_files": 650,
+            "tracked_production_python_files": 329,
+            "candidate_observations": 687,
+            "candidate_observations_are_violations": false,
+            "P3_named_transaction_kernel_commit_operation_calls": 29,
+            "P4_named_commit_recovery_commit_operation_calls": 2,
+            "other_commit_operation_calls_unclassified_per_target": 148,
+            "LocalWorkPort_is_formal_contract": true,
+            "non_python_integration_sources_not_ast_classified": {
+              "count": 7,
+              "counts_by_extension": {
+                "ts": 2,
+                "mjs": 4,
+                "c": 1
+              },
+              "status": "按 dbea blob 哈希登记；因无 TS/JS/C AST 解析器，未作语法树分类。"
+            },
+            "tests_run": false,
+            "snapshot_caveat": "调查清单固定在 source_head；记录的 workspace_head_observed 是调查时快照。两者均不能说明后续改动是否解决候选。"
+          },
+          "source_mtime_ns": 1793356999602657308,
+          "uncompressed_bytes": 953507,
+          "uncompressed_sha256": "cf24782424f7860199307c3953efa84b374d38717793c68bf53b8e8dbcd3ba01",
+          "format": "json",
+          "compressed_bytes": 123154,
+          "compressed_sha256": "5a7858bf6ec70d5cef5f15911917d4762be4fcf5f6fe2bfa74ab1238e7416b56",
+          "note": "原文件字节压缩保存；JSON 解析通过。报告的摘要与限制以冻结原文为准。"
+        },
+        {
+          "archive_path": "boundary-inventory/public-boundary-inventory.md.gz",
+          "storage_kind": "new-gzip-payload",
+          "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/public-boundary-inventory.md",
+          "source_head": "dbea9317ba2821111e0069cfe3e9d1ebb3c99ace",
+          "source_workspace_head_observed": "47cb7c6b302def953bab5c5d4709c8b6311823fe",
+          "run_identity": "not_run; 冻结的静态 AST 候选调查，不是测试运行。",
+          "scope": {
+            "kind": "static_survey",
+            "snapshot_base_commit": "dbea9317ba2821111e0069cfe3e9d1ebb3c99ace",
+            "workspace_head_observed_at_survey": "47cb7c6b302def953bab5c5d4709c8b6311823fe",
+            "python_integration_test_files": 650,
+            "tracked_production_python_files": 329,
+            "candidate_observations": 687,
+            "candidate_observations_are_violations": false,
+            "P3_named_transaction_kernel_commit_operation_calls": 29,
+            "P4_named_commit_recovery_commit_operation_calls": 2,
+            "other_commit_operation_calls_unclassified_per_target": 148,
+            "LocalWorkPort_is_formal_contract": true,
+            "non_python_integration_sources_not_ast_classified": {
+              "count": 7,
+              "counts_by_extension": {
+                "ts": 2,
+                "mjs": 4,
+                "c": 1
+              },
+              "status": "按 dbea blob 哈希登记；因无 TS/JS/C AST 解析器，未作语法树分类。"
+            },
+            "tests_run": false,
+            "snapshot_caveat": "调查清单固定在 source_head；记录的 workspace_head_observed 是调查时快照。两者均不能说明后续改动是否解决候选。"
+          },
+          "source_mtime_ns": 1793357037785225992,
+          "uncompressed_bytes": 8941,
+          "uncompressed_sha256": "0a7f3b18eab7711243b6c65ebc94a7bbb6d4c8abd09125fc5cf86df1942e959d",
+          "format": "markdown",
+          "compressed_bytes": 4431,
+          "compressed_sha256": "2b644ecb32625eb713d003dfca57bb56e806e7cb9766468b58d55ed210702b2e",
+          "note": "原文件字节压缩保存；Markdown 报告与对应 JSON 清单同属冻结调查快照。"
+        }
+      ],
+      "result": {
+        "status": "not_run",
+        "tests_run": false,
+        "note": "静态调查清单归档；没有运行测试，也不代表违规数或迁移验收。"
       }
     }
   ],
@@ -887,6 +1022,84 @@
       "format": "json",
       "compressed_bytes": 3165,
       "compressed_sha256": "b348983820d76839bef831057e68e12df26892f9e923350e1d4e05d3a3cff4d5"
+    },
+    {
+      "archive_path": "boundary-inventory/public-boundary-inventory.json.gz",
+      "storage_kind": "new-gzip-payload",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/public-boundary-inventory.json",
+      "source_head": "dbea9317ba2821111e0069cfe3e9d1ebb3c99ace",
+      "source_workspace_head_observed": "47cb7c6b302def953bab5c5d4709c8b6311823fe",
+      "run_identity": "not_run; 冻结的静态 AST 候选调查，不是测试运行。",
+      "scope": {
+        "kind": "static_survey",
+        "snapshot_base_commit": "dbea9317ba2821111e0069cfe3e9d1ebb3c99ace",
+        "workspace_head_observed_at_survey": "47cb7c6b302def953bab5c5d4709c8b6311823fe",
+        "python_integration_test_files": 650,
+        "tracked_production_python_files": 329,
+        "candidate_observations": 687,
+        "candidate_observations_are_violations": false,
+        "P3_named_transaction_kernel_commit_operation_calls": 29,
+        "P4_named_commit_recovery_commit_operation_calls": 2,
+        "other_commit_operation_calls_unclassified_per_target": 148,
+        "LocalWorkPort_is_formal_contract": true,
+        "non_python_integration_sources_not_ast_classified": {
+          "count": 7,
+          "counts_by_extension": {
+            "ts": 2,
+            "mjs": 4,
+            "c": 1
+          },
+          "status": "按 dbea blob 哈希登记；因无 TS/JS/C AST 解析器，未作语法树分类。"
+        },
+        "tests_run": false,
+        "snapshot_caveat": "调查清单固定在 source_head；记录的 workspace_head_observed 是调查时快照。两者均不能说明后续改动是否解决候选。"
+      },
+      "source_mtime_ns": 1793356999602657308,
+      "uncompressed_bytes": 953507,
+      "uncompressed_sha256": "cf24782424f7860199307c3953efa84b374d38717793c68bf53b8e8dbcd3ba01",
+      "format": "json",
+      "compressed_bytes": 123154,
+      "compressed_sha256": "5a7858bf6ec70d5cef5f15911917d4762be4fcf5f6fe2bfa74ab1238e7416b56",
+      "note": "原文件字节压缩保存；JSON 解析通过。报告的摘要与限制以冻结原文为准。"
+    },
+    {
+      "archive_path": "boundary-inventory/public-boundary-inventory.md.gz",
+      "storage_kind": "new-gzip-payload",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/public-boundary-inventory.md",
+      "source_head": "dbea9317ba2821111e0069cfe3e9d1ebb3c99ace",
+      "source_workspace_head_observed": "47cb7c6b302def953bab5c5d4709c8b6311823fe",
+      "run_identity": "not_run; 冻结的静态 AST 候选调查，不是测试运行。",
+      "scope": {
+        "kind": "static_survey",
+        "snapshot_base_commit": "dbea9317ba2821111e0069cfe3e9d1ebb3c99ace",
+        "workspace_head_observed_at_survey": "47cb7c6b302def953bab5c5d4709c8b6311823fe",
+        "python_integration_test_files": 650,
+        "tracked_production_python_files": 329,
+        "candidate_observations": 687,
+        "candidate_observations_are_violations": false,
+        "P3_named_transaction_kernel_commit_operation_calls": 29,
+        "P4_named_commit_recovery_commit_operation_calls": 2,
+        "other_commit_operation_calls_unclassified_per_target": 148,
+        "LocalWorkPort_is_formal_contract": true,
+        "non_python_integration_sources_not_ast_classified": {
+          "count": 7,
+          "counts_by_extension": {
+            "ts": 2,
+            "mjs": 4,
+            "c": 1
+          },
+          "status": "按 dbea blob 哈希登记；因无 TS/JS/C AST 解析器，未作语法树分类。"
+        },
+        "tests_run": false,
+        "snapshot_caveat": "调查清单固定在 source_head；记录的 workspace_head_observed 是调查时快照。两者均不能说明后续改动是否解决候选。"
+      },
+      "source_mtime_ns": 1793357037785225992,
+      "uncompressed_bytes": 8941,
+      "uncompressed_sha256": "0a7f3b18eab7711243b6c65ebc94a7bbb6d4c8abd09125fc5cf86df1942e959d",
+      "format": "markdown",
+      "compressed_bytes": 4431,
+      "compressed_sha256": "2b644ecb32625eb713d003dfca57bb56e806e7cb9766468b58d55ed210702b2e",
+      "note": "原文件字节压缩保存；Markdown 报告与对应 JSON 清单同属冻结调查快照。"
     }
   ],
   "excluded_from_archive": [
