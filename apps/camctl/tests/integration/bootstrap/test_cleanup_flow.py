@@ -14,6 +14,7 @@ import asyncio
 import contextlib
 import json
 import sqlite3
+import sys
 import time
 from pathlib import Path
 
@@ -251,6 +252,18 @@ def _cleanup_plan(request_id: str, params: dict) -> dict:
     }
 
 
+async def _drain_file_tasks(supervisor, primary=None):
+    result = await supervisor.drain_required()
+    failures = [failure.exception or RuntimeError(failure.error) for failure in result.failed]
+    if not failures:
+        return
+    if primary is not None:
+        raise BaseExceptionGroup("会话和文件责任收场失败", [primary, *failures])
+    if len(failures) == 1:
+        raise failures[0]
+    raise BaseExceptionGroup("文件责任收场失败", failures)
+
+
 def _run_session(deps, cfg, driver: _CleanupDriver, results) -> asyncio.Task:
     from camctl.host_files.tasks import FileTaskExecutor
     from camctl.outputs.work_files import WorkFileContext, WorkFileLimits, clean_work_files
@@ -302,7 +315,7 @@ def _run_session(deps, cfg, driver: _CleanupDriver, results) -> asyncio.Task:
                 poll_interval_s=0.1,
             )
         finally:
-            await supervisor.drain_required()
+            await _drain_file_tasks(supervisor, sys.exception())
 
     return asyncio.create_task(run())
 
@@ -559,6 +572,30 @@ class TestCleanupCancelSettlement:
         close_runtime(deps)
 
 
+def _seed_repaired_artifact(db: Path, cfg, output_id: int) -> None:
+    """按存储格式准备主机产物，供仓储边界测试使用。"""
+    """把照片产物改为主机修复成品承载；staging 建对应真实文件。"""
+    connection = sqlite3.connect(db)
+    try:
+        connection.execute(
+            "INSERT INTO intermediate_files (id, owner_action_id, purpose,"
+            " relative_path, retention_state, cleanup_state, size_bytes,"
+            " created_event_id, last_event_id, change_count)"
+            " VALUES (900, (SELECT source_action_id FROM outputs"
+            " WHERE id = ?), 4, 'derived/900.jpg', 3, 1, 16, 1, 1, 1)",
+            (output_id,))
+        connection.execute(
+            "UPDATE outputs SET kind = 2, device_file_id = NULL,"
+            " intermediate_file_id = 900 WHERE id = ?", (output_id,))
+        connection.commit()
+    finally:
+        connection.close()
+    derived = Path(cfg.paths.staging) / "derived"
+    derived.mkdir(parents=True, exist_ok=True)
+    (derived / "900.jpg").write_bytes(b"repaired-artifact")
+
+
+
 async def _real_repaired_artifact(tmp_path, capture_resources):
     """录像实际停止、修复并发布后，取得原产物和文件位置。"""
     from ..support.recording_consumer_cases import reconciliation_case
@@ -647,7 +684,64 @@ class TestHostArtifactCleanup:
             assert _scalar(db, "SELECT cleanup_state FROM intermediate_files WHERE id=(SELECT intermediate_file_id FROM outputs WHERE id=" + str(output_id) + ")") == (4,)
             assert _scalar(db, "SELECT availability, cleanup_status FROM outputs WHERE id=" + str(output_id)) == (3, 4)
             assert calls == ["delete", "query"]
+            assert not target.exists()
+            from camctl.contracts.enums import enum_for
+            with sqlite3.connect(db) as connection:
+                attempts = connection.execute(
+                    "SELECT a.status,a.effect_state,a.result_json,a.error_json"
+                    " FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id"
+                    " WHERE r.cleanup_item_id IS NOT NULL ORDER BY a.id").fetchall()
+            assert len(attempts) == 2
+            status, effect, delete_result, delete_error = attempts[0]
+            assert status == int(enum_for("operation_attempts.status").FAILED)
+            assert effect == int(enum_for("operation_attempts.effect_state").UNKNOWN)
+            assert json.loads(delete_result)["observations"] == []
+            error = json.loads(delete_error)
+            assert (error["code"], error["stage"]) == ("local_io_failed", "delete")
+            diagnostics = error["details"]["diagnostic"]["exceptions"]
+            assert [(item["type"], item["message"]) for item in diagnostics] == [
+                ("builtins.OSError", "删除结果未知"),
+                ("builtins.OSError", "删除后的观察结果未知")]
+            query_status, _, query_result, query_error = attempts[1]
+            assert query_status == int(enum_for("operation_attempts.status").SUCCEEDED)
+            assert query_error is None
+            observations = json.loads(query_result)["observations"]
+            assert len(observations) == 1
+            assert observations[0]["type"] == "file_presence"
+            assert observations[0]["data"]["present"] is False
             assert driver.delete_calls == [] and driver.query_calls == []
         finally:
             await _cancel(task)
             close_runtime(deps)
+
+
+async def test_file_supervision_delivers_actual_failure_and_primary_error():
+    from camctl.session.supervision import OwnedTask, Supervisor
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    actual_error = OSError("实际文件责任失败")
+    primary = RuntimeError("会话主错误")
+
+    async def actual():
+        entered.set()
+        await release.wait()
+        raise actual_error
+
+    class Owner:
+        async def take_over(self, task):
+            await task.pending
+
+    supervisor = Supervisor()
+    token = supervisor.register(Owner())
+    task = asyncio.create_task(actual())
+    supervisor.handoff(token, OwnedTask("file/1", "delete", "清理", ("file/1",), task))
+    await entered.wait()
+    draining = asyncio.create_task(_drain_file_tasks(supervisor, primary))
+    await asyncio.sleep(0)
+    assert not draining.done()
+    release.set()
+    with pytest.raises(BaseExceptionGroup) as failed:
+        await draining
+    assert failed.value.exceptions == (primary, actual_error)
+    assert task.done() and not supervisor.outstanding()

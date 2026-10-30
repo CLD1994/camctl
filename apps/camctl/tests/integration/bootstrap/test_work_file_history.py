@@ -17,7 +17,8 @@ from camctl.persistence.repositories.history import HistoryRepository, SqliteSna
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.transaction import row_facts
 
-from .test_output_binding_changes import environment  # noqa: F401
+from .test_output_binding_changes import _NOW, environment  # noqa: F401
+from ..session.test_session import FixedClock
 from .test_work_file_runtime import _execute, _history_cleanup
 
 pytestmark = pytest.mark.asyncio
@@ -68,13 +69,20 @@ async def test_work_file_results_and_cursor_match_three_history_paths(environmen
             await store.save_snapshots((prepare_snapshot(seed),))
     finally:
         await executor.close()
+    original_remove = work_files._remove_work_file
     if first_failed:
         def failed(_path):
             raise OSError("historical unlink refused")
         monkeypatch.setattr(work_files, "_remove_work_file", failed)
+    from camctl.bootstrap import lifecycle
+    monkeypatch.setattr(lifecycle, "SystemClock", lambda: FixedClock(_NOW))
+    before_event = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
     first = await _execute(cfg)
     assert first.succeeded, first
     boundary = history.current_boundary()
+    assert owned.connection.execute(
+        "SELECT DISTINCT occurred_at FROM history_events WHERE id>? AND id<=?",
+        (before_event, boundary.last_event_id)).fetchall() == [(_NOW,)]
     assert owned.connection.execute("SELECT cleanup_state FROM intermediate_files ORDER BY id").fetchall() == [
         (5 if first_failed else 4,), (2,)]
     assert owned.connection.execute("SELECT cleanup_cursor_file_id FROM runtime_state").fetchone() == (identities[0],)
@@ -82,10 +90,13 @@ async def test_work_file_results_and_cursor_match_three_history_paths(environmen
         owned.connection, "intermediate_files", identity)}) for identity in identities}
     expected_runtime = _business({("runtime_state", 1): row_facts(owned.connection, "runtime_state", 1)})
     action_business = tuple(owned.connection.execute("SELECT id,status,cancel_requested FROM actions ORDER BY id"))
-    monkeypatch.undo()
+    monkeypatch.setattr(work_files, "_remove_work_file", original_remove)
     second = await _execute(replace(cfg, cleanup=replace(cfg.cleanup, work_file_limit_per_run=2)))
     assert second.succeeded, second
     assert owned.connection.execute("SELECT cleanup_state FROM intermediate_files ORDER BY id").fetchall() == [(4,), (4,)]
+    assert owned.connection.execute(
+        "SELECT DISTINCT occurred_at FROM history_events WHERE id>?",
+        (boundary.last_event_id,)).fetchall() == [(_NOW,)]
     assert tuple(owned.connection.execute("SELECT id,status,cancel_requested FROM actions ORDER BY id")) == action_business
     for identity, seed, ref in zip(identities, seeds, refs):
         events = _events(owned, (10, identity), boundary)
