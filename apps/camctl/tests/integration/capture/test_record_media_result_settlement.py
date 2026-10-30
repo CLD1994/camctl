@@ -66,11 +66,26 @@ def _result_run(owned):
     ).fetchone()
 
 
-async def _runtime_with_media(pipeline, duration_s):
+class _TestClock:
+    """墙钟与单调钟分别由测试推进。"""
+
+    def __init__(self):
+        self.wall = _NOW
+        self.mono = 5_000_000_000
+
+    def wall_us(self):
+        return self.wall
+
+    def monotonic_ns(self):
+        return self.mono
+
+
+async def _runtime_with_media(pipeline, duration_s, clock):
     entry = original_recording_entry()
     results = ResultsDouble({1: (entry,)})
-    runtime = (await _runtime(pipeline[0], results=results, listing_cache={}))
-    runtime.evidence = _EVIDENCE
+    runtime = (await _runtime(pipeline[0], results=results, listing_cache={},
+                              evidence=_EVIDENCE, wall_us=clock.wall_us,
+                              monotonic_ns=clock.monotonic_ns))
     reader, tools = ReadDriverDouble(_CONTENT), _WaitingProbe(duration_s)
     runtime.media = (await _flow(pipeline, reader, tools))
     return runtime, results, reader, tools
@@ -104,7 +119,8 @@ def _assert_joint_settlement(owned, run_id, action_status):
 async def test_media_completion_ends_original_results_without_new_observation(
         media_pipeline, duration_s, action_status, reopen):
     owned, roots, source_id = media_pipeline
-    runtime, results, reader, tools = (await _runtime_with_media(media_pipeline, duration_s))
+    clock = _TestClock()
+    runtime, results, reader, tools = (await _runtime_with_media(media_pipeline, duration_s, clock))
 
     await capture_handler("camera_record")(1, runtime)
 
@@ -130,10 +146,11 @@ async def test_media_completion_ends_original_results_without_new_observation(
             recovered = open_existing(database_path, DbOpenMode.EXISTING_RW, DbConfig())
             assert recovered.metadata == metadata
             owned = recovered
-            runtime = (await _runtime(owned, results=results, listing_cache={}))
-            runtime.evidence = _EVIDENCE
+            runtime = (await _runtime(owned, results=results, listing_cache={},
+                                      evidence=_EVIDENCE, wall_us=clock.wall_us,
+                                      monotonic_ns=clock.monotonic_ns))
             runtime.media = (await _flow((owned, roots, source_id), reader, tools))
-        runtime.wall_us = lambda: _NOW + 200_000_000
+        clock.wall = _NOW + 200_000_000
         await capture_handler("camera_record")(1, runtime)
 
         assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (action_status,)
@@ -178,7 +195,8 @@ class _AtSettlementBoundary(Exception):
 async def test_new_settlement_rejects_business_result_opposite_to_saved_media(
         media_pipeline, monkeypatch, duration_s):
     owned = media_pipeline[0]
-    runtime, _results, _reader, _tools = (await _runtime_with_media(media_pipeline, duration_s))
+    clock = _TestClock()
+    runtime, _results, _reader, _tools = (await _runtime_with_media(media_pipeline, duration_s, clock))
     await capture_handler("camera_record")(1, runtime)
     original_save = CaptureRepository.finish_recording_results
     recorded = []
@@ -193,7 +211,7 @@ async def test_new_settlement_rejects_business_result_opposite_to_saved_media(
         return replace(result, handoff_error=_AtSettlementBoundary())
 
     monkeypatch.setattr(CaptureRepository, "finish_recording_results", save)
-    runtime.wall_us = lambda: _NOW + 200_000_000
+    clock.wall = _NOW + 200_000_000
     with pytest.raises(_AtSettlementBoundary):
         await capture_handler("camera_record")(1, runtime)
     assert len(recorded) == 1
@@ -208,7 +226,8 @@ async def test_new_settlement_rejects_business_result_opposite_to_saved_media(
 ])
 async def test_original_settlement_key_rejects_changed_request_member(media_pipeline, monkeypatch, member):
     owned = media_pipeline[0]
-    runtime, results, reader, tools = (await _runtime_with_media(media_pipeline, Decimal("61")))
+    clock = _TestClock()
+    runtime, results, reader, tools = (await _runtime_with_media(media_pipeline, Decimal("61"), clock))
     await capture_handler("camera_record")(1, runtime)
     original_save = CaptureRepository.finish_recording_results
     inputs = []
@@ -218,7 +237,7 @@ async def test_original_settlement_key_rejects_changed_request_member(media_pipe
         return original_save(repository, request, key, save_owned)
 
     monkeypatch.setattr(CaptureRepository, "finish_recording_results", save)
-    runtime.wall_us = lambda: _NOW + 200_000_000
+    clock.wall = _NOW + 200_000_000
     await capture_handler("camera_record")(1, runtime)
     assert len(inputs) == 1
     request, key = inputs[0]
@@ -254,7 +273,8 @@ async def test_original_settlement_key_rejects_changed_request_member(media_pipe
 async def test_unknown_settlement_reuses_whole_request_and_original_decision_time(
         media_pipeline, monkeypatch, duration_s, action_status, after):
     owned, roots, source_id = media_pipeline
-    runtime, results, reader, tools = (await _runtime_with_media(media_pipeline, duration_s))
+    clock = _TestClock()
+    runtime, results, reader, tools = (await _runtime_with_media(media_pipeline, duration_s, clock))
     await capture_handler("camera_record")(1, runtime)
     original_attempts = _attempts(owned)
     run_id = _result_run(owned)[0]
@@ -273,7 +293,7 @@ async def test_unknown_settlement_reuses_whole_request_and_original_decision_tim
         return outcome
 
     monkeypatch.setattr(CaptureRepository, "finish_recording_results", save)
-    runtime.wall_us = lambda: _NOW + 200_000_000
+    clock.wall = _NOW + 200_000_000
     with pytest.raises((ConsistencyError, AssertionError)) as first_error:
         await capture_handler("camera_record")(1, runtime)
     assert len(inputs) == 1 and proxies[0].commit_calls == 1
@@ -298,7 +318,7 @@ async def test_unknown_settlement_reuses_whole_request_and_original_decision_tim
         # UNKNOWN 回执使真实执行器关闭故障连接；原会话继续持有完整申请，
         # 下一次公开处理器调用由执行器新开连接后重送原保存。
         resumed = runtime
-        runtime.wall_us = lambda: _NOW + 300_000_000
+        clock.wall = _NOW + 300_000_000
         await capture_handler("camera_record")(1, resumed)
 
         assert inputs == [(original_request, original_key), (original_request, original_key)]
@@ -337,7 +357,8 @@ async def test_explicit_media_issue_settles_from_saved_check_without_new_queries
     零新设备查询、零新尝试，错误事实与原 T0、完整可靠文件保持。
     """
     owned, roots, source_id = media_pipeline
-    runtime, results, reader, tools = (await _runtime_with_media(media_pipeline, Decimal("65")))
+    clock = _TestClock()
+    runtime, results, reader, tools = (await _runtime_with_media(media_pipeline, Decimal("65"), clock))
 
     await capture_handler("camera_record")(1, runtime)
 
@@ -368,10 +389,11 @@ async def test_explicit_media_issue_settles_from_saved_check_without_new_queries
             recovered = open_existing(database_path, DbOpenMode.EXISTING_RW, DbConfig())
             assert recovered.metadata == metadata
             owned = recovered
-            runtime = (await _runtime(owned, results=results, listing_cache={}))
-            runtime.evidence = _EVIDENCE
+            runtime = (await _runtime(owned, results=results, listing_cache={},
+                                      evidence=_EVIDENCE, wall_us=clock.wall_us,
+                                      monotonic_ns=clock.monotonic_ns))
             runtime.media = (await _flow((owned, roots, source_id), reader, tools))
-        runtime.wall_us = lambda: _NOW + 200_000_000
+        clock.wall = _NOW + 200_000_000
         await capture_handler("camera_record")(1, runtime)
 
         # 动作按明确媒体问题失败，公共错误如实表达 invalid_media。
@@ -422,15 +444,17 @@ async def test_incomplete_other_file_control_partition_keeps_media_pipeline(
                     locator={"path": "/DCIM/original.mp4"}, original_name="original.mp4")
     incomplete = _entry("sidecar-log", kind=FileKind.OTHER, complete=False)
     results = ResultsDouble({1: (entry, incomplete)})
-    runtime = (await _runtime(owned, results=results, listing_cache={}))
-    runtime.evidence = _EVIDENCE
+    clock = _TestClock()
+    runtime = (await _runtime(owned, results=results, listing_cache={},
+                              evidence=_EVIDENCE, wall_us=clock.wall_us,
+                              monotonic_ns=clock.monotonic_ns))
     reader, tools = ReadDriverDouble(_CONTENT), _WaitingProbe(Decimal("61"))
     runtime.media = (await _flow(media_pipeline, reader, tools))
 
     await capture_handler("camera_record")(1, runtime)
     assert _result_run(owned)[1:4] == (2, 1, 1)
 
-    runtime.wall_us = lambda: _NOW + 200_000_000
+    clock.wall = _NOW + 200_000_000
     await capture_handler("camera_record")(1, runtime)
 
     # 未完成 OTHER 被如实观察为完成未知，不进入读取或产物。
@@ -475,13 +499,15 @@ async def test_incomplete_other_turning_complete_settles_from_saved_facts(
                     locator={"path": "/DCIM/original.mp4"}, original_name="original.mp4")
     incomplete = _entry("sidecar-log", kind=FileKind.OTHER, complete=False)
     results = ResultsDouble({1: (entry, incomplete)})
-    runtime = (await _runtime(owned, results=results, listing_cache={}))
-    runtime.evidence = _EVIDENCE
+    clock = _TestClock()
+    runtime = (await _runtime(owned, results=results, listing_cache={},
+                              evidence=_EVIDENCE, wall_us=clock.wall_us,
+                              monotonic_ns=clock.monotonic_ns))
     reader, tools = ReadDriverDouble(_CONTENT), _WaitingProbe(Decimal("61"))
     runtime.media = (await _flow(media_pipeline, reader, tools))
 
     await capture_handler("camera_record")(1, runtime)
-    runtime.wall_us = lambda: _NOW + 200_000_000
+    clock.wall = _NOW + 200_000_000
     await capture_handler("camera_record")(1, runtime)
     assert _result_run(owned)[1:4] == (2, 1, 1)
     assert len(reader.opens) == 1
@@ -493,8 +519,8 @@ async def test_incomplete_other_turning_complete_settles_from_saved_facts(
     # 后续轮次：同一集合中的 OTHER 转完整且集合确定。重试间隔按会
     # 话单调钟计时，墙钟与单调钟一起越过间隔。
     results.files_by_action[1] = (entry, _entry("sidecar-log", kind=FileKind.OTHER))
-    runtime.wall_us = lambda: _NOW + 400_000_000
-    runtime.monotonic_ns = lambda: 15_000_000_000
+    clock.wall = _NOW + 400_000_000
+    clock.mono = 15_000_000_000
     await capture_handler("camera_record")(1, runtime)
 
     # 本地装载次序：新轮次重新列举并只补观察 OTHER 的完成事实；已可
