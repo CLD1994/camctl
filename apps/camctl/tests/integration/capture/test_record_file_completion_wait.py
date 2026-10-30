@@ -22,8 +22,8 @@ from camctl.operations.models import ErrorValue, EvidenceValue, Settlement, Sett
 from camctl.persistence.repositories.history import HistoryRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
-from .result_consumer_fixtures import RESULT_EVIDENCE, ResultCatalog, consumer_world, returned
-from .test_capture_contract import _NOW, _runtime
+from .result_consumer_fixtures import RESULT_EVIDENCE, ResultCatalog, returned
+from .test_capture_contract import _NOW
 from .test_result_page_history import _actual, _entry, _BINDING, _CURSOR
 from ..support.result_cases import ResultCase, saved_result_pages
 from .result_consumer_fixtures import result_driver
@@ -47,13 +47,6 @@ class WaitCatalog(ResultCatalog):
             return replace(definition, task_factory=lambda params: replace(
                 factory(params), file_completion_wait_s=Decimal("5")))
         return definition
-
-
-async def _wait_world(tmp_path, *, start=True):
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, "record",
-        catalog=WaitCatalog(), start=start)
-    runtime.check_config = AttemptConfig(3, Decimal("10"), Decimal("2"))
-    return owned, runtime, action_id, handler
 
 
 def _stop_context(owned, action_id):

@@ -22,7 +22,7 @@ from camctl.operations.models import (
 )
 from camctl.persistence.repositories.scheduling import SchedulingRepository
 
-from .test_capture_contract import _NOW, _RECORD, _environment, _runtime
+from .test_capture_contract import _NOW
 
 from .recording_start_fixtures import start_case
 
@@ -38,19 +38,6 @@ _START_EVIDENCE = EvidenceRegistry((
     EvidenceContract("query_returned", 1, "query", frozenset()),
     EvidenceContract("activity_status", 1, "query", frozenset({"activity_id"})),
 ))
-
-
-def _world(tmp_path):
-    owned = _environment(tmp_path, _RECORD)
-    # 录像定义和公共原输入均采用正式结构；长窗口让重试测试只改变
-    # 所要验证的间隔与预算条件。
-    params = {"type": "ordinary", "duration_s": 60}
-    owned.connection.execute(
-        "UPDATE actions SET input_fields_json = ?, effective_params_json = ?,"
-        " max_delay_ms = 60000 WHERE id = 12",
-        (json.dumps({"params": params, "policy": {"max_delay_ms": 60000}}),
-         json.dumps(params)))
-    return owned
 
 
 def _result(*, confirmed=False, no_effect=False, assumed=False, error=None, activity_id="12"):
@@ -100,19 +87,6 @@ class StateQuery:
             observations=(DeviceObservation("activity_status", 1, {"activity_id": self.activity_id}),)
                          if self.active else (),
         ))
-
-
-async def _configured(owned, driver, *, wall=None, mono=None, maximum=3,
-                timeout=Decimal("0.75")):
-    wall = [_NOW] if wall is None else wall
-    mono = [_ANCHOR] if mono is None else mono
-    runtime = (await _runtime(owned, driver=driver))
-    runtime.evidence = _START_EVIDENCE
-    runtime.wall_us = lambda: wall[0]
-    runtime.monotonic_ns = lambda: mono[0]
-    runtime.start_config = AttemptConfig(maximum, timeout, Decimal("1"))
-    runtime.query_config = AttemptConfig(2, Decimal("0.5"), Decimal("1"))
-    return runtime
 
 
 def _start(owned, action_id=12):
@@ -401,25 +375,10 @@ async def test_original_start_stays_in_flight_without_second_dispatch_or_early_t
         owned.connection.close()
 
 
-def _sent_world(tmp_path, duration_ms=10000, *, startup_margin_ms=1000):
-    owned = _world(tmp_path)
-    owned.connection.execute("UPDATE actions SET execution_spec_json=? WHERE id=12", (
-        json.dumps({"target_duration_ms": duration_ms, "start_return_meaning": 1,
-                    "startup_margin_ms": startup_margin_ms}),))
-    return owned
-
-
 def _sent_result(activity_id="12"):
     from dataclasses import replace
     return replace(_result(confirmed=True, activity_id=activity_id), observations=(
         DeviceObservation("recording_sent", 1, {"activity_id": activity_id}),))
-
-
-async def _sent_runtime(owned, driver, **kwargs):
-    runtime = (await _configured(owned, driver, **kwargs))
-    runtime.evidence = _START_EVIDENCE.with_contract(EvidenceContract(
-        "recording_sent", 1, "control", frozenset({"activity_id"}), identity_field="activity_id"))
-    return runtime
 
 
 @pytest.mark.parametrize('model,parameter_type,deadline_ns', [

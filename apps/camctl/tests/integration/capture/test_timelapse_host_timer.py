@@ -75,28 +75,6 @@ class HostCatalog(DeviceCompletionCatalog):
                 "exact_count": None, "require_pairing": False},)))
 
 
-async def world(tmp_path, *, meaning=StartReturn.SENT, case="video", consumer="timelapse", completion_page=None,
-                baseline=False, end_control=EndControl.HOST_TIMER, startup_margin_ms=None, catalog=None):
-    owned, runtime, action_id, handler = await consumer_world(tmp_path, consumer,
-        independent_activity=True, catalog=catalog or HostCatalog(meaning, baseline=baseline, end_control=end_control, startup_margin_ms=startup_margin_ms), start=False)
-    if baseline:
-        from camctl.contracts.pages import Page
-        from camctl.devices.directory import DirectoryRead
-        from .test_baseline_prepare import Directory
-        runtime.baseline_directory = Directory([lambda request: DirectoryRead(None, None, Page((), None))])
-    results = device_pages(runtime, completion_page=completion_page, case=case)
-    runtime.evidence = EvidenceRegistry(tuple(RESULT_EVIDENCE.contract(name, 1) for name in (
-        "operation_returned", "timelapse_sent", "start_confirmed", "stop_returned", "stop_confirmed")) + (
-        _EVIDENCE.contract("result_files_listed", 2), _EVIDENCE.contract("results_returned", 1),
-        _EVIDENCE.contract("timelapse_completed", 1)))
-    stop = create_autospec(StopDriver, instance=True)
-    stop.stop.return_value = DeviceCallResult.from_outcome(returned("stop", "stop_confirmed", 1))
-    runtime.stopper = stop
-    clock = [5_000_000_000]
-    runtime.monotonic_ns = lambda: clock[0]
-    return owned, runtime, action_id, handler, results, clock
-
-
 @pytest.mark.parametrize("meaning", [StartReturn.SENT, StartReturn.STARTED])
 async def test_waits_until_original_host_target_without_listing_or_stop(tmp_path, meaning, native_result_case):
     case_support = native_result_case
