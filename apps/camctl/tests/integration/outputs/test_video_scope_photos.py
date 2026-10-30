@@ -7,16 +7,37 @@ from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.segment_selections import FixSegmentSelection, fix_segment_selection
 
-from ..capture.test_action6_segmented_normal import _entry, _stopped_action6_record
-from ..capture.test_record_file_completion_wait import _completed_result, _result_port, _stop_context
+from ..capture.test_action6_segmented_normal import _entry, Action6RecordCatalog
+from ..capture.test_record_file_completion_wait import _completed_result, _stop_context, _REGISTRY
+from ..support.result_cases import result_case
+from ..capture.result_consumer_fixtures import result_driver
+from ..capture.test_capture_contract import _NOW
 from .test_segment_default_scope import _obtain
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode,exclude_photos", [("default", False), ("preview", False), ("default", True)])
-async def test_video_scope_selection_keeps_independent_photos_as_originals(tmp_path, mode, exclude_photos):
-    owned, runtime, action_id, handler, _ = await _stopped_action6_record(tmp_path)
+async def test_video_scope_selection_keeps_independent_photos_as_originals(tmp_path, result_case, monkeypatch, mode, exclude_photos):
+    from dataclasses import replace
+    from camctl.persistence.repositories.capture import CaptureRepository
+    case = result_case
+    owned, runtime, action_id, handler = await case.world(tmp_path, 'record', start=False,
+        catalog=Action6RecordCatalog(), evidence_contracts=(_REGISTRY.contract('results_returned', 1),))
+    class Stopped(Exception):
+        pass
+    actual = CaptureRepository.conclude_activity
+    def conclude(repository, request, key, current):
+        receipt = actual(repository, request, key, current)
+        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+        return replace(receipt, handoff_error=Stopped())
     try:
+        await capture_handler(handler)(action_id, runtime)
+        case.clock.wall, case.clock.monotonic = _NOW + 12_000_000, 17_000_000_000
+        with monkeypatch.context() as boundary:
+            boundary.setattr(CaptureRepository, 'conclude_activity', conclude)
+            with pytest.raises(Stopped):
+                await capture_handler(handler)(action_id, runtime)
+        case.clock.wall, case.clock.monotonic = _NOW + 17_000_000, 22_000_000_000
         context = _stop_context(owned, action_id)
         entries = sorted([
             *(_entry(f"DJI_001/DJI_20261022100000_{index:04d}_D.{suffix}")
@@ -30,9 +51,10 @@ async def test_video_scope_selection_keeps_independent_photos_as_originals(tmp_p
         async def read(request, batch):
             return _completed_result(request.ticket, context, entries=entries, finalized=True)
 
-        _result_port(runtime, read)
+        driver = result_driver(case, side_effect=read)
         await capture_handler(handler)(action_id, runtime)
-        assert runtime.action(action_id)["status"] == 3
+        assert owned.connection.execute("SELECT status FROM actions WHERE id=?", (action_id,)).fetchone() == (3,)
+        assert driver.list_results.await_count == 1
         photos = [row[0] for row in owned.connection.execute(
             "SELECT o.id FROM outputs o JOIN device_files d ON d.id=o.device_file_id"
             " WHERE o.source_action_id=? AND json_extract(d.identity_key,'$[2]') LIKE '%.JPG'",
