@@ -487,6 +487,8 @@ def _install_fault(root: Path, fault: str):
 
     elif fault == "complete-receipt-loss":
         from camctl.persistence.repositories.host_capture import HostCaptureRepository
+        from _hbf_readonly_probe import TrackedConnection, main_database_readonly, tracked_connect_factory
+        sqlite3.connect = tracked_connect_factory(sqlite3.connect)
         real_save = HostCaptureRepository.save_host_photo_complete
         real_verify = HostCaptureRepository.verify_operation
         write_connections = {}
@@ -511,17 +513,21 @@ def _install_fault(root: Path, fault: str):
             if str(key) not in write_connections:
                 return real_verify(self, request, key, owned)
             original = write_connections[str(key)]
+            assert isinstance(original, TrackedConnection)
+            writer_closed = original.closed_by_owner
+            main_readonly = main_database_readonly(owned.connection)
             verifier_input = {"request": asdict(request), "operation_key": str(key),
                 "write_connection": id(original), "verifier_connection": id(owned.connection),
-                "query_only": query_only}
+                "query_only": query_only, "writer_closed": writer_closed, "main_readonly": main_readonly}
             _write(root, "complete-verifier-input", verifier_input)
-            assert owned.connection is not original and query_only == 1, verifier_input
+            assert owned.connection is not original and writer_closed and main_readonly, verifier_input
             result = real_verify(self, request, key, owned)
             _write(root, "complete-verifier", {
                 "request": asdict(request), "operation_key": str(key),
                 "boundary": asdict(result.boundary) if result.boundary else None,
                 "write_connection": id(original), "verifier_connection": id(owned.connection),
-                "query_only": query_only, "returned_receipt": result.kind.value,
+                "query_only": query_only, "writer_closed": writer_closed, "main_readonly": main_readonly,
+                "returned_receipt": result.kind.value,
             })
             return result
         HostCaptureRepository.save_host_photo_complete = save

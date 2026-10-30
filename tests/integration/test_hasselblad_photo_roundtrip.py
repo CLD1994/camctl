@@ -367,6 +367,7 @@ class PhotoWorld:
         self.launcher = root / "installed-camctl"
         entry = root / "_hasselblad_photo_entry.py"
         shutil.copy2(REPO / "tests/integration/_hasselblad_photo_entry.py", entry)
+        shutil.copy2(REPO / "tests/integration/_hbf_readonly_probe.py", root / "_hbf_readonly_probe.py")
         self.launcher.write_text(f"#!{installed.python}\nimport runpy\nrunpy.run_path({str(entry)!r}, run_name='__main__')\n")
         self.launcher.chmod(0o700)
         self.package.environment["CAMCTL_HB_TEST_ROOT"] = str(root)
@@ -1003,7 +1004,7 @@ def test_installed_hasselblad_complete_commit_receipt_loss_reuses_request(tmp_pa
         assert saved['operation_key'] == verified['operation_key']
         assert saved['boundary'] == verified['boundary']
         assert saved['in_transaction'] is False and saved['returned_receipt'] == 'unknown'
-        assert verified['returned_receipt'] == 'completed' and verified['query_only'] == 1
+        assert verified['returned_receipt'] == 'completed' and verified['main_readonly'] and verified['writer_closed']
         assert verified['write_connection'] == saved['write_connection'] != verified['verifier_connection']
         target = _capture_target(world)
         assert saved['target'] == target

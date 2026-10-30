@@ -914,7 +914,13 @@ async def test_legacy_photo_with_result_port_keeps_device_listing_path(tmp_path)
 
 
 @pytest.mark.parametrize("capture_format", ["raw", "jpeg"])
-async def test_jpeg_photo_unknown_complete_reuses_original_request_and_pair(tmp_path, capture_format):
+async def test_jpeg_photo_unknown_complete_reuses_original_request_and_pair(tmp_path, capture_format, monkeypatch):
+    import importlib.util
+    probe_path = Path(__file__).resolve().parents[5] / "tests/integration/_hbf_readonly_probe.py"
+    spec = importlib.util.spec_from_file_location("hbf_readonly_probe", probe_path)
+    probe = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(probe)
+    monkeypatch.setattr(sqlite3, "connect", probe.tracked_connect_factory(sqlite3.connect))
     _cfg, owned, driver, runtime, _clock = await _world(tmp_path, capture_format=capture_format)
     from camctl.persistence.repositories.host_capture import HostCaptureRepository
 
@@ -925,6 +931,7 @@ async def test_jpeg_photo_unknown_complete_reuses_original_request_and_pair(tmp_
             self.saved = []
             self.verified = []
             self.verifier_connections = []
+            self.writer_connection = None
             self.delegate = real
 
         def prepare_host_photo(self, *args):
@@ -932,6 +939,7 @@ async def test_jpeg_photo_unknown_complete_reuses_original_request_and_pair(tmp_
 
         def save_host_photo_complete(self, request, key, current_owned):
             self.saved.append((request, key))
+            self.writer_connection = current_owned.connection
             receipt = self.delegate.save_host_photo_complete(request, key, current_owned)
             assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
             current_owned.connection.execute("BEGIN").close()
@@ -939,10 +947,11 @@ async def test_jpeg_photo_unknown_complete_reuses_original_request_and_pair(tmp_
 
         def verify_operation(self, request, key, verifier):
             self.verified.append((request, key))
-            assert verifier.connection is not owned.connection
+            assert isinstance(self.writer_connection, probe.TrackedConnection)
+            assert self.writer_connection.closed_by_owner
+            assert verifier.connection is not self.writer_connection
             self.verifier_connections.append(verifier.connection)
-            assert owned.connection.in_transaction is False
-            assert verifier.connection.execute("PRAGMA query_only").fetchone() == (1,)
+            assert probe.main_database_readonly(verifier.connection)
             return self.delegate.verify_operation(request, key, verifier)
 
     uncertain = UnknownCommittedReceipt()
@@ -956,8 +965,7 @@ async def test_jpeg_photo_unknown_complete_reuses_original_request_and_pair(tmp_
         assert owned.connection.execute("SELECT COUNT(*) FROM output_origins").fetchone() == (1,)
         assert len(uncertain.saved) == len(uncertain.verified) == 1
         assert uncertain.saved[0] == uncertain.verified[0]
-        with pytest.raises(sqlite3.ProgrammingError):
-            uncertain.verifier_connections[0].execute("SELECT 1")
+        assert uncertain.verifier_connections[0].closed_by_owner
         assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (3,)
         assert len(_saved_output_rows(owned)) == 2
     finally:
