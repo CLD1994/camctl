@@ -43,7 +43,11 @@ def _environment(tmp_path: Path, *, duration_ms=600000, driver_margin_ms=0):
     import asyncio
     from decimal import Decimal
     from .result_consumer_fixtures import ResultCatalog, consumer_world
-    from camctl.capture.handlers import _control_call
+    from camctl.capture.handlers import capture_handler
+    from camctl.persistence.executor import DbExecutorError
+    from camctl.persistence.repositories.capture import CaptureRepository
+    from support.repository_ports import repository_port
+    from ..support.capture import capture_test_session
 
     class WaitCatalog(ResultCatalog):
         def parameter_definition(self, device_id, action_type, parameter_type):
@@ -55,14 +59,57 @@ def _environment(tmp_path: Path, *, duration_ms=600000, driver_margin_ms=0):
                     result_wait_margin_s=Decimal(driver_margin_ms)/1000))
             return definition
 
-    async def prepare():
-        owned, runtime, action_id, _ = await consumer_world(tmp_path, "timelapse",
-            catalog=WaitCatalog(), start=False)
-        assert action_id == 1
-        await _control_call(runtime, runtime.action(action_id), "start_timelapse", "timelapse_sent")
-        return owned
+    class StartSaved(Exception):
+        """实际 START 结果已提交，测试尚未安排等待。"""
 
-    return asyncio.run(prepare())
+    class ObserveStart(CaptureRepository):
+        def __init__(self):
+            self.saved = []
+
+        def finish_start_result(self, finish, observation, key, owned, **kwargs):
+            result = super().finish_start_result(finish, observation, key, owned, **kwargs)
+            if result.kind is DbOutcomeKind.COMPLETED:
+                self.saved.append((finish, observation, key))
+                return replace(result, handoff_error=StartSaved())
+            return result
+
+    async def prepare():
+        owned = None
+        try:
+            async with capture_test_session() as resources:
+                owned, runtime, action_id, handler = await consumer_world(
+                    tmp_path, "timelapse", catalog=WaitCatalog(), start=False)
+                assert action_id == 1 and handler == "camera_timelapse"
+                database = await resources.database(owned)
+                observer = ObserveStart()
+                with repository_port(CaptureRepository, observer, ("finish_start_result",),
+                        matches=lambda _name, args, _kwargs: args[1] is not None
+                        and args[1].action_id == action_id):
+                    with pytest.raises(StartSaved):
+                        await capture_handler(handler)(action_id, runtime)
+                assert len(observer.saved) == 1
+                finish, observation, _key = observer.saved[0]
+                assert finish.occurred_at == _NOW and observation.sent_at == _NOW
+                assert owned.connection.execute(
+                    "SELECT sent_at,started_at,expected_check_at,wait_completed_event_id"
+                    " FROM device_activities WHERE action_id=?", (action_id,)).fetchone() == (
+                        _NOW, None, None, None)
+                spec = parse_exact_json(owned.connection.execute(
+                    "SELECT execution_spec_json FROM actions WHERE id=?", (action_id,)).fetchone()[0])
+                assert spec["target_duration_ms"] == duration_ms
+                assert spec.get("result_wait_margin_ms", 0) == driver_margin_ms
+            with pytest.raises(DbExecutorError):
+                await database.read(lambda worker: worker.connection.execute("SELECT 1").fetchone())
+            await resources.close()
+            return owned, asyncio.get_running_loop()
+        except BaseException:
+            if owned is not None:
+                owned.connection.close()
+            raise
+
+    owned, loop = asyncio.run(prepare())
+    assert loop.is_closed()
+    return owned
 
 
 def _value(owned, sql: str, *params):
