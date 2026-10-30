@@ -210,7 +210,7 @@
 - 结论：部分覆盖
 - 归属：Q 窗口观察与过期（scheduling 计划）。
 - 生产入口：apps/camctl/src/camctl/persistence/repositories/scheduling.py
-- 测试：apps/camctl/tests/integration/scheduling/test_window_expiration.py、apps/camctl/tests/integration/capture/test_recording_start.py、apps/camctl/tests/integration/capture/test_recording_start_runtime.py、apps/camctl/tests/integration/capture/test_stop_confirmed_with_error.py、apps/camctl/tests/integration/capture/test_recording_start_query_cancel.py、apps/camctl/tests/integration/capture/test_recording_queries.py
+- 测试：apps/camctl/tests/integration/scheduling/test_window_expiration.py、apps/camctl/tests/integration/capture/test_recording_start.py、apps/camctl/tests/integration/capture/test_recording_start_runtime.py、apps/camctl/tests/integration/capture/test_stop_confirmed_with_error.py、apps/camctl/tests/integration/capture/test_recording_queries.py
 - 证据：窗口观察、窗口外未派发过期和窗口守卫已覆盖；`capture/test_recording_start.py::test_late_confirmation_after_window_is_accepted` 验证录像在窗口内派发、窗口后确认仍沿原责任继续，`scheduling/test_window_expiration.py::test_granted_intent_is_not_expired_by_window` 验证已授予意图不因窗口结束过期。未知启动先核实、不重发及核实耗尽时保留未知占用由 `capture/test_recording_start_runtime.py::test_unknown_start_uses_start_confirmation_before_any_resend`、`test_start_confirmation_exhaustion_keeps_unknown_occupancy_and_original_start`、`test_original_start_stays_in_flight_without_second_dispatch_or_early_terminal` 覆盖；窗口后不得派发且保留已用次数由 `test_window_end_after_intent_prevents_dispatch_and_keeps_consumed_attempt` 覆盖。窗口观察、可靠未派发、无效果等待、在途和迟到结果均有相应分区用例，见路线图阶段 3 的 2026-10-11 核对记录。
 - 未核验前提：单张拍摄、录像和延时摄影三种动作的启动、停止及结果核实，尚未与窗口边界、取消／有限核实及各结果分支组合到同一个历史边界，并共同完成三路径恢复对照；剩余项是统一交叉矩阵，不是上述分项行为缺少验证。
 
@@ -226,11 +226,11 @@
 #### 验收 W-20
 - 原文：[验收 W-20](database/consistency-verification.md#等待与来源结束)（调用截止与启动窗口分别触发；迟到成功不改写终态）。
 - 结论：部分覆盖
-- 归属：Q 窗口与 O 尝试（scheduling、operations 计划）。
+- 归属：Q 窗口与 O 尝试（scheduling、operations 计划）；取消时在途启动核实与迟到结果协调由 capture 流程负责，当前仅有存储边界证据。
 - 生产入口：apps/camctl/src/camctl/persistence/repositories/scheduling.py
-- 测试：apps/camctl/tests/integration/scheduling/test_window_expiration.py、apps/camctl/tests/integration/capture/test_stop_confirmed_with_error.py、apps/camctl/tests/integration/capture/test_recording_start_query_cancel.py、apps/camctl/tests/integration/capture/test_recording_queries.py、apps/camctl/tests/integration/capture/test_recording_start_save_boundary.py、apps/camctl/tests/integration/capture/test_call_result_save.py
-- 证据：调用窗口后确认、已授予意图在窗口后保留、未知启动核实及结果保存边界见 W-18／W-19 用例。迟到停止调用在取消后仍等待实际结果并按真实停止事实收场由 `capture/test_stop_confirmed_with_error.py::test_cancel_during_in_flight_stop_waits_for_actual_result` 覆盖；取消后的迟到确认保留实际观察且不改写原动作与尝试终态由 `capture/test_recording_start_query_cancel.py::test_canceled_confirmation_keeps_actual_observation_and_original_terminals` 覆盖；原停止／活动查询结束后迟到核实由 `capture/test_recording_queries.py::test_orphan_stop_confirmation_settled_after_stop_succeeds`、`test_orphan_activity_observation_settled_after_cancel` 覆盖。`capture/test_call_result_save.py` 覆盖调用结果读取、投影及提交阶段的故障注入。
-- 未核验前提：现有分项证据尚未在同一历史 H 上交叉覆盖原调用截止与启动窗口、核实期间取消、迟到成功／错误及终态，并对初始回放、快照正向和当前投影逆向作整链对照；还须验证回放不读取当前时钟或调用设备。
+- 测试：apps/camctl/tests/integration/scheduling/test_window_expiration.py、apps/camctl/tests/integration/capture/test_stop_confirmed_with_error.py、apps/camctl/tests/integration/capture/test_recording_queries.py、apps/camctl/tests/integration/capture/test_recording_start_save_boundary.py、apps/camctl/tests/integration/capture/test_call_result_save.py
+- 证据：调用窗口后确认、已授予意图在窗口后保留、未知启动核实及结果保存边界见 W-18／W-19 用例。迟到停止调用在取消后仍等待实际结果并按真实停止事实收场由 `capture/test_stop_confirmed_with_error.py::test_cancel_during_in_flight_stop_waits_for_actual_result` 覆盖；取消终态后，迟到启动核实的实际观察和结果可写入存储，且不会复活动作或运行，由 `capture/test_recording_start_save_boundary.py::test_canceled_query_storage_keeps_late_actual_observation_without_reviving_runs` 的独立仓储合同验证。该用例在取消后直接调用仓储保存迟到结果，没有验证 `capture_handler` 如何协调仍在途的启动核实，因此不能替代端到端取消行为用例。原停止／活动查询结束后迟到核实由 `capture/test_recording_queries.py::test_orphan_stop_confirmation_settled_after_stop_succeeds`、`test_orphan_activity_observation_settled_after_cancel` 覆盖。`capture/test_call_result_save.py` 覆盖调用结果读取、投影及提交阶段的故障注入。
+- 未核验前提：现有分项证据尚未在同一历史 H 上交叉覆盖原调用截止与启动窗口、核实期间取消、迟到成功／错误及终态，并对初始回放、快照正向和当前投影逆向作整链对照；还缺少生产 `capture_handler` 在启动核实查询已在途时收到取消、随后处理迟到成功或错误且不提前停止的端到端用例；还须验证回放不读取当前时钟或调用设备。
 
 ## 二、相机读取机会与调度交接（W-07–W-12）
 
