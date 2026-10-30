@@ -1,4 +1,4 @@
-"""历史回放与固定 H 报告不加载新配置、无设备与文件副作用。"""
+"""历史回放与固定 H 报告不重查绑定或执行设备、媒体操作。"""
 
 from dataclasses import replace
 from decimal import Decimal
@@ -10,7 +10,6 @@ import pytest
 
 from camctl.bootstrap import capture_assembly
 from camctl.contracts.schemas import validate_document
-from camctl.contracts.values import new_operation_key
 from camctl.contracts.values import new_operation_key
 from camctl.history.decoding import decode_event_row
 from camctl.history.events import branch_of, event_type_name
@@ -66,7 +65,7 @@ def _events_of(connection, entity_type: int, entity_id: int):
 
 async def test_replay_and_fixed_report_ignore_changed_read_configuration(
         pipeline, monkeypatch):
-    """读取责任的回放与报告重建与配置变化无关，且无设备或文件副作用。"""
+    """读取责任回放与固定报告不重查设备绑定或执行读取。"""
     owned, roots, source_id = pipeline
     # 前提：经真实媒体链完成一次完整读取，建立读取责任的持久化事实。
     from ..capture.test_media_flow import ProbeTools, ReadDriverDouble, _flow
@@ -75,11 +74,13 @@ async def test_replay_and_fixed_report_ignore_changed_read_configuration(
     from ..capture.test_input_copy import _CONTENT
     driver = ReadDriverDouble(_CONTENT)
     tools = ProbeTools(MediaProbe(duration_s=Decimal("61"), error=None))
-    flow = _flow(pipeline, driver, tools)
+    flow = await _flow(pipeline, driver, tools)
     from camctl.capture.media_flow import run_recording_media
     await run_recording_media(flow, 1, 1, source_id)
+    second_driver = ReadDriverDouble(_CONTENT)
     await run_recording_media(
-        _flow(pipeline, ReadDriverDouble(_CONTENT), tools), 1, 1, source_id)
+        await _flow(pipeline, second_driver, tools), 1, 1, source_id)
+    opens_before = (tuple(driver.opens), tuple(second_driver.opens))
     read_run, = owned.connection.execute(
         "SELECT id FROM operation_runs WHERE kind=3").fetchone()
     copy_id, = owned.connection.execute(
@@ -106,12 +107,14 @@ async def test_replay_and_fixed_report_ignore_changed_read_configuration(
     staging_before = sorted(str(path.relative_to(roots.staging))
                             for path in roots.staging.rglob("*") if path.is_file())
 
-    # 配置变化：设备驱动改绑、读取上限与间隔改值。
+    # 监控设备绑定检查；回放和报告接口不接收设备配置。
     from types import SimpleNamespace
     from camctl.devices import bindings
     actual_check = bindings.check_binding
+    binding_checks = []
 
     def check(saved, current):
+        binding_checks.append((saved, current))
         if saved.device_id != "cam-1":
             return actual_check(saved, current)
         return actual_check(saved, SimpleNamespace(devices={
@@ -119,9 +122,6 @@ async def test_replay_and_fixed_report_ignore_changed_read_configuration(
 
     monkeypatch.setattr(bindings, "check_binding", check)
     monkeypatch.setattr(capture_assembly, "check_binding", check)
-    changed = SimpleNamespace(devices={"cam-1": {
-        "kind": "camera", "driver": "alternate-camera",
-        "recording": {"max_read_attempts": 9, "read_retry_interval_s": "0.01"}}})
 
     # 固定 H 报告重建：字节一致，不产生新的 staging 文件。
     rebuilt = generate_report_file(GenerationSpec(
@@ -161,5 +161,7 @@ async def test_replay_and_fixed_report_ignore_changed_read_configuration(
     assert (attempt_row["attempt_no"], attempt_row["status"]) == (1, 2)
     assert attempt_row["error_json"] is None
 
-    # 读取配置的变更不被回放或报告消费：回放与报告阶段零工具调用。
+    # 回放与报告未调用设备绑定或重新打开源，也没有重复媒体检查。
+    assert not binding_checks
+    assert (tuple(driver.opens), tuple(second_driver.opens)) == opens_before
     assert tools.calls == ["probe"]
