@@ -22,7 +22,8 @@ from .test_record_file_completion_wait import _result_port, _result_setup
 from .result_consumer_fixtures import consumer_world
 from .test_action6_segmented_recovery import (
     _Action6Native151Catalog,
-    _attach_media,
+    _ProbeTools,
+    _media_options,
     _entries,
     _overrun_recording,
     _publish_ordinary_result,
@@ -37,10 +38,10 @@ pytestmark = pytest.mark.asyncio
 
 
 async def test_action6_ordinary_cancel_publishes_canceled_segment_result_without_outputs(
-    tmp_path,
+    tmp_path, monkeypatch,
 ):
     owned, runtime, action_id, handler, _, result_port, evidence = await _overrun_recording(
-        tmp_path, (Decimal("18"), Decimal("27"), Decimal("22"))
+        tmp_path, monkeypatch, (Decimal("18"), Decimal("27"), Decimal("22"))
     )
     try:
         _apply_public_cancel(owned, action_id, _NOW + 90_000_000)
@@ -191,11 +192,11 @@ async def test_action6_stop_budget_exhaustion_publishes_unconfirmed_without_rele
         owned.connection.close()
 
 
-async def test_action6_binding_failure_uses_external_segment_terminal(tmp_path):
+async def test_action6_binding_failure_uses_external_segment_terminal(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
     owned, runtime, action_id, _handler, _tools, result_port, evidence = await _overrun_recording(
-        tmp_path, (Decimal("18"), Decimal("27"), Decimal("22"))
+        tmp_path, monkeypatch, (Decimal("18"), Decimal("27"), Decimal("22"))
     )
     try:
         runtime.binding_check = lambda binding: check_binding(
@@ -218,14 +219,15 @@ async def test_action6_binding_failure_uses_external_segment_terminal(tmp_path):
 
 
 async def test_action6_native_required_photo_failure_reaches_recovery_through_real_handler(
-    tmp_path,
+    tmp_path, monkeypatch,
 ):
     result_port, evidence = _result_setup()
     clock = CaseClock(_NOW, 5_000_000_000)
-    media_clock = CaseClock(_NOW, 5_000_000_000)
+    tools = _ProbeTools((60, 60, 31, 20), monkeypatch)
     owned, runtime, action_id, handler = await consumer_world(
         tmp_path, "timelapse", catalog=_Action6Native151Catalog(0), start=False, clock=clock,
-        runtime_options={"results": result_port, "evidence": evidence}
+        runtime_options=_media_options(tools, results=result_port, evidence=evidence,
+            wall_us=clock.wall_us, monotonic_ns=clock.monotonic_ns)
     )
     try:
         (activity_id,) = owned.connection.execute(
@@ -240,10 +242,6 @@ async def test_action6_native_required_photo_failure_reaches_recovery_through_re
         from .test_result_page_history import _actual
 
         await capture_handler(handler)(action_id, runtime)
-        tools = (await _attach_media(
-            runtime, owned, tmp_path,
-            (60, 60, 31, 20), occurred_at=media_clock.wall_us,
-        ))
         runtime.wait_config = lambda action: CaptureWaitConfig(300_000, 200, 0, 0)
         await capture_handler(handler)(action_id, runtime)
 
@@ -282,21 +280,27 @@ async def test_action6_native_required_photo_failure_reaches_recovery_through_re
 
 
 async def test_action6_pending_inspection_waits_for_full_session_then_cancels_without_resume(
-    tmp_path,
+    tmp_path, monkeypatch, capture_resources,
 ):
-    from camctl.capture.media_flow import DriverReadSessions
     from camctl.contracts.enums import enum_for
     from camctl.persistence.repositories.segment_inspections import read_inspection_for_member
     from .test_segment_inspections import _CONTENT, _ReadDriver
 
+    from camctl.operations.attempts import RetryWaitGate
+    shared = {name: {} for name in (
+        "pending_call_results", "pending_capture_completions", "pending_result_closes",
+        "recording_anchors", "pending_media_results", "pending_file_observations",
+        "continuing_read_tickets", "pending_read_results", "pending_read_business",
+        "pending_read_ends", "pending_baselines", "pending_result_scans",
+        "pending_segment_writes", "pending_segment_inspection_results",
+        "pending_host_photo_prepares", "pending_host_photo_completions",
+    )}
+    shared["retry_wait_gate"] = RetryWaitGate()
     owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
-        tmp_path, (Decimal("18"), Decimal("27"), Decimal("22"))
+        tmp_path, monkeypatch, (Decimal("18"), Decimal("27"), Decimal("22")),
+        read_driver=_ReadDriver(_CONTENT, fail_after=4), segment_size=4, assembly_shared=shared,
     )
     try:
-        runtime.media.sessions = DriverReadSessions(
-            await capture_database(owned), _ReadDriver(_CONTENT, fail_after=4), ticket=None,
-        )
-        runtime.media.segment_size = 4
         await _publish_ordinary_result(runtime, owned, action_id, handler, _entries(3), result_port, evidence)
 
         facts = read_inspection_for_member(action_id, 1, owned)
@@ -313,7 +317,10 @@ async def test_action6_pending_inspection_waits_for_full_session_then_cancels_wi
         assert output_count_before_cancel == (0,)
 
         # 受限媒体会话可以继续保存已有状态，但不重开输入或启动媒体工具。
-        runtime.media = None
+        options = _media_options(tools, results=result_port, wall_us=runtime.wall_us,
+            monotonic_ns=runtime.monotonic_ns, media_enabled=False, **shared)(
+                owned, runtime.driver, {"evidence": runtime.evidence})
+        runtime = await capture_resources.runtime(owned, driver=runtime.driver, **options)
         event_count = owned.connection.execute(
             "SELECT COUNT(*) FROM history_events"
         ).fetchone()

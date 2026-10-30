@@ -15,7 +15,7 @@ from camctl.persistence.repositories.segments import SegmentRepository
 
 from .result_consumer_fixtures import consumer_world, returned
 from .test_action6_segmented_normal import Action6RecordCatalog
-from .test_action6_segmented_recovery import _attach_media, _entries
+from .test_action6_segmented_recovery import _ProbeTools, _media_options, _entries
 from .test_capture_contract import _NOW, _PAGE_EVIDENCE, ResultsDouble
 from ..support.capture import capture_runtime
 from .test_record_file_completion_wait import (
@@ -29,7 +29,7 @@ pytestmark = pytest.mark.asyncio
 
 
 async def test_action6_recording_handler_persists_current_session_elapsed_and_inspects(
-    tmp_path,
+    tmp_path, monkeypatch,
 ):
     clock = {"wall_us": _NOW, "monotonic_ns": 5_000_000_000}
     catalog = Action6RecordCatalog()
@@ -38,12 +38,11 @@ async def test_action6_recording_handler_persists_current_session_elapsed_and_in
     stopper.stop.side_effect = lambda request: DeviceCallResult.from_outcome(
         returned("stop", "stop_confirmed", request.ticket.target_id))
     result_port, evidence = _result_setup()
+    tools = _ProbeTools((Decimal("18"), Decimal("27"), Decimal("22"), Decimal("40")), monkeypatch)
     owned, runtime, action_id, handler = await consumer_world(
         tmp_path, "record", catalog=catalog, start=False,
-        runtime_options={"results": result_port, "evidence": evidence, "wall_us": lambda: clock["wall_us"],
-            "monotonic_ns": lambda: clock["monotonic_ns"], "stopper": stopper,
-            "devices": {"cam-1": {"driver": "camctl-adb",
-                "recording": {"repair_margin_s": Decimal("2")}}}},
+        runtime_options=_media_options(tools, results=result_port, evidence=evidence,
+            wall_us=lambda: clock["wall_us"], monotonic_ns=lambda: clock["monotonic_ns"], stopper=stopper),
     )
 
     (activity_id,) = owned.connection.execute(
@@ -63,12 +62,6 @@ async def test_action6_recording_handler_persists_current_session_elapsed_and_in
         )
 
     result_driver = _result_port(result_port, evidence, read_results)
-    tools = (await _attach_media(
-        runtime,
-        owned,
-        tmp_path,
-        (Decimal("18"), Decimal("27"), Decimal("22"), Decimal("40")),
-    ))
 
     try:
         await capture_handler(handler)(action_id, runtime)

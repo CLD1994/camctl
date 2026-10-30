@@ -188,7 +188,7 @@ async def test_action6_fixed_h_survives_obtain_delete_and_inspection_cleanup(
     tmp_path, monkeypatch, capture_resources
 ):
     owned, capture_runtime, action_id, handler, _tools, result_port, evidence = await _overrun_recording(
-        tmp_path, (Decimal("18"),)
+        tmp_path, monkeypatch, (Decimal("18"),)
     )
     try:
         obtain_action_id, selection_id = _obtain(

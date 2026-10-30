@@ -1,13 +1,11 @@
 """Action6 检查预算从 JSON 冷恢复，并沿原部分拷贝接续。"""
 
-from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
 from camctl.capture.handlers import capture_handler
-from camctl.capture.media_flow import DriverReadSessions, MediaFlow
 from camctl.contracts.enums import enum_for
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.segment_inspections import (
@@ -19,11 +17,11 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from ..bootstrap.test_media_assembly import _config
 from .test_action6_segmented_recovery import (
     _entries,
+    _media_options,
     _overrun_recording,
     _publish_ordinary_result,
 )
 from .test_capture_contract import _NOW
-from ..support.capture import capture_database
 from .test_input_copy import _CONTENT
 from .test_segment_inspections import _ReadDriver
 
@@ -35,34 +33,24 @@ class _NoDeviceResults:
         raise AssertionError("冷恢复应消费可靠结果页，不能重新列举设备")
 
 
-async def _cold_runtime(runtime, owned, driver, *, now, resources):
-    tools = runtime.media.tools
-    tools.owned = owned
+async def _cold_runtime(runtime, owned, driver, tools, *, now, resources):
     ns = [100_000_000_000]
     database = await resources.restart_database(owned)
-    resumed = await resources.runtime(database, driver=runtime.driver, evidence=runtime.evidence,
-        results=_NoDeviceResults(), wall_us=lambda: now, monotonic_ns=lambda: ns[0])
-    resumed.media = MediaFlow(database=database, roots=runtime.media.roots,
-        sessions=DriverReadSessions(database, driver, ticket=None), tools=tools,
-        policy=runtime.media.policy, occurred_at=lambda: now,
-        digest_supported=True, digest=runtime.media.digest,
-        segment_size=runtime.media.segment_size, monotonic_ns=lambda: ns[0])
+    options = _media_options(tools, read_driver=driver, segment_size=4,
+        results=_NoDeviceResults(), wall_us=lambda: now, monotonic_ns=lambda: ns[0])(
+            owned, runtime.driver, {"evidence": runtime.evidence})
+    resumed = await resources.runtime(database, driver=runtime.driver, **options)
     return resumed, ns
 
 
 async def test_action6_cold_recovery_decodes_saved_budget_and_continues_same_copy(
     tmp_path, monkeypatch, capture_resources,
 ):
-    owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
-        tmp_path, (Decimal("70"),)
-    )
     first_driver = _ReadDriver(_CONTENT, fail_after=4)
-    active_owned = owned
-    runtime.media = replace(
-        runtime.media,
-        sessions=DriverReadSessions(await capture_database(owned), first_driver, ticket=None),
-        segment_size=4,
+    owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
+        tmp_path, monkeypatch, (Decimal("70"),), read_driver=first_driver, segment_size=4
     )
+    active_owned = owned
     try:
         await _publish_ordinary_result(
             runtime, owned, action_id, handler, _entries(1), result_port, evidence
@@ -107,7 +95,7 @@ async def test_action6_cold_recovery_decodes_saved_budget_and_continues_same_cop
         active_owned = reopened
         resumed_driver = _ReadDriver(_CONTENT)
         runtime, ns = await _cold_runtime(
-            runtime, reopened, resumed_driver, now=_NOW + 90_000_000, resources=capture_resources
+            runtime, reopened, resumed_driver, tools, now=_NOW + 90_000_000, resources=capture_resources
         )
 
         original_save = SegmentInspectionRepository.save_result
@@ -161,7 +149,7 @@ async def test_action6_cold_recovery_decodes_saved_budget_and_continues_same_cop
         active_owned = cold_reopened
         final_driver = _ReadDriver(_CONTENT)
         runtime, _ns = await _cold_runtime(
-            runtime, cold_reopened, final_driver, now=_NOW + 100_000_000, resources=capture_resources
+            runtime, cold_reopened, final_driver, tools, now=_NOW + 100_000_000, resources=capture_resources
         )
         monkeypatch.setattr(
             SegmentInspectionRepository, "save_result", original_save

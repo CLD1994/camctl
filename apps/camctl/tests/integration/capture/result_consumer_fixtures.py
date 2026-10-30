@@ -262,7 +262,9 @@ async def consumer_world(
             "wall_us": clock.wall_us, "monotonic_ns": clock.monotonic_ns,
             "check_config": AttemptConfig(3, Decimal("1.25"), Decimal("2")),
             "directory": Directory([lambda request: DirectoryRead(None, None, Page((), None))])}
-        options.update({} if runtime_options is None else runtime_options)
+        supplied = (runtime_options(owned, control, options)
+                    if callable(runtime_options) else runtime_options)
+        options.update({} if supplied is None else supplied)
         if start and consumer in ("record", "winddown", "cancel") and runtime_factory is None:
             stop = create_autospec(StopDriver, instance=True)
             stop.stop.return_value = DeviceCallResult.from_outcome(

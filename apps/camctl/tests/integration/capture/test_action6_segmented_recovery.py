@@ -5,23 +5,22 @@ from decimal import Decimal
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
+from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverStatus
+from camctl.devices.evidence import DeviceObservation, EvidenceContract
+from camctl.devices.ports import DriverDeclaration
 from unittest.mock import create_autospec
 
 import pytest
 
-from ..support.capture import capture_database
 
 from camctl.capture.baseline_models import BaselineFixSave
 from camctl.capture.handlers import capture_handler
-from camctl.capture.media import MediaPolicy
-from camctl.capture.media_flow import DriverReadSessions, MediaFlow
 from camctl.capture.timelapse import CaptureWaitConfig
 from camctl.contracts.values import new_operation_key
 from camctl.devices.ports import DeviceCallResult, StopDriver
-from camctl.host_files.models import BoundDirectories
 from camctl.host_files.media import MediaProbe, MediaStream
-from camctl.host_files.tasks import FileTaskId, FileTaskResult
-from camctl.outputs.copy import SourceDigest
+from camctl.host_files.tasks import FileTaskResult
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.segments import SegmentRepository
 from camctl.operations.attempts import AttemptConfig
@@ -52,21 +51,16 @@ from ..outputs.test_segment_default_scope import _obtain
 pytestmark = pytest.mark.asyncio
 
 
-class _Digest:
-    def __init__(self) -> None:
-        self.digest = hashlib.sha256(_CONTENT).hexdigest()
-
-    async def read_digest(self):
-        return SourceDigest(digest=self.digest, error=None)
-
-
 class _ProbeTools:
-    def __init__(self, owned, values) -> None:
-        self.owned = owned
+    def __init__(self, values, monkeypatch) -> None:
+        self.owned = None
+        monkeypatch.setattr("camctl.bootstrap.capture_assembly.probe_media", self.probe_media)
+        monkeypatch.setattr("camctl.bootstrap.capture_assembly.repair_media", self.repair_media)
         self.values = tuple(values)
         self.calls: list[tuple[int, bool]] = []
 
-    async def probe_segment(self, input, *, count_frames: bool):
+    async def probe_media(self, input, roots, request, *, executor, task_id, owner):
+        count_frames = request.count_frames
         rows = self.owned.connection.execute(
             "SELECT committed_bytes,source_size,target_sha256 FROM file_copies"
             " WHERE target_file_id=?",
@@ -95,37 +89,51 @@ class _ProbeTools:
             fps=Decimal("30"),
         )
         return FileTaskResult(
-            FileTaskId(f"action6-segment-{index + 1}"),
+            task_id,
             ran=True,
             value=MediaProbe(duration_s=None, error=None, streams=(stream,)),
         )
 
-    async def probe(self, input):
-        raise AssertionError("Action6 分段检查必须使用 probe_segment")
-
-    async def repair(self, input, output, *, trim_s):
+    async def repair_media(self, input, output, roots, request, *, executor, task_id, owner):
         raise AssertionError("Action6 覆盖检查不能启动修复")
 
 
-async def _attach_media(runtime, owned, tmp_path: Path, values, *, occurred_at=None) -> _ProbeTools:
-    staging = tmp_path / "staging"
-    staging.mkdir(exist_ok=True)
-    tools = _ProbeTools(owned, values)
-    runtime.media = MediaFlow(
-        database=await capture_database(owned),
-        roots=BoundDirectories(staging=staging),
-        sessions=DriverReadSessions(await capture_database(owned), _ReadDriver(_CONTENT), ticket=None),
-        tools=tools,
-        policy=MediaPolicy(repair_margin_s=Decimal("2")),
-        occurred_at=runtime.wall_us if occurred_at is None else occurred_at,
-        digest_supported=True,
-        digest=_Digest(),
-    )
-    return tools
+def _media_options(tools, *, read_driver=None, segment_size=None, **overrides):
+    """在正式工厂之前补全设备读取与摘要声明，保留既有准备端口。"""
+    read_driver = _ReadDriver(_CONTENT) if read_driver is None else read_driver
+    async def digest(request):
+        return DeviceCallResult(observations=(DeviceObservation(
+            "file_digest", 1, {"file_id": request.params["file_id"],
+                "sha256": hashlib.sha256(_CONTENT).hexdigest()}),), error=None)
+
+    def options(owned, control, defaults):
+        tools.owned = owned
+        evidence = overrides.get("evidence", defaults["evidence"])
+        evidence = evidence.with_contract(EvidenceContract("read_returned", 1, "read", frozenset()))
+        evidence = evidence.with_contract(EvidenceContract("file_digest", 1, "digest",
+            frozenset({"file_id", "sha256"}), identity_field="file_id"))
+        stopper = overrides.get("stopper", defaults.get("stopper"))
+        directory = defaults.get("directory")
+        ports = SimpleNamespace(control=control.control, open_read=read_driver.open_read, digest=digest)
+        if stopper is not None:
+            ports.stop = stopper.stop
+        if directory is not None:
+            ports.read_directory = directory.read_directory
+        declaration = DriverDeclaration(control_supported=True, stop_supported=stopper is not None,
+            query_supported=False, result_supported=False, read_supported=True, digest_supported=True,
+            delete_supported=False, directory_supported=directory is not None)
+        registry = DriverRegistry((DriverEntry("camctl-adb", ports, declaration, evidence,
+            DriverStatus.SOFTWARE_CONTRACT_VERIFIED),))
+        result = {**overrides, "evidence": evidence, "drivers": registry,
+            "devices": {"cam-1": {"driver": "camctl-adb", "recording": {"repair_margin_s": Decimal("2")}}}}
+        if segment_size is not None:
+            result["segment_size"] = segment_size
+        return result
+    return options
 
 
 async def _overrun_recording(
-    tmp_path, values, *, catalog=None, fix_baseline=True,
+    tmp_path, monkeypatch, values, *, catalog=None, fix_baseline=True, read_driver=None, segment_size=None, assembly_shared=None,
 ):
     catalog = Action6RecordCatalog() if catalog is None else catalog
     catalog.duration_s = Decimal("60")
@@ -134,10 +142,13 @@ async def _overrun_recording(
     stopper.stop.side_effect = lambda request: DeviceCallResult.from_outcome(
         returned("stop", "stop_confirmed", request.ticket.target_id))
     result_port, evidence = _result_setup()
+    tools = _ProbeTools(values, monkeypatch)
     owned, runtime, action_id, handler = await consumer_world(
         tmp_path, "record", catalog=catalog, start=False,
-        runtime_options={"results": result_port, "evidence": evidence, "wall_us": lambda: wall[0], "monotonic_ns": lambda: mono[0],
-            "stopper": stopper},
+        runtime_options=_media_options(tools, read_driver=read_driver, segment_size=segment_size,
+            results=result_port, evidence=evidence, wall_us=lambda: wall[0],
+            monotonic_ns=lambda: mono[0], stopper=stopper,
+            **({} if assembly_shared is None else assembly_shared)),
     )
     (activity_id,) = owned.connection.execute(
         "SELECT id FROM device_activities WHERE action_id=?", (action_id,)
@@ -155,8 +166,6 @@ async def _overrun_recording(
         "SELECT control_elapsed_ns FROM device_activities WHERE action_id=?", (action_id,)
     ).fetchone() == (75_000_000_000,)
     wall[0], mono[0] = _NOW + 80_000_000, 85_000_000_000
-    tools = (await _attach_media(runtime, owned, tmp_path, values,
-                                 occurred_at=lambda: _NOW + 80_000_000))
     return owned, runtime, action_id, handler, tools, result_port, evidence
 
 
@@ -238,9 +247,9 @@ class _Action6TaskScopeCatalog(Action6RecordCatalog):
         )
 
 
-async def test_action6_overrun_measures_only_the_prefix_needed_to_reach_target(tmp_path):
+async def test_action6_overrun_measures_only_the_prefix_needed_to_reach_target(tmp_path, monkeypatch):
     owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
-        tmp_path, (Decimal("18"), Decimal("27"), Decimal("22"), Decimal("40"))
+        tmp_path, monkeypatch, (Decimal("18"), Decimal("27"), Decimal("22"), Decimal("40"))
     )
     try:
         await _publish_ordinary_result(
@@ -275,10 +284,10 @@ async def test_action6_overrun_measures_only_the_prefix_needed_to_reach_target(t
 
 
 async def test_action6_unknown_third_probe_keeps_reliable_control_success_and_two_file_prefix(
-    tmp_path,
+    tmp_path, monkeypatch,
 ):
     owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
-        tmp_path,
+        tmp_path, monkeypatch,
         (Decimal("18"), Decimal("27"), RuntimeError("ffprobe unavailable"), Decimal("40")),
     )
     try:
@@ -315,9 +324,9 @@ async def test_action6_unknown_third_probe_keeps_reliable_control_success_and_tw
         owned.connection.close()
 
 
-async def test_action6_complete_short_sequence_reports_confirmed_short(tmp_path):
+async def test_action6_complete_short_sequence_reports_confirmed_short(tmp_path, monkeypatch):
     owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
-        tmp_path, (Decimal("18"), Decimal("20"), Decimal("12"), Decimal("40"))
+        tmp_path, monkeypatch, (Decimal("18"), Decimal("20"), Decimal("12"), Decimal("40"))
     )
     try:
         await _publish_ordinary_result(
@@ -344,9 +353,9 @@ async def test_action6_complete_short_sequence_reports_confirmed_short(tmp_path)
         owned.connection.close()
 
 
-async def test_action6_unknown_start_saves_unknown_scope_header(tmp_path):
+async def test_action6_unknown_start_saves_unknown_scope_header(tmp_path, monkeypatch):
     owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
-        tmp_path,
+        tmp_path, monkeypatch,
         (Decimal("18"), Decimal("27"), Decimal("22"), Decimal("40")),
         catalog=_Action6TaskScopeCatalog(),
         fix_baseline=False,
@@ -382,9 +391,9 @@ async def test_action6_unknown_start_saves_unknown_scope_header(tmp_path):
         owned.connection.close()
 
 
-async def test_action6_first_probe_unknown_keeps_known_start_as_empty_scope(tmp_path):
+async def test_action6_first_probe_unknown_keeps_known_start_as_empty_scope(tmp_path, monkeypatch):
     owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
-        tmp_path,
+        tmp_path, monkeypatch,
         (RuntimeError("ffprobe unavailable"), Decimal("27"), Decimal("22")),
     )
     try:
@@ -462,13 +471,15 @@ async def test_action6_native_recovery_reports_actual_frame_coverage(
 
     wall, mono = [_NOW], [5_000_000_000]
     result_port, evidence = _result_setup()
+    tools = _ProbeTools(values, monkeypatch)
     owned, runtime, action_id, handler = await consumer_world(
         tmp_path,
         "timelapse",
         catalog=_Action6Native151Catalog(0),
         start=False,
-        runtime_options={"results": result_port, "evidence": evidence, "wall_us": lambda: wall[0], "monotonic_ns": lambda: mono[0],
-            "wait_config": lambda action: CaptureWaitConfig(300_000, 200, 0, 0)},
+        runtime_options=_media_options(tools, results=result_port, evidence=evidence,
+            wall_us=lambda: wall[0], monotonic_ns=lambda: mono[0],
+            wait_config=lambda action: CaptureWaitConfig(300_000, 200, 0, 0)),
     )
     try:
         (activity_id,) = owned.connection.execute(
@@ -480,7 +491,6 @@ async def test_action6_native_recovery_reports_actual_frame_coverage(
         assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
 
         await capture_handler(handler)(action_id, runtime)
-        tools = (await _attach_media(runtime, owned, tmp_path, values, occurred_at=lambda: _NOW))
         await capture_handler(handler)(action_id, runtime)
 
         async def read(request, batch):
@@ -559,14 +569,16 @@ async def _native_action6_recovery_with_unknown_video_scope(
 
     wall, mono = [_NOW], [5_000_000_000]
     result_port, evidence = _result_setup()
+    tools = _ProbeTools(probe_values, monkeypatch)
     owned, runtime, action_id, handler = await consumer_world(
         tmp_path,
         "timelapse",
         catalog=_Action6Native151Catalog(0),
         start=False,
-        runtime_options={"results": result_port, "evidence": evidence, "wall_us": lambda: wall[0], "monotonic_ns": lambda: mono[0],
-            "wait_config": lambda action: CaptureWaitConfig(300_000, 200, 0, 0),
-            "check_config": AttemptConfig(1, Decimal("1"), Decimal(0))},
+        runtime_options=_media_options(tools, results=result_port, evidence=evidence,
+            wall_us=lambda: wall[0], monotonic_ns=lambda: mono[0],
+            wait_config=lambda action: CaptureWaitConfig(300_000, 200, 0, 0),
+            check_config=AttemptConfig(1, Decimal("1"), Decimal(0))),
     )
     (activity_id,) = owned.connection.execute(
         "SELECT id FROM device_activities WHERE action_id=?", (action_id,)
@@ -577,7 +589,6 @@ async def _native_action6_recovery_with_unknown_video_scope(
     assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
 
     await capture_handler(handler)(action_id, runtime)
-    tools = (await _attach_media(runtime, owned, tmp_path, probe_values, occurred_at=lambda: _NOW))
     await capture_handler(handler)(action_id, runtime)
 
     async def read(request, batch):
