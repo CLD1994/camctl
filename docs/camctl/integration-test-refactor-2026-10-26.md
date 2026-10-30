@@ -14,6 +14,8 @@
 
 延续删除阶段 `51a0e20b` 的有效行为目标。原优化计划的当前验收项统一在这里推进；此前步骤的历史材料见[历史阶段与证据](#历史阶段与证据)。
 
+当前顺序是先固定源码运行完整约定范围，登记实际失败与未执行范围，优先修复测试侧直接报错；小错误可以在其余任务运行时修复并分别记录补测。完整范围通过后，再选择单例准备、执行和收场合计超过九秒的用例优化，最后处理其余接口重构。生产问题按下表交接，原断言与暂缓范围保留；目前尚未进入慢用例优化阶段。
+
 - [x] 集中真实状态库、异步数据库及资源关闭支持，使用所属模块的正式调用入口。
 - [ ] 完成各模块的旧数据库调用、内部运行对象和私有推进迁移；接口设计问题记录后等待改进，不增加无关准备层级。
 - [x] 将旧缓存五项有效目标由六个当前事务和分页实例承接，保留隔离、资格、篡改和边界反例。
@@ -52,7 +54,8 @@
 | 历史读取 | 缓存与连接观察未完成 | 两项派生库读写故障已迁移；继续保留真实分页、资源释放与工作量，替换其他私有布局和调用图依赖，核对强制缓存模式的有效目标。 |
 | 容量与内存判据 | 来源增长检查待判断 | 原 Python 分配增长阈值与整个程序 2GiB 预算分别评价，不能互相替代或以放宽断言消除失败。 |
 | 主机照片的配置变化场景 | 一项准备仍待评估 | 配置在运行内固定；不能为保留旧场景而默认新增热更新接口或换用新拥有者。 |
-| 最终验收 | 未执行 | 统一源码的全部 camctl 集成目录、根 Python／Node 及容量范围。 |
+| 启动核实中的取消与迟到结果 | 验收 W-20 仍部分覆盖 | 仓储用例只证明迟到事实可以落库；后续依[软件验收映射](software-acceptance.md#验收-w-20)补齐正式处理器协调在途调用的行为。 |
+| 最终验收 | 完整基线、收集阻断后的补跑及受影响组合均已执行，尚未通过 | 生产与测试侧阻塞处理后，在统一修复源码上运行全部 camctl、根 Python／Node 及容量范围。 |
 
 剩余总数尚未核清。清理恢复的历史分组缺少逐实例身份，不能作为当前剩余数的依据。上表分别记录可定位的数量与仍待逐实例核对的范围，不把组数、静态函数和参数实例混算。历史逐文件索引覆盖 658 个源文件、3866 个 Python 静态定义，并非参数实例清单；作为[阶段 19 快照](verification-data/2026-10-26-integration-refactor/stage-19/README.md)保留，不再维护一套平行状态文档。旧审计中没有关联评审证据的文件不等于未处理文件。
 
@@ -86,36 +89,36 @@
 | --- | --- | --- |
 | HBF-02：提交未知后的核实新开了可写连接，原断言要求独立只读。 | 使用正确的独立核实边界，保留连接关闭和原申请断言。 | [阶段 18](verification-data/2026-10-26-integration-refactor/stage-18/manifest.json) |
 | 文件事实已保存、录像已取消，但原结果列举调用仍运行且结果为空，取消继续等待。 | 终态筛选前交付原实际结果，沿原票据与键保存，不重新列举补结果。 | [阶段 2](verification-data/2026-10-26-integration-refactor/stage-2/manifest.json) |
-| 目录检查已登记、读取前取消，终态守卫因缺少事实范围拒绝结束动作与占用。 | 取消、过期及准备失败入口提供相应完整事实范围，不能跳过守卫。 | [阶段 2](verification-data/2026-10-26-integration-refactor/stage-2/manifest.json) |
-| 实际目录任务已取消结束，同会话再次推进仍停在意图状态。 | 区分任务在途、返回待存和已结束无返回，沿原调用结束责任。 | [阶段 2](verification-data/2026-10-26-integration-refactor/stage-2/manifest.json) |
+| 目录检查已登记、尚未开始读取时取消，无返回事实已经保存，拍摄取消收尾却因缺少事实读取端口报错，动作与占用未结束。 | 在分段取消的正式收尾入口交付原核对事实，保留零目录调用及已保存的未知结果。 | [阶段 22](verification-data/2026-10-26-integration-refactor/stage-22/manifest.json) |
+| 原目录任务已经取消结束，同一工厂仍持有原任务，但再次推进在等待分支提前返回，没有保存未知结果。 | 区分仍在工作与已结束的原任务，让后者按原票据和键保存结果；诊断已排除测试没有等待任务结束。 | [阶段 22](verification-data/2026-10-26-integration-refactor/stage-22/manifest.json) |
 | 本地读取五字节后纯停止，尚无写入或关闭错误，却保存成失败并记录 ERROR。 | 按实际读取结果区分纯停止、业务取消和真实错误，保持原进度及责任。 | [读取契约](../architecture/file-copy.md#实际读取结束与所属结果)、[阶段 9](verification-data/2026-10-26-integration-refactor/stage-9/README.md) |
 | 清理汇总调用缺少 `closing` 导入，实际取消和原结果保存后抛 `NameError`。 | 修复汇总入口并覆盖设备与主机路径；另一次 DELETE 超时尚未同因归类。 | [阶段证据](verification-data/2026-10-26-integration-refactor/README.md) |
 | 分段判断已保存一处缺段、两份可保留原片，结束动作却按零缺段核对，产物未发布。 | 核对期望数量与已保存决定，仍拒绝真正不一致的输入。 | [阶段 16](verification-data/2026-10-26-integration-refactor/stage-16/README.md) |
 | 默认文件池已满且数据库打开失败时，已退出数据库线程的关闭等待仍排在同一池，阻挡取消与扫描撤回。 | 必要数据库收场独立推进，仍等待真实线程退出；覆盖满池、取消和锁释放。 | [阶段 8](verification-data/2026-10-26-integration-refactor/stage-8/README.md)、[阶段 9](verification-data/2026-10-26-integration-refactor/stage-9/README.md) |
 | 媒体修复或检查仍占有输入文件，同一会话的事实恢复又作为另一任务申请同一文件，发生独占冲突；合法一毫秒轮询、未注入保存故障已复现。 | 协调原任务、原保存阶段和同一会话恢复入口的责任，保持独占、不重复读取或工具调用。 | [阶段 9](verification-data/2026-10-26-integration-refactor/stage-9/manifest.json) |
+| 设备配置缺失时，原 READ 回执、完整副本及双方摘要已经保存，装配返回的运行时没有本地媒体处理端口，主机检查无法继续。 | 按原完整副本与摘要接续不需要设备操作的本地检查，仍阻止不合法的新设备操作。 | [读取规格](../architecture/file-copy.md)、[数据库与驱动事实](verification-data/2026-10-26-integration-refactor/stage-22/local-media-evidence.tar.gz) |
+| OSMO 已保存完整结果页与原片，普通推进却因下一结果轮次的额度耗尽先判为无法确认，尚未开始 READ，后续恢复目标被阻断。 | 已保存原片的本地媒体责任先按原页和原身份接续；保留结果查询预算，不重新列举冒充原结果。 | [录像规格](../architecture/camera-recording.md)、[数据库与驱动事实](verification-data/2026-10-26-integration-refactor/stage-22/local-media-evidence.tar.gz) |
+
+阶段 22 的同源码组合中，媒体同文件竞争用例没有再次失败；生产未改，已有合法复现仍作为待处理问题保留。主会话数据库的读取与关闭观察不代替报告子进程只读连接的证据。
 
 ## 最近验证结果
 
 | 受测代码与范围 | 实际结果 | 墙钟与口径 | 证据 |
 | --- | --- | --- | --- |
-| `f74607ce` 对应历史读取补丁，两个目标及直接相关场景 | 6 通过 | 入口 3.431 秒，pytest 2.73 秒 | [阶段 21](verification-data/2026-10-26-integration-refactor/stage-21/manifest.json) |
-| `3f7f82c3`，清理辅助函数实际调用者与同键复验 | 25 通过，未跑完整文件 | 入口 11.025 秒，pytest 10.17 秒 | [阶段 21](verification-data/2026-10-26-integration-refactor/stage-21/manifest.json) |
-| `94f7e2ca` 与 `070db6c3` 对应 Action6 媒体补丁 | 分批文件合计 48 通过；最后修正版复验生命周期 9 通过 | 各组入口整秒耗时见原 meta；最后九项 pytest 3.91 秒，未测统一入口墙钟 | [阶段 21](verification-data/2026-10-26-integration-refactor/stage-21/manifest.json) |
-| `36b987cf`，拍摄十文件、输出和历史各一文件 | 71＋16＋1＝88 通过，零失败与跳过 | 三组顺序测试 64.286 秒，不含启动前资源同步 | [阶段 20](verification-data/2026-10-26-integration-refactor/stage-20/manifest.json) |
-| `86956015`，拍摄十八文件 | 363 通过、两项 HBF-02 失败，零跳过 | 126.792 秒 | [阶段 18](verification-data/2026-10-26-integration-refactor/stage-18/manifest.json) |
-| `2f8cdb6a`，完整 persistence 与 history | 952＋349＝1301 通过 | 两个隔离槽入口 366.295 秒 | [阶段 16](verification-data/2026-10-26-integration-refactor/stage-16/README.md) |
-| `73153d69`，共享准备影响的 105 文件 | 2137 通过、30 失败 | 两个隔离槽入口 647.785 秒 | [阶段 16](verification-data/2026-10-26-integration-refactor/stage-16/README.md) |
+| `6ae7b51c`，全部十六个 camctl 目录、根 Python 和 Node；共 85 个隔离任务 | Python 9033 通过、59 失败、4 跳过；Node 118 通过；bootstrap 收集错误使该目录已收集的 1388 项未执行 | 四槽入口 2011.059 秒，退出 1 | [全量结果](verification-data/2026-10-26-integration-refactor/stage-22/baseline-results.json)、[失败节点](verification-data/2026-10-26-integration-refactor/stage-22/python-failures.csv.gz) |
+| `e0b511bb`，修复悬空导入后补跑完整 bootstrap | 1281 通过、120 失败、1 跳过，实际执行 1402 项 | 单槽入口 900.222 秒，退出 1 | [补跑结果](verification-data/2026-10-26-integration-refactor/stage-22/bootstrap-results.json)、[失败节点](verification-data/2026-10-26-integration-refactor/stage-22/bootstrap-failures.csv.gz) |
+| `066ed4bc`，合入小批修复后的受影响范围组合 | 196 通过、1 失败、零跳过；capture 50 通过、bootstrap 143 通过及 1 失败、根映射 3 通过 | 三槽入口 133.294 秒，退出 1；仅剩满默认池时启动扫描取消未撤回 | [组合结果](verification-data/2026-10-26-integration-refactor/stage-22/combined-results.json) |
 
-最近三批已通过独立评审并合入 `f0f353a9`，未在该提交重新运行统一组合。历史读取的首次连接数量假设错误、清理的首次重试间隔准备错误、Action6 冷恢复的漏参错误与后续通过结果分别保留；Action6 初次评审发现受限工厂丢失 STOP 和目录能力，修正后只复验受影响的九项，不把此前 48 项改称修正版同源整轮通过。
+原始两批失败节点去重后为 179 项，其中 118 项在 `066ed4bc` 组合中通过，61 项尚无修后通过证据：44 项对应生产问题，16 项为用户暂缓的独立检查，1 项为内存判据。该 61 项包含未选入组合的用例，不代表组合又失败了 61 项，也不是全部待重构数量。[逐节点通过映射](verification-data/2026-10-26-integration-refactor/stage-22/original-failures-verified-passing.csv.gz)
 
-105 文件组合中的一项漏 `await` 准备错误后来已单独修正；原组合结果不回填。其余失败按上述责任分别交接。各行范围与测试源码不同，不相加为全量通过，也不作前后提速对照。早期跨组件 Python 的 274 通过、两项 HBF 失败和两个平台跳过，以及 Node 的 118 通过，来自不同快照，不能作为当前统一源码验收。
+小批修复覆盖异步数据库端口、真实资源关闭、缺失夹具和过时固定身份、驱动登记的成对隔离、错误消息结构、异步失败的观察顺序及失效文档引用；原矩阵、失败、原键和恢复目标保留，生产未改。全部命令、实际补丁、首次失败及后续结果、独立复核和资源组收场见[阶段 22](verification-data/2026-10-26-integration-refactor/stage-22/manifest.json)。以上三行范围与源码分别记录，完整约定范围仍未在修复后的统一源码上验收通过。
 
 ## 耗时与容量
 
 - 大窗口诊断中，4200 动作的报告准备约 47.22 秒、读取约 0.51 秒；2048 成员的历史准备约 72.81 秒、读取与快照准备约 12.07 秒。不能把总耗时直接归给 SQL。固定样本已拆分读取与真实生成见证；完整回归仍保留必要生成成本，未声称省掉全部准备。[证据](verification-data/2026-10-26-integration-refactor/stage-16/README.md)
 - 三十项配对回滚的一次诊断中，准备合计 3.359 秒、目标事务 0.146 秒，测试入口 5.965 秒；跨路径复制尚未证明满足实例身份和路径绑定，因此没有为这组小成本增加复用机制。[证据](verification-data/2026-10-26-integration-refactor/stage-18/manifest.json)
 - 513 项容量负载已在专属进程组中实际核验 2GiB 合计限额，后续完整两目录运行的叶组合计峰值为 36,098,048 字节，内存不足事件为零、资源已回收。该有限负载不证明任意规模或严格无交换能力。[说明与收据](verification-data/2026-10-26-integration-refactor/stage-16/README.md)
-- 来源存储 20／200／600 输入的 Python 分配增长超过原两百万字节阈值，但尚不能据此证明整个程序无界或超过 2GiB。原容量分区与判据保留待核对，不以缩规模或放宽断言制造通过。
+- 来源存储 20／200／600 输入的 Python 分配增长超过原两百万字节阈值。去掉原 SQL 观察器后，峰值增量仍为 2,225,434 字节；调用结束后缓存清空，600 项垃圾回收后追踪存活约 42KB。该结果不单独证明程序无界或超 2GiB。另一个 2400 成员、批次四的真实进程组预算测试通过，内存与交换合计峰值 51,232,768 字节，无内存不足事件。原增长断言保留；是否把两百万字节增量视为额外硬要求等待用户决定，其他分页、原键和容量分区不变。[诊断与收据](verification-data/2026-10-26-integration-refactor/stage-22/manifest.json)
 - 历史候选上限为规格规定的 4096 条目录关联。强改内部上限为零或一的测试需要合理覆盖承接；当前 `DISTINCT` 与规格按关联行计数的差异只完成静态调查。4200 个不同动作不覆盖同一对象 4097 次变化的路径，尚未据此认定结果、排序或内存失败。[专题](database/report-changes.md#有上限的候选预查询)、[调查](verification-data/2026-10-26-integration-refactor/stage-18/manifest.json)
 
 ## 历史阶段与证据
@@ -129,3 +132,4 @@
 | S11：合并实现后的完整回归与接口审计 | [历史回归](integration-regression-2026-10-26.md)，执行结束不表示验收通过。 |
 | S12：删除失效目标和重复覆盖 | [逐项删除审计](integration-test-pruning-2026-10-26.md) |
 | S13：当前模块接口重构 | 本页的目标、验收、剩余任务和最近结果；[持续复盘](integration-test-lessons-2026-10-27.md)按新发现维护。 |
+| S13 的此前验证批次 | [阶段 16](verification-data/2026-10-26-integration-refactor/stage-16/README.md)、[阶段 18](verification-data/2026-10-26-integration-refactor/stage-18/manifest.json)、[阶段 20](verification-data/2026-10-26-integration-refactor/stage-20/manifest.json)、[阶段 21](verification-data/2026-10-26-integration-refactor/stage-21/manifest.json)保存各自源码、范围和原结果。 |

@@ -1,0 +1,114 @@
+{
+  "scope": "完整基线、bootstrap收集阻断补跑、直接错误修复与同源码受影响组合",
+  "runs": {
+    "baseline": "baseline-results.json",
+    "bootstrap_rerun": "bootstrap-results.json",
+    "combined_fixes": "combined-results.json"
+  },
+  "payloads": [
+    {
+      "file": "baseline-results.json",
+      "bytes": 1089,
+      "sha256": "5e10ed9878f9ad28f8d12104b41e5614197a67ad87f5a20c91a5d0a13ab52a11"
+    },
+    {
+      "file": "baseline.tar.gz",
+      "bytes": 2659177,
+      "sha256": "600a25b751b0d2587479a78bd912c839192afd7b0944e461481f1ff97b7ddb6e",
+      "members": 881
+    },
+    {
+      "file": "bootstrap-cases.csv.gz",
+      "bytes": 79493,
+      "sha256": "c6d4ef6a780a0260845c65f9ceb693fe3613dcde40621741653eaeec20898cc1"
+    },
+    {
+      "file": "bootstrap-failures.csv.gz",
+      "bytes": 7705,
+      "sha256": "b05c8350ac87c655b48b5708242ab0fb0f664cf4fd5659b4aebedb6b31d219ea"
+    },
+    {
+      "file": "bootstrap-rerun.tar.gz",
+      "bytes": 834132,
+      "sha256": "7a082d2131e4636861cdcc7d5fbc97c4788c94bc808d7671a6a2851455b3937d",
+      "members": 13
+    },
+    {
+      "file": "bootstrap-results.json",
+      "bytes": 638,
+      "sha256": "3446b2159f63ffef8672e50670d09128b2aaf1861e4e2556bd094794c5e0b677"
+    },
+    {
+      "file": "combined-fixes.tar.gz",
+      "bytes": 541608,
+      "sha256": "62c3941e59f06ecf8ac4cfe0f4c2be37b8c3e52fa2cf5165d0270d2db886b1d5",
+      "members": 31
+    },
+    {
+      "file": "combined-results.json",
+      "bytes": 1518,
+      "sha256": "e181d061e50c3a816791bdb913e0afa9c9b5c7ea12b932ecc7815f8de5849064"
+    },
+    {
+      "file": "local-media-evidence.tar.gz",
+      "bytes": 232288,
+      "sha256": "39632c812e45ded7d5b74730cd5c62ae0913145536aa09654fd245017a30a2b7",
+      "members": 30
+    },
+    {
+      "file": "original-failures-verified-passing.csv.gz",
+      "bytes": 2648,
+      "sha256": "b10fba098ac7cd78767cd074f9b97642f7c0920ec05686079707628408dd562b"
+    },
+    {
+      "file": "python-cases.csv.gz",
+      "bytes": 512508,
+      "sha256": "2a29e36f9b82fc22be9a46118aeb2bfa5945894616a60bbadc2c94b5dbbdf6d9"
+    },
+    {
+      "file": "python-failures.csv.gz",
+      "bytes": 4366,
+      "sha256": "54d23c8e66266d170561f7d62f2bc830cd4ffe2de72af060fdf931cc15713578"
+    },
+    {
+      "file": "repairs-and-diagnostics.tar.gz",
+      "bytes": 97017,
+      "sha256": "95512757622bd8c366a330b52a384f3791c07f2d0fba5f570be62bd0f4cb9521",
+      "members": 131
+    }
+  ],
+  "reading": "CSV保存唯一测试身份和setup/call/teardown/total秒数；tar.gz用tar -tzf查看目录、tar -xzf解包。CSV中的日志路径是原运行路径，baseline.tar.gz及bootstrap-rerun.tar.gz保存对应tasks/…/artifacts。",
+  "independent_review": [
+    {
+      "scope": "bootstrap悬空导入、清理/优化模式和软件验收引用",
+      "reviewer": "/root",
+      "result": "核实际差异与14项、6项、3项结果，接受；映射保留W-20部分覆盖。"
+    },
+    {
+      "scope": "拷贝/录像启动、驱动登记隔离、结构化日志、报告异步错误观察",
+      "reviewer": "/root、/root/capture_core_continue",
+      "result": "原作者之外复核实际输入、断言与结果；登记隔离根因经成功/失败前序重现，日志复核移除JSON字段序列依赖。"
+    },
+    {
+      "scope": "OSV提升、应急会话与真实工具资源",
+      "reviewer": "/root/review_repository_boundary_finish、/root",
+      "result": "核真实修复完成但尚未提升前态；应急补充日志等待时共享数据库实际可读，再核关闭和锁。"
+    },
+    {
+      "scope": "异步读取/绑定、报告与目录切换",
+      "reviewer": "/root/terra_media_settlement_ports、/root/capture_core_continue、/root",
+      "result": "核实际SQLite故障命中、回滚、原键重送、原worker关闭重开；报告补充父取消等待阶段实际读取。"
+    }
+  ],
+  "limits": [
+    "第一轮6ae7b51c、bootstrap补跑e0b511bb、组合066ed4bc分别记录；修后完整约定范围尚未验收通过。",
+    "修复补测保存原错误/后续补丁及实际结果；不同修订的定向结果不合称最终同源整轮。",
+    "生产未修改。合法生产失败及暂缓16项保留；两百万字节临时峰值增量是否额外硬要求仍待用户决定。",
+    "组合196通过1失败；原始失败118项在组合通过，61项无修后通过证据，不把未选范围当失败。",
+    "媒体同文件竞争本组合未再现，不据一次通过关闭已有合法复现。",
+    "三个预算启动器均已记录原进程退出、专属委派无残留PID并移除；不据此冒称独立观察了每个内部线程。",
+    "内存诊断原始连接仍有约2.23MB临时峰值增量；不证明无界或超2GiB，也不能归因原Measured包装器。",
+    "local-media-evidence包含原失败和成功对照目录的合成数据、SQLite及驱动记录；节点归属以原pytest日志和cases.json为准。",
+    "尚未执行通过后的超过九秒用例优化；严格无交换及真实设备验收另行开展。"
+  ]
+}

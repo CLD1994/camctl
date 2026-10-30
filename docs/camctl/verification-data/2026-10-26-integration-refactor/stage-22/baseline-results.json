@@ -1,0 +1,36 @@
+{
+  "source_commit": "6ae7b51c4dcd5321929d115758f10d4fc9bcb041",
+  "started_utc": "2026-10-30T18:07:47.119837+00:00",
+  "finished_utc": "2026-10-30T18:41:25.048071+00:00",
+  "entry_wall_seconds": 2011.058985259995,
+  "jobs": 4,
+  "task_outcomes": {
+    "passed": 80,
+    "failed": 5
+  },
+  "python_outcomes": {
+    "passed": 9033,
+    "failed": 59,
+    "skipped": 4
+  },
+  "node_outcomes": {
+    "tests": 118,
+    "pass": 118,
+    "fail": 0,
+    "skipped": 0
+  },
+  "collection_blockers": [
+    {
+      "task": "camctl/bootstrap",
+      "phase": "collection",
+      "collected_but_not_executed": 1388,
+      "log": "/tmp/camctl-full-20261031-6ae7b51c/tasks/003-camctl-bootstrap/artifacts/output.log",
+      "reason": "导入已删除的测试辅助函数，整个目录未进入业务用例执行。"
+    }
+  ],
+  "limits": [
+    "这是6ae7b51c统一基线；修复补测另存，不能替换原失败。",
+    "bootstrap整个目录因收集错误未执行业务用例。",
+    "完整逐用例耗时已保存；本阶段先处理失败，尚未开始超过9秒用例的优化。"
+  ]
+}
