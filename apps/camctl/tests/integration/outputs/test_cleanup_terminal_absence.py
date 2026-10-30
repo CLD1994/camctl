@@ -2,6 +2,8 @@
 
 from dataclasses import replace
 from pathlib import Path
+from sqlite3 import OperationalError
+from unittest.mock import patch
 import json
 
 import pytest
@@ -17,10 +19,10 @@ from camctl.outputs.cleanup_flow import (
     FinishCleanupAction,
 )
 from camctl.outputs.cleanup_results import saved_cleanup_absence
-from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.outputs import OutputsRepository
 
-from .test_cleanup_delete_save_recovery import _FaultOutputs, _prepared
+from .test_cleanup_delete_save_recovery import _prepared
 from .test_cleanup_query_save_recovery import _start_cleanup, _original_member_rows
 from ..bootstrap.test_output_binding_changes import _NOW, environment
 
@@ -67,8 +69,11 @@ async def _terminal(environment, *, query=False, with_error=False):
             )
 
         driver.delete = failed_absence
-    runtime.outputs = _FaultOutputs("finish_cleanup_item", DbOutcomeKind.ROLLED_BACK)
-    assert (await delete_source_file(runtime, item_id)).phase == "result_rejected"
+    with patch.object(OutputsRepository, "finish_cleanup_item", autospec=True,
+                      return_value=DbOutcome(DbOutcomeKind.ROLLED_BACK,
+                          error=OperationalError("保存确认回滚"))) as failed_save:
+        assert (await delete_source_file(runtime, item_id)).phase == "result_rejected"
+    assert failed_save.call_count == 1
     return _finish_original(owned, item_id), (owned, context, runtime, driver, item_id)
 
 
@@ -362,10 +367,11 @@ async def test_real_promoted_host_source_handoff_preserves_preview_and_original_
             max_query_attempts=1,
             occurred_at=lambda: _NOW,
         )(database)
-        runtime.outputs = _FaultOutputs(
-            "finish_cleanup_item", DbOutcomeKind.ROLLED_BACK
-        )
-        assert (await delete_source_file(runtime, item_id)).phase == "result_rejected"
+        with patch.object(OutputsRepository, "finish_cleanup_item", autospec=True,
+                          return_value=DbOutcome(DbOutcomeKind.ROLLED_BACK,
+                              error=OperationalError("保存确认回滚"))) as failed_save:
+            assert (await delete_source_file(runtime, item_id)).phase == "result_rejected"
+        assert failed_save.call_count == 1
         _finish_original(owned, item_id)
         original = _facts(owned, item_id, action_id)
         source = _request(owned, item_id)
