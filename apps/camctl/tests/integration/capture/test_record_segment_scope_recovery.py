@@ -3,31 +3,28 @@
 from dataclasses import replace
 from decimal import Decimal
 import asyncio
-from pathlib import Path
-from unittest.mock import create_autospec
 
 import pytest
 
-from camctl.capture.baseline_models import BaselineFixSave
-from camctl.capture.handlers import SessionRecordingState, _stop_call, capture_handler
+from camctl.capture.handlers import capture_handler, advance_winddown
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.devices.directory import DirectoryCursor
-from camctl.devices.ports import DeviceCallResult, StopDriver
+from camctl.devices.ports import DeviceCallResult
 from camctl.operations.attempts import AttemptConfig
 from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.capture.recovery import RecoveryBoundary
 from camctl.history.events import load_event_registry
 
-from .result_consumer_fixtures import consumer_world, returned
-from .test_capture_contract import _NOW, _runtime
+from .result_consumer_fixtures import result_driver
+from ..support.result_cases import result_case, result_case_for
+from camctl.persistence.repositories.capture import CaptureRepository
+from .test_capture_contract import _NOW
 from .test_record_file_completion_wait import (
     _completed_result,
-    _result_port,
     _stop_context,
 )
-from .test_record_file_completion_wait import _wait_world, _REGISTRY
+from .test_record_file_completion_wait import WaitCatalog, _REGISTRY
 from .test_result_page_history import _entry as _single_entry
 from .test_result_page_history import _BINDING
 from ..persistence.test_segment_file_pairing import _BaselineCatalog, _entry
@@ -42,16 +39,11 @@ async def test_segmented_baseline_failure_publishes_no_results_and_releases_occu
     from camctl.operations.models import ErrorValue
     from .test_baseline_prepare import Directory
 
-    owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, "record", catalog=SegmentWaitCatalog(), start=False
-    )
+    error = ErrorValue("adb_directory_failed", "device_file_access", {"reason": "actual_error"})
+    owned, runtime, action_id, handler = await result_case_for().world(
+        tmp_path, "record", catalog=SegmentWaitCatalog(), start=False,
+        assembly_options={"directory": Directory([lambda request: DirectoryRead(None, error, None)])})
     try:
-        error = ErrorValue(
-            "adb_directory_failed", "device_file_access", {"reason": "actual_error"}
-        )
-        runtime.baseline_directory = Directory(
-            [lambda request: DirectoryRead(None, error, None)]
-        )
         await capture_handler(handler)(action_id, runtime)
         assert owned.connection.execute(
             "SELECT status,error_code FROM actions"
@@ -79,35 +71,24 @@ async def test_segmented_baseline_failure_publishes_no_results_and_releases_occu
 async def test_segmented_external_failure_publishes_explicit_no_results_source(
     tmp_path, cause
 ):
-    from camctl.capture.handlers import _settle_stop_exhausted, _handle_binding_failure
-    from camctl.devices.bindings import check_binding
-    from types import SimpleNamespace
-    from .test_call_result_save import ReturnedCall, _outcome
-
-    owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, "record", catalog=SegmentWaitCatalog(), start=False
-    )
+    from .test_call_result_save import _outcome
+    case = result_case_for()
+    owned, runtime, action_id, handler = await case.world(
+        tmp_path, "record", catalog=SegmentWaitCatalog(), prepare_start_only=True)
     try:
-        (activity,) = owned.connection.execute(
-            "SELECT id FROM device_activities"
-        ).fetchone()
-        saved = runtime.capture.fix_baseline(
-            BaselineFixSave(activity, 0, 0, runtime.wall_us()),
-            new_operation_key(),
-            owned,
-        )
-        assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
-        await capture_handler(handler)(action_id, runtime)
+        case.clock.wall = _NOW
+        case.clock.monotonic = 5_000_000_000
         if cause == "stop_exhausted":
-            runtime.stopper = ReturnedCall(_outcome("stop"))
-            await _stop_call(runtime, runtime.action(action_id))
-            _settle_stop_exhausted(runtime, runtime.action(action_id))
+            case.stopper.stop.return_value = DeviceCallResult.from_outcome(_outcome("stop"))
+            runtime = await case.reopen(owned, cold=True)
+            async def retry_wait(seconds):
+                case.clock.monotonic += int(Decimal(str(seconds)) * 1_000_000_000)
+            await advance_winddown(action_id, runtime, {}, wait_cap_s=Decimal(0), sleep=retry_wait)
+            assert len(case.stopper.stop.await_args_list) == 3
         else:
-            runtime.binding_check = lambda binding: check_binding(
-                binding, SimpleNamespace(devices={})
-            )
-            assert _handle_binding_failure(runtime, runtime.action(action_id))
-        assert runtime.action(action_id)["status"] == 4
+            runtime = await case.reopen(owned, cold=True, assembly_options={"devices": {}})
+            await capture_handler(handler)(action_id, runtime)
+        assert (await runtime.action(action_id))["status"] == 4
         assert owned.connection.execute(
             "SELECT source_kind,published_event_id IS NOT NULL FROM segment_sets"
         ).fetchone() == (3, 1)
@@ -226,7 +207,7 @@ async def test_segmented_cancel_publishes_zero_outputs_and_preserves_original_st
                 entries=[_entry("CAM_001/CAM_20261022100000_0007_D.OSV")],
             )
 
-        driver = _result_port(runtime, read)
+        driver = result_driver(result_case_for(), side_effect=read)
         if stage == "before_results":
             _cancel(owned, runtime, action_id)
         if stage == "before_publication":
@@ -239,7 +220,7 @@ async def test_segmented_cancel_publishes_zero_outputs_and_preserves_original_st
             runtime.capture.finish_segment_recording = finish
             _cancel(owned, runtime, action_id)
         await capture_handler(handler)(action_id, runtime)
-        assert runtime.action(action_id)["status"] == 6
+        assert (await runtime.action(action_id))["status"] == 6
         assert owned.connection.execute(
             "SELECT publication_kind FROM segment_sets WHERE published_event_id IS NOT NULL"
         ).fetchall() == [(2,)]
@@ -281,33 +262,35 @@ class SegmentWaitCatalog(_BaselineCatalog):
         return definition
 
 
-async def _stopped_world(tmp_path, *, control_known=True, pending_capture_group=None):
-    owned, runtime, action_id, handler = await consumer_world(
-        tmp_path,
-        "record",
-        catalog=SegmentWaitCatalog(),
-        start=False,
+async def _stopped_world(tmp_path, *, control_known=True, pending_capture_group=None,
+                         check_config=None):
+    case = result_case_for()
+    owned, runtime, action_id, handler = await case.world(
+        tmp_path, "record", catalog=SegmentWaitCatalog(), prepare_start_only=True,
         pending_capture_group=pending_capture_group,
-    )
-    (activity,) = owned.connection.execute(
-        "SELECT id FROM device_activities"
-    ).fetchone()
-    fixed = runtime.capture.fix_baseline(
-        BaselineFixSave(activity, 0, 0, runtime.wall_us()), new_operation_key(), owned
-    )
-    assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
-    await capture_handler(handler)(action_id, runtime)
+        assembly_options={"check_config": check_config or AttemptConfig(3, Decimal("1.25"), Decimal("2"))},
+        evidence_contracts=(_REGISTRY.contract("results_returned", 1),
+                            _REGISTRY.contract("adb_foreground_recovery", 1)))
+    case.clock.wall = _NOW + 12_000_000
+    case.clock.monotonic = 17_000_000_000
     if not control_known:
-        runtime.recording_state = SessionRecordingState(runtime)
-    runtime.wall_us = lambda: _NOW + 12_000_000
-    runtime.monotonic_ns = lambda: 17_000_000_000
-    stopper = create_autospec(StopDriver, instance=True)
-    stopper.stop.return_value = DeviceCallResult.from_outcome(
-        returned("stop", "stop_confirmed", activity)
-    )
-    runtime.stopper = stopper
-    assert (await _stop_call(runtime, runtime.action(action_id))).phase == "confirmed"
-    return owned, runtime, action_id, handler, stopper
+        runtime = await case.reopen(owned, cold=True)
+    class StopSaved(Exception):
+        pass
+    method = "finish_host_timer_stop"
+    original = getattr(CaptureRepository, method)
+    def stop_after_save(repository, *args, **kwargs):
+        receipt = original(repository, *args, **kwargs)
+        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+        return replace(receipt, handoff_error=StopSaved())
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(CaptureRepository, method, stop_after_save)
+        with pytest.raises(StopSaved):
+            if control_known:
+                await capture_handler(handler)(action_id, runtime)
+            else:
+                await advance_winddown(action_id, runtime, {}, wait_cap_s=Decimal(0))
+    return owned, runtime, action_id, handler, case.stopper
 
 
 async def test_frozen_segment_policy_publishes_cross_page_originals_and_preview_without_media(
@@ -326,8 +309,8 @@ async def test_frozen_segment_policy_publishes_cross_page_originals_and_preview_
         cursor = DirectoryCursor(_BINDING, ("/DCIM",), 0, "/DCIM/" + names[1])
 
         async def read(request, batch):
-            runtime.wall_us = lambda: _NOW + 17_000_000
-            runtime.monotonic_ns = lambda: 22_000_000_000
+            result_case_for().clock.wall = _NOW + 17_000_000
+            result_case_for().clock.monotonic = 22_000_000_000
             if request.params.get("cursor") is None:
                 return _completed_result(
                     request.ticket,
@@ -343,9 +326,9 @@ async def test_frozen_segment_policy_publishes_cross_page_originals_and_preview_
                 finalized=True,
             )
 
-        driver = _result_port(runtime, read)
+        driver = result_driver(result_case_for(), side_effect=read)
         await capture_handler(handler)(action_id, runtime)
-        assert runtime.action(action_id)["status"] == 3
+        assert (await runtime.action(action_id))["status"] == 3
         assert owned.connection.execute(
             "SELECT occupancy_state,output_set_finalized_event_id IS NOT NULL FROM device_activities"
         ).fetchone() == (2, 1)
@@ -442,9 +425,8 @@ async def test_frozen_segment_policy_publishes_cross_page_originals_and_preview_
 async def test_handler_preserves_preview_only_start_and_unknown_order(
     tmp_path, names, status, original_count, preview_count, scope_state, scope_count
 ):
-    owned, runtime, action_id, handler, stopper = await _stopped_world(tmp_path)
+    owned, runtime, action_id, handler, stopper = await _stopped_world(tmp_path, check_config=AttemptConfig(1, Decimal("1"), Decimal(0)))
     try:
-        runtime.check_config = AttemptConfig(1, Decimal("1"), Decimal(0))
         context = _stop_context(owned, action_id)
 
         async def read(request, batch):
@@ -455,9 +437,9 @@ async def test_handler_preserves_preview_only_start_and_unknown_order(
                 entries=[_entry(name) for name in names],
             )
 
-        driver = _result_port(runtime, read)
+        driver = result_driver(result_case_for(), side_effect=read)
         await capture_handler(handler)(action_id, runtime)
-        action = runtime.action(action_id)
+        action = (await runtime.action(action_id))
         assert action["status"] == status
         assert owned.connection.execute(
             "SELECT COUNT(*) FROM outputs WHERE kind=1"
@@ -505,10 +487,9 @@ async def test_segmented_completion_and_default_scope_remain_independent(
     tmp_path, indexes, sizes, control_known, status, count, scope
 ):
     owned, runtime, action_id, handler, stopper = await _stopped_world(
-        tmp_path, control_known=control_known
+        tmp_path, control_known=control_known, check_config=AttemptConfig(1, Decimal("2"), Decimal("0"))
     )
     try:
-        runtime.check_config = AttemptConfig(1, Decimal("2"), Decimal("0"))
         context = _stop_context(owned, action_id)
 
         async def read(request, batch):
@@ -522,9 +503,9 @@ async def test_segmented_completion_and_default_scope_remain_independent(
                 ],
             )
 
-        driver = _result_port(runtime, read)
+        driver = result_driver(result_case_for(), side_effect=read)
         await capture_handler(handler)(action_id, runtime)
-        assert runtime.action(action_id)["status"] == status
+        assert (await runtime.action(action_id))["status"] == status
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (
             count,
         )
@@ -538,10 +519,10 @@ async def test_segmented_completion_and_default_scope_remain_independent(
             "SELECT COUNT(*) FROM intermediate_files"
         ).fetchone() == (0,)
         if indexes == (7, 8, 10) or sizes[0] == 0 and count:
-            assert runtime.action(action_id)["error_details_json"]["gap_count"] > 0
+            assert (await runtime.action(action_id))["error_details_json"]["gap_count"] > 0
         elif not control_known and status == 4:
             assert (
-                runtime.action(action_id)["error_details_json"]["reason"]
+                (await runtime.action(action_id))["error_details_json"]["reason"]
                 == "completion_unknown"
             )
         stopper.stop.assert_awaited_once()
@@ -565,7 +546,7 @@ async def test_segment_finish_lost_receipt_recovers_original_request_without_dup
                 finalized=True,
             )
 
-        driver = _result_port(runtime, read)
+        driver = result_driver(result_case_for(), side_effect=read)
         original = runtime.capture.finish_segment_recording
         requests = []
 
@@ -573,18 +554,17 @@ async def test_segment_finish_lost_receipt_recovers_original_request_without_dup
             requests.append((request, key))
             result = original(request, key, owned)
             assert result.kind is DbOutcomeKind.COMPLETED, result.error
-            return DbOutcome(DbOutcomeKind.UNKNOWN, error=OSError("已提交，回执丢失"))
+            return (DbOutcome(DbOutcomeKind.UNKNOWN, error=OSError("已提交，回执丢失"))
+                if len(requests) == 1 else result)
 
         runtime.capture.finish_segment_recording = lost
         with pytest.raises(ConsistencyError, match="回执丢失"):
             await capture_handler(handler)(action_id, runtime)
-        assert runtime.action(action_id)["status"] == 3
+        assert (await runtime.action(action_id))["status"] == 3
         before = owned.connection.execute(
             "SELECT COUNT(*) FROM history_events"
         ).fetchone()
-        runtime.capture.finish_segment_recording = original
         await capture_handler(handler)(action_id, runtime)
-        assert not runtime.pending_segment_writes
         assert (
             owned.connection.execute("SELECT COUNT(*) FROM history_events").fetchone()
             == before
@@ -592,7 +572,7 @@ async def test_segment_finish_lost_receipt_recovers_original_request_without_dup
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (
             1,
         )
-        assert len(requests) == 1
+        assert len(requests) == 2 and requests[0] == requests[1]
         stopper.stop.assert_awaited_once()
         driver.list_results.assert_awaited_once()
     finally:
@@ -614,7 +594,7 @@ async def test_segment_release_lost_receipt_keeps_original_request_before_public
                 entries=[_entry("CAM_001/CAM_20261022100000_0007_D.OSV")],
             )
 
-        driver = _result_port(runtime, read)
+        driver = result_driver(result_case_for(), side_effect=read)
         original = runtime.capture.release_occupancy
         requests = []
 
@@ -631,17 +611,16 @@ async def test_segment_release_lost_receipt_keeps_original_request_before_public
         runtime.capture.release_occupancy = lost_once
         with pytest.raises(ConsistencyError, match="释放回执丢失"):
             await capture_handler(handler)(action_id, runtime)
-        assert runtime.action(action_id)["status"] == 2
+        assert (await runtime.action(action_id))["status"] == 2
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (
             0,
         )
         await capture_handler(handler)(action_id, runtime)
         assert requests[0] == requests[1]
-        assert runtime.action(action_id)["status"] == 3
+        assert (await runtime.action(action_id))["status"] == 3
         assert owned.connection.execute(
             "SELECT occupancy_state FROM device_activities"
         ).fetchone() == (2,)
-        assert not runtime.pending_segment_writes
         stopper.stop.assert_awaited_once()
         driver.list_results.assert_awaited_once()
     finally:
@@ -654,8 +633,7 @@ async def test_last_scan_keeps_qualified_prior_files_and_its_own_failure(
 ):
     from camctl.operations.models import ErrorValue
 
-    owned, runtime, action_id, handler, stopper = await _stopped_world(tmp_path)
-    runtime.check_config = AttemptConfig(2, Decimal("1"), Decimal(0))
+    owned, runtime, action_id, handler, stopper = await _stopped_world(tmp_path, check_config=AttemptConfig(2, Decimal("1"), Decimal(0)))
     context = _stop_context(owned, action_id)
     count = 0
 
@@ -687,20 +665,20 @@ async def test_last_scan_keeps_qualified_prior_files_and_its_own_failure(
                 finalized=count > 1,
             )
 
-    driver = _result_port(runtime, read)
+    driver = result_driver(result_case_for(), side_effect=read)
     try:
         advance = capture_handler(handler)
         await advance(action_id, runtime)
-        assert runtime.action(action_id)["status"] == 2
+        assert (await runtime.action(action_id))["status"] == 2
         await advance(action_id, runtime)
-        assert runtime.action(action_id)["status"] == 4
+        assert (await runtime.action(action_id))["status"] == 4
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (
             1 if latest == "missing" else 2,
         )
         assert owned.connection.execute(
             "SELECT COUNT(*) FROM segment_scope_members"
         ).fetchone() == (0,)
-        details = runtime.action(action_id)["error_details_json"]
+        details = (await runtime.action(action_id))["error_details_json"]
         if latest == "gap":
             assert (
                 details["gap_count"] == 1
@@ -719,9 +697,8 @@ async def test_last_scan_keeps_qualified_prior_files_and_its_own_failure(
 async def test_incomplete_segment_scan_keeps_qualified_files_without_complete_default_scope(
     tmp_path,
 ):
-    owned, runtime, action_id, handler, stopper = await _stopped_world(tmp_path)
+    owned, runtime, action_id, handler, stopper = await _stopped_world(tmp_path, check_config=AttemptConfig(1, Decimal("2"), Decimal("0")))
     try:
-        runtime.check_config = AttemptConfig(1, Decimal("2"), Decimal("0"))
         context = _stop_context(owned, action_id)
 
         async def read(request, batch):
@@ -732,11 +709,11 @@ async def test_incomplete_segment_scan_keeps_qualified_files_without_complete_de
                 finalized=False,
             )
 
-        driver = _result_port(runtime, read)
+        driver = result_driver(result_case_for(), side_effect=read)
         await capture_handler(handler)(action_id, runtime)
-        assert runtime.action(action_id)["status"] == 4
+        assert (await runtime.action(action_id))["status"] == 4
         assert (
-            runtime.action(action_id)["error_details_json"]["reason"]
+            (await runtime.action(action_id))["error_details_json"]["reason"]
             == "outputs_unknown"
         )
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (
@@ -758,25 +735,24 @@ async def test_incomplete_segment_scan_keeps_qualified_files_without_complete_de
 
 
 async def test_repeated_unknown_order_scan_reuses_pairing_by_attempt_row_identity(tmp_path):
-    owned, runtime, action_id, handler, stopper = await _stopped_world(tmp_path)
+    owned, runtime, action_id, handler, stopper = await _stopped_world(tmp_path, check_config=AttemptConfig(2, Decimal("2"), Decimal("0")))
     try:
-        runtime.check_config = AttemptConfig(2, Decimal("2"), Decimal("0"))
         context = _stop_context(owned, action_id)
 
         async def read(request, batch):
-            runtime.wall_us = lambda: _NOW + 17_000_000
-            runtime.monotonic_ns = lambda: 22_000_000_000
+            result_case_for().clock.wall = _NOW + 17_000_000
+            result_case_for().clock.monotonic = 22_000_000_000
             return _completed_result(
                 request.ticket, context,
                 entries=[_entry("CAM_001/unknown.LRF"), _entry("CAM_001/unknown.OSV")],
                 finalized=True,
             )
 
-        driver = _result_port(runtime, read)
+        driver = result_driver(result_case_for(), side_effect=read)
         await capture_handler(handler)(action_id, runtime)
-        assert runtime.action(action_id)["status"] == 2
+        assert (await runtime.action(action_id))["status"] == 2
         await capture_handler(handler)(action_id, runtime)
-        assert runtime.action(action_id)["status"] == 4
+        assert (await runtime.action(action_id))["status"] == 4
         assert owned.connection.execute(
             "SELECT COUNT(*),COUNT(DISTINCT final_page_event_id) FROM device_file_pairing_facts"
         ).fetchone() == (2, 2)
@@ -805,10 +781,12 @@ async def test_single_original_frozen_task_keeps_its_existing_handler(
     monkeypatch.setattr(
         segment_completion, "advance_segmented_recording", reject_segment_dispatch
     )
-    owned, runtime, action_id, handler = await _wait_world(tmp_path)
+    owned, runtime, action_id, handler = await result_case_for().world(tmp_path, "record",
+        catalog=WaitCatalog(), assembly_options={"check_config": AttemptConfig(3, Decimal("10"), Decimal("2"))},
+        evidence_contracts=(_REGISTRY.contract("results_returned", 1),))
     try:
         assert (
-            runtime.action(action_id)["execution_spec_json"].get("result_policy")
+            (await runtime.action(action_id))["execution_spec_json"].get("result_policy")
             is None
         )
         context = _stop_context(owned, action_id)
@@ -821,9 +799,9 @@ async def test_single_original_frozen_task_keeps_its_existing_handler(
                 finalized=True,
             )
 
-        _result_port(runtime, read)
+        result_driver(result_case_for(), side_effect=read)
         await capture_handler(handler)(action_id, runtime)
-        assert runtime.action(action_id)["status"] == 3
+        assert (await runtime.action(action_id))["status"] == 3
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (
             1,
         )
@@ -835,9 +813,8 @@ async def test_single_original_frozen_task_keeps_its_existing_handler(
 
 
 async def test_segment_scan_resume_reuses_original_baseline_and_saved_pages(tmp_path):
-    owned, runtime, action_id, handler, stopper = await _stopped_world(tmp_path)
+    owned, runtime, action_id, handler, stopper = await _stopped_world(tmp_path, check_config=AttemptConfig(1, Decimal("2"), Decimal("0")))
     try:
-        runtime.check_config = AttemptConfig(1, Decimal("2"), Decimal("0"))
         context = _stop_context(owned, action_id)
         original = "/DCIM/CAM_001/CAM_20261022100000_0007_D.OSV"
         cursor = DirectoryCursor(_BINDING, ("/DCIM",), 0, original)
@@ -854,7 +831,7 @@ async def test_segment_scan_resume_reuses_original_baseline_and_saved_pages(tmp_
                 next_cursor=cursor,
             )
 
-        driver = _result_port(runtime, read)
+        driver = result_driver(result_case_for(), side_effect=read)
         task = asyncio.create_task(capture_handler(handler)(action_id, runtime))
         try:
             await asyncio.wait_for(entered.wait(), 2)
@@ -874,20 +851,16 @@ async def test_segment_scan_resume_reuses_original_baseline_and_saved_pages(tmp_
             "SELECT id FROM history_events WHERE event_type=?",
             (load_event_registry()["events"]["BASELINE_CHUNK"]["id"],),
         ).fetchone()
-        path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
-        owned.connection.close()
-        owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-        resumed = (await _runtime(owned, check_config=runtime.check_config))
-        resumed.wall_us = lambda: _NOW + 30_000_000
-        resumed.monotonic_ns = lambda: 1_000_000_000
-        resumed.recovery_boundary = RecoveryBoundary.HOST_LOCAL_SETTLED
-        resumed.recovery_max_event_id = horizon
-        resumed.recovery_evidence_for = lambda binding, operation: _REGISTRY
-        _result_port(resumed, read)
+        case = result_case_for()
+        case.clock.wall = _NOW + 30_000_000
+        case.clock.monotonic = 1_000_000_000
+        resumed = await case.reopen(owned, cold=True, assembly_options={
+            "recovery_boundary": RecoveryBoundary.HOST_LOCAL_SETTLED,
+            "recovery_max_event_id": lambda: horizon, "result_recovery": True})
         await capture_handler(handler)(action_id, resumed)
-        assert resumed.action(action_id)["status"] == 4
+        assert (await resumed.action(action_id))["status"] == 4
         assert (
-            resumed.action(action_id)["error_details_json"]["reason"]
+            (await resumed.action(action_id))["error_details_json"]["reason"]
             == "outputs_unknown"
         )
         assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (
