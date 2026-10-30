@@ -398,7 +398,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "835a642dd102d6c397377f2476608401cb82a548a8cb326bdd08fdb1a9b00750",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-acceptance-command",
+          "cases_ref": "stage5-acceptance-cases",
+          "result_ref": "stage5-acceptance-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "835a642dd102d6c397377f2476608401cb82a548a8cb326bdd08fdb1a9b00750",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 52,
+          "outcomes": {
+            "passed": 52
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/acceptance/test_adb_camera_definitions.py",
@@ -429,7 +449,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "6fb22f82fb66973ecf8ab89ba69e9096859499946e9c28788dfcf1716f5bf320",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-acceptance-command",
+          "cases_ref": "stage5-acceptance-cases",
+          "result_ref": "stage5-acceptance-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "6fb22f82fb66973ecf8ab89ba69e9096859499946e9c28788dfcf1716f5bf320",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 14,
+          "outcomes": {
+            "passed": 14
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/acceptance/test_atomicity.py",
@@ -460,7 +500,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "0042ba6f2a6da853ddd25edff81fb050270af7366471ba9073a29f5db394f3cd",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-acceptance-command",
+          "cases_ref": "stage5-acceptance-cases",
+          "result_ref": "stage5-acceptance-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "0042ba6f2a6da853ddd25edff81fb050270af7366471ba9073a29f5db394f3cd",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 12,
+          "outcomes": {
+            "passed": 12
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/acceptance/test_clock_status.py",
@@ -491,7 +551,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "584df4f1fee942787084bd49d0ed2d4744579a96bb9543315c0da94d5df1616e",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-acceptance-command",
+          "cases_ref": "stage5-acceptance-cases",
+          "result_ref": "stage5-acceptance-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "584df4f1fee942787084bd49d0ed2d4744579a96bb9543315c0da94d5df1616e",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 10,
+          "outcomes": {
+            "passed": 10
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/acceptance/test_definitions.py",
@@ -522,7 +602,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "6670c9ec28fa5b6abf3f5924c48fb53346137983fe695de8de20acb635f15542",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-acceptance-command",
+          "cases_ref": "stage5-acceptance-cases",
+          "result_ref": "stage5-acceptance-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "6670c9ec28fa5b6abf3f5924c48fb53346137983fe695de8de20acb635f15542",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 30,
+          "outcomes": {
+            "passed": 30
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/acceptance/test_entrypoints.py",
@@ -553,7 +653,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "36a455f7e7d1b6b9853105a898e5f4389a41bc7ad1771e42bda743f9040f3841",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-acceptance-command",
+          "cases_ref": "stage5-acceptance-cases",
+          "result_ref": "stage5-acceptance-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "36a455f7e7d1b6b9853105a898e5f4389a41bc7ad1771e42bda743f9040f3841",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 16,
+          "outcomes": {
+            "passed": 16
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/acceptance/test_error_diagnostics.py",
@@ -584,7 +704,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "db16e14f4655c05be0926793d8970f3a1d15d5d838553eb97973edc533927c8e",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-acceptance-command",
+          "cases_ref": "stage5-acceptance-cases",
+          "result_ref": "stage5-acceptance-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "db16e14f4655c05be0926793d8970f3a1d15d5d838553eb97973edc533927c8e",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 6,
+          "outcomes": {
+            "passed": 6
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/acceptance/test_fields.py",
@@ -615,7 +755,40 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "a10fd406e2d8c921398b33fd946a9f96571a81993557b4715bb42bd6fdab2816",
+        "matches_519_frozen_source_sha256": true,
+        "state": "documented_witness_scope_linked_current_function_changed",
+        "directory_execution": {
+          "command_ref": "stage5-acceptance-command",
+          "cases_ref": "stage5-acceptance-cases",
+          "result_ref": "stage5-acceptance-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "a10fd406e2d8c921398b33fd946a9f96571a81993557b4715bb42bd6fdab2816",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 71,
+          "outcomes": {
+            "passed": 71
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        },
+        "documented_scope_reviews": [
+          {
+            "evidence_ref": "unit-bootstrap-record",
+            "scope": "保留 acceptance/test_fields.py 中的 test_admission_details_match_registry 作为实际登记见证。",
+            "test_identity": "test_admission_details_match_registry",
+            "baseline_source_sha256": "ee237b81333015af0c6ea01a1871a5ca42891eff75b945d63ca28480263d5f17",
+            "current_source_sha256": "a10fd406e2d8c921398b33fd946a9f96571a81993557b4715bb42bd6fdab2816",
+            "baseline_test_ast_sha256": "c068f13ea704a6ae9a2e21c99164a5a26c52b88a01a6dfa38b3dd125fb073ab4",
+            "current_test_ast_sha256": "cd895a67ad2e99764a9ed3d404c21be025b04ab2c97282ecebe853140dc4f6af",
+            "identity_limit": "测试身份仍存在，但函数 AST 和整文件摘要均变化；历史报告未提供实现版逐文件 SHA。本链接仅记录原审查范围，当前测试实现仍需按本地目标判断。",
+            "scope_status": "一个登记见证已关联；不代表该文件其余测试或当前函数实现已经完成复核。"
+          }
+        ]
+      }
     },
     {
       "path": "apps/camctl/tests/integration/acceptance/test_hasselblad_definitions.py",
@@ -646,7 +819,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "c0db3fd7e2b225724c21e9daae1b6529f9f8fa937c516bf06b42d6f93bb9fd52",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-acceptance-command",
+          "cases_ref": "stage5-acceptance-cases",
+          "result_ref": "stage5-acceptance-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "c0db3fd7e2b225724c21e9daae1b6529f9f8fa937c516bf06b42d6f93bb9fd52",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 9,
+          "outcomes": {
+            "passed": 9
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/acceptance/test_input.py",
@@ -677,7 +870,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "1c38de364089b57768f72f428d981b6841d2c576fb93269f746fd9486649d90e",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-acceptance-command",
+          "cases_ref": "stage5-acceptance-cases",
+          "result_ref": "stage5-acceptance-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "1c38de364089b57768f72f428d981b6841d2c576fb93269f746fd9486649d90e",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 9,
+          "outcomes": {
+            "passed": 9
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/acceptance/test_links.py",
@@ -708,7 +921,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "5a59fcca90219c89000c2c6790f826bd15b5a8a6d17ef462d24005712cb13d7c",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-acceptance-command",
+          "cases_ref": "stage5-acceptance-cases",
+          "result_ref": "stage5-acceptance-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "5a59fcca90219c89000c2c6790f826bd15b5a8a6d17ef462d24005712cb13d7c",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 25,
+          "outcomes": {
+            "passed": 25
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/acceptance/test_parent_notification.py",
@@ -739,7 +972,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "fafd86b442469c8c1ed097488f8c45c6dab366138308df43a350983a1aefa478",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-acceptance-command",
+          "cases_ref": "stage5-acceptance-cases",
+          "result_ref": "stage5-acceptance-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "fafd86b442469c8c1ed097488f8c45c6dab366138308df43a350983a1aefa478",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 3,
+          "outcomes": {
+            "passed": 3
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/acceptance/test_source_member_proof.py",
@@ -773,7 +1026,39 @@
           "use": "仅为历史候选路由线索；不是违规认定或当前结论。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "f888778f6b707b10dbbea40f95daf9cc1c7d68820fae158d682f6928e9e8c21c",
+        "matches_519_frozen_source_sha256": true,
+        "state": "candidate_unresolved_directory_execution_linked",
+        "directory_execution": {
+          "command_ref": "stage5-acceptance-command",
+          "cases_ref": "stage5-acceptance-cases",
+          "result_ref": "stage5-acceptance-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "f888778f6b707b10dbbea40f95daf9cc1c7d68820fae158d682f6928e9e8c21c",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 70,
+          "outcomes": {
+            "passed": 70
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        },
+        "static_boundary_candidate": {
+          "evidence_refs": [
+            "old-public-boundary-inventory",
+            "old-remaining-boundary-survey"
+          ],
+          "source_sha256": "f888778f6b707b10dbbea40f95daf9cc1c7d68820fae158d682f6928e9e8c21c",
+          "matches_519_and_aa2e": true,
+          "candidate": "两个 commit_operation 调用，行 87 的 _commit helper 与行 135 的具名测试；另有行 14 的导入。",
+          "remaining_survey_cluster": "business_tests_direct_repository_command_commit",
+          "interpretation": "精确静态候选，仍需按这个 admission boundary 测试目标与事务专项分工复核；不单因调用私有事务入口定性。",
+          "state": "candidate_unresolved"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/acceptance/test_validation.py",
@@ -804,7 +1089,68 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "508f7a495cc5237dadddaba1d40e4214fcf577d7fa50ed2512ba08f06c248cd7",
+        "matches_519_frozen_source_sha256": true,
+        "state": "documented_case_transfer_scope_linked_open",
+        "directory_execution": {
+          "command_ref": "stage5-acceptance-command",
+          "cases_ref": "stage5-acceptance-cases",
+          "result_ref": "stage5-acceptance-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "508f7a495cc5237dadddaba1d40e4214fcf577d7fa50ed2512ba08f06c248cd7",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 10,
+          "outcomes": {
+            "passed": 10
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        },
+        "documented_scope_reviews": [
+          {
+            "evidence_ref": "unit-bootstrap-record",
+            "scope": "从 acceptance 集成源移出六个精确数字校验和一个非法 Schema 校验；真实正文受理、资源登记和引用解析见证继续留在集成层。",
+            "transferred_case_ids": [
+              {
+                "test_identity": "TestPreciseNumbers.test_integral_decimals_satisfy_integer",
+                "baseline_and_current_unit_ast_sha256": "cd379c335202f8b020cae4ce58d8e3984e9425929f604f3a1d74875a1676eac8"
+              },
+              {
+                "test_identity": "TestPreciseNumbers.test_exponent_form_integer_satisfies",
+                "baseline_and_current_unit_ast_sha256": "d28f58d983fffdc867008984eee6bdb03c943443021bcd25f50241d8f5c66596"
+              },
+              {
+                "test_identity": "TestPreciseNumbers.test_near_integer_long_decimal_rejected",
+                "baseline_and_current_unit_ast_sha256": "6bb244e081b294442f501c7cf0a31d87a5066827448b1badac7e37ad3caa9fc1"
+              },
+              {
+                "test_identity": "TestPreciseNumbers.test_multiple_of_uses_exact_fraction",
+                "baseline_and_current_unit_ast_sha256": "e05595a5b49665cf9bc497eac3bd6d3a3dcef4223b6e5f6637c6f225ac93fdf3"
+              },
+              {
+                "test_identity": "TestPreciseNumbers.test_bool_and_string_numbers_rejected",
+                "baseline_and_current_unit_ast_sha256": "6ddcce2280d2e640249c2d61cd5c8e106325a4f9f8939ffab0baa64d12360042"
+              },
+              {
+                "test_identity": "TestPreciseNumbers.test_defaults_applied_and_original_preserved",
+                "baseline_and_current_unit_ast_sha256": "833635c9463e62b5ca9eb9fb4b28fedef9eb331f3bbad1bbf48fcbdea88edb9b"
+              },
+              {
+                "test_identity": "TestRuleErrors.test_invalid_schema_is_rule_error",
+                "baseline_and_current_unit_ast_sha256": "85282ed937f9102dcf19b091300c29cd3b99bf31b8e9ce5086ef321b0c9b14c4"
+              }
+            ],
+            "baseline_integration_source_sha256": "591d68bf917519bdf1da98f6cf8ff4d6c1cfc0af29488853fae6db08dc7be76a",
+            "current_integration_source_sha256": "508f7a495cc5237dadddaba1d40e4214fcf577d7fa50ed2512ba08f06c248cd7",
+            "current_file_diff_explanation": "整文件摘要变化；7 个记录中的函数当前在单元文件中，函数 AST 与基线一致，并已从当前集成文件消失；当前集成文件保留另 10 个测试定义。",
+            "source_identity_limit": "历史实现提交 323a933 对象不在当前 Git 对象库；本次据可读的 cd228 基线及 aa2e AST 对照确认这七个函数身份，不声称两份整文件摘要相同。",
+            "scope_status": "仅此七个输入的归属已关联；不代表 acceptance/test_validation.py 整文件完成公开边界审查。"
+          }
+        ]
+      }
     },
     {
       "path": "apps/camctl/tests/integration/bootstrap/__init__.py",
@@ -9433,7 +9779,20 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "5a68c06d5bcd1e59ec3675e528634f5898016780482125004554d9a350e2d145",
+        "matches_519_frozen_source_sha256": true,
+        "optimization_review": {
+          "evidence_ref": "contracts-optimization-record",
+          "recorded_implementation_source_sha256": "5a68c06d5bcd1e59ec3675e528634f5898016780482125004554d9a350e2d145",
+          "implementation_source_matches_aa2e": true,
+          "scope": "contracts 目录对真实源码复用语法树的局部成本优化；该报告记录原 442 个 testcase identifier 保持。",
+          "boundary_effect": "只作为该优化的文件身份与范围记录，不把语法树复用评审解释为该文件所有公开边界均已审查。"
+        },
+        "state": "exact_optimization_scope_linked_support_file"
+      }
     },
     {
       "path": "apps/camctl/tests/integration/contracts/test_dependencies.py",
@@ -9464,7 +9823,34 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "844c486578f7a1b59eac9bcb784f1e55b1ed69026646ad6c4e86032217c84d89",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_prior_optimization_digest_stale",
+        "directory_execution": {
+          "command_ref": "stage5-contracts-command",
+          "cases_ref": "stage5-contracts-cases",
+          "result_ref": "stage5-contracts-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "844c486578f7a1b59eac9bcb784f1e55b1ed69026646ad6c4e86032217c84d89",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 27,
+          "outcomes": {
+            "passed": 27
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        },
+        "historical_review_identity_gap": {
+          "evidence_ref": "contracts-optimization-record",
+          "recorded_implementation_source_sha256": "f2225d903b344538d6e7e4c59420483d8cd538876da67af0feacda6614121b45",
+          "current_aa2e_source_sha256": "844c486578f7a1b59eac9bcb784f1e55b1ed69026646ad6c4e86032217c84d89",
+          "matches_current_source": false,
+          "handling": "不把 contracts 性能优化报告当作此当前源码的逐文件审查；这里只保留 stage-5 同源目录执行证据。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/contracts/test_enums.py",
@@ -9495,7 +9881,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "86ee214dd026760882166565d7bb7ae76539742e5c3d662bee5d01b579584c44",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-contracts-command",
+          "cases_ref": "stage5-contracts-cases",
+          "result_ref": "stage5-contracts-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "86ee214dd026760882166565d7bb7ae76539742e5c3d662bee5d01b579584c44",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 4,
+          "outcomes": {
+            "passed": 4
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/contracts/test_external_boundaries.py",
@@ -9526,7 +9932,34 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "9bf71eba0836c22384ecbcc553f815369605d616c8dd715140dd2e9400e8fdb5",
+        "matches_519_frozen_source_sha256": true,
+        "optimization_review": {
+          "evidence_ref": "contracts-optimization-record",
+          "recorded_implementation_source_sha256": "9bf71eba0836c22384ecbcc553f815369605d616c8dd715140dd2e9400e8fdb5",
+          "implementation_source_matches_aa2e": true,
+          "scope": "contracts 目录对真实源码复用语法树的局部成本优化；该报告记录原 442 个 testcase identifier 保持。",
+          "boundary_effect": "只作为该优化的文件身份与范围记录，不把语法树复用评审解释为该文件所有公开边界均已审查。"
+        },
+        "state": "directory_execution_and_exact_optimization_scope_linked_boundary_state_open",
+        "directory_execution": {
+          "command_ref": "stage5-contracts-command",
+          "cases_ref": "stage5-contracts-cases",
+          "result_ref": "stage5-contracts-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "9bf71eba0836c22384ecbcc553f815369605d616c8dd715140dd2e9400e8fdb5",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 8,
+          "outcomes": {
+            "passed": 8
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/contracts/test_motor_schema.py",
@@ -9557,7 +9990,38 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "e40521f106980d7db8d077e6d3d61619617752244d787aa9a9cfa2368ed4bb0c",
+        "matches_519_frozen_source_sha256": true,
+        "state": "documented_witness_scope_linked_exact_source",
+        "directory_execution": {
+          "command_ref": "stage5-contracts-command",
+          "cases_ref": "stage5-contracts-cases",
+          "result_ref": "stage5-contracts-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "e40521f106980d7db8d077e6d3d61619617752244d787aa9a9cfa2368ed4bb0c",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 142,
+          "outcomes": {
+            "passed": 142
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        },
+        "documented_scope_reviews": [
+          {
+            "evidence_ref": "unit-bootstrap-record",
+            "scope": "共享电机计划的受理边界见证。",
+            "test_identity": "test_shared_motor_plan_keeps_admission_boundary",
+            "baseline_source_sha256": "e40521f106980d7db8d077e6d3d61619617752244d787aa9a9cfa2368ed4bb0c",
+            "current_source_sha256": "e40521f106980d7db8d077e6d3d61619617752244d787aa9a9cfa2368ed4bb0c",
+            "whole_file_identity_matches_unit_bootstrap_base": true,
+            "scope_status": "此具名见证源码与 cd228 基线和 aa2e 当前源码一致；只证明此见证范围，不推导整文件其他节点的边界状态。"
+          }
+        ]
+      }
     },
     {
       "path": "apps/camctl/tests/integration/contracts/test_public_projection.py",
@@ -9588,7 +10052,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "be90851667d842ba9d01b31bdbe838bce0f1ee3d410493da32fc1e7bf7ac7c9b",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-contracts-command",
+          "cases_ref": "stage5-contracts-cases",
+          "result_ref": "stage5-contracts-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "be90851667d842ba9d01b31bdbe838bce0f1ee3d410493da32fc1e7bf7ac7c9b",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 24,
+          "outcomes": {
+            "passed": 24
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/contracts/test_schemas.py",
@@ -9619,7 +10103,38 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "3cc2c36305c98e26aac83ae008ba6c9469065aa2d2fa92f7f1ec2c0a9633b312",
+        "matches_519_frozen_source_sha256": true,
+        "state": "documented_witness_scope_linked_exact_source",
+        "directory_execution": {
+          "command_ref": "stage5-contracts-command",
+          "cases_ref": "stage5-contracts-cases",
+          "result_ref": "stage5-contracts-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "3cc2c36305c98e26aac83ae008ba6c9469065aa2d2fa92f7f1ec2c0a9633b312",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 5,
+          "outcomes": {
+            "passed": 5
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        },
+        "documented_scope_reviews": [
+          {
+            "evidence_ref": "unit-bootstrap-record",
+            "scope": "真实打包计划中的本地引用与十进制整数见证。",
+            "test_identity": "test_packaged_plan_local_reference_accepts_decimal_integer",
+            "baseline_source_sha256": "3cc2c36305c98e26aac83ae008ba6c9469065aa2d2fa92f7f1ec2c0a9633b312",
+            "current_source_sha256": "3cc2c36305c98e26aac83ae008ba6c9469065aa2d2fa92f7f1ec2c0a9633b312",
+            "whole_file_identity_matches_unit_bootstrap_base": true,
+            "scope_status": "此具名见证源码与 cd228 基线和 aa2e 当前源码一致；只证明此见证范围，不推导整文件其他节点的边界状态。"
+          }
+        ]
+      }
     },
     {
       "path": "apps/camctl/tests/integration/contracts/test_test_setup.py",
@@ -9650,7 +10165,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "af3bf12ac60a696d7db077a3b1d5ac1a5ef49ec92f7ea946ae9099c414432e3d",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-contracts-command",
+          "cases_ref": "stage5-contracts-cases",
+          "result_ref": "stage5-contracts-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "af3bf12ac60a696d7db077a3b1d5ac1a5ef49ec92f7ea946ae9099c414432e3d",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 1,
+          "outcomes": {
+            "passed": 1
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/contracts/test_video_size_estimate.py",
@@ -9681,7 +10216,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "ae883205bbffbc225333fe55c3eaa0e24e623c9446b84b01c811a014464775e1",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-contracts-command",
+          "cases_ref": "stage5-contracts-cases",
+          "result_ref": "stage5-contracts-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "ae883205bbffbc225333fe55c3eaa0e24e623c9446b84b01c811a014464775e1",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 246,
+          "outcomes": {
+            "passed": 246
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/devices/__init__.py",
@@ -11067,7 +11622,39 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "52ebd3ec45aa0cb4a196d4caf5594352b497c444c21ef5df6cf2af6d6673b583",
+        "matches_519_frozen_source_sha256": true,
+        "state": "documented_witness_scope_linked_exact_source",
+        "directory_execution": {
+          "command_ref": "stage5-host_files-command",
+          "cases_ref": "stage5-host_files-cases",
+          "result_ref": "stage5-host_files-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "52ebd3ec45aa0cb4a196d4caf5594352b497c444c21ef5df6cf2af6d6673b583",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 23,
+          "outcomes": {
+            "passed": 23
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        },
+        "documented_scope_reviews": [
+          {
+            "evidence_ref": "unit-bootstrap-record",
+            "scope": "三个 host_files 值、路径和 JSON 检查继续保留在集成层；冷导入链真实读取枚举登记。",
+            "test_file": "apps/camctl/tests/integration/host_files/test_capture_sources.py",
+            "baseline_source_sha256": "52ebd3ec45aa0cb4a196d4caf5594352b497c444c21ef5df6cf2af6d6673b583",
+            "current_source_sha256": "52ebd3ec45aa0cb4a196d4caf5594352b497c444c21ef5df6cf2af6d6673b583",
+            "whole_file_identity_matches_unit_bootstrap_base": true,
+            "case_identity_limit": "旧报告未写出三个检查的 nodeid，故不补猜具体函数名；完整文件与基线相同，且 stage-5 记录列出此文件的节点。",
+            "scope_status": "只关联这三个检查的保留理由；不据此认定文件其余测试边界已审完。"
+          }
+        ]
+      }
     },
     {
       "path": "apps/camctl/tests/integration/host_files/test_downloads.py",
@@ -11098,7 +11685,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "256f28e782f1d8ebd421b3d46e892f939a74c08ac1cfd56de69bea96ebee2686",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-host_files-command",
+          "cases_ref": "stage5-host_files-cases",
+          "result_ref": "stage5-host_files-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "256f28e782f1d8ebd421b3d46e892f939a74c08ac1cfd56de69bea96ebee2686",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 9,
+          "outcomes": {
+            "passed": 9
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/host_files/test_file_contract.py",
@@ -11129,7 +11736,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "873bbd909f208d0ef8d5586fa102e1143c82969e3bf048cd37fa6de7d9a461d3",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-host_files-command",
+          "cases_ref": "stage5-host_files-cases",
+          "result_ref": "stage5-host_files-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "873bbd909f208d0ef8d5586fa102e1143c82969e3bf048cd37fa6de7d9a461d3",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 9,
+          "outcomes": {
+            "passed": 9
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/host_files/test_file_io.py",
@@ -11160,7 +11787,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "192f6c12770cabeebeb7e557fcc2a5bd4867685db27e50725799f1ee05d450cc",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-host_files-command",
+          "cases_ref": "stage5-host_files-cases",
+          "result_ref": "stage5-host_files-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "192f6c12770cabeebeb7e557fcc2a5bd4867685db27e50725799f1ee05d450cc",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 8,
+          "outcomes": {
+            "passed": 8
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/host_files/test_handoff.py",
@@ -11191,7 +11838,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "67692913551a71f0748a57c5fb2e6eb978f219b5f4f6751e5d3c88d45e3e5102",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-host_files-command",
+          "cases_ref": "stage5-host_files-cases",
+          "result_ref": "stage5-host_files-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "67692913551a71f0748a57c5fb2e6eb978f219b5f4f6751e5d3c88d45e3e5102",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 5,
+          "outcomes": {
+            "passed": 5
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/host_files/test_handoff_error_facts.py",
@@ -11222,7 +11889,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "67b17b8901357a03d1ce88aa56b7be5fb1faf932a77fe97576cc130626ced417",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-host_files-command",
+          "cases_ref": "stage5-host_files-cases",
+          "result_ref": "stage5-host_files-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "67b17b8901357a03d1ce88aa56b7be5fb1faf932a77fe97576cc130626ced417",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 4,
+          "outcomes": {
+            "passed": 4
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/host_files/test_media.py",
@@ -11253,7 +11940,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "7453b4e0f4894fff61c2dbe0f7938211ad632ba1affbdd4e3272bb93469ae8ad",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-host_files-command",
+          "cases_ref": "stage5-host_files-cases",
+          "result_ref": "stage5-host_files-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "7453b4e0f4894fff61c2dbe0f7938211ad632ba1affbdd4e3272bb93469ae8ad",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 15,
+          "outcomes": {
+            "passed": 15
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/host_files/test_media_tasks.py",
@@ -11284,7 +11991,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "943888f23f71d6a3887e43deb9ef2d954f8c78782e8d4a99569f1f4b3112b962",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-host_files-command",
+          "cases_ref": "stage5-host_files-cases",
+          "result_ref": "stage5-host_files-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "943888f23f71d6a3887e43deb9ef2d954f8c78782e8d4a99569f1f4b3112b962",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 12,
+          "outcomes": {
+            "passed": 12
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/host_files/test_media_tool_diagnostics.py",
@@ -11315,7 +12042,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "957a78dd7c1f6c700ce9afc12260855951618036ca4a744fd3a81831b37fd7c7",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-host_files-command",
+          "cases_ref": "stage5-host_files-cases",
+          "result_ref": "stage5-host_files-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "957a78dd7c1f6c700ce9afc12260855951618036ca4a744fd3a81831b37fd7c7",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 3,
+          "outcomes": {
+            "passed": 3
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/host_files/test_paths.py",
@@ -11346,7 +12093,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "862bf13acde9b277c67f3870d6e76f59193051a7186db879d07af416ef19980e",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-host_files-command",
+          "cases_ref": "stage5-host_files-cases",
+          "result_ref": "stage5-host_files-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "862bf13acde9b277c67f3870d6e76f59193051a7186db879d07af416ef19980e",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 6,
+          "outcomes": {
+            "passed": 6
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/host_files/test_segments.py",
@@ -11377,7 +12144,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "1dadc133c91e1dc981b24988e1db8ea12d0344ba5a7c6d59e97276ba5e310ab5",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-host_files-command",
+          "cases_ref": "stage5-host_files-cases",
+          "result_ref": "stage5-host_files-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "1dadc133c91e1dc981b24988e1db8ea12d0344ba5a7c6d59e97276ba5e310ab5",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 21,
+          "outcomes": {
+            "passed": 21
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/host_files/test_tasks.py",
@@ -11410,7 +12197,49 @@
           "use": "仅为历史候选路由线索；不是违规认定或当前结论。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "1c8bd20b00235d2b96860324e0bb43ccf6a48aaccdd27de943c84a914cc0066b",
+        "matches_519_frozen_source_sha256": true,
+        "state": "candidate_screened_local_directory_execution_linked",
+        "directory_execution": {
+          "command_ref": "stage5-host_files-command",
+          "cases_ref": "stage5-host_files-cases",
+          "result_ref": "stage5-host_files-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "1c8bd20b00235d2b96860324e0bb43ccf6a48aaccdd27de943c84a914cc0066b",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 12,
+          "outcomes": {
+            "passed": 12
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        },
+        "static_boundary_screen": {
+          "evidence_refs": [
+            "old-public-boundary-inventory"
+          ],
+          "source_sha256": "1c8bd20b00235d2b96860324e0bb43ccf6a48aaccdd27de943c84a914cc0066b",
+          "matches_519_and_aa2e": true,
+          "locations": [
+            {
+              "line": 325,
+              "test": "test_wrapper_failure_during_execution_retains_lease_and_shared_result",
+              "snippet": "pending.append(draining)"
+            },
+            {
+              "line": 329,
+              "test": "test_wrapper_failure_during_execution_retains_lease_and_shared_result",
+              "snippet": "pending.extend([canceled, waiting])"
+            }
+          ],
+          "audit_screening": "测试局部等待列表；审计未保留为 runtime pending 候选。",
+          "scope_status": "这两个名称命中已按局部列表筛除；不代表该文件全部边界审查完成。",
+          "state": "screened_local_state_not_runtime_candidate"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/host_files/test_video_metrics.py",
@@ -11441,7 +12270,27 @@
           "use": "仅记录历史文件摘要；未出现在候选列表中不能证明符合边界要求。"
         }
       ],
-      "p3_transaction_route": null
+      "p3_transaction_route": null,
+      "current_crosswalk": {
+        "snapshot_commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+        "current_source_sha256": "6eae33c82cce17a9ce353710e46955f5b429cfc6af41d6f1e68e4b40b745291d",
+        "matches_519_frozen_source_sha256": true,
+        "state": "directory_execution_linked_boundary_review_open",
+        "directory_execution": {
+          "command_ref": "stage5-host_files-command",
+          "cases_ref": "stage5-host_files-cases",
+          "result_ref": "stage5-host_files-result",
+          "run_commit": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+          "run_source_snapshot_sha256": "f45d7882c3372416c3c7b846a165f29ba0b64ab726f4b587ba51677e2ff56738",
+          "run_file_sha256": "6eae33c82cce17a9ce353710e46955f5b429cfc6af41d6f1e68e4b40b745291d",
+          "run_file_matches_519_and_aa2e": true,
+          "pytest_node_count": 1,
+          "outcomes": {
+            "passed": 1
+          },
+          "interpretation": "仅证明该源码身份的这些 pytest 节点纳入相应目录运行；不证明测试通过的部分都覆盖公开接口，也不证明整文件完成边界迁移。"
+        }
+      }
     },
     {
       "path": "apps/camctl/tests/integration/logging_runtime/__init__.py",
@@ -21362,5 +22211,242 @@
       "docs/camctl/integration-test-refactor-2026-10-26.md",
       "docs/camctl/integration-test-lessons-2026-10-27.md"
     ]
+  },
+  "current_crosswalk_snapshot": {
+    "commit": "aa2e5f268bd652c3f9c3dc34e27405f7ca4cb6a9",
+    "tree": "2fe11a2997c553c789be4a30e85f461da4daee8e",
+    "scope": "仅交叉关联 acceptance、contracts、host_files 三目录已有执行和特定范围审查记录；不更新 519 冻结状态，也不对其它目录外推。",
+    "method": [
+      "逐个目录从阶段5 cases.json.gz 读取 pytest nodeid 与结果，并将 nodeid 模块路径绑定到清单文件行。",
+      "对三目录的35个测试源，以 git show 比较运行提交290f、冻结提交519d及当前aa2e的Git blob SHA；全部相同。",
+      "对已有局部审查文件按报告中的测试身份或implementation_files_sha256逐项核对；历史身份不完整或源码不同的情况明确留作缺口。",
+      "阶段7/12的AST结果只用于精确候选或已筛除名称命中，不据无命中判合规。"
+    ],
+    "tests_run": false,
+    "scope_limit": "目录执行结果仅证明对应源码中的被收集节点曾按记录运行；不证明覆盖边界完整，不等于当前分支重跑。"
+  },
+  "crosswalk_evidence_sources": [
+    {
+      "id": "stage5-run-manifest",
+      "path": "docs/camctl/verification-data/2026-10-26-integration-refactor/stage-5/manifest.json",
+      "kind": "stage-run-manifest",
+      "raw_sha256": "51560f41fdf040523e4d236795c6c9afc22da0131b3c0e0afa412a56087afac5",
+      "sha256_is_uncompressed": true,
+      "use": "将三个任务的源快照 SHA 绑定到实际运行提交 290f；不作为边界判断。",
+      "compression": "none",
+      "raw_bytes": 129048
+    },
+    {
+      "id": "stage5-acceptance-command",
+      "path": "docs/camctl/verification-data/2026-10-26-integration-refactor/stage-5/diagnostic-other14/tasks/006-camctl-acceptance/artifacts/command.json.gz",
+      "kind": "stage5-acceptance-command",
+      "raw_sha256": "a37e9ffec306cb0c2c592c4a9be09076e05e7fd226c4c29f0ae9dc4175d51d4b",
+      "sha256_is_uncompressed": true,
+      "use": "记录测试目录目标和源码快照摘要。",
+      "compressed_sha256": "f10422a5bd811df8a5d7e62a4ed6409fb6fe28c7fb7942d0766091d0ebff65bc",
+      "uncompressed_bytes": 3154,
+      "compression": "gzip"
+    },
+    {
+      "id": "stage5-acceptance-cases",
+      "path": "docs/camctl/verification-data/2026-10-26-integration-refactor/stage-5/diagnostic-other14/tasks/006-camctl-acceptance/artifacts/cases.json.gz",
+      "kind": "stage5-acceptance-cases",
+      "raw_sha256": "2f86b02cbfe68ecfb2bbbde09fb04381f57ccc9f189232d462f33a4051413123",
+      "sha256_is_uncompressed": true,
+      "use": "逐节点记录文件路径、测试身份与结果，用于精确关联运行范围。",
+      "compressed_sha256": "36e48aa3e7dfc787242aa0a4f3e297a4c2fa1a0d9f6f6c4100dd8adadc598c3c",
+      "uncompressed_bytes": 184430,
+      "compression": "gzip"
+    },
+    {
+      "id": "stage5-acceptance-result",
+      "path": "docs/camctl/verification-data/2026-10-26-integration-refactor/stage-5/diagnostic-other14/tasks/006-camctl-acceptance/artifacts/result.json.gz",
+      "kind": "stage5-acceptance-result",
+      "raw_sha256": "c53f5c25bfdcbff5d73cdfac5347646581426285032bf4977b435207837a9706",
+      "sha256_is_uncompressed": true,
+      "use": "记录目录命令退出结果，不说明接口边界是否合规。",
+      "compressed_sha256": "bcf9a3dc82315503cb367d1e1cd7761806100c9033f692131e1bbb177097d9f7",
+      "uncompressed_bytes": 2885,
+      "compression": "gzip"
+    },
+    {
+      "id": "stage5-contracts-command",
+      "path": "docs/camctl/verification-data/2026-10-26-integration-refactor/stage-5/diagnostic-other14/tasks/009-camctl-contracts/artifacts/command.json.gz",
+      "kind": "stage5-contracts-command",
+      "raw_sha256": "a9a7793616bb2a391674b577d258544e5c02facd876c3e90fb0c78479909be9b",
+      "sha256_is_uncompressed": true,
+      "use": "记录测试目录目标和源码快照摘要。",
+      "compressed_sha256": "c8d905d503377201b6d0551ee8715f461db6b77efbbe543561c979c771eaa6fe",
+      "uncompressed_bytes": 3141,
+      "compression": "gzip"
+    },
+    {
+      "id": "stage5-contracts-cases",
+      "path": "docs/camctl/verification-data/2026-10-26-integration-refactor/stage-5/diagnostic-other14/tasks/009-camctl-contracts/artifacts/cases.json.gz",
+      "kind": "stage5-contracts-cases",
+      "raw_sha256": "6276961d9c7f33774dbab197b22d052616782aee84ee1fcdf4b490d2d3fce071",
+      "sha256_is_uncompressed": true,
+      "use": "逐节点记录文件路径、测试身份与结果，用于精确关联运行范围。",
+      "compressed_sha256": "c67c386b64235b077bc2304083cdeadf10ef450db171b9d9d85aabf6c2627356",
+      "uncompressed_bytes": 262589,
+      "compression": "gzip"
+    },
+    {
+      "id": "stage5-contracts-result",
+      "path": "docs/camctl/verification-data/2026-10-26-integration-refactor/stage-5/diagnostic-other14/tasks/009-camctl-contracts/artifacts/result.json.gz",
+      "kind": "stage5-contracts-result",
+      "raw_sha256": "0371431e40a68d5b260ec6d0dc03a60ea4fda8e1942598c26d1301b8c869d6f1",
+      "sha256_is_uncompressed": true,
+      "use": "记录目录命令退出结果，不说明接口边界是否合规。",
+      "compressed_sha256": "04b13cd1ce7b29fc2d182250ff875172f995fd1631d180373c6338215b19be92",
+      "uncompressed_bytes": 2872,
+      "compression": "gzip"
+    },
+    {
+      "id": "stage5-host_files-command",
+      "path": "docs/camctl/verification-data/2026-10-26-integration-refactor/stage-5/diagnostic-other14/tasks/012-camctl-host_files/artifacts/command.json.gz",
+      "kind": "stage5-host_files-command",
+      "raw_sha256": "ac8ea7a12525b5f537cf90bd10def13042a9a2843bda72f5fccce61aa071da8c",
+      "sha256_is_uncompressed": true,
+      "use": "记录测试目录目标和源码快照摘要。",
+      "compressed_sha256": "1706b0a7e17b2268fbf603857e564d6af7c0fd179e23b9ce5a805eadb9810aab",
+      "uncompressed_bytes": 3159,
+      "compression": "gzip"
+    },
+    {
+      "id": "stage5-host_files-cases",
+      "path": "docs/camctl/verification-data/2026-10-26-integration-refactor/stage-5/diagnostic-other14/tasks/012-camctl-host_files/artifacts/cases.json.gz",
+      "kind": "stage5-host_files-cases",
+      "raw_sha256": "67aa84be511a09b66ae4758cf260e80fa2b3b54b365dd0ea541a9bc1f0e3c45e",
+      "sha256_is_uncompressed": true,
+      "use": "逐节点记录文件路径、测试身份与结果，用于精确关联运行范围。",
+      "compressed_sha256": "464c324e26897716e399a40d9c5354e547a4faec318b94a19f0e53f9f1abc9bb",
+      "uncompressed_bytes": 69532,
+      "compression": "gzip"
+    },
+    {
+      "id": "stage5-host_files-result",
+      "path": "docs/camctl/verification-data/2026-10-26-integration-refactor/stage-5/diagnostic-other14/tasks/012-camctl-host_files/artifacts/result.json.gz",
+      "kind": "stage5-host_files-result",
+      "raw_sha256": "949660be217284a02fd481cb6add4422093129644782e86ca048cdef538de0f0",
+      "sha256_is_uncompressed": true,
+      "use": "记录目录命令退出结果，不说明接口边界是否合规。",
+      "compressed_sha256": "29a019a2fc3b9c2c0901c9f33a68ea48ebf3a3a1730d5626337654acba8f73bf",
+      "uncompressed_bytes": 2893,
+      "compression": "gzip"
+    },
+    {
+      "id": "old-public-boundary-inventory",
+      "path": "docs/camctl/verification-data/2026-10-26-integration-refactor/stage-7/boundary-inventory/public-boundary-inventory.json.gz",
+      "kind": "static-boundary-audit",
+      "raw_sha256": "cf24782424f7860199307c3953efa84b374d38717793c68bf53b8e8dbcd3ba01",
+      "sha256_is_uncompressed": true,
+      "use": "冻结 AST 候选和逐文件摘要；候选或未命中都不单独证明违规或合规。",
+      "compressed_sha256": "5a7858bf6ec70d5cef5f15911917d4762be4fcf5f6fe2bfa74ab1238e7416b56",
+      "uncompressed_bytes": 953507,
+      "compression": "gzip"
+    },
+    {
+      "id": "old-remaining-boundary-survey",
+      "path": "docs/camctl/verification-data/2026-10-26-integration-refactor/stage-12/remaining-boundary-survey.json.gz",
+      "kind": "static-boundary-survey",
+      "raw_sha256": "f5b0aceb3af649374750dcd2a7d6baa1b86f459851b858c4e4fcc443f437d468",
+      "sha256_is_uncompressed": true,
+      "use": "作为候选路由；只引用本次目标目录中的精确条目，不把簇汇总作结论。",
+      "compressed_sha256": "3b3985060568ccd95baa3a84b51c87732cdc410726fc7c8cdb871766a478ad52",
+      "uncompressed_bytes": 405891,
+      "compression": "gzip"
+    },
+    {
+      "id": "unit-bootstrap-record",
+      "path": "docs/camctl/verification-data/2026-10-25-integration-optimization/unit-bootstrap.json",
+      "kind": "tracked-uncompressed-scope-record",
+      "raw_sha256": "a76929fe8f3d004e929bf027a2e7f594676182afd3fbb30e21642a5cd1001743",
+      "sha256_is_uncompressed": true,
+      "use": "记录接受校验用例转移、继续保留的真实见证，以及 host_files 导入边界；文件本身无 gzip 版本。",
+      "compression": "none",
+      "raw_bytes": 25798
+    },
+    {
+      "id": "contracts-optimization-record",
+      "path": "docs/camctl/verification-data/2026-10-25-integration-optimization/contracts.json",
+      "kind": "tracked-uncompressed-scope-record",
+      "raw_sha256": "5c5dc4921c988618d04803a2407afd431ef4aaf70341925f165c26848a16913a",
+      "sha256_is_uncompressed": true,
+      "use": "记录 contracts 目录 AST 解析复用及实现文件 SHA；文件本身无 gzip 版本。",
+      "compression": "none",
+      "raw_bytes": 2987
+    },
+    {
+      "id": "optimization-summary-document",
+      "path": "docs/camctl/integration-test-optimization-2026-10-25.md",
+      "kind": "formal-scope-report",
+      "raw_sha256": "7d47786fc2e41c6116355ccea3fdc106e839b92c1dda2d0639b35eef7a57ab0c",
+      "sha256_is_uncompressed": true,
+      "use": "提供 acceptance、contracts 与 host_files 的既有范围说明。",
+      "compression": "none",
+      "raw_bytes": 43675
+    }
+  ],
+  "crosswalk_summary": {
+    "target_directories": {
+      "acceptance": {
+        "tracked_source_rows_in_519_index": 15,
+        "static_test_source_files": 14,
+        "stage5_run_source_files": 14,
+        "stage5_pytest_nodes": 337,
+        "stage5_node_outcomes": {
+          "passed": 337
+        },
+        "current_blob_matches_519_and_run_commit_for_all_test_sources": true
+      },
+      "contracts": {
+        "tracked_source_rows_in_519_index": 10,
+        "static_test_source_files": 8,
+        "stage5_run_source_files": 8,
+        "stage5_pytest_nodes": 457,
+        "stage5_node_outcomes": {
+          "passed": 457
+        },
+        "current_blob_matches_519_and_run_commit_for_all_test_sources": true
+      },
+      "host_files": {
+        "tracked_source_rows_in_519_index": 14,
+        "static_test_source_files": 13,
+        "stage5_run_source_files": 13,
+        "stage5_pytest_nodes": 128,
+        "stage5_node_outcomes": {
+          "passed": 128
+        },
+        "current_blob_matches_519_and_run_commit_for_all_test_sources": true
+      }
+    },
+    "total_test_source_files_with_directory_run_evidence": 35,
+    "total_directory_run_nodes": 922,
+    "source_rows_with_documented_specific_behavior_or_retention_scope": 5,
+    "source_rows_with_exact_hash_matched_contracts_optimization_evidence": 2,
+    "static_candidate_unresolved_rows": 1,
+    "static_name_hits_screened_as_local_state_rows": 1,
+    "whole_file_public_boundary_completion_claims_added": 0,
+    "frozen_519_current_status_values_changed": 0,
+    "baseline_523_unlinked_status_count_rewritten": false,
+    "status_count_scope": "原 summary_counts 及 current_status 保留为 519 冻结索引的历史分类；本次只增加 aa2e 定向交叉引用，不把运行链接当边界审查完成。",
+    "open_gaps": [
+      "acceptance/test_fields.py 的历史目标函数仍存在，但当前函数AST与cd228基线不同；旧报告没有实现版文件SHA，需root决定是否重新审该现函数。",
+      "contracts/test_dependencies.py 的旧性能报告implementation SHA与当前文件SHA不一致；不沿用该报告身份。",
+      "其余仅有阶段5运行链接的文件没有在本任务关联到具体逐文件公开边界结论；这表示交叉引用尚未补齐，不表示需要全部重审或重跑。"
+    ],
+    "files_with_any_current_aa2e_crosswalk": 36,
+    "current_crosswalk_state_counts": {
+      "directory_execution_linked_boundary_review_open": 26,
+      "documented_witness_scope_linked_current_function_changed": 1,
+      "candidate_unresolved_directory_execution_linked": 1,
+      "documented_case_transfer_scope_linked_open": 1,
+      "exact_optimization_scope_linked_support_file": 1,
+      "directory_execution_linked_prior_optimization_digest_stale": 1,
+      "directory_execution_and_exact_optimization_scope_linked_boundary_state_open": 1,
+      "documented_witness_scope_linked_exact_source": 3,
+      "candidate_screened_local_directory_execution_linked": 1
+    }
   }
 }
