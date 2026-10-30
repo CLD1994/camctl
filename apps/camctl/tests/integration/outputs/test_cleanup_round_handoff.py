@@ -24,6 +24,7 @@ from camctl.persistence.models import DbOutcomeKind
 
 from .test_cleanup_delete_save_recovery import _prepared, _configured
 from ..support.outputs import cleanup_factory
+from ..support.capture import capture_database
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.repositories.operations import OperationRepository
 from .test_cleanup_residual_recovery import _orphan_intent, _recovering_registry
@@ -58,7 +59,7 @@ async def _intent(environment, owned, runtime, driver, item_id, operation, consu
         "delete_timeout_s": Decimal(17), "query_timeout_s": Decimal(17),
         "delete_retry_interval_s": Decimal(0), "query_retry_interval_s": Decimal(0)}}
         for name, declaration in environment[0].devices.items()}
-    prepared = await _configured(environment, owned, driver, database=runtime.database,
+    prepared = await _configured(environment, owned, driver, database=await capture_database(owned),
         devices=devices, delete_attempts=5, query_attempts=5)
     port = GrantPort()
     with repository_port(OutputsRepository, port, ("begin_cleanup_attempt",),
@@ -229,7 +230,7 @@ async def test_absent_original_intent_is_not_granted_locally_before_current_elig
             assert fault == "first_exception"
         original = port.calls[0]
         assert original[0].operation == operation
-        await runtime.database.close()
+        await (await capture_database(owned)).close()
         owned.connection.close()
         fresh = context.open_connection()
         try:

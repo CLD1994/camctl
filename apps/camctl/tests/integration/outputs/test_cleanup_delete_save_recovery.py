@@ -137,7 +137,7 @@ async def test_delete_original_request_survives_save_failure(environment, method
         assert len(port.calls) == 1
         original = port.calls[0]
         assert len(driver.deletes) == (0 if method == "begin_cleanup_attempt" else 1)
-        await runtime.database.close()
+        await (await capture_database(owned)).close()
         owned.connection.close()
         fresh = context.open_connection()
         try:
@@ -163,7 +163,7 @@ async def test_delete_companion_failure_keeps_original_request(environment, faul
         assert (await delete_source_file(runtime, item_id)).phase == "companion_rejected"
         original = companion.calls[0]
         companion.enabled = False
-        await runtime.database.close()
+        await (await capture_database(owned)).close()
         owned.connection.close()
         fresh = context.open_connection()
         try:
@@ -189,7 +189,7 @@ async def test_cancel_before_recovered_delete_never_dispatches(environment, faul
         original = port.calls[0]
         action_id = owned.connection.execute("SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()[0]
         # 未决连接先关闭，取消以新连接提交，再接回原会话保存集合。
-        await runtime.database.close()
+        await (await capture_database(owned)).close()
         owned.connection.close()
         fresh = context.open_connection()
         try:
@@ -250,7 +250,7 @@ async def test_new_factory_without_current_driver_completes_original_delete(envi
         original = port.calls[0]
         factory = cleanup_factory(devices=environment[0].devices, drivers=DriverRegistry(),
             max_delete_attempts=3, max_query_attempts=3)
-        await runtime.database.close()
+        await (await capture_database(owned)).close()
         owned.connection.close()
         fresh = context.open_connection()
         try:
@@ -361,7 +361,7 @@ async def test_all_terminal_member_saves_keep_original_application(environment, 
         assert len(port.calls) == 1
         original = port.calls[0]
         original_delete_count, original_query_count = len(driver.deletes), len(driver.queries)
-        await runtime.database.close()
+        await (await capture_database(owned)).close()
         owned.connection.close()
         fresh = context.open_connection()
         try:
@@ -390,7 +390,7 @@ async def test_query_begin_uses_original_request_and_ticket(environment, fault, 
         assert not driver.queries and not driver.deletes
         original = port.calls[0]
         assert original[0].operation == "query"
-        await runtime.database.close()
+        await (await capture_database(owned)).close()
         owned.connection.close()
         fresh = context.open_connection()
         try:
@@ -414,14 +414,14 @@ async def test_temporarily_unreadable_original_key_does_not_replace_responsibili
         await delete_source_file(runtime, item_id)
         original = port.calls[0]
         original_count = len(driver.deletes)
-        await runtime.database.close()
+        await (await capture_database(owned)).close()
         owned.connection.close()
         fresh = context.open_connection()
         try:
             port.enabled = False
             resumed = await _resumed(environment, runtime, fresh, capture_resources, driver)
             async with sqlite_operation_fault(
-                    resumed.database, sqlite3.SQLITE_READ, "history_transactions") as fault:
+                    await capture_database(fresh), sqlite3.SQLITE_READ, "history_transactions") as fault:
                 try:
                     blocked = await delete_source_file(resumed, item_id)
                     assert blocked.phase in ("delete_budget_rejected", "finish_rejected", "result_rejected")
@@ -621,7 +621,7 @@ async def test_already_ended_unreadable_history_keeps_late_raw_until_handoff(env
             with pytest.raises(sqlite3.DatabaseError):
                 await delete_source_file(runtime, item_id)
         finally:
-            await runtime.database.read(lambda worker: worker.connection.set_authorizer(None))
+            await (await capture_database(owned)).read(lambda worker: worker.connection.set_authorizer(None))
             port.enabled = False
         assert port.triggered and len(driver.deletes) == 1
         original = port.late_calls[0]
@@ -648,7 +648,7 @@ async def test_binding_failure_original_application_can_finish_after_later_cance
             await delete_source_file(runtime, item_id)
         original = port.calls[0]
         action_id, = owned.connection.execute("SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
-        await runtime.database.close()
+        await (await capture_database(owned)).close()
         owned.connection.close()
         fresh = context.open_connection()
         try:
@@ -701,7 +701,7 @@ async def test_unissued_original_call_is_not_dispatched_after_binding_disappears
                          matches=lambda _name, args, _kwargs: (args[0].target.cleanup_item_id if _name == "begin_cleanup_attempt" else args[0].ticket.target_id if _name == "finish_cleanup_attempt" else args[0].item_id) in (item_id, str(item_id))):
         assert (await delete_source_file(runtime, item_id)).phase == ("delete_budget_rejected" if operation == "delete" else "query_rejected")
         original = port.calls[0]
-        await runtime.database.close()
+        await (await capture_database(owned)).close()
         owned.connection.close()
         fresh = context.open_connection()
         try:
@@ -729,7 +729,7 @@ async def test_unreadable_original_binding_key_does_not_create_cancel_applicatio
         action_id, = owned.connection.execute("SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
         _apply_cleanup_cancel(owned, action_id)
         port.enabled = False
-        async with sqlite_operation_fault(runtime.database, sqlite3.SQLITE_READ, "history_transactions") as fault:
+        async with sqlite_operation_fault(await capture_database(owned), sqlite3.SQLITE_READ, "history_transactions") as fault:
             with pytest.raises(sqlite3.DatabaseError):
                 await delete_source_file(runtime, item_id)
         assert fault["triggered"] and port.calls == [original]
@@ -761,7 +761,7 @@ async def test_plain_save_exception_does_not_dispose_binding_application_as_busi
         _apply_cleanup_cancel(owned, action_id)
         port.enabled = False
         # 真实执行器分类 UNKNOWN；须可靠核实原键，不能仅凭普通异常转取消。
-        async with sqlite_operation_fault(runtime.database, sqlite3.SQLITE_READ, "history_transactions") as fault:
+        async with sqlite_operation_fault(await capture_database(owned), sqlite3.SQLITE_READ, "history_transactions") as fault:
             with pytest.raises(sqlite3.DatabaseError):
                 await delete_source_file(runtime, item_id)
         assert fault["triggered"] and port.calls == [original]
@@ -808,7 +808,7 @@ async def test_new_factory_completes_original_query_before_parsing_removed_drive
         with pytest.raises(ConsistencyError):
             await delete_source_file(runtime, item_id)
         original = port.finishes[0]
-        await runtime.database.close()
+        await (await capture_database(owned)).close()
         owned.connection.close()
         fresh = context.open_connection()
         try:
@@ -890,7 +890,7 @@ async def test_recovered_ticket_does_not_dispatch_after_delete_capability_closes
                          matches=lambda _name, args, _kwargs: (args[0].target.cleanup_item_id if _name == "begin_cleanup_attempt" else args[0].ticket.target_id if _name == "finish_cleanup_attempt" else args[0].item_id) in (item_id, str(item_id))):
         assert (await delete_source_file(runtime, item_id)).phase == "delete_budget_rejected"
         original = port.calls[0]
-        await runtime.database.close()
+        await (await capture_database(owned)).close()
         owned.connection.close()
         fresh = context.open_connection()
         try:

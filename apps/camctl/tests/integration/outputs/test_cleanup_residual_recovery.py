@@ -1,4 +1,4 @@
-"""丢失所有内存后，原清理结果与伴随责任仍由持久化事实发现。"""
+"""原保存责任与持久结果在数据库重开后继续交付，残留责任按原事实发现。"""
 
 from pathlib import Path
 
@@ -347,8 +347,10 @@ async def test_terminal_flow_running_attempt_is_work_and_cancellation_cannot_fin
     environment,
     capture_resources,
 ):
+    """真实收场端口仍等待残留调用；终态投影不消除独立调用责任。"""
     from camctl.bootstrap.application import query_work_facts
     from camctl.cancellation.settlement import TargetSettlement
+    from camctl.cancellation.ports import TargetSettlementPort
     from camctl.persistence.repositories.outputs import OutputsRepository
     from camctl.persistence.repositories.cancellation import CancellationRepository
 
@@ -368,7 +370,7 @@ async def test_terminal_flow_running_attempt_is_work_and_cancellation_cannot_fin
         owned.connection.execute("UPDATE actions SET status=3 WHERE id=?", (action_id,))
         owned.connection.commit()
         assert query_work_facts(owned.connection).required_settlements > 0
-        settlement = TargetSettlement(
+        settlement: TargetSettlementPort = TargetSettlement(
             await capture_resources.restart_database(owned),
             OutputsRepository(),
             CancellationRepository(),
@@ -540,7 +542,7 @@ async def test_cancel_saved_unknown_respects_available_consumption_evidence(envi
     base, old_driver, action_id, item_id, _ = await _world(environment, "after", None)
     assert (await delete_source_file(base, item_id)).phase == "query_unknown"
     _apply_cleanup_cancel(owned, action_id)
-    await base.database.close()
+    await (await capture_database(owned)).close()
     owned.connection.close()
     fresh = context.open_connection()
     driver = _MatrixDriver(fresh) if same_session else _NoDeviceCalls()
@@ -614,13 +616,13 @@ async def test_discovery_pages_release_terminal_history_and_do_not_duplicate_cal
     members = [first_item]
     for request_id in range(10, 16):
         members.append(_start_cleanup(owned, output_id, str(request_id))[1])
-    batches = [batch async for batch in cleanup_item_batches(runtime.database, batch_size=2)]
+    batches = [batch async for batch in cleanup_item_batches(await capture_database(owned), batch_size=2)]
     assert [len(batch) for batch in batches] == [2, 2, 2, 1]
     assert [item for batch in batches for item in batch] == members
     runtime = await _configured(environment, owned, driver, discovery_batch_size=2)
     await advance_cleanup(runtime)
     assert len(driver.deletes) == 1 and not driver.queries
-    assert not [batch async for batch in cleanup_item_batches(runtime.database, batch_size=2)]
+    assert not [batch async for batch in cleanup_item_batches(await capture_database(owned), batch_size=2)]
     before = tuple(owned.connection.iterdump())
     await advance_cleanup(runtime)
     assert tuple(owned.connection.iterdump()) == before
@@ -655,8 +657,10 @@ async def test_terminal_member_with_running_call_is_diagnosed_without_reopening(
 
 
 async def test_cancel_waits_original_pending_application_before_member_save(environment, capture_resources):
+    """真实目标收场端口消费原保存拥有者；原保存责任未提交时不推进取消成员。"""
     from camctl.bootstrap.cleanup_assembly import cleanup_flow
     from camctl.cancellation.settlement import TargetSettlement
+    from camctl.cancellation.ports import TargetSettlementPort
     from camctl.persistence.repositories.cancellation import CancellationRepository
     from .test_cleanup_query_save_recovery import _apply_cleanup_cancel
     owned, _, runtime, _, item_id = await _prepared(environment)
@@ -669,12 +673,13 @@ async def test_cancel_waits_original_pending_application_before_member_save(envi
     owner: LocalWorkPort = cleanup_flow(cleanup_factory(devices={}, drivers=DriverRegistry(),
         max_delete_attempts=3, max_query_attempts=3))
     assert owner.required_settlements() == 1
+    original_database = await capture_database(owned)
     async def cleanup_pending(database, target):
-        assert database.metadata.instance_id == runtime.database.metadata.instance_id
+        assert database is original_database
         assert target == action_id
         return owner.required_settlements() > 0
     before = tuple(owned.connection.iterdump())
-    settlement = TargetSettlement(runtime.database, OutputsRepository(), CancellationRepository(),
+    settlement: TargetSettlementPort = TargetSettlement(original_database, OutputsRepository(), CancellationRepository(),
         lambda _: "unknown", lambda: _NOW, cleanup_pending=cleanup_pending)
     assert not (await settlement.settle(action_id)).complete
     assert tuple(owned.connection.iterdump()) == before
@@ -697,7 +702,7 @@ async def test_pending_query_with_original_intent_is_saved_before_other_member_p
             await delete_source_file(runtime, second_item)
         original = port.finishes[0]
         assert original[0].ticket.target_id == str(second_item)
-        await runtime.database.close()
+        await (await capture_database(owned)).close()
         owned.connection.close()
         fresh = context.open_connection()
         try:
