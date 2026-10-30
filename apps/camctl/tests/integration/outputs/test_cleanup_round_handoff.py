@@ -1,10 +1,13 @@
 """默认轮次区分原结果交接、可靠未派发票据和普通调用资格。"""
 
 from decimal import Decimal
+from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
+
+from support.repository_ports import repository_port
 
 from camctl.bootstrap.cleanup_assembly import session_cleanup_assembly
 from camctl.contracts.values import ConsistencyError
@@ -21,6 +24,7 @@ from camctl.persistence.models import DbOutcomeKind
 from .test_cleanup_delete_save_recovery import _prepared, _configured
 from ..support.outputs import cleanup_factory
 from camctl.persistence.repositories.outputs import OutputsRepository
+from camctl.persistence.repositories.operations import OperationRepository
 from .test_cleanup_residual_recovery import _orphan_intent, _recovering_registry
 from ..bootstrap.test_output_binding_changes import _NOW, _registry, environment
 
@@ -31,7 +35,7 @@ async def _runtime(factory, owned, resources):
     return await factory(await resources.database(owned))
 
 
-async def _intent(environment, owned, runtime, driver, item_id, operation, consumer=None):
+async def _intent(environment, owned, runtime, driver, item_id, operation, consumer=None, *, observed=None):
     from dataclasses import dataclass
     class Granted(Exception):
         pass
@@ -56,12 +60,13 @@ async def _intent(environment, owned, runtime, driver, item_id, operation, consu
     prepared = await _configured(environment, owned, driver, database=runtime.database,
         devices=devices, delete_attempts=5, query_attempts=5)
     port = GrantPort()
-    prepared.outputs = port
-    with pytest.raises(Granted):
-        await delete_source_file(prepared, item_id)
+    with repository_port(OutputsRepository, port, ("begin_cleanup_attempt",),
+                         matches=lambda _name, args, _kwargs: args[0].target.cleanup_item_id == item_id):
+        with pytest.raises(Granted):
+            await delete_source_file(prepared, item_id)
     assert port.original is not None and port.original.request.operation == operation
-    port.enabled = False
-    runtime.outputs = port
+    if observed is not None:
+        observed.append(port.original)
     return port.original.ticket
 
 
@@ -74,8 +79,9 @@ async def test_default_round_dispatches_reliable_unsent_original_ticket_once(
     owned, _, runtime, driver, item_id = await _prepared(environment, before_query=operation == "query")
     driver.matrix_enabled, driver.present = True, False
     consumer = None if operation == "delete" else CleanupQueryConsumer.BEFORE_DELETE
-    ticket = await _intent(environment, owned, runtime, driver, item_id, operation, consumer)
-    original = runtime.outputs.original
+    observed = []
+    ticket = await _intent(environment, owned, runtime, driver, item_id, operation, consumer, observed=observed)
+    original, = observed
     original_config = owned.connection.execute(
         "SELECT max_attempts_used,timeout_s_json,retry_interval_s_json,intent_event_id"
         " FROM operation_attempts WHERE run_id=?",
@@ -213,32 +219,33 @@ async def test_absent_original_intent_is_not_granted_locally_before_current_elig
             raise RuntimeError("原意图首次保存没有回执")
     port = (FirstException("begin_cleanup_attempt", DbOutcomeKind.UNKNOWN) if fault == "first_exception" else
         _FaultOutputs("begin_cleanup_attempt", DbOutcomeKind.ROLLED_BACK if fault == "rollback" else DbOutcomeKind.UNKNOWN))
-    runtime.outputs = port
-    try:
-        result = await delete_source_file(runtime, item_id)
-        assert result.phase in ("delete_budget_rejected", "query_rejected")
-    except ConsistencyError:
-        assert fault == "first_exception"
-    original = port.calls[0]
-    assert original[0].operation == operation
-    await runtime.database.close()
-    owned.connection.close()
-    fresh = context.open_connection()
-    try:
-        if change == "cancel":
-            _apply_cleanup_cancel(fresh, action_id)
-        entry = _registry(driver).entry("camctl-adb")
-        registry = _registry(driver) if change != "capability_false" else DriverRegistry((
-            replace(entry, declaration=replace(entry.declaration, delete_supported=False, file_query_supported=False)),))
-        factory = cleanup_factory(devices={} if change == "binding" else environment[0].devices,
-            drivers=registry, max_delete_attempts=1, max_query_attempts=1, occurred_at=lambda: _NOW)
-        await advance_cleanup(await factory(await capture_resources.restart_database(fresh)))
-        assert fresh.connection.execute("SELECT COUNT(*) FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.cleanup_item_id=?", (item_id,)).fetchone() == (0,)
-        assert not driver.deletes and not driver.queries
-        assert port.calls == [original]
-        assert fresh.connection.execute("SELECT id FROM history_transactions WHERE operation_key=?", (str(original[1]),)).fetchone() is None
-    finally:
-        fresh.connection.close()
+    with repository_port(OutputsRepository, port, ("begin_cleanup_attempt",),
+                         matches=lambda _name, args, _kwargs: args[0].target.cleanup_item_id == item_id):
+        try:
+            result = await delete_source_file(runtime, item_id)
+            assert result.phase in ("delete_budget_rejected", "query_rejected")
+        except ConsistencyError:
+            assert fault == "first_exception"
+        original = port.calls[0]
+        assert original[0].operation == operation
+        await runtime.database.close()
+        owned.connection.close()
+        fresh = context.open_connection()
+        try:
+            if change == "cancel":
+                _apply_cleanup_cancel(fresh, action_id)
+            entry = _registry(driver).entry("camctl-adb")
+            registry = _registry(driver) if change != "capability_false" else DriverRegistry((
+                replace(entry, declaration=replace(entry.declaration, delete_supported=False, file_query_supported=False)),))
+            factory = cleanup_factory(devices={} if change == "binding" else environment[0].devices,
+                drivers=registry, max_delete_attempts=1, max_query_attempts=1, occurred_at=lambda: _NOW)
+            await advance_cleanup(await factory(await capture_resources.restart_database(fresh)))
+            assert fresh.connection.execute("SELECT COUNT(*) FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.cleanup_item_id=?", (item_id,)).fetchone() == (0,)
+            assert not driver.deletes and not driver.queries
+            assert port.calls == [original]
+            assert fresh.connection.execute("SELECT id FROM history_transactions WHERE operation_key=?", (str(original[1]),)).fetchone() is None
+        finally:
+            fresh.connection.close()
 
 
 @pytest.mark.parametrize("operation", ["delete", "query"])
@@ -254,13 +261,15 @@ async def test_unsent_ticket_uses_current_operation_capability_and_preserves_ori
     cfg = environment[0]
     owned, _, runtime, driver, item_id = await _prepared(environment, before_query=operation == "query")
     driver.matrix_enabled, driver.present = True, False
+    observed = []
     ticket = await _intent(
         environment, owned, runtime, driver,
         item_id,
         operation,
         None if operation == "delete" else CleanupQueryConsumer.BEFORE_DELETE,
+        observed=observed,
     )
-    original = runtime.outputs.original
+    original, = observed
     entry = _registry(driver).entry("camctl-adb")
     registry = DriverRegistry(
         (
@@ -355,8 +364,10 @@ async def test_delete_disabled_keeps_only_needed_finite_query_and_original_delet
                 )
             return super().begin_cleanup_attempt(request, key, owned)
 
-    runtime.outputs = QueryNotGranted()
-    assert (await delete_source_file(runtime, item_id)).phase == "query_rejected"
+    port = QueryNotGranted()
+    with repository_port(OutputsRepository, port, ("begin_cleanup_attempt",),
+                         matches=lambda _name, args, _kwargs: args[0].target.cleanup_item_id == item_id):
+        assert (await delete_source_file(runtime, item_id)).phase == "query_rejected"
     assert len(driver.deletes) == 1 and not driver.queries
     entry = _registry(driver).entry("camctl-adb")
     registry = DriverRegistry(
@@ -483,13 +494,15 @@ async def test_unsent_original_ticket_is_settled_without_side_effect_after_eligi
 
     cfg = environment[0]
     owned, _, runtime, driver, item_id = await _prepared(environment, before_query=operation == "query")
+    observed = []
     ticket = await _intent(
         environment, owned, runtime, driver,
         item_id,
         operation,
         None if operation == "delete" else CleanupQueryConsumer.BEFORE_DELETE,
+        observed=observed,
     )
-    original = runtime.outputs.original
+    original, = observed
     if change == "cancel":
         _apply_cleanup_cancel(owned, original.request.action_id)
     factory = cleanup_factory(
@@ -843,6 +856,7 @@ async def test_newer_query_responsibility_precedes_unconsumed_durable_delete(env
             if self.enabled and state.startswith("saved") and result.kind is DbOutcomeKind.COMPLETED:
                 return replace(result, handoff_error=SavedQuery())
             return result
+    ports = ExitStack()
     try:
         if state.startswith("running"):
             action_id, = fresh.connection.execute("SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
@@ -859,7 +873,10 @@ async def test_newer_query_responsibility_precedes_unconsumed_durable_delete(env
                 for name, declaration in environment[0].devices.items()}
             runtime = await _configured(environment, fresh, driver, devices=devices, query_attempts=5)
             port = QueryPort(DbOutcomeKind.ROLLED_BACK if state.startswith("pending") else DbOutcomeKind.COMPLETED, item_id, driver)
-            runtime.operations = port
+            ports.enter_context(repository_port(
+                OperationRepository, port, ("finish_attempt",),
+                matches=lambda _name, args, _kwargs: (args[0].ticket.operation == "query"
+                    and args[0].ticket.target_id == str(item_id))))
             # 已确认在场的旧DELETE先按公开单次调用消费，下一调用才产生新DELETE/QUERY。
             for _ in range(2):
                 try:
@@ -883,7 +900,6 @@ async def test_newer_query_responsibility_precedes_unconsumed_durable_delete(env
         if port is not None and state.startswith("pending"):
             port.kind = DbOutcomeKind.COMPLETED
             port.enabled = False
-            resumed.operations = port
         if state == "running_unqualified":
             with pytest.raises(ConsistencyError, match="恢复收场"):
                 await advance_cleanup(resumed)
@@ -910,6 +926,7 @@ async def test_newer_query_responsibility_precedes_unconsumed_durable_delete(env
         assert (len(driver.deletes), len(driver.queries)) == old_calls
         assert fresh.connection.execute("SELECT * FROM operation_attempts WHERE run_id=?", (delete_ticket.run_id,)).fetchone() == delete_row
     finally:
+        ports.close()
         fresh.connection.close()
 
 
