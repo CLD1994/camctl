@@ -1,16 +1,11 @@
 """明确的视频成员错误优先于控制侧完成，但保留先前可取的检查前缀。"""
 
-from dataclasses import replace
 from decimal import Decimal
+import json
 
 import pytest
 
-from camctl.capture.handlers import capture_handler
-from camctl.capture.segment_completion import _control_facts
-from camctl.capture.segment_models import EvidenceState
 from camctl.contracts.enums import enum_for
-from camctl.host_files.media import MediaProbe
-from camctl.host_files.tasks import FileTaskId, FileTaskResult
 from camctl.persistence.repositories.segment_inspections import (
     read_inspection_for_member,
 )
@@ -18,11 +13,8 @@ from camctl.persistence.repositories.segments import SegmentRepository
 from camctl.persistence.transaction import row_facts
 
 from .test_action6_segmented_normal import _entry
-from .test_action6_segmented_recovery import (
-    _CONTENT,
-    _overrun_recording,
-    _publish_ordinary_result,
-)
+from .test_input_copy import _CONTENT
+from ..support.capture_guard_cases import known_failure_case
 
 pytestmark = pytest.mark.asyncio
 
@@ -48,14 +40,27 @@ def _coverage_facts(owned, action_id: int):
     return ref, repository.read_set(ref, owned), repository.read_decision(ref, owned)
 
 
-def _assert_reliable_control_complete(runtime, owned, action_id: int):
-    (activity_id,) = owned.connection.execute(
-        "SELECT id FROM device_activities WHERE action_id=?", (action_id,)
-    ).fetchone()
-    activity = row_facts(owned.connection, "device_activities", activity_id)
+def _assert_reliable_control_complete(world):
+    owned, action_id = world.owned, world.action_id
+    activity = row_facts(owned.connection, "device_activities", 1)
     action = row_facts(owned.connection, "actions", action_id)
-    status, _overrun = _control_facts(runtime, action, activity)
-    assert status is EvidenceState.CONFIRMED
+    assert action["execution_spec_json"]["target_duration_ms"] == 60000
+    assert action["execution_spec_json"].get("startup_margin_ms", 0) == 0
+    assert activity["control_elapsed_ns"] == 75_000_000_000
+    rows = owned.connection.execute(
+        "SELECT r.kind,t.status,t.effect_state,t.result_json FROM operation_runs r"
+        " JOIN operation_attempts t ON t.run_id=r.id WHERE r.action_id=? AND r.kind IN (1,2) ORDER BY r.kind",
+        (action_id,)).fetchall()
+    assert len(rows) == 2
+    for (_kind, status, effect, result), observation in zip(rows, ("start_confirmed", "stop_confirmed")):
+        assert status == int(enum_for("operation_attempts.status").SUCCEEDED)
+        assert effect == int(enum_for("operation_attempts.effect_state").CONFIRMED)
+        actual = json.loads(result)
+        assert actual["settlement"]["basis"] == "observed"
+        assert any(item["type"] == observation and item["data"]["activity_id"] == str(activity["id"])
+            for item in actual["observations"])
+    world.control.control.assert_awaited_once()
+    world.stopper.stop.assert_awaited_once()
 
 
 def _scope_rows(owned, set_id: int):
@@ -116,7 +121,7 @@ def _assert_available_prefix(owned, set_id: int, identities):
     ],
 )
 async def test_video_sequence_and_photo_members_do_not_override_explicit_coverage(
-    tmp_path,
+    tmp_path, capture_resources, monkeypatch,
     entries,
     probe_values,
     status,
@@ -125,26 +130,21 @@ async def test_video_sequence_and_photo_members_do_not_override_explicit_coverag
     checked_count,
     scope_identities,
 ):
-    owned, runtime, action_id, handler, tools = await _overrun_recording(
-        tmp_path, probe_values
-    )
+    world = await known_failure_case(tmp_path, capture_resources, monkeypatch, probe_values,
+        sorted(entries, key=lambda entry: entry["identity"]))
+    owned, action_id, tools = world.owned, world.action_id, world.tools
     try:
-        await _publish_ordinary_result(
-            runtime, owned, action_id, handler,
-            sorted(entries, key=lambda entry: entry["identity"]),
-        )
-
         ref, setrow, decision = _coverage_facts(owned, action_id)
-        _assert_reliable_control_complete(runtime, owned, action_id)
+        _assert_reliable_control_complete(world)
         assert decision.status.value == status
         assert decision.coverage_status.value == coverage_status
         assert decision.confirmed == confirmed
         assert decision.checked_count == checked_count
         assert decision.default_scope.member_count == checked_count
-        assert (await runtime.action(action_id))["status"] == (
+        assert owned.connection.execute("SELECT status FROM actions WHERE id=?", (action_id,)).fetchone()[0] == (
             3 if status == "succeeded" else 4
         )
-        assert len(tools.calls) == checked_count
+        assert len(tools) == checked_count
         _assert_available_prefix(owned, setrow["id"], scope_identities)
 
         if coverage_status == "unconfirmed":
@@ -155,26 +155,22 @@ async def test_video_sequence_and_photo_members_do_not_override_explicit_coverag
 
 
 async def test_zero_byte_required_video_fails_without_publishing_that_output(
-    tmp_path,
+    tmp_path, capture_resources, monkeypatch,
 ):
-    owned, runtime, action_id, handler, tools = await _overrun_recording(
-        tmp_path, (Decimal("18"), Decimal("42"))
-    )
+    empty = _video(8, size=0)
+    world = await known_failure_case(tmp_path, capture_resources, monkeypatch,
+        (Decimal("18"), Decimal("42")), (_video(7), empty))
+    owned, action_id, tools = world.owned, world.action_id, world.tools
     try:
-        empty = _video(8, size=0)
-        await _publish_ordinary_result(
-            runtime, owned, action_id, handler, (_video(7), empty)
-        )
-
         ref, setrow, decision = _coverage_facts(owned, action_id)
-        _assert_reliable_control_complete(runtime, owned, action_id)
+        _assert_reliable_control_complete(world)
         assert decision.status.value == "failed"
         assert decision.coverage_status.value == "unconfirmed"
         assert decision.confirmed == Decimal("18")
         assert decision.checked_count == 1
         assert decision.default_scope.member_count == 1
-        assert (await runtime.action(action_id))["status"] == 4
-        assert len(tools.calls) == 1
+        assert owned.connection.execute("SELECT status FROM actions WHERE id=?", (action_id,)).fetchone()[0] == 4
+        assert len(tools) == 1
 
         prefix_identity = "/DCIM/DJI_001/DJI_20261022100000_0007_D.MP4"
         _assert_available_prefix(owned, setrow["id"], (prefix_identity,))
@@ -198,61 +194,21 @@ async def test_zero_byte_required_video_fails_without_publishing_that_output(
         owned.connection.close()
 
 
-class _NoVideoStreamTools:
-    def __init__(self, owned):
-        self.owned = owned
-        self.calls = []
-
-    async def probe_segment(self, input_file, *, count_frames: bool):
-        assert count_frames is False
-        copy = self.owned.connection.execute(
-            "SELECT committed_bytes,source_size,target_sha256 FROM file_copies"
-            " WHERE target_file_id=?",
-            (input_file.file_id,),
-        ).fetchone()
-        assert copy is not None
-        assert copy[0] == copy[1] == len(_CONTENT)
-        assert copy[2] is not None
-        assert (input_file.root / input_file.relative_path).read_bytes() == _CONTENT
-        self.calls.append(input_file.file_id)
-        return FileTaskResult(
-            FileTaskId("action6-explicit-no-video"),
-            ran=True,
-            value=MediaProbe(
-                duration_s=None,
-                error="no_video_stream: 容器没有视频流",
-                streams=(),
-            ),
-        )
-
-    async def probe(self, input_file):
-        raise AssertionError("Action6 分段检查必须调用 probe_segment")
-
-    async def repair(self, input_file, output_file, *, trim_s):
-        raise AssertionError("覆盖检查不能启动媒体修复")
-
-
 async def test_parsed_no_video_stream_fails_even_when_control_is_complete(
-    tmp_path,
+    tmp_path, capture_resources, monkeypatch,
 ):
-    owned, runtime, action_id, handler, _ = await _overrun_recording(
-        tmp_path, (Decimal("18"), Decimal("42"))
-    )
+    world = await known_failure_case(tmp_path, capture_resources, monkeypatch,
+        (Decimal("18"), Decimal("42")), (_video(7), _video(8)), no_video=True)
+    owned, action_id, tools = world.owned, world.action_id, world.tools
     try:
-        tools = _NoVideoStreamTools(owned)
-        runtime.media = replace(runtime.media, tools=tools)
-        await _publish_ordinary_result(
-            runtime, owned, action_id, handler, (_video(7), _video(8))
-        )
-
         ref, setrow, decision = _coverage_facts(owned, action_id)
-        _assert_reliable_control_complete(runtime, owned, action_id)
+        _assert_reliable_control_complete(world)
         assert decision.status.value == "failed"
         assert decision.failure_code == "capture_failed"
-        assert (await runtime.action(action_id))["status"] == 4
+        assert owned.connection.execute("SELECT status FROM actions WHERE id=?", (action_id,)).fetchone()[0] == 4
         assert decision.default_scope.state.value == "empty"
         assert decision.default_scope.member_count == 0
-        assert tools.calls and len(tools.calls) == 1
+        assert tools and len(tools) == 1
 
         (member_id,) = owned.connection.execute(
             "SELECT id FROM segment_members WHERE set_id=? AND identity=?",

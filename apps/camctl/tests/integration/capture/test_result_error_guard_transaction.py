@@ -14,11 +14,9 @@ import traceback
 
 import pytest
 
-from camctl.capture.handlers import (
-    ListingPhase, _listing_round, _register_listing, capture_handler,
-)
+from camctl.capture.handlers import capture_handler
 from camctl.capture.models import ActivityConcludeSave, ResultSetPhase, ResultSetSave
-from camctl.contracts.values import new_operation_key
+from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.contracts import workflow_errors
 from camctl.contracts.schemas import SchemaRuleError
 from camctl.contracts.workflow_errors import registered_error
@@ -29,19 +27,18 @@ from camctl.operations.models import (
     AttemptStatus, CallOutcome, EffectState, ErrorValue, EvidenceValue,
     Settlement, SettlementBasis,
 )
-from camctl.operations.validation import validate_outcome
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import (
-    CaptureRepository, _ResultSetConfirmCommand, register_capture_guards,
+    CaptureRepository, register_capture_guards,
 )
 from camctl.persistence.repositories.operations import register_operation_guards
 from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.repositories.timelapse import register_timelapse_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
-from camctl.persistence.transaction import commit_operation
 
-from .result_consumer_fixtures import consumer_world
-from .test_result_consumer_saves import _result_port
+from .result_consumer_fixtures import result_driver
+from ..support.result_cases import result_case, result_case_for
+from ..support.capture_guard_cases import CompleteResultCommand
 
 pytestmark = pytest.mark.asyncio
 register_capture_guards()
@@ -94,12 +91,14 @@ class _World:
         return getattr(repository, self.entry)(command, key, self.owned)
 
     def calls(self):
-        return (tuple(self.runtime.driver.mock_calls), tuple(self.result_driver.mock_calls))
+        return (tuple(self.runtime.driver.control.mock_calls), tuple(self.result_driver.mock_calls))
 
 
 async def _world(tmp_path, entry, *, error_kind="known"):
-    owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, "photo", independent_activity=True)
+    case = result_case_for()
+    owned, runtime, action_id, handler = await case.world(
+        tmp_path, "photo", independent_activity=True,
+        assembly_options={"check_config": AttemptConfig(1, Decimal("1.25"), Decimal(0))})
     try:
         activity_id, = owned.connection.execute(
             "SELECT id FROM device_activities WHERE action_id=?", (action_id,)).fetchone()
@@ -112,31 +111,47 @@ async def _world(tmp_path, entry, *, error_kind="known"):
                     "kind": "other", "complete": True, "size_bytes": 41,
                     "locator": {"path": "/DCIM/auxiliary"},
                     "original_name": "auxiliary.bin", "media_type": "application/octet-stream"}]}),))
-        driver = _result_port(runtime, actual)
-        runtime.check_config = AttemptConfig(1, Decimal("1.25"), Decimal(0))
+        driver = result_driver(case, actual)
         finish = None
         if entry == "finish_result_check":
-            listing = await _listing_round(runtime, action_id)
-            assert listing.phase is ListingPhase.LISTED
-            assert listing.outcome is actual
-            registered = _register_listing(runtime, action_id, listing)
-            registered_files = tuple(registered)
-            assert len(registered_files) == 1
-            original = runtime.pending_start_results[(listing.ticket.run_id, listing.ticket.attempt_id)]
-            assert original.finish.ticket == listing.ticket
-            assert original.finish.occurred_at == listing.occurred_at
-            # 最后一轮实际返回仍不能确认 PHOTO 要求；正常调用结果
-            # 与无法确认的用途分别表达，不改原 Outcome 或票据。
+            from camctl.persistence.repositories.operations import OperationRepository
+
+            class OriginalResultReady(Exception):
+                pass
+
+            actual_finish = OperationRepository.finish_attempt
+            captured = []
+
+            def hold(repository, original, key, current):
+                if original.ticket.operation == "result":
+                    captured.append(original)
+                    raise OriginalResultReady()
+                return actual_finish(repository, original, key, current)
+
+            def hold_compound(repository, original, confirm, key, current, **options):
+                captured.append(original)
+                raise OriginalResultReady()
+
+            with pytest.MonkeyPatch.context() as boundary:
+                boundary.setattr(OperationRepository, "finish_attempt", hold)
+                boundary.setattr(CaptureRepository, "finish_result_check", hold_compound)
+                with pytest.raises(ConsistencyError) as held:
+                    await capture_handler(handler)(action_id, runtime)
+                assert isinstance(held.value.__cause__, OriginalResultReady)
+            assert captured
+            original = captured[0]
+            assert all(value == original for value in captured)
+            assert original.outcome.outcome == actual
+            assert owned.connection.execute("SELECT COUNT(*) FROM device_files").fetchone() == (1,)
             run_error = _known_error(activity_id)
-            finish = replace(original.finish, outcome=validate_outcome(
-                listing.ticket, actual, runtime.evidence),
-                run_finish=RunFinish(RunOutcome.UNCONFIRMED, ErrorValue(
-                    run_error["code"], run_error["stage"], run_error["details"])))
-            assert finish.outcome.outcome is actual
+            # 事务专项把真实调用结果交给明确的最终用途；重试等待与流程终结互斥。
+            finish = replace(original, retry_wait=False, run_finish=RunFinish(RunOutcome.UNCONFIRMED, ErrorValue(
+                run_error["code"], run_error["stage"], run_error["details"])))
+            assert finish.outcome is original.outcome
             assert owned.connection.execute(
                 "SELECT status,result_event_id FROM operation_attempts WHERE run_id=?",
-                (listing.ticket.run_id,)).fetchone() == (1, None)
-            formed_at = original.finish.occurred_at
+                (finish.ticket.run_id,)).fetchone() == (1, None)
+            formed_at = original.occurred_at
         else:
             await capture_handler(handler)(action_id, runtime)
             run_id, status, used, retry = owned.connection.execute(
@@ -146,7 +161,7 @@ async def _world(tmp_path, entry, *, error_kind="known"):
             assert owned.connection.execute(
                 "SELECT status,result_json IS NOT NULL FROM operation_attempts WHERE run_id=?",
                 (run_id,)).fetchone() == (2, 1)
-            formed_at = runtime.wall_us()
+            formed_at = case.clock.wall_us()
         driver.list_results.assert_awaited_once()
         runtime.driver.control.assert_awaited_once()
         assert owned.connection.execute("SELECT COUNT(*) FROM device_files").fetchone() == (1,)
@@ -306,7 +321,8 @@ async def test_allowed_null_capture_and_error_remain_null_on_original_key_replay
 
 async def test_begin_original_key_replay_recovers_basis_before_later_completion(tmp_path):
     """重开后重送开始申请，返回原判定，不使用后来完成的当前判定。"""
-    owned, runtime, action_id, _handler = await consumer_world(
+    case = result_case_for()
+    owned, runtime, action_id, _handler = await case.world(
         tmp_path, "photo", independent_activity=True)
     try:
         repository = CaptureRepository()
@@ -314,7 +330,7 @@ async def test_begin_original_key_replay_recovers_basis_before_later_completion(
         activity_id, = owned.connection.execute(
             "SELECT id FROM device_activities WHERE action_id=?", (action_id,)).fetchone()
         assert action_id != activity_id
-        calls = tuple(runtime.driver.mock_calls)
+        calls = tuple(runtime.driver.control.mock_calls)
         attempt_id, result_json = owned.connection.execute(
             "SELECT t.id,t.result_json FROM operation_attempts t"
             " JOIN operation_runs r ON r.id=t.run_id"
@@ -349,7 +365,8 @@ async def test_begin_original_key_replay_recovers_basis_before_later_completion(
         assert (later.value.result_set_state, later.value.completion_basis) == (3, 2)
         saved = _database_facts(owned)
         history_head, = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()
-        assert tuple(runtime.driver.mock_calls) == calls
+        assert tuple(runtime.driver.control.mock_calls) == calls
+        runtime = await case.reopen(owned, cold=True)
         owned.connection.close()
         reopened = open_existing(database_path, DbOpenMode.EXISTING_RW, DbConfig())
         try:
@@ -365,7 +382,7 @@ async def test_begin_original_key_replay_recovers_basis_before_later_completion(
             assert _database_facts(reopened) == saved
             assert reopened.connection.execute(
                 "SELECT MAX(id) FROM history_events").fetchone() == (history_head,)
-            assert tuple(runtime.driver.mock_calls) == calls
+            assert tuple(runtime.driver.control.mock_calls) == calls
             assert begin == original_begin
         finally:
             reopened.connection.close()
@@ -444,11 +461,7 @@ async def test_schema_rule_failure_after_begin_releases_public_owned_transaction
         assert raised.value.__cause__ is failure
         assert len(hits) == 1 and hits[0][0] is True, hits
         assert "commit_operation" in hits[0][1]
-        # close 的流程错误在 command.plan 中读取登记；confirm 的
-        # 实际校验可能先由报告影响派生执行。分别记录触发位置，不能
-        # 把这些事务退出路径冒充活动守卫自身的行为红。
-        assert any(name in hits[0][1] for name in (
-            "_activity_guard", "_result_check_guard", "project_public", "_run_error")), hits
+        assert world.entry in hits[0][1], hits
         assert world.owned.connection.in_transaction is False
         assert _database_facts(world.owned) == before
         assert world.calls() == calls
@@ -494,23 +507,6 @@ async def test_schema_rule_failure_and_failed_rollback_return_unknown_with_both_
         connection.close()
 
 
-class _CompleteResultCommand:
-    """在 AtomicCommand.plan 边界给真实结果核实计划添加响应回调。"""
-
-    def __init__(self, command, key, callback, *, read_only):
-        self.delegate = _ResultSetConfirmCommand(command, key)
-        self.callback = callback
-        self.read_only = read_only
-        self.plans = []
-
-    def plan(self, scope):
-        actual = self.delegate.plan(scope)
-        assert actual.read_only is self.read_only
-        assert bool(actual.events) == (not self.read_only)
-        self.plans.append(actual)
-        return replace(actual, complete_result=self.callback)
-
-
 @pytest.mark.parametrize("read_only", [False, True], ids=["write-result", "read-only-result"])
 async def test_complete_result_schema_failure_releases_owned_transaction(tmp_path, monkeypatch, read_only):
     """验证通用 complete_result 协议；capture 当前没有该生产回调。"""
@@ -535,13 +531,22 @@ async def test_complete_result_schema_failure_releases_owned_transaction(tmp_pat
             workflow_errors.validate_public_error(error)
             raise AssertionError("真实错误校验必须遭遇包资源故障")
 
-        command = _CompleteResultCommand(world.command, key, complete_result, read_only=read_only)
+        import camctl.persistence.repositories.capture as capture_module
+        original_commit = capture_module.commit_operation
+        submitted = []
 
+        def commit(delegate, actual_key, current):
+            command = CompleteResultCommand(delegate, complete_result, read_only=read_only)
+            submitted.append(command)
+            return original_commit(command, actual_key, current)
+
+        monkeypatch.setattr(capture_module, "commit_operation", commit)
         with pytest.raises(SchemaRuleError) as raised:
-            returned = commit_operation(command, key, world.owned)
+            returned = world.save(world.command, key)
             pytest.fail(
                 f"完整响应资源故障没有原样传播: {returned!r}; "
                 f"回调次数={len(callback_calls)}, 实际资源故障={faults!r}")
+        command, = submitted
 
         assert len(command.plans) == len(callback_calls) == len(faults) == 1
         assert callback_calls[0][:2] == (True, True)

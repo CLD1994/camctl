@@ -9,7 +9,9 @@ from camctl.history import validators
 from camctl.history.events import load_event_registry
 from camctl.history.validators import EventContext, EventValidationError, validate_event
 from camctl.persistence.repositories.timelapse import register_timelapse_guards
-from camctl.persistence.transaction import _encode_body, event_envelope, update_change
+from camctl.persistence.transaction import event_envelope, update_change
+
+from ..support.capture_guard_cases import history_body
 
 
 _SENT_AT = 1_700_000_000_000_000
@@ -88,7 +90,7 @@ def _source_attempt_event(attempt):
         "occurred_at": event.occurred_at,
         "clock_status": event.clock_status,
         "change_seq": event.change_seq,
-        "body_json": _encode_body(event),
+        "body_json": history_body(event),
     }
 
 

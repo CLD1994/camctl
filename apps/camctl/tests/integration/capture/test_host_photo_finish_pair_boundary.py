@@ -78,33 +78,19 @@ def test_host_spec_with_unreadable_saved_spec_is_not_treated_as_legacy(tmp_path)
 def test_action_finish_event_guard_rejects_host_spec_without_source_responsibilities(
     tmp_path,
 ):
-    from types import SimpleNamespace
-
-    from camctl.history.validators import EventValidationError
-    from camctl.persistence.repositories.capture import _action_finish_guard
+    from camctl.history.validators import EventValidationError, validate_event
+    from ..support.capture_guard_cases import host_success_event_context
 
     owned = _photo_environment(tmp_path)
     try:
         action = row_facts(owned.connection, "actions", 1)
-
-        class Context:
-            state_rows = {"actions": {1: action}}
-            transaction_rows = {"outputs": {}, "output_origins": {}}
-
-            def complete_rows(self, table, column, identity):
-                assert (table, column, identity) == (
-                    "intermediate_files", "owner_action_id", 1)
-                return {}
-
-        row = SimpleNamespace(
-            table="actions",
-            row_id=1,
-            before=SimpleNamespace(exists=True, values={"cancel_requested": 0}),
-            after=SimpleNamespace(values={"status": 3}),
-        )
-
-        with pytest.raises(EventValidationError):
-            _action_finish_guard(SimpleNamespace(rows=(row,), evidence={}), Context())
+        event, context = host_success_event_context(action, _NOW)
+        # 相同规范事件和完整空范围，在非host照片上可通过，拒绝来自host配对约束。
+        legacy = {**action, "execution_spec_json": {}}
+        assert validate_event(event, replace(context, state_rows={"actions": {1: legacy},
+            "intermediate_files": {}})).envelope == event
+        with pytest.raises(EventValidationError, match="主机|源责任|原片"):
+            validate_event(event, context)
     finally:
         owned.connection.close()
 
@@ -478,10 +464,8 @@ def test_terminal_host_spec_missing_pair_is_not_recovered_or_repaired(
 async def test_same_and_new_key_recovery_preserve_explicit_source_cleanup(
     tmp_path, clean_kind
 ):
-    from camctl.bootstrap.cleanup_assembly import session_cleanup_assembly
-    from camctl.bootstrap.work_file_assembly import WorkFileRuntime
+    from ..support.capture_guard_cases import host_cleanup
     from camctl.outputs.cleanup_flow import delete_source_file
-    from camctl.outputs.work_files import WorkFileLimits
     from camctl.persistence.repositories.acceptance import register_acceptance_guards
     from camctl.persistence.repositories.scheduling import register_window_guard
     from ..outputs.test_cleanup_query_save_recovery import _start_cleanup
@@ -505,17 +489,8 @@ async def test_same_and_new_key_recovery_preserve_explicit_source_cleanup(
         source_path.parent.mkdir()
         source_path.write_bytes(b"x" * (4096 if clean_kind == "original" else 128))
         _, item_id = _start_cleanup(owned, source_id, "23")
-        work_files = WorkFileRuntime(
-            staging=tmp_path,
-            limits=WorkFileLimits(batch_size=100, limit_per_run=100),
-        )
-        runtime = session_cleanup_assembly(
-            devices={}, drivers=None, staging=tmp_path, max_delete_attempts=1,
-            file_executor=work_files.executor,
-            max_query_attempts=1, occurred_at=lambda: 1_800_000_000_000_000,
-            monotonic_ns=lambda: 0,
-        )(owned)
-        cleanup = await delete_source_file(runtime.for_item(item_id), item_id)
+        async with host_cleanup(owned, tmp_path) as runtime:
+            cleanup = await delete_source_file(await runtime.for_item(item_id), item_id)
         assert cleanup.phase == "succeeded", cleanup
         assert not source_path.exists()
         before = _snapshot(owned)
@@ -538,36 +513,46 @@ async def test_same_and_new_key_recovery_preserve_explicit_source_cleanup(
 @pytest.mark.parametrize("same_key", [True, False], ids=["same-key", "new-key"])
 @pytest.mark.parametrize("output_count", [0, 1], ids=["no-outputs", "one-device-output"])
 def test_terminal_host_spec_without_source_pair_is_consistency_error_on_recovery(
-    tmp_path, monkeypatch, same_key, output_count,
+    tmp_path, same_key, output_count,
 ):
-    import camctl.persistence.repositories.capture as capture_module
     from camctl.contracts.values import ConsistencyError
 
     owned = _photo_environment(tmp_path)
     try:
-        drafts = () if output_count == 0 else (
-            OutputDraft(
-                OutputKind.ORIGINAL,
-                FileReference(device_file_id=11),
-                True,
-            ),
-        )
-        request = _finish(drafts=drafts)
+        files = _prepare(owned)
+        _complete(owned, files)
+        request = _finish(drafts=_drafts(files))
         key = new_operation_key()
-
-        # 仅构造一个缺少主机源责任的已终态回执，随后恢复路径必须拒绝确认它。
-        monkeypatch.setattr(
-            capture_module, "_host_photo_source_pair",
-            lambda *_args, **_kwargs: None,
-        )
         saved = CaptureRepository().finish_capture(request, key, owned)
         assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
-        monkeypatch.undo()
+        original_action = row_facts(owned.connection, "actions", 1)
+        history = owned.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall()
+        transactions = owned.connection.execute("SELECT * FROM history_transactions ORDER BY id").fetchall()
+        # 无源的0/1设备产物分区由H1显式上下文校验，不制造非法host成功历史。
+        from camctl.history.validators import EventValidationError, validate_event
+        from ..support.capture_guard_cases import host_success_event_context
+        outputs = {}
+        if output_count:
+            original_id, = owned.connection.execute("SELECT id FROM outputs WHERE kind=1").fetchone()
+            output = row_facts(owned.connection, "outputs", original_id)
+            outputs[original_id] = {**output, "intermediate_file_id": None, "device_file_id": 11}
+        event, context = host_success_event_context({**original_action, "status": 2}, _NOW, outputs=outputs)
+        with pytest.raises(EventValidationError, match="主机|源责任|原片"):
+            validate_event(event, context)
+        # 恢复专项仅损坏当前源角色；原输出、配对、host规格、完整申请及全部历史不改。
+        for file in (files.original, files.preview):
+            owned.connection.execute("UPDATE intermediate_files SET purpose=?,relative_path=? WHERE id=?",
+                (int(enum_for("intermediate_files.purpose").RECORDING_INPUT),
+                 f"recording-inputs/{file.file_id}", file.file_id))
+        owned.connection.commit()
+        assert row_facts(owned.connection, "actions", 1) == original_action
+        assert owned.connection.execute("SELECT * FROM history_events ORDER BY id").fetchall() == history
+        assert owned.connection.execute("SELECT * FROM history_transactions ORDER BY id").fetchall() == transactions
+        assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (2,)
         before = _snapshot(owned)
 
         recovered = CaptureRepository().finish_capture(
-            request, key if same_key else new_operation_key(), owned
-        )
+            request, key if same_key else new_operation_key(), owned)
 
         assert recovered.kind is DbOutcomeKind.ROLLED_BACK
         assert isinstance(recovered.error, ConsistencyError)
