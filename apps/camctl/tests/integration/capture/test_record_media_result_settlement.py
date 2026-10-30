@@ -14,8 +14,13 @@ from camctl.capture.processing import (
 )
 from camctl.contracts.workflow_errors import registered_error
 from camctl.contracts.values import ConsistencyError, new_operation_key
-from camctl.host_files.media import MediaProbe
-from camctl.host_files.tasks import FileTaskId, FileTaskResult
+from camctl.host_files.media import MediaProbe, ProbeRequest, RepairRequest
+from camctl.host_files.paths import resolve_file
+from camctl.devices.drivers.registry import DriverEntry, DriverRegistry, DriverStatus
+from camctl.devices.ports import DriverDeclaration
+from ..bootstrap.test_media_assembly import _SessionDriver, _config
+from ..support.capture import capture_runtime
+from camctl.host_files.tasks import FileTaskResult
 from camctl.persistence.repositories.outputs import register_outputs_guards
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.models import DbOutcomeKind
@@ -24,9 +29,9 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from .media_retry_fixtures import _EVIDENCE, media_pipeline, original_recording_entry  # noqa: F401
 from camctl.capture.results import FileKind
-from .test_capture_contract import ResultsDouble, _entry, _runtime
+from .test_capture_contract import ResultsDouble, _entry
 from .test_input_copy import _CONTENT, _NOW
-from .test_media_flow import ReadDriverDouble, _flow
+
 from ..bootstrap.test_binding_transactions import _CommitFailure
 
 pytestmark = pytest.mark.asyncio
@@ -34,22 +39,48 @@ register_outputs_guards()
 
 
 class _WaitingProbe:
-    """第一次工具未执行，第二次返回实际时长观察。"""
+    """在公开媒体工具函数边界安排首次未执行和后续观察。"""
 
-    def __init__(self, duration_s):
+    def __init__(self, duration_s, monkeypatch):
         self.duration_s = duration_s
         self.calls = []
+        monkeypatch.setattr("camctl.bootstrap.capture_assembly.probe_media", self.probe)
+        monkeypatch.setattr("camctl.bootstrap.capture_assembly.repair_media", self.repair)
 
-    async def probe(self, input):
+    async def probe(self, input, roots, request, *, executor, task_id, owner):
+        assert isinstance(request, ProbeRequest)
+        assert resolve_file(input, roots).path.is_file()
         self.calls.append("probe")
         if len(self.calls) == 1:
-            return FileTaskResult(task_id=FileTaskId("probe"), ran=False)
-        return FileTaskResult(task_id=FileTaskId("probe"), ran=True,
+            return FileTaskResult(task_id=task_id, ran=False)
+        return FileTaskResult(task_id=task_id, ran=True,
             value=MediaProbe(duration_s=self.duration_s, error=None))
 
-    async def repair(self, input, output, *, trim_s):
+    async def repair(self, input, output, roots, request, *, executor, task_id, owner):
+        assert isinstance(request, RepairRequest)
         self.calls.append("repair")
-        return FileTaskResult(task_id=FileTaskId("repair"), ran=False)
+        return FileTaskResult(task_id=task_id, ran=False)
+
+
+class _ReadDriver(_SessionDriver):
+    def __init__(self):
+        super().__init__(_CONTENT)
+        self.opens = []
+
+    async def open_read(self, source, offset, ticket, *, idle_timeout_s):
+        self.opens.append((source, offset))
+        return await super().open_read(source, offset, ticket, idle_timeout_s=idle_timeout_s)
+
+
+async def _assembled_runtime(owned, roots, results, reader, clock):
+    config = _config(roots.staging.parent)
+    registry = DriverRegistry((DriverEntry("camctl-adb", reader,
+        DriverDeclaration(control_supported=True, stop_supported=True, query_supported=False,
+            result_supported=False, read_supported=True, digest_supported=True, delete_supported=False),
+        _EVIDENCE, DriverStatus.SOFTWARE_CONTRACT_VERIFIED),))
+    return await capture_runtime(owned, driver=reader, evidence=_EVIDENCE,
+        devices=config.devices, drivers=registry, staging=roots.staging, results=results,
+        wall_us=clock.wall_us, monotonic_ns=clock.monotonic_ns)
 
 
 def _attempts(owned):
@@ -80,14 +111,12 @@ class _TestClock:
         return self.mono
 
 
-async def _runtime_with_media(pipeline, duration_s, clock):
-    entry = original_recording_entry()
-    results = ResultsDouble({1: (entry,)})
-    runtime = (await _runtime(pipeline[0], results=results,
-                              evidence=_EVIDENCE, wall_us=clock.wall_us,
-                              monotonic_ns=clock.monotonic_ns))
-    reader, tools = ReadDriverDouble(_CONTENT), _WaitingProbe(duration_s)
-    runtime.media = (await _flow(pipeline, reader, tools))
+async def _runtime_with_media(pipeline, duration_s, clock, monkeypatch, results=None):
+    owned, roots, _source_id = pipeline
+    if results is None:
+        results = ResultsDouble({1: (original_recording_entry(),)})
+    reader, tools = _ReadDriver(), _WaitingProbe(duration_s, monkeypatch)
+    runtime = await _assembled_runtime(owned, roots, results, reader, clock)
     return runtime, results, reader, tools
 
 
@@ -117,10 +146,10 @@ def _assert_joint_settlement(owned, run_id, action_status):
 ], ids=["media-succeeded", "media-failed"])
 @pytest.mark.parametrize("reopen", [False, True], ids=["same-runtime", "saved-history"])
 async def test_media_completion_ends_original_results_without_new_observation(
-        media_pipeline, duration_s, action_status, reopen):
+        media_pipeline, duration_s, action_status, reopen, monkeypatch):
     owned, roots, source_id = media_pipeline
     clock = _TestClock()
-    runtime, results, reader, tools = (await _runtime_with_media(media_pipeline, duration_s, clock))
+    runtime, results, reader, tools = (await _runtime_with_media(media_pipeline, duration_s, clock, monkeypatch))
 
     await capture_handler("camera_record")(1, runtime)
 
@@ -128,12 +157,20 @@ async def test_media_completion_ends_original_results_without_new_observation(
     assert original_run[1:4] == (2, 1, 1)
     original_attempts = _attempts(owned)
     assert len(original_attempts) == 4  # START、STOP、RESULTS 和真实 READ。
+    read_attempt = owned.connection.execute(
+        "SELECT r.max_attempts_used,r.timeout_s_json,r.retry_interval_s_json,"
+        "i.occurred_at,o.occurred_at FROM operation_runs r"
+        " JOIN operation_attempts a ON a.run_id=r.id"
+        " JOIN history_events i ON i.id=a.intent_event_id"
+        " JOIN history_events o ON o.id=a.result_event_id"
+        " WHERE r.responsibility_key='read/1'").fetchone()
+    assert read_attempt == (3, "10", "3", clock.wall, clock.wall)
     history = owned.connection.execute(
         "SELECT * FROM history_events ORDER BY id"
     ).fetchall()
     assert results.calls == [1]
     assert tools.calls == ["probe"]
-    assert not runtime.pending_start_results
+    assert all(name != "control" for name, _ in reader.calls)
     assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (2,)
     assert owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (0,)
 
@@ -146,10 +183,7 @@ async def test_media_completion_ends_original_results_without_new_observation(
             recovered = open_existing(database_path, DbOpenMode.EXISTING_RW, DbConfig())
             assert recovered.metadata == metadata
             owned = recovered
-            runtime = (await _runtime(owned, results=results,
-                                      evidence=_EVIDENCE, wall_us=clock.wall_us,
-                                      monotonic_ns=clock.monotonic_ns))
-            runtime.media = (await _flow((owned, roots, source_id), reader, tools))
+            runtime = await _assembled_runtime(owned, roots, results, reader, clock)
         clock.wall = _NOW + 200_000_000
         await capture_handler("camera_record")(1, runtime)
 
@@ -158,6 +192,7 @@ async def test_media_completion_ends_original_results_without_new_observation(
         assert results.calls == [1]
         assert len(reader.opens) == 1
         assert tools.calls == ["probe", "probe"]
+        assert all(name != "control" for name, _ in reader.calls)
         assert _attempts(owned) == original_attempts
         assert owned.connection.execute(
             "SELECT * FROM history_events WHERE id<=? ORDER BY id", (history[-1][0],)
@@ -196,7 +231,7 @@ async def test_new_settlement_rejects_business_result_opposite_to_saved_media(
         media_pipeline, monkeypatch, duration_s):
     owned = media_pipeline[0]
     clock = _TestClock()
-    runtime, _results, _reader, _tools = (await _runtime_with_media(media_pipeline, duration_s, clock))
+    runtime, _results, _reader, _tools = (await _runtime_with_media(media_pipeline, duration_s, clock, monkeypatch))
     await capture_handler("camera_record")(1, runtime)
     original_save = CaptureRepository.finish_recording_results
     recorded = []
@@ -227,7 +262,7 @@ async def test_new_settlement_rejects_business_result_opposite_to_saved_media(
 async def test_original_settlement_key_rejects_changed_request_member(media_pipeline, monkeypatch, member):
     owned = media_pipeline[0]
     clock = _TestClock()
-    runtime, results, reader, tools = (await _runtime_with_media(media_pipeline, Decimal("61"), clock))
+    runtime, results, reader, tools = (await _runtime_with_media(media_pipeline, Decimal("61"), clock, monkeypatch))
     await capture_handler("camera_record")(1, runtime)
     original_save = CaptureRepository.finish_recording_results
     inputs = []
@@ -274,7 +309,7 @@ async def test_unknown_settlement_reuses_whole_request_and_original_decision_tim
         media_pipeline, monkeypatch, duration_s, action_status, after):
     owned, roots, source_id = media_pipeline
     clock = _TestClock()
-    runtime, results, reader, tools = (await _runtime_with_media(media_pipeline, duration_s, clock))
+    runtime, results, reader, tools = (await _runtime_with_media(media_pipeline, duration_s, clock, monkeypatch))
     await capture_handler("camera_record")(1, runtime)
     original_attempts = _attempts(owned)
     run_id = _result_run(owned)[0]
@@ -348,7 +383,7 @@ async def test_unknown_settlement_reuses_whole_request_and_original_decision_tim
 
 @pytest.mark.parametrize("reopen", [False, True], ids=["same-runtime", "saved-history"])
 async def test_explicit_media_issue_settles_from_saved_check_without_new_queries(
-        media_pipeline, reopen):
+        media_pipeline, reopen, monkeypatch):
     """明确媒体问题的检查结果经公开仓储保存后，原输入足以本地收场。
 
     时长充足但检查发现明确媒体问题：probe 通路不产生该分区（检查
@@ -358,7 +393,7 @@ async def test_explicit_media_issue_settles_from_saved_check_without_new_queries
     """
     owned, roots, source_id = media_pipeline
     clock = _TestClock()
-    runtime, results, reader, tools = (await _runtime_with_media(media_pipeline, Decimal("65"), clock))
+    runtime, results, reader, tools = (await _runtime_with_media(media_pipeline, Decimal("65"), clock, monkeypatch))
 
     await capture_handler("camera_record")(1, runtime)
 
@@ -389,10 +424,7 @@ async def test_explicit_media_issue_settles_from_saved_check_without_new_queries
             recovered = open_existing(database_path, DbOpenMode.EXISTING_RW, DbConfig())
             assert recovered.metadata == metadata
             owned = recovered
-            runtime = (await _runtime(owned, results=results,
-                                      evidence=_EVIDENCE, wall_us=clock.wall_us,
-                                      monotonic_ns=clock.monotonic_ns))
-            runtime.media = (await _flow((owned, roots, source_id), reader, tools))
+            runtime = await _assembled_runtime(owned, roots, results, reader, clock)
         clock.wall = _NOW + 200_000_000
         await capture_handler("camera_record")(1, runtime)
 
@@ -431,7 +463,7 @@ async def test_explicit_media_issue_settles_from_saved_check_without_new_queries
 
 
 async def test_incomplete_other_file_control_partition_keeps_media_pipeline(
-        media_pipeline):
+        media_pipeline, monkeypatch):
     """完整 VIDEO 加未完成 OTHER 的控制分区：媒体链照常，收场等集合。
 
     未完成 OTHER 被如实观察为完成未知，不进入读取或产物；完整
@@ -445,11 +477,8 @@ async def test_incomplete_other_file_control_partition_keeps_media_pipeline(
     incomplete = _entry("sidecar-log", kind=FileKind.OTHER, complete=False)
     results = ResultsDouble({1: (entry, incomplete)})
     clock = _TestClock()
-    runtime = (await _runtime(owned, results=results,
-                              evidence=_EVIDENCE, wall_us=clock.wall_us,
-                              monotonic_ns=clock.monotonic_ns))
-    reader, tools = ReadDriverDouble(_CONTENT), _WaitingProbe(Decimal("61"))
-    runtime.media = (await _flow(media_pipeline, reader, tools))
+    runtime, results, reader, tools = await _runtime_with_media(
+        media_pipeline, Decimal("61"), clock, monkeypatch, results)
 
     await capture_handler("camera_record")(1, runtime)
     assert _result_run(owned)[1:4] == (2, 1, 1)
@@ -486,7 +515,7 @@ async def test_incomplete_other_file_control_partition_keeps_media_pipeline(
 
 
 async def test_incomplete_other_turning_complete_settles_from_saved_facts(
-        media_pipeline):
+        media_pipeline, monkeypatch):
     """未完成 OTHER 转完整后的本地装载次序：新轮次只补观察，收场沿已保存事实。
 
     第一轮集合因未完成 OTHER 保持重试等待（VIDEO 已读取、检查完成、
@@ -500,11 +529,8 @@ async def test_incomplete_other_turning_complete_settles_from_saved_facts(
     incomplete = _entry("sidecar-log", kind=FileKind.OTHER, complete=False)
     results = ResultsDouble({1: (entry, incomplete)})
     clock = _TestClock()
-    runtime = (await _runtime(owned, results=results,
-                              evidence=_EVIDENCE, wall_us=clock.wall_us,
-                              monotonic_ns=clock.monotonic_ns))
-    reader, tools = ReadDriverDouble(_CONTENT), _WaitingProbe(Decimal("61"))
-    runtime.media = (await _flow(media_pipeline, reader, tools))
+    runtime, results, reader, tools = await _runtime_with_media(
+        media_pipeline, Decimal("61"), clock, monkeypatch, results)
 
     await capture_handler("camera_record")(1, runtime)
     clock.wall = _NOW + 200_000_000
