@@ -171,7 +171,7 @@ async def test_already_saved_missing_wait_is_diagnosed_without_rewriting_or_repl
         fresh.connection.close()
 
 
-async def _actual_save_failure(world, monkeypatch, operation, *, output_id=701):
+async def _actual_save_failure(world, monkeypatch, operation, *, output_id=701, commit_after=False):
     from pathlib import Path
     import sqlite3
     from ..support.outputs import SqliteOperationFault
@@ -238,11 +238,18 @@ async def _actual_save_failure(world, monkeypatch, operation, *, output_id=701):
             saves.append((request, key))
             if rejected:
                 before = tuple(worker.connection.iterdump())
-                faulty = SqliteOperationFault(worker.connection, sqlite3.SQLITE_UPDATE, 'operation_attempts')
+                if commit_after:
+                    from .test_binding_transactions import _CommitFailure
+                    faulty = _CommitFailure(worker.connection, True)
+                else:
+                    faulty = SqliteOperationFault(worker.connection, sqlite3.SQLITE_UPDATE, 'operation_attempts')
                 saved = save(port, request, key, replace(worker, connection=faulty))
-                assert faulty.triggered and saved.kind is DbOutcomeKind.ROLLED_BACK
+                if commit_after:
+                    assert saved.kind is DbOutcomeKind.UNKNOWN
+                else:
+                    assert faulty.triggered and saved.kind is DbOutcomeKind.ROLLED_BACK
+                    assert tuple(worker.connection.iterdump()) == before
                 assert isinstance(saved.error, sqlite3.DatabaseError)
-                assert tuple(worker.connection.iterdump()) == before
                 failures.append(saved.error)
                 return saved
         return save(port, request, key, worker)
@@ -259,11 +266,14 @@ async def _actual_save_failure(world, monkeypatch, operation, *, output_id=701):
             await delete_source_file(runtime, item_id)
         assert failures and caught.value.__cause__ is failures[0]
     else:
-        assert (await delete_source_file(runtime, item_id)).phase == "finish_rejected"
+        step = await delete_source_file(runtime, item_id)
+        assert step.phase == "finish_rejected"
+        assert failures and step.exception.__cause__ is failures[0]
     assert len(calls) == len(saves) == len(failures) == 1 and not after_actual_reads
     request, actual = calls[0]
-    assert world.owned.connection.execute("SELECT status,result_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
-        (request.ticket.run_id, request.ticket.attempt_id)).fetchone() == (1, None)
+    status, result = world.owned.connection.execute("SELECT status,result_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
+        (request.ticket.run_id, request.ticket.attempt_id)).fetchone()
+    assert (status != 1 and result is not None) if commit_after else (status, result) == (1, None)
     return item_id, request, actual, calls, saves, rejected, after_actual_reads
 
 
@@ -302,3 +312,27 @@ async def test_actual_host_query_return_keeps_original_null_config_after_save_fa
     assert world.owned.connection.execute("SELECT timeout_s_json,retry_interval_s_json FROM operation_attempts WHERE run_id=? AND attempt_no=?", (case[1].ticket.run_id,case[1].ticket.attempt_id)).fetchone() == (None, None)
     assert world.channel.operations == []
     assert all(path.exists() for path in world.paths.values())
+
+
+async def test_actual_device_query_unknown_commit_retries_original_save(world, monkeypatch):
+    _configure(world, interval=Decimal("0.625"))
+    case = await _actual_save_failure(world, monkeypatch, "query", commit_after=True)
+    assert case[1].timeout_s == Decimal("8.125")
+    world.cfg = replace(world.cfg, devices={})
+    await _retry_original_actual(world, *case)
+    assert world.channel.operations == ["delete", "query"]
+    assert world.paths[701].exists()
+
+
+async def test_actual_host_delete_unknown_commit_retries_original_save(world, monkeypatch):
+    from camctl.bootstrap import cleanup_assembly
+    case = await _actual_save_failure(world, monkeypatch, "delete", output_id=703, commit_after=True)
+    def forbidden_ports(*args):
+        raise AssertionError("主机原返回保存不能解析当前设备端口")
+    monkeypatch.setattr(cleanup_assembly, "port_for", forbidden_ports)
+    await _retry_original_actual(world, *case)
+    assert world.owned.connection.execute(
+        "SELECT timeout_s_json,retry_interval_s_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
+        (case[1].ticket.run_id, case[1].ticket.attempt_id)).fetchone() == (None, None)
+    assert world.channel.operations == [] and not world.paths[703].exists()
+    assert all(path.exists() for identity, path in world.paths.items() if identity != 703)

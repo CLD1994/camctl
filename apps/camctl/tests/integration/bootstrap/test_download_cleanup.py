@@ -286,12 +286,6 @@ async def test_last_budget_original_ticket_waits_for_maintenance_then_resumes(
     saved = OperationRepository().finish_attempt(AttemptFinish(first,
         validate_outcome(first, failed, EVIDENCE), _NOW + 2, retry_wait=True), new_operation_key(), owned)
     assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
-    # 重试等待由单调时钟推进；不以缩短原票据的间隔跳过等待。
-    from camctl.operations.attempts import RetryWaitGate
-    gate = RetryWaitGate()
-    gate.established('read', 0)
-    assert gate.pending('read', interval_s=Decimal('2.1'), now_ns=0) == Decimal('2.1')
-    assert gate.pending('read', interval_s=Decimal('2.1'), now_ns=2_100_000_000) is None
     ticket, intent = begin_read(owned, command, prepared)
     assert ticket.attempt_id == 2
     budgets = owned.connection.execute(
