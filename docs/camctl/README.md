@@ -50,8 +50,7 @@ camctl 是嵌入式主机上的 Python CLI，负责计划受理、调度、设�
 | [集成测试失败修复记录（2026-10-25）](integration-test-repairs-2026-10-25.md) | 原 44 项失败的修复、生产行为回归及逐项执行证据；历史原因见记录链接的诊断报告 |
 | [完整集成回归与测试接口审计（2026-10-26）](integration-regression-2026-10-26.md) | 同步最新实现后的两轮结果、共享测试接口失配、生产问题、实际耗时及资源证据缺口 |
 | [集成测试冗余清理（2026-10-26）](integration-test-pruning-2026-10-26.md) | 全范围文件审查、删除依据与覆盖承接、精确节点变化及后续公开接口重构范围 |
-| [集成测试重构记录](integration-test-refactor-2026-10-26.md)与[复盘及编写示例](integration-test-lessons-2026-10-27.md) | 公开接口迁移、实际验证结果、既有测试的质量问题及后续写法 |
-| [集成测试重构状态清单](integration-test-refactor-status.md)及[完整JSON清单](integration-test-refactor-status.json) | 冻结提交上的逐文件路由、静态定义数、已登记待迁分组和未决状态；JSON是唯一完整状态来源 |
+| [集成测试重构工作记录](integration-test-refactor-2026-10-26.md)与[持续复盘](integration-test-lessons-2026-10-27.md) | 当前计划、剩余任务、模块接口问题与验证结果；复盘保存原因和后续写法 |
 | [内存预算测试](memory-budget-testing.md)与[改造结果](memory-budget-test-results.md) | 测试侧合计预算、sudo 专属委派、进程树峰值、实际容量检查及独立无交换验收 |
 | [报告历史读取范围审查（2026-10-25）](report-history-read-scope-review-2026-10-25.md) | 公开字段依赖、完整动作恢复的额外工作、旧报告重建基准及待明确的校验范围 |
 | [事务事实读取与普通完成消费重构](../superpowers/plans/2026-10-26-transaction-facts-refactor.md) | 事实形成、内核读取、普通消费、批次依赖及真实副本对照的实施与验收 |

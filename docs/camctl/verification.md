@@ -8,7 +8,7 @@
 
 [集成测试耗时与精简评估（2026-10-25）](integration-test-timing-2026-10-25.md)保存本轮逐项计时、目录汇总、失败与跳过，以及保留覆盖前提下的执行分组和准备合并建议。逐项 CSV 与运行元数据一同纳入版本控制。
 
-后续改造由[集成测试耗时优化计划](../superpowers/plans/2026-10-25-integration-test-optimization.md)推进，实际覆盖映射、测量结果及验证边界保存在[优化记录](integration-test-optimization-2026-10-25.md)。
+当前集成测试重构的计划、进度、接口问题与验证结果统一见[工作记录](integration-test-refactor-2026-10-26.md)；此前耗时优化的历史覆盖和测量见[优化记录](integration-test-optimization-2026-10-25.md)。
 
 [集成测试耗时分析（2026-10-25）](integration-test-cost-analysis-2026-10-25.md)核对完整记录与修复后专项的区别，重算耗时集中度和并行任务占用，并保存当前源码三个分阶段样本及下一步优先项。
 
