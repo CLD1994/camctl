@@ -1161,7 +1161,9 @@ async def test_cancel_during_open_admission_drain_stops_all_new_work(
     from camctl.bootstrap.background_flow import CombinedLocalWork
     from camctl.logging_runtime.copies import MarkerStore
     from camctl.logging_runtime.ownership import LoggingOwner
-    from camctl.session import service as session_service
+    from camctl.bootstrap.clocks import SystemClock
+    from camctl.session.service import run_session
+    from ..support.session import session_context
     from camctl.session.supervision import Supervisor
 
     config = _config_for(tmp_path)
@@ -1227,9 +1229,10 @@ async def test_cancel_during_open_admission_drain_stops_all_new_work(
         supervisor=Supervisor(), owner_settled=True,
         diagnose=lambda _message: asyncio.sleep(0),
     )
-    lease = acquire_session(deps.session_lock)
-    await owner.start_session()
     local_work = CombinedLocalWork((ControlledOwner(), owner))
+    context = session_context(Path(config.paths.state_db), clock=SystemClock(),
+        on_session_locked=owner.start_session, logging_owner=owner,
+        local_work=local_work)
     original_stop_new = LoggingOwner.stop_new_work
     original_cancel_sweep = LoggingOwner.cancel_startup_sweep
     original_log_settle = LoggingOwner.settle
@@ -1254,12 +1257,7 @@ async def test_cancel_during_open_admission_drain_stops_all_new_work(
         LoggingOwner, "cancel_startup_sweep", observe_startup_stop)
     monkeypatch.setattr(LoggingOwner, "settle", observe_log_settle)
 
-    settle_task = asyncio.create_task(session_service._settle_local_work(
-        type("Context", (), {
-            "local_work": local_work, "logging_owner": owner,
-        })(),
-        stop_new=False,
-    ))
+    settle_task = asyncio.create_task(run_session(context, None))
     try:
         await _wait_event(worker_entered)
         await _wait_event(startup_queued)
@@ -1273,6 +1271,12 @@ async def test_cancel_during_open_admission_drain_stops_all_new_work(
         assert ordinary_stop_delivered.is_set()
         assert not log_settle_started.is_set()
         assert order == ["business_stop", "logging_stop", "startup_stop"]
+        with pytest.raises(SessionLockConflictError):
+            acquire_session(deps.session_lock)
+        settle_task.cancel("repeated cancel while business settlement waits")
+        await asyncio.sleep(0)
+        assert order == ["business_stop", "logging_stop", "startup_stop"]
+        assert not settle_task.done()
 
         # 受控业务收场仍未完成时，日志拥有者尚未进入最终 drain。
         release_business_settle.set()
@@ -1300,7 +1304,6 @@ async def test_cancel_during_open_admission_drain_stops_all_new_work(
         if not settle_task.done():
             settle_task.cancel("test cleanup")
             await _wait_task(asyncio.gather(settle_task, return_exceptions=True))
-        lease.close()
         await _wait_task(owner.settle())
         close_runtime(deps)
 
