@@ -557,7 +557,7 @@ async def test_locked_early_database_failure_waits_for_queued_sweep(
     monkeypatch.setattr(copies, "_listdir", blocked_listdir)
 
     def fail_open(_deps):
-        open_attempted.set()
+        loop.call_soon_threadsafe(open_attempted.set)
         raise StateDatabaseError("controlled locked open failure")
 
     monkeypatch.setattr(lifecycle, "_open_runtime_connection", fail_open)
@@ -565,7 +565,7 @@ async def test_locked_early_database_failure_waits_for_queued_sweep(
     try:
         await _wait_event(worker_entered)
         await _wait_event(startup_call_queued)
-        assert open_attempted.is_set(), "queued startup scan must not delay database open"
+        await _wait_event(open_attempted)  # 数据库专用线程已实际进入打开。
         assert scans == []
         assert not run_task.done(), "normal early error must retain the queued scan owner"
 
@@ -951,7 +951,8 @@ async def test_cancel_during_restricted_stop_preserves_result_before_log_drain(
     from .test_restricted_winddown import (
         _FakeWinddownClock, _factory, _recording_in_flight,
     )
-    from .test_recording_stop import _RecordCatalog, _entry, _scalar
+    from .test_recording_stop import _RecordCatalog, _entry
+    from ..session.support import assert_database_closed
 
     driver = _SessionDriver(b"restricted stop source")
     config, database, driver, results = await _recording_in_flight(
@@ -981,8 +982,7 @@ async def test_cancel_during_restricted_stop_preserves_result_before_log_drain(
     startup_stop_delivered = asyncio.Event()
     log_settle_started = asyncio.Event()
     once_report_started = asyncio.Event()
-    opened_connections: list[int] = []
-    closed_connections: list[int] = []
+    session_contexts = []
     log_settle_facts: list[tuple] = []
     stop_entries: list[object] = []
     ordinary_stop_calls: list[int] = []
@@ -1025,16 +1025,15 @@ async def test_cancel_during_restricted_stop_preserves_result_before_log_drain(
         startup_stop_delivered.set()
 
     async def observe_log_settle(owner):
-        log_settle_facts.append((
-            _scalar(database,
-                    "SELECT status, attempts_used FROM operation_runs"
-                    " WHERE responsibility_key = 'stop/1'"),
-            _scalar(database,
-                    "SELECT check_decision FROM recording_processing"
-                    " WHERE action_id = 1"),
-            tuple(opened_connections),
-            tuple(closed_connections),
-        ))
+        database_port = session_contexts[0].database
+        log_settle_facts.append(await database_port.read(lambda owned: (
+            owned.connection.execute(
+                "SELECT status, attempts_used FROM operation_runs"
+                " WHERE responsibility_key = 'stop/1'").fetchone(),
+            owned.connection.execute(
+                "SELECT check_decision FROM recording_processing"
+                " WHERE action_id = 1").fetchone(),
+        )))
         log_settle_started.set()
         await original_log_settle(owner)
 
@@ -1046,26 +1045,7 @@ async def test_cancel_during_restricted_stop_preserves_result_before_log_drain(
     original_run_session = lifecycle.run_session
 
     async def observe_session(context, source):
-        original_open = context.open_connection
-
-        def tracked_open():
-            owned = original_open()
-            identity = len(opened_connections) + 1
-            opened_connections.append(identity)
-            connection = owned.connection
-
-            class ConnectionCloseSpy:
-                def __getattr__(self, name):
-                    return getattr(connection, name)
-
-                def close(self) -> None:
-                    closed_connections.append(identity)
-                    connection.close()
-
-            return type(owned)(
-                connection=ConnectionCloseSpy(), metadata=owned.metadata)
-
-        context.open_connection = tracked_open
+        session_contexts.append(context)
 
         async def observe_once_report(_context):
             once_report_started.set()
@@ -1133,7 +1113,7 @@ async def test_cancel_during_restricted_stop_preserves_result_before_log_drain(
 
         release_stop.set()
         await _wait_event(log_settle_started)
-        assert log_settle_facts == [((3, 1), (3,), (1, 2), (2,))]
+        assert log_settle_facts == [((3, 1), (3,))]
         assert not once_report_started.is_set()
         assert not stop_cancelled.is_set()
         assert_session_lock_held()
@@ -1146,6 +1126,7 @@ async def test_cancel_during_restricted_stop_preserves_result_before_log_drain(
         assert len(stop_entries) == 1
         assert not stop_cancelled.is_set()
         assert not once_report_started.is_set()
+        await assert_database_closed(session_contexts[0].database)
     finally:
         release_stop.set()
         release_listdir.set()
