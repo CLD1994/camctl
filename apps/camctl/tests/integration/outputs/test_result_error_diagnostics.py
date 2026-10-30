@@ -23,6 +23,7 @@ from camctl.persistence.models import DbOutcome, DbOutcomeKind
 from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 
+from support.repository_ports import repository_port
 from ..bootstrap.test_cleanup_flow import _seed_repaired_artifact
 from ..bootstrap.test_output_binding_changes import environment, Catalog, _NOW, _save_photos, _registry
 from ..support.database import business_database, database_path
@@ -107,10 +108,11 @@ async def test_unperformed_canceled_query_does_not_emit_error(environment):
                 prepare_cancel_target(worker, catalog=Catalog(), now=_NOW, action_id=action, request_id='9')
             return result
     port = CancelAtIntent()
-    runtime.outputs = port
     before = len(driver.queries)
     lines = []
-    with error_diagnostics_context(None, lines.append):
+    with repository_port(OutputsRepository, port, ("begin_cleanup_attempt",),
+            matches=lambda name, args, kwargs: args[0].target.cleanup_item_id == item_id), \
+            error_diagnostics_context(None, lines.append):
         async with diagnostic_scope():
             await delete_source_file(runtime, item_id)
     assert port.tickets and len(driver.queries) == before
@@ -201,9 +203,10 @@ async def test_member_rejection_logs_original_request_once_during_save_retry(env
                 return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=RuntimeError('save failed'))
             return super().fail_cleanup_item(request, key, worker)
     port = RejectOnce()
-    runtime.outputs = port
     lines = []
-    with error_diagnostics_context(None, lines.append):
+    with repository_port(OutputsRepository, port, ("fail_cleanup_item",),
+            matches=lambda name, args, kwargs: args[0].item_id == item_id), \
+            error_diagnostics_context(None, lines.append):
         async with diagnostic_scope():
             await delete_source_file(runtime, item_id)
             await delete_source_file(runtime, item_id)
@@ -254,9 +257,10 @@ async def test_query_target_exception_graph_is_preserved(environment):
                 worker.connection.commit()
             return result
     port = CorruptAfterIntent()
-    runtime.outputs = port
     lines = []
-    with error_diagnostics_context(None, lines.append):
+    with repository_port(OutputsRepository, port, ("begin_cleanup_attempt",),
+            matches=lambda name, args, kwargs: args[0].target.cleanup_item_id == item_id), \
+            error_diagnostics_context(None, lines.append):
         async with diagnostic_scope():
             await delete_source_file(runtime, item_id)
     assert len(lines) == 1
@@ -275,16 +279,16 @@ async def test_restored_saved_query_does_not_generate_old_error_again(environmen
                 return DbOutcome(DbOutcomeKind.ROLLED_BACK, error=OSError('member save failed'))
             return super().finish_cleanup_item(request, key, worker)
     port = RejectMember()
-    runtime.outputs = port
     first, restored = [], []
-    with error_diagnostics_context(None, first.append):
+    with repository_port(OutputsRepository, port, ("finish_cleanup_item",),
+            matches=lambda name, args, kwargs: args[0].item_id == item_id), \
+            error_diagnostics_context(None, first.append):
         async with diagnostic_scope():
             await delete_source_file(runtime, item_id)
     assert len(first) == len(calls) == 1
     assert owned.connection.execute('SELECT a.status FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.responsibility_key=?', (f'exists/{item_id}',)).fetchone() == (3,)
     port.enabled = False
     resumed = await _configured(environment, owned, driver)
-    resumed.outputs = port
     with error_diagnostics_context(None, restored.append):
         async with diagnostic_scope():
             assert (await delete_source_file(resumed, item_id)).phase in ('succeeded', 'already_terminal')

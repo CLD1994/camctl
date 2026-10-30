@@ -27,6 +27,7 @@ from camctl.persistence.repositories.operations import OperationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 
 from ..bootstrap.test_output_binding_changes import _NOW, _save_photos, environment
+from support.repository_ports import repository_port
 from ..support.outputs import SqliteOperationFault
 from .test_cleanup_query_save_recovery import (
     _MatrixDriver, _apply_cleanup_cancel, _member_facts, _new_runtime,
@@ -123,11 +124,12 @@ async def test_query_only_cancel_releases_reversible_restriction(
     action_id, item_id = _start_cleanup(owned, output_id, "3")
     runtime = await _new_runtime(cfg, owned, driver)
     port = _CancelQueryPort(owned, item_id, action_id, when)
-    runtime.operations = port
-    session = await runtime.for_item(item_id)
     driver.matrix_enabled, driver.present = True, present
 
-    step = await delete_source_file(session, item_id)
+    with repository_port(OperationRepository, port, ("finish_attempt",),
+            matches=lambda name, args, kwargs: args[0].ticket.operation == "query"
+            and args[0].ticket.target_id == str(item_id)):
+        step = await delete_source_file(runtime, item_id)
 
     assert (step.phase, step.detail) == ("canceled", None), step
     assert port.saved == 1
@@ -247,10 +249,11 @@ async def test_first_entry_rollback_leaves_no_attempt(environment):
     action_id, item_id = _start_cleanup(owned, output_id, "3")
     runtime = await _new_runtime(cfg, owned, driver)
     port = _EntryPort(owned, item_id, action_id, "rolled_back")
-    runtime.outputs = port
     driver.matrix_enabled, driver.present = True, True
 
-    step = await delete_source_file(await runtime.for_item(item_id), item_id)
+    with repository_port(OutputsRepository, port, ("begin_cleanup_attempt",),
+            matches=lambda name, args, kwargs: args[0].target.cleanup_item_id == item_id):
+        step = await delete_source_file(runtime, item_id)
 
     assert step.phase == "query_rejected", step
     assert owned.connection.in_transaction is False
@@ -276,9 +279,9 @@ async def test_delete_intent_cancel_before_dispatch_saves_not_dispatched(environ
     action_id, item_id = _start_cleanup(owned, output_id, "2")
     runtime = await _new_runtime(cfg, owned, driver)
     port = _EntryPort(owned, item_id, action_id, "cancel_after_grant")
-    runtime.outputs = port
-
-    step = await delete_source_file(await runtime.for_item(item_id), item_id)
+    with repository_port(OutputsRepository, port, ("begin_cleanup_attempt",),
+            matches=lambda name, args, kwargs: args[0].target.cleanup_item_id == item_id):
+        step = await delete_source_file(runtime, item_id)
 
     assert (step.phase, step.detail) == ("canceled", None), step
     assert [entry[:2] for entry in port.entries] == [("delete", DbOutcomeKind.COMPLETED)]
@@ -355,7 +358,8 @@ async def test_cancel_after_query_return_settles_by_matrix(
     driver.matrix_enabled, driver.present = True, present
     driver.on_query_return = lambda: _apply_cleanup_cancel(owned, action_id)
 
-    step = await delete_source_file(await (await _new_runtime(cfg, owned, driver)).for_item(item_id), item_id)
+    runtime = await _new_runtime(cfg, owned, driver)
+    step = await delete_source_file(runtime, item_id)
 
     assert (step.phase, step.detail) == (phase, detail), step
     # 取消生效后不再发起任何设备调用。

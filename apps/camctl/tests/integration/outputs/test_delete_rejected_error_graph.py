@@ -4,6 +4,9 @@ import asyncio
 from contextlib import asynccontextmanager
 import json
 from pathlib import Path
+from unittest.mock import patch
+
+from camctl.bootstrap.cleanup_assembly import HostArtifacts
 
 import pytest
 
@@ -19,6 +22,7 @@ from camctl.persistence.models import DbOutcome, DbOutcomeKind, db_outcome_for
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.session.supervision import Supervisor
 
+from support.repository_ports import repository_port
 from .test_cleanup_delete_save_recovery import _prepared, _configured
 from ..bootstrap.test_output_binding_changes import environment
 
@@ -44,11 +48,12 @@ async def test_original_delete_rejection_carries_complete_database_outcome(envir
     error.__cause__ = OSError(5, 'delete save IO')
     outcome = DbOutcome(kind, error=error, secondary_errors=(RuntimeError('save close failure'),))
     port = _SavePort(outcome)
-    runtime.outputs = port
-    step = await delete_source_file(runtime, item_id)
-    assert db_outcome_for(step.exception) is outcome
-    with pytest.raises(ConsistencyError) as caught:
-        await advance_cleanup(runtime)
+    with repository_port(OutputsRepository, port, ("finish_cleanup_attempt",),
+            matches=lambda name, args, kwargs: args[0].ticket.target_id == str(item_id)):
+        step = await delete_source_file(runtime, item_id)
+        assert db_outcome_for(step.exception) is outcome
+        with pytest.raises(ConsistencyError) as caught:
+            await advance_cleanup(runtime)
     assert db_outcome_for(caught.value) is outcome
     assert db_outcome_for(caught.value).error is error
     assert db_outcome_for(caught.value).secondary_errors == outcome.secondary_errors
@@ -63,12 +68,13 @@ async def test_delete_save_control_keeps_original_identity_and_actual_result(env
     control = asyncio.CancelledError('original worker cancellation')
     outcome = DbOutcome(DbOutcomeKind.UNKNOWN, error=OSError(5, 'save IO failure'), control=control)
     port = _SavePort(outcome)
-    runtime.outputs = port
-    for _ in range(2):
-        with pytest.raises(asyncio.CancelledError) as caught:
-            await delete_source_file(runtime, item_id)
-        assert caught.value is control
-        assert db_outcome_for(control) is outcome
+    with repository_port(OutputsRepository, port, ("finish_cleanup_attempt",),
+            matches=lambda name, args, kwargs: args[0].ticket.target_id == str(item_id)):
+        for _ in range(2):
+            with pytest.raises(asyncio.CancelledError) as caught:
+                await delete_source_file(runtime, item_id)
+            assert caught.value is control
+            assert db_outcome_for(control) is outcome
     assert port.calls == [port.calls[0], port.calls[0]]
     assert len(driver.deletes) == 1
     assert owned.connection.execute('SELECT result_json FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.cleanup_item_id=?',
@@ -90,20 +96,20 @@ async def _supervised_world(environment, outcome=None):
         CleanupSupervisionFault('runner', None, None, None, (), type(original).__name__, str(original)),
         CleanupSupervisionFault('runner.cause', None, None, None, (), 'PermissionError', str(original.__cause__)),
     ), original)
-    actual_port = runtime.local_files
+    actual_delete = HostArtifacts.delete
     calls = []
-    class SupervisedFiles:
-        async def delete(self, request):
-            result = await actual_port.delete(request)
-            calls.append((request, result))
-            raise LocalArtifactTaskFailure(result, diagnostic) from original
-        async def query_file(self, request):
-            return await actual_port.query_file(request)
-    runtime.local_files = SupervisedFiles()
+    async def supervised_delete(host, request):
+        result = await actual_delete(host, request)
+        if request.cleanup_item_id != item_id:
+            return result
+        calls.append((request, result))
+        raise LocalArtifactTaskFailure(result, diagnostic) from original
     saves = _SavePort(outcome)
-    runtime.outputs = saves
     try:
-        yield owned, runtime, item_id, original, saves, calls
+        with patch.object(HostArtifacts, "delete", supervised_delete), \
+                repository_port(OutputsRepository, saves, ("finish_cleanup_attempt",),
+                    matches=lambda name, args, kwargs: args[0].ticket.target_id == str(item_id)):
+            yield owned, runtime, item_id, original, saves, calls
     finally:
         await supervisor.drain_required()
 
