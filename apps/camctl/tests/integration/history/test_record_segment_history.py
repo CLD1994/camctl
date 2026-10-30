@@ -539,17 +539,19 @@ async def test_connection_failure_cannot_leave_a_new_range_marked_verified(tmp_p
 async def _large_fixture(tmp_path,count):
     """正式装配只负责准备；读取与计量前完整关闭其线程和文件责任。"""
     from ..support.capture import capture_test_session
+    from ..support.result_cases import CaseClock
     from ..capture.test_capture_contract import _NOW, _PAGE_EVIDENCE, ResultsDouble
 
+    clock = CaseClock(_NOW, 5_000_000_000)
     async with capture_test_session() as session:
         async def runtime_factory(owned, *, driver):
             return await session.runtime(
                 owned, driver=driver, evidence=_PAGE_EVIDENCE, results=ResultsDouble({}),
-                wall_us=lambda: _NOW, monotonic_ns=lambda: 5_000_000_000)
-        return await _prepare_large_fixture(tmp_path, count, runtime_factory)
+                wall_us=clock.wall_us, monotonic_ns=clock.monotonic_ns)
+        return await _prepare_large_fixture(tmp_path, count, runtime_factory, clock)
 
 
-async def _prepare_large_fixture(tmp_path,count,runtime_factory):
+async def _prepare_large_fixture(tmp_path,count,runtime_factory,clock):
     """从真实P2端口逐页建跨CAM目录的夹具；准备阶段也只持有128项。"""
     import sqlite3
     from itertools import islice
@@ -572,7 +574,7 @@ async def _prepare_large_fixture(tmp_path,count,runtime_factory):
     from ..capture.result_consumer_fixtures import consumer_world
     from ..capture.test_result_page_history import _actual,_REGISTRY
     owned,runtime,action_id,_=await consumer_world(
-        tmp_path,'record',catalog=SegmentedCatalog(),runtime_factory=runtime_factory)
+        tmp_path,'record',catalog=SegmentedCatalog(),runtime_factory=runtime_factory,clock=clock)
     stage=None
     try:
         stage=sqlite3.connect(tmp_path/'fixture-members.db',isolation_level=None)

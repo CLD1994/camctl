@@ -40,18 +40,19 @@ pytestmark = pytest.mark.asyncio
 
 
 async def _exhausted_world(tmp_path, consumer, independent_activity):
+    from ..support.result_cases import CaseClock
+
+    clock = CaseClock(_NOW, 5_000_000_000)
     owned = None
     entry = replace(_entry("auxiliary", size=41, kind=FileKind.OTHER),
                     original_name="auxiliary.bin", media_type="application/octet-stream")
     results = ResultsDouble({1: (entry,)})
     try:
         owned, runtime, action_id, handler = await consumer_world(
-            tmp_path, consumer, independent_activity=independent_activity,
+            tmp_path, consumer, independent_activity=independent_activity, clock=clock,
             runtime_options={
                 "results": results,
                 "check_config": AttemptConfig(2, Decimal("1.25"), Decimal(0)),
-                "wall_us": lambda: _NOW,
-                "monotonic_ns": lambda: 5_000_000_000,
                 "wait_config": lambda params: CaptureWaitConfig(
                     target_duration_ms=600_000, driver_margin_ms=0),
             })

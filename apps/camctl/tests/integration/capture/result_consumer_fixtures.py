@@ -182,8 +182,13 @@ async def consumer_world(
     runtime_options=None,
     max_delay_ms=5000,
     now_us=_NOW,
+    clock=None,
 ):
     """只执行本地公开事务和真实拍摄处理器，不补写历史或投影。"""
+    from ..support.result_cases import CaseClock
+
+    if clock is None:
+        clock = CaseClock(_NOW, 5_000_000_000)
     cfg = _config(tmp_path)
     path = Path(cfg.paths.state_db)
     assert initialize_state(cfg, path).outcome is InitOutcome.CREATED
@@ -232,6 +237,7 @@ async def consumer_world(
         from .test_baseline_prepare import Directory
 
         options = {"evidence": RESULT_EVIDENCE,
+            "wall_us": clock.wall_us, "monotonic_ns": clock.monotonic_ns,
             "check_config": AttemptConfig(3, Decimal("1.25"), Decimal("2")),
             "directory": Directory([lambda request: DirectoryRead(None, None, Page((), None))])}
         options.update({} if runtime_options is None else runtime_options)
@@ -244,8 +250,8 @@ async def consumer_world(
         else:
             await capture_handler(handler)(action_id, runtime)
         if consumer in ("record", "winddown"):
-            runtime.wall_us = lambda: _NOW + 60_000_000
-            runtime.monotonic_ns = lambda: 5_000_000_000 + (60_000_000_000 if record_control_elapsed_ns is None else record_control_elapsed_ns)
+            clock.wall = _NOW + 60_000_000
+            clock.monotonic = 5_000_000_000 + (60_000_000_000 if record_control_elapsed_ns is None else record_control_elapsed_ns)
             stop = create_autospec(StopDriver, instance=True)
             stop.stop.return_value = DeviceCallResult.from_outcome(returned("stop", "stop_confirmed", activity_id))
             runtime.stopper = stop
@@ -269,8 +275,8 @@ async def consumer_world(
             applied = repository.apply_cancel_target(ApplyCancelTarget(item_id, CancelApplyMode.WITH_STOP,
                 runtime.wall_us()), new_operation_key(), owned)
             assert applied.kind is DbOutcomeKind.COMPLETED, applied.error
-            runtime.wall_us = lambda: _NOW + 60_000_000
-            runtime.monotonic_ns = lambda: 65_000_000_000
+            clock.wall = _NOW + 60_000_000
+            clock.monotonic = 65_000_000_000
             stop = create_autospec(StopDriver, instance=True)
             stop.stop.return_value = DeviceCallResult.from_outcome(returned("stop", "stop_confirmed", activity_id))
             runtime.stopper = stop
@@ -279,8 +285,9 @@ async def consumer_world(
             # 前次 START 会话的文件责任和 worker 实际结束；新工厂只消费
             # 已保存事实，本次可靠 UTC 已越过原自主任务等待。
             database = await restart_capture_database(owned)
+            clock.wall = _NOW + 700_000_000
             runtime = (await _runtime(database, driver=control,
-                **{**options, "wall_us": lambda: _NOW + 700_000_000})
+                **{**options, "wall_us": clock.wall_us})
                 if runtime_factory is None else await runtime_factory(owned, driver=control))
         return owned, runtime, action_id, handler
     except BaseException:
