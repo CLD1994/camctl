@@ -10,7 +10,8 @@ from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.models import DbOutcomeKind
 
 from support.repository_ports import repository_port
-from ..bootstrap.test_output_binding_changes import Catalog, _NOW, environment
+from ..bootstrap.test_output_binding_changes import Catalog, environment
+from .test_cleanup_guards import _NOW
 from ..support.outputs import submit_output_document
 from .test_cleanup_delete_save_recovery import _configured
 
@@ -19,11 +20,13 @@ from .test_cleanup_delete_save_recovery import _configured
 async def test_target_rejection_from_real_transaction_is_diagnosed_once(environment):
     cfg, owned, context, driver = environment
     accepted = await submit_output_document(context.database, catalog=Catalog(), occurred_at=_NOW, body={
-        'request_id': '2', 'created_at': '2026-01-15 08:00:00', 'name': '错误目标',
-        'actions': [{'name': '清理', 'type': 'delete_action_outputs', 'scheduled_at': '2026-01-15 09:00:00',
+        'request_id': '2', 'created_at': '2025-06-15 14:00:00', 'name': '错误目标',
+        'actions': [{'name': '清理', 'type': 'delete_action_outputs', 'scheduled_at': '2025-06-15 15:06:40',
                      'params': {'output_ids': ['999']}}]})
     assert accepted.plan_id is not None
-    action_id, = owned.connection.execute('SELECT id FROM actions WHERE plan_id=?', (accepted.plan_id,)).fetchone()
+    action_id, scheduled_at = owned.connection.execute(
+        'SELECT id,scheduled_at FROM actions WHERE plan_id=?', (accepted.plan_id,)).fetchone()
+    assert scheduled_at == _NOW
 
     class TargetPort(OutputsRepository):
         def __init__(self):
@@ -35,7 +38,7 @@ async def test_target_rejection_from_real_transaction_is_diagnosed_once(environm
             self.receipt = super().fix_cleanup_targets(request, key, worker)
             return self.receipt
 
-    runtime = await _configured(environment, owned, driver, delete_attempts=1, query_attempts=1)
+    runtime = await _configured(environment, owned, driver, delete_attempts=1, query_attempts=1, wall=lambda: _NOW)
     port = TargetPort()
     lines = []
     with error_diagnostics_context(None, lines.append):
@@ -52,6 +55,11 @@ async def test_target_rejection_from_real_transaction_is_diagnosed_once(environm
             assert error.code == 'output_not_found'
             history = tuple(owned.connection.execute('SELECT * FROM history_events'))
             request, key = port.calls[0]
+            assert request.occurred_at == _NOW
+            event_times = owned.connection.execute(
+                "SELECT occurred_at FROM history_events WHERE transaction_id=("
+                "SELECT id FROM history_transactions WHERE operation_key=?)", (str(key),)).fetchall()
+            assert event_times and all(row == (_NOW,) for row in event_times)
             replayed = OutputsRepository().fix_cleanup_targets(request, key, owned)
             assert replayed.kind is DbOutcomeKind.COMPLETED, replayed.error
             assert replayed.value.failures == result.value.failures
@@ -64,3 +72,4 @@ async def test_target_rejection_from_real_transaction_is_diagnosed_once(environm
     document = json.loads(lines[0])
     assert document['error']['details'] == {'requested_output_id': '999'}
     assert document['context']['cleanup_item_id'] == item_id
+    assert not driver.deletes and not driver.queries
