@@ -160,11 +160,17 @@ async def test_finite_cancel_end_unknown_reuses_exact_request_and_history_before
         assert outcomes[0].kind is DbOutcomeKind.UNKNOWN
         assert world.owned.connection.execute('SELECT status FROM actions WHERE id=?', (world.action_id,)).fetchone() == (2,)
         assert world.owned.connection.execute('SELECT occupancy_state FROM device_activities WHERE id=?', (world.activity_id,)).fetchone() == (1,)
-        world.elapse(500_000)
+        monotonic_before_reopen = world.mono[0]
+        world.wall[0] += 500_000
         await world.reopen(cold=False)
+        assert world.mono[0] == monotonic_before_reopen
         await world.advance()
+        assert world.mono[0] == monotonic_before_reopen
         assert len(saves) == 2 and saves[1] == saves[0]
         assert outcomes[-1].kind is DbOutcomeKind.COMPLETED
+        assert world.owned.connection.execute(
+            'SELECT COUNT(*) FROM history_transactions WHERE operation_key=?',
+            (str(saves[0][1]),)).fetchone() == (1,)
         assert len(world.ports.pages) == len(world.ports.stops) == 1
         history = HistoryRepository(world.path)
         restored = history.restore_entity('action', world.action_id, history.current_boundary())
