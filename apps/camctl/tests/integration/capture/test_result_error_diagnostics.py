@@ -1,48 +1,35 @@
-"""拍摄结果消费者的实际错误交给公共诊断输出，协作者均为内存替身。"""
+"""拍摄结果经正式消费者与真实保存交付公共诊断。"""
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, create_autospec
+from unittest.mock import AsyncMock
 
 import pytest
 
-from camctl.capture.handlers import (
-    PendingCallResult, PendingCaptureCompletion, StartCloseRequest,
-    resume_capture_completions,
-)
-from camctl.capture.media import RecordingFailure
-from camctl.capture.media_flow import CaptureProcessingSaves
-from camctl.capture.preparation import PendingPreparation, _save_owner
 from camctl.capture.processing import (
     CheckPhase, CheckResultSave, MediaObservation, ProcessingError, RepairOutcome, RepairResultSave,
 )
 from camctl.contracts.values import ConsistencyError, new_operation_key
-from camctl.devices.evidence import EvidenceContract
-from camctl.logging_runtime.diagnostics import diagnostic_scope, error_diagnostics_context
-from camctl.operations.attempts import AttemptFinish, RunFinish, RunOutcome, StaleRunFinish
+from camctl.contracts.enums import enum_for
+from camctl.logging_runtime.diagnostics import diagnostic_scope, error_diagnostics_context, flush_diagnostics
 from camctl.operations.models import (
-    AttemptStatus, AttemptTicket, CallOutcome, EffectState, ErrorValue, EvidenceValue,
-    Settlement, SettlementBasis, ValidatedOutcome,
+    AttemptStatus, CallOutcome, EffectState, ErrorValue, EvidenceValue,
+    Settlement, SettlementBasis,
 )
-from camctl.operations.tool_diagnostics import ToolCallOutput, ToolDiagnostics, ToolStream, ToolStreamState
-from camctl.outputs.catalog import OutputCatalogFacts
-from camctl.persistence.business import BusinessDatabase
-from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from camctl.persistence.repositories.capture import (
-    CaptureRepository, CaptureResult, FinishBindingFailure, FinishCapture, FinishRecordingResults,
-)
+from camctl.operations.tool_diagnostics import ToolDiagnostics
+from camctl.persistence.models import DbOutcomeKind
+from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.repositories.operations import OperationRepository
-from unit.capture.test_stop_result_handoff import _runtime
 
 pytestmark = pytest.mark.asyncio
 
-
-def _outcome(operation='stop'):
-    raw = b'camera error\xff\n'
-    stream = ToolStream(ToolStreamState.COMPLETE, raw)
-    return CallOutcome(status=AttemptStatus.FAILED, effect=EffectState.UNKNOWN,
-        error=ErrorValue('device_error', 'device', {'operation': operation}),
-        settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue('returned', 1)),
-        diagnostics=ToolDiagnostics(1, (ToolCallOutput(1, operation, stream, stream),)))
+from ..support.capture_diagnostic_cases import diagnostic_case, call_world, started_call, actual_call
+from ..support.call_cases import SavedCallBoundary
+from ..support.result_cases import result_case
+from .test_input_copy import pipeline
+from .media_retry_fixtures import media_pipeline
+from ..support.capture_media_cases import media_cases
+from .baseline_database import database
+from ..support.baseline_cases import baseline_case
 
 
 def _documents(records):
@@ -50,118 +37,214 @@ def _documents(records):
 
 
 @pytest.mark.parametrize('operation', ['control', 'stop', 'query', 'result'])
-async def test_call_error_is_logged_before_failed_business_save_and_replay_logs_once(mocker, operation):
-    runtime, _, _, _ = _runtime(mocker)
-    ticket = AttemptTicket(1, operation, '71', operation + '/21', 9)
-    outcome = _outcome(operation)
-    validated = ValidatedOutcome(outcome, EvidenceContract('returned', 1, operation, frozenset()), (), ticket)
-    pending = PendingCallResult(new_operation_key(), AttemptFinish(ticket, validated, 100), None)
-    identity = (ticket.run_id, ticket.attempt_id)
-    runtime.pending_start_results[identity] = pending
-    writer = mocker.patch.object(runtime, '_write_call_result', autospec=True,
-        return_value=DbOutcome(DbOutcomeKind.UNKNOWN, error=RuntimeError('save unknown')))
+async def test_call_error_is_logged_before_failed_business_save_and_replay_logs_once(
+        tmp_path, diagnostic_case, result_case, monkeypatch, operation):
+    from camctl.capture.handlers import capture_handler
+    from camctl.operations.attempts import QueryPurpose
+    error = ErrorValue('device_error', 'device', {'operation': operation})
     records = []
-    with error_diagnostics_context(None, records.append):
-        async with diagnostic_scope():
-            with pytest.raises(ConsistencyError):
-                await runtime._save_call_result(identity, pending)
-        writer.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
-        async with diagnostic_scope():
-            await runtime._save_call_result(identity, runtime.pending_start_results[identity])
+    if operation == 'result':
+        from dataclasses import replace
+        from .result_consumer_fixtures import RESULT_EVIDENCE, result_driver
+        from ..bootstrap.test_binding_transactions import _CommitFailure
+        case = result_case
+        owned, runtime, aid, handler = await case.world(tmp_path, 'photo', evidence_contracts=(
+            replace(RESULT_EVIDENCE.contract('results_returned', 1), max_diagnostic_calls=1),))
+        driver = result_driver(case, actual_call('result', SimpleNamespace(target_id='1'), error=error))
+        enabled, saves = [True], []
+        actual = OperationRepository.finish_attempt
+        def finish(repository, request, key, current):
+            if request.ticket.operation == 'result':
+                saves.append((request, key))
+                if enabled[0]:
+                    current = replace(current, connection=_CommitFailure(current.connection, False))
+            return actual(repository, request, key, current)
+        monkeypatch.setattr(OperationRepository, 'finish_attempt', finish)
+        with error_diagnostics_context(None, records.append):
+            async with diagnostic_scope():
+                with pytest.raises(ConsistencyError):
+                    await capture_handler(handler)(aid, runtime)
+            enabled[0] = False
+            async with diagnostic_scope():
+                await capture_handler(handler)(aid, runtime)
+        assert driver.list_results.await_count == 1
+        ticket = saves[0][0].ticket
+        assert all(value == saves[0] for value in saves)
+    else:
+        case = diagnostic_case
+        if operation == 'control':
+            runtime = await call_world(case, tmp_path, control=lambda request: actual_call(operation, request.ticket, error=error))
+            port = case.control
+        elif operation == 'stop':
+            runtime = await started_call(case, tmp_path, stop=lambda request: actual_call(operation, request.ticket, error=error))
+            case.clock.wall += 60_000_000
+            case.clock.monotonic += 60_000_000_000
+            port = case.stop
+        else:
+            from .test_call_result_save import _query_consumer
+            runtime = await _query_consumer(case, tmp_path, QueryPurpose.ACTIVITY_OBSERVATION)
+            case.query.outcome = lambda request: actual_call(operation, request.ticket, error=error)
+            from dataclasses import replace
+            from ..support.capture import capture_assembly
+            case.options['evidence'] = case.options['evidence'].with_contract(replace(
+                case.options['evidence'].contract('query_returned', 1), max_diagnostic_calls=1))
+            case.factory = capture_assembly(**case.options)
+            runtime = await case.view()
+            port = case.query
+        case.boundary = operation
+        case.fault.arm(port, 'persistent')
+        with error_diagnostics_context(None, records.append):
+            async with diagnostic_scope():
+                with pytest.raises(ConsistencyError):
+                    await capture_handler('camera_record')(case.action_id, runtime)
+            request, = port.calls
+            ticket = request.ticket
+            assert case.owned.connection.execute('SELECT status,result_event_id FROM operation_attempts WHERE run_id=?',
+                (ticket.run_id,)).fetchone() == (1, None)
+            case.fault.enabled = False
+            async with diagnostic_scope():
+                with pytest.raises(SavedCallBoundary):
+                    await capture_handler('camera_record')(case.action_id, await case.restart())
+        assert len(port.calls) == 1
+        saves = [(finish, key) for finish, key in case.saves if finish.ticket == ticket]
+        assert saves and all(value == saves[0] for value in saves)
     document, = _documents(records)
     assert document['error']['details'] == {'operation': operation}
-    assert document['ticket']['run_id'] == 9
+    assert document['ticket']['run_id'] == ticket.run_id
     assert document['outcome']['diagnostics']['calls'][0]['stderr']['hex'] == b'camera error\xff\n'.hex()
-    assert not runtime.pending_start_results
 
 
 @pytest.mark.parametrize('wrapper', ['ordinary', 'results', 'start_close', 'binding'])
-async def test_failed_capture_is_logged_when_combined_database_save_completes(wrapper, monkeypatch):
-    failure = RecordingFailure('capture_failed', {'activity_id': '71', 'reason': 'no_outputs'})
-    command = FinishCapture(21, (), OutputCatalogFacts(21, True), 100, failure)
-    if wrapper == 'results':
-        command = FinishRecordingResults(command, 9)
-    elif wrapper == 'start_close':
-        command = StartCloseRequest(StaleRunFinish(('start/21',), RunOutcome.FAILED, 100,
-            ErrorValue('device_error', 'device')), command)
-    elif wrapper == 'binding':
-        monkeypatch.setattr('camctl.persistence.repositories.capture.validate_error_details', lambda code, details: None)
-        command = FinishBindingFailure(21, 100,
-            RecordingFailure('device_binding_unavailable', {
-                'device_id': 'cam-1', 'expected_driver_id': 'driver-1', 'reason': 'missing'}))
-    pending = PendingCaptureCompletion(new_operation_key(), command)
-    database = create_autospec(BusinessDatabase, instance=True)
-    database.read.return_value = None
-    database.write.return_value = DbOutcome(DbOutcomeKind.COMPLETED, CaptureResult(4, 2, ()))
+async def test_failed_capture_is_logged_when_combined_database_save_completes(
+        tmp_path, result_case, monkeypatch, wrapper):
+    from camctl.capture.handlers import capture_handler
     records = []
-    with error_diagnostics_context(None, records.append):
-        async with diagnostic_scope():
-            await resume_capture_completions(database, pending_capture_completions={21: pending},
-                capture=create_autospec(CaptureRepository, instance=True))
+    if wrapper == 'start_close':
+        from dataclasses import replace
+        from ..bootstrap.test_binding_transactions import _CommitFailure
+        from ..support.close_cases import start_case
+        requests = []
+        with error_diagnostics_context(None, records.append):
+            async with diagnostic_scope():
+                world = await start_case(tmp_path, 'lowered')
+            try:
+                actual = CaptureRepository.close_start
+                def close_start(repository, finish, action, key, owned):
+                    requests.append((finish, action, key))
+                    if len(requests) == 1:
+                        owned = replace(owned, connection=_CommitFailure(owned.connection, True))
+                    return actual(repository, finish, action, key, owned)
+                monkeypatch.setattr(CaptureRepository, 'close_start', close_start)
+                async with diagnostic_scope():
+                    with pytest.raises(ConsistencyError):
+                        await world.advance()
+                async with diagnostic_scope():
+                    await world.advance()
+                aid, owned = world.action_id, world.owned
+                assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (aid,)).fetchone() == (4,)
+                assert requests == [requests[0], requests[0]]
+                assert len(world.driver.calls) == 1
+                assert owned.connection.execute('SELECT result_event_id IS NOT NULL FROM operation_attempts').fetchone() == (1,)
+                assert owned.connection.execute('SELECT COUNT(*) FROM history_transactions WHERE operation_key=?',
+                    (str(requests[0][2]),)).fetchone() == (1,)
+            finally:
+                await world.close()
+        call, document = _documents(records)
+        assert call['error']['code'] == 'device_busy'
+        assert call['ticket']['run_id'] == world.driver.calls[0].ticket.run_id
+        assert document['error']['code'] == 'start_attempts_exhausted'
+        assert document['context']['action_id'] == aid
+        return
+    else:
+        case = result_case
+        owned, runtime, aid, handler = await case.world(tmp_path, 'photo' if wrapper == 'ordinary' else 'record')
+        try:
+            if wrapper == 'binding':
+                runtime = await case.reopen(owned, cold=True, assembly_options={'devices': {}})
+            with error_diagnostics_context(None, records.append):
+                async with diagnostic_scope():
+                    await capture_handler(handler)(aid, runtime)
+            assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (aid,)).fetchone() == (4,)
+        finally:
+            owned.connection.close()
     document, = _documents(records)
-    assert document['context']['action_id'] == 21
-    assert document['error']['code'] == ('device_binding_unavailable' if wrapper == 'binding' else 'capture_failed')
+    assert document['context']['action_id'] == aid
+    assert document['error']['code'] == {'binding': 'device_binding_unavailable',
+        'start_close': 'start_attempts_exhausted'}.get(wrapper, 'capture_failed')
 
 
 @pytest.mark.parametrize('kind', ['check', 'repair', 'issues'])
-async def test_media_error_is_logged_when_original_request_is_retried(kind):
+async def test_media_error_is_logged_when_original_request_is_retried(pipeline, capture_resources, monkeypatch, kind):
+    from dataclasses import replace
+    from .test_capture_contract import _NOW
+    from ..support.capture_diagnostic_cases import media_saves
+    from ..bootstrap.test_binding_transactions import _CommitFailure
     error = ProcessingError('probe_unconfirmed', 'probe', {'reason': 'duration unavailable'})
-    command = (RepairResultSave(3, RepairOutcome.FAILED, 100, error=error) if kind == 'repair'
-        else CheckResultSave(3, MediaObservation(CheckPhase.COMPLETED, duration_s=1, issues=(error,))
-             if kind == 'issues' else MediaObservation(CheckPhase.UNCONFIRMED, error=error), 100))
-    database = create_autospec(BusinessDatabase, instance=True)
-    database.read.return_value = (21,)
-    database.write.side_effect = (DbOutcome(DbOutcomeKind.UNKNOWN), DbOutcome(DbOutcomeKind.COMPLETED))
-    saves = CaptureProcessingSaves(database)
-    save = saves.save_repair_result if kind == 'repair' else saves.save_check_result
+    command = (RepairResultSave(1, RepairOutcome.FAILED, _NOW, error=error) if kind == 'repair'
+        else CheckResultSave(1, MediaObservation(CheckPhase.COMPLETED, duration_s=1, issues=(error,))
+             if kind == 'issues' else MediaObservation(CheckPhase.UNCONFIRMED, error=error), _NOW))
+    saves = await media_saves(pipeline, capture_resources, repair=kind == 'repair')
+    method = 'save_repair_result' if kind == 'repair' else 'save_check_result'
+    actual = getattr(CaptureRepository, method)
+    requests = []
+    def save(repository, request, key, owned):
+        requests.append((request, key))
+        if len(requests) == 1:
+            owned = replace(owned, connection=_CommitFailure(owned.connection, True))
+        return actual(repository, request, key, owned)
+    monkeypatch.setattr(CaptureRepository, method, save)
+    records = []
+    try:
+        with error_diagnostics_context(None, records.append):
+            async with diagnostic_scope():
+                first = await getattr(saves, method)(command)
+            assert first.disposition.value == 'unknown'
+            async with diagnostic_scope():
+                second = await getattr(saves, method)(command)
+            assert second.disposition.value == 'saved'
+        document, = _documents(records)
+        assert document['error']['code'] == 'probe_unconfirmed'
+        assert document['context']['processing_id'] == 1
+        assert document['context']['action_id'] == 1
+        assert requests == [requests[0], requests[0]]
+        assert pipeline[0].connection.execute('SELECT COUNT(*) FROM history_transactions WHERE operation_key=?',
+            (str(requests[0][1]),)).fetchone() == (1,)
+    finally:
+        pipeline[0].connection.close()
+
+
+async def test_preparation_original_failed_finish_logs_even_after_database_success(tmp_path, diagnostic_case):
+    from ..support.capture_diagnostic_cases import preparation_flow
+    case = diagnostic_case
+    preparation, flow, context = await preparation_flow(case, tmp_path)
     records = []
     with error_diagnostics_context(None, records.append):
         async with diagnostic_scope():
-            await save(command)
-        async with diagnostic_scope():
-            await save(command)
-    document, = _documents(records)
-    assert document['error']['code'] == 'probe_unconfirmed'
-    assert document['context']['processing_id'] == 3
-    assert document['context']['action_id'] == 21
-    assert not saves.pending
-
-
-async def test_preparation_original_failed_finish_logs_even_after_database_success():
-    ticket = AttemptTicket(1, 'control', '71', 'prepare/71/' + 'a' * 32, 9)
-    outcome = _outcome('prepare')
-    validated = ValidatedOutcome(outcome, EvidenceContract('returned', 1, 'control', frozenset()), (), ticket)
-    owner = PendingPreparation(21, 71, 'a' * 32, None, None, None, ticket=ticket,
-        finish=AttemptFinish(ticket, validated, 100, run_finish=RunFinish(RunOutcome.FAILED, outcome.error)))
-    database = create_autospec(BusinessDatabase, instance=True)
-    database.write.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
-    records = []
-    with error_diagnostics_context(None, records.append):
-        async with diagnostic_scope():
-            await _save_owner(owner, database, create_autospec(OperationRepository, instance=True))
+            await flow(context)
+            await flow.settle()
     document, = _documents(records)
     assert document['error']['details']['operation'] == 'prepare'
-    assert document['context']['action_id'] == 21
-    assert owner.saved
+    assert document['context']['action_id'] == case.action_id
+    assert len(preparation.calls) == 1 and case.control.calls == []
+    assert case.owned.connection.execute('SELECT t.status,t.result_event_id IS NOT NULL FROM operation_attempts t JOIN operation_runs r ON r.id=t.run_id WHERE r.kind=?', (int(enum_for('operation_runs.kind').PREPARE_CAPTURE),)).fetchone() == (3, 1)
 
 
-async def test_normal_not_dispatched_control_does_not_log_error(mocker):
-    runtime, _, _, _ = _runtime(mocker)
-    ticket = AttemptTicket(1, 'control', '71', 'start/21', 9)
+async def test_normal_not_dispatched_control_does_not_log_error(tmp_path, diagnostic_case):
+    from camctl.capture.handlers import capture_handler
+    case = diagnostic_case
     outcome = CallOutcome(status=AttemptStatus.FAILED, effect=EffectState.NO_EFFECT,
-        error=ErrorValue('canceled', 'dispatch'), settlement=Settlement(
+        error=ErrorValue('canceled', 'dispatch', {}), settlement=Settlement(
             SettlementBasis.NOT_DISPATCHED, EvidenceValue('dispatch_prevented', 1)))
-    validated = ValidatedOutcome(outcome, EvidenceContract('dispatch_prevented', 1, 'control', frozenset()), (), ticket)
-    pending = PendingCallResult(new_operation_key(), AttemptFinish(ticket, validated, 100), None,
-        canceled_unstarted=True)
-    identity = (9, 1)
-    runtime.pending_start_results[identity] = pending
-    mocker.patch.object(runtime, '_write_call_result', autospec=True, return_value=DbOutcome(DbOutcomeKind.COMPLETED))
+    runtime = await call_world(case, tmp_path, control=outcome)
+    case.boundary = 'control'
     records = []
     with error_diagnostics_context(None, records.append):
         async with diagnostic_scope():
-            await runtime._save_call_result(identity, pending)
-    assert not records
+            with pytest.raises(SavedCallBoundary):
+                await capture_handler('camera_record')(case.action_id, runtime)
+    assert records == []
+    assert len(case.control.calls) == 1
+    assert case.owned.connection.execute('SELECT status,result_event_id IS NOT NULL FROM operation_attempts').fetchone() == (3, 1)
 
 
 async def test_dispatch_keeps_all_handled_errors_and_continues_next_action(monkeypatch):
@@ -180,174 +263,251 @@ async def test_dispatch_keeps_all_handled_errors_and_continues_next_action(monke
     assert [document['context']['action_id'] for document in documents] == [1, 2]
 
 
-async def test_baseline_freezes_full_actual_error_before_return_model_discards_tool_outcome():
-    from decimal import Decimal
-    from camctl.capture.baseline_models import BaselineReadIntent, BaselineRef, BaselineState
-    from camctl.capture.baseline_reads import PendingBaselineRead, _read_and_freeze
-    from camctl.devices.bindings import DeviceBinding
-    from camctl.devices.directory import DirectoryRead, DirectoryReader
+async def test_baseline_freezes_full_actual_error_before_return_model_discards_tool_outcome(
+        database, tmp_path, baseline_case):
+    from camctl.devices.directory import DirectoryRead
     from camctl.operations.process import RawToolOutcome
-    intent = BaselineReadIntent(21, 71, DeviceBinding('cam-1', 'driver-1'), ('/DCIM',), None,
-        Decimal(3), BaselineRef(71, BaselineState.COLLECTING, None, None, 0, 0), 1,
-        new_operation_key(), new_operation_key(), 100)
-    owner = PendingBaselineRead(intent, intent_view=SimpleNamespace(call_id=11))
-    directory = create_autospec(DirectoryReader, instance=True)
+    from .test_baseline_read_owner import ObserveRead
+    from ..support.baseline_cases import BaselineReadBoundary, baseline_read_world, baseline_handler
     actual = RawToolOutcome(None, b'file metadata', 'timeout', None, stderr=b'directory\xff')
-    directory.read_directory.return_value = DirectoryRead(actual,
-        ErrorValue('device_error', 'directory', {'path': '/DCIM'}), None)
-    records = []
-    with error_diagnostics_context(None, records.append):
-        async with diagnostic_scope():
-            await _read_and_freeze(owner, directory, lambda: 101)
-    document, = _documents(records)
-    assert document['details']['tool_outcome']['stderr']['hex'] == b'directory\xff'.hex()
-    assert document['details']['stdout_hex'] == b'file metadata'.hex()
-    assert document['context']['read_no'] == 1
-    assert owner.return_request.returned.outcome is None
+    class Directory:
+        calls = 0
+        async def read_directory(self, request, *, stop):
+            self.calls += 1
+            return DirectoryRead(actual, ErrorValue('device_error', 'directory', {'path': '/DCIM'}), None)
+    directory, repository, records = Directory(), ObserveRead(), []
+    owned, runtime, activity = await baseline_read_world(database, tmp_path, directory, repository=repository)
+    try:
+        with error_diagnostics_context(None, records.append):
+            async with diagnostic_scope():
+                with pytest.raises(BaselineReadBoundary):
+                    await baseline_handler(runtime)
+        document, = _documents(records)
+        assert document['details']['tool_outcome']['stderr']['hex'] == b'directory\xff'.hex()
+        assert document['details']['stdout_hex'] == b'file metadata'.hex()
+        assert document['context']['read_no'] == 1
+        request, _key = repository.returns[0]
+        assert request.returned.outcome is None and directory.calls == 1
+        assert owned.connection.execute('SELECT result_event_id IS NOT NULL FROM baseline_read_calls').fetchone() == (1,)
+    finally:
+        owned.connection.close()
 
 
-async def test_failed_result_page_and_final_attempt_share_one_diagnostic(mocker):
+async def test_failed_result_page_and_final_attempt_share_one_diagnostic(tmp_path, result_case):
+    from camctl.capture.handlers import capture_handler
+    from ..support.result_cases import saved_result_pages
+    case = result_case
+    from dataclasses import replace
+    from .result_consumer_fixtures import RESULT_EVIDENCE
     from decimal import Decimal
-    from camctl.capture.result_scans import PendingResultScan, advance_result_scan
-    from camctl.capture.result_pages import ResultPageRef
-    from unit.capture.test_result_scan import _runtime as scan_runtime, _page
-    from unit.capture.test_result_pages import _TICKET
-    scan_world = scan_runtime()
-    scan_world.capture.save_result_page.return_value = DbOutcome(DbOutcomeKind.COMPLETED,
-        ResultPageRef(_TICKET, 1, 10, None))
-    page = _page(error=ErrorValue('device_error', 'results', {'reason': 'directory unavailable'}))
-    scan_world.results.list_page.return_value = page
-    scan = PendingResultScan(_TICKET, None, Decimal(3))
-    runtime, _, _, _ = _runtime(mocker)
-    identity = (_TICKET.run_id, _TICKET.attempt_id)
-    runtime.pending_result_scans[identity] = scan
-    mocker.patch.object(runtime, '_write_call_result', autospec=True,
-        return_value=DbOutcome(DbOutcomeKind.COMPLETED))
+    from camctl.operations.attempts import AttemptConfig
+    owned, runtime, aid, handler = await case.world(tmp_path, 'photo',
+        assembly_options={'check_config': AttemptConfig(3, Decimal(3), Decimal(2))}, evidence_contracts=(
+        replace(RESULT_EVIDENCE.contract('results_returned', 1), max_diagnostic_calls=1),))
+    error = ErrorValue('device_error', 'results', {'reason': 'directory unavailable'})
+    from camctl.capture.result_inputs import ResultPage
+    outcome = actual_call('result', SimpleNamespace(target_id='1'), error=error)
+    case.results.delegate = SimpleNamespace(list_page=AsyncMock(return_value=ResultPage((), None, None, False, None, outcome, False)))
     records = []
-    with error_diagnostics_context(None, records.append):
-        async with diagnostic_scope():
-            assert await advance_result_scan(scan, runtime=scan_world)
-            pending = PendingCallResult(new_operation_key(), AttemptFinish(_TICKET, scan.last_outcome, 100), None)
-            runtime.pending_start_results[identity] = pending
-            await runtime._save_call_result(identity, pending)
-    document, = _documents(records)
-    assert document['context']['page_no'] == 1
-    assert document['error']['details'] == {'reason': 'directory unavailable'}
-    assert scan.reading_context.closed
+    try:
+        with error_diagnostics_context(None, records.append):
+            async with diagnostic_scope():
+                await capture_handler(handler)(aid, runtime)
+        document, = _documents(records)
+        assert document['context']['page_no'] == 1
+        assert document['error']['details'] == {'reason': 'directory unavailable'}
+        assert case.results.delegate.list_page.await_count == 1
+        assert len(saved_result_pages(owned, aid)) == 1
+        assert owned.connection.execute("SELECT result_event_id IS NOT NULL FROM operation_attempts WHERE run_id=(SELECT id FROM operation_runs WHERE action_id=? AND kind=7)", (aid,)).fetchone() == (1,)
+    finally:
+        owned.connection.close()
 
 
 @pytest.mark.parametrize('kind', ['exception', 'tool', 'invalid', 'probe'])
-async def test_handled_segment_probe_errors_keep_actual_diagnostic_when_save_is_unknown(monkeypatch, kind):
-    from decimal import Decimal
-    from pathlib import Path
-    from camctl.capture import segment_inspections as module
-    from camctl.capture.input_copy import InputPhase, InputStep
-    from camctl.capture.media_flow import MediaFlow
-    from camctl.contracts.video_coverage import CoverageMetric, CoverageTarget
-    from camctl.host_files.media import MediaProbe
-    from camctl.host_files.models import FilePurpose, FileRef
-    from camctl.host_files.tasks import FileTaskId, FileTaskResult
+async def test_handled_segment_probe_errors_keep_actual_diagnostic_when_save_is_unknown(
+        pipeline, capture_resources, monkeypatch, kind):
+    from dataclasses import replace
+    from camctl.persistence.repositories.segment_inspections import SegmentInspectionRepository
+    from ..support.bootstrap_read_cases import inspection_case
+    from ..support.capture_diagnostic_cases import segment_probe_port
+    from ..bootstrap.test_binding_transactions import _CommitFailure
+    calls = segment_probe_port(monkeypatch, kind)
+    world = await inspection_case(pipeline, capture_resources)
     from camctl.outputs.qualification import OperationConfig
-    from camctl.persistence.repositories.segment_inspections import SegmentInspectionRef
-    target = CoverageTarget(CoverageMetric.DURATION_S, 60)
-    config = OperationConfig(3, Decimal(3), Decimal(0))
-    request = module.SegmentInspectionRequest(21, 4, target, config, 100)
-    ref = SegmentInspectionRef(3, 21, 2, 4, 11, 1,
-        {'metric': 'duration_s', 'value': 60},
-        {'max_attempts': 3, 'timeout_s': Decimal(3), 'retry_interval_s': Decimal(0)})
-    flow = create_autospec(MediaFlow, instance=True)
-    flow.database = create_autospec(BusinessDatabase, instance=True)
-    flow.database.write.side_effect = [DbOutcome(DbOutcomeKind.COMPLETED, ref), DbOutcome(DbOutcomeKind.UNKNOWN)]
-    flow.database.read.side_effect = [SimpleNamespace(copy=None), ref, ref, (2, 0), (11, 'a.mp4'), ref]
-    flow.pending_segment_inspection_results = {}
-    flow.pending_read_results = {}
-    flow.occurred_at = lambda: 101
-    probe = AsyncMock()
-    failure = ValueError('invalid probe response')
-    failure.__cause__ = RuntimeError('original tool failure')
-    if kind == 'exception':
-        probe.side_effect = failure
-    else:
-        probe.return_value = (FileTaskResult(FileTaskId('probe'), True, error='tool failed') if kind == 'tool'
-            else FileTaskResult(FileTaskId('probe'), True, value=None) if kind == 'invalid'
-            else FileTaskResult(FileTaskId('probe'), True, value=MediaProbe(None, 'invalid_structure: wrong streams')))
-    flow.tools = SimpleNamespace(probe_segment=probe)
-    monkeypatch.setattr(module, 'retry_read_business', AsyncMock())
-    monkeypatch.setattr(module, 'retry_read_ends', AsyncMock())
-    monkeypatch.setattr(module, '_obtain_input', AsyncMock(return_value=InputStep(InputPhase.INPUT_READY,
-        copy_id=5, input_file=FileRef(6, FilePurpose.RECORDING_INPUT, 'input.mp4', Path('/staging')))))
+    from decimal import Decimal
+    world.request = replace(world.request, budget=OperationConfig(3, Decimal(3), Decimal(0)))
+    actual, requests = SegmentInspectionRepository.save_result, []
+    def save(repository, request, key, current):
+        requests.append((request, key))
+        if len(requests) == 1:
+            current = replace(current, connection=_CommitFailure(current.connection, True))
+        return actual(repository, request, key, current)
+    monkeypatch.setattr(SegmentInspectionRepository, 'save_result', save)
     records = []
-    with error_diagnostics_context(None, records.append):
-        async with diagnostic_scope():
-            result = await module.inspect_segment(flow, request)
-    document, = _documents(records)
-    assert result.reason == 'result_save_unknown'
-    assert document['context']['action_id'] == 21
-    assert document['context']['inspection_id'] == 3
-    if kind == 'exception':
-        assert document['error']['message'] == 'invalid probe response'
-        assert document['error']['cause']['message'] == 'original tool failure'
+    try:
+        with error_diagnostics_context(None, records.append):
+            async with diagnostic_scope():
+                result = await world.inspect()
+            assert result.reason == 'result_save_unknown'
+            async with diagnostic_scope():
+                saved = await world.inspect()
+        documents = _documents(records)
+        assert len(documents) == 2
+        probe, = [doc for doc in documents if doc['stage'] == 'capture.segment_probe']
+        storage, = [doc for doc in documents if doc['stage'] == 'capture.segment_save']
+        assert probe['context']['action_id'] == 1
+        assert probe['context']['inspection_id'] == result.inspection_id
+        assert storage['context']['inspection_id'] == result.inspection_id
+        assert len(calls) == 1 and len(world.reader.requests) == 1
+        world.held_ticket()
+        assert requests == [requests[0], requests[0]]
+        assert saved.reason != 'result_save_unknown'
+        if kind == 'exception':
+            assert probe['error']['message'] == 'invalid probe response'
+            assert probe['error']['cause']['message'] == 'original tool failure'
+    finally:
+        await world.close()
+        pipeline[0].connection.close()
 
 
 @pytest.mark.parametrize('later_failed', [False, True])
-async def test_tolerated_action6_setting_error_is_logged_with_the_outer_result(later_failed):
+async def test_tolerated_action6_setting_error_is_logged_with_the_outer_result(
+        tmp_path, capture_resources, monkeypatch, later_failed):
+    from datetime import datetime, timezone
     from decimal import Decimal
-    from camctl.logging_runtime.diagnostics import record_call_outcome
+    from dataclasses import replace
+    from camctl.acceptance.input import ParsedInput
+    from camctl.acceptance.ports import ParameterDefinition
+    from camctl.acceptance.service import AcceptanceContext, CommandMode, accept_input
+    from camctl.capture.handlers import capture_handler
+    from camctl.devices.drivers.adb_cameras.action6_record import action6_record_contract
+    from camctl.devices.tasks import CaptureTask
+    from camctl.operations.attempts import AttemptConfig
     from camctl.operations.process import LocalExit, RawToolOutcome
-    from unit.devices.test_adb_camera_driver import (
-        Action6ContractTransport, _action6_contract_driver, _request,
-    )
+    from camctl.persistence.repositories.acceptance import AcceptanceRepository
+    from camctl.persistence.repositories.scheduling import SchedulingRepository, ObserveWindowRequest, StartActionRequest
+    from ..bootstrap.test_recording_stop import _RecordCatalog
+    from ..support.capture import capture_assembly
+    from ..support.database import create_test_database
+    from .test_capture_contract import _NOW, ResultsDouble
+    from unit.devices.test_adb_camera_driver import Action6ContractTransport, _action6_contract_driver, _params
+    from camctl.devices.drivers.adb_cameras.commands import CameraModel
+
+    class Catalog(_RecordCatalog):
+        def driver_id(self, device_id):
+            return 'dji-action6'
+        def parameter_definition(self, device_id, action_type, parameter_type):
+            if parameter_type != 'action6_record':
+                return None
+            return ParameterDefinition(schema={'$schema': 'https://json-schema.org/draft/2020-12/schema', 'type': 'object', 'properties': {key: {'const': value} for key, value in _params(CameraModel.ACTION6).items()}, 'required': list(_params(CameraModel.ACTION6)), 'additionalProperties': False}, defaults={}, task_factory=lambda params:
+                CaptureTask('camera_record', target_duration_s=Decimal(10), stop_supported=True))
+
+    path = tmp_path / 'state.db'
+    create_test_database(path)
+    from camctl.persistence.runtime import open_existing, DbOpenMode, DbConfig
+    owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
+    database = await capture_resources.database(owned)
+    instant = datetime.fromtimestamp(_NOW // 1_000_000, timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    accepted = await accept_input(ParsedInput('action6.json', {'request_id': '1', 'created_at': instant,
+        'name': '录像', 'actions': [{'name': '录像', 'type': 'camera_record', 'device_id': 'cam-1',
+        'scheduled_at': instant, 'params': _params(CameraModel.ACTION6), 'policy': {'max_delay_ms': 60000}}]}),
+        AcceptanceContext(CommandMode.RUN, Catalog(), AcceptanceRepository(),
+            clock=SimpleNamespace(utc_micros=lambda: _NOW)), new_operation_key(), database)
+    assert accepted.plan_id is not None, accepted
+    scheduling = SchedulingRepository()
+    for save, request in ((scheduling.observe_window, ObserveWindowRequest(1, _NOW, _NOW)),
+                          (scheduling.start_action, StartActionRequest(1, _NOW, _NOW))):
+        receipt = save(request, new_operation_key(), owned)
+        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
     bitrate = ('simulate_device', '-s', 'bitrate', '2')
     transport = Action6ContractTransport(aperture_payload='e3', overrides={
         bitrate: RawToolOutcome(LocalExit(exit_code=9), b'bitrate failed', None, None, stderr=b'bitrate stderr')
     } if later_failed else None)
+    driver = _action6_contract_driver(transport)
+    factory = capture_assembly(driver=driver, stopper=driver, results=ResultsDouble({}), evidence=action6_record_contract().evidence,
+        driver_id='dji-action6', staging=tmp_path / 'staging', wall_us=lambda: _NOW,
+        monotonic_ns=lambda: 0, start_config=AttemptConfig(3, Decimal(20), Decimal(1)))
+    actual = CaptureRepository.finish_start_result
+    def finish(repository, *args, **kwargs):
+        receipt = actual(repository, *args, **kwargs)
+        return replace(receipt, handoff_error=SavedCallBoundary()) if receipt.kind is DbOutcomeKind.COMPLETED else receipt
+    monkeypatch.setattr(CaptureRepository, 'finish_start_result', finish)
     records = []
-    with error_diagnostics_context(None, records.append):
-        async with diagnostic_scope():
-            result = await _action6_contract_driver(transport).control(_request())
-            record_call_outcome(result.outcome, ticket=_request().ticket)
-    document, = _documents(records)
-    outcome = document.get('outcome') or document['details']['outcome']
-    calls = outcome['settlement']['evidence']['data']['calls']
-    assert any(call['error'] is not None and call['error']['details'].get('response_payload') == 'e3'
-        for call in calls)
-    if later_failed:
-        assert document['error']['details']['reason'] == 'exit_nonzero'
+    try:
+        runtime = await factory(database, 'cam-1')
+        with error_diagnostics_context(None, records.append):
+            async with diagnostic_scope():
+                with pytest.raises(SavedCallBoundary):
+                    await capture_handler('camera_record')(1, runtime)
+        document, = _documents(records)
+        outcome = document.get('outcome') or document['details']['outcome']
+        calls = outcome['settlement']['evidence']['data']['calls']
+        assert any(call['error'] is not None and call['error']['details'].get('response_payload') == 'e3'
+            for call in calls)
+        if later_failed:
+            assert document['error']['details']['reason'] == 'exit_nonzero'
+        assert transport.aperture_seen
+        assert owned.connection.execute('SELECT result_event_id IS NOT NULL FROM operation_attempts').fetchone() == (1,)
+    finally:
+        owned.connection.close()
 
 
-async def test_capture_completion_preserves_all_database_errors_for_fatal_diagnostic():
-    from camctl.persistence.repositories.capture import FinishCanceledCapture
-    pending = PendingCaptureCompletion(new_operation_key(), FinishCanceledCapture(21, 100))
-    primary = OSError('database failed')
+async def test_capture_completion_preserves_all_database_errors_for_fatal_diagnostic(
+        tmp_path, capture_resources, result_case, monkeypatch):
+    from camctl.capture.handlers import capture_handler
+    from ..support.capture_diagnostic_cases import ActualStorageFault, diagnostic_database
+    from ..support.database import database_path
+    case = result_case
+    owned, runtime, aid, handler = await case.world(tmp_path, 'photo')
     secondary = RuntimeError('observer failed')
-    database = create_autospec(BusinessDatabase, instance=True)
-    database.write.return_value = DbOutcome(DbOutcomeKind.UNKNOWN, error=primary,
-        secondary_errors=(secondary,))
-    with pytest.raises(ConsistencyError) as raised:
-        await resume_capture_completions(database, pending_capture_completions={21: pending},
-            capture=create_autospec(CaptureRepository, instance=True))
-    assert isinstance(raised.value.__cause__, BaseExceptionGroup)
-    assert raised.value.__cause__.exceptions == (primary, secondary)
+    fault = ActualStorageFault(secondary=secondary)
+    actual = CaptureRepository.finish_capture
+    def save(repository, request, key, current):
+        fault.armed = True
+        return actual(repository, request, key, current)
+    monkeypatch.setattr(CaptureRepository, 'finish_capture', save)
+    await capture_resources.close()
+    try:
+        async with diagnostic_database(database_path(owned), fault) as database:
+            runtime = await case.factory(database, 'cam-1')
+            with pytest.raises(ConsistencyError) as raised:
+                await capture_handler(handler)(aid, runtime)
+            assert isinstance(raised.value.__cause__, BaseExceptionGroup)
+            assert raised.value.__cause__.exceptions == (fault.primary, secondary)
+            assert fault.commits == fault.failed_closes == 1
+            assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (aid,)).fetchone() == (2,)
+    finally:
+        owned.connection.close()
 
 
 @pytest.mark.parametrize('operation', ['probe', 'repair'])
 @pytest.mark.parametrize('ran', [True, False])
-async def test_uncompleted_media_tool_logs_actual_failure_and_keeps_cancel_control(operation, ran):
-    from camctl.capture.media import execute_check, execute_repair
-    from camctl.host_files.tasks import FileTaskId, FileTaskResult
-    from unit.capture.test_media_execution import (
-        _Saves, _Tools, _status, _check_context, _repair_context, _saved, _REGISTERED_OUTPUT,
-    )
-    result = FileTaskResult(FileTaskId(operation), ran,
-        error='file_conflict: resource occupied' if ran else None)
-    tools = _Tools(result if operation == 'probe' else None, result if operation == 'repair' else None)
-    saves = _Saves({'start_repair_output': _saved(_REGISTERED_OUTPUT)})
+async def test_uncompleted_media_tool_logs_actual_failure_and_keeps_cancel_control(
+        media_pipeline, media_cases, monkeypatch, operation, ran):
+    pipeline = media_pipeline
+    from decimal import Decimal
+    from camctl.bootstrap import capture_assembly
+    from camctl.capture.media_flow import run_recording_media
+    from camctl.host_files.media import MediaProbe, MediaStream
+    from camctl.host_files.tasks import FileTaskResult
+    from ..support.capture_media_cases import ScriptTools, assembled_media, diagnostic_media_ports
+    successful = MediaProbe(Decimal(200), None, (
+        MediaStream(0, 'video', 'h264', 64, 64, Decimal(200), False),))
+    diagnostic_media_ports(monkeypatch, successful_probe=successful)
+    calls = []
+    async def uncompleted(*args, task_id, **kwargs):
+        calls.append(task_id)
+        return FileTaskResult(task_id, ran, error='file_conflict: resource occupied' if ran else None)
+    monkeypatch.setattr(capture_assembly, 'probe_media' if operation == 'probe' else 'repair_media', uncompleted)
+    flow = await assembled_media(pipeline, None, ScriptTools(successful))
     records = []
     with error_diagnostics_context(None, records.append):
         async with diagnostic_scope():
-            step = (await execute_check(_check_context(_status(), saves, tools)) if operation == 'probe'
-                else await execute_repair(_repair_context(_status(repair_state=3), saves, tools)))
+            step = await run_recording_media(flow, 1, 1, pipeline[2])
     assert step.error is not None
+    assert step.phase.value == ('probe_not_completed' if operation == 'probe' else 'tool_not_completed')
+    assert len(calls) == 1
+    assert flow.file_executor.unfinished_files() == ()
     if ran:
         document, = _documents(records)
         assert document['error']['message'] == 'file_conflict: resource occupied'
@@ -355,79 +515,83 @@ async def test_uncompleted_media_tool_logs_actual_failure_and_keeps_cancel_contr
         assert not records
 
 
-@pytest.mark.parametrize('kind', ['presence', 'completion'])
-async def test_file_observation_error_survives_successful_business_fact_save(kind):
-    from camctl.capture.files import FilePresenceSave, FileCompletionSave
-    from camctl.capture.handlers import FileFactStage
-    from unit.capture.test_file_fact_identity import _runtime_with_saved_ownership
-    runtime, _, _ = _runtime_with_saved_ownership()
-    runtime.database = create_autospec(BusinessDatabase, instance=True)
-    runtime.database.write.return_value = DbOutcome(DbOutcomeKind.COMPLETED, object())
-    error = {'code': 'device_error', 'stage': 'metadata', 'details': {'reason': 'unavailable'}}
-    command = FilePresenceSave(3, 2, 100, error=error) if kind == 'presence' else FileCompletionSave(3, 4, 100, error=error)
-    stage = FileFactStage.PRESENCE if kind == 'presence' else FileFactStage.COMPLETION
-    records = []
-    with error_diagnostics_context(None, records.append):
-        async with diagnostic_scope():
-            await runtime._save_file_fact((1, 'original'), stage, command)
-    document, = _documents(records)
-    assert document['error'] == error
-    assert document['context']['action_id'] == 1
-    assert document['context']['file_id'] == 3
-
-
-async def test_handled_segment_save_error_keeps_secondary_errors_in_public_diagnostic():
-    from camctl.capture.segment_inspections import _save_result
-    from camctl.persistence.repositories.segment_inspections import InspectionResultSave
+async def test_handled_segment_save_error_keeps_secondary_errors_in_public_diagnostic(
+        pipeline, capture_resources, monkeypatch):
+    from camctl.persistence.repositories.segment_inspections import SegmentInspectionRepository
+    from ..support.bootstrap_read_cases import inspection_case
+    from ..support.capture_diagnostic_cases import ActualStorageFault, diagnostic_database
+    from ..support.database import database_path
     secondary = OSError('database notification failed')
-    database = create_autospec(BusinessDatabase, instance=True)
-    database.write.return_value = DbOutcome(DbOutcomeKind.UNKNOWN, secondary_errors=(secondary,))
-    flow = SimpleNamespace(database=database, pending_segment_inspection_results={})
+    fault = ActualStorageFault(secondary=secondary)
+    world = await inspection_case(pipeline, capture_resources)
+    actual = SegmentInspectionRepository.save_result
+    def save(repository, request, key, current):
+        fault.armed = True
+        return actual(repository, request, key, current)
+    monkeypatch.setattr(SegmentInspectionRepository, 'save_result', save)
+    await capture_resources.close()
     records = []
-    with error_diagnostics_context(None, records.append):
-        async with diagnostic_scope():
-            assert not await _save_result(flow, InspectionResultSave(3, 2, {'probe': None}, 100))
-    document, = _documents(records)
-    assert document['context']['inspection_id'] == 3
-    assert document['error']['cause']['message'] == 'database notification failed'
+    try:
+        async with diagnostic_database(database_path(pipeline[0]), fault) as database:
+            world.database = database
+            await world.rebuild()
+            with error_diagnostics_context(None, records.append):
+                async with diagnostic_scope():
+                    result = await world.inspect()
+            assert result.reason == 'result_save_unknown'
+            document, = _documents(records)
+            assert document['context']['inspection_id'] == result.inspection_id
+            assert 'database notification failed' in json.dumps(document)
+            assert 'database failed' in json.dumps(document)
+            assert fault.commits == fault.failed_closes == 1
+            assert len(world.reader.requests) == 1
+            world.held_ticket()
+    finally:
+        await world.close()
+        pipeline[0].connection.close()
 
 
-async def test_invalid_call_diagnostic_preserves_original_outcome_before_fatal_handling(mocker):
+async def test_invalid_call_diagnostic_preserves_original_outcome_before_fatal_handling(tmp_path, diagnostic_case):
+    from camctl.capture.handlers import capture_handler
     from camctl.logging_runtime.diagnostics import record_error
-    runtime, _, ticket, _ = _runtime(mocker)
-    outcome = _outcome()
+    case = diagnostic_case
     def rejected(actual):
         raise ValueError('diagnostic rejected')
+    runtime = await call_world(case, tmp_path, diagnostics_check=rejected, control=lambda request:
+        actual_call('control', request.ticket, error=ErrorValue('device_error', 'device', {'operation': 'control'})))
     records = []
     with error_diagnostics_context(None, records.append):
         async with diagnostic_scope():
             with pytest.raises(ConsistencyError) as raised:
-                await runtime.finish(ticket, outcome, diagnostics_check=rejected)
+                await capture_handler('camera_record')(case.action_id, runtime)
             record_error(raised.value, stage='fatal')
     document, = _documents(records)
     assert document['details']['outcome']['diagnostics']['calls'][0]['stderr']['hex'] == b'camera error\xff\n'.hex()
-    assert document['context']['ticket']['run_id'] == ticket.run_id
+    request, = case.control.calls
+    assert document['context']['ticket']['run_id'] == request.ticket.run_id
+    assert case.owned.connection.execute('SELECT status,result_event_id FROM operation_attempts').fetchone() == (1, None)
 
 
-async def test_preparation_validation_error_keeps_original_tool_bytes_and_exception():
-    from camctl.devices.ports import DeviceCallResult
+async def test_preparation_validation_error_keeps_original_tool_bytes_and_exception(tmp_path, diagnostic_case):
     from camctl.logging_runtime.diagnostics import record_error
-    ticket = AttemptTicket(1, 'control', '71', 'prepare/71/' + 'a' * 32, 9)
+    from ..support.capture_diagnostic_cases import preparation_flow
     def rejected(actual):
         raise ValueError('preparation diagnostic rejected')
-    owner = PendingPreparation(21, 71, 'a' * 32, None, None, None,
-        ticket=ticket, actual=DeviceCallResult.from_outcome(_outcome('prepare'), diagnostics_check=rejected),
-        returned_at=100)
+    case = diagnostic_case
+    preparation, flow, context = await preparation_flow(case, tmp_path, diagnostics_check=rejected)
     records = []
     with error_diagnostics_context(None, records.append):
         async with diagnostic_scope():
             with pytest.raises(ValueError) as raised:
-                await _save_owner(owner, create_autospec(BusinessDatabase, instance=True),
-                    create_autospec(OperationRepository, instance=True))
+                await flow(context)
+                await flow.settle()
             record_error(raised.value, stage='fatal')
+        await flush_diagnostics()
     document, = _documents(records)
     assert document['error']['message'] == 'preparation diagnostic rejected'
     assert document['details']['outcome']['diagnostics']['calls'][0]['stderr']['hex'] == b'camera error\xff\n'.hex()
+    assert len(preparation.calls) == 1 and case.control.calls == []
+    assert case.owned.connection.execute('SELECT status,result_event_id FROM operation_attempts').fetchone() == (1, None)
 
 
 @pytest.mark.parametrize('code,stage,details,expected', [
@@ -438,57 +602,64 @@ async def test_preparation_validation_error_keeps_original_tool_bytes_and_except
     ('transport_cancelled', 'transport', {'signal_failures': [{'stage': 'terminate', 'message': 'denied'}]}, True),
     ('transport_cancelled', 'transport', {'output_failure': 'pipe close failed'}, True),
 ])
-async def test_call_control_classification_keeps_actual_timeout_and_cleanup_errors(mocker, code, stage, details, expected):
-    runtime, _, ticket, _ = _runtime(mocker)
+async def test_call_control_classification_keeps_actual_timeout_and_cleanup_errors(
+        tmp_path, diagnostic_case, code, stage, details, expected):
+    from camctl.capture.handlers import capture_handler
+    case = diagnostic_case
     actual = CallOutcome(status=AttemptStatus.FAILED, effect=EffectState.NO_EFFECT,
         error=ErrorValue(code, stage, details), settlement=Settlement(
             SettlementBasis.NOT_DISPATCHED, EvidenceValue('dispatch_prevented', 1)))
-    validated = ValidatedOutcome(actual, EvidenceContract('dispatch_prevented', 1, 'stop', frozenset()), (), ticket)
-    pending = PendingCallResult(new_operation_key(), AttemptFinish(ticket, validated, 100), None)
-    identity = (ticket.run_id, ticket.attempt_id)
-    runtime.pending_start_results[identity] = pending
-    mocker.patch.object(runtime, '_write_call_result', autospec=True, return_value=DbOutcome(DbOutcomeKind.COMPLETED))
+    runtime = await call_world(case, tmp_path, control=actual)
+    case.boundary = 'control'
     records = []
     with error_diagnostics_context(None, records.append):
         async with diagnostic_scope():
-            await runtime._save_call_result(identity, pending)
+            with pytest.raises(SavedCallBoundary):
+                await capture_handler('camera_record')(case.action_id, runtime)
     assert bool(records) is expected
+    assert len(case.control.calls) == 1
+    assert case.owned.connection.execute('SELECT status,result_event_id IS NOT NULL FROM operation_attempts').fetchone() == (3, 1)
 
 
-async def test_result_page_call_error_and_validation_error_have_independent_records():
-    from decimal import Decimal
-    from camctl.capture.result_inputs import ResultPage
-    from camctl.capture.result_scans import PendingResultScan, advance_result_scan
-    from camctl.devices.evidence import EvidenceRegistry
-    from camctl.logging_runtime.diagnostics import record_error
+async def test_result_page_call_error_and_validation_error_have_independent_records(tmp_path, result_case):
+    from dataclasses import replace
+    from camctl.capture.handlers import capture_handler
     from camctl.operations.tool_diagnostics import DiagnosticsValidationError
-    ticket = AttemptTicket(1, 'result', '71', 'results/71', 9)
-    outcome = CallOutcome(status=AttemptStatus.FAILED, effect=EffectState.UNKNOWN,
-        error=ErrorValue('device_error', 'result', {'reason': 'device-call-error'}),
-        settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue('returned', 1)),
+    from camctl.logging_runtime.diagnostics import record_error
+    from .result_consumer_fixtures import RESULT_EVIDENCE, result_driver
+    case = result_case
+    from decimal import Decimal
+    from camctl.operations.attempts import AttemptConfig
+    owned, runtime, aid, handler = await case.world(tmp_path, 'photo',
+        assembly_options={'check_config': AttemptConfig(3, Decimal(1), Decimal(2))}, evidence_contracts=(
+        replace(RESULT_EVIDENCE.contract('results_returned', 1), max_diagnostic_calls=1),))
+    outcome = replace(actual_call('result', SimpleNamespace(target_id='1'),
+        error=ErrorValue('device_error', 'result', {'reason': 'device-call-error'})),
         diagnostics=ToolDiagnostics(2, ()))
-    page = ResultPage((), None, None, False, None, outcome, False)
-    runtime = SimpleNamespace(results=SimpleNamespace(list_page=AsyncMock(return_value=page)),
-        wall_us=lambda: 100, monotonic_ns=lambda: 200,
-        evidence=EvidenceRegistry((EvidenceContract('returned', 1, 'result', frozenset(), max_diagnostic_calls=1),)))
-    pending = PendingResultScan(ticket, None, Decimal(1))
+    from camctl.capture.result_inputs import ResultPage
+    case.results.delegate = SimpleNamespace(list_page=AsyncMock(return_value=ResultPage((), None, None, False, None, outcome, False)))
     records = []
-    with error_diagnostics_context(None, records.append):
-        async with diagnostic_scope():
-            with pytest.raises(DiagnosticsValidationError) as raised:
-                await advance_result_scan(pending, runtime=runtime)
-            record_error(raised.value, stage='outer')
-        async with diagnostic_scope():
-            record_error(raised.value, stage='outer_replay')
-    documents = _documents(records)
-    assert len(documents) == 2
-    assert documents[0]['error']['details']['reason'] == 'device-call-error'
-    assert documents[1]['error']['type'].endswith('DiagnosticsValidationError')
-    assert documents[1]['error']['message']
+    try:
+        with error_diagnostics_context(None, records.append):
+            async with diagnostic_scope():
+                with pytest.raises(DiagnosticsValidationError) as raised:
+                    await capture_handler(handler)(aid, runtime)
+                record_error(raised.value, stage='outer')
+            async with diagnostic_scope():
+                record_error(raised.value, stage='outer_replay')
+        documents = _documents(records)
+        assert len(documents) == 2
+        assert documents[0]['error']['details']['reason'] == 'device-call-error'
+        assert documents[1]['error']['type'].endswith('DiagnosticsValidationError')
+        assert documents[1]['error']['message']
+        assert case.results.delegate.list_page.await_count == 1
+        assert owned.connection.execute("SELECT result_event_id FROM operation_attempts WHERE run_id=(SELECT id FROM operation_runs WHERE action_id=? AND kind=7)", (aid,)).fetchone() == (None,)
+    finally:
+        owned.connection.close()
 
 
 @pytest.mark.parametrize('stage', ['observation', 'checksum', 'synchronization'])
-async def test_media_stopping_retains_actual_file_error(stage):
+async def test_media_stopping_retains_actual_file_error(pipeline, capture_resources, stage):
     from pathlib import Path
     from camctl.host_files.io import HashResult, SyncResult, DirectorySyncStage
     from camctl.host_files.media import MediaArtifact, MediaToolResult
@@ -504,18 +675,23 @@ async def test_media_stopping_retains_actual_file_error(stage):
             if stage == 'synchronization' else None,
         postprocessing_stopped=stage == 'checksum',
         tool_diagnostics=MediaToolResult(stopped_before_start=True) if stage == 'observation' else None)
-    database = create_autospec(BusinessDatabase, instance=True)
-    database.read.return_value = (21,)
-    database.write.return_value = DbOutcome(DbOutcomeKind.COMPLETED)
+    from ..support.capture_diagnostic_cases import media_saves
+    from .test_capture_contract import _NOW
+    saves = await media_saves(pipeline, capture_resources, repair=True)
     records = []
-    with error_diagnostics_context(None, records.append):
-        async with diagnostic_scope():
-            await CaptureProcessingSaves(database).save_repair_result(RepairResultSave(
-                3, RepairOutcome.FAILED, 100, error=ProcessingError('tool_failed', 'repair', {}),
-                artifact=artifact))
-    document, = _documents(records)
-    encoded = json.dumps(document)
-    assert {'observation': 'original file fact', 'checksum': 'checksum close failed',
-        'synchronization': 'file sync failed'}[stage] in encoded
-    if stage == 'observation':
-        assert document['details']['artifact']['observation']['error']['errno'] == 5
+    try:
+        with error_diagnostics_context(None, records.append):
+            async with diagnostic_scope():
+                receipt = await saves.save_repair_result(RepairResultSave(
+                    1, RepairOutcome.FAILED, _NOW, error=ProcessingError('tool_failed', 'repair', {}),
+                    artifact=artifact))
+        assert receipt.disposition.value == 'saved'
+        document, = _documents(records)
+        encoded = json.dumps(document)
+        assert {'observation': 'original file fact', 'checksum': 'checksum close failed',
+            'synchronization': 'file sync failed'}[stage] in encoded
+        if stage == 'observation':
+            assert document['details']['artifact']['observation']['error']['errno'] == 5
+        assert pipeline[0].connection.execute('SELECT repair_state FROM recording_processing WHERE id=1').fetchone() == (6,)
+    finally:
+        pipeline[0].connection.close()
