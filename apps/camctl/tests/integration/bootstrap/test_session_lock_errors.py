@@ -1080,11 +1080,15 @@ async def test_body_success_keeps_first_worker_close_control(
     structured = []
     readable = []
     for note in notes:
-        start = note.find('{"type":')
-        if start < 0:
-            readable.append(note)
+        start = note.find("{")
+        try:
+            item = json.loads(note[start:]) if start >= 0 else None
+        except (ValueError, TypeError):
+            item = None
+        if isinstance(item, dict) and {"type", "message", "notes"} <= item.keys():
+            structured.append(item)
         else:
-            structured.append(json.loads(note[start:]))
+            readable.append(note)
     assert sum("original first worker close marker" in note for note in readable) == 1
     assert sum("later worker close marker" in note for note in readable) == 1
     secondary = first_control if ordinary_first else later_control
