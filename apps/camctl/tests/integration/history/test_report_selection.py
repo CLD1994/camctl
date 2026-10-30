@@ -13,6 +13,9 @@ from .test_report_scope import (
     _boundary, _finish_action, _submit, _submit_diagnostic, _to_wm, finished_photo,
 )
 from .test_restore_paths import two_item_world, _grant_item, owned
+from ..support.report_selection_corpus import (
+    submit_many as _submit_many, finish_many as _finish_many, populate_corpus, open_corpus, corpus_watermarks,
+)
 
 
 def _read(selection, entity, parent=None):
@@ -242,21 +245,6 @@ async def test_delivery_window_does_not_validate_unselected_source_reference_cha
         assert _read(selection, 'output', 1) == []
 
 
-def _submit_many(owned, count, request_id):
-    from camctl.acceptance.input import ParsedInput
-    from camctl.acceptance.service import CommandMode, PlanDisposition, ProcessInput
-    from camctl.contracts.values import new_operation_key
-    from camctl.persistence.models import DbOutcomeKind
-    from camctl.persistence.repositories.acceptance import AcceptanceRepository
-    from .test_report_scope import _Catalog, _plan_body, _past_schedule
-    body = _plan_body(str(request_id), _past_schedule())
-    prototype = body['actions'][0]
-    body['actions'] = [dict(prototype, name=f'shot-{index}') for index in range(count)]
-    result = AcceptanceRepository().process_input(
-        ProcessInput(ParsedInput('many.json', body), _Catalog(), CommandMode.RUN, 1),
-        new_operation_key(), owned)
-    assert result.kind is DbOutcomeKind.COMPLETED, result.error
-    assert result.value.plan_disposition is PlanDisposition.REGISTERED, result.value
 
 
 def _same_readonly_database(database, uri, path):
@@ -351,23 +339,96 @@ class _QueryProbe:
         monkeypatch.setattr(sqlite3, 'connect', connect)
 
 
+@pytest.fixture
+def report_selection_sample(tmp_path):
+    """每个消费者取得独立只读副本；关闭时核对来源和副本未改变。"""
+    import time
+    start = time.perf_counter()
+    with open_corpus(tmp_path) as sample:
+        print('CORPUS_SETUP', {'seconds': time.perf_counter() - start,
+                               'scope': '解压、摘要、完整性、元数据和边界核对'}, flush=True)
+        try:
+            yield sample
+        finally:
+            closing_started = time.perf_counter()
+    print('CORPUS_CLOSE', {'seconds': time.perf_counter() - closing_started,
+                           'scope': '关闭连接并重核来源和副本摘要'}, flush=True)
+
+
 @pytest.mark.asyncio
-async def test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window(finished_photo, monkeypatch):
-    import gc
+async def test_real_source_preparation_preserves_large_report_selection(finished_photo):
+    """真实受理与拍摄形成大窗口，并由历史公开入口独立核对。"""
+    import time
     owned, path = finished_photo
-    # 所有规模数据由真实受理事务生成，没有手填不对应事件的投影或目录。
-    _submit_many(owned, 3, 1)
-    early_sparse_wm = _to_wm(owned.connection)
-    await _finish_many(owned, 4)
-    output_window_end = _to_wm(owned.connection)
-    _submit_many(owned, 4200, 2)
-    early = _to_wm(owned.connection)
-    _submit_many(owned, 3, 3)
-    request = ReportScopeRequest(_boundary(owned.connection), 0, _to_wm(owned.connection), 17)
+    started = time.perf_counter()
+    early_sparse_wm, output_window_end, early = await populate_corpus(owned, path)
+    preparation = time.perf_counter() - started
+    verify_started = time.perf_counter()
+    assert owned.connection.execute('SELECT COUNT(*) FROM plans').fetchone() == (3,)
+    assert owned.connection.execute('SELECT plan_id,COUNT(*) FROM actions GROUP BY plan_id ORDER BY plan_id').fetchall() == [(1, 3), (2, 4200), (3, 3)]
+    assert owned.connection.execute('SELECT id,source_action_id FROM outputs ORDER BY id').fetchall() == [(1, 1), (2, 1), (3, 1), (4, 1)]
+    boundary = _boundary(owned.connection)
+    assert owned.connection.execute('SELECT MAX(id) FROM history_events').fetchone() == (boundary.last_event_id,)
+    assert corpus_watermarks(owned.connection) == (early_sparse_wm, output_window_end, early)
+    verification = time.perf_counter() - verify_started
     repository = HistoryRepository(path / 'state.db')
+    request = ReportScopeRequest(boundary, 0, _to_wm(owned.connection), 17)
+    target_started = time.perf_counter()
+    selection = repository.open_report_selection(request)
+    try:
+        plan_ids = _read(selection, 'plan')
+        first_actions = _read(selection, 'action', 1)
+        large_actions = _read(selection, 'action', 2)
+        last_actions = _read(selection, 'action', 3)
+        outputs = _read(selection, 'output', 1)
+        target = time.perf_counter() - target_started
+        verify_started = time.perf_counter()
+        assert plan_ids == [1, 2, 3]
+        assert first_actions == [1, 2, 3]
+        assert large_actions == list(range(4, 4204))
+        assert last_actions == [4204, 4205, 4206]
+        assert outputs == [1, 2, 3, 4]
+        assert 0 < early_sparse_wm < output_window_end < early < request.to_wm
+        verification += time.perf_counter() - verify_started
+    finally:
+        closing_started = time.perf_counter()
+        selection.close()
+        close = time.perf_counter() - closing_started
+    print('REAL_SOURCE_PHASE', {'preparation_s': preparation, 'reading_s': target,
+        'verification_s': verification, 'close_s': close,
+        'note': '准备含真实受理、调度、拍摄及其测试替身；fixture收场另计'}, flush=True)
+
+
+@pytest.mark.asyncio
+async def test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window(report_selection_sample, monkeypatch):
+    import gc
+    import time
+    from camctl.history.report_selection import ReportEntitySelection
+    elapsed = {'reading': 0.0, 'close': 0.0}
+    depth = [0]
+    def timed(original, phase):
+        def call(*args, **kwargs):
+            outer = depth[0] == 0
+            depth[0] += 1
+            started = time.perf_counter()
+            try:
+                return original(*args, **kwargs)
+            finally:
+                depth[0] -= 1
+                if outer:
+                    elapsed[phase] += time.perf_counter() - started
+        return call
+    monkeypatch.setattr(HistoryRepository, 'open_report_selection', timed(HistoryRepository.open_report_selection, 'reading'))
+    monkeypatch.setattr(ReportEntitySelection, 'read_page', timed(ReportEntitySelection.read_page, 'reading'))
+    monkeypatch.setattr(ReportEntitySelection, '__exit__', timed(ReportEntitySelection.__exit__, 'close'))
+    started = time.perf_counter()
+    connection, state, watermarks = report_selection_sample
+    early_sparse_wm, output_window_end, early = watermarks
+    request = ReportScopeRequest(_boundary(connection), 0, _to_wm(connection), 17)
+    repository = HistoryRepository(state)
     # 前一计划的产物 4 与后一计划的动作 4 共用整数编号；此窗口只包含前一计划的变化。
-    assert owned.connection.execute('SELECT source_action_id FROM outputs WHERE id=4').fetchone()[0] == 1
-    assert owned.connection.execute('SELECT plan_id FROM actions WHERE id=4').fetchone()[0] == 2
+    assert connection.execute('SELECT source_action_id FROM outputs WHERE id=4').fetchone()[0] == 1
+    assert connection.execute('SELECT plan_id FROM actions WHERE id=4').fetchone()[0] == 2
     output_window = replace(request, from_wm=early_sparse_wm, to_wm=output_window_end)
     with repository.open_report_selection(output_window) as selection:
         assert _read(selection, 'output', 1) == [1, 2, 3, 4]
@@ -439,32 +500,13 @@ async def test_large_window_releases_overflow_once_and_keyset_pages_do_not_resca
         assert all(kind != 'page' for kind, _ in probe.sql)
     print({'early_sparse_vm_steps': probe.steps})
     assert probe.steps < preflight_steps // 8
+    total = time.perf_counter() - started
+    print('SAMPLE_READ_PHASE', {'reading_s': elapsed['reading'],
+        'verification_and_observer_s': total - elapsed['reading'] - elapsed['close'],
+        'close_s': elapsed['close'], 'call_s': total,
+        'note': '读取包含SQLite trace、进度和弱引用观测'}, flush=True)
 
 
-async def _finish_many(owned, count, *, action_id=1):
-    import time
-    from camctl.capture.handlers import capture_handler
-    from camctl.capture.results import FileKind
-    from camctl.contracts.values import new_operation_key
-    from camctl.persistence.models import DbOutcomeKind
-    from camctl.persistence.repositories.scheduling import SchedulingRepository, StartActionRequest
-    from .test_report_scope import _ActivityDriver, _PAGE_EVIDENCE
-    from ..support.capture import capture_runtime
-    from camctl.capture.timelapse import CaptureWaitConfig
-    from ..capture.test_capture_contract import ResultsDouble, _entry
-    now = int(time.time() * 1_000_000)
-    started = SchedulingRepository().start_action(StartActionRequest(action_id, now, now), new_operation_key(), owned)
-    assert started.kind is DbOutcomeKind.COMPLETED, started.error
-    from camctl.persistence.repositories.scheduling import StartOutcome
-    assert started.value.outcome is StartOutcome.STARTED, started.value
-    activity_id = owned.connection.execute('SELECT id FROM device_activities WHERE action_id=?', (action_id,)).fetchone()[0]
-    runtime = await capture_runtime(
-        owned, driver=_ActivityDriver(activity_target=str(activity_id)), evidence=_PAGE_EVIDENCE,
-        results=ResultsDouble({activity_id: tuple(_entry(f'photo-{action_id}-{index}', kind=FileKind.PHOTO) for index in range(count))}),
-        wall_us=lambda: int(time.time() * 1_000_000), monotonic_ns=time.monotonic_ns,
-        wait_config=lambda params: CaptureWaitConfig(target_duration_ms=600_000, driver_margin_ms=0))
-    await capture_handler("camera_take_photo")(action_id, runtime)
-    assert owned.connection.execute('SELECT COUNT(*) FROM outputs WHERE source_action_id=?', (action_id,)).fetchone()[0] == count
 
 
 @pytest.mark.asyncio

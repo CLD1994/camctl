@@ -1,0 +1,39 @@
+{
+  "description": "隔离原型：由真实受理与拍摄准备一次生成的历史选择来源，供只读消费者复核。",
+  "database_format_version": 5,
+  "database_sha256": "df80224748e0cd267626ff461518307e6f33bb391483c1ec412cd2191989a866",
+  "database_bytes": 6483968,
+  "gzip_sha256": "d2df95f25b7a932a32a71856c3f40ac47d05cfd2265ff9fe6a89ea17fa282178",
+  "gzip_bytes": 749892,
+  "database_instance_id": "6f883c5103f940f4ae2a1c91a3cfc460",
+  "metadata_paths": {
+    "staging": "/srv/camctl/staging",
+    "ready": "/srv/camctl/ready",
+    "processing": "/srv/camctl/processing"
+  },
+  "journal_mode": "wal",
+  "counts": {
+    "plans": 3,
+    "actions": 4206,
+    "outputs": 4,
+    "history_transactions": 23,
+    "history_events": 4244
+  },
+  "actions_per_plan": [
+    3,
+    4200,
+    3
+  ],
+  "history_boundary": {
+    "transaction_id": 23,
+    "last_event_id": 4244
+  },
+  "origin": {
+    "run": "report-4200-1",
+    "node": "test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window",
+    "head": "c5a257769449bd0d109b8d709f66f3abe6879325",
+    "source_sha256": "77876ce58fad1f5c80a795541fce793c8aeb27ca7c109e66b4351db3ac251fff",
+    "note": "来源记录显示原节点以正式受理、调度和拍摄处理器产生数据；数据库本身不能证明生成路径。",
+    "generator": "integration.support.report_selection_corpus"
+  }
+}
