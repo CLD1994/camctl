@@ -1,0 +1,898 @@
+{
+  "schema": "camctl-stage-7-evidence-v1",
+  "created_utc": "2026-10-30T10:41:24Z",
+  "meaning": "为持续问题记录保留已完成的窄范围组合结果和映射文件；这份耐久快照不等于整套验收，也不表示 S13 或总体目标完成。",
+  "archive": {
+    "format": "gzip",
+    "gzip_mtime_seconds": 0,
+    "compression_level": 9,
+    "new_payload_full_decompression_byte_identity_and_sha256_verified": true,
+    "stage6_references_checked_against_source_and_stage6_manifest": true,
+    "json_and_xml_payloads_parsed_after_decompression": true,
+    "tests_run_by_archiver": false
+  },
+  "workspace": {
+    "path": "/tmp/camctl-resume-20261030/archive-stage7",
+    "branch": "docs/resume-evidence-stage7-20261030",
+    "source_head": "32819074ddbbc2bd48bd71bb1bd994e5f1a5e46b",
+    "initially_clean": true,
+    "only_stage7_written": true
+  },
+  "summary": {
+    "evidence_entry_count": 19,
+    "run_artifact_count": 18,
+    "handoff_mapping_artifacts": 1,
+    "new_gzip_payload_count": 16,
+    "stage6_reference_count": 3,
+    "new_payload_uncompressed_bytes_total": 66775,
+    "new_payload_compressed_bytes_total": 13546,
+    "referenced_uncompressed_bytes_total": 11958,
+    "referenced_compressed_bytes_total": 2491
+  },
+  "timing_semantics": {
+    "suite_time_seconds": "JUnit 所有 <testsuite> 节点 time 属性之和。",
+    "testcase_time_seconds_sum": "JUnit 所有 <testcase> 节点 time 属性之和；与套件时间分开记录。",
+    "pytest_log_reported_seconds": "pytest.log 汇总行报告的运行时间。",
+    "receipt_wall_seconds": "运行收据记录的外层命令墙钟时间。"
+  },
+  "run_groups": [
+    {
+      "id": "merged-boundary-diagnostics54",
+      "source_root": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-diagnostics54",
+      "source_head": "76e07abd3f58c7538b52d1b199c63fa2f5a3bef1",
+      "run_identity": "pid=1441; status=finished; exit=0; receipt wall_seconds=24.610377687000437",
+      "scope": {
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/outputs/test_error_diagnostics.py",
+          "apps/camctl/tests/integration/outputs/test_delete_rejected_error_graph.py",
+          "apps/camctl/tests/integration/outputs/test_result_error_diagnostics.py",
+          "apps/camctl/tests/integration/outputs/test_cleanup_query_cancel_before_delete.py",
+          "apps/camctl/tests/integration/outputs/test_cleanup_terminal_absence.py",
+          "-q",
+          "--tb=short",
+          "--basetemp",
+          "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-diagnostics54/tmp",
+          "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-diagnostics54/results.xml"
+        ],
+        "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl"
+      },
+      "sources_sha256": {
+        "apps/camctl/tests/integration/outputs/test_error_diagnostics.py": "22bef88afa126dae8307b9fe6c491871b0ecf4efb233c500153e874f3fada29e",
+        "apps/camctl/tests/integration/outputs/test_delete_rejected_error_graph.py": "d132d3750206b0c99ebb8a99bf303e2420f6185409fcd3f7a98cb71dce49ca26",
+        "apps/camctl/tests/integration/outputs/test_result_error_diagnostics.py": "c90bfbfdfb4acc71fbd582dd3dda699411935766b724d99d7ba50a4b3091bfff",
+        "apps/camctl/tests/integration/outputs/test_cleanup_query_cancel_before_delete.py": "e7da0a779d4f82c091fd003a7a07e78d04c595a5707fc9214e00ae65bca0fce2",
+        "apps/camctl/tests/integration/outputs/test_cleanup_terminal_absence.py": "345cd4fc67ec067f2e00d6bc3f003bb75d19fc9798503714a094d759802827c0",
+        "apps/camctl/tests/support/repository_ports.py": "318cfe62080da270b2ec89956667074cb55eef641888ef5b14b060a82954820c",
+        "apps/camctl/tests/integration/outputs/test_cleanup_delete_save_recovery.py": "2ea95cc04e3d30a44d38a79e489e7b7b59f27930936b9a8624d430d5f3264893",
+        "apps/camctl/tests/integration/support/outputs.py": "53c008623f36c7f3a5f7a1e43a0784a424da9649067de91d85f1438fc3a494ec"
+      },
+      "source_manifest_changes": [],
+      "result": {
+        "tests": 54,
+        "passed": 54,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "suite_time_seconds": 22.459,
+        "testcase_time_seconds_sum": 20.814,
+        "junit_suite_count": 1,
+        "junit_testcase_count": 54,
+        "pytest_log_reported_seconds": 22.47,
+        "receipt_wall_seconds": 24.610377687000437
+      },
+      "pytest_log_summary": "54 passed in 22.47s",
+      "payload_storage": "stage-6 reference; no duplicate gzip payload"
+    },
+    {
+      "id": "merged-boundary-photo-capture",
+      "source_root": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/capture",
+      "source_head": "47cb7c6b302def953bab5c5d4709c8b6311823fe",
+      "run_identity": "pid=3260; status=finished; exit=0; receipt wall_seconds=33.53474119398743",
+      "scope": {
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/capture/test_host_photo_storage.py",
+          "apps/camctl/tests/integration/capture/test_host_photo_complete_history_recovery.py",
+          "apps/camctl/tests/integration/capture/test_device_photo_flow.py",
+          "apps/camctl/tests/integration/capture/test_binding_failure_file_input_recovery.py",
+          "-q",
+          "--tb=short",
+          "--basetemp",
+          "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/capture/tmp",
+          "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/capture/results.xml"
+        ],
+        "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl"
+      },
+      "sources_sha256": {
+        "apps/camctl/tests/integration/capture/test_host_photo_storage.py": "22be013963352a1fd9fbe876077b4db44c2e156d3b92b79c9789c14bbedb5729",
+        "apps/camctl/tests/integration/capture/test_host_photo_complete_history_recovery.py": "0beb35c0f186d9c229ddc13665a81049d7801b9b25b92920c3a118654fd082c3",
+        "apps/camctl/tests/integration/capture/test_device_photo_flow.py": "0b7b88e47b9c38d680fa8a99406e539213a395c6479f68ded6935242dea67482",
+        "apps/camctl/tests/integration/capture/test_binding_failure_file_input_recovery.py": "9ad2f49f2d0c02f64bb6ba8329c1a7de128e48b04a471671aab24f6d4e7fe1a1",
+        "apps/camctl/tests/support/repository_ports.py": "318cfe62080da270b2ec89956667074cb55eef641888ef5b14b060a82954820c"
+      },
+      "source_manifest_changes": [],
+      "result": {
+        "tests": 79,
+        "passed": 79,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "suite_time_seconds": 32.461,
+        "testcase_time_seconds_sum": 29.458,
+        "junit_suite_count": 1,
+        "junit_testcase_count": 79,
+        "pytest_log_reported_seconds": 32.47,
+        "receipt_wall_seconds": 33.53474119398743
+      },
+      "pytest_log_summary": "79 passed in 32.47s",
+      "payload_storage": "new stage-7 gzip payloads"
+    },
+    {
+      "id": "merged-boundary-photo-bootstrap",
+      "source_root": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/bootstrap",
+      "source_head": "47cb7c6b302def953bab5c5d4709c8b6311823fe",
+      "run_identity": "pid=3763; status=finished; exit=0; receipt wall_seconds=19.764545041005476",
+      "scope": {
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/bootstrap/test_cleanup_query_default_recovery.py",
+          "apps/camctl/tests/integration/bootstrap/test_osmo_file_cleanup.py",
+          "apps/camctl/tests/integration/bootstrap/test_cleanup_original_config.py",
+          "-q",
+          "--tb=short",
+          "--basetemp",
+          "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/bootstrap/tmp",
+          "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/bootstrap/results.xml"
+        ],
+        "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl"
+      },
+      "sources_sha256": {
+        "apps/camctl/tests/integration/bootstrap/test_cleanup_query_default_recovery.py": "0eef786bf4f03723c40ebf42191e45050ffefda2306dc2b69b3d28ca8591b39a",
+        "apps/camctl/tests/integration/bootstrap/test_osmo_file_cleanup.py": "e43b96a019811b40ce20e02158a5bb9fa6c052ffca4a9144b7f61d3e0461885f",
+        "apps/camctl/tests/integration/bootstrap/test_cleanup_original_config.py": "297276856a1d7545a4f6cc518c2d60b2f42cbb6eb3d6e018699ee7ae3731bc27",
+        "apps/camctl/tests/support/repository_ports.py": "318cfe62080da270b2ec89956667074cb55eef641888ef5b14b060a82954820c"
+      },
+      "source_manifest_changes": [],
+      "result": {
+        "tests": 77,
+        "passed": 77,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "suite_time_seconds": 17.873,
+        "testcase_time_seconds_sum": 16.659,
+        "junit_suite_count": 1,
+        "junit_testcase_count": 77,
+        "pytest_log_reported_seconds": 17.88,
+        "receipt_wall_seconds": 19.764545041005476
+      },
+      "pytest_log_summary": "77 passed in 17.88s",
+      "payload_storage": "new stage-7 gzip payloads"
+    },
+    {
+      "id": "merged-boundary-photo-history",
+      "source_root": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/history",
+      "source_head": "47cb7c6b302def953bab5c5d4709c8b6311823fe",
+      "run_identity": "pid=4386; status=finished; exit=0; receipt wall_seconds=56.28212491500017",
+      "scope": {
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/history/test_report_selection.py",
+          "-q",
+          "--tb=short",
+          "--basetemp",
+          "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/history/tmp",
+          "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/history/results.xml"
+        ],
+        "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl"
+      },
+      "sources_sha256": {
+        "apps/camctl/tests/integration/history/test_report_selection.py": "0dc9c7ad86a2b76108893b2547a1a504aea3234af8fbda434f971cfc7045eb34",
+        "apps/camctl/tests/support/repository_ports.py": "318cfe62080da270b2ec89956667074cb55eef641888ef5b14b060a82954820c"
+      },
+      "source_manifest_changes": [],
+      "result": {
+        "tests": 43,
+        "passed": 43,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "suite_time_seconds": 54.417,
+        "testcase_time_seconds_sum": 53.457,
+        "junit_suite_count": 1,
+        "junit_testcase_count": 43,
+        "pytest_log_reported_seconds": 54.43,
+        "receipt_wall_seconds": 56.28212491500017
+      },
+      "pytest_log_summary": "43 passed in 54.43s",
+      "payload_storage": "new stage-7 gzip payloads"
+    },
+    {
+      "id": "merged-boundary-work-files-bootstrap",
+      "source_root": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-work-files/bootstrap",
+      "source_head": "32819074ddbbc2bd48bd71bb1bd994e5f1a5e46b",
+      "run_identity": "pid=13851; status=finished; exit=0; receipt wall_seconds=24.69622444799461",
+      "scope": {
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/bootstrap/test_work_file_history.py",
+          "apps/camctl/tests/integration/bootstrap/test_cleanup_flow.py",
+          "apps/camctl/tests/integration/bootstrap/test_cleanup_query_default_recovery.py",
+          "-q",
+          "--tb=short",
+          "--basetemp",
+          "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-work-files/bootstrap/tmp",
+          "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-work-files/bootstrap/results.xml"
+        ],
+        "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl"
+      },
+      "sources_sha256": {
+        "apps/camctl/tests/integration/bootstrap/test_work_file_history.py": "c5ac1142a1ea8e567ca774c83d88becb69a618ad5ad3a37d59528529325446ac",
+        "apps/camctl/tests/integration/bootstrap/test_cleanup_flow.py": "63f1eb6170b2aa4c2332a65a9746dbef9562e1f3219f7c96b3dee11ba705e4db",
+        "apps/camctl/tests/integration/bootstrap/test_cleanup_query_default_recovery.py": "0eef786bf4f03723c40ebf42191e45050ffefda2306dc2b69b3d28ca8591b39a",
+        "apps/camctl/tests/support/repository_ports.py": "318cfe62080da270b2ec89956667074cb55eef641888ef5b14b060a82954820c",
+        "apps/camctl/tests/integration/support/recording_consumer_cases.py": "5c8b7f587e05885a46fad72fe5245a6e400599f94f7a2f2aa5d140f8098015d1"
+      },
+      "source_manifest_changes": [],
+      "result": {
+        "tests": 32,
+        "passed": 32,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "suite_time_seconds": 22.732,
+        "testcase_time_seconds_sum": 21.54,
+        "junit_suite_count": 1,
+        "junit_testcase_count": 32,
+        "pytest_log_reported_seconds": 22.75,
+        "receipt_wall_seconds": 24.69622444799461
+      },
+      "pytest_log_summary": "32 passed in 22.75s",
+      "payload_storage": "new stage-7 gzip payloads"
+    },
+    {
+      "id": "merged-boundary-work-files-outputs",
+      "source_root": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-work-files/outputs",
+      "source_head": "32819074ddbbc2bd48bd71bb1bd994e5f1a5e46b",
+      "run_identity": "pid=15337; status=finished; exit=0; receipt wall_seconds=22.419427737986553",
+      "scope": {
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/outputs/test_result_error_diagnostics.py",
+          "apps/camctl/tests/integration/outputs/test_delete_rejected_error_graph.py",
+          "apps/camctl/tests/integration/outputs/test_cleanup_residual_recovery.py",
+          "-q",
+          "--tb=short",
+          "--basetemp",
+          "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-work-files/outputs/tmp",
+          "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-work-files/outputs/results.xml"
+        ],
+        "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl"
+      },
+      "sources_sha256": {
+        "apps/camctl/tests/integration/outputs/test_result_error_diagnostics.py": "c90bfbfdfb4acc71fbd582dd3dda699411935766b724d99d7ba50a4b3091bfff",
+        "apps/camctl/tests/integration/outputs/test_delete_rejected_error_graph.py": "d132d3750206b0c99ebb8a99bf303e2420f6185409fcd3f7a98cb71dce49ca26",
+        "apps/camctl/tests/integration/outputs/test_cleanup_residual_recovery.py": "c1730277323c00a624c5465bd23d67362b9dc6cc4e7ff14f7a4dc778afde8ca7",
+        "apps/camctl/tests/support/repository_ports.py": "318cfe62080da270b2ec89956667074cb55eef641888ef5b14b060a82954820c",
+        "apps/camctl/tests/integration/bootstrap/test_cleanup_flow.py": "63f1eb6170b2aa4c2332a65a9746dbef9562e1f3219f7c96b3dee11ba705e4db",
+        "apps/camctl/tests/integration/support/recording_consumer_cases.py": "5c8b7f587e05885a46fad72fe5245a6e400599f94f7a2f2aa5d140f8098015d1"
+      },
+      "source_manifest_changes": [],
+      "result": {
+        "tests": 56,
+        "passed": 56,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "suite_time_seconds": 20.385,
+        "testcase_time_seconds_sum": 18.461,
+        "junit_suite_count": 1,
+        "junit_testcase_count": 56,
+        "pytest_log_reported_seconds": 20.4,
+        "receipt_wall_seconds": 22.419427737986553
+      },
+      "pytest_log_summary": "56 passed in 20.40s",
+      "payload_storage": "new stage-7 gzip payloads"
+    },
+    {
+      "id": "boundary-output-handoff",
+      "source_root": "/tmp/camctl-resume-20261030/evidence-boundary-output",
+      "source_head": null,
+      "run_identity": "completed mapping handoff JSON; not a test run and no single source HEAD is recorded in the file.",
+      "scope": "camctl outputs 五文件公开边界迁移阶段交接；整体目标未完成",
+      "handoff_metadata": {
+        "worktree": "/tmp/camctl-resume-20261030/boundary-output-diagnostics",
+        "base": "ed29963d5aa4348778afa78515a3917cde285e2b",
+        "commits": [
+          "3c9f4815",
+          "f424861b",
+          "bb28c02d"
+        ],
+        "main_integrated_commits": [
+          "5f855e43",
+          "f9c6894e",
+          "76e07abd"
+        ],
+        "helper_dependency": "dbea9317：测试时工作树恢复该提交的 repository_ports.py 与其单元测试；未纳入上述提交"
+      },
+      "result": {
+        "mapping_entries": 5,
+        "remaining_items": 1,
+        "overall_goal_state": "incomplete",
+        "remaining": [
+          {
+            "node": "test_cleanup_terminal_absence.py::test_pending_companion_precondition_is_checked_before_terminal_file_save",
+            "issue": "仍直接构造 PendingCleanupCompanion 并写入 runtime.pending_companions；不是公开业务边界。保留原用例和断言，待协调者与用户统一决定承接，不得宣称五文件迁移完成。"
+          }
+        ],
+        "limits": "未修改生产代码或产品配置；未执行真实设备验收。run7 通过不代表未迁移 pending 节点满足公开边界。"
+      }
+    }
+  ],
+  "files": [
+    {
+      "archive_path": "../stage-6/merged-boundary-diagnostics54/receipt.json.gz",
+      "storage_kind": "stage-6-reference",
+      "reference_manifest": "../stage-6/manifest.json",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-diagnostics54/receipt.json",
+      "source_head": "76e07abd3f58c7538b52d1b199c63fa2f5a3bef1",
+      "run_identity": "pid=1441; status=finished; exit=0; receipt wall_seconds=24.610377687000437",
+      "scope": {
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/outputs/test_error_diagnostics.py",
+          "apps/camctl/tests/integration/outputs/test_delete_rejected_error_graph.py",
+          "apps/camctl/tests/integration/outputs/test_result_error_diagnostics.py",
+          "apps/camctl/tests/integration/outputs/test_cleanup_query_cancel_before_delete.py",
+          "apps/camctl/tests/integration/outputs/test_cleanup_terminal_absence.py",
+          "-q",
+          "--tb=short",
+          "--basetemp",
+          "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-diagnostics54/tmp",
+          "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-diagnostics54/results.xml"
+        ],
+        "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl"
+      },
+      "source_mtime_ns": 1793355794718490146,
+      "uncompressed_bytes": 2346,
+      "uncompressed_sha256": "8f15e913489551182a6caf8bf3c2b91a1261385e12a023105cec9d42f58d14d7",
+      "format": "json",
+      "compressed_bytes": 883,
+      "compressed_sha256": "06891b4a72588f909bafdd1bd5c9920f63749c3010598a664def4c97a50255f2",
+      "note": "已在 stage-6 保存；此处引用并重新核对来源字节与压缩摘要，不复制 payload。"
+    },
+    {
+      "archive_path": "../stage-6/merged-boundary-diagnostics54/results.xml.gz",
+      "storage_kind": "stage-6-reference",
+      "reference_manifest": "../stage-6/manifest.json",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-diagnostics54/results.xml",
+      "source_head": "76e07abd3f58c7538b52d1b199c63fa2f5a3bef1",
+      "run_identity": "pid=1441; status=finished; exit=0; receipt wall_seconds=24.610377687000437",
+      "scope": {
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/outputs/test_error_diagnostics.py",
+          "apps/camctl/tests/integration/outputs/test_delete_rejected_error_graph.py",
+          "apps/camctl/tests/integration/outputs/test_result_error_diagnostics.py",
+          "apps/camctl/tests/integration/outputs/test_cleanup_query_cancel_before_delete.py",
+          "apps/camctl/tests/integration/outputs/test_cleanup_terminal_absence.py",
+          "-q",
+          "--tb=short",
+          "--basetemp",
+          "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-diagnostics54/tmp",
+          "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-diagnostics54/results.xml"
+        ],
+        "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl"
+      },
+      "source_mtime_ns": 1793355794489041418,
+      "uncompressed_bytes": 9512,
+      "uncompressed_sha256": "fd139869131655fa256d6f0d8acfb27e07ee4139aaf0ff22c76bd73cf7f3c8c4",
+      "format": "xml",
+      "compressed_bytes": 1555,
+      "compressed_sha256": "e78243475c5c71bf66153e9853eb10a5276e8fdf3c46340a849d11c081633164",
+      "note": "已在 stage-6 保存；此处引用并重新核对来源字节与压缩摘要，不复制 payload。"
+    },
+    {
+      "archive_path": "../stage-6/merged-boundary-diagnostics54/pytest.log.gz",
+      "storage_kind": "stage-6-reference",
+      "reference_manifest": "../stage-6/manifest.json",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-diagnostics54/pytest.log",
+      "source_head": "76e07abd3f58c7538b52d1b199c63fa2f5a3bef1",
+      "run_identity": "pid=1441; status=finished; exit=0; receipt wall_seconds=24.610377687000437",
+      "scope": {
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/outputs/test_error_diagnostics.py",
+          "apps/camctl/tests/integration/outputs/test_delete_rejected_error_graph.py",
+          "apps/camctl/tests/integration/outputs/test_result_error_diagnostics.py",
+          "apps/camctl/tests/integration/outputs/test_cleanup_query_cancel_before_delete.py",
+          "apps/camctl/tests/integration/outputs/test_cleanup_terminal_absence.py",
+          "-q",
+          "--tb=short",
+          "--basetemp",
+          "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-diagnostics54/tmp",
+          "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-diagnostics54/results.xml"
+        ],
+        "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl"
+      },
+      "source_mtime_ns": 1793355794578825704,
+      "uncompressed_bytes": 100,
+      "uncompressed_sha256": "81869bd462a62902eb1050fcb426ef8251d4d42d57fa04ca685057de9d9585ea",
+      "format": "log",
+      "compressed_bytes": 53,
+      "compressed_sha256": "44894c00c8d3bc037173d4b9554ec8d74037cc8d34be9fda4ea4423bfceb14a9",
+      "note": "已在 stage-6 保存；此处引用并重新核对来源字节与压缩摘要，不复制 payload。"
+    },
+    {
+      "archive_path": "merged-boundary-photo/capture/receipt.json.gz",
+      "storage_kind": "new-gzip-payload",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/capture/receipt.json",
+      "source_head": "47cb7c6b302def953bab5c5d4709c8b6311823fe",
+      "run_identity": "pid=3260; status=finished; exit=0; receipt wall_seconds=33.53474119398743",
+      "scope": {
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/capture/test_host_photo_storage.py",
+          "apps/camctl/tests/integration/capture/test_host_photo_complete_history_recovery.py",
+          "apps/camctl/tests/integration/capture/test_device_photo_flow.py",
+          "apps/camctl/tests/integration/capture/test_binding_failure_file_input_recovery.py",
+          "-q",
+          "--tb=short",
+          "--basetemp",
+          "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/capture/tmp",
+          "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/capture/results.xml"
+        ],
+        "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl"
+      },
+      "source_mtime_ns": 1793355973066290502,
+      "uncompressed_bytes": 1855,
+      "uncompressed_sha256": "191d133a4989896de123c7895b4a6072763ce8dd85bbd5b5dea42802c2dc4e06",
+      "format": "json",
+      "compressed_bytes": 727,
+      "compressed_sha256": "d0d5923c0171e0283c74137327de1bff346492ff0474a93ecea8569b8f194c19"
+    },
+    {
+      "archive_path": "merged-boundary-photo/capture/results.xml.gz",
+      "storage_kind": "new-gzip-payload",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/capture/results.xml",
+      "source_head": "47cb7c6b302def953bab5c5d4709c8b6311823fe",
+      "run_identity": "pid=3260; status=finished; exit=0; receipt wall_seconds=33.53474119398743",
+      "scope": {
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/capture/test_host_photo_storage.py",
+          "apps/camctl/tests/integration/capture/test_host_photo_complete_history_recovery.py",
+          "apps/camctl/tests/integration/capture/test_device_photo_flow.py",
+          "apps/camctl/tests/integration/capture/test_binding_failure_file_input_recovery.py",
+          "-q",
+          "--tb=short",
+          "--basetemp",
+          "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/capture/tmp",
+          "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/capture/results.xml"
+        ],
+        "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl"
+      },
+      "source_mtime_ns": 1793355972796843371,
+      "uncompressed_bytes": 13710,
+      "uncompressed_sha256": "cb4fb3409da573aac0cbcd6370ee5c388ffae3dc9b332be268d79dcb1bc9fd1d",
+      "format": "xml",
+      "compressed_bytes": 1769,
+      "compressed_sha256": "a3009bfee7103d9240ec9c6640dc6d6c2d61395bd0deecd2c63f48e9cc48acfa"
+    },
+    {
+      "archive_path": "merged-boundary-photo/capture/pytest.log.gz",
+      "storage_kind": "new-gzip-payload",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/capture/pytest.log",
+      "source_head": "47cb7c6b302def953bab5c5d4709c8b6311823fe",
+      "run_identity": "pid=3260; status=finished; exit=0; receipt wall_seconds=33.53474119398743",
+      "scope": {
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/capture/test_host_photo_storage.py",
+          "apps/camctl/tests/integration/capture/test_host_photo_complete_history_recovery.py",
+          "apps/camctl/tests/integration/capture/test_device_photo_flow.py",
+          "apps/camctl/tests/integration/capture/test_binding_failure_file_input_recovery.py",
+          "-q",
+          "--tb=short",
+          "--basetemp",
+          "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/capture/tmp",
+          "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/capture/results.xml"
+        ],
+        "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl"
+      },
+      "source_mtime_ns": 1793355972896649201,
+      "uncompressed_bytes": 180,
+      "uncompressed_sha256": "b74785b84c866df32a1c28e0b78c8f3953b105b20459fde20d2043a55bbdfe2d",
+      "format": "log",
+      "compressed_bytes": 61,
+      "compressed_sha256": "58c023e21fd8e8bf602a132c4e43040aef9c9404b5aafcdb377b6b04580579c4"
+    },
+    {
+      "archive_path": "merged-boundary-photo/bootstrap/receipt.json.gz",
+      "storage_kind": "new-gzip-payload",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/bootstrap/receipt.json",
+      "source_head": "47cb7c6b302def953bab5c5d4709c8b6311823fe",
+      "run_identity": "pid=3763; status=finished; exit=0; receipt wall_seconds=19.764545041005476",
+      "scope": {
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/bootstrap/test_cleanup_query_default_recovery.py",
+          "apps/camctl/tests/integration/bootstrap/test_osmo_file_cleanup.py",
+          "apps/camctl/tests/integration/bootstrap/test_cleanup_original_config.py",
+          "-q",
+          "--tb=short",
+          "--basetemp",
+          "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/bootstrap/tmp",
+          "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/bootstrap/results.xml"
+        ],
+        "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl"
+      },
+      "source_mtime_ns": 1793355992849313319,
+      "uncompressed_bytes": 1624,
+      "uncompressed_sha256": "71a4327fcf4c40b1d2181ead1249a65dc707d321464e060020e7a272a65e214f",
+      "format": "json",
+      "compressed_bytes": 666,
+      "compressed_sha256": "403f503c1c80b5603c497b7a5a4de18f801c2917e10a599859e5bfa3319854b3"
+    },
+    {
+      "archive_path": "merged-boundary-photo/bootstrap/results.xml.gz",
+      "storage_kind": "new-gzip-payload",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/bootstrap/results.xml",
+      "source_head": "47cb7c6b302def953bab5c5d4709c8b6311823fe",
+      "run_identity": "pid=3763; status=finished; exit=0; receipt wall_seconds=19.764545041005476",
+      "scope": {
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/bootstrap/test_cleanup_query_default_recovery.py",
+          "apps/camctl/tests/integration/bootstrap/test_osmo_file_cleanup.py",
+          "apps/camctl/tests/integration/bootstrap/test_cleanup_original_config.py",
+          "-q",
+          "--tb=short",
+          "--basetemp",
+          "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/bootstrap/tmp",
+          "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/bootstrap/results.xml"
+        ],
+        "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl"
+      },
+      "source_mtime_ns": 1793355992610741248,
+      "uncompressed_bytes": 14335,
+      "uncompressed_sha256": "29302b2b7f7f908e24163ebb535115dc234fb0a12bae6653809ffc787d827f48",
+      "format": "xml",
+      "compressed_bytes": 1450,
+      "compressed_sha256": "bdd4e0af5dce9274d68b08c45ccfaf64d45c23e3c993d0c6252d843ec21f589f"
+    },
+    {
+      "archive_path": "merged-boundary-photo/bootstrap/pytest.log.gz",
+      "storage_kind": "new-gzip-payload",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/bootstrap/pytest.log",
+      "source_head": "47cb7c6b302def953bab5c5d4709c8b6311823fe",
+      "run_identity": "pid=3763; status=finished; exit=0; receipt wall_seconds=19.764545041005476",
+      "scope": {
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/bootstrap/test_cleanup_query_default_recovery.py",
+          "apps/camctl/tests/integration/bootstrap/test_osmo_file_cleanup.py",
+          "apps/camctl/tests/integration/bootstrap/test_cleanup_original_config.py",
+          "-q",
+          "--tb=short",
+          "--basetemp",
+          "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/bootstrap/tmp",
+          "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/bootstrap/results.xml"
+        ],
+        "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl"
+      },
+      "source_mtime_ns": 1793355992680321202,
+      "uncompressed_bytes": 180,
+      "uncompressed_sha256": "381946e45cf5fad92868f199e1cd92c58f5fe0de2084c8702d1ec322f3cab949",
+      "format": "log",
+      "compressed_bytes": 62,
+      "compressed_sha256": "98bf94096518d9e00c74282ec1ec002203aa91233985fe5f7535e6b6c605fb9a"
+    },
+    {
+      "archive_path": "merged-boundary-photo/history/receipt.json.gz",
+      "storage_kind": "new-gzip-payload",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/history/receipt.json",
+      "source_head": "47cb7c6b302def953bab5c5d4709c8b6311823fe",
+      "run_identity": "pid=4386; status=finished; exit=0; receipt wall_seconds=56.28212491500017",
+      "scope": {
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/history/test_report_selection.py",
+          "-q",
+          "--tb=short",
+          "--basetemp",
+          "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/history/tmp",
+          "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/history/results.xml"
+        ],
+        "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl"
+      },
+      "source_mtime_ns": 1793356049322445663,
+      "uncompressed_bytes": 1147,
+      "uncompressed_sha256": "9f458fecfdb6c23d6d58930cf0039d8d49336ba249f83f180b3b9eeca4449a36",
+      "format": "json",
+      "compressed_bytes": 533,
+      "compressed_sha256": "3976c6ccc04840643c66e4f9e1eb292f9486cd68b3ef49657f642aefaac7b3f7"
+    },
+    {
+      "archive_path": "merged-boundary-photo/history/results.xml.gz",
+      "storage_kind": "new-gzip-payload",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/history/results.xml",
+      "source_head": "47cb7c6b302def953bab5c5d4709c8b6311823fe",
+      "run_identity": "pid=4386; status=finished; exit=0; receipt wall_seconds=56.28212491500017",
+      "scope": {
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/history/test_report_selection.py",
+          "-q",
+          "--tb=short",
+          "--basetemp",
+          "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/history/tmp",
+          "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/history/results.xml"
+        ],
+        "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl"
+      },
+      "source_mtime_ns": 1793356049103652646,
+      "uncompressed_bytes": 7680,
+      "uncompressed_sha256": "1b26c60e90e7b03bde22f895e0e8b4b20f02f1e103e857a414a0c5febc5af960",
+      "format": "xml",
+      "compressed_bytes": 1020,
+      "compressed_sha256": "cc4eea66dcf616d06b92f2efa3a2558a98a23a82f309900a131e5fc51cb1ed7c"
+    },
+    {
+      "archive_path": "merged-boundary-photo/history/pytest.log.gz",
+      "storage_kind": "new-gzip-payload",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/history/pytest.log",
+      "source_head": "47cb7c6b302def953bab5c5d4709c8b6311823fe",
+      "run_identity": "pid=4386; status=finished; exit=0; receipt wall_seconds=56.28212491500017",
+      "scope": {
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/history/test_report_selection.py",
+          "-q",
+          "--tb=short",
+          "--basetemp",
+          "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/history/tmp",
+          "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-photo/history/results.xml"
+        ],
+        "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl"
+      },
+      "source_mtime_ns": 1793356049173268605,
+      "uncompressed_bytes": 100,
+      "uncompressed_sha256": "e3208e4c5c5c483ceefa6a85b2d68bd626691e5d99d330ad20694cd966050f1a",
+      "format": "log",
+      "compressed_bytes": 53,
+      "compressed_sha256": "59c0fd37a532000e3b3c8641f37db0cbcee7f14686680356e985c1db1e139a44"
+    },
+    {
+      "archive_path": "merged-boundary-work-files/bootstrap/receipt.json.gz",
+      "storage_kind": "new-gzip-payload",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-work-files/bootstrap/receipt.json",
+      "source_head": "32819074ddbbc2bd48bd71bb1bd994e5f1a5e46b",
+      "run_identity": "pid=13851; status=finished; exit=0; receipt wall_seconds=24.69622444799461",
+      "scope": {
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/bootstrap/test_work_file_history.py",
+          "apps/camctl/tests/integration/bootstrap/test_cleanup_flow.py",
+          "apps/camctl/tests/integration/bootstrap/test_cleanup_query_default_recovery.py",
+          "-q",
+          "--tb=short",
+          "--basetemp",
+          "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-work-files/bootstrap/tmp",
+          "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-work-files/bootstrap/results.xml"
+        ],
+        "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl"
+      },
+      "source_mtime_ns": 1793356482963926100,
+      "uncompressed_bytes": 1753,
+      "uncompressed_sha256": "770e28fc8a959062834e1ad620fdc0b7a12bb578fb4452a3bd3719dad1c49c95",
+      "format": "json",
+      "compressed_bytes": 721,
+      "compressed_sha256": "b63e86b4b50f02f8def96e9746f2ee6bf0012519091b9ae95a81db501661e3b7"
+    },
+    {
+      "archive_path": "merged-boundary-work-files/bootstrap/results.xml.gz",
+      "storage_kind": "new-gzip-payload",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-work-files/bootstrap/results.xml",
+      "source_head": "32819074ddbbc2bd48bd71bb1bd994e5f1a5e46b",
+      "run_identity": "pid=13851; status=finished; exit=0; receipt wall_seconds=24.69622444799461",
+      "scope": {
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/bootstrap/test_work_file_history.py",
+          "apps/camctl/tests/integration/bootstrap/test_cleanup_flow.py",
+          "apps/camctl/tests/integration/bootstrap/test_cleanup_query_default_recovery.py",
+          "-q",
+          "--tb=short",
+          "--basetemp",
+          "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-work-files/bootstrap/tmp",
+          "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-work-files/bootstrap/results.xml"
+        ],
+        "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl"
+      },
+      "source_mtime_ns": 1793356482734022693,
+      "uncompressed_bytes": 5950,
+      "uncompressed_sha256": "05c1e85c020947fef4d5b6e32040bdfb0ab43d5cf33343fd7dc39ee7c9030ced",
+      "format": "xml",
+      "compressed_bytes": 819,
+      "compressed_sha256": "6b29553e252ec351ad46724f1531ac52e45ba83b3e2842c9d7f26d7cfdfe5cf7"
+    },
+    {
+      "archive_path": "merged-boundary-work-files/bootstrap/pytest.log.gz",
+      "storage_kind": "new-gzip-payload",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-work-files/bootstrap/pytest.log",
+      "source_head": "32819074ddbbc2bd48bd71bb1bd994e5f1a5e46b",
+      "run_identity": "pid=13851; status=finished; exit=0; receipt wall_seconds=24.69622444799461",
+      "scope": {
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/bootstrap/test_work_file_history.py",
+          "apps/camctl/tests/integration/bootstrap/test_cleanup_flow.py",
+          "apps/camctl/tests/integration/bootstrap/test_cleanup_query_default_recovery.py",
+          "-q",
+          "--tb=short",
+          "--basetemp",
+          "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-work-files/bootstrap/tmp",
+          "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-work-files/bootstrap/results.xml"
+        ],
+        "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl"
+      },
+      "source_mtime_ns": 1793356482813989095,
+      "uncompressed_bytes": 100,
+      "uncompressed_sha256": "56d36ed10f1ad40431de459c67e4d5a7d18a0fd5614b4509fe49c49301e9b5e4",
+      "format": "log",
+      "compressed_bytes": 53,
+      "compressed_sha256": "11dde58967a11a3dd35ac926632d6678a632161e706c43f2a4b08b3143d97d72"
+    },
+    {
+      "archive_path": "merged-boundary-work-files/outputs/receipt.json.gz",
+      "storage_kind": "new-gzip-payload",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-work-files/outputs/receipt.json",
+      "source_head": "32819074ddbbc2bd48bd71bb1bd994e5f1a5e46b",
+      "run_identity": "pid=15337; status=finished; exit=0; receipt wall_seconds=22.419427737986553",
+      "scope": {
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/outputs/test_result_error_diagnostics.py",
+          "apps/camctl/tests/integration/outputs/test_delete_rejected_error_graph.py",
+          "apps/camctl/tests/integration/outputs/test_cleanup_residual_recovery.py",
+          "-q",
+          "--tb=short",
+          "--basetemp",
+          "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-work-files/outputs/tmp",
+          "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-work-files/outputs/results.xml"
+        ],
+        "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl"
+      },
+      "source_mtime_ns": 1793356505458258456,
+      "uncompressed_bytes": 1908,
+      "uncompressed_sha256": "6c4f4e15988a375d20412a22180875fcda1f5a25f45efd288ca89c10716033cf",
+      "format": "json",
+      "compressed_bytes": 790,
+      "compressed_sha256": "c223e5fc1504c103c3d34ec334b7b6e577fc78824d9462bccd80a59a9b2ee9f1"
+    },
+    {
+      "archive_path": "merged-boundary-work-files/outputs/results.xml.gz",
+      "storage_kind": "new-gzip-payload",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-work-files/outputs/results.xml",
+      "source_head": "32819074ddbbc2bd48bd71bb1bd994e5f1a5e46b",
+      "run_identity": "pid=15337; status=finished; exit=0; receipt wall_seconds=22.419427737986553",
+      "scope": {
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/outputs/test_result_error_diagnostics.py",
+          "apps/camctl/tests/integration/outputs/test_delete_rejected_error_graph.py",
+          "apps/camctl/tests/integration/outputs/test_cleanup_residual_recovery.py",
+          "-q",
+          "--tb=short",
+          "--basetemp",
+          "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-work-files/outputs/tmp",
+          "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-work-files/outputs/results.xml"
+        ],
+        "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl"
+      },
+      "source_mtime_ns": 1793356505226032050,
+      "uncompressed_bytes": 10062,
+      "uncompressed_sha256": "5bae0134b6b496acdcea56efe5f3fcea563653d97570d91ee98098fc4a9c536d",
+      "format": "xml",
+      "compressed_bytes": 1604,
+      "compressed_sha256": "eee44085ba860d56f1d71c4cbeb6407dab3b416cbfb05eb97ef0be22cf5a54ff"
+    },
+    {
+      "archive_path": "merged-boundary-work-files/outputs/pytest.log.gz",
+      "storage_kind": "new-gzip-payload",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-work-files/outputs/pytest.log",
+      "source_head": "32819074ddbbc2bd48bd71bb1bd994e5f1a5e46b",
+      "run_identity": "pid=15337; status=finished; exit=0; receipt wall_seconds=22.419427737986553",
+      "scope": {
+        "argv": [
+          "/workspaces/camctl/apps/camctl/.venv311/bin/python",
+          "-m",
+          "pytest",
+          "apps/camctl/tests/integration/outputs/test_result_error_diagnostics.py",
+          "apps/camctl/tests/integration/outputs/test_delete_rejected_error_graph.py",
+          "apps/camctl/tests/integration/outputs/test_cleanup_residual_recovery.py",
+          "-q",
+          "--tb=short",
+          "--basetemp",
+          "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-work-files/outputs/tmp",
+          "--junitxml=/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-work-files/outputs/results.xml"
+        ],
+        "cwd": "/opt/devcontainer/.codex/worktrees/de38/camctl"
+      },
+      "source_mtime_ns": 1793356505296709652,
+      "uncompressed_bytes": 100,
+      "uncompressed_sha256": "83460a87ad28eee3d979485f38d2e9df5eacd2df6cd85146420f453141e3f4f1",
+      "format": "log",
+      "compressed_bytes": 53,
+      "compressed_sha256": "ea48879849b1ec208d818f8e71531774ba1e5bedee9dbeee96f7fd2744e96388"
+    },
+    {
+      "archive_path": "boundary-output-handoff/handoff.json.gz",
+      "storage_kind": "new-gzip-payload",
+      "source_path": "/tmp/camctl-resume-20261030/evidence-boundary-output/handoff.json",
+      "source_head": null,
+      "run_identity": "completed mapping handoff JSON; not a test run and no single source HEAD is recorded in the file.",
+      "scope": "camctl outputs 五文件公开边界迁移阶段交接；整体目标未完成",
+      "source_mtime_ns": 1793356201836285550,
+      "uncompressed_bytes": 6091,
+      "uncompressed_sha256": "39d4b971be360d61a6df74b206e7f511b41b6c4f489bdc3fa47da55509924dc2",
+      "format": "json",
+      "compressed_bytes": 3165,
+      "compressed_sha256": "b348983820d76839bef831057e68e12df26892f9e923350e1d4e05d3a3cff4d5"
+    }
+  ],
+  "excluded_from_archive": [
+    "所有 pytest basetemp/tmp、bytecode cache、数据库和工作树源码副本。",
+    "merged-boundary-diagnostics54 的三项 payload 已由 stage-6 保存；本阶段仅引用并核对，不重复压缩。",
+    "未读取或复制 work-files 分支正在运行目录中的任何新文件。",
+    "不将不同 HEAD 或不同目录组合的通过节点相加成一次全量结果。"
+  ]
+}
