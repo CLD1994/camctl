@@ -208,13 +208,14 @@ async def reopen_fault_database(world, capture_resources):
     from camctl.persistence.business import BusinessDatabase
 
     previous = world.database
-    previous_thread = previous.executor._thread
-    assert previous_thread is not None and previous_thread.is_alive()
+    previous_thread = world.connection_threads[-1]
+    assert previous_thread.is_alive()
     await capture_resources.close()
     await previous.close()
     assert not previous_thread.is_alive()
     world.database = await BusinessDatabase.open(world.connect)
-    assert world.database.executor._thread is not previous_thread
+    assert world.connection_threads[-1] is not previous_thread
+    assert world.connection_threads[-1].is_alive()
     return await world.factory(world.database)
 
 

@@ -89,10 +89,13 @@ async def native_fault_world(tmp_path, catalog, *, committed=False):
     devices = {"cam-1": {"driver": "camctl-adb", "result_check": {
         "max_attempts": 3, "call_timeout_s": Decimal("1.25"), "retry_interval_s": Decimal("2")}}}
     state = {}
+    connection_threads = []
 
     async def assemble(owned, *, driver):
         path = database_path(owned)
         def connect():
+            from threading import current_thread
+            connection_threads.append(current_thread())
             actual = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
             return replace(actual, connection=fault.connection(actual.connection))
         database = await BusinessDatabase.open(connect)
@@ -122,7 +125,7 @@ async def native_fault_world(tmp_path, catalog, *, committed=False):
         independent_activity=True, catalog=catalog, start=False, runtime_factory=assemble)
     return SimpleNamespace(owned=owned, runtime=runtime, action_id=action_id, handler=handler,
         fault=fault, wall=wall, mono=mono, stopper=stopper, devices=devices,
-        result_driver=result_driver, **state)
+        result_driver=result_driver, connection_threads=connection_threads, **state)
 
 
 class AfterCommitHoldFault:
