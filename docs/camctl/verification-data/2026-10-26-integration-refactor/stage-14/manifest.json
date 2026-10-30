@@ -1889,7 +1889,7 @@
     {
       "archive_path": "preparation-ports/fix-capture.json.gz",
       "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/fix-capture.json",
-      "role": "e652范围直接证据文件",
+      "role": "异常身份修正后的实际capture运行，源码bfca8f30，对应86734082",
       "raw_bytes": 2059,
       "raw_sha256": "2878d499845cfe01c42817f5e806a9dfb00c4e882db5d582fb22d49920479449",
       "gzip_bytes": 602,
@@ -1905,7 +1905,7 @@
     {
       "archive_path": "preparation-ports/fix-capture.log.gz",
       "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/fix-capture.log",
-      "role": "e652范围直接证据文件",
+      "role": "异常身份修正后的实际capture运行，源码bfca8f30，对应86734082",
       "raw_bytes": 592,
       "raw_sha256": "0223bd60512812b4b6bf692f7bec8b074fbd64d31ef2e5b321ac01395f4a0bb0",
       "gzip_bytes": 99,
@@ -1921,7 +1921,7 @@
     {
       "archive_path": "preparation-ports/fix-capture.xml.gz",
       "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/fix-capture.xml",
-      "role": "e652范围直接证据文件",
+      "role": "异常身份修正后的实际capture运行，源码bfca8f30，对应86734082",
       "raw_bytes": 94028,
       "raw_sha256": "400a33dc4830bee47c48d575574b2d7470291c81d389620f6cdd5cda075e31bb",
       "gzip_bytes": 7283,
@@ -2017,7 +2017,7 @@
     {
       "archive_path": "preparation-ports/identity-fix.diff.gz",
       "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/identity-fix.diff",
-      "role": "e652范围直接证据文件",
+      "role": "e65200e6至86734082的测试支持差异",
       "raw_bytes": 1600,
       "raw_sha256": "cf7df293439390f921a371f7db720667ebeaac17a62262d9f260cc9943e6ff99",
       "gzip_bytes": 654,
@@ -2625,7 +2625,7 @@
     {
       "archive_path": "preparation-ports/test_receipt_probe.py.gz",
       "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/test_receipt_probe.py",
-      "role": "e652范围直接证据文件",
+      "role": "后续三分区局部假回执探针；早期两分区源码缺失",
       "raw_bytes": 1767,
       "raw_sha256": "331331a54d6e50d172022c50261d34864ea3d1cd33c5abc208713f2b1a3fa2ce",
       "gzip_bytes": 743,
@@ -2740,5 +2740,20 @@
     "gzip_payload_count": 98,
     "raw_bytes": 4916108,
     "compressed_bytes": 340476
+  },
+  "payload_scope_clarification": {
+    "date": "2026-10-30",
+    "post_e652_payloads_present": [
+      "preparation-ports/identity-fix.diff.gz",
+      "preparation-ports/fix-capture.json.gz",
+      "preparation-ports/fix-capture.log.gz",
+      "preparation-ports/fix-capture.xml.gz"
+    ],
+    "fix_source_sha256": "bfca8f301a3c905255782c4a241d0cc727226135edf83c7422c2032b7983c6e3",
+    "fix_commit": "86734082d20422f91c08b998f5d2cd042e2c1678",
+    "saved_probe_source": "后续三分区探针；不是早期receipt-probe两分区的精确源码",
+    "early_two_case_probe_source_bytes_available": false,
+    "complete_followup_archive": "stage-15",
+    "raw_payloads_changed": false
   }
 }
