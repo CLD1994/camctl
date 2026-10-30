@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from ..support.capture_media_cases import media_cases  # noqa: F401
+
 from camctl.capture.processing import RepairSuccess
 from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import new_operation_key

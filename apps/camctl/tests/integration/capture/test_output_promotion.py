@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from ..support.capture_media_cases import media_cases  # noqa: F401
+
 from camctl.contracts.history_values import TransactionRange
 from camctl.contracts.values import new_operation_key
 from camctl.outputs.catalog import FileReference, OutputDraft, OutputKind
