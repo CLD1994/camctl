@@ -87,8 +87,8 @@
 
 | 问题与实际影响 | 后续核对或修复方向 | 证据 |
 | --- | --- | --- |
-| HBF-02：提交未知后的核实新开了可写连接，原断言要求独立只读。 | 使用正确的独立核实边界，保留连接关闭和原申请断言。 | [阶段 18](verification-data/2026-10-26-integration-refactor/stage-18/manifest.json) |
-| 文件事实已保存、录像已取消，但原结果列举调用仍运行且结果为空，取消继续等待。 | 终态筛选前交付原实际结果，沿原票据与键保存，不重新列举补结果。 | [阶段 2](verification-data/2026-10-26-integration-refactor/stage-2/manifest.json) |
+| HBF-02：照片完整字节已提交但回执丢失，原写连接已关闭，新核实连接身份不同，却仍能写入业务库；规格要求独立只读。 | 在核实责任内选择独立只读连接，按原申请、键和完整事务边界核对；普通业务读取不因此全部改为只读。 | [判据修正与实际权限](verification-data/2026-10-26-integration-refactor/stage-23/manifest.json)、[原复现](verification-data/2026-10-26-integration-refactor/stage-18/manifest.json) |
+| 原列举已返回、文件事实已保存，录像取消后原调用记录仍停留在运行中且结果为空，取消继续等待。代表用例确认原返回仍由同一工厂保留，补齐测试准备中的扫描集合也未改善。 | 在终态筛选前交付仍持有的原实际结果，沿原票据与键保存，不重新列举补结果；非分页返回的保存不等于扫描完整性确认。 | [原复现](verification-data/2026-10-26-integration-refactor/stage-2/manifest.json)、[责任排查实验](verification-data/2026-10-26-integration-refactor/stage-23/manifest.json) |
 | 目录检查已登记、尚未开始读取时取消，无返回事实已经保存，拍摄取消收尾却因缺少事实读取端口报错，动作与占用未结束。 | 在分段取消的正式收尾入口交付原核对事实，保留零目录调用及已保存的未知结果。 | [阶段 22](verification-data/2026-10-26-integration-refactor/stage-22/manifest.json) |
 | 原目录任务已经取消结束，同一工厂仍持有原任务，但再次推进在等待分支提前返回，没有保存未知结果。 | 区分仍在工作与已结束的原任务，让后者按原票据和键保存结果；诊断已排除测试没有等待任务结束。 | [阶段 22](verification-data/2026-10-26-integration-refactor/stage-22/manifest.json) |
 | 本地读取五字节后纯停止，尚无写入或关闭错误，却保存成失败并记录 ERROR。 | 按实际读取结果区分纯停止、业务取消和真实错误，保持原进度及责任。 | [读取契约](../architecture/file-copy.md#实际读取结束与所属结果)、[阶段 9](verification-data/2026-10-26-integration-refactor/stage-9/README.md) |
@@ -108,10 +108,13 @@
 | `6ae7b51c`，全部十六个 camctl 目录、根 Python 和 Node；共 85 个隔离任务 | Python 9033 通过、59 失败、4 跳过；Node 118 通过；bootstrap 收集错误使该目录已收集的 1388 项未执行 | 四槽入口 2011.059 秒，退出 1 | [全量结果](verification-data/2026-10-26-integration-refactor/stage-22/baseline-results.json)、[失败节点](verification-data/2026-10-26-integration-refactor/stage-22/python-failures.csv.gz) |
 | `e0b511bb`，修复悬空导入后补跑完整 bootstrap | 1281 通过、120 失败、1 跳过，实际执行 1402 项 | 单槽入口 900.222 秒，退出 1 | [补跑结果](verification-data/2026-10-26-integration-refactor/stage-22/bootstrap-results.json)、[失败节点](verification-data/2026-10-26-integration-refactor/stage-22/bootstrap-failures.csv.gz) |
 | `066ed4bc`，合入小批修复后的受影响范围组合 | 196 通过、1 失败、零跳过；capture 50 通过、bootstrap 143 通过及 1 失败、根映射 3 通过 | 三槽入口 133.294 秒，退出 1；仅剩满默认池时启动扫描取消未撤回 | [组合结果](verification-data/2026-10-26-integration-refactor/stage-22/combined-results.json) |
+| `c289da4b` 加运行前保存的差异，对应 `661e4087` 的只读判据修正；组件 RAW／JPEG 与两个安装版回执丢失用例 | 四项均进入核实调用，在原事务核查前的主库只读断言失败：原写连接关闭、连接独立，但核实连接可写。三种 SQLite 连接的诊断正确区分 URI 只读、仅查询与普通可写 | 组件 pytest 3.40 秒；安装版 pytest 31.72 秒、隔离任务 72.208 秒；两次 pytest 均退出 1 | [判据、日志与安装收场](verification-data/2026-10-26-integration-refactor/stage-23/manifest.json) |
 
 原始两批失败节点去重后为 179 项，其中 118 项在 `066ed4bc` 组合中通过，61 项尚无修后通过证据：44 项对应生产问题，16 项为用户暂缓的独立检查，1 项为内存判据。该 61 项包含未选入组合的用例，不代表组合又失败了 61 项，也不是全部待重构数量。[逐节点通过映射](verification-data/2026-10-26-integration-refactor/stage-22/original-failures-verified-passing.csv.gz)
 
-小批修复覆盖异步数据库端口、真实资源关闭、缺失夹具和过时固定身份、驱动登记的成对隔离、错误消息结构、异步失败的观察顺序及失效文档引用；原矩阵、失败、原键和恢复目标保留，生产未改。全部命令、实际补丁、首次失败及后续结果、独立复核和资源组收场见[阶段 22](verification-data/2026-10-26-integration-refactor/stage-22/manifest.json)。以上三行范围与源码分别记录，完整约定范围仍未在修复后的统一源码上验收通过。
+小批修复覆盖异步数据库端口、真实资源关闭、缺失夹具和过时固定身份、驱动登记的成对隔离、错误消息结构、异步失败的观察顺序及失效文档引用；原矩阵、失败、原键和恢复目标保留，生产未改。全部命令、实际补丁、首次失败及后续结果、独立复核和资源组收场见[阶段 22](verification-data/2026-10-26-integration-refactor/stage-22/manifest.json)。各行范围与源码分别记录，完整约定范围仍未在修复后的统一源码上验收通过。
+
+补充排查只对文件结果组的 `[discovery-normal-True]` 代表进行了两次实验，没有重跑该组二十八项。该用例返回 `result_files_listed/v1`，不经过分页扫描集合；原返回始终留在同一工厂的待保存责任内。两次仍在原调用结果未保存处失败，因此没有将试验性的测试准备修改合入。只读判据修正已由原作者之外复核；探针限定无活动事务的核实入口，回滚主库建表尝试，不宣称对任意已有读事务的锁状态透明。首次直接运行缺少资源组委派、首次隔离准备漏传客户端依赖路径，分别保留为准备错误，均不算生产功能失败。
 
 ## 耗时与容量
 

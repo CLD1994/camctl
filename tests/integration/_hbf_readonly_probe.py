@@ -22,7 +22,10 @@ def tracked_connect_factory(original_connect):
 
 
 def main_database_readonly(connection):
-    """在回滚保存点内尝试主库写入，仅 READONLY 及其扩展码表示只读。"""
+    """供无活动事务的 HBF 核实入口使用，在回滚保存点内核对主库写权限。
+
+    仅 READONLY 及其扩展码表示只读；不承诺保持已有读事务的锁状态。
+    """
     name = "hbf_readonly_probe_" + uuid.uuid4().hex
     connection.execute("SAVEPOINT hbf_readonly_probe")
     try:
