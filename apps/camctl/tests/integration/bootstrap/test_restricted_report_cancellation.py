@@ -17,6 +17,7 @@ from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_com
 from camctl.bootstrap.background_flow import CombinedLocalWork
 from camctl.logging_runtime.ownership import LoggingOwner
 from camctl.persistence.initialization import InitOutcome, initialize_state
+from camctl.persistence.executor import DbExecutorError
 from camctl.persistence.repositories.acceptance import register_acceptance_guards
 from camctl.reporting.communication import WorkerCommunicator
 from camctl.reporting.messages import JobMessage
@@ -26,7 +27,6 @@ from camctl.reporting.publication import parse_report_file_name
 from camctl.reporting.supervisor import WorkerSupervisor
 from camctl.session.locks import SessionLockConflictError, acquire_session
 
-import camctl.bootstrap.lifecycle as lifecycle_module
 
 register_acceptance_guards()
 register_report_guards()
@@ -113,11 +113,11 @@ def _session_lock_is_held(lock_path: Path) -> bool:
     return False
 
 
-def _connection_is_closed(connection: sqlite3.Connection) -> bool:
+async def _database_is_closed(database) -> bool:
     try:
-        connection.execute("SELECT 1").fetchone()
-    except sqlite3.ProgrammingError as error:
-        return "closed" in str(error).lower()
+        await database.read(lambda owned: owned.connection.execute("SELECT 1").fetchone())
+    except DbExecutorError:
+        return True
     return False
 
 
@@ -161,23 +161,10 @@ async def test_started_restricted_report_cancellation_preserves_actual_result(
     final_log_drain_started = asyncio.Event()
 
     jobs: list[JobMessage] = []
-    runtime_connections = []
-    report_connection: sqlite3.Connection | None = None
+    report_database = None
     retirement_start_release_states: list[bool] = []
     retirement_results: list[tuple[bool, int | None]] = []
     drain_observations: list[dict] = []
-
-    real_open_runtime_connection = lifecycle_module._open_runtime_connection
-
-    def observe_open_runtime_connection(active_deps):
-        owned = real_open_runtime_connection(active_deps)
-        runtime_connections.append(owned)
-        return owned
-
-    monkeypatch.setattr(
-        lifecycle_module, "_open_runtime_connection",
-        observe_open_runtime_connection,
-    )
 
     real_local_stop = CombinedLocalWork.stop_new_work
 
@@ -200,21 +187,21 @@ async def test_started_restricted_report_cancellation_preserves_actual_result(
     real_logging_settle = LoggingOwner.settle
 
     async def observe_logging_settle(owner):
-        nonlocal report_connection
-        if jobs and report_connection is not None and not drain_observations:
+        nonlocal report_database
+        if jobs and report_database is not None and not drain_observations:
             job = jobs[0]
             row = await asyncio.to_thread(_report_row, db_path, job.report_id)
             ready_names = tuple(sorted(
                 path.name for path in Path(cfg.paths.ready).glob("status-report-*.json")
             ))
-            connection_closed = _connection_is_closed(report_connection)
+            connection_closed = await _database_is_closed(report_database)
             lock_held = await asyncio.to_thread(
                 _session_lock_is_held, Path(deps.session_lock),
             )
             drain_observations.append({
                 "row": row,
                 "ready_names": ready_names,
-                "report_connection_closed": connection_closed,
+                "session_database_closed": connection_closed,
                 "session_lock_held": lock_held,
                 "retirement_started": tuple(retirement_start_release_states),
                 "report_worker_exitcodes": tuple(
@@ -229,12 +216,11 @@ async def test_started_restricted_report_cancellation_preserves_actual_result(
     real_send = WorkerCommunicator.send
 
     async def observe_send(communicator, message):
-        nonlocal report_connection
+        nonlocal report_database
         await real_send(communicator, message)
         if isinstance(message, JobMessage):
             jobs.append(message)
-            if runtime_connections:
-                report_connection = runtime_connections[-1].connection
+            report_database = deps.database
             report_ready.set()
             try:
                 await asyncio.wait_for(release_report.wait(), timeout=45)
@@ -264,8 +250,9 @@ async def test_started_restricted_report_cancellation_preserves_actual_result(
         await _wait_for_event(report_ready, "真实报告任务派发")
         assert len(jobs) == 1
         job = jobs[0]
-        assert report_connection is not None
-        assert len(runtime_connections) >= 2
+        assert report_database is not None
+        assert await report_database.read(
+            lambda owned: owned.connection.execute("SELECT 1").fetchone()) == (1,)
 
         before_cancel = await asyncio.to_thread(_report_row, db_path, job.report_id)
         assert before_cancel is not None
@@ -299,7 +286,7 @@ async def test_started_restricted_report_cancellation_preserves_actual_result(
         observation = drain_observations[0]
         assert observation["row"] is not None
         assert observation["row"][0] == job.report_id
-        assert observation["report_connection_closed"] is True
+        assert observation["session_database_closed"] is False
         assert observation["session_lock_held"] is True
 
         if report_generation_fails:
@@ -328,6 +315,7 @@ async def test_started_restricted_report_cancellation_preserves_actual_result(
 
         assert len(jobs) == 1
         assert not parent_job_send_cancelled.is_set()
+        assert await _database_is_closed(report_database)
         final_row = await asyncio.to_thread(_report_row, db_path, job.report_id)
         assert final_row is not None
         assert final_row[1] == (

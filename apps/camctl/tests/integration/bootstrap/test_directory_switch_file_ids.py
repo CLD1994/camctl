@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,6 +10,8 @@ from camctl.bootstrap.obtain_assembly import obtain_flow, session_obtain_assembl
 from camctl.outputs.work_files import WorkFileContext, WorkFileLimits, clean_work_files
 from camctl.persistence.initialization import InitOutcome, initialize_state
 from camctl.persistence.repositories.outputs import OutputsRepository
+
+from ..support.database import business_database
 
 from .test_output_binding_changes import (
     _NOW, _accept, _registry, _save_photos, environment,
@@ -48,7 +51,7 @@ async def test_switch_keeps_old_file_facts_and_allocates_new_global_ids(environm
         published.rename(claimed)
         claimed.unlink()
     await clean_work_files(WorkFileContext(
-        repository=OutputsRepository(), owned=owned, staging=Path(cfg.paths.staging),
+        repository=OutputsRepository(), database=context.database, staging=Path(cfg.paths.staging),
         occurred_at=_NOW, limits=WorkFileLimits(batch_size=10, limit_per_run=10),
     ))
     before = tuple(owned.connection.execute("SELECT * FROM intermediate_files ORDER BY id"))
@@ -58,12 +61,14 @@ async def test_switch_keeps_old_file_facts_and_allocates_new_global_ids(environm
         for name in ("staging", "ready", "processing")
     }))
 
+    await context.database.close()
     switched = initialize_state(moved, Path(cfg.paths.state_db))
 
     assert switched.outcome is InitOutcome.SWITCHED, switched
     assert owned.connection.execute("SELECT instance_id FROM database_metadata").fetchone() == (identity,)
     assert tuple(owned.connection.execute("SELECT * FROM intermediate_files ORDER BY id")) == before
-    await _obtain(moved, owned, context, driver, "3")
+    async with business_database(Path(cfg.paths.state_db)) as database:
+        await _obtain(moved, owned, SimpleNamespace(database=database, clock=context.clock), driver, "3")
     after = tuple(owned.connection.execute("SELECT * FROM intermediate_files ORDER BY id"))
     assert after[:len(before)] == before
     assert [row[0] for row in after[len(before):]] == [old_files[-1][0] + 1, old_files[-1][0] + 2]

@@ -657,15 +657,14 @@ def test_installed_osmo_camera_config_is_single_device_default_config(installed)
         "'examples/camera-demo/osmo360ii-config.toml'))",
     )
     config = tomllib.loads(config_path.read_text(encoding="utf-8"))
-    assert config == {
-        "devices": {
-            "osmo360ii": {
-                "kind": "camera",
-                "driver": "dji-osmo360-ii",
-                "adb": {"serial": "REPLACE_OSMO360II_SERIAL"},
-            },
-        },
-    }
+    source = Path(__file__).resolve().parents[5] / "docs/camctl/examples/camera-demo/osmo360ii-config.toml"
+    assert config == tomllib.loads(source.read_text(encoding="utf-8"))
+    assert set(config) == {"devices"} and set(config["devices"]) == {"osmo360ii"}
+    device = config["devices"]["osmo360ii"]
+    assert device["kind"] == "camera" and device["driver"] == "dji-osmo360-ii"
+    assert device["adb"]["serial"] == "REPLACE_OSMO360II_SERIAL"
+    assert device["video"]["result_mode"] == "segmented"
+    assert device["software_recovery"]["enabled"] is True
 
 
 def test_installed_obtain_and_ack_samples_preserve_exact_ids(installed, tmp_path):

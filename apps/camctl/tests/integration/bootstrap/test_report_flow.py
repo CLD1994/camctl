@@ -84,17 +84,20 @@ async def _accept(owned, tmp_path: Path, request_id: str) -> None:
     )
 
     register_acceptance_guards()
-    result = await accept_input(
-        await _parsed(tmp_path, _plan_body(request_id)),
-        AcceptanceContext(
-            mode=CommandMode.RUN,
-            catalog=Catalog(),
-            repository=AcceptanceRepository(),
-            clock=type("C", (), {"utc_micros": staticmethod(lambda: 1)})(),
-        ),
-        new_operation_key(),
-        owned,
-    )
+    from ..support.database import business_database, database_path
+
+    async with business_database(database_path(owned)) as database:
+        result = await accept_input(
+            await _parsed(tmp_path, _plan_body(request_id)),
+            AcceptanceContext(
+                mode=CommandMode.RUN,
+                catalog=Catalog(),
+                repository=AcceptanceRepository(),
+                clock=type("C", (), {"utc_micros": staticmethod(lambda: 1)})(),
+            ),
+            new_operation_key(),
+            database,
+        )
     assert result.plan_id is not None
 
 
