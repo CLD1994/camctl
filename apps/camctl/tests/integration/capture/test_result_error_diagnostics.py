@@ -69,7 +69,7 @@ async def test_call_error_is_logged_before_failed_business_save_and_replay_logs_
                 await capture_handler(handler)(aid, runtime)
         assert driver.list_results.await_count == 1
         ticket = saves[0][0].ticket
-        assert all(value == saves[0] for value in saves)
+        assert len(saves) >= 2 and all(value == saves[0] for value in saves)
     else:
         case = diagnostic_case
         if operation == 'control':
@@ -107,11 +107,34 @@ async def test_call_error_is_logged_before_failed_business_save_and_replay_logs_
                     await capture_handler('camera_record')(case.action_id, await case.restart())
         assert len(port.calls) == 1
         saves = [(finish, key) for finish, key in case.saves if finish.ticket == ticket]
-        assert saves and all(value == saves[0] for value in saves)
+        assert len(saves) >= 2 and all(value == saves[0] for value in saves)
+    owned = case.owned if operation != 'result' else owned
+    finish, key = saves[0]
+    rows = owned.connection.execute(
+        'SELECT a.id,a.status,a.error_json,a.result_json,a.result_event_id,e.occurred_at,t.operation_key'
+        ' FROM operation_attempts a JOIN history_events e ON e.id=a.result_event_id'
+        ' JOIN history_transactions t ON t.id=e.transaction_id WHERE a.run_id=? AND a.attempt_no=?',
+        (ticket.run_id, ticket.attempt_id)).fetchall()
+    (attempt_id, status, error_json, result_json, event_id, occurred_at, transaction_key), = rows
+    expected_error = {'code': 'device_error', 'stage': 'device', 'details': {'operation': operation}}
+    assert status == 3 and json.loads(error_json) == expected_error
+    assert occurred_at == finish.occurred_at and transaction_key == str(key)
+    assert owned.connection.execute('SELECT COUNT(*) FROM history_transactions WHERE operation_key=?',
+        (str(key),)).fetchone() == (1,)
+    events = owned.connection.execute(
+        "SELECT e.id FROM history_events e, json_each(e.body_json, '$.rows') r"
+        " WHERE json_extract(r.value, '$.table')='operation_attempts'"
+        " AND json_extract(r.value, '$.id')=?"
+        " AND json_extract(r.value, '$.after.values.result_event_id') IS NOT NULL", (attempt_id,)).fetchall()
+    assert events == [(event_id,)]
+    saved_call, = json.loads(result_json)['diagnostics']['calls']
+    assert saved_call['step_name'] == operation
+    assert saved_call['stderr']['hex'] == b'camera error\xff\n'.hex()
     document, = _documents(records)
-    assert document['error']['details'] == {'operation': operation}
+    assert document['level'] == 'ERROR' and document['error'] == expected_error
     assert document['ticket']['run_id'] == ticket.run_id
     assert document['outcome']['diagnostics']['calls'][0]['stderr']['hex'] == b'camera error\xff\n'.hex()
+
 
 
 @pytest.mark.parametrize('wrapper', ['ordinary', 'results', 'start_close', 'binding'])
@@ -358,13 +381,48 @@ async def test_handled_segment_probe_errors_keep_actual_diagnostic_when_save_is_
         assert probe['context']['action_id'] == 1
         assert probe['context']['inspection_id'] == result.inspection_id
         assert storage['context']['inspection_id'] == result.inspection_id
+        assert probe['level'] == storage['level'] == 'ERROR'
+        assert storage['error']['cause']['type'] == 'sqlite3.OperationalError'
+        assert storage['error']['cause']['message'] == 'injected commit response failure'
         assert len(calls) == 1 and len(world.reader.requests) == 1
         world.held_ticket()
         assert requests == [requests[0], requests[0]]
+        request, key = requests[0]
         assert saved.reason != 'result_save_unknown'
+        row, = pipeline[0].connection.execute(
+            'SELECT s.result_json,s.result_event_id,e.occurred_at,t.operation_key'
+            ' FROM segment_inspections s JOIN history_events e ON e.id=s.result_event_id'
+            ' JOIN history_transactions t ON t.id=e.transaction_id WHERE s.id=?', (result.inspection_id,)).fetchall()
+        saved_json, event_id, occurred_at, transaction_key = row
+        assert json.loads(saved_json) == request.result_json
+        assert occurred_at == request.occurred_at and transaction_key == str(key)
+        assert pipeline[0].connection.execute(
+            'SELECT COUNT(*) FROM history_transactions WHERE operation_key=?', (str(key),)).fetchone() == (1,)
+        assert pipeline[0].connection.execute(
+            "SELECT e.id FROM history_events e, json_each(e.body_json, '$.rows') r"
+            " WHERE json_extract(r.value, '$.table')='segment_inspections'"
+            " AND json_extract(r.value, '$.id')=?"
+            " AND json_extract(r.value, '$.after.values.result_event_id') IS NOT NULL",
+            (result.inspection_id,)).fetchall() == [(event_id,)]
+        data = json.loads(saved_json)
         if kind == 'exception':
+            assert probe['error']['type'] == 'builtins.ValueError'
             assert probe['error']['message'] == 'invalid probe response'
+            assert probe['error']['cause']['type'] == 'builtins.RuntimeError'
             assert probe['error']['cause']['message'] == 'original tool failure'
+            assert data['tool'] == {'ran': False, 'error': 'invalid probe response'}
+        elif kind == 'tool':
+            assert probe['error'] == 'OSError: tool failed'
+            assert data['tool'] == {'ran': True, 'error': 'OSError: tool failed'}
+        elif kind == 'invalid':
+            assert probe['error'] == {'reason': 'probe_result_unavailable', 'probe': None}
+            assert data['tool'] == {'ran': True, 'error': 'probe returned no MediaProbe'}
+        else:
+            assert probe['error']['reason'] == 'probe_error'
+            assert probe['error']['probe']['error'] == 'invalid_structure: wrong streams'
+            assert probe['error']['probe']['duration_s'] is None
+            assert data['tool'] == {'ran': True, 'error': None}
+            assert data['probe']['error'] == 'invalid_structure: wrong streams'
     finally:
         await world.close()
         pipeline[0].connection.close()
