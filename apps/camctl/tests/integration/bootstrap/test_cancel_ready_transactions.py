@@ -3,16 +3,15 @@
 from dataclasses import replace
 from pathlib import Path
 import json
+import os
 
 import pytest
 
-from camctl.bootstrap.flows import _resolve_and_fix
-from camctl.cancellation.models import ApplyCancelTarget, CancelApplyMode, StartCancelAction
+from camctl.cancellation.models import CancelApplyMode
 from camctl.contracts.values import new_operation_key
 from camctl.contracts.workflow_errors import item_error_id
 from camctl.outputs.handoff import AdvanceWithdrawal, WithdrawalChoice
 from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.cancellation import CancellationRepository
 from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.transaction import TransactionError, saved_transaction_events
@@ -20,24 +19,18 @@ from camctl.persistence.transaction import TransactionError, saved_transaction_e
 from .test_binding_transactions import _CommitFailure
 from .test_cancel_ready_runtime import _published
 from .test_output_binding_changes import _NOW, _accept, environment  # noqa: F401
-from ..operations.test_result_reuse import _FaultConnection
+from ..support.bootstrap_cleanup_cases import apply_direct_cancel
+from ..support.outputs import SqliteOperationFault
+import sqlite3
 
 pytestmark = pytest.mark.asyncio
 
 
 def _apply_origin(owned, origin):
-    repository = CancellationRepository()
-    spec = owned.connection.execute("SELECT input_fields_json FROM actions WHERE id=?", (origin,)).fetchone()[0]
-    started = repository.start_cancel_action(StartCancelAction(origin, _NOW), new_operation_key(), owned)
-    assert started.kind is DbOutcomeKind.COMPLETED, started.error
-    items = _resolve_and_fix(owned, repository, origin, spec, lambda: _NOW)
-    assert len(items) == 1
-    key = new_operation_key()
-    applied = repository.apply_cancel_target(
-        ApplyCancelTarget(items[0], CancelApplyMode.TERMINAL, _NOW), key, owned)
-    assert applied.kind is DbOutcomeKind.COMPLETED, applied.error
-    assert owned.connection.execute("SELECT status,cancel_requested FROM actions WHERE id=(SELECT target_action_id FROM cancel_items WHERE id=?)", (items[0],)).fetchone() == (3,0)
+    key, item, target = apply_direct_cancel(owned, origin, _NOW, mode=CancelApplyMode.TERMINAL)
+    assert owned.connection.execute("SELECT status,cancel_requested FROM actions WHERE id=?", (target,)).fetchone() == (3,0)
     return key
+
 
 
 async def _pending(environment, *, second_origin=False):
@@ -129,18 +122,21 @@ async def test_one_withdrawal_result_finishes_all_existing_request_waiters(envir
 
 
 @pytest.mark.parametrize("phase", ["projection", "commit_before", "commit_after"])
-async def test_withdrawal_whole_waiter_group_recovers_original_key(environment, phase):
+async def test_withdrawal_whole_waiter_group_recovers_original_key(environment, phase, capture_resources):
     _target, ids, _runtime = await _pending(environment, second_origin=True)
     cfg, owned, _context, _driver = environment
     repository, key = OutputsRepository(), new_operation_key()
     command = AdvanceWithdrawal(ids[0], WithdrawalChoice.WITHDRAWN, _NOW)
     baseline = tuple(owned.connection.iterdump())
-    faulty = (_FaultConnection(owned.connection, "UPDATE cancel_delivery_items") if phase == "projection" else
+    faulty = (SqliteOperationFault(owned.connection, sqlite3.SQLITE_UPDATE, "cancel_delivery_items") if phase == "projection" else
               _CommitFailure(owned.connection, phase == "commit_after"))
     saved = repository.advance_withdrawal(command, key, replace(owned, connection=faulty))
     assert saved.kind is (DbOutcomeKind.ROLLED_BACK if phase == "projection" else DbOutcomeKind.UNKNOWN)
     if phase == "projection":
+        assert faulty.triggered
         assert tuple(owned.connection.iterdump()) == baseline
+    await _context.database.close()
+    await capture_resources.close()
     owned.connection.close()
     reopened = open_existing(Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
     try:
@@ -177,11 +173,12 @@ async def test_later_cancel_request_joins_original_pending_or_failed_delivery_re
     second = owned.connection.execute("SELECT id FROM actions WHERE type=6 ORDER BY id DESC LIMIT 1").fetchone()[0]
     _apply_origin(owned, second)
     assert owned.connection.execute("SELECT COUNT(*) FROM cancel_delivery_items WHERE cancel_item_id IN (SELECT id FROM cancel_items WHERE action_id=?)", (second,)).fetchone() == (2,)
-    removed, original_remove = [], handoff._remove
-    def remove(path):
-        removed.append(path.name)
-        original_remove(path)
-    monkeypatch.setattr(handoff, "_remove", remove)
+    removed, original_remove = [], os.remove
+    def remove(path, *args, **kwargs):
+        if Path(path).parent == Path(cfg.paths.ready):
+            removed.append(Path(path).name)
+        return original_remove(path, *args, **kwargs)
+    monkeypatch.setattr(os, "remove", remove)
     await cancel_flow(ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing), work_files=runtime)(context)
     statuses = owned.connection.execute("SELECT cdi.status FROM cancel_delivery_items cdi JOIN cancel_items ci ON ci.id=cdi.cancel_item_id WHERE ci.action_id=? ORDER BY cdi.id", (second,)).fetchall()
     assert statuses == ([(2,),(2,)] if original_choice is None else [(4,),(4,)])

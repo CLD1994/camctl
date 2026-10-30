@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from camctl.bootstrap.flows import _resolve_and_fix
 from camctl.bootstrap.obtain_assembly import obtain_flow, session_obtain_assembly
 from camctl.cancellation.models import (
     ApplyCancelTarget, CancelApplyMode, StartCancelAction,
@@ -28,7 +27,9 @@ from .test_cancel_work_file_first_result import _active_obtain
 from .test_output_binding_changes import (
     _NOW, _accept, _registry, _save_photos, environment,  # noqa: F401
 )
-from ..operations.test_result_reuse import _FaultConnection
+from ..support.bootstrap_cleanup_cases import apply_direct_cancel, fix_obtain_selections
+from ..support.outputs import SqliteOperationFault
+import sqlite3
 
 pytestmark = pytest.mark.asyncio
 
@@ -48,14 +49,7 @@ async def _apply(owned, target):
         "params": {"target": {"action_instance_id": str(target)}}}])
     origin, spec = owned.connection.execute(
         "SELECT id,input_fields_json FROM actions WHERE type=6").fetchone()
-    repository = CancellationRepository()
-    begun = repository.start_cancel_action(StartCancelAction(origin, _NOW), new_operation_key(), owned)
-    assert begun.kind is DbOutcomeKind.COMPLETED, begun.error
-    items = _resolve_and_fix(owned, repository, origin, spec, lambda: _NOW)
-    assert len(items) == 1
-    applied = repository.apply_cancel_target(
-        ApplyCancelTarget(items[0], CancelApplyMode.WITH_STOP, _NOW), new_operation_key(), owned)
-    assert applied.kind is DbOutcomeKind.COMPLETED, applied.error
+    apply_direct_cancel(owned, origin, _NOW, mode=CancelApplyMode.WITH_STOP)
     assert owned.connection.execute("SELECT status,cancel_requested FROM actions WHERE id=?", (target,)).fetchone() == (2, 1)
 
 
@@ -81,17 +75,20 @@ def _assert_closed(owned, target, original_attempts):
 
 
 @pytest.mark.parametrize("phase", ["projection", "commit_before", "commit_after"])
-async def test_cancel_obtain_whole_group_recovers_after_database_failure(environment, phase):
+async def test_cancel_obtain_whole_group_recovers_after_database_failure(environment, phase, capture_resources):
     cfg, owned, _context, _driver = environment
     target = await _partial(environment)
     request, key = _request(owned, target), new_operation_key()
     attempts, baseline = _attempts(owned), tuple(owned.connection.iterdump())
-    faulty = (_FaultConnection(owned.connection, "UPDATE operation_runs") if phase == "projection"
+    faulty = (SqliteOperationFault(owned.connection, sqlite3.SQLITE_UPDATE, "operation_runs") if phase == "projection"
               else _CommitFailure(owned.connection, phase == "commit_after"))
     result = outputs.OutputsRepository().settle_canceled_obtain(request, key, replace(owned, connection=faulty))
     assert result.kind is (DbOutcomeKind.ROLLED_BACK if phase == "projection" else DbOutcomeKind.UNKNOWN)
     if phase == "projection":
+        assert faulty.triggered
         assert tuple(owned.connection.iterdump()) == baseline
+    await _context.database.close()
+    await capture_resources.close()
     owned.connection.close()
     reopened = open_existing(Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
     try:
@@ -168,11 +165,7 @@ async def test_cancel_obtain_unbuilt_items_end_without_new_delivery_or_attempt(e
         "scheduled_at": "2026-01-15 09:00:00",
         "params": {"source": {"plan_instance_id": "1", "group": "files"}}}])
     target = owned.connection.execute("SELECT MAX(id) FROM actions WHERE type=4").fetchone()[0]
-    runtime = session_obtain_assembly(devices=cfg.devices, drivers=_registry(driver), staging=Path(cfg.paths.staging),
-        ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing), occurred_at=lambda: _NOW)(owned)
-    obtain._start_due(runtime, _NOW)
-    assert obtain._resolve_sources(runtime, obtain._action_facts(owned.connection, target), _NOW)
-    obtain._fix_pending_selections(runtime, _NOW)
+    fix_obtain_selections(owned, target, _NOW)
     assert owned.connection.execute("SELECT status,delivery_id FROM obtain_items ORDER BY id").fetchall() == [(2, None), (2, None)]
     await _apply(owned, target)
     before_attempts = _attempts(owned)
@@ -190,22 +183,17 @@ async def test_cancel_obtain_keeps_original_unfinished_read_and_all_source_prote
     cfg, owned, context, driver = environment
     await _save_photos(cfg, owned, context, driver)
     target = await _active_obtain(environment, "2")
-    moment = [0]
-    runtime = session_obtain_assembly(devices=cfg.devices, drivers=_registry(driver), staging=Path(cfg.paths.staging),
-        ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing), occurred_at=lambda: _NOW,
-        monotonic_ns=lambda: moment[0])(owned)
-    copy_id = owned.connection.execute("SELECT id FROM file_copies ORDER BY id LIMIT 1").fetchone()[0]
-    facts = obtain._read_facts(owned.connection, copy_id)
-    source_device = owned.connection.execute(
-        "SELECT a.device_id FROM device_files f JOIN actions a ON a.id=f.observer_action_id WHERE f.id=?",
-        (facts["source_device_file_id"],)).fetchone()[0]
-    assembly = runtime.devices[source_device]
-    assert obtain._read_wait_remaining(runtime, copy_id, assembly.retry_interval_s, assembly.max_read_attempts) is not None
-    moment[0] = 1_000_000_000_000
-    assert obtain._read_wait_remaining(runtime, copy_id, assembly.retry_interval_s, assembly.max_read_attempts) is None
+    from decimal import Decimal
+    from camctl.operations.attempts import AttemptConfig, AttemptIntent, AttemptTarget, OperationKind
+    from camctl.persistence.repositories.operations import OperationRepository
+    copy_id, round_index = owned.connection.execute("SELECT id,round FROM file_copies ORDER BY id LIMIT 1").fetchone()
     slot = outputs.OutputsRepository().grant_read_slot(SlotRequest(copy_id, _NOW), new_operation_key(), owned)
     assert slot.kind is DbOutcomeKind.COMPLETED, slot.error
-    ticket = obtain._begin_read_attempt(runtime, assembly, facts, _NOW)
+    begun = OperationRepository().begin_attempt(AttemptIntent("read", target, OperationKind.READ_FILE,
+        AttemptTarget(copy_id=copy_id), None, AttemptConfig(3, Decimal("10"), Decimal("3")),
+        _NOW, copy_round=round_index), new_operation_key(), owned)
+    assert begun.kind is DbOutcomeKind.COMPLETED, begun.error
+    ticket = begun.value.ticket
     assert ticket is not None
     assert owned.connection.execute("SELECT COUNT(*) FROM operation_attempts WHERE status=1").fetchone() == (1,)
     await _apply(owned, target)
@@ -222,7 +210,6 @@ async def test_cancel_obtain_keeps_original_unfinished_read_and_all_source_prote
 
 @pytest.mark.parametrize("publication", ["prepared", "moving", "published"])
 async def test_cancel_obtain_preserves_actual_publication_boundary(environment, publication):
-    from camctl.outputs.obtain_flow import _advance_reads
     cfg, owned, context, driver = environment
     await _save_photos(cfg, owned, context, driver)
     target = await _active_obtain(environment, "2")
@@ -230,12 +217,10 @@ async def test_cancel_obtain_preserves_actual_publication_boundary(environment, 
     factory = session_obtain_assembly(devices=cfg.devices, drivers=_registry(driver), staging=Path(cfg.paths.staging),
         ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing), segment_size=4,
         occurred_at=lambda: _NOW, monotonic_ns=lambda: moment[0])
-    runtime = factory(owned)
-    # 先沿原重试等待登记本会话的单调钟起点；随后只推进实际读取，
-    # 不调用会先发布其他 PREPARED 成员的动作汇总入口。
-    await _advance_reads(runtime, _NOW)
+    flow = obtain_flow(factory)
+    await flow(context)
     moment[0] = 1_000_000_000_000
-    await _advance_reads(runtime, _NOW)
+    await flow(context)
     assert owned.connection.execute("SELECT status FROM deliveries ORDER BY id").fetchall() == [(3,), (3,)]
     assert len(driver.reads) == 2
     assert owned.connection.execute("SELECT COUNT(*) FROM operation_attempts WHERE status=1").fetchone() == (0,)
@@ -244,7 +229,7 @@ async def test_cancel_obtain_preserves_actual_publication_boundary(environment, 
         for identity in ids:
             if publication == "published":
                 saved = await publish_delivery(identity, DeliveryContext(
-                    outputs.OutputsRepository(), owned,
+                    outputs.OutputsRepository(), context.database,
                     DeliveryDirectories(Path(cfg.paths.staging), Path(cfg.paths.ready), Path(cfg.paths.processing)), _NOW))
                 assert saved.phase is DeliveryPhase.PUBLISHED, saved
             else:

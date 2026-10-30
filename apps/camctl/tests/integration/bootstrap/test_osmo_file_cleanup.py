@@ -7,6 +7,8 @@ import shlex
 from types import SimpleNamespace
 
 import pytest
+import pytest_asyncio
+from decimal import Decimal
 
 from camctl.bootstrap.cleanup_assembly import cleanup_flow, session_cleanup_assembly
 from camctl.bootstrap.config import ConfigDefaults, load_config
@@ -19,12 +21,12 @@ from camctl.devices.drivers.adb_cameras.registration import register_builtin_cam
 from camctl.devices.drivers.adb_cameras.file_commands import FILE_COMMAND_EVIDENCE
 from camctl.devices.drivers.registry import DriverRegistry
 from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
-from camctl.operations.attempts import AttemptIntent, AttemptTarget, OperationKind
+from camctl.operations.attempts import AttemptConfig
 from camctl.operations.models import AttemptStatus, SettlementBasis
 from camctl.operations.process import LocalExit, RawToolOutcome
 from camctl.operations.recovery import RecoveryBoundary
 from camctl.outputs.cleanup_flow import (
-    CleanupQueryConsumer, _begin_cleanup_intent, advance_cleanup, delete_source_file,
+    advance_cleanup, delete_source_file,
 )
 from camctl.outputs.cleanup_results import saved_cleanup_delete, saved_cleanup_attempt
 from camctl.outputs.work_files import WorkFileLimits
@@ -41,6 +43,9 @@ from ..outputs.test_qualification import (
 from ..outputs.test_cleanup_delete_save_recovery import _FaultOutputs
 from ..outputs.test_cleanup_query_save_recovery import _start_cleanup
 from .test_output_binding_changes import _NOW, _accept
+from ..support.capture import capture_database
+from ..support.outputs import output_test_session
+from ..support.bootstrap_cleanup_cases import cleanup_case_factory, save_cleanup_intent
 
 pytestmark = pytest.mark.asyncio
 BINDING = DeviceBinding("cam-1", "dji-osmo360-ii")
@@ -74,8 +79,8 @@ class FileChannel(LocalAdbChannel):
         return raw
 
 
-@pytest.fixture
-def world(tmp_path, monkeypatch, request):
+@pytest_asyncio.fixture
+async def world(tmp_path, monkeypatch, request, capture_resources):
     """仅预置已登记源；清理受理、意图、结果及交接全部执行生产事务。"""
     binding = DeviceBinding("cam-1", getattr(request, "param", BINDING.driver_id))
     monkeypatch.setattr(definitions_runtime, "_definitions", {})
@@ -150,29 +155,32 @@ def world(tmp_path, monkeypatch, request):
     channel = FileChannel()
     entry.driver.transport = channel
     work = WorkFileRuntime(staging=Path(cfg.paths.staging), limits=WorkFileLimits(batch_size=100, limit_per_run=100))
-    context = SimpleNamespace(open_connection=lambda: open_existing(
+    context = SimpleNamespace(database=await capture_database(owned), open_connection=lambda: open_existing(
         Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig()))
     value = SimpleNamespace(cfg=cfg, owned=owned, registry=registry, entry=entry, channel=channel,
-                            binding=binding, paths=paths, copy=copy, work=work, context=context)
+                            binding=binding, paths=paths, copy=copy, work=work, context=context, resources=capture_resources)
     try:
-        yield value
-        assert not work.executor.unfinished_files()
+        with output_test_session():
+            yield value
+            assert not work.executor.unfinished_files()
     finally:
+        await work.settle()
+        await context.database.close()
         owned.connection.close()
 
 
 def _factory(world, **kwargs):
-    return session_cleanup_assembly(devices=world.cfg.devices, drivers=world.registry,
+    return cleanup_case_factory(devices=world.cfg.devices, drivers=world.registry,
         max_delete_attempts=kwargs.pop("max_delete_attempts", 3),
         max_query_attempts=kwargs.pop("max_query_attempts", 2),
         staging=Path(world.cfg.paths.staging), file_executor=world.work.executor,
-        occurred_at=lambda: _NOW, monotonic_ns=lambda: 0, **kwargs)
+        occurred_at=lambda: _NOW, **kwargs)
 
 
 @pytest.mark.parametrize("operation", ["query", "delete"])
 @pytest.mark.parametrize("world", ["dji-osmo360-ii", "dji-action6"], indirect=True)
 async def test_registered_osmo_recovery_is_consumed_by_formal_assembly(world, operation):
-    runtime = _factory(world)(world.owned)
+    runtime = await _factory(world)(world.owned)
     evidence = runtime.recovery_evidence_for(world.binding, operation)
     assert evidence is not None
     template = evidence.contract("adb_foreground_recovery", 1)
@@ -200,7 +208,7 @@ async def test_formal_recovery_keeps_missing_or_invalid_registration_blocked(wor
             identity_field=None if missing == "body" else "cleanup_item_id")))
     world.registry = DriverRegistry((entry, world.registry.entry("dji-action6"),
                                      world.registry.entry("hasselblad_cfv100c")))
-    runtime = _factory(world)(world.owned)
+    runtime = await _factory(world)(world.owned)
     if missing in ("body", "identity"):
         with pytest.raises(ValueError, match="空正文"):
             runtime.recovery_evidence_for(BINDING, operation)
@@ -242,7 +250,7 @@ async def test_unknown_delete_queries_original_target_with_independent_budget(wo
     for turn in range(8):
         if turn == 2:
             factory = _factory(world)
-        await advance_cleanup(factory(world.owned))
+        await advance_cleanup(await factory(world.owned))
     assert world.channel.operations == expected
     assert world.paths[701].exists() is kept
     assert world.paths[702].read_bytes() == b"source"
@@ -255,19 +263,18 @@ async def test_unknown_delete_queries_original_target_with_independent_budget(wo
 async def test_reliable_absence_and_actual_channel_error_save_along_original_key(world):
     _, item_id = _start_cleanup(world.owned, 701, "2")
     world.channel.behaviors = ["error_after"]
-    runtime = _factory(world)(world.owned)
+    factory = _factory(world)
+    runtime = await factory(world.owned)
     port = _FaultOutputs("finish_cleanup_attempt", DbOutcomeKind.UNKNOWN, after_commit=True)
     runtime.outputs = port
     assert (await delete_source_file(runtime, item_id)).phase == "finish_rejected"
     original = port.calls[0]
     assert world.channel.operations == ["delete"] and not world.paths[701].exists()
-    assert len(runtime.pending_deletes) == 1
     port.enabled = False
     fresh = world.context.open_connection()
     try:
-        resumed = _factory(world, pending_deletes=runtime.pending_deletes,
-            pending_intents=runtime.pending_intents, pending_queries=runtime.pending_queries,
-            pending_saves=runtime.pending_saves, pending_companions=runtime.pending_companions)(fresh)
+        await world.resources.restart_database(fresh)
+        resumed = await factory(fresh)
         resumed.outputs = port
         await delete_source_file(resumed, item_id)
         assert port.calls[1] == original
@@ -285,23 +292,16 @@ async def test_reliable_absence_and_actual_channel_error_save_along_original_key
         fresh.connection.close()
 
 
-def _lost_intent(world, operation):
-    _, item_id = _start_cleanup(world.owned, 701, "2")
-    runtime = _factory(world)(world.owned)
-    intent = AttemptIntent(operation=operation, action_id=world.owned.connection.execute(
-        "SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()[0],
-        kind=OperationKind.DELETE_FILE if operation == "delete" else OperationKind.CHECK_FILE_EXISTS,
-        target=AttemptTarget(cleanup_item_id=item_id), query_purpose=None,
-        config=runtime.delete_config if operation == "delete" else runtime.query_config, occurred_at=_NOW)
-    # 使用对应设备配置，只有已保存的原票据可进入恢复。
-    runtime = runtime.for_operation(item_id, operation)
-    intent = replace(intent, config=runtime.delete_config if operation == "delete" else runtime.query_config)
-    begun = _begin_cleanup_intent(runtime, intent,
-        None if operation == "delete" else CleanupQueryConsumer.BEFORE_DELETE)
-    assert begun.kind is DbOutcomeKind.COMPLETED, begun.error
-    ticket = begun.value.ticket
-    horizon = world.owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()[0]
-    runtime.pending_intents.clear()
+def _lost_intent(world, operation, *, output_id=701, item_id=None):
+    if item_id is None:
+        _, item_id = _start_cleanup(world.owned, output_id, "2")
+    local = output_id in (703, 704, 705)
+    declaration = world.cfg.devices.get("cam-1", {}).get("cleanup", {})
+    config = AttemptConfig(1) if local else AttemptConfig(
+        3 if operation == "delete" else 2,
+        Decimal(str(declaration.get(operation + "_timeout_s", "10"))),
+        Decimal(str(declaration.get(operation + "_retry_interval_s", "0"))))
+    ticket, horizon = save_cleanup_intent(world.owned, item_id, operation, config, _NOW)
     return item_id, ticket, horizon
 
 
@@ -311,7 +311,8 @@ async def test_old_running_uses_registered_recovery_without_replaying_original_t
     item_id, ticket, horizon = _lost_intent(world, operation)
     fresh = world.context.open_connection()
     try:
-        recovered = _factory(world, recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
+        await world.resources.restart_database(fresh)
+        recovered = await _factory(world, recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
             recovery_max_event_id=horizon)(fresh)
         await advance_cleanup(recovered)
         row = fresh.connection.execute("SELECT status,result_json FROM operation_attempts WHERE run_id=? AND attempt_no=?", (ticket.run_id, ticket.attempt_id)).fetchone()
@@ -336,7 +337,7 @@ async def test_mixed_cleanup_routes_saved_device_host_and_unsupported_source_ind
         "scheduled_at": "2026-01-15 09:00:00", "params": {"output_ids": ["701", "703", "706"]}}])
     factory = _factory(world)
     for _ in range(3):
-        await advance_cleanup(factory(world.owned))
+        await advance_cleanup(await factory(world.owned))
     assert world.channel.operations == ["delete"]
     assert not world.paths[701].exists() and not world.paths[703].exists()
     assert world.paths[702].exists() and world.paths[704].exists() and world.paths[705].exists()
@@ -359,9 +360,10 @@ async def test_old_delete_recovery_uses_original_query_budget_for_absence_or_unk
         world.channel.behaviors = ["unreceived", "unreceived"]
     fresh = world.context.open_connection()
     try:
+        await world.resources.restart_database(fresh)
         factory = _factory(world, recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
             recovery_max_event_id=horizon)
-        await advance_cleanup(factory(fresh))
+        await advance_cleanup(await factory(fresh))
         assert world.channel.operations == []
         recovered = saved_cleanup_attempt(fresh, ticket,
             database_id=fresh.metadata.instance_id, item_id=item_id)
@@ -369,7 +371,7 @@ async def test_old_delete_recovery_uses_original_query_budget_for_absence_or_unk
         assert recovered.actual.outcome.status is AttemptStatus.UNKNOWN
         assert recovered.actual.outcome.observations == ()
         for _ in range(5):
-            await advance_cleanup(factory(fresh))
+            await advance_cleanup(await factory(fresh))
         assert world.channel.operations == (["query"] if verification == "absent" else ["query", "query"])
         state = fresh.connection.execute("SELECT status,error_code FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
         assert state == ((4, None) if verification == "absent" else
