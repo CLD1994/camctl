@@ -83,7 +83,7 @@ class _TestClock:
 async def _runtime_with_media(pipeline, duration_s, clock):
     entry = original_recording_entry()
     results = ResultsDouble({1: (entry,)})
-    runtime = (await _runtime(pipeline[0], results=results, listing_cache={},
+    runtime = (await _runtime(pipeline[0], results=results,
                               evidence=_EVIDENCE, wall_us=clock.wall_us,
                               monotonic_ns=clock.monotonic_ns))
     reader, tools = ReadDriverDouble(_CONTENT), _WaitingProbe(duration_s)
@@ -146,7 +146,7 @@ async def test_media_completion_ends_original_results_without_new_observation(
             recovered = open_existing(database_path, DbOpenMode.EXISTING_RW, DbConfig())
             assert recovered.metadata == metadata
             owned = recovered
-            runtime = (await _runtime(owned, results=results, listing_cache={},
+            runtime = (await _runtime(owned, results=results,
                                       evidence=_EVIDENCE, wall_us=clock.wall_us,
                                       monotonic_ns=clock.monotonic_ns))
             runtime.media = (await _flow((owned, roots, source_id), reader, tools))
@@ -389,7 +389,7 @@ async def test_explicit_media_issue_settles_from_saved_check_without_new_queries
             recovered = open_existing(database_path, DbOpenMode.EXISTING_RW, DbConfig())
             assert recovered.metadata == metadata
             owned = recovered
-            runtime = (await _runtime(owned, results=results, listing_cache={},
+            runtime = (await _runtime(owned, results=results,
                                       evidence=_EVIDENCE, wall_us=clock.wall_us,
                                       monotonic_ns=clock.monotonic_ns))
             runtime.media = (await _flow((owned, roots, source_id), reader, tools))
@@ -445,7 +445,7 @@ async def test_incomplete_other_file_control_partition_keeps_media_pipeline(
     incomplete = _entry("sidecar-log", kind=FileKind.OTHER, complete=False)
     results = ResultsDouble({1: (entry, incomplete)})
     clock = _TestClock()
-    runtime = (await _runtime(owned, results=results, listing_cache={},
+    runtime = (await _runtime(owned, results=results,
                               evidence=_EVIDENCE, wall_us=clock.wall_us,
                               monotonic_ns=clock.monotonic_ns))
     reader, tools = ReadDriverDouble(_CONTENT), _WaitingProbe(Decimal("61"))
@@ -500,7 +500,7 @@ async def test_incomplete_other_turning_complete_settles_from_saved_facts(
     incomplete = _entry("sidecar-log", kind=FileKind.OTHER, complete=False)
     results = ResultsDouble({1: (entry, incomplete)})
     clock = _TestClock()
-    runtime = (await _runtime(owned, results=results, listing_cache={},
+    runtime = (await _runtime(owned, results=results,
                               evidence=_EVIDENCE, wall_us=clock.wall_us,
                               monotonic_ns=clock.monotonic_ns))
     reader, tools = ReadDriverDouble(_CONTENT), _WaitingProbe(Decimal("61"))

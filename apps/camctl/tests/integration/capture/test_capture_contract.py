@@ -330,8 +330,7 @@ def _seed_processing(connection, action_id: int) -> None:
 
 
 async def _runtime(owned, *, driver=None, files=None, wall=None,
-                   recording_state=None, results=None,
-                   listing_cache=None, check_config=None, stop_config=None,
+                   results=None, check_config=None, stop_config=None,
                    evidence=None, directory=None, **options):
     from ..support.capture import capture_runtime
 
@@ -349,10 +348,6 @@ async def _runtime(owned, *, driver=None, files=None, wall=None,
         stop_config=stop_config,
         **options,
     )
-    if recording_state is not None:
-        runtime.recording_state = recording_state
-    if listing_cache is not None:
-        runtime.listing_cache = listing_cache
     return runtime
 
 
