@@ -1,5 +1,5 @@
 {
-  "description": "隔离原型：由真实受理与拍摄准备一次生成的历史选择来源，供只读消费者复核。",
+  "description": "真实受理、调度和拍摄生成的报告历史只读样本。",
   "database_format_version": 5,
   "database_sha256": "df80224748e0cd267626ff461518307e6f33bb391483c1ec412cd2191989a866",
   "database_bytes": 6483968,
