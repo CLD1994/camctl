@@ -54,6 +54,36 @@ async def test_pending_osv_returns_prepared_after_releasing_input_owner(pipeline
     assert executor.unfinished_files() == ()
 
 
+@pytest.mark.parametrize('pipeline', ['osv'], indirect=True)
+async def test_failed_read_waits_three_seconds_on_session_clock(pipeline):
+    from camctl.capture.input_copy import InputPhase
+    from camctl.devices.read_session import ReadSession
+    from .test_media_flow import _FailingStream
+
+    owned, _roots, source_id = pipeline
+    executor = FileTaskExecutor(Supervisor())
+    flow = await media_flow(pipeline, executor, Tools(executor))
+    case = media_case(flow)
+    opens = []
+
+    async def failing_read(source, offset, ticket, *, idle_timeout_s):
+        opens.append(offset)
+        return ReadSession(source, offset, _FailingStream(), idle_timeout_s)
+
+    case.driver.open_read = failing_read
+    first = await run_recording_media(flow, 1, 1, source_id, target_extension='osv')
+    assert first.phase is InputPhase.SEGMENT_FAILED
+    assert owned.connection.execute(
+        'SELECT max_attempts_used, timeout_s_json, retry_interval_s_json, retry_wait_required '
+        'FROM operation_runs WHERE kind=3').fetchone() == (3, '10', '3', 1)
+    case.mono[0] += 2_999_999_999
+    waiting = await run_recording_media(flow, 1, 1, source_id, target_extension='osv')
+    assert waiting.phase is InputPhase.RETRY_WAITING and len(opens) == 1
+    case.mono[0] += 1
+    retried = await run_recording_media(flow, 1, 1, source_id, target_extension='osv')
+    assert retried.phase is InputPhase.SEGMENT_FAILED and len(opens) == 2
+
+
 # 观察器只记录实际受理和结束；所有裁决仍由原执行器执行。
 class ObservedExecutor(FileTaskExecutor):
     def __init__(self):
@@ -242,6 +272,42 @@ async def test_registered_output_survives_real_external_file_conflict(pipeline):
     assert len(tools.probes) == 2 and executor.unfinished_files() == ()
 
 
+async def test_registered_queued_file_task_is_withdrawn_and_identity_reused():
+    import asyncio
+    from camctl.host_files.tasks import FileTask
+
+    reached, release = asyncio.Event(), asyncio.Event()
+    calls = []
+
+    async def runner(fn):
+        reached.set()
+        await release.wait()
+        return await asyncio.to_thread(fn)
+
+    executor = FileTaskExecutor(Supervisor(), thread_runner=runner)
+    task = FileTask(FileTaskId('queued-prepare'), 1, 'media_repair_prepare',
+        '录像修复准备', lambda _stop: calls.append('executed'))
+    waiting = asyncio.create_task(executor.run_file_task(task, _Owner()))
+    try:
+        await asyncio.wait_for(reached.wait(), 2)
+        lease = executor.lease_of(task.task_id)
+        assert lease is not None and not lease.acquired
+        assert executor.unfinished_files() == (1,)
+        waiting.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiting
+        assert lease.released and calls == []
+        assert executor.unfinished_files() == ()
+        release.set()
+        result = await executor.run_file_task(task, _Owner())
+        assert result.ran and calls == ['executed']
+        assert executor.unfinished_files() == ()
+        assert not (await executor.drain_required()).failed
+    finally:
+        release.set()
+        await asyncio.gather(waiting, return_exceptions=True)
+
+
 class GatedExecutor(ObservedExecutor):
     def __init__(self, phase):
         import asyncio
@@ -359,11 +425,12 @@ async def test_real_handler_continues_prepared_stage_without_new_request(pipelin
 async def test_business_cancel_keeps_actual_stage_result_and_blocks_new_content(pipeline, phase):
     import asyncio
     from camctl.capture.handlers import capture_handler
-    from camctl.bootstrap.work_file_assembly import WorkFileRuntime
-    from camctl.outputs.work_files import WorkFileLimits
+    from dataclasses import replace
+    from camctl.acceptance.service import CommandMode
+    from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
+    from .media_retry_fixtures import _Catalog
     owned, roots, _source = pipeline
-    work = WorkFileRuntime(staging=roots.staging, limits=WorkFileLimits(100, 100))
-    executor = work.executor
+    executor = ObservedExecutor()
     tools = ControlledTools(executor)
     flow = await media_flow(pipeline, executor, tools)
     runtime = (await handler_runtime(pipeline, flow))
@@ -397,12 +464,18 @@ async def test_business_cancel_keeps_actual_stage_result_and_blocks_new_content(
     before = (len(tools.probes), len(tools.repairs))
     await advance(1, runtime)
     assert (len(tools.probes), len(tools.repairs)) == before
-    file_ids = tuple(r[0] for r in owned.connection.execute('SELECT id FROM intermediate_files'))
-    outcome = await work.first_cleanup(file_ids, database=flow.database, occurred_at=1_750_000_200_000_000)
-    assert outcome.complete
-    assert all(not (roots.staging / r[0]).exists() for r in owned.connection.execute('SELECT relative_path FROM intermediate_files'))
-    work.stop_new_work()
-    assert not (await work.file_supervisor.drain_required()).failed
+    paths = tuple(roots.staging / row[0] for row in owned.connection.execute(
+        'SELECT relative_path FROM intermediate_files'))
+    assert paths and any(path.exists() for path in paths)
+    cfg = replace(media_case(flow).config, devices={})
+    deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
+    try:
+        outcome = await execute_command(deps, None, poll_interval_s=0.001)
+        assert outcome.succeeded, outcome
+    finally:
+        close_runtime(deps)
+    assert all(not path.exists() for path in paths)
+
 
 
 @pytest.mark.parametrize('pipeline', ['osv-timing'], indirect=True)

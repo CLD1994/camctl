@@ -212,7 +212,7 @@ class Results:
 
 
 class MediaCase:
-    def __init__(self, owned, roots, source_id, tools, *, executor=None, read=True, margin=Decimal(2), results=None):
+    def __init__(self, owned, roots, source_id, tools, *, executor=None, read=True, margin=Decimal(2), results=None, control_retry_interval_s=None):
         from ..bootstrap.test_media_assembly import _SessionDriver, _config
         from ..capture.media_retry_fixtures import _EVIDENCE, original_recording_entry
         from ..capture.test_capture_contract import ResultsDouble
@@ -226,7 +226,10 @@ class MediaCase:
             for name, value in declaration.items()}
             for identity, declaration in self.config.devices.items()}
         devices['cam-1'].setdefault('recording', {})['repair_margin_s'] = margin
-        devices['cam-1'].setdefault('copy', {})['retry_interval_s'] = Decimal(0)
+        if control_retry_interval_s is not None:
+            devices['cam-1']['recording'].update(
+                start_retry_interval_s=control_retry_interval_s,
+                stop_retry_interval_s=control_retry_interval_s)
         if results is None:
             name, locator = owned.connection.execute(
                 'SELECT original_name,locator_json FROM device_files WHERE id=?', (source_id,)).fetchone()
@@ -321,7 +324,7 @@ async def recording_environment(tmp_path, *, check_decision, check_basis):
     accepted = await accept_input(ParsedInput('recording-media.json', {
         'request_id': '1', 'created_at': instant, 'name': '录像媒体链',
         'actions': [{'name': '录像', 'type': 'camera_record', 'device_id': 'cam-1',
-            'scheduled_at': instant, 'params': {'type': 'video'}, 'policy': {'max_delay_ms': 5000}}]}),
+            'scheduled_at': instant, 'params': {'type': 'video'}, 'policy': {'max_delay_ms': 1000}}]}),
         AcceptanceContext(CommandMode.RUN, _Catalog(), AcceptanceRepository(),
             clock=SimpleNamespace(utc_micros=lambda: _NOW)), new_operation_key(), database)
     assert accepted.plan_id is not None, accepted
@@ -333,13 +336,15 @@ async def recording_environment(tmp_path, *, check_decision, check_basis):
         receipt = operation(request, new_operation_key(), owned)
         assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
     roots = BoundDirectories(staging=Path(cfg.paths.staging))
-    case = await MediaCase(owned, roots, None, None, read=False, results=ResultsDouble({})).start()
+    case = await MediaCase(owned, roots, None, None, read=False, results=ResultsDouble({}),
+        control_retry_interval_s=Decimal(1)).start()
     case.wall[0] = _NOW
     case.mono[0] = 7_000_000_000
     await capture_handler('camera_record')(1, case.runtime)
     if check_decision == 3:
         # 新会话没有前会话连续控制锚点，媒体检查基于真实恢复分类。
-        case = await MediaCase(owned, roots, None, None, read=False, results=ResultsDouble({})).start()
+        case = await MediaCase(owned, roots, None, None, read=False, results=ResultsDouble({}),
+            control_retry_interval_s=Decimal(1)).start()
     case.wall[0] = _NOW + 60_000_000
     case.mono[0] = 67_000_000_000
     actual = CaptureRepository.conclude_activity
