@@ -6,6 +6,10 @@ import pytest
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.persistence.repositories.history import HistoryRepository
 from ..persistence.test_segment_storage import _world, _ok, _assessment
+from ..capture.test_capture_contract import _NOW
+
+# 录制完成后的事实时刻，与正式拍摄准备的时钟推进保持一致。
+_RESULT_TIME = _NOW + 60_000_000
 
 
 async def _fixture(tmp_path, count=5, *, many_gaps=False):
@@ -13,14 +17,14 @@ async def _fixture(tmp_path, count=5, *, many_gaps=False):
         tmp_path, indexes=tuple(range(1, count + 1)),
         sizes=tuple((10 if i in (0,count-1) else 0) if many_gaps else (0 if i == 2 else 10) for i in range(count)))
     for offset in range(0, count, 128):
-        _ok(repo.append_members(ref, members[offset:offset+128], runtime.wall_us(), new_operation_key(), owned))
-    _ok(repo.fix_members(ref, runtime.wall_us(), new_operation_key(), owned))
+        _ok(repo.append_members(ref, members[offset:offset+128], _RESULT_TIME, new_operation_key(), owned))
+    _ok(repo.fix_members(ref, _RESULT_TIME, new_operation_key(), owned))
     facts, result, gaps = _assessment(ref, members, owned)
     for offset in range(0, len(gaps), 128):
-        _ok(repo.append_gaps(ref, gaps[offset:offset+128], runtime.wall_us(), new_operation_key(), owned))
-    _ok(repo.save_assessment(ref, facts, result, runtime.wall_us(), new_operation_key(), owned))
+        _ok(repo.append_gaps(ref, gaps[offset:offset+128], _RESULT_TIME, new_operation_key(), owned))
+    _ok(repo.save_assessment(ref, facts, result, _RESULT_TIME, new_operation_key(), owned))
     first = repo.read_members(ref, None, 1, owned).items[0].member_id
-    _ok(repo.append_scope(ref, (first,), runtime.wall_us(), new_operation_key(), owned))
+    _ok(repo.append_scope(ref, (first,), _RESULT_TIME, new_operation_key(), owned))
     history = HistoryRepository(owned.connection.execute('PRAGMA database_list').fetchone()[2])
     return owned, runtime, repo, ref, history
 
@@ -87,7 +91,7 @@ def _version(owned, runtime, repo, ref, version):
     from camctl.capture.segment_storage import SegmentSetCreate
     old = owned.connection.execute('SELECT activity_id,run_id,target_duration_ms FROM segment_sets WHERE version=1').fetchone()
     ref = replace(ref,version=version)
-    _ok(repo.create(SegmentSetCreate(ref,*old,runtime.wall_us()),new_operation_key(),owned))
+    _ok(repo.create(SegmentSetCreate(ref,*old,_RESULT_TIME),new_operation_key(),owned))
     return ref
 
 
@@ -353,8 +357,8 @@ async def test_old_full_action_entry_refuses_segment_growth(tmp_path):
 async def test_member_pages_use_device_order_when_rows_were_saved_in_reverse_order(tmp_path):
     owned,runtime,repo,ref,members=await _world(tmp_path,indexes=(1,2,3,4))
     try:
-        _ok(repo.append_members(ref,tuple(reversed(members)),runtime.wall_us(),new_operation_key(),owned))
-        _ok(repo.fix_members(ref,runtime.wall_us(),new_operation_key(),owned))
+        _ok(repo.append_members(ref,tuple(reversed(members)),_RESULT_TIME,new_operation_key(),owned))
+        _ok(repo.fix_members(ref,_RESULT_TIME,new_operation_key(),owned))
         history=HistoryRepository(owned.connection.execute('PRAGMA database_list').fetchone()[2])
         with history.open_segment_history(ref.action_id,history.current_boundary(),batch_size=2) as handle:
             assert [row.values['segment_index'] for row in _rows(handle,'segment_members',ref,limit=1)] == [1,2,3,4]
@@ -367,12 +371,13 @@ async def test_published_marker_scope_and_independent_files_remain_at_same_h(tmp
     from ..persistence.test_segment_storage import _assessed_world,_completion_command
     from camctl.capture.segment_models import DefaultScopeState
     from camctl.capture.files import FilePresenceSave,FileChecksumSave
+    from camctl.persistence.repositories.capture import CaptureRepository
     from camctl.persistence.transaction import commit_operation
     from camctl.history.snapshots import prepare_snapshot
     owned,runtime,repo,ref,members=await _assessed_world(tmp_path,DefaultScopeState[scope])
     try:
         key=new_operation_key()
-        receipt=commit_operation(_completion_command(owned,ref,members,runtime.wall_us(),key),key,owned)
+        receipt=commit_operation(_completion_command(owned,ref,members,_RESULT_TIME,key),key,owned)
         assert receipt.kind == 'completed', receipt.error
         history=HistoryRepository(owned.connection.execute('PRAGMA database_list').fetchone()[2])
         boundary=history.current_boundary()
@@ -383,8 +388,8 @@ async def test_published_marker_scope_and_independent_files_remain_at_same_h(tmp
         try:
             await _save(history,prepared)
             fid=members[0].file_id
-            _ok(runtime.capture.save_file_checksum(FileChecksumSave(fid,2,runtime.wall_us(),'a'*64),new_operation_key(),owned))
-            _ok(runtime.capture.save_file_presence(FilePresenceSave(fid,3,runtime.wall_us()),new_operation_key(),owned))
+            _ok(CaptureRepository().save_file_checksum(FileChecksumSave(fid,2,_RESULT_TIME,'a'*64),new_operation_key(),owned))
+            _ok(CaptureRepository().save_file_presence(FilePresenceSave(fid,3,_RESULT_TIME),new_operation_key(),owned))
             for strategy in ('initial','snapshot','current'):
                 with history.open_segment_history(ref.action_id,boundary,strategy=strategy,batch_size=1) as handle:
                     assert handle.active_ref() == ref
@@ -491,8 +496,8 @@ async def test_nullable_gap_summary_stays_unknown_in_all_paths(tmp_path):
     from camctl.history.snapshots import prepare_snapshot
     owned,runtime,repo,ref,members=await _world(tmp_path,unknown_keys=True)
     try:
-        _ok(repo.append_members(ref,members,runtime.wall_us(),new_operation_key(),owned))
-        _ok(repo.fix_members(ref,runtime.wall_us(),new_operation_key(),owned))
+        _ok(repo.append_members(ref,members,_RESULT_TIME,new_operation_key(),owned))
+        _ok(repo.fix_members(ref,_RESULT_TIME,new_operation_key(),owned))
         from camctl.capture.segment_models import CompletionFacts,EvidenceState,SegmentAccumulator
         from camctl.capture.segments import advance_segment_assessment,finish_segment_assessment
         from camctl.persistence.repositories.segments import iter_segment_members
@@ -503,7 +508,7 @@ async def test_nullable_gap_summary_stays_unknown_in_all_paths(tmp_path):
         for member in iter_segment_members(ref,owned):state=advance_segment_assessment(state,member)
         result=finish_segment_assessment(state,facts)
         assert result.gap_count is None
-        _ok(repo.save_assessment(ref,facts,result,runtime.wall_us(),new_operation_key(),owned))
+        _ok(repo.save_assessment(ref,facts,result,_RESULT_TIME,new_operation_key(),owned))
         history=HistoryRepository(owned.connection.execute('PRAGMA database_list').fetchone()[2])
         boundary=history.current_boundary()
         with history.open_segment_history(ref.action_id,boundary) as handle:prepared=prepare_snapshot(handle)
@@ -549,7 +554,12 @@ async def _prepare_large_fixture(tmp_path,count,runtime_factory):
     import sqlite3
     from itertools import islice
     from camctl.capture.files import OwnershipSave,FileCompletionSave
-    from ..persistence.result_page_fixtures import begin_result_check
+    from decimal import Decimal
+    from camctl.operations.attempts import AttemptConfig
+    from camctl.capture.result_pages import ResultPageSave
+    from camctl.operations.validation import validate_outcome
+    from camctl.persistence.repositories.capture import CaptureRepository
+    from ..support.result_cases import begin_result_attempt
     from camctl.capture.segment_models import (SegmentSetRef,SegmentMemberRole,OwnershipState,
         FileCompletionState,CompletionFacts,EvidenceState,SegmentAccumulator)
     from camctl.capture.segment_storage import SegmentSetCreate,SegmentMemberInput
@@ -560,14 +570,16 @@ async def _prepare_large_fixture(tmp_path,count,runtime_factory):
     from camctl.persistence.repositories.segments import SegmentRepository,iter_segment_members
     from ..persistence.test_segment_storage import SegmentedCatalog
     from ..capture.result_consumer_fixtures import consumer_world
-    from ..capture.test_result_page_history import _actual,_request
+    from ..capture.test_result_page_history import _actual,_REGISTRY
     owned,runtime,action_id,_=await consumer_world(
         tmp_path,'record',catalog=SegmentedCatalog(),runtime_factory=runtime_factory)
     stage=None
     try:
         stage=sqlite3.connect(tmp_path/'fixture-members.db',isolation_level=None)
         stage.execute('CREATE TABLE members (id INTEGER PRIMARY KEY,file_id INTEGER,page_event INTEGER,file_event INTEGER)')
-        ticket=begin_result_check(owned,runtime,action_id).ticket
+        check_config = AttemptConfig(3, Decimal("10"), Decimal("3"))
+        ticket=begin_result_attempt(owned,action_id,check_config,_RESULT_TIME)
+        capture=CaptureRepository()
         previous=None;last_event=None
         for offset in range(0,count,128):
             entries=[]
@@ -578,17 +590,18 @@ async def _prepare_large_fixture(tmp_path,count,runtime_factory):
                     'size_bytes':10 if number in (0,count-1) else 0,'kind':'video','format_id':'osv'})
             following=(None if offset+128>=count else DirectoryCursor(
                 DeviceBinding('cam-1','camctl-adb'),('/DCIM',),0,entries[-1]['identity']))
-            saved=_ok(runtime.capture.save_result_page(_request(runtime,ticket,
-                _actual(ticket,entries=entries,cursor=previous,next_cursor=following,finalized=following is None),
-                page_no=offset//128+1,cursor=previous),new_operation_key(),owned))
-            page=runtime.capture.read_result_pages(ticket,last_event,1,owned).items[0]
+            outcome=_actual(ticket,entries=entries,cursor=previous,next_cursor=following,finalized=following is None)
+            request=ResultPageSave(ticket,offset//128+1,previous,
+                validate_outcome(ticket,outcome,_REGISTRY),_RESULT_TIME)
+            saved=_ok(capture.save_result_page(request,new_operation_key(),owned))
+            page=capture.read_result_pages(ticket,last_event,1,owned).items[0]
             files=dict(page.file_ids)
             with stage:
                 stage.execute('BEGIN IMMEDIATE')
                 for entry in entries:
                     file_id=files[entry['identity']]
-                    _ok(runtime.capture.save_file_ownership(OwnershipSave(file_id,action_id,1,2,{},runtime.wall_us()),new_operation_key(),owned))
-                    _ok(runtime.capture.save_file_completion(FileCompletionSave(file_id,3,runtime.wall_us(),basis=1,
+                    _ok(capture.save_file_ownership(OwnershipSave(file_id,action_id,1,2,{},_RESULT_TIME),new_operation_key(),owned))
+                    _ok(capture.save_file_completion(FileCompletionSave(file_id,3,_RESULT_TIME,basis=1,
                         observation={},size_bytes=entry['size_bytes']),new_operation_key(),owned))
                     event,=owned.connection.execute('SELECT last_event_id FROM device_files WHERE id=?',(file_id,)).fetchone()
                     stage.execute('INSERT INTO members(file_id,page_event,file_event) VALUES (?,?,?)',(file_id,saved.event_id,event))
@@ -597,17 +610,21 @@ async def _prepare_large_fixture(tmp_path,count,runtime_factory):
             (ticket.run_id,ticket.attempt_id)).fetchone()
         ref=SegmentSetRef(action_id,attempt,last_event,1)
         repo=SegmentRepository()
+        from camctl.contracts.json_values import parse_exact_json
+        execution_spec,=owned.connection.execute(
+            'SELECT execution_spec_json FROM actions WHERE id=?',(action_id,)).fetchone()
+        target_duration_ms=parse_exact_json(execution_spec)['target_duration_ms']
         _ok(repo.create(SegmentSetCreate(ref,int(ticket.target_id),ticket.run_id,
-            (await runtime.action(action_id))['execution_spec_json']['target_duration_ms'],runtime.wall_us()),new_operation_key(),owned))
+            target_duration_ms,_RESULT_TIME),new_operation_key(),owned))
         previous_id=0
         while True:
             selected=stage.execute('SELECT id,file_id,page_event,file_event FROM members WHERE id>? ORDER BY id LIMIT 128',(previous_id,)).fetchall()
             if not selected:break
             inputs=tuple(SegmentMemberInput(file_id,page_event,file_event,SegmentMemberRole.ORIGINAL,
                 OwnershipState.OWNED,FileCompletionState.COMPLETE) for _,file_id,page_event,file_event in selected)
-            _ok(repo.append_members(ref,inputs,runtime.wall_us(),new_operation_key(),owned))
+            _ok(repo.append_members(ref,inputs,_RESULT_TIME,new_operation_key(),owned))
             previous_id=selected[-1][0]
-        _ok(repo.fix_members(ref,runtime.wall_us(),new_operation_key(),owned))
+        _ok(repo.fix_members(ref,_RESULT_TIME,new_operation_key(),owned))
         facts=CompletionFacts(EvidenceState.CONFIRMED,EvidenceState.CONFIRMED,EvidenceState.CONFIRMED,
             EvidenceState.CONFIRMED,SegmentKey(1,1),EvidenceState.CONFIRMED,EvidenceState.UNKNOWN,True,False)
         state=SegmentAccumulator(ref,60000,facts.start_key)
@@ -616,10 +633,10 @@ async def _prepare_large_fixture(tmp_path,count,runtime_factory):
         gaps=iter_segment_gaps(iter_segment_members(ref,owned),last_nonzero_cursor=result.last_nonzero_cursor,
             last_owned_cursor=result.last_owned_cursor,start_key=result.confirmed_start_key)
         while chunk:=tuple(islice(gaps,128)):
-            _ok(repo.append_gaps(ref,chunk,runtime.wall_us(),new_operation_key(),owned))
-        _ok(repo.save_assessment(ref,facts,result,runtime.wall_us(),new_operation_key(),owned))
+            _ok(repo.append_gaps(ref,chunk,_RESULT_TIME,new_operation_key(),owned))
+        _ok(repo.save_assessment(ref,facts,result,_RESULT_TIME,new_operation_key(),owned))
         first=repo.read_members(ref,None,1,owned).items[0].member_id
-        _ok(repo.append_scope(ref,(first,),runtime.wall_us(),new_operation_key(),owned))
+        _ok(repo.append_scope(ref,(first,),_RESULT_TIME,new_operation_key(),owned))
         return owned,runtime,repo,ref,HistoryRepository(owned.connection.execute('PRAGMA database_list').fetchone()[2])
     except BaseException:
         owned.connection.close()
@@ -712,7 +729,7 @@ async def test_current_keeps_h_when_completion_commits_between_candidate_pages(t
             calls+=1
             if calls==4:
                 key=new_operation_key()
-                receipt=commit_operation(_completion_command(owned,ref,members,runtime.wall_us(),key),key,owned)
+                receipt=commit_operation(_completion_command(owned,ref,members,_RESULT_TIME,key),key,owned)
                 assert receipt.kind == 'completed',receipt.error
         monkeypatch.setattr(history,'_read_connection',changing)
         with history.open_segment_history(ref.action_id,boundary,strategy='current',batch_size=1) as handle:
