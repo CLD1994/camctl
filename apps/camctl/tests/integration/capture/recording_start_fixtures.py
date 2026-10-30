@@ -166,7 +166,7 @@ def observe_start_save(monkeypatch, mode):
         if observed.fault is None:
             observed.fault = StartSaveFault(owned.connection, mode)
         elif observed.fault.connection is not owned.connection:
-            # UNKNOWN 由实际执行器关闭原连接；新 worker 连接尚未重送结果，
+            # UNKNOWN 由实际执行器关闭原连接；同一 worker 重建连接后尚未重送结果，
             # 在此观察真实重开后的投影与历史完整图像。
             if mode == 'commit_before' and not observed.fault.reopened_images:
                 observed.fault.reopened_images.append(tuple(owned.connection.iterdump()))

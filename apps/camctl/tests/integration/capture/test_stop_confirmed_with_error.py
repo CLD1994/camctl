@@ -126,8 +126,8 @@ def _assert_settle_transactions(owned, run_id, activity_id):
                     and values.get("activity_state") == 3:
                 transactions["activity"].add(transaction_id)
     assert len(transactions["run"]) == 1
-    assert transactions["attempt"] <= transactions["run"]
-    assert transactions["activity"] <= transactions["run"]
+    assert transactions["attempt"] == transactions["run"]
+    assert transactions["activity"] == transactions["run"]
 
 
 async def test_normal_record_stop_confirmed_with_error_completes_stop_fact(tmp_path, start_case):
@@ -381,9 +381,9 @@ async def test_residual_stop_confirmed_with_error_settles_in_one_transaction(tmp
                     if values.get("occupancy_state") == 2:
                         transactions["released"].add(transaction_id)
         assert len(transactions["attempt"]) == 1
-        assert transactions["run"] <= transactions["attempt"]
-        assert transactions["ended"] <= transactions["attempt"]
-        assert transactions["released"] <= transactions["attempt"]
+        assert transactions["run"] == transactions["attempt"]
+        assert transactions["ended"] == transactions["attempt"]
+        assert transactions["released"] == transactions["attempt"]
     finally:
         owned.connection.close()
 
