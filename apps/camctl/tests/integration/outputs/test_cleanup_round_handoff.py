@@ -174,13 +174,14 @@ async def test_qualified_old_unknown_recovery_uses_whole_round_then_next_round_c
         await capture_resources.restart_database(owned)
         driver.matrix_enabled, driver.present = True, None
         registry = _recovering_registry(driver, operation)
+        monotonic = [0]
         factory = session_cleanup_assembly(
             devices=cfg.devices,
             drivers=registry,
             max_delete_attempts=2,
             max_query_attempts=2,
             occurred_at=lambda: _NOW,
-            monotonic_ns=lambda: 0,
+            monotonic_ns=lambda: monotonic[0],
             recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
             recovery_max_event_id=horizon,
         )
@@ -195,6 +196,10 @@ async def test_qualified_old_unknown_recovery_uses_whole_round_then_next_round_c
             (ticket.run_id, ticket.attempt_id),
         ).fetchone() == (4,)
         await advance_cleanup((await _runtime(factory, owned, capture_resources)))
+        if operation == "query":
+            assert not driver.deletes and not driver.queries
+            monotonic[0] = 3_000_000_000
+            await advance_cleanup((await _runtime(factory, owned, capture_resources)))
         assert len(driver.deletes) + len(driver.queries) == 1
         assert (
             owned.connection.execute(

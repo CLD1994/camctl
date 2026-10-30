@@ -478,7 +478,7 @@ async def test_cleanup_begin_same_key_rejects_changed_original_input(environment
     from camctl.contracts.values import new_operation_key
     from camctl.operations.attempts import AttemptConfig, AttemptIntent, AttemptTarget, OperationKind
     from ..bootstrap.test_output_binding_changes import _NOW
-    owned, _, runtime, driver, item_id = await _prepared(environment)
+    owned, _, runtime, driver, item_id = await _prepared(environment, before_query=True)
     action_id, = owned.connection.execute("SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
     original = AttemptIntent("query", action_id, OperationKind.CHECK_FILE_EXISTS,
         AttemptTarget(cleanup_item_id=item_id), None, AttemptConfig(3, Decimal(10), Decimal(0)), _NOW)

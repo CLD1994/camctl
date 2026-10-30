@@ -178,27 +178,30 @@ async def test_terminal_action_does_not_hide_open_cleanup_companion(environment,
 
 async def _orphan_intent(environment, operation="delete"):
     return await _orphan_intent_for_prepared(
-        environment, await _prepared(environment), operation
+        environment, await _prepared(environment, before_query=operation == "query"), operation
     )
 
 
-async def _orphan_intent_for_prepared(environment, prepared, operation):
+async def _orphan_intent_for_prepared(environment, prepared, operation, *, host_query=False):
     from camctl.contracts.values import new_operation_key
     from camctl.operations.attempts import AttemptIntent, AttemptTarget, OperationKind
     owned, context, runtime, driver, item_id = prepared
     action_id, = owned.connection.execute(
         "SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
-    if operation == "delete":
+    if operation == "delete" or not host_query:
         from dataclasses import replace
         class IntentSaved(Exception):
             pass
         class IntentBoundary(OutputsRepository):
             ticket = None
+            original = None
             def begin_cleanup_attempt(self, request, key, current):
                 receipt = super().begin_cleanup_attempt(request, key, current)
                 assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
                 assert receipt.value.ticket is not None
+                assert request.operation == operation
                 self.ticket = receipt.value.ticket
+                self.original = (request, key)
                 return replace(receipt, handoff_error=IntentSaved())
         cfg = environment[0]
         factory = session_cleanup_assembly(devices=cfg.devices, drivers=_registry(driver),
@@ -212,6 +215,16 @@ async def _orphan_intent_for_prepared(environment, prepared, operation):
                 await delete_source_file(runtime, item_id)
         ticket = boundary.ticket
         assert ticket is not None
+        if operation == "query":
+            from decimal import Decimal
+            request, key = boundary.original
+            assert (request.config.max_attempts, request.config.timeout_s,
+                    request.config.retry_interval_s) == (3, Decimal(10), Decimal(3))
+            assert request.occurred_at == _NOW
+            assert owned.connection.execute(
+                "SELECT operation_key FROM history_transactions WHERE operation_key=?",
+                (str(key),)).fetchone() == (str(key),)
+            assert not driver.queries and not driver.deletes
     else:
         member_runtime = await runtime.for_item(item_id)
         request = AttemptIntent(operation=operation, action_id=action_id,
@@ -465,7 +478,7 @@ async def test_host_recovery_uses_independent_empty_local_file_evidence(
     owned, _, driver, item_id, ticket, horizon = await _orphan_intent_for_prepared(
         environment,
         (owned, environment[2], runtime, environment[3], item_id),
-        operation,
+        operation, host_query=operation == "query",
     )
     try:
         runtime = await _stored_runtime(session_cleanup_assembly(
