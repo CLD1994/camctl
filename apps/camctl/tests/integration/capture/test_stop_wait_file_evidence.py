@@ -24,7 +24,6 @@ from .result_consumer_fixtures import result_driver
 from ..support.result_cases import result_case, result_case_for, current_result_ticket
 from camctl.capture.handlers import capture_handler
 from camctl.persistence.repositories.capture import CaptureRepository
-from camctl.capture.recovery import RecoveryBoundary
 from camctl.devices.evidence import EvidenceContract
 from .test_record_file_completion_wait import WaitCatalog, _REGISTRY
 from .test_result_page_history import _entry
@@ -381,22 +380,32 @@ async def test_original_completion_key_rejects_changed_complete_request(tmp_path
 async def test_wait_file_completion_fault_keeps_original_request_and_key(tmp_path, mode):
     owned, runtime, action_id, context, entry, driver, _, saved, file_id = await _page_world(tmp_path)
     case = result_case_for()
-    spy = FileFactSpy("completion", mode)
+    class FaultHandoff(Exception):
+        pass
+
+    class InterruptingSpy(FileFactSpy):
+        def save_file_completion(self, command, key, current):
+            receipt = super().save_file_completion(command, key, current)
+            if len(self.requests) == 1:
+                self.first_receipt = receipt
+                return replace(receipt, handoff_error=FaultHandoff())
+            return receipt
+
+    spy = InterruptingSpy("completion", mode)
     runtime.capture = spy
     try:
-        try:
+        with pytest.raises(FaultHandoff):
             await capture_handler("camera_record")(action_id, runtime)
-        except ConsistencyError:
-            pass
         assert spy.fault is not None and not spy.fault.armed
         original, key = spy.requests[0]
         assert original.basis == 3
         assert original.result_page_event_id == saved.ref.event_id
         assert original.stop_result_event_id == context["stop_result_event_id"]
-        horizon, = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()
-        runtime = await case.reopen(owned, cold=True, assembly_options={
-            "recovery_boundary": RecoveryBoundary.HOST_LOCAL_SETTLED,
-            "recovery_max_event_id": lambda: horizon, "result_recovery": True})
+        before_reopen = row_facts(owned.connection, "device_files", file_id)["completion_evidence_json"]
+        assert before_reopen == (original.completion_evidence() if mode == "commit_after" else None)
+        factory = case.factory
+        runtime = await case.reopen(owned, cold=False)
+        assert case.factory is factory
         runtime.capture = spy
         await capture_handler("camera_record")(action_id, runtime)
         assert len(spy.requests) >= 2
