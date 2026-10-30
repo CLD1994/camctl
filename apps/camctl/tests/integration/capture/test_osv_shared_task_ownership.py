@@ -374,7 +374,7 @@ async def handler_runtime(pipeline, flow):
     return assembled_handler(flow)
 
 
-def business_cancel(owned):
+def accept_business_cancel(owned):
     from datetime import datetime, timezone
     from camctl.acceptance.input import ParsedInput
     from camctl.acceptance.service import CommandMode
@@ -384,7 +384,6 @@ def business_cancel(owned):
     from camctl.persistence.repositories.cancellation import register_cancellation_guards
     from .media_retry_fixtures import _Catalog
     from .test_input_copy import _NOW
-    from .test_host_photo_flow import _apply_cancel
     register_cancellation_guards()
     instant = datetime.fromtimestamp(_NOW // 1_000_000, timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
     result = AcceptanceRepository().process_input(ProcessInput(ParsedInput('cancel.json', {
@@ -394,7 +393,12 @@ def business_cancel(owned):
         new_operation_key(), owned)
     assert result.kind is DbOutcomeKind.COMPLETED, result.error
     cancel_id, = owned.connection.execute('SELECT id FROM actions WHERE plan_id=?', (result.value.plan_id,)).fetchone()
-    _apply_cancel(owned, cancel_id, 1)
+    return cancel_id
+
+
+def business_cancel(owned):
+    from .test_host_photo_flow import _apply_cancel
+    _apply_cancel(owned, accept_business_cancel(owned), 1)
 
 
 @pytest.mark.parametrize('pipeline', ['osv-timing'], indirect=True)
@@ -429,6 +433,7 @@ async def test_business_cancel_keeps_actual_stage_result_and_blocks_new_content(
     from camctl.acceptance.service import CommandMode
     from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_command
     from .media_retry_fixtures import _Catalog
+    from .test_host_photo_flow import _cancel_through_service
     owned, roots, _source = pipeline
     executor = ObservedExecutor()
     tools = ControlledTools(executor)
@@ -439,14 +444,16 @@ async def test_business_cancel_keeps_actual_stage_result_and_blocks_new_content(
         await advance(1, runtime)
         assert load_processing_status(owned, 1).repair_state == 4
     if phase == 'between':
-        business_cancel(owned)
+        cancel_id = accept_business_cancel(owned)
+        await _cancel_through_service(owned, runtime, cancel_id)
         await advance(1, runtime)
     else:
         tools.gate, tools.started = asyncio.Event(), asyncio.Event()
         running = asyncio.create_task(advance(1, runtime))
         try:
             await asyncio.wait_for(tools.started.wait(), 2)
-            business_cancel(owned)
+            cancel_id = accept_business_cancel(owned)
+            await _cancel_through_service(owned, runtime, cancel_id)
             assert executor.unfinished_files()
             tools.gate.set()
             await running
@@ -454,6 +461,7 @@ async def test_business_cancel_keeps_actual_stage_result_and_blocks_new_content(
             tools.gate.set()
             await asyncio.gather(running, return_exceptions=True)
     assert owned.connection.execute('SELECT status,cancel_requested FROM actions WHERE id=1').fetchone() == (6, 1)
+    assert owned.connection.execute('SELECT target_action_id FROM cancel_items WHERE action_id=?', (cancel_id,)).fetchall() == [(1,)]
     assert owned.connection.execute('SELECT COUNT(*) FROM outputs').fetchone() == (0,)
     assert len(tools.repairs) == (1 if phase == 'repair' else 0)
     assert load_processing_status(owned, 1).source_probe == source_probe()
@@ -475,6 +483,12 @@ async def test_business_cancel_keeps_actual_stage_result_and_blocks_new_content(
     finally:
         close_runtime(deps)
     assert all(not path.exists() for path in paths)
+    assert owned.connection.execute(
+        'SELECT target_action_id,selection_basis,status,cancellation_effect,outcome,error_code '
+        'FROM cancel_items WHERE action_id=?', (cancel_id,)).fetchall() == [(1, 1, 3, 2, 1, None)]
+    assert owned.connection.execute('SELECT status FROM actions WHERE id=?', (cancel_id,)).fetchone() == (3,)
+    assert owned.connection.execute(
+        'SELECT activity_state,occupancy_state FROM device_activities WHERE action_id=1').fetchone() == (3, 2)
 
 
 
