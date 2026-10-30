@@ -199,7 +199,7 @@ async def test_report_configuration_error_stops_normal_and_restricted_session(de
     cfg = load_config(_document(deployed), ConfigDefaults())
     deps = build_runtime(CommandMode.RUN, cfg, catalog=Catalog())
     supervisor = mocker.create_autospec(WorkerSupervisor, instance=True, spec_set=True)
-    jobs, devices = [], []
+    jobs, events = [], []
 
     async def reject(job):
         jobs.append(job)
@@ -210,8 +210,28 @@ async def test_report_configuration_error_stops_normal_and_restricted_session(de
                 error_code="configuration_error", error_message="ready: 原路径 /old，配置新路径 /new"))
 
     async def device(_context):
-        devices.append("called")
+        events.append("device")
 
+    # 观察真实报告流程消费回执并抛出配置错误的边界；此前设备调用允许。
+    from camctl.bootstrap import flows as bootstrap_flows
+    from camctl.persistence.runtime import DirectoryBindingError
+    original_report_flow = bootstrap_flows.report_flow
+
+    def observe_report_flow(**options):
+        report = original_report_flow(**options)
+        advance = report.advance
+
+        async def observe(context):
+            try:
+                await advance(context)
+            except DirectoryBindingError as error:
+                assert str(error) == "ready: 原路径 /old，配置新路径 /new"
+                events.append("configuration_error_observed")
+                raise
+
+        return replace(report, advance=observe)
+
+    mocker.patch.object(bootstrap_flows, "report_flow", side_effect=observe_report_flow)
     supervisor.generate.side_effect = reject
     supervisor.stop.return_value = WorkerShutdown(exitcode=0, forced=False)
     original_assembly = lifecycle._report_assembly
@@ -239,7 +259,9 @@ async def test_report_configuration_error_stops_normal_and_restricted_session(de
     assert outcome.succeeded is False
     assert outcome.reason == "configuration_error"
     assert "/old" in str(outcome.details) and "/new" in str(outcome.details)
-    assert devices == []
+    assert events.count("configuration_error_observed") == 1
+    observed_at = events.index("configuration_error_observed")
+    assert "device" not in events[observed_at + 1:]
     assert len(jobs) == 1
     assert (jobs[0].staging_root, jobs[0].ready_root, jobs[0].processing_root) == (
         cfg.paths.staging, cfg.paths.ready, cfg.paths.processing)
