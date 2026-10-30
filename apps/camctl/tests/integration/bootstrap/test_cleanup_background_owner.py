@@ -574,7 +574,8 @@ async def test_other_flow_fatal_stops_cleanup_before_emergency_wait_and_preserve
     ready_file, release_file = tmp_path / 'delete-ready', tmp_path / 'delete-release'
     code = (
         "from pathlib import Path\nimport signal,time,sys\n"
-        "signal.signal(signal.SIGTERM, lambda *_: None)\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "assert signal.getsignal(signal.SIGTERM) == signal.SIG_IGN\n"
         "Path(sys.argv[1]).write_text('ready')\n"
         "while not Path(sys.argv[2]).exists(): time.sleep(0.005)\n"
     )
