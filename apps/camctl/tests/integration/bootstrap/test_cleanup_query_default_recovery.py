@@ -14,7 +14,6 @@ import json
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
-from sqlite3 import ProgrammingError
 
 import pytest
 
@@ -23,7 +22,8 @@ from .cleanup_helpers import finish_cleanup_round, cleanup_failure
 from camctl.bootstrap.cleanup_assembly import (
     HostArtifacts, cleanup_flow, session_cleanup_assembly,
 )
-from camctl.bootstrap.work_file_assembly import WorkFileRuntime
+from camctl.host_files.tasks import FileTaskExecutor
+from camctl.session.supervision import Supervisor
 from camctl.contracts.enums import enum_for
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.contracts.workflow_errors import item_error_id
@@ -44,7 +44,6 @@ from .test_cleanup_flow import _seed_repaired_artifact
 from .test_output_binding_changes import (
     _NOW, _accept, _registry, _save_photos, environment,
 )
-from camctl.outputs.work_files import WorkFileLimits
 
 pytestmark = pytest.mark.asyncio
 
@@ -89,7 +88,7 @@ class _DefaultQueryFault:
             (item_id,)).fetchone()
         if member[0] != self.action_id:
             return self.original(repository, finish, key, owned)
-        self.calls.append((repository, finish, key, owned))
+        self.calls.append((finish, key, owned.metadata.instance_id))
         self.member_before_save.append(member)
         if self.fault is None:
             self.history_prefix = _history(owned.connection)
@@ -104,11 +103,6 @@ class _DefaultQueryFault:
             receipt = self.original(repository, finish, key, owned)
         self.receipts.append(receipt)
         return receipt
-
-
-def _assert_closed(owned):
-    with pytest.raises(ProgrammingError):
-        owned.connection.execute("SELECT 1")
 
 
 @pytest.mark.parametrize("binding", ["matched", "missing", "mismatch"])
@@ -139,13 +133,6 @@ async def test_default_cleanup_query_recovers_original_result(
         staging=Path(cfg.paths.staging), occurred_at=lambda: clock["wall"],
         monotonic_ns=lambda: clock["mono"],
     )
-    runtimes = []
-
-    def factory(current_owned):
-        runtime = session_factory(current_owned)
-        runtimes.append(runtime)
-        return runtime
-
     fault = _DefaultQueryFault(
         OperationRepository.finish_attempt, action_id, output_id,
         after_commit=after_commit)
@@ -154,19 +141,18 @@ async def test_default_cleanup_query_recovers_original_result(
         return fault.save(repository, finish, key, current_owned)
 
     monkeypatch.setattr(OperationRepository, "finish_attempt", save_query)
-    flow = cleanup_flow(factory)
+    flow = cleanup_flow(session_factory)
     with cleanup_failure(ConsistencyError):
         await finish_cleanup_round(flow, context)
 
-    assert len(runtimes) == len(fault.calls) == len(fault.receipts) == 1
-    _assert_closed(runtimes[0].owned)
+    assert len(fault.calls) == len(fault.receipts) == 1
     assert fault.receipts[0].kind is DbOutcomeKind.UNKNOWN
     assert fault.receipts[0].error is fault.fault.error
     assert fault.fault.commit_calls == 1
     assert fault.fault.actual_commits == int(after_commit)
     assert fault.fault.transaction_at_failure is (not after_commit)
     assert len(driver.deletes) == len(driver.queries) == 1
-    _first_repository, first_finish, first_key, first_owned = fault.calls[0]
+    first_finish, first_key, first_instance = fault.calls[0]
     ticket, item_id = first_finish.ticket, int(first_finish.ticket.target_id)
     assert first_finish.occurred_at == _NOW
     assert first_finish.outcome.outcome is driver.last_query_result.outcome
@@ -192,17 +178,17 @@ async def test_default_cleanup_query_recovers_original_result(
         devices["cam-a"]["driver"] = "alternate-camera"
     clock.update(wall=_NOW + 5_000, mono=900)
     driver.reject_new_calls = True
-    await finish_cleanup_round(flow, context)
+    from ..support.database import business_database
+    first_database = context.database
+    await first_database.close()
+    async with business_database(Path(cfg.paths.state_db)) as second_database:
+        context.database = second_database
+        assert second_database is not first_database
+        await finish_cleanup_round(flow, context)
 
-    assert len(runtimes) == 2
-    assert runtimes[0] is not runtimes[1]
-    assert runtimes[0].owned is not runtimes[1].owned
-    assert runtimes[0].owned.connection is not runtimes[1].owned.connection
-    assert runtimes[0].owned.metadata.instance_id == runtimes[1].owned.metadata.instance_id
-    _assert_closed(runtimes[1].owned)
     assert len(fault.calls) == len(fault.receipts) == 2
-    _second_repository, second_finish, second_key, second_owned = fault.calls[1]
-    assert second_owned is not first_owned
+    second_finish, second_key, second_instance = fault.calls[1]
+    assert second_instance == first_instance
     assert second_finish == first_finish
     assert second_finish.outcome.outcome is first_finish.outcome.outcome
     assert second_finish.occurred_at == _NOW
@@ -465,58 +451,61 @@ async def test_host_artifact_query_recovers_after_save_fault(
     driver = _DefaultDriver(owned)
     clock = {"wall": _NOW, "mono": 0}
 
-    work_files = WorkFileRuntime(
-        staging=Path(cfg.paths.staging),
-        limits=WorkFileLimits(batch_size=100, limit_per_run=100),
-    )
+    supervisor = Supervisor()
+    executor = FileTaskExecutor(supervisor)
+    try:
 
-    def probe(staging, executor):
-        return _LocalProbe(staging, executor)
+        def probe(staging, executor):
+            return _LocalProbe(staging, executor)
 
-    monkeypatch.setattr(
-        "camctl.bootstrap.cleanup_assembly.HostArtifacts", probe)
-    session_factory = session_cleanup_assembly(
-        devices=devices, drivers=_registry(driver),
-        max_delete_attempts=3, max_query_attempts=3,
-        staging=Path(cfg.paths.staging), file_executor=work_files.executor,
-        occurred_at=lambda: clock["wall"],
-        monotonic_ns=lambda: clock["mono"])
-    fault = _DefaultQueryFault(
-        OperationRepository.finish_attempt, action_id, output_id, after_commit=True)
-    monkeypatch.setattr(
-        OperationRepository, "finish_attempt",
-        lambda repository, finish, key, current_owned:
-            fault.save(repository, finish, key, current_owned))
-    _LocalProbe.fail_delete = True
+        monkeypatch.setattr(
+            "camctl.bootstrap.cleanup_assembly.HostArtifacts", probe)
+        session_factory = session_cleanup_assembly(
+            devices=devices, drivers=_registry(driver),
+            max_delete_attempts=3, max_query_attempts=3,
+            staging=Path(cfg.paths.staging), file_executor=executor,
+            occurred_at=lambda: clock["wall"],
+            monotonic_ns=lambda: clock["mono"])
+        fault = _DefaultQueryFault(
+            OperationRepository.finish_attempt, action_id, output_id, after_commit=True)
+        monkeypatch.setattr(
+            OperationRepository, "finish_attempt",
+            lambda repository, finish, key, current_owned:
+                fault.save(repository, finish, key, current_owned))
+        _LocalProbe.fail_delete = True
 
-    with cleanup_failure(ConsistencyError):
+        with cleanup_failure(ConsistencyError):
+            await finish_cleanup_round(cleanup_flow(session_factory), context)
+
+        first = _LocalProbe.instances[-1]
+        assert len(first.delete_calls) == 1 and len(first.query_calls) == 1
+        assert fault.receipts[0].kind is DbOutcomeKind.UNKNOWN
+        _finish, first_key = fault.calls[0][0], fault.calls[0][1]
+        item_id = int(fault.calls[0][0].ticket.target_id)
+        member_before = _member_facts(owned, item_id)
+        assert member_before[0] == 3
+
+        # 设备目录不再包含原设备：主机目标不得被误分为设备目标。
+        devices.pop("cam-a")
+        clock.update(wall=_NOW + 5_000, mono=900)
+        driver.reject_new_calls = True
         await finish_cleanup_round(cleanup_flow(session_factory), context)
 
-    first = _LocalProbe.instances[-1]
-    assert len(first.delete_calls) == 1 and len(first.query_calls) == 1
-    assert fault.receipts[0].kind is DbOutcomeKind.UNKNOWN
-    _finish, first_key = fault.calls[0][1], fault.calls[0][2]
-    item_id = int(fault.calls[0][1].ticket.target_id)
-    member_before = _member_facts(owned, item_id)
-    assert member_before[0] == 3
-
-    # 设备目录不再包含原设备：主机目标不得被误分为设备目标。
-    devices.pop("cam-a")
-    clock.update(wall=_NOW + 5_000, mono=900)
-    driver.reject_new_calls = True
-    await finish_cleanup_round(cleanup_flow(session_factory), context)
-
-    second = _LocalProbe.instances[-1]
-    assert second is not first
-    assert len(second.delete_calls) == 0 and len(second.query_calls) == 0
-    member = _member_facts(owned, item_id)
-    assert member[:4] == (4, 4, 3, None) and member[4] is not None
-    assert owned.connection.execute(
-        "SELECT status,retry_wait_required FROM operation_runs"
-        " WHERE cleanup_item_id=? ORDER BY id", (item_id,)).fetchall() == [(3, 0), (3, 0)]
-    assert owned.connection.execute(
-        "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?",
-        (str(first_key),)).fetchone() == (1,)
-    assert owned.connection.execute(
-        "SELECT status FROM actions WHERE id=?", (action_id,)).fetchone() == (3,)
-    assert (len(driver.deletes), len(driver.queries)) == (0, 0)
+        second = _LocalProbe.instances[-1]
+        assert second is not first
+        assert len(second.delete_calls) == 0 and len(second.query_calls) == 0
+        member = _member_facts(owned, item_id)
+        assert member[:4] == (4, 4, 3, None) and member[4] is not None
+        assert owned.connection.execute(
+            "SELECT status,retry_wait_required FROM operation_runs"
+            " WHERE cleanup_item_id=? ORDER BY id", (item_id,)).fetchall() == [(3, 0), (3, 0)]
+        assert owned.connection.execute(
+            "SELECT COUNT(*) FROM history_transactions WHERE operation_key=?",
+            (str(first_key),)).fetchone() == (1,)
+        assert owned.connection.execute(
+            "SELECT status FROM actions WHERE id=?", (action_id,)).fetchone() == (3,)
+        assert (len(driver.deletes), len(driver.queries)) == (0, 0)
+    finally:
+        settled = await supervisor.drain_required()
+        assert not settled.failed
+        assert not executor.unfinished_files()

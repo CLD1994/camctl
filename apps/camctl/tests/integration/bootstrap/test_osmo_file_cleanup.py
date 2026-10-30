@@ -12,7 +12,8 @@ from decimal import Decimal
 
 from camctl.bootstrap.cleanup_assembly import cleanup_flow, session_cleanup_assembly
 from camctl.bootstrap.config import ConfigDefaults, load_config
-from camctl.bootstrap.work_file_assembly import WorkFileRuntime
+from camctl.host_files.tasks import FileTaskExecutor
+from camctl.session.supervision import Supervisor
 from camctl.contracts.workflow_errors import item_error_id
 from camctl.devices import definitions_runtime
 from camctl.devices.bindings import DeviceBinding
@@ -29,7 +30,8 @@ from camctl.outputs.cleanup_flow import (
     advance_cleanup, delete_source_file,
 )
 from camctl.outputs.cleanup_results import saved_cleanup_delete, saved_cleanup_attempt
-from camctl.outputs.work_files import WorkFileLimits
+from support.repository_ports import repository_port
+from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.repositories.cancellation import register_cancellation_guards
@@ -154,17 +156,20 @@ async def world(tmp_path, monkeypatch, request, capture_resources):
     entry = registry.entry(binding.driver_id)
     channel = FileChannel()
     entry.driver.transport = channel
-    work = WorkFileRuntime(staging=Path(cfg.paths.staging), limits=WorkFileLimits(batch_size=100, limit_per_run=100))
+    supervisor = Supervisor()
+    executor = FileTaskExecutor(supervisor)
     context = SimpleNamespace(database=await capture_database(owned), open_connection=lambda: open_existing(
         Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig()))
     value = SimpleNamespace(cfg=cfg, owned=owned, registry=registry, entry=entry, channel=channel,
-                            binding=binding, paths=paths, copy=copy, work=work, context=context, resources=capture_resources)
+                            binding=binding, paths=paths, copy=copy, executor=executor, context=context, resources=capture_resources)
     try:
         with output_test_session():
             yield value
-            assert not work.executor.unfinished_files()
+            assert not executor.unfinished_files()
     finally:
-        await work.settle()
+        settled = await supervisor.drain_required()
+        assert not settled.failed
+        assert not executor.unfinished_files()
         await context.database.close()
         owned.connection.close()
 
@@ -173,7 +178,7 @@ def _factory(world, **kwargs):
     return cleanup_case_factory(devices=world.cfg.devices, drivers=world.registry,
         max_delete_attempts=kwargs.pop("max_delete_attempts", 3),
         max_query_attempts=kwargs.pop("max_query_attempts", 2),
-        staging=Path(world.cfg.paths.staging), file_executor=world.work.executor,
+        staging=Path(world.cfg.paths.staging), file_executor=world.executor,
         occurred_at=lambda: _NOW, **kwargs)
 
 
@@ -266,8 +271,9 @@ async def test_reliable_absence_and_actual_channel_error_save_along_original_key
     factory = _factory(world)
     runtime = await factory(world.owned)
     port = _FaultOutputs("finish_cleanup_attempt", DbOutcomeKind.UNKNOWN, after_commit=True)
-    runtime.outputs = port
-    assert (await delete_source_file(runtime, item_id)).phase == "finish_rejected"
+    with repository_port(OutputsRepository, port, ("finish_cleanup_attempt",),
+                         matches=lambda _name, args, _kwargs: args[0].ticket.target_id == str(item_id)):
+        assert (await delete_source_file(runtime, item_id)).phase == "finish_rejected"
     original = port.calls[0]
     assert world.channel.operations == ["delete"] and not world.paths[701].exists()
     port.enabled = False
@@ -275,8 +281,9 @@ async def test_reliable_absence_and_actual_channel_error_save_along_original_key
     try:
         await world.resources.restart_database(fresh)
         resumed = await factory(fresh)
-        resumed.outputs = port
-        await delete_source_file(resumed, item_id)
+        with repository_port(OutputsRepository, port, ("finish_cleanup_attempt",),
+                             matches=lambda _name, args, _kwargs: args[0].ticket.target_id == str(item_id)):
+            await delete_source_file(resumed, item_id)
         assert port.calls[1] == original
         saved = saved_cleanup_delete(fresh.connection, item_id)
         assert saved.ticket == original[0].ticket
