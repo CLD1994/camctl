@@ -312,7 +312,7 @@ def _source_spec(action: Mapping) -> SourceSpec:
 async def _fix_pending_selections(
         runtime: ObtainRuntime, now: int) -> None:
     """先恢复原保存，再按来源直接事实推进选择；来源未完成保持等待。"""
-    from camctl.outputs.definitions import read_excluded_output_ids, read_selection_request
+    from camctl.outputs.definitions import SelectionMode, read_excluded_output_ids, read_selection_request
 
     from camctl.persistence.repositories.segment_selections import (
         FixSegmentSelection,
