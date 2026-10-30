@@ -18,35 +18,50 @@ from camctl.persistence.transaction import TransactionError
 
 from ..capture.test_capture_contract import _NOW
 from ..operations.test_result_reuse import _FaultConnection
-from .test_binding_canceled_results import _stopped_canceled_timelapse
+from camctl.capture.handlers import capture_handler
+from .test_binding_canceled_results import FailedResults
+from ..support.bootstrap_capture_cases import bootstrap_case, SavedBoundary
 from .test_binding_changes import environment
 from .test_binding_transactions import _CommitFailure
 
 
-async def _command(home, *, result_started):
-    owned = await _stopped_canceled_timelapse(home, result_started=result_started)
+async def _command(home, *, result_started, case):
+    runtime = await case.world(home, "timelapse", results=FailedResults({}))
+    await capture_handler(case.handler)(case.action_id, runtime)
+    await case.cancel()
+    case.boundary = "finish_capture_stop"
+    with pytest.raises(SavedBoundary):
+        await capture_handler(case.handler)(case.action_id, await case.view())
+    if result_started:
+        case.boundary = "finish_attempt"
+        with pytest.raises(SavedBoundary):
+            await capture_handler(case.handler)(case.action_id, await case.view())
+    case.boundary = None
+    await case.drain()
+    await case.database.close()
+    case.database = None
     command = FinishBindingFailure(
-        action_id=13, occurred_at=_NOW, canceled=True,
+        action_id=case.action_id, occurred_at=_NOW, canceled=True,
         failure=RecordingFailure("device_binding_unavailable", {
             "device_id": "cam-1", "expected_driver_id": "camctl-adb", "reason": "missing"}),
-        responsibility_keys=("results/13",) if result_started else (),
+        responsibility_keys=(f"results/{case.activity_id}",) if result_started else (),
         check_config=AttemptConfig(6, Decimal("17"), Decimal("2")))
-    return owned, command
+    return case.owned, command
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("result_started", [False, True])
 @pytest.mark.parametrize("phase", ["projection", "commit_before", "commit_after"])
 async def test_canceled_results_failure_recovers_complete_transaction(
-        environment, result_started, phase):
+        environment, bootstrap_case, result_started, phase):
     _, _, home = environment
     directory = home / "atomic-results"
-    owned, command = await _command(directory, result_started=result_started)
+    owned, command = await _command(directory, result_started=result_started, case=bootstrap_case)
     repository = CaptureRepository()
     key = new_operation_key()
     before = tuple(owned.connection.iterdump())
     stop_before = owned.connection.execute(
-        "SELECT * FROM operation_runs WHERE responsibility_key = 'stop/13'").fetchone()
+        "SELECT * FROM operation_runs WHERE responsibility_key = ?", (f"stop/{bootstrap_case.action_id}",)).fetchone()
     attempts_before = tuple(owned.connection.execute("SELECT * FROM operation_attempts"))
     faulty = (_FaultConnection(owned.connection, "UPDATE operation_runs")
               if phase == "projection" else _CommitFailure(owned.connection, phase == "commit_after"))
@@ -64,14 +79,14 @@ async def test_canceled_results_failure_recovers_complete_transaction(
         recovered = repository.finish_binding_failure(command, key, reopened)
         assert recovered.kind is DbOutcomeKind.COMPLETED, recovered.error
         assert reopened.connection.execute(
-            "SELECT status, cancel_requested FROM actions WHERE id = 13").fetchone() == (6, 1)
+            "SELECT status, cancel_requested FROM actions WHERE id = ?", (bootstrap_case.action_id,)).fetchone() == (6, 1)
         assert reopened.connection.execute(
-            "SELECT * FROM operation_runs WHERE responsibility_key = 'stop/13'"
+            "SELECT * FROM operation_runs WHERE responsibility_key = ?", (f"stop/{bootstrap_case.action_id}",)
         ).fetchone() == stop_before
         assert tuple(reopened.connection.execute("SELECT * FROM operation_attempts")) == attempts_before
         result_row = reopened.connection.execute(
             "SELECT status, attempts_used, max_attempts_used, timeout_s_json, retry_interval_s_json,"
-            " error_json FROM operation_runs WHERE responsibility_key = 'results/13'").fetchone()
+            " error_json FROM operation_runs WHERE responsibility_key = ?", (f"results/{bootstrap_case.activity_id}",)).fetchone()
         assert result_row is not None
         assert result_row[:2] == (4, int(result_started))
         if not result_started:
@@ -99,9 +114,9 @@ async def test_canceled_results_failure_recovers_complete_transaction(
     (False, "time"), (False, "reason"), (False, "check_config"), (False, "responsibilities"),
     (True, "time"), (True, "reason"), (True, "responsibilities"),
 ])
-async def test_canceled_results_original_key_rejects_changed_input(environment, result_started, changed):
+async def test_canceled_results_original_key_rejects_changed_input(environment, bootstrap_case, result_started, changed):
     _, _, home = environment
-    owned, command = await _command(home / "input-results", result_started=result_started)
+    owned, command = await _command(home / "input-results", result_started=result_started, case=bootstrap_case)
     try:
         repository = CaptureRepository()
         key = new_operation_key()
@@ -116,7 +131,7 @@ async def test_canceled_results_original_key_rejects_changed_input(environment, 
         elif changed == "check_config":
             different = replace(command, check_config=AttemptConfig(7, Decimal("17"), Decimal("2")))
         else:
-            different = replace(command, responsibility_keys=() if result_started else ("results/13",))
+            different = replace(command, responsibility_keys=() if result_started else (f"results/{bootstrap_case.activity_id}",))
         before = tuple(owned.connection.iterdump())
 
         changed_result = repository.finish_binding_failure(different, key, owned)
@@ -129,13 +144,13 @@ async def test_canceled_results_original_key_rejects_changed_input(environment, 
 
 
 @pytest.mark.asyncio
-async def test_canceled_results_original_key_rejects_action_only_group(environment):
+async def test_canceled_results_original_key_rejects_action_only_group(environment, bootstrap_case):
     _, _, home = environment
-    owned, command = await _command(home / "partial-results", result_started=False)
+    owned, command = await _command(home / "partial-results", result_started=False, case=bootstrap_case)
     try:
         repository = CaptureRepository()
         key = new_operation_key()
-        partial = repository.finish_canceled_capture(FinishCanceledCapture(13, _NOW), key, owned)
+        partial = repository.finish_canceled_capture(FinishCanceledCapture(bootstrap_case.action_id, _NOW), key, owned)
         assert partial.kind is DbOutcomeKind.COMPLETED, partial.error
         before = tuple(owned.connection.iterdump())
 
