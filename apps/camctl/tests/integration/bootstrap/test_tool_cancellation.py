@@ -24,9 +24,11 @@ from camctl.devices.evidence import DeviceObservation
 from camctl.operations.models import EffectState
 from camctl.operations.process import execute_tool, spawn_subprocess
 from .test_adb_camera_dispatch import EVIDENCE, RETURNED, ASSUMED
-from ..capture.test_baseline_start import _prepared, _runtime
+from ..capture.test_baseline_start import _prepared
+from ..capture.test_capture_contract import DriverDouble, ResultsDouble
+from ..support.capture import capture_runtime
 from ..capture.test_baseline_prepare import Directory
-from ..scheduling.test_start_action import owned
+from ..scheduling.test_start_action import owned, _SCHEDULED
 
 pytestmark = pytest.mark.asyncio
 
@@ -86,8 +88,10 @@ async def test_canceled_real_control_saves_actual_response_without_next_dispatch
         commands={CameraCall.SETTING: command("setting"), CameraCall.START: command("start")}, evidence=EVIDENCE)
     driver = AdbCameraDriver(contract, {"cam-1": {"driver": CameraModel.ACTION6, "adb": {"serial": "serial-1"}}},
         transport, terminate_grace_s=Decimal(".1"), monotonic_ns=lambda: 0)
-    runtime = _runtime(owned, Directory([lambda request: DirectoryRead(None, None, Page((), None))]), driver)
-    runtime.evidence = EVIDENCE
+    runtime = await capture_runtime(owned, driver=driver, driver_id="dji-action6",
+        evidence=EVIDENCE, results=ResultsDouble({}),
+        directory=Directory([lambda request: DirectoryRead(None, None, Page((), None))]),
+        wall_us=lambda: _SCHEDULED, monotonic_ns=lambda: 0)
     task = asyncio.create_task(capture_handler(action_type)(1, runtime))
     try:
         await _entered(marker)
@@ -122,7 +126,9 @@ async def test_canceled_real_baseline_settles_tool_and_saves_error_without_start
     transport = LocalTransport(tmp_path / "started", lambda spec: True)
     filesystem = AdbFilesystem(DeviceBinding("cam-1", CameraModel.ACTION6), "serial-1", transport,
         tools=ShellFileTools(), terminate_grace_s=Decimal(".1"))
-    runtime = _runtime(owned, filesystem, None)
+    runtime = await capture_runtime(owned, driver=DriverDouble(), driver_id="dji-action6",
+        evidence=EVIDENCE, results=ResultsDouble({}), directory=filesystem,
+        wall_us=lambda: _SCHEDULED, monotonic_ns=lambda: 0)
     task = asyncio.create_task(capture_handler("camera_record")(1, runtime))
     try:
         await _entered(transport.marker)

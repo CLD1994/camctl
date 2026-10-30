@@ -11,6 +11,7 @@ from camctl.bootstrap.lifecycle import build_runtime, close_runtime, execute_com
 from camctl.devices.drivers.registry import DriverRegistry
 
 from ..outputs.test_cleanup_residual_recovery import _orphan_intent
+from ..support.outputs import output_test_session
 from .test_output_binding_changes import _NOW, Catalog, environment
 
 pytestmark = pytest.mark.asyncio
@@ -20,7 +21,8 @@ pytestmark = pytest.mark.asyncio
 async def test_run_reports_state_db_error_for_unqualified_original_cleanup(
     environment, operation
 ):
-    owned, _, driver, item_id, ticket, _ = await _orphan_intent(environment, operation)
+    with output_test_session():
+        owned, _, driver, item_id, ticket, _ = await _orphan_intent(environment, operation)
     cfg = environment[0]
     before_attempts = tuple(
         owned.connection.execute("SELECT * FROM operation_attempts")

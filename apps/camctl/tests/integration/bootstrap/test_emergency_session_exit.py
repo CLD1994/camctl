@@ -20,6 +20,8 @@ from camctl.devices.ports import DeviceCallResult, DriverDeclaration
 from camctl.persistence.repositories.capture import register_capture_guards
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
+from ..support.capture import capture_database
+from ..support.session import open_session_database
 from ..persistence.test_runtime import _create_valid_database
 from ..scheduling.test_resources import _seed_activity, _seed_plan, _seed_record_action
 
@@ -103,7 +105,7 @@ def _world(tmp_path: Path, *, activity_state: int = 2, safe_repeat: bool = True)
     return target, owned
 
 
-def _settlement(target: Path, registry, *, anchors=None, maximum: int = 2):
+async def _settlement(target: Path, registry, *, anchors=None, maximum: int = 2, session=False):
     return EmergencySettlement(
         session_key=_SESSION,
         anchors=anchors if anchors is not None else {1: (_NOW, _NOW + 1)},
@@ -113,10 +115,15 @@ def _settlement(target: Path, registry, *, anchors=None, maximum: int = 2):
             "retry_interval_s": Decimal("0"),
         }},
         registry=registry,
-        open_owned=lambda: open_existing(target, DbOpenMode.EXISTING_RW, DbConfig()),
+        database=None if session else await capture_database(target),
         wall_us=lambda: _NOW,
     )
 
+
+
+async def _settle_in_session(context, settlement):
+    settlement.database = context.database
+    return await settlement.settle()
 
 def _run_row(owned):
     return owned.connection.execute(
@@ -128,7 +135,7 @@ async def test_fatal_exit_stops_recording_once_and_records_stopped(tmp_path):
     target, owned = _world(tmp_path)
     stop = _StopPort(_declaration(), (_confirmed(),))
     try:
-        entries = await _settlement(target, _registry(stop)).settle()
+        entries = await (await _settlement(target, _registry(stop))).settle()
 
         assert len(stop.calls) == 1
         request = stop.calls[0]
@@ -159,7 +166,7 @@ async def test_budget_exhaustion_records_unconfirmed_with_each_attempt(tmp_path)
     target, owned = _world(tmp_path)
     stop = _StopPort(_declaration(), (_timeout(), _timeout()))
     try:
-        entries = await _settlement(target, _registry(stop)).settle()
+        entries = await (await _settlement(target, _registry(stop))).settle()
 
         assert len(stop.calls) == 2
         run = _run_row(owned)
@@ -187,7 +194,7 @@ async def test_unsafe_repeat_target_records_not_attempted_without_stop(tmp_path)
     target, owned = _world(tmp_path, safe_repeat=False)
     stop = _StopPort(_declaration(), (_confirmed(),))
     try:
-        entries = await _settlement(target, _registry(stop)).settle()
+        entries = await (await _settlement(target, _registry(stop))).settle()
 
         assert stop.calls == []
         run = _run_row(owned)
@@ -206,7 +213,7 @@ async def test_unsafe_repeat_target_records_not_attempted_without_stop(tmp_path)
 async def test_ended_activity_and_repeated_settlement_do_not_stop_again(tmp_path):
     target, owned = _world(tmp_path)
     stop = _StopPort(_declaration(), (_confirmed(), _confirmed()))
-    settlement = _settlement(target, _registry(stop))
+    settlement = await _settlement(target, _registry(stop))
     try:
         await settlement.settle()
         assert len(stop.calls) == 1
@@ -217,7 +224,7 @@ async def test_ended_activity_and_repeated_settlement_do_not_stop_again(tmp_path
             anchors={1: (_NOW, _NOW + 1)},
             stop_config=settlement.stop_config,
             registry=_registry(stop),
-            open_owned=settlement.open_owned,
+            database=settlement.database,
             wall_us=settlement.wall_us,
         )
         assert await again.settle() == []
@@ -234,7 +241,7 @@ async def test_ended_activity_and_repeated_settlement_do_not_stop_again(tmp_path
             anchors={1: (_NOW, _NOW + 1)},
             stop_config=settlement.stop_config,
             registry=_registry(stop),
-            open_owned=settlement.open_owned,
+            database=settlement.database,
             wall_us=settlement.wall_us,
         )
         assert await third.settle() == []
@@ -248,13 +255,14 @@ async def test_unreadable_state_keeps_diagnosis_without_device_calls(tmp_path):
     owned.connection.close()
     stop = _StopPort(_declaration(), (_confirmed(),))
 
-    def _broken_open():
-        raise RuntimeError("database disk image is malformed")
+    class _UnreadableDatabase:
+        async def read(self, operation, *, description):
+            raise RuntimeError("database disk image is malformed")
 
     settlement = EmergencySettlement(
         session_key=_SESSION, anchors={1: (_NOW, _NOW + 1)},
         stop_config={"cam-1": {"max_attempts": 2}},
-        registry=_registry(stop), open_owned=_broken_open,
+        registry=_registry(stop), database=_UnreadableDatabase(),
         wall_us=lambda: _NOW)
     entries = await settlement.settle()
 
@@ -280,7 +288,7 @@ async def test_run_session_merges_emergency_diagnostics_into_fatal_error(tmp_pat
     target, owned = _world(tmp_path)
     owned.connection.close()
     stop = _StopPort(_declaration(), (_confirmed(),))
-    settlement = _settlement(target, _registry(stop))
+    settlement = await _settlement(target, _registry(stop), session=True)
     session_lock, admission_lock = lock_file_paths(target)
 
     async def fatal_flow(context):
@@ -290,8 +298,7 @@ async def test_run_session_merges_emergency_diagnostics_into_fatal_error(tmp_pat
         mode=CommandMode.RUN,
         catalog=None,
         clock=_StaticClock(_NOW),
-        open_connection=lambda: open_existing(
-            target, DbOpenMode.EXISTING_RW, DbConfig()),
+        open_database=lambda: open_session_database(target),
         acceptance_repository=AcceptanceRepository(),
         session_repository=SessionRepository(),
         paths=SessionPaths(session_lock=session_lock, admission_lock=admission_lock),
@@ -302,7 +309,7 @@ async def test_run_session_merges_emergency_diagnostics_into_fatal_error(tmp_pat
         acquire_admission=lambda: acquire_admission(admission_lock),
         facts_query=lambda connection: None,
         flows={"capture": fatal_flow},
-        emergency_settlement=settlement.settle,
+        emergency_settlement=lambda: _settle_in_session(context, settlement),
     )
     outcome = await run_session(context, None)
 
@@ -368,11 +375,13 @@ async def test_cancel_during_emergency_stop_settles_before_logs_and_unlock(
 
     monkeypatch.setattr(logging_owner, "cancel_startup_sweep", observed_cancel_sweep)
     log_settle_started = asyncio.Event()
+    log_settle_finished = asyncio.Event()
     original_log_settle = logging_owner.settle
 
     async def observed_log_settle() -> None:
         log_settle_started.set()
         await original_log_settle()
+        log_settle_finished.set()
 
     monkeypatch.setattr(logging_owner, "settle", observed_log_settle)
 
@@ -387,29 +396,21 @@ async def test_cancel_during_emergency_stop_settles_before_logs_and_unlock(
             return _confirmed()
 
     stop = GatedStopPort(_declaration(), ())
-    settlement = _settlement(target, _registry(stop))
-    close_counts: list[int] = []
-    original_open = settlement.open_owned
+    settlement = await _settlement(target, _registry(stop), session=True)
+    database_close = []
 
-    class ConnectionCloseSpy:
-        def __init__(self, connection) -> None:
-            self._connection = connection
+    async def open_tracked_database():
+        database = await open_session_database(target)
+        original_close = database.close
 
-        def __getattr__(self, name):
-            return getattr(self._connection, name)
+        async def observed_close():
+            database_close.append(("begin", log_settle_finished.is_set()))
+            await original_close()
+            database_close.append(("end", log_settle_finished.is_set()))
 
-        def close(self) -> None:
-            close_counts.append(len(close_counts) + 1)
-            self._connection.close()
+        database.close = observed_close
+        return database
 
-    def open_owned():
-        owned = original_open()
-        return type(owned)(
-            connection=ConnectionCloseSpy(owned.connection),
-            metadata=owned.metadata,
-        )
-
-    settlement.open_owned = open_owned
     local_stopped = asyncio.Event()
 
     class LocalOwner:
@@ -434,8 +435,7 @@ async def test_cancel_during_emergency_stop_settles_before_logs_and_unlock(
 
     context = SessionContext(
         mode=CommandMode.RUN, catalog=None, clock=_StaticClock(_NOW),
-        open_connection=lambda: open_existing(
-            target, DbOpenMode.EXISTING_RW, DbConfig()),
+        open_database=open_tracked_database,
         acceptance_repository=AcceptanceRepository(),
         session_repository=SessionRepository(),
         paths=SessionPaths(session_lock=session_lock, admission_lock=admission_lock),
@@ -449,7 +449,7 @@ async def test_cancel_during_emergency_stop_settles_before_logs_and_unlock(
         on_session_locked=logging_owner.start_session,
         logging_owner=logging_owner,
         local_work=CombinedLocalWork((local_owner, logging_owner)),
-        emergency_settlement=settlement.settle,
+        emergency_settlement=lambda: _settle_in_session(context, settlement),
     )
     run_task = asyncio.create_task(run_session(context, None))
     try:
@@ -488,13 +488,17 @@ async def test_cancel_during_emergency_stop_settles_before_logs_and_unlock(
             assert _run_row(saved)[1:4] == (3, 1, 2)
         finally:
             saved.connection.close()
-        assert close_counts == [1, 2]
+        # 共享业务 worker 要等日志收场结束后关闭，不能在等待期间提前关闭。
+        assert database_close == []
         assert len(stop.calls) == 1
         assert not run_task.done()
         release_scan.set()
         with pytest.raises(asyncio.CancelledError) as cancelled:
             await asyncio.wait_for(run_task, timeout=timeout)
         assert cancelled.value.args == ("parent cancel during emergency STOP",)
+        assert database_close == [("begin", True), ("end", True)]
+        released_lease = acquire_session(session_lock)
+        released_lease.close()
     finally:
         release_stop.set()
         release_scan.set()
@@ -565,7 +569,7 @@ async def test_internal_emergency_control_error_still_settles_logs(
             raise internal_control
 
     stop = ControlStopPort(_declaration(), ())
-    settlement = _settlement(target, _registry(stop))
+    settlement = await _settlement(target, _registry(stop), session=True)
     session_lock, admission_lock = lock_file_paths(target)
 
     async def fatal_flow(_context) -> None:
@@ -573,8 +577,7 @@ async def test_internal_emergency_control_error_still_settles_logs(
 
     context = SessionContext(
         mode=CommandMode.RUN, catalog=None, clock=_StaticClock(_NOW),
-        open_connection=lambda: open_existing(
-            target, DbOpenMode.EXISTING_RW, DbConfig()),
+        open_database=lambda: open_session_database(target),
         acceptance_repository=AcceptanceRepository(),
         session_repository=SessionRepository(),
         paths=SessionPaths(session_lock=session_lock, admission_lock=admission_lock),
@@ -588,7 +591,7 @@ async def test_internal_emergency_control_error_still_settles_logs(
         on_session_locked=logging_owner.start_session,
         logging_owner=logging_owner,
         local_work=CombinedLocalWork((logging_owner,)),
-        emergency_settlement=settlement.settle,
+        emergency_settlement=lambda: _settle_in_session(context, settlement),
     )
     run_task = asyncio.create_task(run_session(context, None))
     try:
@@ -699,8 +702,7 @@ async def test_initial_restricted_internal_control_stays_separate_from_parent(
 
     context = SessionContext(
         mode=CommandMode.RUN, catalog=None, clock=_StaticClock(_NOW),
-        open_connection=lambda: open_existing(
-            target, DbOpenMode.EXISTING_RW, DbConfig()),
+        open_database=lambda: open_session_database(target),
         acceptance_repository=AcceptanceRepository(),
         session_repository=SessionRepository(),
         paths=SessionPaths(session_lock=session_lock, admission_lock=admission_lock),
