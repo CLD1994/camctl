@@ -7,6 +7,7 @@ import hashlib
 import json
 import sqlite3
 from pathlib import Path
+from contextlib import closing
 
 import pytest
 
@@ -280,6 +281,11 @@ async def test_started_restricted_report_cancellation_preserves_actual_result(
         assert retirement_start_release_states == []
         assert not drain_observations
 
+        def read_during_cancel(owned):
+            with closing(owned.connection.execute("SELECT 1")) as cursor:
+                return cursor.fetchone()
+
+        assert await report_database.read(read_during_cancel, description="取消等待期间核对会话数据库") == (1,)
         release_report.set()
         await _wait_for_event(final_log_drain_started, "报告后的最终日志收场")
         assert len(drain_observations) == 1
