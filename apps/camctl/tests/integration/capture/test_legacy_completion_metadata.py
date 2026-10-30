@@ -1,40 +1,45 @@
 """旧 v1 的完成元信息来自首次 COMPLETE 所属尝试，发现条目只证明身份。"""
 from dataclasses import replace
 from decimal import Decimal
-from pathlib import Path
 from unittest.mock import create_autospec
 
 import pytest
 
-from camctl.capture.handlers import (
-    ResultFilesPort, _advance_timelapse_natural_wait, _finish_listing_result,
-    _listing_round, _register_listing,
-)
+from camctl.capture.handlers import ResultFilesPort, capture_handler
 from camctl.capture.result_inputs import ListedResult, observed_file
 from camctl.contracts.values import ConsistencyError
 from camctl.devices.evidence import DeviceObservation
 from camctl.operations.attempts import AttemptConfig
 from camctl.operations.models import ErrorValue
-from camctl.persistence.models import DbOutcome, DbOutcomeKind
-from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+from camctl.persistence.models import DbOutcomeKind
 
-from .result_consumer_fixtures import RESULT_EVIDENCE
+from .result_consumer_fixtures import RESULT_EVIDENCE, complete_natural_wait
+from ..support.result_cases import result_case, result_case_for
+from .result_source_fixtures import save_v1_round
+from .test_result_file_fact_saves import FileFactFault
+from camctl.persistence.repositories.capture import CaptureRepository
+from camctl.capture.timelapse import CaptureWaitConfig
 from .test_cancel_timelapse_exhaustion_files import _apply_public_cancel
 from .test_native_completion_context import _osv
-from .test_natural_wait_source_transitions import _legacy_catalog, _stopper, _finish_cancel
-from .test_natural_wait_time_eligibility import _world
+from .test_natural_wait_source_transitions import _legacy_catalog, _stop_driver, _finish_cancel
 from .test_result_page_history import _actual
 
 pytestmark = pytest.mark.asyncio
 
 
 async def _completed_world(tmp_path, startup, size, opaque, result_first, save_mode='reliable'):
-    owned, runtime, aid, advance, wall, mono, unused, stopper, due = await _world(
-        tmp_path, startup, catalog=_legacy_catalog(startup))
-    runtime.check_config = AttemptConfig(3, Decimal('1'), Decimal(0))
-    runtime.evidence = RESULT_EVIDENCE
+    case = result_case_for()
+    config = AttemptConfig(3, Decimal('1'), Decimal(0))
+    owned, runtime, aid, handler = await case.world(tmp_path, 'timelapse', start=False,
+        catalog=_legacy_catalog(startup), result_page_contract=False,
+        assembly_options={'check_config': config,
+            'wait_config': lambda action: CaptureWaitConfig(1000, 200, 0, startup)})
+    advance = capture_handler(handler)
+    await advance(aid, runtime)
+    wall = [case.clock.wall]
+    due = case.clock.wall + (startup + 1200) * 1000
     port = create_autospec(ResultFilesPort, instance=True)
-    runtime.results = port
+    case.results.delegate = port
     calls = []
     completed = {**_osv(size), 'original_name': 'completed.OSV'}
     discovery = {**completed, 'complete': False, 'size_bytes': None,
@@ -49,41 +54,48 @@ async def _completed_world(tmp_path, startup, size, opaque, result_first, save_m
         entry = observed_file(raw)
         return ListedResult((replace(entry, evidence={'listing': 'opaque'} if opaque else entry.evidence),), outcome)
     port.list_round.side_effect = actual
-    wall[0] = due+100
-    mono[0] += (startup+1200)*1000000
-    assert _advance_timelapse_natural_wait(runtime, runtime.action(aid)) is not None
-    first = await _listing_round(runtime, aid)
-    _register_listing(runtime, aid, first)
-    _finish_listing_result(runtime, first, retry_wait=True)
-    incomplete = runtime.capture.read_result_sources(calls[-1], None, 1, owned)
+    wall[0] = case.clock.wall = due + 100
+    case.clock.monotonic += (startup + 1200) * 1_000_000
+    assert await complete_natural_wait(runtime, aid) is not None
+    runtime, first = await save_v1_round(owned, runtime, aid, port, config, wall[0])
+    incomplete = CaptureRepository().read_result_sources(calls[-1], None, 1, owned)
     assert not incomplete.items[0][1].complete
-    second = await _listing_round(runtime, aid)
-    if result_first:
-        _finish_listing_result(runtime, second, retry_wait=True)
     requests = []
-    if save_mode != 'reliable':
-        save = runtime.capture.save_file_completion
-        def uncertain(command, key, current):
+    completion_patch = pytest.MonkeyPatch()
+
+    async def recover_completion(current, command, key):
+        # 文件事实仓储专项：故障回执处实际停止，再重开 worker，重送原完整申请。
+        original = CaptureRepository().save_file_completion
+        mode = 'commit_after' if save_mode == 'unknown-after' else 'commit_before'
+        fault = None
+        def save(connection):
+            nonlocal fault
+            fault = FileFactFault(connection.connection, 'completion', mode)
             requests.append((command, key))
-            if len(requests) <= 2:
-                if save_mode == 'unknown-after' and len(requests) == 1:
-                    assert save(command, key, current).kind is DbOutcomeKind.COMPLETED
-                return DbOutcome(DbOutcomeKind.UNKNOWN)
-            return save(command, key, current)
-        runtime.capture.save_file_completion = uncertain
-        with pytest.raises(ConsistencyError):
-            _register_listing(runtime, aid, second)
+            return original(command, key, replace(connection, connection=fault))
+        receipt = await current.database.write(save, key=key)
+        assert fault is not None and not fault.armed
+        assert receipt.kind is DbOutcomeKind.UNKNOWN
+        persisted = owned.connection.execute('SELECT completion_state FROM device_files').fetchone()
+        assert persisted == ((3,) if save_mode == 'unknown-after' else (1,))
+        resumed = await case.reopen(owned, cold=False)
+        def observe_resend(repository, repeated, repeated_key, current):
+            requests.append((repeated, repeated_key))
+            return original(repeated, repeated_key, current)
+        completion_patch.setattr(CaptureRepository, 'save_file_completion', observe_resend)
+        return resumed
+
+    try:
+        runtime, second = await save_v1_round(owned, runtime, aid, port, config, wall[0],
+            result_first=result_first,
+            before_completion=None if save_mode == 'reliable' else recover_completion)
+    finally:
+        completion_patch.undo()
+    if requests:
+        assert requests[0] == requests[1]
         assert len(calls) == 2
-        assert owned.connection.execute('SELECT attempts_used FROM operation_runs WHERE id=?', (calls[-1].run_id,)).fetchone() == (2,)
-        path = Path(owned.connection.execute('PRAGMA database_list').fetchone()[2])
-        owned.connection.close()
-        owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-        runtime = replace(runtime, owned=owned, natural_wait_states={}, timelapse_deadlines={})
-        runtime.resume_file_observations(aid)
-        assert all(value == requests[0] for value in requests)
-    _register_listing(runtime, aid, second)
-    if not result_first:
-        _finish_listing_result(runtime, second, retry_wait=True)
+        assert owned.connection.execute('SELECT attempts_used FROM operation_runs WHERE id=?',
+            (calls[-1].run_id,)).fetchone() == (2,)
     facts = owned.connection.execute('SELECT id,completion_state,completion_evidence_json,size_bytes,original_name,media_type FROM device_files').fetchone()
     complete_id, = owned.connection.execute(
         "SELECT MIN(e.id) FROM history_events e,json_each(e.body_json,'$.rows') r"
@@ -111,15 +123,14 @@ async def test_legacy_retention_uses_complete_attempt_metadata(tmp_path, startup
         assert (entry.kind.value, entry.format_id, entry.original_name, entry.complete, entry.size_bytes) == (
             'video', 'osv', 'completed.OSV', True, size)
         assert identity == facts[0] and file.complete
-        third = await _listing_round(runtime, aid)
-        _register_listing(runtime, aid, third)
-        _finish_listing_result(runtime, third, retry_wait=True)
+        runtime, third = await save_v1_round(owned, runtime, aid, port,
+            AttemptConfig(3, Decimal('1'), Decimal(0)), wall[0])
         if canceled:
             _apply_public_cancel(owned, aid, wall[0])
-            _stopper(runtime, aid, 'failed')
+            result_case_for().stopper.stop.side_effect = _stop_driver('failed').stop
         for _ in range(3):
             await advance(aid, runtime)
-        assert runtime.action(aid)['status'] == (6 if canceled else 4)
+        assert (await runtime.action(aid))['status'] == (6 if canceled else 4)
         outputs = owned.connection.execute('SELECT id,device_file_id FROM outputs').fetchall()
         assert [value[1] for value in outputs] == ([facts[0]] if size > 0 else [])
         source = runtime.capture.read_result_sources(calls[-1], None, 1, owned)
@@ -128,7 +139,7 @@ async def test_legacy_retention_uses_complete_attempt_metadata(tmp_path, startup
         assert port.list_round.await_count == 3
         assert owned.connection.execute('SELECT activity_state,occupancy_state FROM device_activities WHERE action_id=?', (aid,)).fetchone() == (1, 1)
         if canceled:
-            await _finish_cancel(owned, wall, False)
+            await _finish_cancel(owned, runtime, wall, False)
         await advance(aid, runtime)
         assert owned.connection.execute('SELECT id,device_file_id FROM outputs').fetchall() == outputs
         assert port.list_round.await_count == 3
