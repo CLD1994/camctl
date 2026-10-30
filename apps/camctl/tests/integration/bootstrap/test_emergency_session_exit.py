@@ -490,6 +490,9 @@ async def test_cancel_during_emergency_stop_settles_before_logs_and_unlock(
             saved.connection.close()
         # 共享业务 worker 要等日志收场结束后关闭，不能在等待期间提前关闭。
         assert database_close == []
+        assert await context.database.read(
+            lambda current: _run_row(current)[1:4], description="核对共享数据库中的应急结果"
+        ) == (3, 1, 2)
         assert len(stop.calls) == 1
         assert not run_task.done()
         release_scan.set()
