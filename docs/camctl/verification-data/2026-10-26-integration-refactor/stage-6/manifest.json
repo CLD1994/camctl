@@ -1,0 +1,1345 @@
+{
+  "schema": "camctl-stage-6-evidence-v1",
+  "created_utc": "2026-10-30T10:26:17Z",
+  "meaning": "只归档已经终止且稳定的现场证据；stage-6 是独立证据快照，不构成整体验收，也不把不同源码和运行结果拼成一次通过。",
+  "archive": {
+    "format": "gzip",
+    "gzip_mtime_seconds": 0,
+    "compression_level": 9,
+    "full_decompression_byte_identity_and_sha256_verified": true,
+    "compressed_sha256_and_length_recorded_per_file": true,
+    "json_and_xml_payloads_parsed_after_decompression": true,
+    "tests_run_by_archiver": false,
+    "sqlite_api_used_by_archiver": false,
+    "database_bytes_copied_without_sqlite_queries": true
+  },
+  "workspace": {
+    "path": "/tmp/camctl-resume-20261030/archive-stage6",
+    "branch": "docs/resume-evidence-stage6-20261030",
+    "source_head": "dbea9317ba2821111e0069cfe3e9d1ebb3c99ace",
+    "initially_clean": true,
+    "only_stage6_written": true
+  },
+  "summary": {
+    "compressed_evidence_file_count": 73,
+    "uncompressed_bytes_total": 15332270,
+    "compressed_bytes_total": 1272228
+  },
+  "run_groups": [
+    {
+      "id": "unit-all-d56",
+      "source_root": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/unit-all",
+      "source_head": "d56be550c597ed96c8aedd6b986eeb1ad97c05e5",
+      "run_identity": "pid=67982; started=2026-10-30T09:32:56.603572+00:00; finished=2026-10-30T09:35:30.676084+00:00; exit=0",
+      "scope": "apps/camctl/tests/unit at source HEAD d56be; full unit collection/run recorded in the receipt and source manifest.",
+      "result": {
+        "xml": {
+          "tests": 9355,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 1,
+          "time_seconds": 134.227
+        },
+        "pytest_summary": "9354 passed, 1 skipped; 2 warnings"
+      }
+    },
+    {
+      "id": "unit-boundary-audit-d56",
+      "source_root": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030",
+      "source_head": "d56be550c597ed96c8aedd6b986eeb1ad97c05e",
+      "run_identity": "read-only fixed-scope first-import audit; JSON/Markdown reports produced on 2026-10-30; no test bodies run",
+      "scope": "unit-boundary-audit fixed module inventory; the read-only type-loading rule was later documented under commit 7f0aa164; this archive keeps the original audit bytes unchanged.",
+      "result": {
+        "resource_json_files": 3,
+        "direct_import_processes": 13
+      }
+    },
+    {
+      "id": "repository-port-initial-before",
+      "source_root": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/repository-port-review/before",
+      "source_head": "ed29963d5aa4348778afa78515a3917cde285e2b",
+      "run_identity": "pid=88167; phase=before; exit=1",
+      "scope": "initial repository-port review run; source hashes are recorded in the receipt but exact initial source bytes are no longer present in the review directory.",
+      "source_sha256": {
+        "apps/camctl/tests/support/repository_ports.py": "318cfe62080da270b2ec89956667074cb55eef641888ef5b14b060a82954820c",
+        "apps/camctl/tests/unit/persistence/test_repository_ports.py": "f8d33284b61eace178f9bc94b62c3a9b520507f0657096dfbd4ac895151ee53f"
+      },
+      "result": {
+        "tests": 17,
+        "failures": 8,
+        "errors": 0,
+        "skipped": 0,
+        "time_seconds": 0.006
+      }
+    },
+    {
+      "id": "repository-port-initial-after",
+      "source_root": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/repository-port-review/after",
+      "source_head": "ed29963d5aa4348778afa78515a3917cde285e2b",
+      "run_identity": "pid=88184; phase=after; exit=1",
+      "scope": "initial after run, retained separately from the final after rerun.",
+      "source_sha256": {
+        "apps/camctl/tests/support/repository_ports.py": "318cfe62080da270b2ec89956667074cb55eef641888ef5b14b060a82954820c",
+        "apps/camctl/tests/unit/persistence/test_repository_ports.py": "f8d33284b61eace178f9bc94b62c3a9b520507f0657096dfbd4ac895151ee53f"
+      },
+      "result": {
+        "tests": 17,
+        "failures": 1,
+        "errors": 0,
+        "skipped": 0,
+        "time_seconds": 0.002
+      }
+    },
+    {
+      "id": "repository-port-final-before",
+      "source_root": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/repository-port-review/before-final",
+      "source_head": "ed29963d5aa4348778afa78515a3917cde285e2b",
+      "run_identity": "pid=88430; phase=before-final; exit=1",
+      "scope": "final source snapshot before repository-port change; not overwritten by the later passing after-final run.",
+      "source_sha256": {
+        "test": "7a76facc310549a67750119726d3810800a994d01009f18c0491cbe396230ab0",
+        "helper": "e7e15bff83ef47b6469d6f59d17d622dcad57a0c3a3ef6c13207ced3748727f2"
+      },
+      "result": {
+        "tests": 17,
+        "failures": 8,
+        "errors": 0,
+        "skipped": 0,
+        "time_seconds": 0.006
+      }
+    },
+    {
+      "id": "repository-port-final-after",
+      "source_root": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/repository-port-review/after-final",
+      "source_head": "ed29963d5aa4348778afa78515a3917cde285e2b",
+      "run_identity": "pid=88435; phase=after-final; exit=0",
+      "scope": "final source snapshot after repository-port change; its source hashes match the archived final review source copies.",
+      "source_sha256": {
+        "test": "7a76facc310549a67750119726d3810800a994d01009f18c0491cbe396230ab0",
+        "helper": "318cfe62080da270b2ec89956667074cb55eef641888ef5b14b060a82954820c"
+      },
+      "result": {
+        "tests": 17,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "time_seconds": 0.005
+      }
+    },
+    {
+      "id": "repository-port-unit-final-dbea",
+      "source_root": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/repository-port-unit-final",
+      "source_head": "dbea9317ba2821111e0069cfe3e9d1ebb3c99ace",
+      "run_identity": "pid=76553; exit=0; wall=0.29601418200763874s",
+      "scope": "main worktree early repository-port unit run; distinct from review worktree runs.",
+      "source_sha256": {
+        "apps/camctl/tests/support/repository_ports.py": "e7e15bff83ef47b6469d6f59d17d622dcad57a0c3a3ef6c13207ced3748727f2",
+        "apps/camctl/tests/unit/persistence/test_repository_ports.py": "e21d32ec4f9ad4bf76b93b42fa5c69b60a1c7516166a7f800fa14e054d02eeef"
+      },
+      "result": {
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "time_seconds": 0.004
+      }
+    },
+    {
+      "id": "source-capacity-unit",
+      "source_root": "/tmp/camctl-resume-20261030/source-capacity/.local/source-capacity",
+      "source_head": "1cc0f887654db9c3cb7f37a948892ab6a5061236",
+      "run_identity": "pid=50552; exit=0; elapsed=0.8843722343444824s",
+      "scope": "8 source-capacity message unit cases with capacity_unit_guard; separate from the 2400-item integration run.",
+      "source_sha256": {
+        "apps/camctl/tests/integration/support/source_capacity.py": "a6f603195878cd9abc142f7fa7594ff563f9b4e61f7808e8d825a63018132944",
+        "apps/camctl/tests/unit/outputs/test_source_capacity_messages.py": "b27893aa198222396b2d6c2270fafedf81b897626b5078da5aa63010dd985324"
+      },
+      "result": {
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "time_seconds": 0.003
+      }
+    },
+    {
+      "id": "source-capacity-first-setup-error",
+      "source_root": "/tmp/camctl-resume-20261030/source-capacity/.local/source-capacity",
+      "source_head": "1cc0f887654db9c3cb7f37a948892ab6a5061236",
+      "run_identity": "pid=50599; exit=1; elapsed=1.247262716293335s",
+      "scope": "first capacity invocation; pytest setup failed because basetemp /tmp/camctl-resume-20261030/source-capacity-evidence/capacity-final did not exist. No leaf capacity result or database was produced.",
+      "source_sha256": {
+        "apps/camctl/tests/integration/outputs/source_capacity_worker.py": "ebbcab2a67d1ae65f89cdf3ca9a3f92ab96b290023dead19135e6a306b25e145",
+        "apps/camctl/tests/integration/outputs/test_source_capacity.py": "ba7fda65e63a89792b42f8caf6ec59a4a106005a67eea402effa58cddbc651b4",
+        "apps/camctl/tests/integration/support/source_capacity.py": "a6f603195878cd9abc142f7fa7594ff563f9b4e61f7808e8d825a63018132944",
+        "apps/camctl/tests/unit/outputs/test_source_capacity_messages.py": "b27893aa198222396b2d6c2270fafedf81b897626b5078da5aa63010dd985324",
+        "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py": "3b82db3ebacba76d8b5963b84a7547842063e420f20302dfc07ea71057c49a59"
+      },
+      "result": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 1,
+        "skipped": 0,
+        "time_seconds": 0.002
+      }
+    },
+    {
+      "id": "source-capacity-2400-capacity-2",
+      "source_root": "/tmp/camctl-resume-20261030/source-capacity-evidence",
+      "source_head": "1cc0f887654db9c3cb7f37a948892ab6a5061236",
+      "run_identity": "pid=50645; exit=0; elapsed=25.81623101234436s",
+      "scope": "one fixed batch input count=2400, batch_size=4; capacity-2 is a separate successful run. The leaf memory-budget receipt records 2 GiB combined memory-and-swap limit, combined peak 43040768 bytes, zero OOM/limit events, returncode 0, group removed; swap peak was not separately measured.",
+      "source_sha256": {
+        "apps/camctl/tests/integration/outputs/source_capacity_worker.py": "ebbcab2a67d1ae65f89cdf3ca9a3f92ab96b290023dead19135e6a306b25e145",
+        "apps/camctl/tests/integration/outputs/test_source_capacity.py": "ba7fda65e63a89792b42f8caf6ec59a4a106005a67eea402effa58cddbc651b4",
+        "apps/camctl/tests/integration/support/source_capacity.py": "a6f603195878cd9abc142f7fa7594ff563f9b4e61f7808e8d825a63018132944",
+        "apps/camctl/tests/unit/outputs/test_source_capacity_messages.py": "b27893aa198222396b2d6c2270fafedf81b897626b5078da5aa63010dd985324",
+        "apps/camctl/tests/integration/outputs/test_source_resolution_batches.py": "3b82db3ebacba76d8b5963b84a7547842063e420f20302dfc07ea71057c49a59"
+      },
+      "result": {
+        "pytest": {
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "time_seconds": 24.932
+        },
+        "business_phase": "closed",
+        "messages": 3,
+        "member_counts": [
+          2400,
+          2400,
+          2400
+        ],
+        "checks_member_count": [
+          2400,
+          2400,
+          2400
+        ],
+        "count": 2400,
+        "budget": {
+          "budget_scope": "memory_and_swap",
+          "status": "completed",
+          "requested_limit": "2GiB",
+          "limit_bytes": 2147483648,
+          "final_status": "completed",
+          "group_removed": true,
+          "returncode": 0
+        },
+        "evidence": {
+          "budget_scope": "memory_and_swap",
+          "limit_bytes": 2147483648,
+          "combined_limit_bytes": 2147483648,
+          "peak_bytes": 43040768,
+          "combined_peak_bytes": 43040768,
+          "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+          "swap_peak_bytes": null,
+          "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+          "host_swap_bytes": 4294967296,
+          "events": {
+            "oom_kill_disable": 0,
+            "under_oom": 0,
+            "oom_kill": 0,
+            "failcnt": 0,
+            "memsw_failcnt": 0
+          }
+        }
+      }
+    },
+    {
+      "id": "capture-production-gap-facts",
+      "source_root": "/tmp/camctl-resume-20261030/evidence/capture-core-migration-handoff",
+      "source_head": null,
+      "run_identity": "production-gap-facts.json has no run receipt or source commit; source identity is the exact facts and database byte digests in this manifest.",
+      "scope": "original capture segment production-gap fact snapshot and the exact database path named by that JSON; database and WAL/SHM bytes copied without SQLite reads.",
+      "result": {
+        "journal_mode": "wal",
+        "database": "/tmp/camctl-resume-20261030/evidence/capture-core-final-public-writes/db/test_last_scan_keeps_qualified1/state.db",
+        "production_gap_count": 1
+      }
+    },
+    {
+      "id": "bootstrap-public-boundary-final48-real",
+      "source_root": "/tmp/camctl-resume-20261030/bootstrap-recovery-evidence/public-boundary-final48-real",
+      "source_head": "88bfa20efb5670f80374973ed4c0975722b70d05",
+      "run_identity": "pid=60309; started=2026-10-30T09:15:07.259697+00:00; finished=2026-10-30T09:15:26.975750+00:00; exit=1; sources_sha256=cffb918058953a018fbe6d08528574b83c24a0c094ec25c8ca1b4b59a2d05998",
+      "scope": "48 real-boundary nodes in one run; preserve all four failures, including three nodes whose node map records closing=true and the default-delete TimeoutError. Do not treat subsequent single-case rerun as replacing this result.",
+      "result": {
+        "xml": {
+          "tests": 48,
+          "failures": 4,
+          "errors": 0,
+          "skipped": 0,
+          "time_seconds": 18.445999999999998
+        },
+        "nodes": 48,
+        "node_outcomes": {
+          "pass": 44,
+          "fail": 4,
+          "skip": 0
+        },
+        "closing_failure_nodes": [
+          "test_real_session_applies_cancel_before_device_call_returns[default-query]",
+          "test_real_session_applies_cancel_while_shared_host_file_task_is_running[delete]",
+          "test_real_session_applies_cancel_while_shared_host_file_task_is_running[query]"
+        ],
+        "timeout_nodes": [
+          "test_real_session_applies_cancel_before_device_call_returns[default-delete]",
+          "test_real_session_applies_cancel_before_device_call_returns[default-query]"
+        ]
+      }
+    },
+    {
+      "id": "bootstrap-default-delete-single-rerun",
+      "source_root": "/tmp/camctl-resume-20261030/bootstrap-recovery-evidence/default-delete-diagnosis",
+      "source_head": "88bfa20efb5670f80374973ed4c0975722b70d05",
+      "run_identity": "pid=63186; started=2026-10-30T09:20:36.845888+00:00; finished=2026-10-30T09:20:40.673758+00:00; exit=0; sources_sha256=2a2534d061e534c01eb77cdf256f97f889091698f5fab09dc23e479949c89ae0",
+      "scope": "one default-delete case rerun after the 48-node run; the passing single result remains a separate observation and does not diagnose or erase the prior 4 failures.",
+      "result": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "time_seconds": 2.746
+      }
+    },
+    {
+      "id": "merged-boundary-diagnostics54",
+      "source_root": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-diagnostics54",
+      "source_head": "76e07abd3f58c7538b52d1b199c63fa2f5a3bef1",
+      "run_identity": "pid=1441; exit=0; wall_seconds=24.610377687000437",
+      "scope": "merged boundary diagnostic target set; receipt records no source-manifest changes; distinct from unit-all and bootstrap results.",
+      "result": {
+        "pytest_nodes": 54,
+        "passed": 54,
+        "failed": 0,
+        "pytest_elapsed_seconds": 22.459,
+        "wall_seconds": 24.610377687000437
+      }
+    },
+    {
+      "id": "diagnostic-other14-cost-summary",
+      "source_root": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030",
+      "source_head": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+      "run_identity": "derived timing and node summary for the earlier 14 serialized diagnostic tasks; no new run was performed for this summary.",
+      "scope": "290f4ad3 camctl 14 directories except capture/bootstrap; jobs=1; diagnostic includes 94 failures; not final regression or speedup comparison",
+      "result": {
+        "runner_wall_seconds": 1302.6238226860005,
+        "tasks": 14,
+        "files": 275,
+        "slowest_nodes": 30,
+        "call_is_not_target_operation_time": true,
+        "input_sha256_count": 14
+      }
+    }
+  ],
+  "files": [
+    {
+      "archive_path": "unit-all/receipt.json.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/unit-all/receipt.json",
+      "source_head": "d56be550c597ed96c8aedd6b986eeb1ad97c05e5",
+      "run_identity": "pid=67982; started=2026-10-30T09:32:56.603572+00:00; finished=2026-10-30T09:35:30.676084+00:00; exit=0",
+      "scope": "apps/camctl/tests/unit at source HEAD d56be; full unit collection/run recorded in the receipt and source manifest.",
+      "source_mtime_ns": 1793352930715318913,
+      "uncompressed_bytes": 836,
+      "uncompressed_sha256": "29a049c7f90f47e16378542dd119bf8a47884c790330ce9fc94490fc2310cb2a",
+      "format": "json",
+      "compressed_bytes": 490,
+      "compressed_sha256": "d8ec2181b941e1f1a0188f4b37f9e132b538f12c338504bc72460ac0b56691d9"
+    },
+    {
+      "archive_path": "unit-all/source-manifest.json.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/unit-all/source-manifest.json",
+      "source_head": "d56be550c597ed96c8aedd6b986eeb1ad97c05e5",
+      "run_identity": "pid=67982; started=2026-10-30T09:32:56.603572+00:00; finished=2026-10-30T09:35:30.676084+00:00; exit=0",
+      "scope": "apps/camctl/tests/unit at source HEAD d56be; full unit collection/run recorded in the receipt and source manifest.",
+      "source_mtime_ns": 1793352776566868552,
+      "uncompressed_bytes": 175926,
+      "uncompressed_sha256": "18f1b750335ae598a1c29032a291c6ede391841de38119d41384444d78dbf49e",
+      "format": "json",
+      "compressed_bytes": 62414,
+      "compressed_sha256": "6a3e846e060acb892e7e1a5aedd3ec06868627acf9265dc381987f0bcf4e69a1"
+    },
+    {
+      "archive_path": "unit-all/results.xml.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/unit-all/results.xml",
+      "source_head": "d56be550c597ed96c8aedd6b986eeb1ad97c05e5",
+      "run_identity": "pid=67982; started=2026-10-30T09:32:56.603572+00:00; finished=2026-10-30T09:35:30.676084+00:00; exit=0",
+      "scope": "apps/camctl/tests/unit at source HEAD d56be; full unit collection/run recorded in the receipt and source manifest.",
+      "source_mtime_ns": 1793352928637412800,
+      "uncompressed_bytes": 2542924,
+      "uncompressed_sha256": "fa728a120f70e204607bf799e92500f15d0f8fe628bfe0452457ecbbf307a8bd",
+      "format": "xml",
+      "compressed_bytes": 129830,
+      "compressed_sha256": "42aef72034823bf7b7f67f2b8134c6c98159ea41ddd2e6ee54e35062c818b619"
+    },
+    {
+      "archive_path": "unit-all/pytest.log.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/unit-all/pytest.log",
+      "source_head": "d56be550c597ed96c8aedd6b986eeb1ad97c05e5",
+      "run_identity": "pid=67982; started=2026-10-30T09:32:56.603572+00:00; finished=2026-10-30T09:35:30.676084+00:00; exit=0",
+      "scope": "apps/camctl/tests/unit at source HEAD d56be; full unit collection/run recorded in the receipt and source manifest.",
+      "source_mtime_ns": 1793352929184773202,
+      "uncompressed_bytes": 11460,
+      "uncompressed_sha256": "6de4a0206365fdf9e351f6daedd3bd71ced6e35cadb454f84af3029293318dac",
+      "format": "log",
+      "compressed_bytes": 744,
+      "compressed_sha256": "5da83d6de5622b166c099dbdba687f139b489694f9472bea2231475f7b983efd"
+    },
+    {
+      "archive_path": "unit-boundary-audit.json.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/unit-boundary-audit.json",
+      "source_head": "d56be550c597ed96c8aedd6b986eeb1ad97c05e",
+      "run_identity": "read-only fixed-scope first-import audit; JSON/Markdown reports produced on 2026-10-30; no test bodies run",
+      "scope": "unit-boundary-audit fixed module inventory; the read-only type-loading rule was later documented under commit 7f0aa164; this archive keeps the original audit bytes unchanged.",
+      "source_mtime_ns": 1793353559975640555,
+      "uncompressed_bytes": 23613,
+      "uncompressed_sha256": "b0f85bd6914cc94b82964ae7663ef3b1d289fa0bf688be9cd56a4aa491f6fed7",
+      "format": "json",
+      "compressed_bytes": 4730,
+      "compressed_sha256": "d3776a3df138bf2bb7a124bf0ac74b4750140c00d921adf20b7be7a00b193b60",
+      "note": "原始只读审计文件保持字节不变。"
+    },
+    {
+      "archive_path": "unit-boundary-audit.md.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/unit-boundary-audit.md",
+      "source_head": "d56be550c597ed96c8aedd6b986eeb1ad97c05e",
+      "run_identity": "read-only fixed-scope first-import audit; JSON/Markdown reports produced on 2026-10-30; no test bodies run",
+      "scope": "unit-boundary-audit fixed module inventory; the read-only type-loading rule was later documented under commit 7f0aa164; this archive keeps the original audit bytes unchanged.",
+      "source_mtime_ns": 1793353559975640555,
+      "uncompressed_bytes": 6482,
+      "uncompressed_sha256": "a67b4492fb0beda24e82f508e9439362c87ca470c15edd798427734b901f1363",
+      "format": "markdown",
+      "compressed_bytes": 3034,
+      "compressed_sha256": "874fea53775e78cc0b4f3c21c41326a022a6cd50e0ea8de329e7d75c4b7b1038",
+      "note": "原始只读审计文件保持字节不变。"
+    },
+    {
+      "archive_path": "repository-port-review/before/receipt.json.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/repository-port-review/before/receipt.json",
+      "source_head": "ed29963d5aa4348778afa78515a3917cde285e2b",
+      "run_identity": "pid=88167; phase=before; exit=1",
+      "scope": "initial repository-port review run; source hashes are recorded in the receipt but exact initial source bytes are no longer present in the review directory.",
+      "source_mtime_ns": 1793354973429626586,
+      "uncompressed_bytes": 1242,
+      "uncompressed_sha256": "260837b452d9759772200a9572ca4a4b76f1302fcc26f053aef4ebf0a494625e",
+      "format": "json",
+      "compressed_bytes": 513,
+      "compressed_sha256": "101396e4ee6ca40996f6542fb01acdc7893e83fcfe100d089e1bbc166dd64abf"
+    },
+    {
+      "archive_path": "repository-port-review/before/results.xml.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/repository-port-review/before/results.xml",
+      "source_head": "ed29963d5aa4348778afa78515a3917cde285e2b",
+      "run_identity": "pid=88167; phase=before; exit=1",
+      "scope": "initial repository-port review run; source hashes are recorded in the receipt but exact initial source bytes are no longer present in the review directory.",
+      "source_mtime_ns": 1793354973389481226,
+      "uncompressed_bytes": 7276,
+      "uncompressed_sha256": "5a7b3fd6f8cb99290df9054049baf56c1187c8bf50d3b4129eebf0a31eeef38b",
+      "format": "xml",
+      "compressed_bytes": 1110,
+      "compressed_sha256": "36397df99db604e43a15f7e34de6238a0c3d0a971bffb7615cee64a4d39c987b"
+    },
+    {
+      "archive_path": "repository-port-review/before/pytest.log.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/repository-port-review/before/pytest.log",
+      "source_head": "ed29963d5aa4348778afa78515a3917cde285e2b",
+      "run_identity": "pid=88167; phase=before; exit=1",
+      "scope": "initial repository-port review run; source hashes are recorded in the receipt but exact initial source bytes are no longer present in the review directory.",
+      "source_mtime_ns": 1793354973399517565,
+      "uncompressed_bytes": 4828,
+      "uncompressed_sha256": "1a1e3f39283e9447dc7c2b76c32d2594f8229a556421da94ae5f506aec30ae6f",
+      "format": "log",
+      "compressed_bytes": 827,
+      "compressed_sha256": "fd5e35a421e871bd03c77574d34573ac69632c6e29345e9f99b75a368484957c"
+    },
+    {
+      "archive_path": "repository-port-review/after/receipt.json.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/repository-port-review/after/receipt.json",
+      "source_head": "ed29963d5aa4348778afa78515a3917cde285e2b",
+      "run_identity": "pid=88184; phase=after; exit=1",
+      "scope": "initial after run, retained separately from the final after rerun.",
+      "source_mtime_ns": 1793354973750789463,
+      "uncompressed_bytes": 1069,
+      "uncompressed_sha256": "69d3d6d151a436cc161f39a733ce39194eaba1e97ca58c9464a6b9325055a015",
+      "format": "json",
+      "compressed_bytes": 499,
+      "compressed_sha256": "ebe4fabef707347bebfbdbb4f75e23c002efdfa57ed80b81f343393b0fce59c9"
+    },
+    {
+      "archive_path": "repository-port-review/after/results.xml.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/repository-port-review/after/results.xml",
+      "source_head": "ed29963d5aa4348778afa78515a3917cde285e2b",
+      "run_identity": "pid=88184; phase=after; exit=1",
+      "scope": "initial after run, retained separately from the final after rerun.",
+      "source_mtime_ns": 1793354973680535083,
+      "uncompressed_bytes": 3373,
+      "uncompressed_sha256": "cabf18c1939ef02be53c66f9f4d4e85bb961b97ad94bb2aba71ebc0721c7942e",
+      "format": "xml",
+      "compressed_bytes": 802,
+      "compressed_sha256": "24caaabb70eefb2fd833f6a29e6c82f1a60d2a3dce7f2e8b220a313761ae934c"
+    },
+    {
+      "archive_path": "repository-port-review/after/pytest.log.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/repository-port-review/after/pytest.log",
+      "source_head": "ed29963d5aa4348778afa78515a3917cde285e2b",
+      "run_identity": "pid=88184; phase=after; exit=1",
+      "scope": "initial after run, retained separately from the final after rerun.",
+      "source_mtime_ns": 1793354973710644102,
+      "uncompressed_bytes": 855,
+      "uncompressed_sha256": "caf2be1a9d59cf469a1883fb80a1c8d5cc0ab4429635ad60a2893e91589a69ad",
+      "format": "log",
+      "compressed_bytes": 340,
+      "compressed_sha256": "ac3538e5b20eae0b3a9edb364aaceabdb4fa055e51a15ae1820f604ca3168b41"
+    },
+    {
+      "archive_path": "repository-port-review/before-final/receipt.json.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/repository-port-review/before-final/receipt.json",
+      "source_head": "ed29963d5aa4348778afa78515a3917cde285e2b",
+      "run_identity": "pid=88430; phase=before-final; exit=1",
+      "scope": "final source snapshot before repository-port change; not overwritten by the later passing after-final run.",
+      "source_mtime_ns": 1793355001822187308,
+      "uncompressed_bytes": 1151,
+      "uncompressed_sha256": "98ae6eb1622edb0249c8c8fcce1c64a8e4c1d3bf45c12541f53583ea429bd07b",
+      "format": "json",
+      "compressed_bytes": 480,
+      "compressed_sha256": "b699bdfeaed32cc0cff9fbfdf26c55e0f439c1df348ebd0dca7a04ea899d5fc0"
+    },
+    {
+      "archive_path": "repository-port-review/before-final/results.xml.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/repository-port-review/before-final/results.xml",
+      "source_head": "ed29963d5aa4348778afa78515a3917cde285e2b",
+      "run_identity": "pid=88430; phase=before-final; exit=1",
+      "scope": "final source snapshot before repository-port change; not overwritten by the later passing after-final run.",
+      "source_mtime_ns": 1793355001782485908,
+      "uncompressed_bytes": 7276,
+      "uncompressed_sha256": "6a35943339c7ab953d4fbfac8b8e9109ceb2d9a6cff4b6bbe8acf4674ca56d4b",
+      "format": "xml",
+      "compressed_bytes": 1106,
+      "compressed_sha256": "4c0782636928a1cc30ceae6a5d86466d2a323d3ff2d57af56ccbee4b67e89529"
+    },
+    {
+      "archive_path": "repository-port-review/before-final/pytest.log.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/repository-port-review/before-final/pytest.log",
+      "source_head": "ed29963d5aa4348778afa78515a3917cde285e2b",
+      "run_identity": "pid=88430; phase=before-final; exit=1",
+      "scope": "final source snapshot before repository-port change; not overwritten by the later passing after-final run.",
+      "source_mtime_ns": 1793355001792411258,
+      "uncompressed_bytes": 4828,
+      "uncompressed_sha256": "1a1e3f39283e9447dc7c2b76c32d2594f8229a556421da94ae5f506aec30ae6f",
+      "format": "log",
+      "compressed_bytes": 827,
+      "compressed_sha256": "fd5e35a421e871bd03c77574d34573ac69632c6e29345e9f99b75a368484957c"
+    },
+    {
+      "archive_path": "repository-port-review/after-final/receipt.json.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/repository-port-review/after-final/receipt.json",
+      "source_head": "ed29963d5aa4348778afa78515a3917cde285e2b",
+      "run_identity": "pid=88435; phase=after-final; exit=0",
+      "scope": "final source snapshot after repository-port change; its source hashes match the archived final review source copies.",
+      "source_mtime_ns": 1793355002131810279,
+      "uncompressed_bytes": 978,
+      "uncompressed_sha256": "78a716dde26df6b2008453dc2e765c1546de74ef5371b0391269b8d8a54f4a07",
+      "format": "json",
+      "compressed_bytes": 482,
+      "compressed_sha256": "6d26a25ffa37b45a431e680d4453206055d41d2a9db893a891e1b6a0be14ffd5"
+    },
+    {
+      "archive_path": "repository-port-review/after-final/results.xml.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/repository-port-review/after-final/results.xml",
+      "source_head": "ed29963d5aa4348778afa78515a3917cde285e2b",
+      "run_identity": "pid=88435; phase=after-final; exit=0",
+      "scope": "final source snapshot after repository-port change; its source hashes match the archived final review source copies.",
+      "source_mtime_ns": 1793355002061241488,
+      "uncompressed_bytes": 2797,
+      "uncompressed_sha256": "56adf826d1313c7d3b1d11f82fe0203ff05deed0c7d2ed5d594a7546263304c1",
+      "format": "xml",
+      "compressed_bytes": 612,
+      "compressed_sha256": "e9ef15116353914149a8bd187b09676345e5a0e2044a3e2eac1e812d43f7375a"
+    },
+    {
+      "archive_path": "repository-port-review/after-final/pytest.log.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/repository-port-review/after-final/pytest.log",
+      "source_head": "ed29963d5aa4348778afa78515a3917cde285e2b",
+      "run_identity": "pid=88435; phase=after-final; exit=0",
+      "scope": "final source snapshot after repository-port change; its source hashes match the archived final review source copies.",
+      "source_mtime_ns": 1793355002091485255,
+      "uncompressed_bytes": 99,
+      "uncompressed_sha256": "1fd8ea768d3828437a6c045cd265b7e1573a616dd90e55f058ec34a6985daf11",
+      "format": "log",
+      "compressed_bytes": 52,
+      "compressed_sha256": "cf51b7e9d4e94f55fce626fbda4a51cfb8369706233b844c0eae061f9236dbaa"
+    },
+    {
+      "archive_path": "repository-port-review/final-source/test_repository_ports.py.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/repository-port-review/before/test_repository_ports.py",
+      "source_head": "ed29963d5aa4348778afa78515a3917cde285e2b",
+      "run_identity": "pid=88435; phase=after-final; exit=0",
+      "scope": "final source snapshot after repository-port change; its source hashes match the archived final review source copies.",
+      "source_mtime_ns": 1793355001504576108,
+      "uncompressed_bytes": 8635,
+      "uncompressed_sha256": "7a76facc310549a67750119726d3810800a994d01009f18c0491cbe396230ab0",
+      "format": "python_source",
+      "compressed_bytes": 1950,
+      "compressed_sha256": "ddcd2164f1f5354a3241ba807070922786263227250d7e645e09f7c3dc90b5ab",
+      "note": "SHA matches before-final and after-final test hashes; it does not match initial run hashes."
+    },
+    {
+      "archive_path": "repository-port-review/final-source/support/repository_ports.py.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/repository-port-review/before/support/repository_ports.py",
+      "source_head": "ed29963d5aa4348778afa78515a3917cde285e2b",
+      "run_identity": "pid=88435; phase=after-final; exit=0",
+      "scope": "final source snapshot after repository-port change; its source hashes match the archived final review source copies.",
+      "source_mtime_ns": 1793354973098427369,
+      "uncompressed_bytes": 2198,
+      "uncompressed_sha256": "e7e15bff83ef47b6469d6f59d17d622dcad57a0c3a3ef6c13207ced3748727f2",
+      "format": "python_source",
+      "compressed_bytes": 1027,
+      "compressed_sha256": "209fccdb036d257a4b007e2ec3ba2be23078476ad6c4b584f25508c69254d2be",
+      "note": "SHA matches before-final and after-final helper hashes; it does not match initial run hashes."
+    },
+    {
+      "archive_path": "repository-port-review/final-source/support/__init__.py.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/repository-port-review/before/support/__init__.py",
+      "source_head": "ed29963d5aa4348778afa78515a3917cde285e2b",
+      "run_identity": "pid=88435; phase=after-final; exit=0",
+      "scope": "final source snapshot after repository-port change; its source hashes match the archived final review source copies.",
+      "source_mtime_ns": 1793354973098427369,
+      "uncompressed_bytes": 0,
+      "uncompressed_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "format": "python_source",
+      "compressed_bytes": 20,
+      "compressed_sha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+      "note": "Empty package marker retained with the final review source snapshot."
+    },
+    {
+      "archive_path": "repository-port-unit-final/receipt.json.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/repository-port-unit-final/receipt.json",
+      "source_head": "dbea9317ba2821111e0069cfe3e9d1ebb3c99ace",
+      "run_identity": "pid=76553; exit=0; wall=0.29601418200763874s",
+      "scope": "main worktree early repository-port unit run; distinct from review worktree runs.",
+      "source_mtime_ns": 1793354032545859088,
+      "uncompressed_bytes": 883,
+      "uncompressed_sha256": "d759a2745f7fe68631782c4f02a5f62e2e4740316bc943bbfc232fca1fbce30b",
+      "format": "json",
+      "compressed_bytes": 416,
+      "compressed_sha256": "f3fe7923d3f4167a402ac531075509f7479646bcb648b2c314a0c1e7030cab9e"
+    },
+    {
+      "archive_path": "repository-port-unit-final/results.xml.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/repository-port-unit-final/results.xml",
+      "source_head": "dbea9317ba2821111e0069cfe3e9d1ebb3c99ace",
+      "run_identity": "pid=76553; exit=0; wall=0.29601418200763874s",
+      "scope": "main worktree early repository-port unit run; distinct from review worktree runs.",
+      "source_mtime_ns": 1793354032466607214,
+      "uncompressed_bytes": 1571,
+      "uncompressed_sha256": "79c94d31a28eb6fae61174873490505f636742c5fff5e1dc157084211207e8f4",
+      "format": "xml",
+      "compressed_bytes": 438,
+      "compressed_sha256": "4e67e2ae806710359f258f778a2d6e23c6cad668ff0df1a27530d91ca7b65dc0"
+    },
+    {
+      "archive_path": "repository-port-unit-final/pytest.log.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/repository-port-unit-final/pytest.log",
+      "source_head": "dbea9317ba2821111e0069cfe3e9d1ebb3c99ace",
+      "run_identity": "pid=76553; exit=0; wall=0.29601418200763874s",
+      "scope": "main worktree early repository-port unit run; distinct from review worktree runs.",
+      "source_mtime_ns": 1793354032496326668,
+      "uncompressed_bytes": 98,
+      "uncompressed_sha256": "3f2a7d474201c0ea38d8bf1671a9f35e691f355933bdef622342047561fb3da4",
+      "format": "log",
+      "compressed_bytes": 51,
+      "compressed_sha256": "fe619994c40062a38ebcc1c6d695c3ff9a5767c54ff2784521ee98c916206aaa"
+    },
+    {
+      "archive_path": "source-capacity/unit.json.gz",
+      "source_path": "/tmp/camctl-resume-20261030/source-capacity/.local/source-capacity/unit.json",
+      "source_head": "1cc0f887654db9c3cb7f37a948892ab6a5061236",
+      "run_identity": "pid=50552; exit=0; elapsed=0.8843722343444824s",
+      "scope": "8 source-capacity message unit cases with capacity_unit_guard; separate from the 2400-item integration run.",
+      "source_mtime_ns": 1793350344179086440,
+      "uncompressed_bytes": 1046,
+      "uncompressed_sha256": "95ce3e0b3f4058934615e3cf1513cc3ed854539b81d5c4742218d3aba678e0b4",
+      "format": "json",
+      "compressed_bytes": 443,
+      "compressed_sha256": "e19fe2db09a26e4fedd19a1ae2e304490aa6eaff209adb0742aac83c9516196f"
+    },
+    {
+      "archive_path": "source-capacity/unit.log.gz",
+      "source_path": "/tmp/camctl-resume-20261030/source-capacity/.local/source-capacity/unit.log",
+      "source_head": "1cc0f887654db9c3cb7f37a948892ab6a5061236",
+      "run_identity": "pid=50552; exit=0; elapsed=0.8843722343444824s",
+      "scope": "8 source-capacity message unit cases with capacity_unit_guard; separate from the 2400-item integration run.",
+      "source_mtime_ns": 1793350344149539559,
+      "uncompressed_bytes": 98,
+      "uncompressed_sha256": "1698cf53738fece3fc128f68a2005bf90098cb09ffc528d80a18fe683159d622",
+      "format": "log",
+      "compressed_bytes": 51,
+      "compressed_sha256": "e1cef146e287624d1cd3a1cca04a63519285efb6e1d409e7123270d671e1f6d6"
+    },
+    {
+      "archive_path": "source-capacity/unit.xml.gz",
+      "source_path": "/tmp/camctl-resume-20261030/source-capacity/.local/source-capacity/unit.xml",
+      "source_head": "1cc0f887654db9c3cb7f37a948892ab6a5061236",
+      "run_identity": "pid=50552; exit=0; elapsed=0.8843722343444824s",
+      "scope": "8 source-capacity message unit cases with capacity_unit_guard; separate from the 2400-item integration run.",
+      "source_mtime_ns": 1793350344139690600,
+      "uncompressed_bytes": 1422,
+      "uncompressed_sha256": "76605f96f216b5a02e65115733312c48a86069f7ac035b51c164bc6cc9eb7afa",
+      "format": "xml",
+      "compressed_bytes": 359,
+      "compressed_sha256": "fe1399a31c134d648a88de233abf728b592ad08f84c30dbc66344258b7e9308f"
+    },
+    {
+      "archive_path": "source-capacity/import-check.log.gz",
+      "source_path": "/tmp/camctl-resume-20261030/source-capacity/.local/source-capacity/import-check.log",
+      "source_head": "1cc0f887654db9c3cb7f37a948892ab6a5061236",
+      "run_identity": "pid=50552; exit=0; elapsed=0.8843722343444824s",
+      "scope": "8 source-capacity message unit cases with capacity_unit_guard; separate from the 2400-item integration run.",
+      "source_mtime_ns": 1793350421599194959,
+      "uncompressed_bytes": 103,
+      "uncompressed_sha256": "12a90df1da176d536bec69ad56a64e9770803c5e317bb2d0aea5e8f01bab1d9d",
+      "format": "log",
+      "compressed_bytes": 103,
+      "compressed_sha256": "e77ef40886cbad5221d108a5313c816faa89bd3107dbc7d49d668d32fde00c24"
+    },
+    {
+      "archive_path": "source-capacity/database-evidence.json.gz",
+      "source_path": "/tmp/camctl-resume-20261030/source-capacity/.local/source-capacity/database-evidence.json",
+      "source_head": "1cc0f887654db9c3cb7f37a948892ab6a5061236",
+      "run_identity": "pid=50645; exit=0; elapsed=25.81623101234436s",
+      "scope": "one fixed batch input count=2400, batch_size=4; capacity-2 is a separate successful run. The leaf memory-budget receipt records 2 GiB combined memory-and-swap limit, combined peak 43040768 bytes, zero OOM/limit events, returncode 0, group removed; swap peak was not separately measured.",
+      "source_mtime_ns": 1793350421629332225,
+      "uncompressed_bytes": 402,
+      "uncompressed_sha256": "c7e2c40a671ed1e6d4ef334de9e5b0f44356f153ae34c20e4943fa7207ed88d5",
+      "format": "json",
+      "compressed_bytes": 365,
+      "compressed_sha256": "946c1524d798d4509f00c44a3fbfec58fcaeef597683b05928a133175803a724"
+    },
+    {
+      "archive_path": "source-capacity/capacity-final.json.gz",
+      "source_path": "/tmp/camctl-resume-20261030/source-capacity/.local/source-capacity/capacity-final.json",
+      "source_head": "1cc0f887654db9c3cb7f37a948892ab6a5061236",
+      "run_identity": "pid=50599; exit=1; elapsed=1.247262716293335s",
+      "scope": "first capacity invocation; pytest setup failed because basetemp /tmp/camctl-resume-20261030/source-capacity-evidence/capacity-final did not exist. No leaf capacity result or database was produced.",
+      "source_mtime_ns": 1793350357132877071,
+      "uncompressed_bytes": 1644,
+      "uncompressed_sha256": "e2bf11e5882ba5d8349132986dfdd8496dbcb2ffe65e3e05a90ee6340a3ed545",
+      "format": "json",
+      "compressed_bytes": 642,
+      "compressed_sha256": "d3c913f2c7bd31de54266a537d0b038501df7e0424f25fea35c71b490d3d03ba"
+    },
+    {
+      "archive_path": "source-capacity/capacity-final.log.gz",
+      "source_path": "/tmp/camctl-resume-20261030/source-capacity/.local/source-capacity/capacity-final.log",
+      "source_head": "1cc0f887654db9c3cb7f37a948892ab6a5061236",
+      "run_identity": "pid=50599; exit=1; elapsed=1.247262716293335s",
+      "scope": "first capacity invocation; pytest setup failed because basetemp /tmp/camctl-resume-20261030/source-capacity-evidence/capacity-final did not exist. No leaf capacity result or database was produced.",
+      "source_mtime_ns": 1793350357000308085,
+      "uncompressed_bytes": 2338,
+      "uncompressed_sha256": "045d1cf468fcaf1075cdbcc061759de1eb6cd53ae8420be8c4f7d6805d71c31e",
+      "format": "log",
+      "compressed_bytes": 929,
+      "compressed_sha256": "6d5618459f9dd86f825eba39c922b1b6e140ccd3ce0336d5b9f5b32e0af0ba1c"
+    },
+    {
+      "archive_path": "source-capacity/capacity-final.xml.gz",
+      "source_path": "/tmp/camctl-resume-20261030/source-capacity/.local/source-capacity/capacity-final.xml",
+      "source_head": "1cc0f887654db9c3cb7f37a948892ab6a5061236",
+      "run_identity": "pid=50599; exit=1; elapsed=1.247262716293335s",
+      "scope": "first capacity invocation; pytest setup failed because basetemp /tmp/camctl-resume-20261030/source-capacity-evidence/capacity-final did not exist. No leaf capacity result or database was produced.",
+      "source_mtime_ns": 1793350356969555718,
+      "uncompressed_bytes": 2348,
+      "uncompressed_sha256": "33574a8c226df9387d00f9363a1387e7974b70cec40cf1c705aed413b2f2f6d7",
+      "format": "xml",
+      "compressed_bytes": 975,
+      "compressed_sha256": "fdcb88f17645a9b7b1bb6df5f084a1889df7752bf11e0e2c5de412fdb265b21e"
+    },
+    {
+      "archive_path": "source-capacity/capacity-2.json.gz",
+      "source_path": "/tmp/camctl-resume-20261030/source-capacity/.local/source-capacity/capacity-2.json",
+      "source_head": "1cc0f887654db9c3cb7f37a948892ab6a5061236",
+      "run_identity": "pid=50645; exit=0; elapsed=25.81623101234436s",
+      "scope": "one fixed batch input count=2400, batch_size=4; capacity-2 is a separate successful run. The leaf memory-budget receipt records 2 GiB combined memory-and-swap limit, combined peak 43040768 bytes, zero OOM/limit events, returncode 0, group removed; swap peak was not separately measured.",
+      "source_mtime_ns": 1793350394020878915,
+      "uncompressed_bytes": 1633,
+      "uncompressed_sha256": "5f247bda0cdb6de7ca932e118cd11439f2a663f795916549ddbf560aaea2a12e",
+      "format": "json",
+      "compressed_bytes": 641,
+      "compressed_sha256": "cd926472e74a6f47e19407bec670b1d2fd973772528d8fc03582737a2573d1e4"
+    },
+    {
+      "archive_path": "source-capacity/capacity-2.log.gz",
+      "source_path": "/tmp/camctl-resume-20261030/source-capacity/.local/source-capacity/capacity-2.log",
+      "source_head": "1cc0f887654db9c3cb7f37a948892ab6a5061236",
+      "run_identity": "pid=50645; exit=0; elapsed=25.81623101234436s",
+      "scope": "one fixed batch input count=2400, batch_size=4; capacity-2 is a separate successful run. The leaf memory-budget receipt records 2 GiB combined memory-and-swap limit, combined peak 43040768 bytes, zero OOM/limit events, returncode 0, group removed; swap peak was not separately measured.",
+      "source_mtime_ns": 1793350393871017226,
+      "uncompressed_bytes": 220,
+      "uncompressed_sha256": "d2494df6cf003d44f3530703f4a44b4ad2c64be5049f6652302d0d1969080674",
+      "format": "log",
+      "compressed_bytes": 158,
+      "compressed_sha256": "687ceb05143b76039bc078fd9350fb276c79ac17f3033b057040ac7ef3da1da1"
+    },
+    {
+      "archive_path": "source-capacity/capacity-2.xml.gz",
+      "source_path": "/tmp/camctl-resume-20261030/source-capacity/.local/source-capacity/capacity-2.xml",
+      "source_head": "1cc0f887654db9c3cb7f37a948892ab6a5061236",
+      "run_identity": "pid=50645; exit=0; elapsed=25.81623101234436s",
+      "scope": "one fixed batch input count=2400, batch_size=4; capacity-2 is a separate successful run. The leaf memory-budget receipt records 2 GiB combined memory-and-swap limit, combined peak 43040768 bytes, zero OOM/limit events, returncode 0, group removed; swap peak was not separately measured.",
+      "source_mtime_ns": 1793350393851031920,
+      "uncompressed_bytes": 401,
+      "uncompressed_sha256": "e3cc448db98e4bce9098b9caeb1ea73423a75b7c42722c4aca8e87d8c5dc8f8e",
+      "format": "xml",
+      "compressed_bytes": 266,
+      "compressed_sha256": "b01d23879315f16bd28d63555367ab7c55892b361da60bece71665a78d35d51c"
+    },
+    {
+      "archive_path": "source-capacity/delegation-final/launcher.json.gz",
+      "source_path": "/tmp/camctl-resume-20261030/source-capacity/.local/source-capacity/delegation-final/launcher.json",
+      "source_head": "1cc0f887654db9c3cb7f37a948892ab6a5061236",
+      "run_identity": "pid=50599; exit=1; elapsed=1.247262716293335s",
+      "scope": "first capacity invocation; pytest setup failed because basetemp /tmp/camctl-resume-20261030/source-capacity-evidence/capacity-final did not exist. No leaf capacity result or database was produced.",
+      "source_mtime_ns": 1793350357122679459,
+      "uncompressed_bytes": 2361,
+      "uncompressed_sha256": "57fa2ce4b1f0ac9fff3722f0208939398f60297e4ab5d9ef2baae5f5b339a564",
+      "format": "json",
+      "compressed_bytes": 703,
+      "compressed_sha256": "df0b6ab1143d8099510763a99a8bbf34eab426262bfd2c2a992c9fc88120a0e6",
+      "note": "Delegation-parent receipt only; it is not the constrained worker group."
+    },
+    {
+      "archive_path": "source-capacity/delegation-2/launcher.json.gz",
+      "source_path": "/tmp/camctl-resume-20261030/source-capacity/.local/source-capacity/delegation-2/launcher.json",
+      "source_head": "1cc0f887654db9c3cb7f37a948892ab6a5061236",
+      "run_identity": "pid=50645; exit=0; elapsed=25.81623101234436s",
+      "scope": "one fixed batch input count=2400, batch_size=4; capacity-2 is a separate successful run. The leaf memory-budget receipt records 2 GiB combined memory-and-swap limit, combined peak 43040768 bytes, zero OOM/limit events, returncode 0, group removed; swap peak was not separately measured.",
+      "source_mtime_ns": 1793350394010905704,
+      "uncompressed_bytes": 2360,
+      "uncompressed_sha256": "2ae679325cb2f05fc9319a0b8e40e88a960a87334082a302d68314013aa0d57e",
+      "format": "json",
+      "compressed_bytes": 698,
+      "compressed_sha256": "3fecc636efb85311db228815fd0601406d35d583fe9892240f7f0e61dc2ee1d0",
+      "note": "Delegation-parent receipt only; the leaf memory-budget.json is the measured group receipt."
+    },
+    {
+      "archive_path": "source-capacity/capacity-2/capacity-timing.json.gz",
+      "source_path": "/tmp/camctl-resume-20261030/source-capacity-evidence/capacity-2/test_source_write_and_original0/capacity-timing.json",
+      "source_head": "1cc0f887654db9c3cb7f37a948892ab6a5061236",
+      "run_identity": "pid=50645; exit=0; elapsed=25.81623101234436s",
+      "scope": "one fixed batch input count=2400, batch_size=4; capacity-2 is a separate successful run. The leaf memory-budget receipt records 2 GiB combined memory-and-swap limit, combined peak 43040768 bytes, zero OOM/limit events, returncode 0, group removed; swap peak was not separately measured.",
+      "source_mtime_ns": 1793350393841039268,
+      "uncompressed_bytes": 434,
+      "uncompressed_sha256": "3a43e6f7a508445bc79042a569542c60eca88d76c8ba8d43410fbd1304a34b6c",
+      "format": "json",
+      "compressed_bytes": 269,
+      "compressed_sha256": "150ec1cabe4cefb6beb7109f3c2cfcd7ae84b04089e5f77fb9b78a15632fdb62"
+    },
+    {
+      "archive_path": "source-capacity/capacity-2/checks.json.gz",
+      "source_path": "/tmp/camctl-resume-20261030/source-capacity-evidence/capacity-2/test_source_write_and_original0/checks.json",
+      "source_head": "1cc0f887654db9c3cb7f37a948892ab6a5061236",
+      "run_identity": "pid=50645; exit=0; elapsed=25.81623101234436s",
+      "scope": "one fixed batch input count=2400, batch_size=4; capacity-2 is a separate successful run. The leaf memory-budget receipt records 2 GiB combined memory-and-swap limit, combined peak 43040768 bytes, zero OOM/limit events, returncode 0, group removed; swap peak was not separately measured.",
+      "source_mtime_ns": 1793350393671164176,
+      "uncompressed_bytes": 602,
+      "uncompressed_sha256": "475db6686810fef96d8750089b0a1f9e40c04a8b580420b48602dbbaa933a8ba",
+      "format": "json",
+      "compressed_bytes": 171,
+      "compressed_sha256": "c4aeb4e807c6b49f8ef00a9aeceaec8d6cd12a26797ac318415ceedb2708484a"
+    },
+    {
+      "archive_path": "source-capacity/capacity-2/result.json.gz",
+      "source_path": "/tmp/camctl-resume-20261030/source-capacity-evidence/capacity-2/test_source_write_and_original0/result.json",
+      "source_head": "1cc0f887654db9c3cb7f37a948892ab6a5061236",
+      "run_identity": "pid=50645; exit=0; elapsed=25.81623101234436s",
+      "scope": "one fixed batch input count=2400, batch_size=4; capacity-2 is a separate successful run. The leaf memory-budget receipt records 2 GiB combined memory-and-swap limit, combined peak 43040768 bytes, zero OOM/limit events, returncode 0, group removed; swap peak was not separately measured.",
+      "source_mtime_ns": 1793350393681156828,
+      "uncompressed_bytes": 4321,
+      "uncompressed_sha256": "df75a89609231595ed7f74787ffa954415f672a894d2d65ea10cbb5cbeeb6883",
+      "format": "json",
+      "compressed_bytes": 867,
+      "compressed_sha256": "d747f8120c483ad10ef5b420503b0701d54d7708a0c0ec2e8f9c88623d862b78"
+    },
+    {
+      "archive_path": "source-capacity/capacity-2/memory-budget.json.gz",
+      "source_path": "/tmp/camctl-resume-20261030/source-capacity-evidence/capacity-2/test_source_write_and_original0/memory-budget.json",
+      "source_head": "1cc0f887654db9c3cb7f37a948892ab6a5061236",
+      "run_identity": "pid=50645; exit=0; elapsed=25.81623101234436s",
+      "scope": "one fixed batch input count=2400, batch_size=4; capacity-2 is a separate successful run. The leaf memory-budget receipt records 2 GiB combined memory-and-swap limit, combined peak 43040768 bytes, zero OOM/limit events, returncode 0, group removed; swap peak was not separately measured.",
+      "source_mtime_ns": 1793350393721127437,
+      "uncompressed_bytes": 2192,
+      "uncompressed_sha256": "226e14c6551bb7053bf3b7d4c4a8400acbfe2e46c89a642488a2730fd19c0dfe",
+      "format": "json",
+      "compressed_bytes": 716,
+      "compressed_sha256": "4e81c10c468428d6ca1b0c8dfc1dbe9621320236c110bef63386817823770c75"
+    },
+    {
+      "archive_path": "source-capacity/capacity-2/worker.stdout.gz",
+      "source_path": "/tmp/camctl-resume-20261030/source-capacity-evidence/capacity-2/test_source_write_and_original0/worker.stdout",
+      "source_head": "1cc0f887654db9c3cb7f37a948892ab6a5061236",
+      "run_identity": "pid=50645; exit=0; elapsed=25.81623101234436s",
+      "scope": "one fixed batch input count=2400, batch_size=4; capacity-2 is a separate successful run. The leaf memory-budget receipt records 2 GiB combined memory-and-swap limit, combined peak 43040768 bytes, zero OOM/limit events, returncode 0, group removed; swap peak was not separately measured.",
+      "source_mtime_ns": 1793350393681156828,
+      "uncompressed_bytes": 5457,
+      "uncompressed_sha256": "75779599268827c274bc1f6dccc45b53421b9653f7fbf816724df6967f11b435",
+      "format": "worker_stdout",
+      "compressed_bytes": 839,
+      "compressed_sha256": "bd3e129fe2f87853af871b68b73f4e5a4f9308ccdc04e11b90b64746f13e6f62"
+    },
+    {
+      "archive_path": "source-capacity/capacity-2/worker.stderr.gz",
+      "source_path": "/tmp/camctl-resume-20261030/source-capacity-evidence/capacity-2/test_source_write_and_original0/worker.stderr",
+      "source_head": "1cc0f887654db9c3cb7f37a948892ab6a5061236",
+      "run_identity": "pid=50645; exit=0; elapsed=25.81623101234436s",
+      "scope": "one fixed batch input count=2400, batch_size=4; capacity-2 is a separate successful run. The leaf memory-budget receipt records 2 GiB combined memory-and-swap limit, combined peak 43040768 bytes, zero OOM/limit events, returncode 0, group removed; swap peak was not separately measured.",
+      "source_mtime_ns": 1793350388694751673,
+      "uncompressed_bytes": 0,
+      "uncompressed_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "format": "worker_stderr",
+      "compressed_bytes": 20,
+      "compressed_sha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+    },
+    {
+      "archive_path": "source-capacity/capacity-2/world/state.db.gz",
+      "source_path": "/tmp/camctl-resume-20261030/source-capacity-evidence/capacity-2/test_source_write_and_original0/world/state.db",
+      "source_head": "1cc0f887654db9c3cb7f37a948892ab6a5061236",
+      "run_identity": "pid=50645; exit=0; elapsed=25.81623101234436s",
+      "scope": "one fixed batch input count=2400, batch_size=4; capacity-2 is a separate successful run. The leaf memory-budget receipt records 2 GiB combined memory-and-swap limit, combined peak 43040768 bytes, zero OOM/limit events, returncode 0, group removed; swap peak was not separately measured.",
+      "source_mtime_ns": 1793350393681156828,
+      "uncompressed_bytes": 5627904,
+      "uncompressed_sha256": "4a35404033038a2fbddcd60c16bf03b2f032017b3c8d4326f781d49bb4dcd833",
+      "format": "sqlite_database",
+      "compressed_bytes": 588289,
+      "compressed_sha256": "6b5bdb4b1642faca382974f09a646e105c06f595ebc7d05cb4a37e4bb1cb011d",
+      "note": "现存测试数据库原始字节；未使用 SQLite 打开。database-evidence.json 中 SHA 应相同。"
+    },
+    {
+      "archive_path": "capture-production-gap/production-gap-facts.json.gz",
+      "source_path": "/tmp/camctl-resume-20261030/evidence/capture-core-migration-handoff/production-gap-facts.json",
+      "source_head": null,
+      "run_identity": "production-gap-facts.json has no run receipt or source commit; source identity is the exact facts and database byte digests in this manifest.",
+      "scope": "original capture segment production-gap fact snapshot and the exact database path named by that JSON; database and WAL/SHM bytes copied without SQLite reads.",
+      "source_mtime_ns": 1793349675814438641,
+      "uncompressed_bytes": 1966,
+      "uncompressed_sha256": "3e5dc6f7b73e00d8384da6a2f5c0788feab6506185b867edbdf605722aefb64e",
+      "format": "json",
+      "compressed_bytes": 913,
+      "compressed_sha256": "4c46115adac37cdb05acfa34b01c025f2d0b2de775154ad59206d6fd0790c1e5"
+    },
+    {
+      "archive_path": "capture-production-gap/database/state.db.gz",
+      "source_path": "/tmp/camctl-resume-20261030/evidence/capture-core-final-public-writes/db/test_last_scan_keeps_qualified1/state.db",
+      "source_head": null,
+      "run_identity": "production-gap-facts.json has no run receipt or source commit; source identity is the exact facts and database byte digests in this manifest.",
+      "scope": "original capture segment production-gap fact snapshot and the exact database path named by that JSON; database and WAL/SHM bytes copied without SQLite reads.",
+      "source_mtime_ns": 1793349559919397656,
+      "uncompressed_bytes": 839680,
+      "uncompressed_sha256": "e82042733804e44b77caa2010b1cb9db6f24e6604dd965dbf9da3910664dce84",
+      "format": "sqlite_database",
+      "compressed_bytes": 35630,
+      "compressed_sha256": "2a84ba3f0b1a95d0dcc6be28c1188724e28eaff44cb56d126eb67211e06d60a4",
+      "note": "精确事实文件所指数据库及现存侧文件，按原始字节打包；未查询 SQLite。"
+    },
+    {
+      "archive_path": "capture-production-gap/database/state.db-wal.gz",
+      "source_path": "/tmp/camctl-resume-20261030/evidence/capture-core-final-public-writes/db/test_last_scan_keeps_qualified1/state.db-wal",
+      "source_head": null,
+      "run_identity": "production-gap-facts.json has no run receipt or source commit; source identity is the exact facts and database byte digests in this manifest.",
+      "scope": "original capture segment production-gap fact snapshot and the exact database path named by that JSON; database and WAL/SHM bytes copied without SQLite reads.",
+      "source_mtime_ns": 1793349675814438641,
+      "uncompressed_bytes": 0,
+      "uncompressed_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "format": "sqlite_wal",
+      "compressed_bytes": 20,
+      "compressed_sha256": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+      "note": "精确事实文件所指数据库及现存侧文件，按原始字节打包；未查询 SQLite。"
+    },
+    {
+      "archive_path": "capture-production-gap/database/state.db-shm.gz",
+      "source_path": "/tmp/camctl-resume-20261030/evidence/capture-core-final-public-writes/db/test_last_scan_keeps_qualified1/state.db-shm",
+      "source_head": null,
+      "run_identity": "production-gap-facts.json has no run receipt or source commit; source identity is the exact facts and database byte digests in this manifest.",
+      "scope": "original capture segment production-gap fact snapshot and the exact database path named by that JSON; database and WAL/SHM bytes copied without SQLite reads.",
+      "source_mtime_ns": 1793349675814438641,
+      "uncompressed_bytes": 32768,
+      "uncompressed_sha256": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb",
+      "format": "sqlite_shm",
+      "compressed_bytes": 101,
+      "compressed_sha256": "39e0d49d316293073d5359dccfb5c45b2545510edfa54a827a72b3bee77d4ab1",
+      "note": "精确事实文件所指数据库及现存侧文件，按原始字节打包；未查询 SQLite。"
+    },
+    {
+      "archive_path": "bootstrap/public-boundary-final48-real/receipt.json.gz",
+      "source_path": "/tmp/camctl-resume-20261030/bootstrap-recovery-evidence/public-boundary-final48-real/receipt.json",
+      "source_head": "88bfa20efb5670f80374973ed4c0975722b70d05",
+      "run_identity": "pid=60309; started=2026-10-30T09:15:07.259697+00:00; finished=2026-10-30T09:15:26.975750+00:00; exit=1; sources_sha256=cffb918058953a018fbe6d08528574b83c24a0c094ec25c8ca1b4b59a2d05998",
+      "scope": "48 real-boundary nodes in one run; preserve all four failures, including three nodes whose node map records closing=true and the default-delete TimeoutError. Do not treat subsequent single-case rerun as replacing this result.",
+      "source_mtime_ns": 1793351726961563560,
+      "uncompressed_bytes": 1228,
+      "uncompressed_sha256": "6735b92ffc951101bc77672d31f4d5d53131b33e1ce86e1784f52d42ab4a43b0",
+      "format": "json",
+      "compressed_bytes": 498,
+      "compressed_sha256": "5a3d5a18b5a474f155d25957c9156bc53d761eefa71fb431a369f01c543e8cb7"
+    },
+    {
+      "archive_path": "bootstrap/public-boundary-final48-real/junit.xml.gz",
+      "source_path": "/tmp/camctl-resume-20261030/bootstrap-recovery-evidence/public-boundary-final48-real/junit.xml",
+      "source_head": "88bfa20efb5670f80374973ed4c0975722b70d05",
+      "run_identity": "pid=60309; started=2026-10-30T09:15:07.259697+00:00; finished=2026-10-30T09:15:26.975750+00:00; exit=1; sources_sha256=cffb918058953a018fbe6d08528574b83c24a0c094ec25c8ca1b4b59a2d05998",
+      "scope": "48 real-boundary nodes in one run; preserve all four failures, including three nodes whose node map records closing=true and the default-delete TimeoutError. Do not treat subsequent single-case rerun as replacing this result.",
+      "source_mtime_ns": 1793351726783327791,
+      "uncompressed_bytes": 52518,
+      "uncompressed_sha256": "794561b9abf0d01385282af79a22646eb9d5021382d5b09f193f45c14ba56456",
+      "format": "xml",
+      "compressed_bytes": 5976,
+      "compressed_sha256": "c900b840de4b567cb6e729c43e7ade1fd6076ca37f7e382eaff333ee1d28e1fe"
+    },
+    {
+      "archive_path": "bootstrap/public-boundary-final48-real/pytest.log.gz",
+      "source_path": "/tmp/camctl-resume-20261030/bootstrap-recovery-evidence/public-boundary-final48-real/pytest.log",
+      "source_head": "88bfa20efb5670f80374973ed4c0975722b70d05",
+      "run_identity": "pid=60309; started=2026-10-30T09:15:07.259697+00:00; finished=2026-10-30T09:15:26.975750+00:00; exit=1; sources_sha256=cffb918058953a018fbe6d08528574b83c24a0c094ec25c8ca1b4b59a2d05998",
+      "scope": "48 real-boundary nodes in one run; preserve all four failures, including three nodes whose node map records closing=true and the default-delete TimeoutError. Do not treat subsequent single-case rerun as replacing this result.",
+      "source_mtime_ns": 1793351726793229814,
+      "uncompressed_bytes": 50742,
+      "uncompressed_sha256": "dd4d27c9156489779392b441c664f5b59b33ac80a0962239e7b787d0cfce9d63",
+      "format": "log",
+      "compressed_bytes": 6075,
+      "compressed_sha256": "9ef9df339960c2ee6be3bac26a9189f30a44b0084d5c18f65a6568e9540c42e4"
+    },
+    {
+      "archive_path": "bootstrap/public-boundary-final48-real/nodes.json.gz",
+      "source_path": "/tmp/camctl-resume-20261030/bootstrap-recovery-evidence/public-boundary-final48-real/nodes.json",
+      "source_head": "88bfa20efb5670f80374973ed4c0975722b70d05",
+      "run_identity": "pid=60309; started=2026-10-30T09:15:07.259697+00:00; finished=2026-10-30T09:15:26.975750+00:00; exit=1; sources_sha256=cffb918058953a018fbe6d08528574b83c24a0c094ec25c8ca1b4b59a2d05998",
+      "scope": "48 real-boundary nodes in one run; preserve all four failures, including three nodes whose node map records closing=true and the default-delete TimeoutError. Do not treat subsequent single-case rerun as replacing this result.",
+      "source_mtime_ns": 1793351732108399459,
+      "uncompressed_bytes": 11683,
+      "uncompressed_sha256": "49f16ad9f5c024a771114fa05323aa8dbe67ffd548f43434836ff861a225924d",
+      "format": "json",
+      "compressed_bytes": 1219,
+      "compressed_sha256": "3a95996b4016c7e6b2abaa51ec1a6f633581fc984e05cb89dafd92abe0ad2f37"
+    },
+    {
+      "archive_path": "bootstrap/public-boundary-final48-real/sources.json.gz",
+      "source_path": "/tmp/camctl-resume-20261030/bootstrap-recovery-evidence/public-boundary-final48-real/sources.json",
+      "source_head": "88bfa20efb5670f80374973ed4c0975722b70d05",
+      "run_identity": "pid=60309; started=2026-10-30T09:15:07.259697+00:00; finished=2026-10-30T09:15:26.975750+00:00; exit=1; sources_sha256=cffb918058953a018fbe6d08528574b83c24a0c094ec25c8ca1b4b59a2d05998",
+      "scope": "48 real-boundary nodes in one run; preserve all four failures, including three nodes whose node map records closing=true and the default-delete TimeoutError. Do not treat subsequent single-case rerun as replacing this result.",
+      "source_mtime_ns": 1793351707249579685,
+      "uncompressed_bytes": 189654,
+      "uncompressed_sha256": "cffb918058953a018fbe6d08528574b83c24a0c094ec25c8ca1b4b59a2d05998",
+      "format": "json",
+      "compressed_bytes": 66976,
+      "compressed_sha256": "afe6f9db45f7c07a519dccbd2c1c32db8a0ffd4975f615c7d1672bc41cc3165a"
+    },
+    {
+      "archive_path": "bootstrap/public-boundary-final48-real/failing-cases/default-delete-timeout/camctl.log.gz",
+      "source_path": "/tmp/camctl-resume-20261030/bootstrap-recovery-evidence/public-boundary-final48-real/tmp/test_real_session_applies_canc4/camctl.log",
+      "source_head": "88bfa20efb5670f80374973ed4c0975722b70d05",
+      "run_identity": "pid=60309; started=2026-10-30T09:15:07.259697+00:00; finished=2026-10-30T09:15:26.975750+00:00; exit=1; sources_sha256=cffb918058953a018fbe6d08528574b83c24a0c094ec25c8ca1b4b59a2d05998",
+      "scope": "48 real-boundary nodes in one run; preserve all four failures, including three nodes whose node map records closing=true and the default-delete TimeoutError. Do not treat subsequent single-case rerun as replacing this result.",
+      "source_mtime_ns": 1793351712524509084,
+      "uncompressed_bytes": 2326,
+      "uncompressed_sha256": "44c64d215d8de03d8777fc53395c1142a7dbdfb158df9cb115b2a2301573cefe",
+      "format": "log",
+      "compressed_bytes": 595,
+      "compressed_sha256": "05040cc9a7a6cbbd206d11218736ef3f0bb12c302467ce4c10c8608b0cd82d2e",
+      "note": "JUnit failure traceback maps this tmp_path to the named failed node; raw DB/sidecars only, not opened with SQLite."
+    },
+    {
+      "archive_path": "bootstrap/public-boundary-final48-real/failing-cases/default-delete-timeout/state.db.gz",
+      "source_path": "/tmp/camctl-resume-20261030/bootstrap-recovery-evidence/public-boundary-final48-real/tmp/test_real_session_applies_canc4/state.db",
+      "source_head": "88bfa20efb5670f80374973ed4c0975722b70d05",
+      "run_identity": "pid=60309; started=2026-10-30T09:15:07.259697+00:00; finished=2026-10-30T09:15:26.975750+00:00; exit=1; sources_sha256=cffb918058953a018fbe6d08528574b83c24a0c094ec25c8ca1b4b59a2d05998",
+      "scope": "48 real-boundary nodes in one run; preserve all four failures, including three nodes whose node map records closing=true and the default-delete TimeoutError. Do not treat subsequent single-case rerun as replacing this result.",
+      "source_mtime_ns": 1793351712573672915,
+      "uncompressed_bytes": 831488,
+      "uncompressed_sha256": "01e5f479af0505ed9f66b37cc705e7c9fcef3ae181b4fed9d12d789aa1de6756",
+      "format": "sqlite_database",
+      "compressed_bytes": 35141,
+      "compressed_sha256": "efae01a767dea3c86b2ca9b51351a5304010bda361e48b960cf9946265b08bfd",
+      "note": "JUnit failure traceback maps this tmp_path to the named failed node; raw DB/sidecars only, not opened with SQLite."
+    },
+    {
+      "archive_path": "bootstrap/public-boundary-final48-real/failing-cases/default-query-closing/camctl.log.gz",
+      "source_path": "/tmp/camctl-resume-20261030/bootstrap-recovery-evidence/public-boundary-final48-real/tmp/test_real_session_applies_canc5/camctl.log",
+      "source_head": "88bfa20efb5670f80374973ed4c0975722b70d05",
+      "run_identity": "pid=60309; started=2026-10-30T09:15:07.259697+00:00; finished=2026-10-30T09:15:26.975750+00:00; exit=1; sources_sha256=cffb918058953a018fbe6d08528574b83c24a0c094ec25c8ca1b4b59a2d05998",
+      "scope": "48 real-boundary nodes in one run; preserve all four failures, including three nodes whose node map records closing=true and the default-delete TimeoutError. Do not treat subsequent single-case rerun as replacing this result.",
+      "source_mtime_ns": 1793351713077556940,
+      "uncompressed_bytes": 5709,
+      "uncompressed_sha256": "38a35628cb21f7fc3e167b7b27ecfa2a5c03b02add544a0789e031721f8430ce",
+      "format": "log",
+      "compressed_bytes": 962,
+      "compressed_sha256": "19fe0cc1c670a3fbdd0bbd5614829b94445a5e5f7d47d52b8e3cb2ec5a7d89c6",
+      "note": "JUnit failure traceback maps this tmp_path to the named failed node; raw DB/sidecars only, not opened with SQLite."
+    },
+    {
+      "archive_path": "bootstrap/public-boundary-final48-real/failing-cases/default-query-closing/state.db.gz",
+      "source_path": "/tmp/camctl-resume-20261030/bootstrap-recovery-evidence/public-boundary-final48-real/tmp/test_real_session_applies_canc5/state.db",
+      "source_head": "88bfa20efb5670f80374973ed4c0975722b70d05",
+      "run_identity": "pid=60309; started=2026-10-30T09:15:07.259697+00:00; finished=2026-10-30T09:15:26.975750+00:00; exit=1; sources_sha256=cffb918058953a018fbe6d08528574b83c24a0c094ec25c8ca1b4b59a2d05998",
+      "scope": "48 real-boundary nodes in one run; preserve all four failures, including three nodes whose node map records closing=true and the default-delete TimeoutError. Do not treat subsequent single-case rerun as replacing this result.",
+      "source_mtime_ns": 1793351712839157597,
+      "uncompressed_bytes": 823296,
+      "uncompressed_sha256": "36208010aa29dc0d5b887926659ff324d2253f6892b7ebdfa9368c067a2a07d9",
+      "format": "sqlite_database",
+      "compressed_bytes": 30802,
+      "compressed_sha256": "c62399eb8ba2563c0c99744d70bc88cefdb6e576d8e30a464c13a913fea15cf6",
+      "note": "JUnit failure traceback maps this tmp_path to the named failed node; raw DB/sidecars only, not opened with SQLite."
+    },
+    {
+      "archive_path": "bootstrap/public-boundary-final48-real/failing-cases/default-query-closing/state.db-wal.gz",
+      "source_path": "/tmp/camctl-resume-20261030/bootstrap-recovery-evidence/public-boundary-final48-real/tmp/test_real_session_applies_canc5/state.db-wal",
+      "source_head": "88bfa20efb5670f80374973ed4c0975722b70d05",
+      "run_identity": "pid=60309; started=2026-10-30T09:15:07.259697+00:00; finished=2026-10-30T09:15:26.975750+00:00; exit=1; sources_sha256=cffb918058953a018fbe6d08528574b83c24a0c094ec25c8ca1b4b59a2d05998",
+      "scope": "48 real-boundary nodes in one run; preserve all four failures, including three nodes whose node map records closing=true and the default-delete TimeoutError. Do not treat subsequent single-case rerun as replacing this result.",
+      "source_mtime_ns": 1793351712957150789,
+      "uncompressed_bytes": 1170112,
+      "uncompressed_sha256": "87eb939a030a82a2e540bb5206e91d4146a75de67a87e43b45b9f84e8f7282fd",
+      "format": "sqlite_wal",
+      "compressed_bytes": 68415,
+      "compressed_sha256": "ce2e86fa29cd5379e5bc32b2efe3b7740e279bd714b2a012d46cd8ff517009c9",
+      "note": "JUnit failure traceback maps this tmp_path to the named failed node; raw DB/sidecars only, not opened with SQLite."
+    },
+    {
+      "archive_path": "bootstrap/public-boundary-final48-real/failing-cases/default-query-closing/state.db-shm.gz",
+      "source_path": "/tmp/camctl-resume-20261030/bootstrap-recovery-evidence/public-boundary-final48-real/tmp/test_real_session_applies_canc5/state.db-shm",
+      "source_head": "88bfa20efb5670f80374973ed4c0975722b70d05",
+      "run_identity": "pid=60309; started=2026-10-30T09:15:07.259697+00:00; finished=2026-10-30T09:15:26.975750+00:00; exit=1; sources_sha256=cffb918058953a018fbe6d08528574b83c24a0c094ec25c8ca1b4b59a2d05998",
+      "scope": "48 real-boundary nodes in one run; preserve all four failures, including three nodes whose node map records closing=true and the default-delete TimeoutError. Do not treat subsequent single-case rerun as replacing this result.",
+      "source_mtime_ns": 1793351712848990363,
+      "uncompressed_bytes": 32768,
+      "uncompressed_sha256": "4f4c642a377922d34f09c0b52172d87e8c0f9243e294b68ea8627a52cdb750ee",
+      "format": "sqlite_shm",
+      "compressed_bytes": 915,
+      "compressed_sha256": "6485cecac3e291bcdeba47a1c92756bb7b91b7b76efd680481ed3f9d261e5bf4",
+      "note": "JUnit failure traceback maps this tmp_path to the named failed node; raw DB/sidecars only, not opened with SQLite."
+    },
+    {
+      "archive_path": "bootstrap/public-boundary-final48-real/failing-cases/shared-host-delete-closing/camctl.log.gz",
+      "source_path": "/tmp/camctl-resume-20261030/bootstrap-recovery-evidence/public-boundary-final48-real/tmp/test_real_session_applies_canc6/camctl.log",
+      "source_head": "88bfa20efb5670f80374973ed4c0975722b70d05",
+      "run_identity": "pid=60309; started=2026-10-30T09:15:07.259697+00:00; finished=2026-10-30T09:15:26.975750+00:00; exit=1; sources_sha256=cffb918058953a018fbe6d08528574b83c24a0c094ec25c8ca1b4b59a2d05998",
+      "scope": "48 real-boundary nodes in one run; preserve all four failures, including three nodes whose node map records closing=true and the default-delete TimeoutError. Do not treat subsequent single-case rerun as replacing this result.",
+      "source_mtime_ns": 1793351713701876134,
+      "uncompressed_bytes": 1861,
+      "uncompressed_sha256": "226020f05da988e394ae8c0b8a82a7d5341858f57a2993a719a08f3f52eb85d0",
+      "format": "log",
+      "compressed_bytes": 488,
+      "compressed_sha256": "b8f52ce4c5e56f975dac94c7eb5c8a5fe7b28a2da3941d1259654380956c4b13",
+      "note": "JUnit failure traceback maps this tmp_path to the named failed node; raw DB/sidecars only, not opened with SQLite."
+    },
+    {
+      "archive_path": "bootstrap/public-boundary-final48-real/failing-cases/shared-host-delete-closing/state.db.gz",
+      "source_path": "/tmp/camctl-resume-20261030/bootstrap-recovery-evidence/public-boundary-final48-real/tmp/test_real_session_applies_canc6/state.db",
+      "source_head": "88bfa20efb5670f80374973ed4c0975722b70d05",
+      "run_identity": "pid=60309; started=2026-10-30T09:15:07.259697+00:00; finished=2026-10-30T09:15:26.975750+00:00; exit=1; sources_sha256=cffb918058953a018fbe6d08528574b83c24a0c094ec25c8ca1b4b59a2d05998",
+      "scope": "48 real-boundary nodes in one run; preserve all four failures, including three nodes whose node map records closing=true and the default-delete TimeoutError. Do not treat subsequent single-case rerun as replacing this result.",
+      "source_mtime_ns": 1793351713722345616,
+      "uncompressed_bytes": 839680,
+      "uncompressed_sha256": "bf07620de42bce30abc5a582878a71c28afdb3fc976a061fb78dcbd31fec641d",
+      "format": "sqlite_database",
+      "compressed_bytes": 39030,
+      "compressed_sha256": "ef36978183a557f11ad9a3dc37eacb46f48322a7731d59372ed0d7c7d000ec5d",
+      "note": "JUnit failure traceback maps this tmp_path to the named failed node; raw DB/sidecars only, not opened with SQLite."
+    },
+    {
+      "archive_path": "bootstrap/public-boundary-final48-real/failing-cases/shared-host-query-closing/camctl.log.gz",
+      "source_path": "/tmp/camctl-resume-20261030/bootstrap-recovery-evidence/public-boundary-final48-real/tmp/test_real_session_applies_canc7/camctl.log",
+      "source_head": "88bfa20efb5670f80374973ed4c0975722b70d05",
+      "run_identity": "pid=60309; started=2026-10-30T09:15:07.259697+00:00; finished=2026-10-30T09:15:26.975750+00:00; exit=1; sources_sha256=cffb918058953a018fbe6d08528574b83c24a0c094ec25c8ca1b4b59a2d05998",
+      "scope": "48 real-boundary nodes in one run; preserve all four failures, including three nodes whose node map records closing=true and the default-delete TimeoutError. Do not treat subsequent single-case rerun as replacing this result.",
+      "source_mtime_ns": 1793351714355226740,
+      "uncompressed_bytes": 3117,
+      "uncompressed_sha256": "3cdb9821ac6041707c5fe0d04f5e922b5c335a49face9e9ea8d8e52b99db1f77",
+      "format": "log",
+      "compressed_bytes": 867,
+      "compressed_sha256": "a42393f372146269478fb0eb82ad3162a61ac01b73901798e7d8444e3eb791e2",
+      "note": "JUnit failure traceback maps this tmp_path to the named failed node; raw DB/sidecars only, not opened with SQLite."
+    },
+    {
+      "archive_path": "bootstrap/public-boundary-final48-real/failing-cases/shared-host-query-closing/state.db.gz",
+      "source_path": "/tmp/camctl-resume-20261030/bootstrap-recovery-evidence/public-boundary-final48-real/tmp/test_real_session_applies_canc7/state.db",
+      "source_head": "88bfa20efb5670f80374973ed4c0975722b70d05",
+      "run_identity": "pid=60309; started=2026-10-30T09:15:07.259697+00:00; finished=2026-10-30T09:15:26.975750+00:00; exit=1; sources_sha256=cffb918058953a018fbe6d08528574b83c24a0c094ec25c8ca1b4b59a2d05998",
+      "scope": "48 real-boundary nodes in one run; preserve all four failures, including three nodes whose node map records closing=true and the default-delete TimeoutError. Do not treat subsequent single-case rerun as replacing this result.",
+      "source_mtime_ns": 1793351714375595728,
+      "uncompressed_bytes": 843776,
+      "uncompressed_sha256": "aca0a655144aa64e89260ff2f723c837b8b0528567288956162d88c44dd80667",
+      "format": "sqlite_database",
+      "compressed_bytes": 40235,
+      "compressed_sha256": "e41fe79343f2cc726800a92dd1e9c2a584d216f390dc7c899350703efa73e435",
+      "note": "JUnit failure traceback maps this tmp_path to the named failed node; raw DB/sidecars only, not opened with SQLite."
+    },
+    {
+      "archive_path": "bootstrap/default-delete-diagnosis/receipt.json.gz",
+      "source_path": "/tmp/camctl-resume-20261030/bootstrap-recovery-evidence/default-delete-diagnosis/receipt.json",
+      "source_head": "88bfa20efb5670f80374973ed4c0975722b70d05",
+      "run_identity": "pid=63186; started=2026-10-30T09:20:36.845888+00:00; finished=2026-10-30T09:20:40.673758+00:00; exit=0; sources_sha256=2a2534d061e534c01eb77cdf256f97f889091698f5fab09dc23e479949c89ae0",
+      "scope": "one default-delete case rerun after the 48-node run; the passing single result remains a separate observation and does not diagnose or erase the prior 4 failures.",
+      "source_mtime_ns": 1793352040665113801,
+      "uncompressed_bytes": 1170,
+      "uncompressed_sha256": "28aa4e0932b0557585eebe08737dfe87aadf6fb0fd12c2ffda6fad1d49998d14",
+      "format": "json",
+      "compressed_bytes": 522,
+      "compressed_sha256": "eaf8de65173e297b2a15f162fe9f6108606ac8549765b8c79243c5be9a73ae24"
+    },
+    {
+      "archive_path": "bootstrap/default-delete-diagnosis/junit.xml.gz",
+      "source_path": "/tmp/camctl-resume-20261030/bootstrap-recovery-evidence/default-delete-diagnosis/junit.xml",
+      "source_head": "88bfa20efb5670f80374973ed4c0975722b70d05",
+      "run_identity": "pid=63186; started=2026-10-30T09:20:36.845888+00:00; finished=2026-10-30T09:20:40.673758+00:00; exit=0; sources_sha256=2a2534d061e534c01eb77cdf256f97f889091698f5fab09dc23e479949c89ae0",
+      "scope": "one default-delete case rerun after the 48-node run; the passing single result remains a separate observation and does not diagnose or erase the prior 4 failures.",
+      "source_mtime_ns": 1793352040409094392,
+      "uncompressed_bytes": 426,
+      "uncompressed_sha256": "14fdcd6dccef5c5ad885244cd356680cd7be07555d00a6299527e5c556b5edd9",
+      "format": "xml",
+      "compressed_bytes": 290,
+      "compressed_sha256": "5ac3648544a951d3dd1a19e455fb191be75154719ac3c5d57475a36339183b8f"
+    },
+    {
+      "archive_path": "bootstrap/default-delete-diagnosis/pytest.log.gz",
+      "source_path": "/tmp/camctl-resume-20261030/bootstrap-recovery-evidence/default-delete-diagnosis/pytest.log",
+      "source_head": "88bfa20efb5670f80374973ed4c0975722b70d05",
+      "run_identity": "pid=63186; started=2026-10-30T09:20:36.845888+00:00; finished=2026-10-30T09:20:40.673758+00:00; exit=0; sources_sha256=2a2534d061e534c01eb77cdf256f97f889091698f5fab09dc23e479949c89ae0",
+      "scope": "one default-delete case rerun after the 48-node run; the passing single result remains a separate observation and does not diagnose or erase the prior 4 failures.",
+      "source_mtime_ns": 1793352040409094392,
+      "uncompressed_bytes": 551,
+      "uncompressed_sha256": "b9b7a2c7b7425c30091d24eba4e9a15404068636c0c71b0b5b7c63cf4febfbd7",
+      "format": "log",
+      "compressed_bytes": 235,
+      "compressed_sha256": "699280de8555291c756ebf1f24a2c94b3cb93f28408149b275a5debcd818f024"
+    },
+    {
+      "archive_path": "bootstrap/default-delete-diagnosis/sources.json.gz",
+      "source_path": "/tmp/camctl-resume-20261030/bootstrap-recovery-evidence/default-delete-diagnosis/sources.json",
+      "source_head": "88bfa20efb5670f80374973ed4c0975722b70d05",
+      "run_identity": "pid=63186; started=2026-10-30T09:20:36.845888+00:00; finished=2026-10-30T09:20:40.673758+00:00; exit=0; sources_sha256=2a2534d061e534c01eb77cdf256f97f889091698f5fab09dc23e479949c89ae0",
+      "scope": "one default-delete case rerun after the 48-node run; the passing single result remains a separate observation and does not diagnose or erase the prior 4 failures.",
+      "source_mtime_ns": 1793352036833197390,
+      "uncompressed_bytes": 189654,
+      "uncompressed_sha256": "2a2534d061e534c01eb77cdf256f97f889091698f5fab09dc23e479949c89ae0",
+      "format": "json",
+      "compressed_bytes": 66977,
+      "compressed_sha256": "69a10f245c2f94f63cf6faac54c1cf0483f05c5858e9b512a2db1a6be6fdd13f"
+    },
+    {
+      "archive_path": "bootstrap/default-delete-diagnosis/case/camctl.log.gz",
+      "source_path": "/tmp/camctl-resume-20261030/bootstrap-recovery-evidence/default-delete-diagnosis/tmp/test_real_session_applies_canc0/camctl.log",
+      "source_head": "88bfa20efb5670f80374973ed4c0975722b70d05",
+      "run_identity": "pid=63186; started=2026-10-30T09:20:36.845888+00:00; finished=2026-10-30T09:20:40.673758+00:00; exit=0; sources_sha256=2a2534d061e534c01eb77cdf256f97f889091698f5fab09dc23e479949c89ae0",
+      "scope": "one default-delete case rerun after the 48-node run; the passing single result remains a separate observation and does not diagnose or erase the prior 4 failures.",
+      "source_mtime_ns": 1793352040399247492,
+      "uncompressed_bytes": 3976,
+      "uncompressed_sha256": "12bf995438ee52564511e6749eb8bfdfa3dcbd0ffde4548342381e2891637b66",
+      "format": "log",
+      "compressed_bytes": 785,
+      "compressed_sha256": "fdb58450b6892f550a198952977458604d1957243b0c6f3c9e3ce9203af38976",
+      "note": "单项复跑现存日志/数据库；原始字节，不做数据库读写或内容判断。"
+    },
+    {
+      "archive_path": "bootstrap/default-delete-diagnosis/case/state.db.gz",
+      "source_path": "/tmp/camctl-resume-20261030/bootstrap-recovery-evidence/default-delete-diagnosis/tmp/test_real_session_applies_canc0/state.db",
+      "source_head": "88bfa20efb5670f80374973ed4c0975722b70d05",
+      "run_identity": "pid=63186; started=2026-10-30T09:20:36.845888+00:00; finished=2026-10-30T09:20:40.673758+00:00; exit=0; sources_sha256=2a2534d061e534c01eb77cdf256f97f889091698f5fab09dc23e479949c89ae0",
+      "scope": "one default-delete case rerun after the 48-node run; the passing single result remains a separate observation and does not diagnose or erase the prior 4 failures.",
+      "source_mtime_ns": 1793352040448481994,
+      "uncompressed_bytes": 831488,
+      "uncompressed_sha256": "6c1b328f96d7ecdb63b55a20672e94c6794caee059f666784fb2dc034ea1a041",
+      "format": "sqlite_database",
+      "compressed_bytes": 35570,
+      "compressed_sha256": "bb95d8f04dd83e78b7d75f08278a9944c470a4ef6932ef01494796e287aeedf4",
+      "note": "单项复跑现存日志/数据库；原始字节，不做数据库读写或内容判断。"
+    },
+    {
+      "archive_path": "merged-boundary-diagnostics54/receipt.json.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-diagnostics54/receipt.json",
+      "source_head": "76e07abd3f58c7538b52d1b199c63fa2f5a3bef1",
+      "run_identity": "pid=1441; exit=0; wall_seconds=24.610377687000437",
+      "scope": "merged boundary diagnostic target set; receipt records no source-manifest changes; distinct from unit-all and bootstrap results.",
+      "source_mtime_ns": 1793355794718490146,
+      "uncompressed_bytes": 2346,
+      "uncompressed_sha256": "8f15e913489551182a6caf8bf3c2b91a1261385e12a023105cec9d42f58d14d7",
+      "format": "json",
+      "compressed_bytes": 883,
+      "compressed_sha256": "06891b4a72588f909bafdd1bd5c9920f63749c3010598a664def4c97a50255f2",
+      "note": "追加稳定证据；不合并到既有全量统计或性能结论。"
+    },
+    {
+      "archive_path": "merged-boundary-diagnostics54/results.xml.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-diagnostics54/results.xml",
+      "source_head": "76e07abd3f58c7538b52d1b199c63fa2f5a3bef1",
+      "run_identity": "pid=1441; exit=0; wall_seconds=24.610377687000437",
+      "scope": "merged boundary diagnostic target set; receipt records no source-manifest changes; distinct from unit-all and bootstrap results.",
+      "source_mtime_ns": 1793355794489041418,
+      "uncompressed_bytes": 9512,
+      "uncompressed_sha256": "fd139869131655fa256d6f0d8acfb27e07ee4139aaf0ff22c76bd73cf7f3c8c4",
+      "format": "xml",
+      "compressed_bytes": 1555,
+      "compressed_sha256": "e78243475c5c71bf66153e9853eb10a5276e8fdf3c46340a849d11c081633164",
+      "note": "追加稳定证据；不合并到既有全量统计或性能结论。"
+    },
+    {
+      "archive_path": "merged-boundary-diagnostics54/pytest.log.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/merged-boundary-diagnostics54/pytest.log",
+      "source_head": "76e07abd3f58c7538b52d1b199c63fa2f5a3bef1",
+      "run_identity": "pid=1441; exit=0; wall_seconds=24.610377687000437",
+      "scope": "merged boundary diagnostic target set; receipt records no source-manifest changes; distinct from unit-all and bootstrap results.",
+      "source_mtime_ns": 1793355794578825704,
+      "uncompressed_bytes": 100,
+      "uncompressed_sha256": "81869bd462a62902eb1050fcb426ef8251d4d42d57fa04ca685057de9d9585ea",
+      "format": "log",
+      "compressed_bytes": 53,
+      "compressed_sha256": "44894c00c8d3bc037173d4b9554ec8d74037cc8d34be9fda4ea4423bfceb14a9",
+      "note": "追加稳定证据；不合并到既有全量统计或性能结论。"
+    },
+    {
+      "archive_path": "diagnostic-other14/cost-summary.json.gz",
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/diagnostic-other14-cost-summary.json",
+      "source_head": "290f4ad39db1bffdf6b764e2ef77c97ce12a82fb",
+      "run_identity": "derived timing and node summary for the earlier 14 serialized diagnostic tasks; no new run was performed for this summary.",
+      "scope": "290f4ad3 camctl 14 directories except capture/bootstrap; jobs=1; diagnostic includes 94 failures; not final regression or speedup comparison",
+      "source_mtime_ns": 1793355813008298772,
+      "uncompressed_bytes": 90991,
+      "uncompressed_sha256": "b170aeb08b115207afa4b4ad39738038e0f96da1fbfeecde5aeaed0db0bf9394",
+      "format": "json",
+      "compressed_bytes": 20202,
+      "compressed_sha256": "c5eb5a17bcc9ce9bed15c880635a34bb25afdfeb9956298914fa9fcc8935e05f",
+      "note": "追加稳定证据；不合并到既有全量统计或性能结论。"
+    }
+  ],
+  "missing_or_unverifiable_sources": [
+    {
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/repository-port-review/before/test_repository_ports.py",
+      "expected_sha256": "f8d33284b61eace178f9bc94b62c3a9b520507f0657096dfbd4ac895151ee53f",
+      "reason": "initial before/after receipts record this old hash, but the retained before/ file now matches the later final hash 7a76facc...; exact initial bytes were absent and were not replaced with a different snapshot."
+    },
+    {
+      "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/repository-port-review/before/support/repository_ports.py",
+      "expected_sha256": "318cfe62080da270b2ec89956667074cb55eef641888ef5b14b060a82954820c",
+      "reason": "initial before/after receipts record this old hash, but the retained support file now matches the later final helper hash e7e15bff...; exact initial bytes were absent and were not substituted."
+    },
+    {
+      "source_path": "/tmp/camctl-resume-20261030/source-capacity-evidence/capacity-final",
+      "reason": "directory is absent. The retained capacity-final receipt/log/XML record a pytest setup FileNotFoundError before the test ran; no leaf budget result or database exists."
+    },
+    {
+      "source_path": "/tmp/camctl-resume-20261030/evidence/capture-core-migration-handoff/production-gap-facts.json",
+      "reason": "facts and exact DB are present, but the source commit/run receipt is not recorded in this fact file; source_head is left null."
+    }
+  ],
+  "excluded_from_archive": [
+    "unit-all 的 pytest basetemp 与缓存目录；仅保留 receipt、source-manifest、完整 JUnit XML 和 pytest log。",
+    "unit-boundary-audit 的源代码快照；只保留原始 JSON/Markdown 审计文件，不修改旧报告。",
+    "repository-port-review 的 pytest 临时目录和 __pycache__；只保留四轮 receipts/logs/XML 和最终匹配的源码快照。",
+    "repository-port-review 初始 before/after 源码字节因 hash 不匹配未用最终源码替代；保留原运行收据中的源文件 SHA。",
+    "source-capacity 的源码工作树、脚本、pycache，以及 capacity-2 的 input.json、expected.json、world/input.json；保留结果校验、容量计时、叶预算收据、必要日志和现成 DB。",
+    "bootstrap final48 的通过用例临时目录、锁文件及数据库；仅保留四个失败节点路径中的 DB/侧文件/日志与完整节点映射和报告。",
+    "capture facts 以外的 capture worktree、源码、普通数据库及其他日志；只保留事实文件明确指向的 DB 及现存 WAL/SHM。",
+    "未查询、未迁移或未创建任何 SQLite 数据库备份；数据库仅按原始字节压缩并记录摘要。"
+  ],
+  "supplemental_capture_utc": "2026-10-30T10:26:17Z"
+}
