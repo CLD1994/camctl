@@ -320,8 +320,9 @@ def test_finish_recovery_rejects_host_metadata_change(tmp_path, same_key):
 async def test_original_requests_remain_verifiable_after_explicit_source_cleanup(tmp_path):
     from camctl.bootstrap.cleanup_assembly import session_cleanup_assembly
     from camctl.outputs.cleanup_flow import delete_source_file
-    from camctl.bootstrap.work_file_assembly import WorkFileRuntime
-    from camctl.outputs.work_files import WorkFileLimits
+    from camctl.host_files.tasks import FileTaskExecutor
+    from camctl.session.supervision import Supervisor
+    from ..support.capture import capture_database
     from camctl.persistence.repositories.host_capture import HostCaptureRepository, HostPhotoComplete, PrepareHostPhoto
     from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
     from camctl.persistence.repositories.acceptance import register_acceptance_guards
@@ -331,6 +332,8 @@ async def test_original_requests_remain_verifiable_after_explicit_source_cleanup
     register_window_guard()
     owned = _photo_environment(tmp_path)
     verification = None
+    supervisor = Supervisor()
+    executor = FileTaskExecutor(supervisor)
     try:
         repository = HostCaptureRepository()
         prepare_key, complete_key = new_operation_key(), new_operation_key()
@@ -349,15 +352,11 @@ async def test_original_requests_remain_verifiable_after_explicit_source_cleanup
         original_path.write_bytes(b"o" * 4096)
         preview_path.write_bytes(b"p" * 128)
         _, item_id = _start_cleanup(owned, original_id, "23")
-        work_files = WorkFileRuntime(
-            staging=tmp_path,
-            limits=WorkFileLimits(batch_size=100, limit_per_run=100),
-        )
-        runtime = session_cleanup_assembly(devices={}, drivers=None, staging=tmp_path,
-            file_executor=work_files.executor,
+        runtime = await session_cleanup_assembly(devices={}, drivers=None, staging=tmp_path,
+            file_executor=executor,
             max_delete_attempts=1, max_query_attempts=1,
-            occurred_at=lambda: _NOW, monotonic_ns=lambda: 0)(owned)
-        result = await delete_source_file(runtime.for_item(item_id), item_id)
+            occurred_at=lambda: _NOW, monotonic_ns=lambda: 0)(await capture_database(owned))
+        result = await delete_source_file(await runtime.for_item(item_id), item_id)
         assert result.phase == "succeeded", result
         assert not original_path.exists()
         assert preview_path.exists()
@@ -374,6 +373,9 @@ async def test_original_requests_remain_verifiable_after_explicit_source_cleanup
             assert verified.kind is DbOutcomeKind.COMPLETED, verified.error
             assert verified.value == files
     finally:
+        settled = await supervisor.drain_required()
+        assert not settled.failed
+        assert not executor.unfinished_files()
         if verification is not None:
             verification.connection.close()
         owned.connection.close()
