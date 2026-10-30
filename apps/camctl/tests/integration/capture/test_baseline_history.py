@@ -31,8 +31,7 @@ pytestmark = pytest.mark.asyncio
 async def _activity(owned, tmp_path, *, request_id="42", device_id="cam-1"):
     body = _plan_body(request_id=request_id)
     body["actions"][0].update(type="camera_timelapse", device_id=device_id, params=_params("dji-action6", "camera_timelapse"))
-    async with business_database(database_path(owned)) as database:
-        await _accept_plan(database, tmp_path, body, _catalog("dji-action6", device_id=device_id))
+    await _accept_plan(owned, tmp_path, body, _catalog("dji-action6", device_id=device_id))
     action_id = owned.connection.execute("SELECT MAX(id) FROM actions").fetchone()[0]
     result = _start(owned, action_id, now=_SCHEDULED)
     assert result.kind is DbOutcomeKind.COMPLETED, result.error
