@@ -88,7 +88,7 @@ async def test_member_success_reuse_rejects_changed_outcome_and_target(environme
     runtime = await _new_runtime(cfg, owned, driver)
     with repository_port(OutputsRepository, recorder, (recorder.method,),
                          matches=lambda _name, args, _kwargs: args[0].item_id == item_id):
-        step = await delete_source_file(await runtime.for_item(item_id), item_id)
+        step = await delete_source_file(runtime, item_id)
     assert step.phase == "succeeded", step
     assert len(recorder.calls) == 1
     request, key = recorder.calls[0]
@@ -109,7 +109,7 @@ async def test_member_success_reuse_rejects_changed_outcome_and_target(environme
     # 员成功后产物已清理：另一成员复用完成事实直接成功。
     other_runtime = await _new_runtime(cfg, owned, driver)
     other_step = await delete_source_file(
-        await other_runtime.for_item(other_item), other_item)
+        other_runtime, other_item)
     assert (other_step.phase, other_step.detail) == (
         "succeeded", "ALREADY_CLEANED"), other_step
     finished = OutputsRepository().finish_cleanup_action(
@@ -141,7 +141,7 @@ async def test_member_failure_reuse_rejects_changed_details(environment):
     runtime = await _new_runtime(cfg, owned, driver, query_attempts=1)
     with repository_port(OutputsRepository, recorder, (recorder.method,),
                          matches=lambda _name, args, _kwargs: args[0].item_id == item_id):
-        exhausted = await delete_source_file(await runtime.for_item(item_id), item_id)
+        exhausted = await delete_source_file(runtime, item_id)
     assert (exhausted.phase, exhausted.detail) == (
         "failed", "file_query_attempts_exhausted"), exhausted
     assert len(recorder.calls) == 1
@@ -180,7 +180,7 @@ async def test_progress_reuse_uses_original_boundary_and_rejects_other_input(env
     # 同键同输入复用；成员后来推进（进入删除中）不改变只读复用。
     runtime = await _new_runtime(cfg, owned, driver)
     driver.matrix_enabled, driver.present = True, False
-    step = await delete_source_file(await runtime.for_item(item_id), item_id)
+    step = await delete_source_file(runtime, item_id)
     assert step.phase == "succeeded", step
     advanced = _history_count(owned)
     reused = repository.progress_cleanup_item(
@@ -219,7 +219,7 @@ async def _dispatched_cancel_member(cfg, owned, output_id, driver):
     runtime = await _new_runtime(cfg, owned, driver)
     with repository_port(OutputsRepository, recorder, (recorder.method,),
                          matches=lambda _name, args, _kwargs: args[0].item_id == item_id):
-        step = await delete_source_file(await runtime.for_item(item_id), item_id)
+        step = await delete_source_file(runtime, item_id)
     assert step.phase == "canceled", step
     assert recorder.calls, "收场取消事务未被记录"
     return action_id, item_id, recorder.calls[-1]
@@ -237,7 +237,7 @@ async def test_member_cancel_reuse_keeps_original_when_facts_changed(environment
     other_driver.unknown_delete = False
     other_action, other_item = _start_cleanup(owned, output_id, "9")
     other_runtime = await _new_runtime(cfg, owned, other_driver)
-    other_step = await delete_source_file(await other_runtime.for_item(other_item), other_item)
+    other_step = await delete_source_file(other_runtime, other_item)
     assert other_step.phase == "succeeded", other_step
     changed = _history_count(owned)
     reused = OutputsRepository().cancel_cleanup_item(request, key, owned)
@@ -263,7 +263,7 @@ async def test_companion_reuse_rejects_changed_responsibility_keys(environment):
     driver.unknown_delete = False
     action_id, item_id = _start_cleanup(owned, output_id, "2")
     runtime = await _new_runtime(cfg, owned, driver)
-    step = await delete_source_file(await runtime.for_item(item_id), item_id)
+    step = await delete_source_file(runtime, item_id)
     assert step.phase == "succeeded", step
     operations = OperationRepository()
     request = StaleRunFinish(
@@ -288,7 +288,7 @@ async def test_companion_reuse_rejects_changed_responsibility_keys(environment):
     other_driver.matrix_enabled, other_driver.present = True, None
     other_action, other_item = _start_cleanup(owned, other_output, "4")
     other_runtime = await _new_runtime(cfg, owned, other_driver)
-    other_step = await delete_source_file(await other_runtime.for_item(other_item), other_item)
+    other_step = await delete_source_file(other_runtime, other_item)
     assert other_step.phase == "query_unknown", other_step
     open_request = StaleRunFinish(
         responsibility_keys=(f"delete/{other_item}", f"exists/{other_item}"),
