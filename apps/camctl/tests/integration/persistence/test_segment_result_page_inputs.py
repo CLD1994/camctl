@@ -25,12 +25,20 @@ from camctl.history.reads import ResultPageWriteScope
 from camctl.capture.files import FileObservationSave, file_identity_key
 from camctl.contracts.values import ConsistencyError
 
-from ..capture.test_baseline_start import owned
+from ..capture.test_baseline_start import owned, _SCHEDULED
 from ..capture.test_capture_contract import register_capture_guards
-from ..capture.test_result_page_history import _actual, _baseline_world, _request
+from ..capture.test_result_page_history import _actual, _baseline_world, _REGISTRY
+from camctl.capture.result_pages import ResultPageSave
+from camctl.operations.validation import validate_outcome
 
 register_operation_guards()
 register_capture_guards()
+
+
+def _request(ticket, actual, *, page_no=1, cursor=None):
+    """按既有拍摄场景时钟构造结果页公开仓储请求。"""
+    return ResultPageSave(ticket, page_no, cursor,
+                          validate_outcome(ticket, actual, _REGISTRY), _SCHEDULED)
 
 
 def _relation_values(*,identity,**values):
@@ -54,13 +62,13 @@ def _osmo_entry(path: str, *, size: int | None, complete: bool = True) -> dict:
 
 async def _save_raw_page(owned, tmp_path, entries, *, baseline=(), error=None,
                          cursor=None, next_cursor=None, finalized=True):
-    runtime, ticket, _ = await _baseline_world(owned, tmp_path, baseline)
+    _, ticket, _ = await _baseline_world(owned, tmp_path, baseline)
     actual = _actual(ticket, entries=entries, cursor=cursor, next_cursor=next_cursor,
                      finalized=finalized, error=error)
-    request = _request(runtime, ticket, actual)
-    receipt = runtime.capture.save_result_page(request, new_operation_key(), owned)
+    request = _request(ticket, actual)
+    receipt = CaptureRepository().save_result_page(request, new_operation_key(), owned)
     assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-    return runtime, ticket, request, receipt
+    return ticket, request, receipt
 
 
 @pytest.mark.asyncio
@@ -82,10 +90,10 @@ async def test_raw_osmo_page_indexes_every_difference_identity_without_pairing(o
                            complete=path.rpartition(".")[2].lower() == "osv") for path in paths]
     error = ErrorValue(
         "adb_metadata_failed", "device_file_access", {"reason": "bounded_test_failure"})
-    runtime, ticket, request, receipt = await _save_raw_page(
+    ticket, request, receipt = await _save_raw_page(
         owned, tmp_path, entries, error=error)
 
-    saved = runtime.capture.read_result_pages(ticket, None, 1, owned).items[0]
+    saved = CaptureRepository().read_result_pages(ticket, None, 1, owned).items[0]
     assert [entry.identity for entry in saved.page.entries] == paths
     assert all(entry.paired_identity is None for entry in saved.page.entries)
     assert [identity for identity, _ in saved.file_ids] == paths
@@ -159,11 +167,11 @@ def _tamper_index_event(event, tamper, root, extra_file_id=None):
     return replace(event, rows=(changed,))
 
 
-async def _save_out_of_page_file(runtime, ticket, owned, identity):
+async def _save_out_of_page_file(ticket, owned, identity):
     run = row_facts(owned.connection, "operation_runs", ticket.run_id)
-    saved = runtime.capture.save_file_observation(
+    saved = CaptureRepository().save_file_observation(
         FileObservationSave(run["action_id"], identity, {"path": identity},
-            runtime.wall_us(), identity.rpartition("/")[2], "video"),
+            _SCHEDULED, identity.rpartition("/")[2], "video"),
         new_operation_key(), owned)
     assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
     return saved.value.file_id
@@ -176,8 +184,8 @@ async def test_128_file_page_keeps_existing_page_bound_and_index_event_bound(own
         _osmo_entry(f"{root}/{index:03d}.OSV", size=index, complete=True)
         for index in range(128)
     ]
-    runtime, ticket, _, receipt = await _save_raw_page(owned, tmp_path, entries)
-    page = runtime.capture.read_result_pages(ticket, None, 1, owned).items[0]
+    ticket, _, receipt = await _save_raw_page(owned, tmp_path, entries)
+    page = CaptureRepository().read_result_pages(ticket, None, 1, owned).items[0]
     assert len(page.page.entries) == len(page.file_ids) == 128
     row_count, index_event_id = owned.connection.execute(
         "SELECT COUNT(*),MIN(created_event_id) FROM result_page_files "
@@ -210,7 +218,7 @@ async def test_family_prefix_and_run_file_indexes_bound_actual_reads(owned, tmp_
     family_paths = [f"{root}/Take.{suffix}" for suffix in family_suffixes]
     unrelated_paths = [f"{root}/other-{index:03d}.LRF" for index in range(120)]
     paths = sorted((*family_paths, *unrelated_paths))
-    runtime, ticket, _, receipt = await _save_raw_page(
+    ticket, _, receipt = await _save_raw_page(
         owned, tmp_path,
         [_osmo_entry(path, size=None, complete=False) for path in paths],
     )
@@ -310,8 +318,8 @@ async def test_one_and_127_relation_rows_keep_single_index_event_bound(owned, tm
     root = "/mnt/media_rw/emulated/DCIM/CAM"
     entries = [_osmo_entry(f"{root}/{index:03d}.LRF", size=None, complete=False)
                for index in range(count)]
-    runtime, ticket, _, receipt = await _save_raw_page(owned, tmp_path, entries)
-    page = runtime.capture.read_result_pages(ticket, None, 1, owned).items[0]
+    ticket, _, receipt = await _save_raw_page(owned, tmp_path, entries)
+    page = CaptureRepository().read_result_pages(ticket, None, 1, owned).items[0]
     assert len(page.file_ids) == count
     relation_count, index_event_id = owned.connection.execute(
         "SELECT COUNT(*),MIN(created_event_id) FROM result_page_files WHERE page_event_id=?",
@@ -331,17 +339,17 @@ async def test_page_difference_indexes_reused_and_new_files_together(owned, tmp_
     root = "/mnt/media_rw/emulated/DCIM/CAM"
     old_identity = f"{root}/already-seen.OSV"
     new_identity = f"{root}/new.OSV"
-    runtime, ticket, _ = await _baseline_world(owned, tmp_path, ())
-    old = runtime.capture.save_file_observation(
+    _, ticket, _ = await _baseline_world(owned, tmp_path, ())
+    old = CaptureRepository().save_file_observation(
         FileObservationSave(1, old_identity, {"path": old_identity},
-            runtime.wall_us(), "already-seen.OSV", "video"),
+            _SCHEDULED, "already-seen.OSV", "video"),
         new_operation_key(), owned)
     assert old.kind is DbOutcomeKind.COMPLETED, old.error
-    request = _request(runtime, ticket, _actual(ticket, entries=[
+    request = _request(ticket, _actual(ticket, entries=[
         _osmo_entry(old_identity, size=0), _osmo_entry(new_identity, size=7)], finalized=True))
-    receipt = runtime.capture.save_result_page(request, new_operation_key(), owned)
+    receipt = CaptureRepository().save_result_page(request, new_operation_key(), owned)
     assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-    saved = runtime.capture.read_result_pages(ticket, None, 1, owned).items[0]
+    saved = CaptureRepository().read_result_pages(ticket, None, 1, owned).items[0]
     assert [identity for identity, _ in saved.file_ids] == [old_identity, new_identity]
     assert saved.file_ids[0][1] == old.value.file_id
     transaction_id = owned.connection.execute(
@@ -367,14 +375,14 @@ async def test_zero_difference_is_not_an_empty_or_final_device_page(owned, tmp_p
     identity = f"{root}/already.OSV"
     cursor = DirectoryCursor(DeviceBinding("cam-1", "dji-action6"),
                              (root, "/mnt/media_rw/sd/DCIM"), 0, identity)
-    runtime, ticket, _, receipt = await _save_raw_page(
+    ticket, _, receipt = await _save_raw_page(
         owned, tmp_path,
         [_osmo_entry(identity, size=0)],
         baseline=("already.OSV",),
         next_cursor=cursor,
         finalized=False,
     )
-    page = runtime.capture.read_result_pages(ticket, None, 1, owned).items[0]
+    page = CaptureRepository().read_result_pages(ticket, None, 1, owned).items[0]
     assert [entry.identity for entry in page.page.entries] == [identity]
     assert page.file_ids == ()
     assert page.page.next_cursor == cursor
@@ -399,7 +407,7 @@ async def test_zero_difference_is_not_an_empty_or_final_device_page(owned, tmp_p
 async def test_page_read_rejects_corrupt_relation_without_rebuilding(owned, tmp_path, corruption):
     root = "/mnt/media_rw/emulated/DCIM/CAM"
     identity = f"{root}/corrupt.OSV"
-    runtime, ticket, _, receipt = await _save_raw_page(
+    ticket, _, receipt = await _save_raw_page(
         owned, tmp_path, [_osmo_entry(identity, size=0)])
     row_id, created_event_id = owned.connection.execute(
         "SELECT id,created_event_id FROM result_page_files WHERE page_event_id=?",
@@ -414,7 +422,7 @@ async def test_page_read_rejects_corrupt_relation_without_rebuilding(owned, tmp_
             (receipt.value.event_id, row_id),
         )
     with pytest.raises(ConsistencyError):
-        runtime.capture.read_result_pages(ticket, None, 1, owned)
+        CaptureRepository().read_result_pages(ticket, None, 1, owned)
     assert owned.connection.execute(
         "SELECT COUNT(*) FROM result_page_files WHERE page_event_id=?",
         (receipt.value.event_id,),
@@ -430,14 +438,14 @@ async def test_bounded_zero_difference_preserves_raw_page_without_index(
     root = "/mnt/media_rw/emulated/DCIM"
     identity = f"{root}/already-seen.OSV"
     baseline = ("already-seen.OSV",) if page_kind == "nonempty_zero_difference" else ()
-    runtime, ticket, _ = await _baseline_world(owned, tmp_path, baseline)
+    _, ticket, _ = await _baseline_world(owned, tmp_path, baseline)
     cursor = DirectoryCursor(
         DeviceBinding("cam-1", "dji-action6"),
         (root, "/mnt/media_rw/sd/DCIM"), 0, identity,
     )
     entries = ([_osmo_entry(identity, size=0)]
                if page_kind == "nonempty_zero_difference" else [])
-    request = _request(runtime, ticket, _actual(
+    request = _request(ticket, _actual(
         ticket, entries=entries,
         next_cursor=cursor if entries else None,
         finalized=not entries,
@@ -470,7 +478,7 @@ async def test_bounded_zero_difference_preserves_raw_page_without_index(
     assert receipt.kind == "completed", receipt.error
     assert completed == [True]
     assert receipt.result.event_id == receipt.boundary.last_event_id
-    saved = runtime.capture.read_result_pages(ticket, None, 1, owned).items[0]
+    saved = CaptureRepository().read_result_pages(ticket, None, 1, owned).items[0]
     assert [entry.identity for entry in saved.page.entries] == [entry["identity"] for entry in entries]
     assert saved.file_ids == ()
     assert owned.connection.execute(
@@ -496,13 +504,13 @@ async def test_bounded_zero_difference_preserves_raw_page_without_index(
 async def test_atomic_page_guard_recomputes_the_difference_and_index_rows(owned, tmp_path, tamper):
     root = "/mnt/media_rw/emulated/DCIM/CAM"
     identity = f"{root}/guard.OSV"
-    runtime, ticket, _ = await _baseline_world(owned, tmp_path, ())
+    _, ticket, _ = await _baseline_world(owned, tmp_path, ())
     outside_identity = f"{root}/outside-page.OSV"
     outside_file_id = None
     if tamper in ("append_adds_out_of_page_file", "index_adds_extra_relation"):
         outside_file_id = await _save_out_of_page_file(
-            runtime, ticket, owned, outside_identity)
-    request = _request(runtime, ticket, _actual(
+            ticket, owned, outside_identity)
+    request = _request(ticket, _actual(
         ticket, entries=[_osmo_entry(identity, size=0)], finalized=True))
     key = new_operation_key()
 
@@ -554,8 +562,8 @@ async def test_bounded_entry_accepts_only_actual_append_then_index(owned, tmp_pa
     from ..support.output_planning import apply_values
 
     root = "/mnt/media_rw/emulated/DCIM/CAM"
-    runtime, ticket, _ = await _baseline_world(owned, tmp_path, ())
-    request = _request(runtime, ticket, _actual(
+    _, ticket, _ = await _baseline_world(owned, tmp_path, ())
+    request = _request(ticket, _actual(
         ticket, entries=[_osmo_entry(f"{root}/bounded-{index:03d}.OSV", size=0)
                          for index in range(count)], finalized=True))
     key = new_operation_key()
@@ -596,7 +604,7 @@ async def test_bounded_entry_accepts_only_actual_append_then_index(owned, tmp_pa
     assert receipt.kind == "completed", receipt.error
     assert completed == [True]
     assert receipt.result.event_id == receipt.boundary.last_event_id - 1
-    saved = runtime.capture.read_result_pages(ticket, None, 1, owned).items[0]
+    saved = CaptureRepository().read_result_pages(ticket, None, 1, owned).items[0]
     assert saved.ref == receipt.result
     assert len(saved.file_ids) == count
     index = owned.connection.execute(
@@ -623,13 +631,13 @@ async def test_bounded_entry_rejects_mutated_page_group(owned, tmp_path, tamper)
 
     root = "/mnt/media_rw/emulated/DCIM/CAM"
     identity = f"{root}/bounded-tamper.OSV"
-    runtime, ticket, _ = await _baseline_world(owned, tmp_path, ())
+    _, ticket, _ = await _baseline_world(owned, tmp_path, ())
     outside_identity = f"{root}/outside-page.OSV"
     outside_file_id = None
     if tamper in ("append_adds_out_of_page_file", "index_adds_extra_relation"):
         outside_file_id = await _save_out_of_page_file(
-            runtime, ticket, owned, outside_identity)
-    request = _request(runtime, ticket, _actual(
+            ticket, owned, outside_identity)
+    request = _request(ticket, _actual(
         ticket, entries=[_osmo_entry(identity, size=0)], finalized=True))
     key = new_operation_key()
     completed = []
@@ -700,7 +708,7 @@ async def test_bounded_entry_rejects_mutated_page_group(owned, tmp_path, tamper)
 @pytest.mark.parametrize("bounded", [False, True])
 @pytest.mark.asyncio
 async def test_create_only_prefix_cannot_complete_without_page(owned, tmp_path, bounded):
-    runtime, ticket, _ = await _baseline_world(owned, tmp_path, ())
+    _, ticket, _ = await _baseline_world(owned, tmp_path, ())
     run = row_facts(owned.connection, "operation_runs", ticket.run_id)
     action = row_facts(owned.connection, "actions", run["action_id"])
     activity = row_facts(owned.connection, "device_activities", run["activity_id"])
@@ -849,10 +857,10 @@ def _alter_page_context(state, scope, case):
 async def test_fix1_i1_mismatched_caller_state_is_rejected_as_consistency_control(
         owned, tmp_path, caller_fact, bounded):
     root = "/mnt/media_rw/emulated/DCIM"
-    runtime, ticket, _ = await _baseline_world(owned, tmp_path, ("z-old.OSV",))
+    _, ticket, _ = await _baseline_world(owned, tmp_path, ("z-old.OSV",))
     identity = f"{root}/a-new.OSV"
-    await _save_out_of_page_file(runtime, ticket, owned, identity)
-    request = _request(runtime, ticket, _actual(
+    await _save_out_of_page_file(ticket, owned, identity)
+    request = _request(ticket, _actual(
         ticket, entries=[_osmo_entry(identity, size=0)], finalized=True))
     key = new_operation_key()
 
@@ -879,9 +887,9 @@ async def test_fix1_i1_real_baseline_rejects_caller_task_scope_and_common_extra(
     root = "/mnt/media_rw/emulated/DCIM"
     old_identity = f"{root}/z-old.OSV"
     new_identity = f"{root}/a-new.OSV"
-    runtime, ticket, _ = await _baseline_world(owned, tmp_path, ("z-old.OSV",))
-    old_file_id = await _save_out_of_page_file(runtime, ticket, owned, old_identity)
-    request = _request(runtime, ticket, _actual(ticket, entries=[
+    _, ticket, _ = await _baseline_world(owned, tmp_path, ("z-old.OSV",))
+    old_file_id = await _save_out_of_page_file(ticket, owned, old_identity)
+    request = _request(ticket, _actual(ticket, entries=[
         _osmo_entry(new_identity, size=1), _osmo_entry(old_identity, size=1),
     ], finalized=True))
     key = new_operation_key()
@@ -942,9 +950,9 @@ async def test_fix1_i1_real_baseline_rejects_caller_task_scope_and_common_extra(
     ).fetchone() == (None, None)
 
 
-async def _save_three_pages(runtime, ticket, owned, *, outside_identity):
+async def _save_three_pages(ticket, owned, *, outside_identity):
     outside_file_id = await _save_out_of_page_file(
-        runtime, ticket, owned, outside_identity)
+        ticket, owned, outside_identity)
     root = "/mnt/media_rw/emulated/DCIM/CAM"
     binding = DeviceBinding("cam-1", "dji-action6")
     previous_cursor = None
@@ -954,11 +962,11 @@ async def _save_three_pages(runtime, ticket, owned, *, outside_identity):
         next_cursor = (None if page_no == 3 else DirectoryCursor(
             binding, ("/mnt/media_rw/emulated/DCIM", "/mnt/media_rw/sd/DCIM"),
             0, identity))
-        request = _request(runtime, ticket, _actual(
+        request = _request(ticket, _actual(
             ticket, entries=[_osmo_entry(identity, size=0)],
             cursor=previous_cursor, next_cursor=next_cursor,
             finalized=page_no == 3), page_no=page_no, cursor=previous_cursor)
-        receipt = runtime.capture.save_result_page(
+        receipt = CaptureRepository().save_result_page(
             request, new_operation_key(), owned)
         assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
         receipts.append(receipt.value)
@@ -1039,9 +1047,9 @@ async def test_fix1_i2_read_pages_validates_each_selected_and_lookahead_group(
         owned, tmp_path, batch, page_index, corruption):
     root = "/mnt/media_rw/emulated/DCIM/CAM"
     outside_identity = f"{root}/outside-page.LRF"
-    runtime, ticket, _ = await _baseline_world(owned, tmp_path, ())
+    _, ticket, _ = await _baseline_world(owned, tmp_path, ())
     refs, outside_file_id = await _save_three_pages(
-        runtime, ticket, owned, outside_identity=outside_identity)
+        ticket, owned, outside_identity=outside_identity)
     target = refs[page_index]
     _damage_page_group(
         owned, target.event_id, corruption, outside_file_id=outside_file_id,
@@ -1053,7 +1061,7 @@ async def test_fix1_i2_read_pages_validates_each_selected_and_lookahead_group(
     if batch == 1 and page_index == 2:
         cursor = refs[1].event_id
     with pytest.raises(ConsistencyError):
-        runtime.capture.read_result_pages(ticket, cursor, batch, owned)
+        CaptureRepository().read_result_pages(ticket, cursor, batch, owned)
     assert owned.connection.execute(
         "SELECT COUNT(*),MAX(id) FROM result_page_files").fetchone() == before
 
@@ -1065,16 +1073,16 @@ async def test_fix1_i3_fresh_original_key_recomputes_difference_from_f_before(
 
     root = "/mnt/media_rw/emulated/DCIM"
     first_identity, omitted_identity = f"{root}/a.OSV", f"{root}/b.OSV"
-    runtime, ticket, _ = await _baseline_world(owned, tmp_path, ())
+    _, ticket, _ = await _baseline_world(owned, tmp_path, ())
     first_file_id = await _save_out_of_page_file(
-        runtime, ticket, owned, first_identity)
+        ticket, owned, first_identity)
     omitted_file_id = await _save_out_of_page_file(
-        runtime, ticket, owned, omitted_identity)
-    request = _request(runtime, ticket, _actual(ticket, entries=[
+        ticket, owned, omitted_identity)
+    request = _request(ticket, _actual(ticket, entries=[
         _osmo_entry(first_identity, size=1), _osmo_entry(omitted_identity, size=1),
     ], finalized=True))
     key = new_operation_key()
-    saved = runtime.capture.save_result_page(request, key, owned)
+    saved = CaptureRepository().save_result_page(request, key, owned)
     assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
     append_id = saved.value.event_id
     index_id = owned.connection.execute(
@@ -1117,7 +1125,7 @@ async def test_fix1_i3_fresh_original_key_recomputes_difference_from_f_before(
             "(SELECT result_first_page_event_id FROM operation_attempts WHERE run_id=?)",
             (ticket.run_id,),
         ).fetchone()
-        replay = runtime.capture.save_result_page(request, key, reopened)
+        replay = CaptureRepository().save_result_page(request, key, reopened)
         after = reopened.connection.execute(
             "SELECT (SELECT MAX(id) FROM history_transactions),"
             "(SELECT MAX(id) FROM history_events),"
@@ -1213,20 +1221,20 @@ async def test_fix1_i3_fresh_original_key_rejects_canonical_group_corruption(
 
     root = "/mnt/media_rw/emulated/DCIM"
     old_identity = f"{root}/a-old.OSV"
-    runtime, ticket, _ = await _baseline_world(
+    _, ticket, _ = await _baseline_world(
         owned, tmp_path, ("a-old.OSV",) if corruption in (
             "extra_baseline", "same_count_baseline_replacement") else ())
     old_file_id = None
     if corruption in ("extra_baseline", "same_count_baseline_replacement"):
         old_file_id = await _save_out_of_page_file(
-            runtime, ticket, owned, old_identity)
+            ticket, owned, old_identity)
     if corruption == "extra_baseline":
         new_identity = f"{root}/b-new.OSV"
         entries = [_osmo_entry(old_identity, size=0), _osmo_entry(new_identity, size=1)]
     elif corruption == "same_count_baseline_replacement":
         first_new, second_new = f"{root}/b-new.OSV", f"{root}/c-new.OSV"
-        await _save_out_of_page_file(runtime, ticket, owned, first_new)
-        second_id = await _save_out_of_page_file(runtime, ticket, owned, second_new)
+        await _save_out_of_page_file(ticket, owned, first_new)
+        second_id = await _save_out_of_page_file(ticket, owned, second_new)
         entries = [
             _osmo_entry(old_identity, size=0),
             _osmo_entry(first_new, size=1),
@@ -1235,9 +1243,9 @@ async def test_fix1_i3_fresh_original_key_rejects_canonical_group_corruption(
     else:
         new_identity = f"{root}/a-new.OSV"
         entries = [_osmo_entry(new_identity, size=1)]
-    request = _request(runtime, ticket, _actual(ticket, entries=entries, finalized=True))
+    request = _request(ticket, _actual(ticket, entries=entries, finalized=True))
     key = new_operation_key()
-    saved = runtime.capture.save_result_page(request, key, owned)
+    saved = CaptureRepository().save_result_page(request, key, owned)
     assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
     append_id = saved.value.event_id
 
@@ -1278,7 +1286,7 @@ async def test_fix1_i3_fresh_original_key_rejects_canonical_group_corruption(
     reopened = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         before = _replay_checkpoint(reopened.connection, ticket.run_id)
-        replay = runtime.capture.save_result_page(request, key, reopened)
+        replay = CaptureRepository().save_result_page(request, key, reopened)
         after = _replay_checkpoint(reopened.connection, ticket.run_id)
         assert replay.kind is DbOutcomeKind.ROLLED_BACK
         assert replay.error is not None
@@ -1294,22 +1302,22 @@ async def test_fix1_i3_original_key_replay_uses_f_before_after_later_page(
         owned, tmp_path):
     from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
-    runtime, ticket, _ = await _baseline_world(
+    _, ticket, _ = await _baseline_world(
         owned, tmp_path, tuple(f"{index:03d}.OSV" for index in range(129)))
     root = "/mnt/media_rw/emulated/DCIM"
     binding = DeviceBinding("cam-1", "dji-action6")
     next_cursor = DirectoryCursor(binding,
         (root, "/mnt/media_rw/sd/DCIM"), 0, f"{root}/129.OSV")
-    first_request = _request(runtime, ticket, _actual(ticket,
+    first_request = _request(ticket, _actual(ticket,
         entries=[_osmo_entry(f"{root}/128.OSV", size=0),
                  _osmo_entry(f"{root}/129.OSV", size=1)], next_cursor=next_cursor))
     first_key = new_operation_key()
-    first = runtime.capture.save_result_page(first_request, first_key, owned)
+    first = CaptureRepository().save_result_page(first_request, first_key, owned)
     assert first.kind is DbOutcomeKind.COMPLETED, first.error
-    second_request = _request(runtime, ticket, _actual(ticket,
+    second_request = _request(ticket, _actual(ticket,
         entries=[_osmo_entry(f"{root}/130.OSV", size=2)], cursor=next_cursor,
         finalized=True), page_no=2, cursor=next_cursor)
-    second = runtime.capture.save_result_page(second_request, new_operation_key(), owned)
+    second = CaptureRepository().save_result_page(second_request, new_operation_key(), owned)
     assert second.kind is DbOutcomeKind.COMPLETED, second.error
 
     path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
@@ -1317,7 +1325,7 @@ async def test_fix1_i3_original_key_replay_uses_f_before_after_later_page(
     reopened = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
     try:
         before = _replay_checkpoint(reopened.connection, ticket.run_id)
-        replay = runtime.capture.save_result_page(first_request, first_key, reopened)
+        replay = CaptureRepository().save_result_page(first_request, first_key, reopened)
         after = _replay_checkpoint(reopened.connection, ticket.run_id)
         assert replay.kind is DbOutcomeKind.COMPLETED, replay.error
         assert replay.value == first.value
