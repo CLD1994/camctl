@@ -92,7 +92,7 @@
 | 目录检查已登记、尚未开始读取时取消，无返回事实已经保存，拍摄取消收尾却因缺少事实读取端口报错，动作与占用未结束。 | 在分段取消的正式收尾入口交付原核对事实，保留零目录调用及已保存的未知结果。 | [阶段 22](verification-data/2026-10-26-integration-refactor/stage-22/manifest.json) |
 | 原目录任务已经取消结束，同一工厂仍持有原任务，但再次推进在等待分支提前返回，没有保存未知结果。 | 区分仍在工作与已结束的原任务，让后者按原票据和键保存结果；诊断已排除测试没有等待任务结束。 | [阶段 22](verification-data/2026-10-26-integration-refactor/stage-22/manifest.json) |
 | 本地读取五字节后纯停止，尚无写入或关闭错误，却保存成失败并记录 ERROR。 | 按实际读取结果区分纯停止、业务取消和真实错误，保持原进度及责任。 | [读取契约](../architecture/file-copy.md#实际读取结束与所属结果)、[阶段 9](verification-data/2026-10-26-integration-refactor/stage-9/README.md) |
-| 清理汇总调用缺少 `closing` 导入，实际取消和原结果保存后抛 `NameError`。 | 修复汇总入口并覆盖设备与主机路径；另一次 DELETE 超时尚未同因归类。 | [阶段证据](verification-data/2026-10-26-integration-refactor/README.md) |
+| 清理取消的四项用例均在汇总读取处因缺少 `closing` 导入而提前结束，覆盖设备删除／查询和主机删除／查询。设备 DELETE 用例已保存取消标记，但原返回尚未保存；等待终态时检测到会话已失败，立即报错。 | 补齐汇总入口的导入，再按原四项验证原调用收场、原票据结果保存及取消完成；当前生产源码仍缺导入。 | [原始 bootstrap 日志](verification-data/2026-10-26-integration-refactor/stage-22/bootstrap-rerun.tar.gz) |
 | 分段判断已保存一处缺段、两份可保留原片，结束动作却按零缺段核对，产物未发布。 | 核对期望数量与已保存决定，仍拒绝真正不一致的输入。 | [阶段 16](verification-data/2026-10-26-integration-refactor/stage-16/README.md) |
 | 默认文件池已满且数据库打开失败时，已退出数据库线程的关闭等待仍排在同一池，阻挡取消与扫描撤回。 | 必要数据库收场独立推进，仍等待真实线程退出；覆盖满池、取消和锁释放。 | [阶段 8](verification-data/2026-10-26-integration-refactor/stage-8/README.md)、[阶段 9](verification-data/2026-10-26-integration-refactor/stage-9/README.md) |
 | 媒体修复或检查仍占有输入文件，同一会话的事实恢复又作为另一任务申请同一文件，发生独占冲突；合法一毫秒轮询、未注入保存故障已复现。 | 协调原任务、原保存阶段和同一会话恢复入口的责任，保持独占、不重复读取或工具调用。 | [阶段 9](verification-data/2026-10-26-integration-refactor/stage-9/manifest.json) |
@@ -100,6 +100,8 @@
 | OSMO 已保存完整结果页与原片，普通推进却因下一结果轮次的额度耗尽先判为无法确认，尚未开始 READ，后续恢复目标被阻断。 | 已保存原片的本地媒体责任先按原页和原身份接续；保留结果查询预算，不重新列举冒充原结果。 | [录像规格](../architecture/camera-recording.md)、[数据库与驱动事实](verification-data/2026-10-26-integration-refactor/stage-22/local-media-evidence.tar.gz) |
 
 阶段 22 的同源码组合中，媒体同文件竞争用例没有再次失败；生产未改，已有合法复现仍作为待处理问题保留。主会话数据库的读取与关闭观察不代替报告子进程只读连接的证据。
+
+清理取消的四项归因已经按原日志补齐：`test_cleanup_background_owner.py` 中设备用例的 `[default-delete]`、`[default-query]`，以及主机文件用例的 `[delete]`、`[query]`，均指向同一 `NameError`。此前将设备 DELETE 的等待失败写成另一次超时不准确；实际进入了等待辅助函数的“会话已经结束”分支。四项未选入 `066ed4bc` 组合，仍属于前述生产阻塞。本次只复核已有日志与现场，没有新增测试运行；原始错误保存在归档的 `tasks/001-camctl-bootstrap/artifacts/output.log`。
 
 ## 最近验证结果
 
