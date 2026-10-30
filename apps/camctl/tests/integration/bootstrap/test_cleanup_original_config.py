@@ -1,5 +1,7 @@
 """原尝试配置、原结果保存及后轮真实授票之间的合同。"""
 
+from support.repository_ports import repository_port
+
 from dataclasses import replace
 from decimal import Decimal
 
@@ -196,21 +198,23 @@ async def _actual_save_failure(world, monkeypatch, operation, *, output_id=701, 
                     return saved
                 return super().begin_cleanup_attempt(request, key, worker)
         gate = QueryGate()
-        runtime.outputs = gate
         if local:
             unlink = Path.unlink
             def blocked(path, *args, **kwargs):
                 if path == world.paths[output_id]:
                     raise PermissionError("删除结果仍须查询核实")
                 return unlink(path, *args, **kwargs)
-            with monkeypatch.context() as patch:
+            with monkeypatch.context() as patch, repository_port(
+                    OutputsRepository, gate, ("begin_cleanup_attempt",),
+                    matches=lambda _name, args, _kwargs: args[0].target.cleanup_item_id == item_id):
                 patch.setattr(Path, "unlink", blocked)
                 await delete_source_file(runtime, item_id)
         else:
             world.channel.behaviors = ["unreceived"]
-            await delete_source_file(runtime, item_id)
+            with repository_port(OutputsRepository, gate, ("begin_cleanup_attempt",),
+                                 matches=lambda _name, args, _kwargs: args[0].target.cleanup_item_id == item_id):
+                await delete_source_file(runtime, item_id)
         assert len(gate.calls) == 1
-        runtime.outputs = OutputsRepository()
     calls = []
     if local:
         method = getattr(HostArtifacts, "delete" if operation == "delete" else "query_file")
@@ -282,7 +286,7 @@ async def _retry_original_actual(world, item_id, request, actual, calls, saves, 
     before = list(world.channel.operations)
     rejected.clear()
     runtime = await _factory(world)(world.owned)
-    await delete_source_file(replace(runtime, allow_new_calls=False), item_id)
+    await delete_source_file(runtime, item_id)
     assert len(calls) == 1 and len(saves) == 2 and saves[0] == saves[1]
     assert not after_actual_reads and world.channel.operations == before
     saved = saved_cleanup_attempt(world.owned, request.ticket,
