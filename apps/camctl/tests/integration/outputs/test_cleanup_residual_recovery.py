@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from support.repository_ports import repository_port
+from camctl.session.service import LocalWorkPort
 from camctl.persistence.repositories.operations import OperationRepository
 
 from camctl.bootstrap.cleanup_assembly import session_cleanup_assembly
@@ -187,18 +188,43 @@ async def _orphan_intent_for_prepared(environment, prepared, operation):
     owned, context, runtime, driver, item_id = prepared
     action_id, = owned.connection.execute(
         "SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
-    member_runtime = await runtime.for_item(item_id)
-    request = AttemptIntent(operation=operation, action_id=action_id,
-        kind=OperationKind.DELETE_FILE if operation == "delete" else OperationKind.CHECK_FILE_EXISTS,
-        target=AttemptTarget(cleanup_item_id=item_id), query_purpose=None,
-        config=member_runtime.delete_config if operation == "delete" else member_runtime.query_config,
-        occurred_at=_NOW)
-    result = runtime.outputs.begin_cleanup_attempt(request, new_operation_key(), owned)
-    assert result.kind is DbOutcomeKind.COMPLETED, result.error
-    assert result.value.ticket is not None
+    if operation == "delete":
+        from dataclasses import replace
+        class IntentSaved(Exception):
+            pass
+        class IntentBoundary(OutputsRepository):
+            ticket = None
+            def begin_cleanup_attempt(self, request, key, current):
+                receipt = super().begin_cleanup_attempt(request, key, current)
+                assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+                assert receipt.value.ticket is not None
+                self.ticket = receipt.value.ticket
+                return replace(receipt, handoff_error=IntentSaved())
+        cfg = environment[0]
+        factory = session_cleanup_assembly(devices=cfg.devices, drivers=_registry(driver),
+            max_delete_attempts=3, max_query_attempts=3, staging=Path(cfg.paths.staging),
+            occurred_at=lambda: _NOW, monotonic_ns=lambda: 0)
+        runtime = await factory(await capture_database(owned))
+        boundary = IntentBoundary()
+        with repository_port(OutputsRepository, boundary, ("begin_cleanup_attempt",),
+                matches=lambda _name, args, _kwargs: args[0].target.cleanup_item_id == item_id):
+            with pytest.raises(IntentSaved):
+                await delete_source_file(runtime, item_id)
+        ticket = boundary.ticket
+        assert ticket is not None
+    else:
+        member_runtime = await runtime.for_item(item_id)
+        request = AttemptIntent(operation=operation, action_id=action_id,
+            kind=OperationKind.CHECK_FILE_EXISTS,
+            target=AttemptTarget(cleanup_item_id=item_id), query_purpose=None,
+            config=member_runtime.query_config, occurred_at=_NOW)
+        result = runtime.outputs.begin_cleanup_attempt(request, new_operation_key(), owned)
+        assert result.kind is DbOutcomeKind.COMPLETED, result.error
+        ticket = result.value.ticket
+        assert ticket is not None
     horizon, = owned.connection.execute("SELECT MAX(id) FROM history_events").fetchone()
     owned.connection.close()
-    return context.open_connection(), context, driver, item_id, result.value.ticket, horizon
+    return context.open_connection(), context, driver, item_id, ticket, horizon
 
 
 @pytest.mark.parametrize("operation", ["delete", "query"])
@@ -640,7 +666,7 @@ async def test_cancel_waits_original_pending_application_before_member_save(envi
         assert (await delete_source_file(runtime, item_id)).phase == "delete_budget_rejected"
     action_id, = owned.connection.execute("SELECT action_id FROM cleanup_items WHERE id=?", (item_id,)).fetchone()
     _apply_cleanup_cancel(owned, action_id)
-    owner = cleanup_flow(cleanup_factory(devices={}, drivers=DriverRegistry(),
+    owner: LocalWorkPort = cleanup_flow(cleanup_factory(devices={}, drivers=DriverRegistry(),
         max_delete_attempts=3, max_query_attempts=3))
     assert owner.required_settlements() == 1
     async def cleanup_pending(database, target):
@@ -695,7 +721,7 @@ async def test_historical_binding_failure_after_saved_absence_keeps_file_handoff
     capture_resources,
 ):
     from types import SimpleNamespace
-    from camctl.devices.bindings import check_binding
+    from camctl.devices.bindings import DeviceBinding, check_binding
     from camctl.persistence.repositories.outputs import (
         OutputsRepository,
         FailCleanupBinding,
@@ -712,11 +738,14 @@ async def test_historical_binding_failure_after_saved_absence_keeps_file_handoff
         "SELECT o.device_file_id,o.id,c.action_id FROM cleanup_items c JOIN outputs o ON o.id=c.output_id WHERE c.id=?",
         (item_id,),
     ).fetchone()
+    device_id, driver_id = owned.connection.execute(
+        "SELECT a.device_id,a.driver_id FROM device_files f JOIN actions a"
+        " ON a.id=f.observer_action_id WHERE f.id=?", (file_id,)).fetchone()
     result = OutputsRepository().fail_cleanup_binding(
         FailCleanupBinding(
             item_id,
             file_id,
-            check_binding(await runtime.binding_of(item_id), SimpleNamespace(devices={})),
+            check_binding(DeviceBinding(device_id, driver_id), SimpleNamespace(devices={})),
             (f"delete/{item_id}",),
             _NOW + 1,
             False,

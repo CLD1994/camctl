@@ -7,6 +7,7 @@ import sqlite3
 import pytest
 
 from support.repository_ports import repository_port
+from camctl.session.service import LocalWorkPort
 
 from camctl.contracts.values import ConsistencyError
 from camctl.outputs.cleanup_flow import delete_source_file
@@ -467,7 +468,7 @@ async def test_waiter_cancel_keeps_delete_owner_until_actual_return_is_saved(env
     assert owned.connection.execute("SELECT status FROM cleanup_items WHERE id=?", (item_id,)).fetchone()[0] == 4
     from camctl.bootstrap.cleanup_assembly import cleanup_flow
     from camctl.devices.drivers.registry import DriverRegistry
-    owner = cleanup_flow(cleanup_factory(devices={}, drivers=DriverRegistry(),
+    owner: LocalWorkPort = cleanup_flow(cleanup_factory(devices={}, drivers=DriverRegistry(),
         max_delete_attempts=3, max_query_attempts=3))
     assert owner.required_settlements() == 0
 

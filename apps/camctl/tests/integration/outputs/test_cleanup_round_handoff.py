@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from support.repository_ports import repository_port
+from camctl.session.service import LocalWorkPort
 
 from camctl.bootstrap.cleanup_assembly import session_cleanup_assembly
 from camctl.contracts.values import ConsistencyError
@@ -646,7 +647,7 @@ async def test_default_round_waits_for_actual_original_owner_after_factory_rebui
         await advance_cleanup(rebuilt)
         assert tuple(fresh.connection.iterdump()) == before
         from camctl.bootstrap.cleanup_assembly import cleanup_flow
-        owner_view = cleanup_flow(cleanup_factory(devices={}, drivers=DriverRegistry(),
+        owner_view: LocalWorkPort = cleanup_flow(cleanup_factory(devices={}, drivers=DriverRegistry(),
             max_delete_attempts=1, max_query_attempts=1))
         assert len(calls) == 1 and owner_view.required_settlements() > 0
         release.set()
