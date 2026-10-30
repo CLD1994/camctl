@@ -3,6 +3,7 @@
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
+import sqlite3
 
 import pytest
 
@@ -14,6 +15,7 @@ from camctl.persistence.repositories.outputs import FailReadDelivery, OutputsRep
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..cancellation.test_report_sync_lifecycle import _fault_owned
+from ..support.outputs import SqliteOperationFault
 from .test_output_binding_changes import _NOW, environment
 from .test_output_binding_transactions import pending_read
 
@@ -41,10 +43,10 @@ async def test_exhaustion_projection_failure_keeps_delivery_source_and_slot(pend
     command = _exhausted(owned, original.copy_id)
     before = tuple(owned.connection.iterdump())
 
-    faulty = _fault_owned(owned, prefix)
-    failed = OutputsRepository().fail_read_delivery(command, new_operation_key(), faulty)
+    fault = SqliteOperationFault(owned.connection, sqlite3.SQLITE_UPDATE, prefix.split()[1])
+    failed = OutputsRepository().fail_read_delivery(command, new_operation_key(), replace(owned, connection=fault))
 
-    assert faulty.connection.failed
+    assert fault.triggered
     assert failed.kind is DbOutcomeKind.ROLLED_BACK
     assert tuple(owned.connection.iterdump()) == before
 

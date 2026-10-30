@@ -49,7 +49,7 @@ async def _assert_complete_finish_time(owned, runtime, reader, target, advance, 
     try:
         await asyncio.wait_for(completion_entered.wait(), timeout=5)
         ticket = reader.requests[0][0]
-        end, ended_at = reader.ends[0]
+        end, ended_at = reader.timed_ends[0]
         assert ended_at == raw_time and end.stopped and end.error is None
         assert owned.connection.execute(
             "SELECT status,result_json FROM operation_attempts WHERE run_id=? AND attempt_no=?",
@@ -93,7 +93,7 @@ class TimedReadRequests(ReadRequests):
 
     def __init__(self, owned, content, clock):
         super().__init__(owned, content)
-        self.clock, self.ends = clock, []
+        self.clock, self.timed_ends = clock, []
 
     async def open_read(self, source, offset, ticket, *, idle_timeout_s):
         session = await super().open_read(source, offset, ticket, idle_timeout_s=idle_timeout_s)
@@ -114,7 +114,7 @@ class TimedReadRequests(ReadRequests):
 
             async def wait_stopped(self):
                 end = await session.wait_stopped()
-                owner.ends.append((end, owner.clock[0]))
+                owner.timed_ends.append((end, owner.clock[0]))
                 return end
 
         return ObservedEnd()

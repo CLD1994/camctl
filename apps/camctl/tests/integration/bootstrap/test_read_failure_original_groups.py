@@ -151,7 +151,7 @@ async def test_exhausted_delivery_original_key_keeps_original_source_release_and
 
 
 @pytest.mark.parametrize('after_commit', [False, True])
-async def test_actual_obtain_binding_child_unknown_reopens_same_factory_with_original_request_and_key(pending_read, monkeypatch, after_commit):
+async def test_actual_obtain_binding_child_unknown_reopens_same_factory_with_original_request_and_key(pending_read, environment, monkeypatch, after_commit):
     from camctl.bootstrap.obtain_assembly import session_obtain_assembly
     from camctl.capture.recovery import RecoveryBoundary
     from camctl.contracts.values import ConsistencyError
@@ -188,11 +188,14 @@ async def test_actual_obtain_binding_child_unknown_reopens_same_factory_with_ori
 
     monkeypatch.setattr(OutputsRepository, 'fail_read_binding', uncertain_once)
     with pytest.raises(ConsistencyError):
-        await advance_obtain(factory(owned))
+        await advance_obtain(factory(environment[2].database))
+    await environment[2].database.close()
     owned.connection.close()
     reopened = open_existing(Path(cfg.paths.state_db), DbOpenMode.EXISTING_RW, DbConfig())
     try:
-        await advance_obtain(factory(reopened))
+        from ..support.database import business_database
+        async with business_database(Path(cfg.paths.state_db)) as database:
+            await advance_obtain(factory(database))
         assert len(saves) == 2 and saves[0] == saves[1]
         assert reopened.connection.execute('SELECT status,attempts_used FROM operation_runs WHERE id=?',
             (ticket.run_id,)).fetchone() == (4, ticket.attempt_id)

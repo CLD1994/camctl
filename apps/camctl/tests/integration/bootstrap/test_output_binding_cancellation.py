@@ -60,7 +60,7 @@ async def test_canceled_cleanup_error_fails_actual_cancel_origin(environment, co
     saved = OutputsRepository().cancel_cleanup_item(CancelCleanupItem(
         cleanup_item_id, _NOW, code, {"output_id": str(output_id)}), new_operation_key(), owned)
     assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
-    settlement = TargetSettlement(owned, OutputsRepository(), CancellationRepository(),
+    settlement = TargetSettlement(context.database, OutputsRepository(), CancellationRepository(),
                                   lambda _: "unknown", lambda: _NOW)
 
     assert not (await settlement.settle(target)).complete
@@ -70,7 +70,7 @@ async def test_canceled_cleanup_error_fails_actual_cancel_origin(environment, co
         monotonic_ns=lambda: 0)), context)
 
     progress = await apply_cancel(ApplyCancel(origin, (cancel_item_id,)), CancellationRuntime(
-        owned, CancellationRepository(), settlement, lambda: _NOW))
+        context.database, CancellationRepository(), settlement, lambda: _NOW))
 
     assert progress.items[0].status == int(enum_for("cancel_items.status").FAILED)
     assert progress.items[0].error_code == item_error_id("cancel_items", "target_cleanup_failed")
@@ -174,7 +174,7 @@ async def test_canceled_cleanup_preserves_saved_unknown_results_after_binding_ch
         " JOIN actions a ON a.id=f.observer_action_id WHERE o.id=?", (output_id,)).fetchone() == binding_before
     assert owned.connection.execute(
         "SELECT status,cancel_requested FROM actions WHERE id=?", (target,)).fetchone() == (2, 1)
-    settled = await TargetSettlement(owned, OutputsRepository(), CancellationRepository(),
+    settled = await TargetSettlement(context.database, OutputsRepository(), CancellationRepository(),
                                     lambda _: "unknown", lambda: _NOW).settle(target)
     assert settled.complete and settled.failed
     assert owned.connection.execute(

@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from pathlib import Path
+import sqlite3
 
 import pytest
 import pytest_asyncio
@@ -14,6 +15,7 @@ from camctl.persistence.repositories.outputs import FailCleanupBinding, FailRead
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 
 from ..cancellation.test_report_sync_lifecycle import _fault_owned
+from ..support.outputs import SqliteOperationFault
 from .test_output_binding_changes import (
     _NOW, _accept, _changed, _pending_cleanup, _registry, _save_photos, environment,
 )
@@ -50,8 +52,10 @@ async def test_read_binding_projection_failure_rolls_back_complete_group(pending
     _cfg, owned, command = pending_read
     before = tuple(owned.connection.iterdump())
 
-    result = OutputsRepository().fail_read_binding(command, new_operation_key(), _fault_owned(owned, prefix))
+    fault = SqliteOperationFault(owned.connection, sqlite3.SQLITE_UPDATE, prefix.split()[1])
+    result = OutputsRepository().fail_read_binding(command, new_operation_key(), replace(owned, connection=fault))
 
+    assert fault.triggered
     assert result.kind is DbOutcomeKind.ROLLED_BACK
     assert tuple(owned.connection.iterdump()) == before
 
@@ -126,8 +130,10 @@ async def test_cleanup_binding_projection_failure_rolls_back_complete_group(pend
     _cfg, owned, command = pending_cleanup
     before = tuple(owned.connection.iterdump())
 
-    result = OutputsRepository().fail_cleanup_binding(command, new_operation_key(), _fault_owned(owned, prefix))
+    fault = SqliteOperationFault(owned.connection, sqlite3.SQLITE_UPDATE, prefix.split()[1])
+    result = OutputsRepository().fail_cleanup_binding(command, new_operation_key(), replace(owned, connection=fault))
 
+    assert fault.triggered
     assert result.kind is DbOutcomeKind.ROLLED_BACK
     assert tuple(owned.connection.iterdump()) == before
 
