@@ -2,58 +2,70 @@
 
 import asyncio
 from pathlib import Path
+from decimal import Decimal
+import json
 
 import pytest
 
 from camctl.contracts.enums import enum_for
-from camctl.contracts.values import new_operation_key
 from camctl.host_files.tasks import AsyncFileTask, FileTaskExecutor, FileTaskId
 from camctl.outputs import work_files
 from camctl.outputs.work_files import (
     WorkFileContext, WorkFileLimits, WorkFileSingleOutcome, clean_one_work_file,
 )
-from camctl.persistence.models import DbOutcomeKind
-from camctl.persistence.repositories.outputs import OutputsRepository, SettleCanceledObtain
+from camctl.persistence.repositories.outputs import OutputsRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.session.supervision import Supervisor
 
-from ..capture.test_action6_segmented_recovery import (
-    _entries, _overrun_recording, _publish_ordinary_result,
-)
-from ..capture.test_record_segment_scope_recovery import _cancel
 from ..capture.test_capture_contract import _NOW
-from .test_segment_default_scope import _obtain
+from ..capture.test_input_copy import _CONTENT
+from ..support.bootstrap_read_cases import segment_input_case
 
 pytestmark = pytest.mark.asyncio
 
 
-async def _published_check_copy(tmp_path, *, waiting=False):
-    owned, runtime, source, handler, tools = await _overrun_recording(tmp_path, (60,))
-    waiters = [_obtain(owned, runtime, source, "default", 120)] if waiting else []
-    await _publish_ordinary_result(runtime, owned, source, handler, _entries(1))
-    assert runtime.action(source)["status"] == int(enum_for("actions.status").SUCCEEDED)
-    assert len(tools.calls) == 1
-    file_id, relative_path = owned.connection.execute(
-        "SELECT f.id,f.relative_path FROM segment_inspections i"
-        " JOIN file_copies c ON c.inspection_id=i.id"
-        " JOIN intermediate_files f ON f.id=c.target_file_id"
-        " WHERE i.action_id=?", (source,),
-    ).fetchone()
-    path = tmp_path / "staging" / relative_path
-    assert path.is_file()
-    return owned, runtime, source, file_id, path, waiters
+async def _published_check_copy(tmp_path, capture_resources, monkeypatch, *, waiting=False):
+    world = await segment_input_case(tmp_path, capture_resources, monkeypatch, (60,),
+        early_waiters=(120,) if waiting else (), read_retry_s=Decimal(3), segment_size=4 * 1024 * 1024,
+        result_check={"max_attempts": 3, "call_timeout_s": Decimal("1.25"), "retry_interval_s": Decimal(2)})
+    try:
+        await world.publish()
+        assert world.owned.connection.execute('SELECT status FROM actions WHERE id=?',
+            (world.source_id,)).fetchone() == (int(enum_for("actions.status").SUCCEEDED),)
+        assert len(world.early) == int(waiting)
+        assert world.wall[0] == _NOW + 80_000_000 and world.mono[0] == 85_000_000_000
+        action, = world.owned.connection.execute('SELECT execution_spec_json FROM actions WHERE id=?', (world.source_id,)).fetchone()
+        assert json.loads(action)['target_duration_ms'] == 60_000
+        assert world.owned.connection.execute("SELECT kind,max_attempts_used,timeout_s_json,retry_interval_s_json FROM operation_runs WHERE kind IN (2,3,7) ORDER BY kind").fetchall() == [
+            (2, 3, '10', '3'), (3, 3, '10', '3'), (7, 3, '1.25', '2')]
+        budget, = world.owned.connection.execute('SELECT budget_json FROM segment_inspections').fetchone()
+        assert json.loads(budget) == {'max_attempts': 3, 'timeout_s': 10, 'retry_interval_s': 3}
+        assert len(world.reader.sessions) == len(world.reader.streams) == 1
+        end = world.reader.sessions[0].poll_stopped()
+        assert end is not None and end.stopped and end.error is None and end.bytes_read == len(_CONTENT)
+        assert world.reader.streams[0].closed
+        assert len(world.tool_log.read_text().splitlines()) == 1
+        assert len(world.inputs) == 1
+        file_id, relative_path, _state = world.inputs[0]
+        path = Path(world.cfg.paths.staging) / relative_path
+        assert path.is_file()
+        return world, file_id, path
+    except BaseException:
+        await world.close()
+        raise
 
 
-def _context(owned, tmp_path, executor):
+def _context(world, executor):
     return WorkFileContext(
-        repository=OutputsRepository(), owned=owned, staging=tmp_path / "staging",
+        repository=OutputsRepository(), database=world.database, staging=Path(world.cfg.paths.staging),
         occurred_at=_NOW + 90_000_000,
         limits=WorkFileLimits(batch_size=2, limit_per_run=4), executor=executor,
     )
 
 
-async def test_unbound_inspection_copy_waits_for_actual_file_task_then_is_cleaned(tmp_path):
-    owned, _, source, file_id, path, _ = await _published_check_copy(tmp_path)
+async def test_unbound_inspection_copy_waits_for_actual_file_task_then_is_cleaned(tmp_path, capture_resources, monkeypatch):
+    world, file_id, path = await _published_check_copy(tmp_path, capture_resources, monkeypatch)
+    owned, source = world.owned, world.source_id
     executor = FileTaskExecutor(Supervisor())
     entered, finish = asyncio.Event(), asyncio.Event()
 
@@ -73,13 +85,13 @@ async def test_unbound_inspection_copy_waits_for_actual_file_task_then_is_cleane
         before = owned.connection.execute(
             "SELECT status FROM actions WHERE id=?", (source,),
         ).fetchone()
-        kept = await clean_one_work_file(file_id, _context(owned, tmp_path, executor))
+        kept = await clean_one_work_file(file_id, _context(world, executor))
         assert kept.outcome is WorkFileSingleOutcome.KEPT
         assert path.exists() and file_id in executor.unfinished_files()
         finish.set()
         assert len(await operation) == path.stat().st_size
         assert file_id not in executor.unfinished_files()
-        cleaned = await clean_one_work_file(file_id, _context(owned, tmp_path, executor))
+        cleaned = await clean_one_work_file(file_id, _context(world, executor))
         assert cleaned.outcome is WorkFileSingleOutcome.DELETED
         assert not path.exists()
         assert owned.connection.execute(
@@ -88,14 +100,14 @@ async def test_unbound_inspection_copy_waits_for_actual_file_task_then_is_cleane
     finally:
         finish.set()
         await operation
-        owned.connection.close()
+        await world.close()
 
 
 async def test_inspection_copy_delete_failure_is_retried_after_database_reopen(
-    tmp_path, monkeypatch,
+    tmp_path, capture_resources, monkeypatch,
 ):
-    owned, _, source, file_id, path, _ = await _published_check_copy(tmp_path)
-    database = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
+    world, file_id, path = await _published_check_copy(tmp_path, capture_resources, monkeypatch)
+    owned, source = world.owned, world.source_id
     executor = FileTaskExecutor(Supervisor())
     remove = work_files._remove_work_file
     removals = []
@@ -111,7 +123,7 @@ async def test_inspection_copy_delete_failure_is_retried_after_database_reopen(
         "SELECT status,error_code,error_details_json FROM actions WHERE id=?", (source,),
     ).fetchone()
     try:
-        failed = await clean_one_work_file(file_id, _context(owned, tmp_path, executor))
+        failed = await clean_one_work_file(file_id, _context(world, executor))
         assert failed.outcome is WorkFileSingleOutcome.FAILED
         assert path.exists() and len(removals) == 1
         assert owned.connection.execute(
@@ -121,43 +133,39 @@ async def test_inspection_copy_delete_failure_is_retried_after_database_reopen(
             int(enum_for("intermediate_files.retention_state").RELEASABLE),
             int(enum_for("intermediate_files.cleanup_state").FAILED),
         )
-    finally:
+        await world.executor.drain_required()
+        world.database = await capture_resources.restart_database(world.path)
         owned.connection.close()
-
-    reopened = open_existing(database, DbOpenMode.EXISTING_RW, DbConfig())
-    try:
-        retried = await clean_one_work_file(file_id, _context(reopened, tmp_path, executor))
+        world.owned = open_existing(world.path, DbOpenMode.EXISTING_RW, DbConfig())
+        reopened = world.owned
+        retried = await clean_one_work_file(file_id, _context(world, executor))
         assert retried.outcome is WorkFileSingleOutcome.DELETED
         assert not path.exists() and removals == [path, path]
         assert reopened.connection.execute(
             "SELECT status,error_code,error_details_json FROM actions WHERE id=?", (source,),
         ).fetchone() == before
     finally:
-        reopened.connection.close()
+        await world.close()
 
 
-async def test_canceled_bound_waiter_releases_copy_after_its_original_settlement(tmp_path):
-    owned, runtime, source, file_id, path, waiters = await _published_check_copy(
-        tmp_path, waiting=True)
+async def test_canceled_bound_waiter_releases_copy_after_its_original_settlement(tmp_path, capture_resources, monkeypatch):
+    world, file_id, path = await _published_check_copy(
+        tmp_path, capture_resources, monkeypatch, waiting=True)
+    owned, source, waiters = world.owned, world.source_id, world.early
     executor = FileTaskExecutor(Supervisor())
     try:
         facts = OutputsRepository().load_work_file_state(file_id, owned)
         assert not facts.owner_finished
-        kept = await clean_one_work_file(file_id, _context(owned, tmp_path, executor))
+        kept = await clean_one_work_file(file_id, _context(world, executor))
         assert kept.outcome is WorkFileSingleOutcome.KEPT and path.exists()
         waiter, _ = waiters[0]
-        _cancel(owned, runtime, waiter)
-        settled = OutputsRepository().settle_canceled_obtain(
-            SettleCanceledObtain(waiter, runtime.wall_us(), ()),
-            new_operation_key(), owned)
-        assert settled.kind is DbOutcomeKind.COMPLETED, settled.error
-        assert settled.value.complete
+        await world.cancel(waiter)
         assert owned.connection.execute(
             "SELECT status FROM actions WHERE id=?", (waiter,),
         ).fetchone() == (int(enum_for("actions.status").CANCELED),)
         assert OutputsRepository().load_work_file_state(file_id, owned).owner_finished
-        cleaned = await clean_one_work_file(file_id, _context(owned, tmp_path, executor))
+        cleaned = await clean_one_work_file(file_id, _context(world, executor))
         assert cleaned.outcome is WorkFileSingleOutcome.DELETED and not path.exists()
-        assert runtime.action(source)["status"] == int(enum_for("actions.status").SUCCEEDED)
+        assert owned.connection.execute("SELECT status FROM actions WHERE id=?", (source,)).fetchone() == (int(enum_for("actions.status").SUCCEEDED),)
     finally:
-        owned.connection.close()
+        await world.close()
