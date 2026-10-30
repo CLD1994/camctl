@@ -9,7 +9,7 @@ from camctl.devices.evidence import DeviceObservation, EvidenceContract
 from camctl.devices.tasks import StartReturn
 from camctl.operations.models import EffectState, ErrorValue
 from .contracts import CameraCall
-from .responses import _call_details, _call_failure, _simulation_call_failure
+from .responses import STOP_RESPONSE_PAYLOADS, _call_details, _call_failure, _simulation_call_failure
 
 
 _FIELDS = frozenset({"activity_id", "response_payload", "confirmation_basis"})
@@ -74,13 +74,13 @@ class Osmo360IIDjiInterpreter:
         if call_failure is not None or response_failure is not None:
             return _failure(details, call_failure.value if call_failure is not None else response_failure)
         accepted = {"00"}
-        # 特殊响应按原生延时的原命令限定，不扩展到普通录像。
+        # 设置响应按原生延时命令限定；停止响应对应原操作的停止命令。
         if (self.operation == "start_timelapse" and self.kind is CameraCall.SETTING
                 and self.command[-3:] == ("-c", "1e", "0000")):
             accepted.add("ee")
-        if (self.operation == "stop_timelapse" and self.kind is CameraCall.STOP
-                and self.command[-3:] == ("-c", "01", "00")):
-            accepted.add("df")
+        stop_command = ("-c", "02", "00") if self.operation == "stop_recording" else ("-c", "01", "00")
+        if self.kind is CameraCall.STOP and self.command[-3:] == stop_command:
+            accepted = STOP_RESPONSE_PAYLOADS
         if details["response_payload"] not in accepted:
             return _failure(details, "response_payload_unconfirmed")
         name = ("setting_applied" if self.kind is CameraCall.SETTING else "stop_confirmed"

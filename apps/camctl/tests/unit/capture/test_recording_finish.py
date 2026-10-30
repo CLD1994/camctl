@@ -221,6 +221,19 @@ class TestRecoveredControl:
         assert decision.reason is RecoveredControlReason.CONTINUOUS
         assert decision.control_elapsed_ns is None
 
+    @pytest.mark.parametrize('session_anchor', [False, True])
+    @pytest.mark.parametrize('elapsed_us', [None, 65_000_000, 90_000_000])
+    async def test_prior_stop_requires_media_timing_without_inventing_duration(
+            self, session_anchor, elapsed_us) -> None:
+        decision = decide_recovered_control(self._facts(
+            session_anchor=session_anchor,
+            started_at_us=None if elapsed_us is None else _NOW_US - elapsed_us,
+            stop_already_stopped=True))
+
+        assert decision is not None
+        assert decision.reason is RecoveredControlReason.DURATION_UNCERTAIN
+        assert decision.control_elapsed_ns is None
+
     async def test_at_threshold_is_continuous(self) -> None:
         """恰好达到目标加余量不触发修复（含等号）。"""
         decision = decide_recovered_control(self._facts())

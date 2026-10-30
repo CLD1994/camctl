@@ -56,7 +56,7 @@ Action6 使用正式参数类型 `action6_timelapse` 执行有限原生延时任
 
 设备的[视频结果模式](../superpowers/specs/2026-10-23-video-result-modes-and-segmentation-design.md#部署配置与受理)统一作用于普通录像及原生延时。单文件模式保留原有限任务与产物数量合同；多段模式的 MP4 度量及采样目标由[Action6 特化](../superpowers/specs/2026-10-23-action6-video-segmentation-design.md)提供，公共层负责异常检查及范围。RAW/JPEG 保持本节的独立照片规则，采集时长和间隔不转化为必需照片数量。任务始终使用受理时冻结的模式与结果合同。
 
-Action6 原生延时的启动响应只记录 `timelapse_sent`，表示本地命令调用取得严格成功响应；它不表示相机已独立确认开始或完成。Action6 的延时设置、START 和 STOP 都要求调用正常收场、退出状态为零、stderr 为空，并且 stdout 含有唯一一条完整响应，其声明长度为 1、数据恰为 `00`。`e3`、`ee`、`df`、其他数据、缺失或多条响应、格式错误及调用错误都不建立对应确认事实。该任务的 STOP 操作为：
+Action6 原生延时的启动响应只记录 `timelapse_sent`，表示本地命令调用取得严格成功响应；它不表示相机已独立确认开始或完成。Action6 的延时设置和 START 要求调用正常收场、退出状态为零、stderr 为空，并且 stdout 含有唯一一条完整响应，其声明长度为 1、数据恰为 `00`。STOP 按[停止命令响应](../hardware/camera-control-handoff.md#停止命令响应)确认采集已结束，并保存实际返回值。各阶段仅接受其契约定义的响应；其他数据、缺失或多条响应、格式错误及调用错误不建立对应确认事实。该任务的 STOP 操作为：
 
 ```text
 dji_mb_ctrl -R diag -g 1 -t 0 -s 2 -c 01 00

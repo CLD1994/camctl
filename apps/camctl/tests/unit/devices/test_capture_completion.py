@@ -55,6 +55,47 @@ def test_stop_context_keeps_original_stop_identity_and_wait_budget(kind):
     assert result_page_timeout_s(Decimal('10'), context) == Decimal('40')
 
 
+@pytest.mark.parametrize('kind', ['record_stop', 'timelapse_stop'])
+def test_already_stopped_context_preserves_file_wait_and_original_response(kind):
+    from camctl.devices.capture_completion import validate_completion_context, result_page_timeout_s
+    context = _stop(kind)
+    context['stop_response']['result']['observations'][0]['data']['response_payload'] = 'df'
+
+    assert validate_completion_context(context, activity_id='7') == context
+    assert result_page_timeout_s(Decimal('10'), context) == Decimal('40')
+
+
+@pytest.mark.parametrize('observation_type,version,activity_id,payload,expected', [
+    ('stop_confirmed', 1, '7', 'df', True),
+    ('stop_confirmed', 1, '7', '00', False),
+    ('stop_confirmed', 1, '8', 'df', False),
+    ('stop_confirmed', 2, '7', 'df', False),
+    ('setting_applied', 1, '7', 'df', False),
+])
+def test_prior_stop_fact_is_scoped_to_original_activity_and_observation(
+        observation_type, version, activity_id, payload, expected):
+    from camctl.devices.capture_completion import stop_reports_already_stopped
+    from camctl.devices.evidence import DeviceObservation
+    observation = DeviceObservation(observation_type, version, {
+        'activity_id': activity_id, 'response_payload': payload})
+
+    assert stop_reports_already_stopped((observation,), '7') is expected
+
+
+@pytest.mark.parametrize('payload,already_stopped', [('00', False), ('df', True)])
+def test_saved_stop_response_retains_its_original_timing_meaning(payload, already_stopped):
+    from camctl.devices.capture_completion import stop_reports_already_stopped
+    from camctl.operations.result_format import read_result_document
+    response = _response('stop_confirmed')
+    response['result']['observations'][0]['data']['response_payload'] = payload
+
+    restored = read_result_document(response['status'], response['effect_state'],
+        response['result'], response['error'])
+
+    assert stop_reports_already_stopped(restored.observations, '7') is already_stopped
+    assert restored.observations[0].data['response_payload'] == payload
+
+
 def test_legacy_record_stop_context_remains_readable():
     from camctl.devices.capture_completion import validate_completion_context
     context = _stop(); del context['kind']

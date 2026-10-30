@@ -22,9 +22,11 @@ def _parser(kind=CameraCall.START, operation="start_timelapse", command=("dji_mb
 @pytest.mark.parametrize("kind,operation,command,payload,observation", [
     (CameraCall.SETTING, "start_timelapse", ("dji_mb_ctrl", "-c", "1e", "0000"), "ee", "setting_applied"),
     (CameraCall.STOP, "stop_timelapse", ("dji_mb_ctrl", "-c", "01", "00"), "df", "stop_confirmed"),
+    (CameraCall.STOP, "stop_timelapse", ("dji_mb_ctrl", "-c", "01", "00"), "00", "stop_confirmed"),
     (CameraCall.START, "start_timelapse", ("dji_mb_ctrl", "-c", "01", "01"), "00", "timelapse_sent"),
     (CameraCall.START, "start_recording", ("dji_mb_ctrl", "-c", "02", "01"), "00", "start_confirmed"),
     (CameraCall.STOP, "stop_recording", ("dji_mb_ctrl", "-c", "02", "00"), "00", "stop_confirmed"),
+    (CameraCall.STOP, "stop_recording", ("dji_mb_ctrl", "-c", "02", "00"), "df", "stop_confirmed"),
 ])
 def test_command_scoped_response_records_actual_payload_and_control_fact(kind, operation, command, payload, observation):
     result = _parser(kind, operation, command).interpret(_raw(payload))
@@ -38,6 +40,9 @@ def test_command_scoped_response_records_actual_payload_and_control_fact(kind, o
     (CameraCall.SETTING, "start_recording", ("dji_mb_ctrl", "-c", "1e", "0000"), "ee"),
     (CameraCall.SETTING, "start_timelapse", ("dji_mb_ctrl", "-c", "1e", "0100"), "ee"),
     (CameraCall.START, "start_timelapse", ("dji_mb_ctrl", "-c", "01", "01"), "ee"),
+    (CameraCall.START, "start_recording", ("dji_mb_ctrl", "-c", "02", "01"), "df"),
+    (CameraCall.START, "start_timelapse", ("dji_mb_ctrl", "-c", "01", "01"), "df"),
+    (CameraCall.SETTING, "start_recording", ("dji_mb_ctrl", "-c", "1e", "0000"), "df"),
     (CameraCall.STOP, "stop_recording", ("dji_mb_ctrl", "-c", "01", "00"), "df"),
     (CameraCall.STOP, "stop_timelapse", ("dji_mb_ctrl", "-c", "02", "00"), "df"),
 ])
@@ -56,8 +61,13 @@ def test_special_payload_cannot_cross_command_or_action_scope(kind, operation, c
     {"output": b"Resp message, len = 1, data:\n 00\ntrailer"},
     {"output": _raw().output * 2}, {"output": b""},
 ])
-def test_incomplete_or_failed_call_never_confirms_control(changes):
-    result = _parser().interpret(replace(_raw(), **changes))
+@pytest.mark.parametrize("kind,operation,command,payload", [
+    (CameraCall.START, "start_timelapse", ("dji_mb_ctrl", "-c", "01", "01"), "00"),
+    (CameraCall.STOP, "stop_recording", ("dji_mb_ctrl", "-c", "02", "00"), "df"),
+    (CameraCall.STOP, "stop_timelapse", ("dji_mb_ctrl", "-c", "01", "00"), "df"),
+])
+def test_incomplete_or_failed_call_never_confirms_control(changes, kind, operation, command, payload):
+    result = _parser(kind, operation, command).interpret(replace(_raw(payload), **changes))
     assert result.error is not None and result.observations == ()
     assert result.effect is EffectState.UNKNOWN
 

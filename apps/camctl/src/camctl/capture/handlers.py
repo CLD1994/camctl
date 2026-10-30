@@ -140,7 +140,8 @@ from camctl.devices.bindings import BindingResult, DeviceBinding, binding_failur
 from camctl.devices.capture_timing import CaptureTiming, WaitClockReference
 from camctl.devices.capture_preparation import CAPTURE_ACTION_TYPES
 from camctl.devices.tasks import CompletionMode, VideoResultMode
-from camctl.devices.capture_completion import is_stop_context
+from camctl.devices.capture_completion import is_stop_context, stop_reports_already_stopped
+from camctl.operations.result_format import read_result_document
 from camctl.persistence.repositories.result_sources import ResultSourceKind
 from camctl.devices.directory import DirectoryReader
 from camctl.devices.drivers.registry import CapabilityNotDeclaredError
@@ -2893,6 +2894,7 @@ async def _stop_call(runtime: CaptureRuntime, action,
         response, "stop_confirmed", evidence_type="stop_returned")
     if response.outcome is not None:
         confirmed = call.effect is EffectState.CONFIRMED
+    already_stopped = stop_reports_already_stopped(call.observations, ticket.target_id)
     try:
         if confirmed:
             host_stop = None
@@ -2900,7 +2902,7 @@ async def _stop_call(runtime: CaptureRuntime, action,
                 state = stop_state
                 elapsed = None
                 if (
-                    state.anchor_from_current_session
+                    not already_stopped and state.anchor_from_current_session
                     and state.stop_target_ns is not None
                 ):
                     duration_ns = (
@@ -2909,12 +2911,12 @@ async def _stop_call(runtime: CaptureRuntime, action,
                     ) * 1_000_000
                     elapsed = returned_ns - (state.stop_target_ns - duration_ns)
                 host_stop = HostTimerStopSave(elapsed, normal_source if (
-                    call.status is AttemptStatus.SUCCEEDED and call.error is None
+                    not already_stopped and call.status is AttemptStatus.SUCCEEDED and call.error is None
                 ) else None)
             if (action["type"] == int(_ACTION_TYPE.CAMERA_TIMELAPSE)
                     and action["execution_spec_json"]["end_control"] == int(EndControl.HOST_TIMER)):
                 deadline = runtime.timelapse_deadlines.get(action["id"])
-                elapsed = None if deadline is None else returned_ns - (
+                elapsed = None if already_stopped or deadline is None else returned_ns - (
                     deadline - (_target_duration_ms(action)
                         + action["execution_spec_json"].get("startup_margin_ms", 0)) * 1_000_000)
                 host_stop = HostTimerStopSave(elapsed)
@@ -4387,11 +4389,12 @@ async def _recording_confirmation_at(runtime: CaptureRuntime, action_id: int) ->
     return None if row is None else row[0]
 
 
-async def _stop_confirmed_at(runtime: CaptureRuntime, action_id: int) -> int | None:
+async def _stop_confirmation_facts(runtime: CaptureRuntime, action_id: int) -> tuple[int, bool] | None:
     def read(owned):
-        """读取停止责任最近可靠确认尝试的结果事件墙钟。"""
+        """读取原停止确认时刻及此前已停止的事实，不补造采集时长。"""
         with closing(owned.connection.execute(
-            "SELECT e.occurred_at FROM operation_runs r"
+            "SELECT e.occurred_at,r.activity_id,a.status,a.effect_state,a.result_json,a.error_json"
+            " FROM operation_runs r"
             " JOIN operation_attempts a ON a.run_id = r.id"
             " JOIN history_events e ON e.id = a.result_event_id"
             " WHERE r.responsibility_key = ? AND a.status <> ? AND a.effect_state = ?"
@@ -4400,8 +4403,17 @@ async def _stop_confirmed_at(runtime: CaptureRuntime, action_id: int) -> int | N
              int(_EFFECT_STATE.CONFIRMED)),
         )) as cursor:
             row = cursor.fetchone()
-        return None if row is None else int(row[0])
+        if row is None:
+            return None
+        actual = read_result_document(int(row[2]), int(row[3]), parse_exact_json(row[4]),
+            None if row[5] is None else parse_exact_json(row[5]))
+        return int(row[0]), stop_reports_already_stopped(actual.observations, str(row[1]))
     return await runtime.database.read(read, description="读取拍摄当前责任")
+
+
+async def _stop_confirmed_at(runtime: CaptureRuntime, action_id: int) -> int | None:
+    facts = await _stop_confirmation_facts(runtime, action_id)
+    return None if facts is None else facts[0]
 
 
 async def _record_media_source(registered, entries, *, source_file_id=None):
@@ -4551,13 +4563,15 @@ async def _recovered_control_facts(
     runtime: CaptureRuntime, action) -> RecoveredControlFacts:
     """恢复停止后控制完成依据判定的事实装载。"""
     action_id = action["id"]
+    stop = await _stop_confirmation_facts(runtime, action_id)
     return RecoveredControlFacts(
         session_anchor=_recording_port(runtime).has_session_anchor(action_id),
         started_at_us=(await _recording_confirmation_at(runtime, action_id)),
-        stop_confirmed_at_us=(await _stop_confirmed_at(runtime, action_id)),
+        stop_confirmed_at_us=None if stop is None else stop[0],
         target_duration_ms=_target_duration_ms(action),
         repair_margin_s=runtime.repair_margin_s,
-        startup_margin_ms=action["execution_spec_json"].get("startup_margin_ms", 0))
+        startup_margin_ms=action["execution_spec_json"].get("startup_margin_ms", 0),
+        stop_already_stopped=stop is not None and stop[1])
 
 
 async def _reconcile_recording(

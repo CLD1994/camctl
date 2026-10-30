@@ -43,6 +43,14 @@ def validate_control_confirmation(response, observation_type, activity_id):
         raise ValueError('完成上下文没有原活动所需的可靠控制确认')
 
 
+def stop_reports_already_stopped(observations, activity_id: str) -> bool:
+    """原活动的停止观察只报告此前已停止，不提供本次采集时长下界。"""
+    return any(observation.type == 'stop_confirmed' and observation.version == 1
+        and observation.data.get('activity_id') == activity_id
+        and observation.data.get('response_payload') == 'df'
+        for observation in observations)
+
+
 def is_stop_context(context) -> bool:
     return context is not None and context.get('kind') != CompletionContextKind.TIMELAPSE_NATURAL
 

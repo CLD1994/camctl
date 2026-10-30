@@ -160,8 +160,12 @@ def test_consumer_rejects_corrupt_saved_source_instead_of_assuming_absent():
     ("normal", True), ("delayed", True), ("cancel", False), ("recovery", False),
     ("retry", False), ("ticket_retry", False), ("no_anchor", False), ("missing_start", False),
     ("failed_with_effect", False),
+    ("already_stopped", False),
 ])
 def test_stop_owner_only_forms_normal_source_from_eligible_actual_result(case, has_source):
+    from camctl.devices.capture_completion import stop_reports_already_stopped
+    from camctl.devices.evidence import DeviceObservation
+
     handlers = SOURCE.parents[2] / "capture" / "handlers.py"
     tree = ast.parse(handlers.read_text())
     function = next(n for n in tree.body if isinstance(n, ast.AsyncFunctionDef) and n.name == "_stop_call")
@@ -215,7 +219,10 @@ def test_stop_owner_only_forms_normal_source_from_eligible_actual_result(case, h
     models = ModuleType("camctl.capture.models")
     models.NormalRecordingStop = Source
     call = SimpleNamespace(status=failure if case == "failed_with_effect" else succeeded,
-                           error=object() if case == "failed_with_effect" else None, effect=confirmed)
+                           error=object() if case == "failed_with_effect" else None, effect=confirmed,
+                           observations=(DeviceObservation("stop_confirmed", 1, {
+                               "activity_id": "2", "response_payload": "df"}),)
+                           if case == "already_stopped" else ())
     ns = {"_ACTION_TYPE": SimpleNamespace(CAMERA_RECORD=2, CAMERA_TIMELAPSE=3),
           "_ATTEMPT_STATUS": SimpleNamespace(SUCCEEDED=2), "_EFFECT_STATE": SimpleNamespace(CONFIRMED=3),
           "EffectState": SimpleNamespace(CONFIRMED=confirmed), "AttemptStatus": SimpleNamespace(SUCCEEDED=succeeded),
@@ -225,6 +232,7 @@ def test_stop_owner_only_forms_normal_source_from_eligible_actual_result(case, h
           "_recording_port": lambda runtime: SimpleNamespace(recording_state=recording_state),
           "_activity_id_of": activity_id, "closing": closing, "measure_stage": lambda *args, **kwargs: nullcontext(),
           "ControlRequest": lambda **kwargs: kwargs, "_binding": lambda action: object(),
+          "stop_reports_already_stopped": stop_reports_already_stopped,
           "_target_duration_ms": lambda action: 9000, "_operation_outcome": lambda *args, **kwargs: (call, True),
           "HostTimerStopSave": lambda elapsed, source=None: SimpleNamespace(elapsed=elapsed, source=source),
           "RunOutcome": SimpleNamespace(SUCCEEDED="success"), "OutcomeValidationError": ValueError,
@@ -236,6 +244,8 @@ def test_stop_owner_only_forms_normal_source_from_eligible_actual_result(case, h
     with patch.dict(sys.modules, {tasks.__name__: tasks, models.__name__: models}):
         asyncio.run(ns["_stop_call"](Runtime(), action, normal_recording=case != "recovery"))
     assert (results[0].source is not None) is has_source
+    if case == "already_stopped":
+        assert results[0].elapsed is None
     if has_source:
         assert results[0].source.start_result_event_id == 10
         assert results[0].source.elapsed_before_stop_ns == (20_000_000_000 if case == "delayed" else 10_000_000_000)
