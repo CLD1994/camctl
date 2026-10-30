@@ -6,8 +6,8 @@
 
 | 证据组 | 源码身份与运行范围 | 记录结果 |
 | --- | --- | --- |
-| `unit-all` | HEAD `d56be550c597ed96c8aedd6b986eeb1ad97c05e5`；PID `67982`；`2026-10-30T09:32:56.603572+00:00` 至 `2026-10-30T09:35:30.676084+00:00`；exit `0` | 组件单元测试全目录：9,354 通过、1 跳过，JUnit 共 9,355 节点；此结果只归属于 d56 源码快照。 |
-| `unit-boundary-audit` | 原审计固定在 HEAD `d56be550c597ed96c8aedd6b986eeb1ad97c05e`；只读定义在后续规范提交 `7f0aa164` 获批准并记录 | 保留原 JSON/Markdown 字节，不重跑、不改写。原审计只覆盖首次导入观察，不代表所有单测函数体均无资源访问。 |
+| `unit-all` | HEAD `d56be550c597ed96c8aedd6b986eeb1ad97c05e5`；PID `67982`；`2026-10-30T09:32:56.603572+00:00` 至 `2026-10-30T09:35:30.676084+00:00`；exit `0` | 组件单元测试全目录：9,354 通过、1 跳过，JUnit 共 9,355 节点；JUnit testsuite 时间 150.120 秒，testcase 时间总和 134.227 秒，pytest.log 汇总为 150.20 秒，receipt 命令墙钟为 153.088 秒；四种时间分别记录，此结果只归属于 d56 源码快照。 |
+| `unit-boundary-audit` | 原审计文件记录的 HEAD 前缀为 `d56be550c597ed96c8aedd6b986eeb1ad97c05e`，清单解析为完整 HEAD `d56be550c597ed96c8aedd6b986eeb1ad97c05e5`；只读定义在后续规范提交 `7f0aa164` 获批准并记录 | 原 JSON 的 HEAD 字段仍保留 39 字符前缀；manifest 另存原值并记录 Git 唯一解析出的 40 字符提交。保留原 JSON/Markdown 压缩证据字节，不重跑、不改写。原审计只覆盖首次导入观察，不代表所有单测函数体均无资源访问。 |
 | 仓储端口初轮 | HEAD `ed29963d5aa4348778afa78515a3917cde285e2b`；初轮 before/after 收据记录同一对未提交源哈希 | before 为 8 失败、9 通过；after 为 1 失败、16 通过。 |
 | 仓储端口最终复核 | HEAD 仍记录为 `ed29963d5aa4348778afa78515a3917cde285e2b`，但源文件哈希已变化 | before-final 为 8 失败、9 通过；after-final 为 17 通过。最终测试和 helper 源码快照与该轮哈希一致。初轮源码字节已缺失，只保留初轮收据中的 SHA，没有用最终版本替代。 |
 | main 仓储端口单测 | dbea 主工作区早期 helper-9 快照；PID `76553` | 9 项通过；与 review worktree 的 17 项结果分开记录。 |
@@ -22,7 +22,7 @@
 
 ## 后续补充的稳定证据
 
-- `merged-boundary-diagnostics54/` 保存 HEAD `76e07abd3f58c7538b52d1b199c63fa2f5a3bef1` 的单独诊断范围：54 项通过，pytest 阶段 22.459 秒，进程墙钟 24.610 秒；收据记录 source manifest 未变化。该结果单独归档，不并入 unit-all 或 bootstrap 的运行。
+- `merged-boundary-diagnostics54/` 保存 HEAD `76e07abd3f58c7538b52d1b199c63fa2f5a3bef1` 的单独诊断范围：54 项通过，JUnit testsuite 时间 22.459 秒、testcase 时间总和 20.814 秒、receipt 命令墙钟 24.610 秒；收据记录 source manifest 未变化。该结果单独归档，不并入 unit-all 或 bootstrap 的运行。
 - `diagnostic-other14/cost-summary.json.gz` 是 290f4ad3 诊断轮 14 个串行任务的节点、文件、任务计时摘要，引用 14 份原 cases 文件 SHA。其范围字段明确声明不是最终回归或提速比较，摘要中的 call 耗时也不是单个目标操作耗时。没有复制完整 events、临时目录或数据库。
 
 ## 缺失与排除
@@ -31,6 +31,10 @@
 - 来源容量首次调用的 `capacity-final` basetemp 目录缺失；收据、pytest 日志和 XML 保留了准备失败。没有对应业务 DB 或受限叶组收据可归档。
 - capture facts 没有记录源码提交。清单将 `source_head` 留空，未按相邻仓库推断。
 - 未归档源码工作树、依赖、pycache、pytest 临时目录、普通用例 DB、通过用例 DB、容量输入/expected fixture 或全量 capture 证据。bootstrap 只保存四个实际失败节点及 default-delete 单项复跑对应的 DB 字节和日志。
+
+## 时间字段口径
+
+manifest 对 12 个有 JUnit XML 的运行组分别记录 `suite_time_seconds` 与 `testcase_time_seconds_sum`；这两项来自 XML 的不同字段，不能互相替代。`unit-all` 另外保留 pytest.log 的 150.20 秒摘要和 receipt 的 153.088 秒命令墙钟。所有原始 XML 与日志均保持不变。
 
 ## 文件和校验统计
 

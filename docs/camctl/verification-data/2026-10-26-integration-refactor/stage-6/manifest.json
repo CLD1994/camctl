@@ -38,21 +38,28 @@
           "failures": 0,
           "errors": 0,
           "skipped": 1,
-          "time_seconds": 134.227
+          "suite_time_seconds": 150.12,
+          "testcase_time_seconds_sum": 134.227,
+          "junit_suite_count": 1,
+          "junit_testcase_count": 9355
         },
-        "pytest_summary": "9354 passed, 1 skipped; 2 warnings"
+        "pytest_summary": "9354 passed, 1 skipped; 2 warnings",
+        "pytest_log_reported_seconds": 150.2,
+        "receipt_wall_seconds": 153.088
       }
     },
     {
       "id": "unit-boundary-audit-d56",
       "source_root": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030",
-      "source_head": "d56be550c597ed96c8aedd6b986eeb1ad97c05e",
+      "source_head": "d56be550c597ed96c8aedd6b986eeb1ad97c05e5",
       "run_identity": "read-only fixed-scope first-import audit; JSON/Markdown reports produced on 2026-10-30; no test bodies run",
       "scope": "unit-boundary-audit fixed module inventory; the read-only type-loading rule was later documented under commit 7f0aa164; this archive keeps the original audit bytes unchanged.",
       "result": {
         "resource_json_files": 3,
         "direct_import_processes": 13
-      }
+      },
+      "source_head_as_recorded": "d56be550c597ed96c8aedd6b986eeb1ad97c05e",
+      "source_head_resolution": "Git uniquely resolved the original 39-character value; archived JSON/Markdown bytes remain unchanged."
     },
     {
       "id": "repository-port-initial-before",
@@ -69,7 +76,10 @@
         "failures": 8,
         "errors": 0,
         "skipped": 0,
-        "time_seconds": 0.006
+        "suite_time_seconds": 0.11,
+        "testcase_time_seconds_sum": 0.006,
+        "junit_suite_count": 1,
+        "junit_testcase_count": 17
       }
     },
     {
@@ -87,7 +97,10 @@
         "failures": 1,
         "errors": 0,
         "skipped": 0,
-        "time_seconds": 0.002
+        "suite_time_seconds": 0.074,
+        "testcase_time_seconds_sum": 0.002,
+        "junit_suite_count": 1,
+        "junit_testcase_count": 17
       }
     },
     {
@@ -105,7 +118,10 @@
         "failures": 8,
         "errors": 0,
         "skipped": 0,
-        "time_seconds": 0.006
+        "suite_time_seconds": 0.107,
+        "testcase_time_seconds_sum": 0.006,
+        "junit_suite_count": 1,
+        "junit_testcase_count": 17
       }
     },
     {
@@ -123,7 +139,10 @@
         "failures": 0,
         "errors": 0,
         "skipped": 0,
-        "time_seconds": 0.005
+        "suite_time_seconds": 0.069,
+        "testcase_time_seconds_sum": 0.005,
+        "junit_suite_count": 1,
+        "junit_testcase_count": 17
       }
     },
     {
@@ -141,7 +160,10 @@
         "failures": 0,
         "errors": 0,
         "skipped": 0,
-        "time_seconds": 0.004
+        "suite_time_seconds": 0.041,
+        "testcase_time_seconds_sum": 0.004,
+        "junit_suite_count": 1,
+        "junit_testcase_count": 9
       }
     },
     {
@@ -159,7 +181,10 @@
         "failures": 0,
         "errors": 0,
         "skipped": 0,
-        "time_seconds": 0.003
+        "suite_time_seconds": 0.036,
+        "testcase_time_seconds_sum": 0.003,
+        "junit_suite_count": 1,
+        "junit_testcase_count": 8
       }
     },
     {
@@ -180,7 +205,10 @@
         "failures": 0,
         "errors": 1,
         "skipped": 0,
-        "time_seconds": 0.002
+        "suite_time_seconds": 0.077,
+        "testcase_time_seconds_sum": 0.002,
+        "junit_suite_count": 1,
+        "junit_testcase_count": 1
       }
     },
     {
@@ -202,7 +230,10 @@
           "failures": 0,
           "errors": 0,
           "skipped": 0,
-          "time_seconds": 24.932
+          "suite_time_seconds": 24.954,
+          "testcase_time_seconds_sum": 24.932,
+          "junit_suite_count": 1,
+          "junit_testcase_count": 1
         },
         "business_phase": "closed",
         "messages": 3,
@@ -270,7 +301,10 @@
           "failures": 4,
           "errors": 0,
           "skipped": 0,
-          "time_seconds": 18.445999999999998
+          "suite_time_seconds": 18.854,
+          "testcase_time_seconds_sum": 18.446,
+          "junit_suite_count": 1,
+          "junit_testcase_count": 48
         },
         "nodes": 48,
         "node_outcomes": {
@@ -300,7 +334,10 @@
         "failures": 0,
         "errors": 0,
         "skipped": 0,
-        "time_seconds": 2.746
+        "suite_time_seconds": 3.035,
+        "testcase_time_seconds_sum": 2.746,
+        "junit_suite_count": 1,
+        "junit_testcase_count": 1
       }
     },
     {
@@ -313,8 +350,11 @@
         "pytest_nodes": 54,
         "passed": 54,
         "failed": 0,
-        "pytest_elapsed_seconds": 22.459,
-        "wall_seconds": 24.610377687000437
+        "receipt_wall_seconds": 24.610377687000437,
+        "suite_time_seconds": 22.459,
+        "testcase_time_seconds_sum": 20.814,
+        "junit_suite_count": 1,
+        "junit_testcase_count": 54
       }
     },
     {
@@ -389,7 +429,7 @@
     {
       "archive_path": "unit-boundary-audit.json.gz",
       "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/unit-boundary-audit.json",
-      "source_head": "d56be550c597ed96c8aedd6b986eeb1ad97c05e",
+      "source_head": "d56be550c597ed96c8aedd6b986eeb1ad97c05e5",
       "run_identity": "read-only fixed-scope first-import audit; JSON/Markdown reports produced on 2026-10-30; no test bodies run",
       "scope": "unit-boundary-audit fixed module inventory; the read-only type-loading rule was later documented under commit 7f0aa164; this archive keeps the original audit bytes unchanged.",
       "source_mtime_ns": 1793353559975640555,
@@ -398,12 +438,13 @@
       "format": "json",
       "compressed_bytes": 4730,
       "compressed_sha256": "d3776a3df138bf2bb7a124bf0ac74b4750140c00d921adf20b7be7a00b193b60",
-      "note": "原始只读审计文件保持字节不变。"
+      "note": "原始只读审计文件保持字节不变。",
+      "source_head_as_recorded": "d56be550c597ed96c8aedd6b986eeb1ad97c05e"
     },
     {
       "archive_path": "unit-boundary-audit.md.gz",
       "source_path": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/unit-boundary-audit.md",
-      "source_head": "d56be550c597ed96c8aedd6b986eeb1ad97c05e",
+      "source_head": "d56be550c597ed96c8aedd6b986eeb1ad97c05e5",
       "run_identity": "read-only fixed-scope first-import audit; JSON/Markdown reports produced on 2026-10-30; no test bodies run",
       "scope": "unit-boundary-audit fixed module inventory; the read-only type-loading rule was later documented under commit 7f0aa164; this archive keeps the original audit bytes unchanged.",
       "source_mtime_ns": 1793353559975640555,
@@ -412,7 +453,8 @@
       "format": "markdown",
       "compressed_bytes": 3034,
       "compressed_sha256": "874fea53775e78cc0b4f3c21c41326a022a6cd50e0ea8de329e7d75c4b7b1038",
-      "note": "原始只读审计文件保持字节不变。"
+      "note": "原始只读审计文件保持字节不变。",
+      "source_head_as_recorded": "d56be550c597ed96c8aedd6b986eeb1ad97c05e"
     },
     {
       "archive_path": "repository-port-review/before/receipt.json.gz",
@@ -1341,5 +1383,12 @@
     "capture facts 以外的 capture worktree、源码、普通数据库及其他日志；只保留事实文件明确指向的 DB 及现存 WAL/SHM。",
     "未查询、未迁移或未创建任何 SQLite 数据库备份；数据库仅按原始字节压缩并记录摘要。"
   ],
-  "supplemental_capture_utc": "2026-10-30T10:26:17Z"
+  "supplemental_capture_utc": "2026-10-30T10:26:17Z",
+  "timing_semantics": {
+    "suite_time_seconds": "JUnit 所有 <testsuite> 节点 time 属性之和。",
+    "testcase_time_seconds_sum": "JUnit 所有 <testcase> 节点 time 属性之和；此口径与套件时间分开记录。",
+    "pytest_log_reported_seconds": "pytest.log 汇总行打印的运行时间，与 JUnit 时间分开记录。",
+    "receipt_wall_seconds": "运行收据记录的外层命令墙钟时间，与 pytest 汇总及 JUnit 时间分开记录。",
+    "xml_backed_run_groups": 12
+  }
 }
