@@ -1,6 +1,7 @@
 """报告运行入口加载实际登记资源，并经存储和控制通信端口交付完整诊断。"""
 
 import json
+from dataclasses import replace
 from multiprocessing.connection import Connection
 from unittest.mock import create_autospec
 
@@ -9,7 +10,7 @@ import pytest
 from camctl.persistence.runtime import StateDatabaseError
 from camctl.reporting import worker
 from camctl.reporting.messages import (
-    MAX_MESSAGE_BYTES, ErrorKind, JobMessage, MessageProtocolError,
+    MAX_MESSAGE_BYTES, ErrorKind, JobMessage, MessageProtocolError, MessageCapacityError,
     ResultFailureMessage, ResultSuccessMessage, StartupFailedMessage, StartupPhase,
     decode_message, encode_message,
 )
@@ -81,7 +82,10 @@ def test_oversize_job_diagnostic_uses_complete_stderr_and_bounded_result(mocker,
         graph, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
     assert result.diagnostic_size_bytes == len(diagnostic_bytes)
     if message_size < MAX_MESSAGE_BYTES:
-        assert result.diagnostic_size_bytes < MAX_MESSAGE_BYTES
+        assert len(str(error).encode("utf-8")) < MAX_MESSAGE_BYTES
+    complete = replace(result, diagnostic=graph, diagnostic_fallback=None, diagnostic_size_bytes=None)
+    with pytest.raises(MessageCapacityError):
+        encode_message(complete)
     encoded = encode_message(result)
     assert len(encoded) <= MAX_MESSAGE_BYTES
     assert decode_message(encoded) == result
