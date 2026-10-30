@@ -707,6 +707,10 @@ async def test_cancel_during_local_drain_withdraws_queued_startup_sweep(
     worker_entered = asyncio.Event()
     startup_call_queued = asyncio.Event()
     scans: list[Path] = []
+    database_open_attempted = asyncio.Event()
+    database_stopped = asyncio.Event()
+    database_threads: list[threading.Thread] = []
+    observer_thread = None
 
     def occupy_worker():
         loop.call_soon_threadsafe(worker_entered.set)
@@ -731,6 +735,7 @@ async def test_cancel_during_local_drain_withdraws_queued_startup_sweep(
     monkeypatch.setattr(copies, "_listdir", record_listdir)
 
     from camctl.logging_runtime.ownership import LoggingOwner
+    from camctl.persistence.business import BusinessDatabase
 
     log_settle_started = asyncio.Event()
     startup_stop_delivered = asyncio.Event()
@@ -749,30 +754,65 @@ async def test_cancel_during_local_drain_withdraws_queued_startup_sweep(
     monkeypatch.setattr(
         LoggingOwner, "cancel_startup_sweep", observe_cancel_startup)
 
-    def fail_open(_deps):
-        raise StateDatabaseError("controlled locked open failure")
+    original_open = BusinessDatabase.open
+    original_failure = StateDatabaseError("controlled locked open failure")
 
-    monkeypatch.setattr(lifecycle, "_open_runtime_connection", fail_open)
+    async def fail_database_open(cls, factory, **options):
+        def fail_factory():
+            database_threads.append(threading.current_thread())
+            loop.call_soon_threadsafe(database_open_attempted.set)
+            raise original_failure
+        return await original_open(fail_factory, **options)
+
+    monkeypatch.setattr(BusinessDatabase, "open", classmethod(fail_database_open))
 
     run_task = asyncio.create_task(execute_command(deps, None, flows={}))
     try:
         await _wait_event(worker_entered)
         await _wait_event(startup_call_queued)
-        await _wait_event(log_settle_started)
+        await _wait_event(database_open_attempted)
+        assert len(database_threads) == 1
+        def observe_database_stopped():
+            database_threads[0].join()
+            loop.call_soon_threadsafe(database_stopped.set)
+        observer_thread = threading.Thread(target=observe_database_stopped)
+        observer_thread.start()
+        await _wait_event(database_stopped)
+        observer_thread.join()
+        assert not database_threads[0].is_alive()
+        assert not log_settle_started.is_set() and scans == []
+        with pytest.raises(SessionLockConflictError):
+            acquire_session(deps.session_lock)
         run_task.cancel("cancel while local work drain owns queued sweep")
-        await _wait_event(startup_stop_delivered)
+        stop_wait = asyncio.create_task(startup_stop_delivered.wait())
+        done, _ = await asyncio.wait((stop_wait, blocker), timeout=_GATE_TIMEOUT,
+                                     return_when=asyncio.FIRST_COMPLETED)
+        try:
+            assert stop_wait in done and not blocker.done(), (
+                "数据库线程已结束，取消必须在工作线程释放前撤回启动扫描")
+        finally:
+            if not stop_wait.done():
+                stop_wait.cancel()
+                await asyncio.gather(stop_wait, return_exceptions=True)
+        assert scans == [] and old_copy.exists()
+        with pytest.raises(SessionLockConflictError):
+            acquire_session(deps.session_lock)
         release_worker.set()
         await _wait_task(blocker)
-        with pytest.raises(asyncio.CancelledError) as cancelled:
-            await _wait_task_result(run_task)
-        assert cancelled.value.args == (
-            "cancel while local work drain owns queued sweep",)
+        try:
+            outcome = await _wait_task_result(run_task)
+        except asyncio.CancelledError as cancelled:
+            assert cancelled.args == ("cancel while local work drain owns queued sweep",)
+        else:
+            assert not outcome.succeeded and outcome.reason == "state_db_error"
+            assert "controlled locked open failure" in str(outcome.details)
         assert scans == [], "true cancellation must withdraw queued startup scan"
         assert old_copy.exists()
     finally:
         release_worker.set()
-        if not blocker.done():
-            await _wait_task(blocker)
+        await asyncio.gather(blocker, return_exceptions=True)
+        if observer_thread is not None:
+            observer_thread.join()
         if not run_task.done():
             run_task.cancel("test cleanup")
             await _wait_task(asyncio.gather(run_task, return_exceptions=True))
@@ -806,7 +846,10 @@ async def test_late_clock_winddown_stops_before_blocked_log_settlement(
     allow_stop_to_finish = asyncio.Event()
     once_report_started = asyncio.Event()
     order: list[str] = []
-    logger_state: list[tuple] = []
+    logger_operations: list[str] = []
+    old_copy = Path(config.paths.staging) / "logs" / "log-copy-prior.log"
+    old_copy.parent.mkdir(parents=True, exist_ok=True)
+    old_copy.write_bytes(b"old snapshot")
 
     original_listdir = copies._listdir
 
@@ -836,15 +879,13 @@ async def test_late_clock_winddown_stops_before_blocked_log_settlement(
 
     def observed_resume(owner):
         original_resume(owner)
-        logger_state.append(("resume", owner._stopping.is_set()))
+        logger_operations.append("resume")
 
     async def observed_owned_call(owner, stage, operation, *, required=False):
+        result = await original_owned_call(owner, stage, operation, required=required)
         if stage == "marker_check":
-            logger_state.append((
-                "marker_check", owner._stopping.is_set(),
-                owner._startup_stopping.is_set()))
-        return await original_owned_call(
-            owner, stage, operation, required=required)
+            logger_operations.append("marker_check_completed")
+        return result
 
     monkeypatch.setattr(LoggingOwner, "settle", observed_log_settle)
     monkeypatch.setattr(
@@ -929,8 +970,8 @@ async def test_late_clock_winddown_stops_before_blocked_log_settlement(
 
     assert order == ["restricted_stop", "log_settle"]
     assert once_report_started.is_set()
-    assert logger_state == [
-        ("resume", False), ("marker_check", False, False)]
+    assert logger_operations == ["resume", "marker_check_completed"]
+    assert old_copy.exists()  # 本次未声明旧 owner 已收场，不能删除旧副本。
     assert (Path(config.paths.staging) / "logs" / "failure-marker.json").is_file()
     assert outcome.succeeded is False
     assert outcome.reason == "clock_invalid"
