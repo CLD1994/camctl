@@ -17,7 +17,7 @@ from camctl.operations.validation import validate_outcome
 from camctl.history.validators import EventContext
 from camctl.persistence.repositories import result_pages
 from camctl.persistence.repositories import capture as capture_storage
-from .transaction_fixtures import plan_operation
+from .transaction_fixtures import capture_operation_command
 from camctl.persistence.transaction import BoundedCommandPlan, commit_operation
 
 from .test_segment_storage import SegmentedCatalog
@@ -86,9 +86,13 @@ async def test_unpaired_preview_completion_requires_saved_page_and_original_wait
             stop_result_event_id=context["stop_result_event_id"])
         key = new_operation_key()
         if bounded:
+            original_command = capture_operation_command(
+                capture_storage,
+                lambda: capture_storage.CaptureRepository().save_file_completion(command, key, owned),
+            )
             class BoundedCompletion:
                 def plan(self, scope):
-                    finite = plan_operation(scope,capture_storage,lambda: runtime.capture.save_file_completion(command,key,owned))
+                    finite = original_command.plan(scope)
                     return BoundedCommandPlan(
                         iter(finite.events),
                         lambda event, transaction: EventContext(
