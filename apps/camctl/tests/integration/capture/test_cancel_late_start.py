@@ -1,6 +1,8 @@
 """取消生效后迟到启动结果的有限停止与重入。"""
 
 from decimal import Decimal
+import asyncio
+import json
 
 import pytest
 
@@ -8,7 +10,6 @@ from camctl.cancellation.models import ApplyCancelTarget, CancelApplyMode
 from camctl.capture.handlers import capture_handler
 from camctl.contracts.values import new_operation_key
 from camctl.devices.ports import DeviceCallResult
-from camctl.operations.attempts import AttemptConfig, RunOutcome
 from camctl.operations.models import (
     AttemptStatus, CallOutcome, EffectState, ErrorValue, EvidenceValue,
     Settlement, SettlementBasis,
@@ -16,9 +17,7 @@ from camctl.operations.models import (
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.cancellation import CancellationRepository, register_cancellation_guards
 
-from .test_capture_contract import (
-    _NOW, _environment, _runtime, _value, StopDouble,
-)
+from .test_capture_contract import _NOW
 
 register_cancellation_guards()
 pytestmark = pytest.mark.asyncio
@@ -42,99 +41,159 @@ def _cancel(owned, action_id, *, origin_id=50, mode=CancelApplyMode.WITH_STOP, o
     assert result.kind is DbOutcomeKind.COMPLETED, result.error
 
 
-class StopResult:
-    def __init__(self, action_id, success):
-        self.action_id, self.success, self.calls = action_id, success, 0
-
-    async def stop(self, request):
-        self.calls += 1
-        if self.success:
-            result = await StopDouble(str(self.action_id)).stop(request)
-            if self.success == "confirmed_error":
-                return DeviceCallResult(observations=result.observations,
-                                        error={"code": "transport_timeout", "message": "timeout"})
-            return result
-        return DeviceCallResult(observations=(), error={"code": "transport_timeout", "message": "timeout"})
-
-
-@pytest.mark.parametrize("action_id,action_type,handler", [
-    (12, 2, "camera_record"), (13, 3, "camera_timelapse"), (12, 2, "winddown")])
-@pytest.mark.parametrize("sent", [False, True])
-@pytest.mark.parametrize("late_error", [False, True])
-@pytest.mark.parametrize("stop_success", [False, True, "confirmed_error"])
+@pytest.mark.parametrize('entry', ['camera_record', 'camera_timelapse', 'winddown'])
+@pytest.mark.parametrize('late_error', [False, True])
+@pytest.mark.parametrize('stop_success', [False, True, 'confirmed_error'])
 async def test_cancel_late_unknown_reuses_stop_and_finishes(
-        tmp_path, action_id, action_type, handler, sent, late_error, stop_success):
-    owned = _environment(tmp_path, ((action_id, action_type),))
-    try:
-        async def advance(runtime):
-            if handler == "winddown":
-                from camctl.capture.handlers import advance_winddown
-                await advance_winddown(action_id, runtime, {}, wait_cap_s=Decimal("1"))
-            else:
-                await capture_handler(handler)(action_id, runtime)
+        tmp_path, capture_resources, entry, late_error, stop_success):
+    import asyncio
+    import json
+    from camctl.bootstrap.flows import winddown_flow
+    from types import SimpleNamespace
+    from ..support.capture_cancellation_cases import cancellation_world
 
-        config = AttemptConfig(1, Decimal("10"), Decimal("1"))
-        runtime = (await _runtime(owned, stop_config=config))
-        ticket, reason = runtime.grant(runtime.action(action_id))
-        assert ticket is not None, reason
-        _cancel(owned, action_id)
-        _cancel(owned, action_id, origin_id=60, mode=CancelApplyMode.ALREADY)
-        stop = StopResult(action_id, stop_success)
-        runtime.stopper = stop
-        # 启动仍在途时，取消不能提前假定效果或派发新的停止。
-        await advance(runtime)
-        assert stop.calls == 0
-        assert _value(owned, "SELECT status FROM actions WHERE id = ?", action_id) == (2,)
-        runtime.finish(ticket, CallOutcome(
+    world = await cancellation_world(tmp_path, capture_resources, finite=False,
+        handler='camera_timelapse' if entry == 'camera_timelapse' else 'camera_record',
+        start=False, canceled=False, stop_attempts=1,
+        stop_timeout_s=Decimal('10'), stop_retry_s=Decimal('1'))
+    entered, release = asyncio.Event(), asyncio.Event()
+    async def control(request):
+        entered.set()
+        await release.wait()
+        return DeviceCallResult.from_outcome(CallOutcome(
             status=AttemptStatus.FAILED if late_error else AttemptStatus.UNKNOWN,
-            error=ErrorValue("transport_timeout", "transport"), effect=EffectState.UNKNOWN,
-            settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("operation_returned", 1, {})),
-            observations=()), end_run=RunOutcome.FAILED if late_error else RunOutcome.UNCONFIRMED,
-            run_error=ErrorValue("result_unconfirmed", "device"))
-        if sent:
-            owned.connection.execute("UPDATE device_activities SET sent_at = ? WHERE action_id = ?", (_NOW, action_id))
-        # 新运行时不继承计时锚点，沿原 START/STOP 事实恢复。
-        runtime = (await _runtime(owned, stop_config=config))
-        runtime.stopper = stop
-        await advance(runtime)
-        if stop_success == "confirmed_error":
-            await advance(runtime)
+            error=ErrorValue('transport_timeout', 'transport'), effect=EffectState.UNKNOWN,
+            settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue('operation_returned', 1, {})),
+            observations=()))
+    async def stop(request):
+        from camctl.devices.evidence import DeviceObservation
+        if stop_success:
+            return DeviceCallResult((DeviceObservation('stop_confirmed', 1,
+                {'activity_id': request.ticket.target_id}),),
+                {'code': 'transport_timeout', 'message': 'timeout'} if stop_success == 'confirmed_error' else None)
+        return DeviceCallResult((), {'code': 'transport_timeout', 'message': 'timeout'})
+    world.ports.control_script, world.ports.stop_script = control, stop
+    task = asyncio.create_task(world.advance())
+    async def advance():
+        if entry == 'winddown':
+            await winddown_flow(capture_factory=world.factory, wait_cap_s=Decimal('1'))(
+                SimpleNamespace(database=world.database, clock=SimpleNamespace(utc_micros=lambda: world.wall[0])))
+        else:
+            await world.advance()
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        origins = [await world.cancel(), await world.cancel()]
+        await advance()
+        assert world.ports.stops == []
+        assert world.owned.connection.execute('SELECT status FROM actions WHERE id=?', (world.action_id,)).fetchone() == (2,)
+        release.set()
+        await task
+        actual = world.owned.connection.execute(
+            'SELECT a.status,a.effect_state,a.result_json,a.error_json,e.occurred_at FROM operation_attempts a'
+            ' JOIN operation_runs r ON r.id=a.run_id JOIN history_events e ON e.id=a.result_event_id WHERE r.kind=1').fetchone()
+        assert actual[:2] == (3 if late_error else 4, 1)
+        assert json.loads(actual[2])['observations'] == []
+        assert json.loads(actual[3]) == {'code': 'transport_timeout', 'stage': 'transport', 'details': {}}
+        assert actual[4] == world.wall[0]
+        await world.reopen()
+        await advance()
+        if stop_success == 'confirmed_error':
+            await advance()
         if not stop_success:
-            await advance(runtime)
-            assert stop.calls == 1  # 重试间隔及预算不允许新增调用。
-            runtime.monotonic_ns = lambda: 7_000_000_000
-            await advance(runtime)
-        assert _value(owned, "SELECT status, cancel_requested, execution_started FROM actions WHERE id = ?", action_id) == (6, 1, 1)
-        assert _value(owned, "SELECT status, attempts_used, retry_wait_required FROM operation_runs WHERE responsibility_key = ?", f"start/{action_id}") == (5, 1, 0)
-        assert _value(owned, "SELECT status, attempts_used, retry_wait_required FROM operation_runs WHERE responsibility_key = ?", f"stop/{action_id}") == ((3 if stop_success else 6), 1, 0)
-        assert _value(owned, "SELECT activity_state, occupancy_state, started_at FROM device_activities WHERE action_id = ?", action_id) == ((3 if stop_success else 1), (2 if stop_success else 1), None)
-        before = tuple(owned.connection.iterdump())
-        await advance(runtime)
-        assert tuple(owned.connection.iterdump()) == before
-        assert stop.calls == 1
-        # 目标 CANCELED 与本次取消是否成功是两个结论，停止未知不能报成功。
-        from camctl.cancellation.service import ApplyCancel, CancellationRuntime, apply_cancel
-        from camctl.cancellation.settlement import TargetSettlement
-        from camctl.cancellation.models import FinishCancelAction
-
-        cancellations = CancellationRepository()
-        settlement = TargetSettlement(owned, None, cancellations, lambda _: "unknown", lambda: _NOW)
-        outcome = await settlement.settle(action_id)
-        assert outcome.complete and outcome.failed is (not stop_success)
-        progress = await apply_cancel(ApplyCancel(50, (91,)), CancellationRuntime(
-            owned, cancellations, settlement, lambda: _NOW))
-        assert progress.items[0].status == (3 if stop_success else 4)
-        from camctl.contracts.workflow_errors import item_error_id, registered_error
-        assert progress.items[0].error_code == (None if stop_success else
-                                                item_error_id("cancel_items", "target_cleanup_failed"))
-        finished = cancellations.finish_cancel_action(FinishCancelAction(50, _NOW), new_operation_key(), owned)
-        assert finished.kind is DbOutcomeKind.COMPLETED, finished.error
-        assert _value(owned, "SELECT status, error_code FROM actions WHERE id = 50") == (
-            3 if stop_success else 4,
-            None if stop_success else registered_error("cancel_items_failed")["action_error_id"])
-        saved = tuple(owned.connection.iterdump())
-        await apply_cancel(ApplyCancel(50, (91,)), CancellationRuntime(
-            owned, cancellations, settlement, lambda: _NOW))
-        assert tuple(owned.connection.iterdump()) == saved
+            await advance()
+            assert len(world.ports.stops) == 1
+            world.mono[0] += 2_000_000_000
+            await advance()
+        assert world.owned.connection.execute('SELECT status,cancel_requested,execution_started FROM actions WHERE id=?', (world.action_id,)).fetchone() == (6, 1, 1)
+        assert world.owned.connection.execute('SELECT status,attempts_used,retry_wait_required FROM operation_runs WHERE responsibility_key=?', (f'start/{world.action_id}',)).fetchone() == (5, 1, 0)
+        assert world.owned.connection.execute('SELECT status,attempts_used,retry_wait_required FROM operation_runs WHERE responsibility_key=?', (f'stop/{world.action_id}',)).fetchone() == (3 if stop_success else 6, 1, 0)
+        assert world.owned.connection.execute('SELECT activity_state,occupancy_state,started_at,sent_at FROM device_activities WHERE action_id=?', (world.action_id,)).fetchone() == (3 if stop_success else 1, 2 if stop_success else 1, None, None)
+        assert len(world.ports.controls) == len(world.ports.stops) == 1
+        assert world.owned.connection.execute(
+            'SELECT a.status,a.effect_state,a.result_json,a.error_json,e.occurred_at FROM operation_attempts a'
+            ' JOIN operation_runs r ON r.id=a.run_id JOIN history_events e ON e.id=a.result_event_id WHERE r.kind=1').fetchone() == actual
+        stopped = world.owned.connection.execute(
+            'SELECT a.status,a.effect_state,a.error_json FROM operation_attempts a JOIN operation_runs r ON r.id=a.run_id WHERE r.kind=2').fetchone()
+        assert stopped[:2] == (2 if stop_success is True else 3, 3 if stop_success else 1)
+        assert (stopped[2] is None) is (stop_success is True)
+        if stopped[2] is not None:
+            assert json.loads(stopped[2])['code'] == 'transport_timeout'
+        saved = tuple(world.owned.connection.iterdump())
+        await advance()
+        assert tuple(world.owned.connection.iterdump()) == saved
+        await world.settle_cancel()
+        assert [world.owned.connection.execute('SELECT status FROM actions WHERE id=?', (origin,)).fetchone()[0]
+            for origin in origins] == [3 if stop_success else 4] * 2
+        saved = tuple(world.owned.connection.iterdump())
+        await world.settle_cancel()
+        assert tuple(world.owned.connection.iterdump()) == saved
     finally:
-        owned.connection.close()
+        release.set()
+        try:
+            if not task.done():
+                await task
+        finally:
+            await world.close()
+
+
+@pytest.mark.parametrize("handler", ["camera_record", "camera_timelapse"])
+async def test_independent_sent_column_cannot_replace_reliable_start_result(tmp_path, capture_resources, handler):
+    from camctl.capture.models import ActivityObservationSave
+    from camctl.devices.capture_completion import validate_control_confirmation
+    from camctl.persistence.repositories.capture import CaptureRepository
+    from ..support.capture_cancellation_cases import cancellation_world
+
+    world = await cancellation_world(tmp_path, capture_resources, handler=handler,
+        finite=False, start=False, canceled=False, stop_attempts=1)
+    entered, release = asyncio.Event(), asyncio.Event()
+    async def control(request):
+        entered.set()
+        await release.wait()
+        return DeviceCallResult.from_outcome(CallOutcome(status=AttemptStatus.UNKNOWN,
+            effect=EffectState.UNKNOWN, error=ErrorValue("transport_timeout", "transport"),
+            settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("operation_returned", 1, {})), observations=()))
+    world.ports.control_script = control
+    task = asyncio.create_task(world.advance())
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        key = new_operation_key()
+        request = ActivityObservationSave(world.action_id, world.wall[0], sent_at=world.wall[0], dispatch_state=3)
+        receipt = await world.database.write(lambda owned: CaptureRepository().save_activity_observation(request, key, owned), key=key)
+        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+        await world.cancel()
+        release.set()
+        await task
+        rows = world.owned.connection.execute(
+            "SELECT a.status,a.result_json,a.error_json,a.intent_event_id,a.result_event_id FROM operation_attempts a"
+            " JOIN operation_runs r ON r.id=a.run_id WHERE r.kind=1").fetchall()
+        assert len(rows) == 1 and rows[0][0] == 4
+        assert json.loads(rows[0][1])["observations"] == []
+        confirmation = {"status": rows[0][0], "effect_state": 1, "result": rows[0][1], "error": rows[0][2]}
+        with pytest.raises(ValueError):
+            validate_control_confirmation(confirmation,
+                "timelapse_sent" if handler == "camera_timelapse" else "start_confirmed", str(world.activity_id))
+        wait_receipt = None
+        if handler == "camera_timelapse":
+            from camctl.capture.timelapse import WaitPlan, WaitKind
+            from camctl.persistence.repositories.timelapse import TimelapseRepository, ScheduleWait
+            wait_key = new_operation_key()
+            wait = ScheduleWait(world.action_id,
+                WaitPlan(WaitKind.WAIT_THEN_CHECK, check_at_utc=world.wall[0] + 600_000_000), 0, 0, world.wall[0])
+            saved = tuple(world.owned.connection.iterdump())
+            wait_receipt = await world.database.write(
+                lambda owned: TimelapseRepository().schedule_wait(wait, wait_key, owned), key=wait_key)
+            assert wait_receipt.kind is DbOutcomeKind.ROLLED_BACK, wait_receipt.error
+            assert "自然等待不匹配原可靠发送" in str(wait_receipt.error)
+            assert tuple(world.owned.connection.iterdump()) == saved
+        assert world.owned.connection.execute("SELECT sent_at FROM device_activities WHERE action_id=?", (world.action_id,)).fetchone() == (world.wall[0],)
+        events = world.owned.connection.execute("SELECT id,event_type,occurred_at,body_json FROM history_events ORDER BY id").fetchall()
+        (tmp_path / "sent-input-facts.json").write_text(json.dumps({"handler": handler,
+            "observation_receipt": receipt.kind.value, "start_rows": rows, "events": events,
+            "wait_rejection": None if wait_receipt is None else str(wait_receipt.error)}, ensure_ascii=False, indent=2))
+    finally:
+        release.set()
+        try:
+            if not task.done():
+                await task
+        finally:
+            await world.close()
