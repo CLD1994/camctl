@@ -6,6 +6,8 @@ import sqlite3
 
 import pytest
 
+from support.repository_ports import repository_port
+
 from camctl.contracts.values import ConsistencyError
 from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
@@ -106,16 +108,20 @@ async def test_file_fact_fault_keeps_original_stage_request_and_key(tmp_path, co
         actual.observations[0].data["entries"][0]["kind"] = "photo"
     driver = _result_driver(actual)
     spy = FileFactSpy(stage, mode)
-    runtime.capture = spy
     original_wall = case.clock.wall
     path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
     metadata = owned.metadata
     try:
-        try:
-            await _consume(runtime, consumer, action_id, handler)
-        except ConsistencyError:
-            # 正式处理器可在本次停止，原工厂继续拥有完整保存申请。
-            pass
+        with repository_port(CaptureRepository, spy, (f"save_file_{stage}",),
+                matches=lambda _name, args, _kwargs: args[2].connection.execute(
+                    "SELECT 1 FROM device_files WHERE id=? AND observer_action_id=? "
+                    "AND json_extract(locator_json, '$.path')=?",
+                    (args[0].file_id, action_id, "/DCIM/original.mp4")).fetchone() is not None):
+            try:
+                await _consume(runtime, consumer, action_id, handler)
+            except ConsistencyError:
+                # 正式处理器可在本次停止，原工厂继续拥有完整保存申请。
+                pass
         assert spy.fault is not None and not spy.fault.armed, "必须实际到达所选文件事实的投影或提交边界"
         command, key = spy.requests[0]
         assert command.occurred_at == original_wall
@@ -123,10 +129,14 @@ async def test_file_fact_fault_keeps_original_stage_request_and_key(tmp_path, co
         owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
         assert owned.metadata == metadata
         resumed = (await _fresh_runtime(owned, runtime))
-        resumed.capture = spy
         case.clock.wall = original_wall + 5_000_000
 
-        await _consume(resumed, consumer, action_id, handler)
+        with repository_port(CaptureRepository, spy, (f"save_file_{stage}",),
+                matches=lambda _name, args, _kwargs: args[2].connection.execute(
+                    "SELECT 1 FROM device_files WHERE id=? AND observer_action_id=? "
+                    "AND json_extract(locator_json, '$.path')=?",
+                    (args[0].file_id, action_id, "/DCIM/original.mp4")).fetchone() is not None):
+            await _consume(resumed, consumer, action_id, handler)
 
         driver.list_results.assert_awaited_once()
         assert all(request == command and request_key == key for request, request_key in spy.requests), spy.requests

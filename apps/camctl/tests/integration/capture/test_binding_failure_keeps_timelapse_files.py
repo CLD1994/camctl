@@ -4,6 +4,8 @@ import json
 
 import pytest
 
+from support.repository_ports import repository_port
+
 from camctl.cancellation.models import FinishCancelAction
 from camctl.cancellation.service import ApplyCancel, CancellationRuntime, apply_cancel
 from camctl.cancellation.settlement import TargetSettlement
@@ -167,10 +169,11 @@ async def test_binding_failed_stop_keeps_complete_timelapse_files_atomically(
         assert owned.metadata == world.metadata
         runtime, methods = (await fresh_binding_runtime(owned, world, binding))
         saves = _BindingSaveSpy()
-        runtime.capture = saves
         advance = capture_handler(world.handler)
 
-        await advance(world.action_id, runtime)
+        with repository_port(CaptureRepository, saves, ("finish_binding_failure",),
+                matches=lambda _name, args, _kwargs: args[0].action_id == world.action_id):
+            await advance(world.action_id, runtime)
 
         (request, key, saved_owned), = saves.calls
         receipt, = saves.receipts
@@ -249,7 +252,9 @@ async def test_binding_failed_stop_keeps_complete_timelapse_files_atomically(
         _assert_joint_binding_finish(owned, world, key, stop_id, output_id)
 
         terminal = tuple(owned.connection.iterdump())
-        await advance(world.action_id, runtime)
+        with repository_port(CaptureRepository, saves, ("finish_binding_failure",),
+                matches=lambda _name, args, _kwargs: args[0].action_id == world.action_id):
+            await advance(world.action_id, runtime)
         assert tuple(owned.connection.iterdump()) == terminal
         assert len(saves.calls) == 1
         for method in methods:
@@ -271,8 +276,9 @@ async def test_binding_file_finish_reuses_full_request_with_original_key_after_r
     try:
         runtime, methods = (await fresh_binding_runtime(owned, world, binding))
         saves = _BindingSaveSpy()
-        runtime.capture = saves
-        await capture_handler(world.handler)(world.action_id, runtime)
+        with repository_port(CaptureRepository, saves, ("finish_binding_failure",),
+                matches=lambda _name, args, _kwargs: args[0].action_id == world.action_id):
+            await capture_handler(world.handler)(world.action_id, runtime)
         (request, key, _owned), = saves.calls
         receipt, = saves.receipts
         assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
@@ -316,10 +322,11 @@ async def test_binding_file_transaction_fault_recovers_full_original_request_aft
         runtime, methods = (await fresh_binding_runtime(owned, world, binding))
         fault = _BindingTransactionFault(mode)
         saves = _FaultingBindingSaveSpy(fault)
-        runtime.capture = saves
 
-        with pytest.raises(ConsistencyError):
-            await capture_handler(world.handler)(world.action_id, runtime)
+        with repository_port(CaptureRepository, saves, ("finish_binding_failure",),
+                matches=lambda _name, args, _kwargs: args[0].action_id == world.action_id):
+            with pytest.raises(ConsistencyError):
+                await capture_handler(world.handler)(world.action_id, runtime)
 
         (request, key, fault_owned), = saves.calls
         receipt, = saves.receipts

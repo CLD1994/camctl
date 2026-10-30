@@ -2,9 +2,12 @@
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import create_autospec
 
 import pytest
+
+from support.repository_ports import repository_port
 
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.devices.ports import DeviceCallResult, StopDriver
@@ -187,42 +190,50 @@ async def test_unknown_original_save_crosses_stop_and_connection_without_reread(
         return DeviceCallResult.from_outcome(_actual(request.ticket, entries=[_osv()], finalized=True))
     result.list_results.side_effect = actual
     name = 'save_result_page' if save_kind == 'page' else 'save_file_completion'
-    save = getattr(CaptureRepository, name)
     requests = []
     unknown_count = 1 if save_kind == 'page' else 2
-    def uncertain(repository, command, key, connection):
+    observer = SimpleNamespace(delegate=CaptureRepository())
+    def uncertain(command, key, connection):
         requests.append((command, key))
         if len(requests) <= unknown_count:
             if committed and len(requests) == 1:
-                assert save(repository, command, key, connection).kind is DbOutcomeKind.COMPLETED
+                assert getattr(observer.delegate, name)(command, key, connection).kind is DbOutcomeKind.COMPLETED
             return DbOutcome(DbOutcomeKind.UNKNOWN)
-        return save(repository, command, key, connection)
-    monkeypatch.setattr(CaptureRepository, name, uncertain)
+        return getattr(observer.delegate, name)(command, key, connection)
+    setattr(observer, name, uncertain)
+    def matches(_name, args, _kwargs):
+        if save_kind == 'page':
+            return args[0].ticket.responsibility_key == f'results/{aid}'
+        return args[2].connection.execute(
+            "SELECT 1 FROM device_files WHERE id=? AND observer_action_id=? "
+            "AND json_extract(locator_json, '$.path')=?",
+            (args[0].file_id, aid, '/DCIM/a.OSV')).fetchone() is not None
     try:
-        wall[0] = due+100
-        mono[0] += (startup+1200)*1000000
-        with pytest.raises(ConsistencyError): await advance(aid, runtime)
-        assert len(requests) == unknown_count
-        path = Path(owned.connection.execute('PRAGMA database_list').fetchone()[2])
-        owned.connection.close()
-        owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
-        await capture_resources.restart_database(owned)
-        runtime = await state['factory'](owned)
-        wall[0] = due-1
-        await advance(aid, runtime)
-        assert all(item == requests[0] for item in requests)
-        wall[0] = due+100
-        for _ in range(3): await advance(aid, runtime)
-        assert (await runtime.action(aid))['status'] == 6
-        assert len(_retained(owned, aid)) == 1
-        from camctl.contracts.json_values import parse_exact_json
-        proof = parse_exact_json(_retained(owned, aid)[0][2])
-        assert proof['basis'] == 2
-        assert proof['wait_completed_event_id'] == contexts[0]['wait_completed_event_id']
-        assert 'stop_result_event_id' not in proof
-        assert result.list_results.await_count == stop.stop.await_count == 1
-        assert len(_pages(owned)) == 1 and _pages(owned)[0][1] == due+100
-        await _finish_cancel(owned, runtime, wall, True)
+        with repository_port(CaptureRepository, observer, (name,), matches=matches):
+            wall[0] = due+100
+            mono[0] += (startup+1200)*1000000
+            with pytest.raises(ConsistencyError): await advance(aid, runtime)
+            assert len(requests) == unknown_count
+            path = Path(owned.connection.execute('PRAGMA database_list').fetchone()[2])
+            owned.connection.close()
+            owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
+            await capture_resources.restart_database(owned)
+            runtime = await state['factory'](owned)
+            wall[0] = due-1
+            await advance(aid, runtime)
+            assert all(item == requests[0] for item in requests)
+            wall[0] = due+100
+            for _ in range(3): await advance(aid, runtime)
+            assert (await runtime.action(aid))['status'] == 6
+            assert len(_retained(owned, aid)) == 1
+            from camctl.contracts.json_values import parse_exact_json
+            proof = parse_exact_json(_retained(owned, aid)[0][2])
+            assert proof['basis'] == 2
+            assert proof['wait_completed_event_id'] == contexts[0]['wait_completed_event_id']
+            assert 'stop_result_event_id' not in proof
+            assert result.list_results.await_count == stop.stop.await_count == 1
+            assert len(_pages(owned)) == 1 and _pages(owned)[0][1] == due+100
+            await _finish_cancel(owned, runtime, wall, True)
     finally:
         owned.connection.close()
 
@@ -310,11 +321,13 @@ async def test_reliable_natural_page_recovers_original_source_without_process_ca
             assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
             return replace(saved, handoff_error=ConsistencyError('原页可靠保存后模拟进程结束'))
 
-    runtime.capture = InterruptedPage()
+    page_spy = InterruptedPage()
     try:
         wall[0] = due+100
         mono[0] += (startup+1200)*1000000
-        with pytest.raises(ConsistencyError, match='模拟进程结束'): await advance(aid, runtime)
+        with repository_port(CaptureRepository, page_spy, ('save_result_page',),
+                matches=lambda _name, args, _kwargs: args[0].ticket.responsibility_key == f'results/{aid}'):
+            with pytest.raises(ConsistencyError, match='模拟进程结束'): await advance(aid, runtime)
         raw = _pages(owned)
         assert len(raw) == 1 and not _retained(owned, aid)
         from camctl.operations.models import AttemptTicket
@@ -745,15 +758,16 @@ async def test_legal_unanchored_start_consumes_finite_query_without_completing_a
         assert not request.params.get('completion_context')
         return DeviceCallResult.from_outcome(_actual(request.ticket, finalized=True))
     result.list_results.side_effect = actual
-    save = CaptureRepository.save_result_page
     requests = []
-    def uncertain(repository, command, key, connection):
+    observer = SimpleNamespace(delegate=CaptureRepository())
+    def uncertain(command, key, connection):
         requests.append((command, key))
         if len(requests) == 1 and save_mode != 'reliable':
             if save_mode == 'after_commit':
-                assert save(repository, command, key, connection).kind is DbOutcomeKind.COMPLETED
+                assert observer.delegate.save_result_page(command, key, connection).kind is DbOutcomeKind.COMPLETED
             return DbOutcome(DbOutcomeKind.UNKNOWN)
-        return save(repository, command, key, connection)
+        return observer.delegate.save_result_page(command, key, connection)
+    observer.save_result_page = uncertain
     try:
         with monkeypatch.context() as boundary:
             boundary.setattr(SchedulingRepository, 'grant_start', interrupted)
@@ -763,19 +777,20 @@ async def test_legal_unanchored_start_consumes_finite_query_without_completing_a
             recovery_boundary=RecoveryBoundary.HOST_LOCAL_SETTLED,
             recovery_max_event_id=lambda: horizon)
         if canceled: await _request_cancel(runtime, aid, wall)
-        monkeypatch.setattr(CaptureRepository, 'save_result_page', uncertain)
-        if canceled and save_mode != 'reliable':
-            with pytest.raises(ConsistencyError): await advance(aid, runtime)
-            await capture_resources.restart_database(owned)
-            runtime = await state['factory'](owned)
-        await advance(aid, runtime)
-        assert (await runtime.action(aid))['status'] == (6 if canceled else 4)
-        assert owned.connection.execute('SELECT sent_at,wait_completed_event_id,activity_state,occupancy_state FROM device_activities WHERE action_id=?', (aid,)).fetchone() == (None, None, 1, 1)
-        assert state['options']['driver'].control.await_count == 0
-        assert stop.stop.await_count == result.list_results.await_count == int(canceled)
-        assert not _retained(owned, aid)
-        assert all(request == requests[0] for request in requests)
-        if canceled: await _finish_cancel(owned, runtime, wall, False)
+        with repository_port(CaptureRepository, observer, ('save_result_page',),
+                matches=lambda _name, args, _kwargs: args[0].ticket.responsibility_key == f'results/{aid}'):
+            if canceled and save_mode != 'reliable':
+                with pytest.raises(ConsistencyError): await advance(aid, runtime)
+                await capture_resources.restart_database(owned)
+                runtime = await state['factory'](owned)
+            await advance(aid, runtime)
+            assert (await runtime.action(aid))['status'] == (6 if canceled else 4)
+            assert owned.connection.execute('SELECT sent_at,wait_completed_event_id,activity_state,occupancy_state FROM device_activities WHERE action_id=?', (aid,)).fetchone() == (None, None, 1, 1)
+            assert state['options']['driver'].control.await_count == 0
+            assert stop.stop.await_count == result.list_results.await_count == int(canceled)
+            assert not _retained(owned, aid)
+            assert all(request == requests[0] for request in requests)
+            if canceled: await _finish_cancel(owned, runtime, wall, False)
     finally:
         owned.connection.close()
 

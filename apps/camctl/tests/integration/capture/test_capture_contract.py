@@ -13,6 +13,8 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+
+from support.repository_ports import repository_port
 from ..support.result_cases import result_case, result_case_for
 
 from camctl.capture.handlers import CaptureRuntime, ListedResult, capture_handler
@@ -716,14 +718,16 @@ class TestInterruptionRecovery:
         actual.observations[0].data["entries"][0]["kind"] = "photo"
         results_driver = _result_driver(actual)
         spy = FileObservationSpy("projection", failures=2)
-        runtime.capture = spy
         original_wall = result_case.clock.wall
         original_monotonic = result_case.clock.monotonic
         path = Path(owned.connection.execute("PRAGMA database_list").fetchone()[2])
         metadata = owned.metadata
         try:
-            with pytest.raises(ConsistencyError):
-                await capture_handler(handler)(action_id, runtime)
+            with repository_port(CaptureRepository, spy, ("save_file_observation",),
+                    matches=lambda _name, args, _kwargs: args[0].observer_action_id == action_id
+                    and args[0].file_identity == "original"):
+                with pytest.raises(ConsistencyError):
+                    await capture_handler(handler)(action_id, runtime)
             assert len(spy.requests) == 2 and spy.requests[1] == spy.requests[0]
             request, file_key = spy.requests[0]
             assert request.occurred_at == original_wall and request.locator == {"path": "/DCIM/original.mp4"}
@@ -739,10 +743,12 @@ class TestInterruptionRecovery:
             owned = open_existing(path, DbOpenMode.EXISTING_RW, DbConfig())
             assert owned.metadata == metadata
             recovery = (await _fresh_runtime(owned, runtime))
-            recovery.capture = spy
             result_case.clock.wall = original_wall + 5_000_000
 
-            await capture_handler(handler)(action_id, recovery)
+            with repository_port(CaptureRepository, spy, ("save_file_observation",),
+                    matches=lambda _name, args, _kwargs: args[0].observer_action_id == action_id
+                    and args[0].file_identity == "original"):
+                await capture_handler(handler)(action_id, recovery)
             assert _value(owned, "SELECT status FROM actions WHERE id=?", action_id) == (2,)
             _assert_actual_saved(owned, action_id, actual)
             assert owned.connection.execute(

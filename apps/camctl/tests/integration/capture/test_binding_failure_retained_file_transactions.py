@@ -10,6 +10,8 @@ from unittest.mock import create_autospec
 import pytest
 import pytest_asyncio
 
+from support.repository_ports import repository_port
+
 from camctl.bootstrap.capture_assembly import DriverResultListing
 from camctl.capture.handlers import capture_handler
 from camctl.capture.media import RecordingFailure
@@ -91,18 +93,18 @@ async def _paired_capture_world(tmp_path, monkeypatch, *, incomplete_a=False):
             assert a_complete != 3 and a_size is None
         else:
             assert (a_complete, a_size) == (3, 41)
-        original_close = CaptureRepository.close_result_check_unconfirmed
         closed = []
 
-        def close(repository, request, key, save_owned):
-            receipt = original_close(repository, request, key, save_owned)
-            assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
-            closed.append((request, key))
-            return replace(receipt, handoff_error=_ClosedBeforeBusiness())
+        class CloseObserver(CaptureRepository):
+            def close_result_check_unconfirmed(self, request, key, save_owned):
+                receipt = super().close_result_check_unconfirmed(request, key, save_owned)
+                assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+                closed.append((request, key))
+                return replace(receipt, handoff_error=_ClosedBeforeBusiness())
 
         formed_at = runtime.wall_us()
-        with monkeypatch.context() as patch:
-            patch.setattr(CaptureRepository, "close_result_check_unconfirmed", close)
+        with repository_port(CaptureRepository, CloseObserver(), ("close_result_check_unconfirmed",),
+                matches=lambda _name, args, _kwargs: args[0].action_id == action_id):
             with pytest.raises(_ClosedBeforeBusiness):
                 await advance(action_id, runtime)
         (close_request, close_key), = closed
@@ -179,8 +181,9 @@ async def saved_pair(tmp_path, monkeypatch):
     reopened = None
     try:
         saves = _PreviewFirstSave(world)
-        runtime.capture = saves
-        await capture_handler(world.handler)(world.action_id, runtime)
+        with repository_port(CaptureRepository, saves, ("finish_binding_failure",),
+                matches=lambda _name, args, _kwargs: args[0].action_id == world.action_id):
+            await capture_handler(world.handler)(world.action_id, runtime)
         (request, key, _owned), = saves.calls
         receipt, = saves.receipts
         assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
@@ -299,9 +302,10 @@ async def test_incomplete_original_excludes_its_preview_and_keeps_other_complete
     world, owned, runtime, methods = await _paired_capture_world(tmp_path, monkeypatch, incomplete_a=True)
     try:
         saves = _BindingSaveSpy()
-        runtime.capture = saves
 
-        await capture_handler(world.handler)(world.action_id, runtime)
+        with repository_port(CaptureRepository, saves, ("finish_binding_failure",),
+                matches=lambda _name, args, _kwargs: args[0].action_id == world.action_id):
+            await capture_handler(world.handler)(world.action_id, runtime)
 
         (request, key, _owned), = saves.calls
         receipt, = saves.receipts
@@ -320,7 +324,9 @@ async def test_incomplete_original_excludes_its_preview_and_keeps_other_complete
         assert (status, used) == (4, 0)
         _assert_joint_binding_finish(owned, world, key, stop_id, 1)
         terminal = tuple(owned.connection.iterdump())
-        await capture_handler(world.handler)(world.action_id, runtime)
+        with repository_port(CaptureRepository, saves, ("finish_binding_failure",),
+                matches=lambda _name, args, _kwargs: args[0].action_id == world.action_id):
+            await capture_handler(world.handler)(world.action_id, runtime)
         assert tuple(owned.connection.iterdump()) == terminal
         assert len(saves.calls) == 1
     finally:
