@@ -17,7 +17,7 @@ from camctl.operations.validation import validate_outcome
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.capture import CaptureRepository
 
-from ..support.result_cases import result_case, result_case_for, begin_result_attempt
+from ..support.result_cases import result_case, result_case_for, begin_result_attempt, current_result_ticket
 from ..support.natural_sources import save_historical_source_page, save_historical_direct_files
 from .result_consumer_fixtures import ResultCatalog, complete_natural_wait
 from .result_source_fixtures import save_v1_round, current_v1_entries
@@ -201,11 +201,11 @@ async def test_current_minimum_size_rejection_does_not_fall_back_to_unknown_reta
         owned.connection.close()
 
 
-async def _v1_world(tmp_path, consumer, *, catalog=None, start=True):
+async def _v1_world(tmp_path, consumer, *, catalog=None, start=True, result_page_contract=False):
     case = result_case_for()
     config = AttemptConfig(2, Decimal('1'), Decimal(0))
     owned, runtime, aid, handler = await case.world(tmp_path, consumer, catalog=catalog,
-        start=start, result_page_contract=False, assembly_options={'check_config': config})
+        start=start, result_page_contract=result_page_contract, assembly_options={'check_config': config})
     if consumer == 'timelapse':
         await complete_natural_wait(runtime, aid)
     return case, owned, runtime, aid, handler, config
@@ -237,8 +237,35 @@ async def test_v1_saved_current_set_and_terminal_retention_have_separate_inputs(
         owned.connection.close()
 
 
+async def _finalized_current_size_world(tmp_path, consumer, current_size):
+    case, owned, runtime, aid, handler, config = await _v1_world(
+        tmp_path, consumer, result_page_contract=True)
+    kind = FileKind.PHOTO if consumer == 'photo' else FileKind.VIDEO
+    port = ResultsDouble({aid: (_entry('current', kind=kind),)})
+    case.results.delegate = port
+    runtime, first = await save_v1_round(owned, runtime, aid, port, config, case.clock.wall)
+    original = owned.connection.execute(
+        'SELECT id,completion_evidence_json,size_bytes FROM device_files').fetchall()
+    port.files_by_action[aid] = (replace(_entry('current', kind=kind), size_bytes=current_size),)
+    await capture_handler(handler)(aid, runtime)
+    ticket = current_result_ticket(owned, aid)
+    page = CaptureRepository().read_last_result_page(ticket, owned)
+    assert page.page.scan_complete and page.page.set_finalized
+    assert [(entry.identity, entry.complete, entry.size_bytes) for entry in page.page.entries] == [
+        ('current', True, current_size)]
+    runtime = await case.reopen(owned, cold=True)
+    reopened = CaptureRepository().read_last_result_page(ticket, owned)
+    assert reopened == page
+    await capture_handler(handler)(aid, runtime)
+    assert owned.connection.execute(
+        'SELECT id,completion_evidence_json,size_bytes FROM device_files').fetchall() == original
+    assert port.calls == [aid, aid]
+    return owned, runtime, aid, original
+
+
 @pytest.mark.parametrize('consumer', ['photo', 'record'])
-async def test_v1_current_completion_must_match_original_fixed_size(tmp_path, consumer):
+async def test_v1_current_size_observation_keeps_original_complete_facts(tmp_path, consumer):
+    """v1 保存当前观察和原完成来源，不据此声称集合完成资格已确认。"""
     case, owned, runtime, aid, handler, config = await _v1_world(tmp_path, consumer)
     kind = FileKind.PHOTO if consumer == 'photo' else FileKind.VIDEO
     port = ResultsDouble({aid: (_entry('current', kind=kind),)})
@@ -252,10 +279,22 @@ async def test_v1_current_completion_must_match_original_fixed_size(tmp_path, co
         runtime = await case.reopen(owned, cold=True)
         assert current_v1_entries(owned, second.ticket) == current
         retained = CaptureRepository().read_result_sources(second.ticket, None, 128, owned)
-        assert [(file.file_id, file.complete, file.size_bytes) for _, file, _ in retained.items] == [('current', True, 4096)]
-        await capture_handler(handler)(aid, runtime)
-        assert (await runtime.action(aid))['status'] == 4
+        assert [(file.file_id, file.complete, file.size_bytes, file_id) for _, file, file_id in retained.items] == [
+            ('current', True, 4096, original[0][0])]
         assert owned.connection.execute('SELECT id,completion_evidence_json,size_bytes FROM device_files').fetchall() == original
+    finally:
+        owned.connection.close()
+
+
+@pytest.mark.parametrize('consumer', ['photo', 'record'])
+@pytest.mark.parametrize('current_size,status', [(4096, 3), (99, 4)], ids=['matching', 'conflicting'])
+async def test_finalized_current_size_requires_original_fixed_size(tmp_path, consumer, current_size, status):
+    """独立完整 v2 集合对照：仅当前大小不同，当前完成资格产生不同结果。"""
+    owned, runtime, aid, original = await _finalized_current_size_world(tmp_path, consumer, current_size)
+    try:
+        assert (await runtime.action(aid))['status'] == status
+        assert owned.connection.execute('SELECT source_action_id,device_file_id,kind FROM outputs').fetchall() == [
+            (aid, original[0][0], 1)]
     finally:
         owned.connection.close()
 
@@ -303,11 +342,9 @@ _KIND_BOUNDARIES = [
 ]
 
 
-@pytest.mark.parametrize('consumer,view,proof,current_kind,size,minimum', _KIND_BOUNDARIES,
-    ids=['-'.join(map(str, case)) for case in _KIND_BOUNDARIES])
-async def test_v1_terminal_uses_known_typed_kind_and_retains_unknown_current(
-        tmp_path, consumer, view, proof, current_kind, size, minimum):
-    """原结果和首次完成事实经公开仓储保存，终态由正式处理器消费。"""
+async def _terminal_source_case(tmp_path, consumer, view, proof, current_kind, size, minimum,
+                                *, expected_outputs=None):
+    """公开存储保留原来源，实际发布结果见证适用规则是否消费了当前观察。"""
     from unittest.mock import create_autospec
 
     class Catalog(ResultCatalog):
@@ -354,6 +391,7 @@ async def test_v1_terminal_uses_known_typed_kind_and_retains_unknown_current(
         for _ in range(2):
             runtime, saved = await save_v1_round(owned, runtime, aid, port, config, case.clock.wall)
             if len(calls) == 1:
+                first = saved
                 original = owned.connection.execute('SELECT id,completion_evidence_json,size_bytes FROM device_files').fetchall()
         # 同一会话重入和新 worker 均消费原可靠结果，不构造内部缓存对象。
         if view == 'saved':
@@ -368,11 +406,29 @@ async def test_v1_terminal_uses_known_typed_kind_and_retains_unknown_current(
         assert [(entry.kind, entry.format_id) for entry in current] == [
             (expected_current_kind, format_id if current_kind == 'known' else None)]
         retained = CaptureRepository().read_result_sources(saved.ticket, None, 128, owned)
-        assert [(entry.kind, entry.format_id) for entry, _, _ in retained.items] == [
-            (retained_kind, retained_format)]
-        expected_outputs = int(consumer == 'photo' or size >= minimum)
+        assert [(entry.identity, entry.kind, entry.format_id, file.complete, file.size_bytes, file_id)
+                for entry, file, file_id in retained.items] == [
+            ('current', retained_kind, retained_format, True, size, original[0][0])]
+        complete_event, = owned.connection.execute(
+            "SELECT MIN(e.id) FROM history_events e,json_each(e.body_json,'$.rows') r"
+            " WHERE json_extract(r.value,'$.table')='device_files' AND json_extract(r.value,'$.id')=?"
+            " AND json_extract(r.value,'$.after.values.completion_state')=3"
+            " AND json_extract(r.value,'$.before.values.completion_state')<>3", (original[0][0],)).fetchone()
+        first_intent, first_result = owned.connection.execute(
+            'SELECT intent_event_id,result_event_id FROM operation_attempts WHERE run_id=? AND attempt_no=?',
+            (first.ticket.run_id, first.ticket.attempt_id)).fetchone()
+        later_intent, = owned.connection.execute(
+            'SELECT intent_event_id FROM operation_attempts WHERE run_id=? AND attempt_no=?',
+            (saved.ticket.run_id, saved.ticket.attempt_id)).fetchone()
+        assert first_intent < complete_event < first_result < later_intent
+        if expected_outputs is None:
+            expected_outputs = int(consumer == 'photo' or size >= minimum)
         assert (await runtime.action(aid))['status'] == 4
-        assert owned.connection.execute('SELECT COUNT(*) FROM outputs').fetchone() == (expected_outputs,)
+        outputs = owned.connection.execute(
+            "SELECT o.source_action_id,o.kind,f.id,f.source_action_id,f.role,"
+            "json_extract(f.identity_key,'$[2]'),f.size_bytes FROM outputs o"
+            " JOIN device_files f ON f.id=o.device_file_id ORDER BY o.id").fetchall()
+        assert outputs == ([(aid, 1, original[0][0], aid, 2, 'current', size)] if expected_outputs else [])
         assert owned.connection.execute('SELECT id,completion_evidence_json,size_bytes FROM device_files').fetchall() == original
         assert len(calls) == port.list_round.await_count == 2
         case.driver.control.assert_awaited_once()
@@ -380,3 +436,18 @@ async def test_v1_terminal_uses_known_typed_kind_and_retains_unknown_current(
             case.stopper.stop.assert_awaited_once()
     finally:
         owned.connection.close()
+
+
+@pytest.mark.parametrize('consumer,view,proof,current_kind,size,minimum', _KIND_BOUNDARIES,
+    ids=['-'.join(map(str, case)) for case in _KIND_BOUNDARIES])
+async def test_v1_terminal_retains_qualified_source_files(
+        tmp_path, consumer, view, proof, current_kind, size, minimum):
+    await _terminal_source_case(tmp_path, consumer, view, proof, current_kind, size, minimum)
+
+
+@pytest.mark.parametrize('current_kind,expected_outputs', [('unknown', 0), ('explicit_other', 1)])
+async def test_terminal_size_rule_distinguishes_unknown_type_from_explicit_other(
+        tmp_path, current_kind, expected_outputs):
+    """VIDEO+osv 规则的适用性通过真实发布见证，不读取内部合并视图。"""
+    await _terminal_source_case(tmp_path, 'record', 'live', 'parsed', current_kind, 50, 51,
+        expected_outputs=expected_outputs)

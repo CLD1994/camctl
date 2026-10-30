@@ -27,7 +27,7 @@ from camctl.persistence.repositories.capture import CaptureRepository
 from camctl.devices.evidence import EvidenceContract
 from .test_record_file_completion_wait import WaitCatalog, _REGISTRY
 from .test_result_page_history import _entry
-from .test_result_file_fact_saves import FileFactSpy
+from .test_result_file_fact_saves import FileFactFault
 
 pytestmark = pytest.mark.asyncio
 
@@ -377,40 +377,46 @@ async def test_original_completion_key_rejects_changed_complete_request(tmp_path
 
 
 @pytest.mark.parametrize("mode", ["projection", "commit_before", "commit_after"])
-async def test_wait_file_completion_fault_keeps_original_request_and_key(tmp_path, mode):
+async def test_wait_file_completion_fault_keeps_original_request_and_key(tmp_path, monkeypatch, mode):
     owned, runtime, action_id, context, entry, driver, _, saved, file_id = await _page_world(tmp_path)
     case = result_case_for()
     class FaultHandoff(Exception):
         pass
 
-    class InterruptingSpy(FileFactSpy):
-        def save_file_completion(self, command, key, current):
-            receipt = super().save_file_completion(command, key, current)
-            if len(self.requests) == 1:
-                self.first_receipt = receipt
-                return replace(receipt, handoff_error=FaultHandoff())
-            return receipt
+    requests, connections = [], []
+    fault = None
+    save = CaptureRepository.save_file_completion
+    def observed(repository, command, key, current):
+        nonlocal fault
+        if command.file_id != file_id:
+            return save(repository, command, key, current)
+        requests.append((command, key))
+        connections.append(current.connection)
+        if len(requests) == 1:
+            fault = FileFactFault(current.connection, 'completion', mode)
+            receipt = save(repository, command, key, replace(current, connection=fault))
+            return replace(receipt, handoff_error=FaultHandoff())
+        return save(repository, command, key, current)
 
-    spy = InterruptingSpy("completion", mode)
-    runtime.capture = spy
+    monkeypatch.setattr(CaptureRepository, 'save_file_completion', observed)
     try:
         with pytest.raises(FaultHandoff):
-            await capture_handler("camera_record")(action_id, runtime)
-        assert spy.fault is not None and not spy.fault.armed
-        original, key = spy.requests[0]
+            await capture_handler('camera_record')(action_id, runtime)
+        assert fault is not None and not fault.armed
+        original, key = requests[0]
         assert original.basis == 3
+        assert original.occurred_at == saved.occurred_at
         assert original.result_page_event_id == saved.ref.event_id
-        assert original.stop_result_event_id == context["stop_result_event_id"]
-        before_reopen = row_facts(owned.connection, "device_files", file_id)["completion_evidence_json"]
-        assert before_reopen == (original.completion_evidence() if mode == "commit_after" else None)
-        factory = case.factory
+        assert original.stop_result_event_id == context['stop_result_event_id']
+        before_reopen = row_facts(owned.connection, 'device_files', file_id)['completion_evidence_json']
+        assert before_reopen == (original.completion_evidence() if mode == 'commit_after' else None)
+        factory, database = case.factory, runtime.database
         runtime = await case.reopen(owned, cold=False)
-        assert case.factory is factory
-        runtime.capture = spy
-        await capture_handler("camera_record")(action_id, runtime)
-        assert len(spy.requests) >= 2
-        assert all(command == original and request_key == key for command, request_key in spy.requests)
-        assert row_facts(owned.connection, "device_files", file_id)["completion_evidence_json"] == original.completion_evidence()
+        assert case.factory is factory and runtime.database is not database
+        await capture_handler('camera_record')(action_id, runtime)
+        assert len(requests) >= 2 and connections[0] is not connections[1]
+        assert all(command == original and request_key == key for command, request_key in requests)
+        assert row_facts(owned.connection, 'device_files', file_id)['completion_evidence_json'] == original.completion_evidence()
         driver.list_results.assert_awaited_once()
         case.stopper.stop.assert_awaited_once()
     finally:
