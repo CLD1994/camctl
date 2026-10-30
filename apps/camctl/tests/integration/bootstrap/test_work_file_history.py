@@ -1,10 +1,10 @@
 """真实自动维护的文件事实和继续位置沿原完整 H 恢复。"""
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from camctl.bootstrap.work_file_assembly import WorkFileRuntime
 from camctl.contracts.history_values import INITIAL_BOUNDARY
 from camctl.history.decoding import decode_event_row
 from camctl.history.events import branch_of, business_columns, event_type_name
@@ -12,14 +12,13 @@ from camctl.history.replay import EntityImage, RestoreSeed, restore
 from camctl.history.snapshots import SnapshotRef, decode_snapshot, prepare_snapshot
 from camctl.history.validators import ValidatedEvent
 from camctl.outputs import work_files
-from camctl.outputs.work_files import WorkFileLimits
 from camctl.persistence.executor import DbExecutor
 from camctl.persistence.repositories.history import HistoryRepository, SqliteSnapshotStore
 from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from camctl.persistence.transaction import row_facts
 
 from .test_output_binding_changes import environment  # noqa: F401
-from .test_work_file_runtime import _history_cleanup
+from .test_work_file_runtime import _execute, _history_cleanup
 
 pytestmark = pytest.mark.asyncio
 
@@ -73,10 +72,8 @@ async def test_work_file_results_and_cursor_match_three_history_paths(environmen
         def failed(_path):
             raise OSError("historical unlink refused")
         monkeypatch.setattr(work_files, "_remove_work_file", failed)
-    first = WorkFileRuntime(staging=Path(cfg.paths.staging), limits=WorkFileLimits(32, 1))
-    first.initialize(owned)
-    await first.flow(context)
-    await first.settle()
+    first = await _execute(cfg)
+    assert first.succeeded, first
     boundary = history.current_boundary()
     assert owned.connection.execute("SELECT cleanup_state FROM intermediate_files ORDER BY id").fetchall() == [
         (5 if first_failed else 4,), (2,)]
@@ -86,10 +83,8 @@ async def test_work_file_results_and_cursor_match_three_history_paths(environmen
     expected_runtime = _business({("runtime_state", 1): row_facts(owned.connection, "runtime_state", 1)})
     action_business = tuple(owned.connection.execute("SELECT id,status,cancel_requested FROM actions ORDER BY id"))
     monkeypatch.undo()
-    second = WorkFileRuntime(staging=Path(cfg.paths.staging), limits=WorkFileLimits(32, 2))
-    second.initialize(owned)
-    await second.flow(context)
-    await second.settle()
+    second = await _execute(replace(cfg, cleanup=replace(cfg.cleanup, work_file_limit_per_run=2)))
+    assert second.succeeded, second
     assert owned.connection.execute("SELECT cleanup_state FROM intermediate_files ORDER BY id").fetchall() == [(4,), (4,)]
     assert tuple(owned.connection.execute("SELECT id,status,cancel_requested FROM actions ORDER BY id")) == action_business
     for identity, seed, ref in zip(identities, seeds, refs):
