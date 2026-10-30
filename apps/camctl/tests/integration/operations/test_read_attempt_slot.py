@@ -15,7 +15,7 @@ from camctl.persistence.repositories.operations import BeginAttemptCommand, Oper
 from camctl.persistence.transaction import TransactionError, TransactionScope, commit_operation
 
 from ..outputs.test_grant_reuse import granted, read_request, read_targets, local_read
-from ..outputs.test_selection_reuse_boundaries import _ReadProbe
+from ..support.output_storage_cases import QueryProbe
 
 
 @pytest.fixture
@@ -195,12 +195,18 @@ def test_real_intent_transaction_requires_complete_current_read_facts(ready_read
 def test_read_source_query_failure_is_preserved_without_attempt(ready_read, failure):
     owned, command, _, prepared = ready_read
     table = "device_files" if command.source_device_file_id is not None else "intermediate_files"
-    probe = _ReadProbe(owned.connection, f"SELECT * FROM {table}", failure)
+    identity = command.source_device_file_id if command.source_device_file_id is not None else command.source_intermediate_file_id
+    columns = {row[1] for row in owned.connection.execute(f"PRAGMA table_info({table})")}
+    probe = QueryProbe(owned.connection,
+        lambda actual, reads, parameters: actual == columns and (table, 'id') in reads and parameters == (identity,),
+        failure=failure)
     before = tuple(owned.connection.iterdump())
     result = OperationRepository().begin_attempt(_intent(command, prepared), new_operation_key(),
                                                  replace(owned, connection=probe))
+    assert probe.matches == 1
     assert result.kind is DbOutcomeKind.ROLLED_BACK, result
     assert result.error is probe.error
     for cursor in probe.cursors:
         cursor.close.assert_called_once_with()
     assert tuple(owned.connection.iterdump()) == before
+    assert not owned.connection.in_transaction

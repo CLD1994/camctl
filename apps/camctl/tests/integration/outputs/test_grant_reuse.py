@@ -4,7 +4,6 @@ from contextlib import closing
 from dataclasses import replace
 from decimal import Decimal
 import json
-import sqlite3
 
 import pytest
 
@@ -19,7 +18,7 @@ from camctl.persistence.transaction import TransactionError
 from .test_read_associations import read_targets, _command
 from .test_local_read import local_read
 from .test_read_rejections import target, _availability
-from ..operations.test_result_reuse import _FaultConnection
+from ..support.output_storage_cases import QueryProbe
 
 
 @pytest.fixture(params=["device", "host", "internal"])
@@ -231,13 +230,21 @@ def test_original_grant_still_requires_fixed_current_relations(granted, fault):
 
 
 def test_original_group_read_error_does_not_create_new_grant(granted):
-    owned, command, key, _ = granted
+    owned, command, key, first = granted
     before = tuple(owned.connection.iterdump())
-    fault = replace(owned, connection=_FaultConnection(owned.connection, "SELECT id, transaction_id, event_type"))
-    result = OutputsRepository().grant_file(command, key, fault)
+    transaction_id, = owned.connection.execute(
+        'SELECT id FROM history_transactions WHERE operation_key=?', (str(key),)).fetchone()
+    probe = QueryProbe(owned.connection, lambda columns, reads, parameters:
+        {'id', 'transaction_id', 'event_type', 'body_json'} <= columns
+        and ('history_events', 'transaction_id') in reads and parameters[0] == transaction_id,
+        failure='execute')
+    result = OutputsRepository().grant_file(command, key, replace(owned, connection=probe))
+    assert probe.matches == 1
     assert result.kind is DbOutcomeKind.ROLLED_BACK
-    assert isinstance(result.error, sqlite3.OperationalError), result.error
+    assert result.error is probe.error
     assert tuple(owned.connection.iterdump()) == before
+    assert not owned.connection.in_transaction
+    assert _reuse(owned, command, key).value == first
 
 
 def test_original_snapshot_is_not_replaced_by_later_known_checksum(granted):
