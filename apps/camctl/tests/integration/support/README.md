@@ -10,6 +10,8 @@
 
 拍摄功能沿 `session_capture_assembly`、`capture_flow` 及实际会话推进；完整会话通过 `build_runtime`、`execute_command`、`close_runtime` 执行。驱动、文件与时钟在已有端口提供受契约约束的替身。不能在测试中直接拼装 `CaptureRuntime`、调用私有推进或修改待保存集合来替代业务过程。
 
+共享录制准备 `consumer_world` 可以接收测试持有的 `CaseClock`，在创建正式工厂前传入时间回调，后续只推进这个测试对象。`start=True` 的自定义工厂或 `runtime_options` 时间回调须与准备函数使用同一个时钟；不要让准备函数推进一个对象、实际工厂却读取另一个固定回调。`start=False` 仍按原方式调用严格的 `runtime_factory(owned, driver=...)`；该回调可以返回 `None` 作为尚未装配的占位，`consumer_world` 自身仍返回原四元组。录像、取消及延时摄影分别保持各自 UTC、单调钟和真实 worker 重开的原边界，不能统一推进。
+
 报告生成文件、发布子模块和完整报告会话分别使用所属正式入口。现有生产会话通过 `report_flow`、报告 worker 和文件发布链执行，未被生产装配使用的通用辅助函数不能代替这些流程的验证。
 
 `apps/camctl/tests/support/business_database.py` 的内联执行器服务局部单元测试，不提供真实线程组合。功能集成测试使用本目录的真实数据库支持；取消、未知提交、线程结束及文件生命周期继续在真实边界验证。
