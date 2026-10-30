@@ -1,0 +1,63 @@
+{
+  "scope": "历史 SQLite 故障边界、清理 QUERY 合法前态、Action6 媒体正式装配",
+  "integrated_test_commit": "f0f353a9a503e5a12adf1a22eabfee70bcc2b9ef",
+  "payloads": [
+    {
+      "file": "history-io-ports.tar.gz",
+      "sha256": "e57525f794406ebb7898e15adc5ce87f45376f6e80588a764971b1b9d79f1fb7",
+      "bytes": 3562,
+      "members": 11,
+      "tested_author_commits": [
+        "f74607cea4f397cf9fbd1b3b94e4fc996b742503"
+      ],
+      "passing_instances_in_selected_scope": 6,
+      "result": "6 个定向实例通过；入口 3.431 秒，pytest 2.73 秒；首次连接数量假设错误的日志保留。",
+      "boundary": "仅保存顶层命令、补丁、日志和 XML；不归档 pytest 临时数据库。"
+    },
+    {
+      "file": "cleanup-query-preconditions.tar.gz",
+      "sha256": "41b3f437f2e367d13b2ca79ddbbec19304259e428877cf8cd7d1f11a96eb5997",
+      "bytes": 6853,
+      "members": 11,
+      "tested_author_commits": [
+        "3f7f82c3e7f385b04b7cb7970ddbac559a065dc0"
+      ],
+      "passing_instances_in_selected_scope": 25,
+      "result": "25 个定向实例通过；入口 11.025 秒，pytest 10.17 秒；首次 24 通过、1 失败保留。",
+      "boundary": "仅保存顶层命令、补丁、日志和 XML；不归档 pytest 临时数据库。"
+    },
+    {
+      "file": "action6-media-ports.tar.gz",
+      "sha256": "f2bf6d8363599cddeb00d290dab1d2e4eb51f67cd2357213277b51bd784d9aa7",
+      "bytes": 15423,
+      "members": 40,
+      "tested_author_commits": [
+        "94f7e2ca8a50cfd2ce04de7f1f0e5659fbc15ade",
+        "070db6c3e1ccbe9d745fb9bf2d0da74ca85aa907"
+      ],
+      "passing_instances_in_selected_scope": 48,
+      "result": "分批文件结果合计 48 通过；最后修正版仅复验生命周期 9 项，pytest 3.91 秒。不是同源单轮 48 项。",
+      "boundary": "仅保存顶层命令、补丁、日志和 XML；不归档 pytest 临时数据库。"
+    }
+  ],
+  "independent_review": {
+    "history": {
+      "reviewer": "/root/review_repository_boundary_finish",
+      "result": "接受；核对实际 diff、派生连接与原异常、空页续读、连接关闭、临时文件清理及业务库不变；未重跑。"
+    },
+    "cleanup": {
+      "reviewer": "/root/review_repository_boundary_finish",
+      "result": "接受相机 QUERY 合法前态修改；核对实际 C1 到 C2、可靠保存后未派发断点、原票据、原键及三秒等待；主机 QUERY 等未迁移范围保留；未重跑。"
+    },
+    "action6": {
+      "reviewer": "/root/capture_core_continue",
+      "result": "接受两提交组合；初次评审发现受限工厂丢失 STOP 与目录声明，已修正并移除无必要的十六个集合共享。核对实际工具端口、冷恢复 worker、offset、预算、原票据和保存断言及修正版九项结果；未重跑。"
+    }
+  },
+  "limits": [
+    "各组来自独立工作树和相应补丁，不相加为统一源码完整验收。",
+    "Action6 原始 meta 记录基线 HEAD、命令、退出码和整秒耗时；补丁另存，不声称逐轮具备独立源码指纹或 PID。",
+    "未执行全部 camctl、根 Python/Node 或容量回归；未测整体提速。",
+    "本批只修改测试与相关文档，生产问题交接状态不因局部通过而关闭。"
+  ]
+}
