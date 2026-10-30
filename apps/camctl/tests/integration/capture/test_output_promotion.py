@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
@@ -261,24 +262,48 @@ def test_guard_rejects_promotion_without_registration(tmp_path: Path) -> None:
         owned.connection.close()
 
 
+async def _successful_osv_repair(tmp_path):
+    """沿真实读取与工具执行保存修复结果，再核对实际成品身份和字节。"""
+    from camctl.capture.media_flow import load_processing_status, run_recording_media
+    from .test_osv_input_failure import prepared_input
+
+    owned, _runtime, flow, source_id, _source, tools, _entry = await prepared_input(
+        tmp_path, False, "valid")
+    action_id, processing_id = owned.connection.execute(
+        "SELECT action_id,id FROM recording_processing WHERE source_device_file_id=?",
+        (source_id,)).fetchone()
+    tools.result = "success"
+    tools.refresh()
+    await run_recording_media(flow, action_id, processing_id, source_id, target_extension="osv")
+    await run_recording_media(flow, action_id, processing_id, source_id, target_extension="osv")
+    status = load_processing_status(owned, processing_id)
+    assert status.repair_state == 5
+    output_id = status.repair_output_file_id
+    relative, size, sha256 = owned.connection.execute(
+        "SELECT relative_path,size_bytes,sha256 FROM intermediate_files WHERE id=? AND owner_action_id=?",
+        (output_id, action_id)).fetchone()
+    content = (tmp_path / "staging" / relative).read_bytes()
+    assert size == len(content) and size > 0
+    assert sha256 == hashlib.sha256(content).hexdigest()
+    assert tools.repairs == 1
+    return owned, action_id, source_id, output_id, sha256, tools
+
+
 @pytest.mark.asyncio
 async def test_osv_repaired_mp4_has_independent_format_metadata(tmp_path: Path) -> None:
-    from .test_osv_success_proof import prepared_repair
-    from camctl.capture.processing import RepairSuccess
-    owned, output_id, source, probe = await prepared_repair(tmp_path)
+    owned, action_id, source_id, output_id, sha256, tools = await _successful_osv_repair(tmp_path)
     try:
-        source_id = owned.connection.execute("SELECT source_device_file_id FROM recording_processing WHERE id=41").fetchone()[0]
-        saved = CaptureRepository().complete_repair_output(
-            RepairSuccess(41, output_id, 2048, "a" * 64, _NOW, output_probe=probe),
+        repaired = replace(_repaired_draft(output_id, batch=source_id), sha256=sha256)
+        outcome = CaptureRepository().finish_capture(
+            _finish(action_id, drafts=(repaired, _original_draft(source_id))),
             new_operation_key(), owned)
-        assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
-        outcome = _finish_with_repair(owned, drafts=(
-            _repaired_draft(output_id,batch=source_id),_original_draft(source_id)))
         assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
         repaired_id, original_id = outcome.value.output_ids
         assert _row(owned, "SELECT original_name,media_type FROM outputs WHERE id=?",
             repaired_id) == ("clip.mp4", "video/mp4")
         assert _row(owned, "SELECT original_name,media_type FROM outputs WHERE id=?",
             original_id) == ("clip.OSV", None)
+        assert repaired_id != original_id
+        assert tools.repairs == 1
     finally:
         owned.connection.close()

@@ -7,7 +7,6 @@ import pytest
 
 from ..support.capture_media_cases import media_cases  # noqa: F401
 
-from camctl.capture.processing import RepairSuccess
 from camctl.contracts.json_values import parse_exact_json
 from camctl.contracts.values import new_operation_key
 from camctl.persistence.models import DbOutcomeKind
@@ -15,24 +14,21 @@ from camctl.persistence.repositories.capture import CaptureRepository, FinishDis
 from camctl.persistence.runtime import open_existing, DbOpenMode, DbConfig
 from camctl.persistence.transaction import encode_json_value
 
-from .test_osv_success_proof import prepared_repair, alter_source_history
-from .test_output_promotion import _repaired_draft, promotion_environment
+from .test_osv_success_proof import alter_source_history
+from .test_output_promotion import _repaired_draft, promotion_environment, _successful_osv_repair
 from .test_recording_finish import _finish, _original_draft
 from .test_recording_media_link import _NOW
 
 
 async def promoted(tmp_path):
-    owned, output_id, source, probe = await prepared_repair(tmp_path)
-    saved = CaptureRepository().complete_repair_output(RepairSuccess(41,output_id,2048,
-        "a"*64,_NOW+200,output_probe=probe),new_operation_key(),owned)
-    assert saved.kind is DbOutcomeKind.COMPLETED, saved.error
-    source_id = owned.connection.execute("SELECT source_device_file_id FROM recording_processing WHERE id=41").fetchone()[0]
-    command = _finish(drafts=(_repaired_draft(output_id,batch=source_id),_original_draft(source_id)))
+    owned, action_id, source_id, output_id, sha256, tools = await _successful_osv_repair(tmp_path)
+    repaired = replace(_repaired_draft(output_id, batch=source_id), sha256=sha256)
+    command = _finish(action_id, drafts=(repaired, _original_draft(source_id)))
     key = new_operation_key()
     outcome = CaptureRepository().finish_capture(command,key,owned)
     assert outcome.kind is DbOutcomeKind.COMPLETED, outcome.error
     assert owned.connection.execute("SELECT retention_state FROM intermediate_files WHERE id=?",(output_id,)).fetchone() == (3,)
-    return owned, command, key, outcome.value
+    return owned, command, key, outcome.value, tools
 
 
 def reopen(owned):
@@ -46,7 +42,8 @@ def reopen(owned):
 @pytest.mark.parametrize("reopened",[False,True])
 async def test_qualified_promoted_osv_recovers_without_writes_and_pins_original_boundary(tmp_path,monkeypatch,key_kind,reopened):
     from camctl.persistence.repositories import capture
-    owned, command, original_key, original = await promoted(tmp_path)
+    owned, command, original_key, original, tools = await promoted(tmp_path)
+    original_tool_calls = tuple(tools.calls)
     if reopened: owned = reopen(owned)
     try:
         boundaries = []
@@ -67,6 +64,8 @@ async def test_qualified_promoted_osv_recovers_without_writes_and_pins_original_
         assert outcome.value.plan_status == original.plan_status
         assert tuple(owned.connection.iterdump()) == before
         assert boundaries == [event_id]
+        assert tuple(tools.calls) == original_tool_calls
+        assert tools.repairs == 1
     finally:
         owned.connection.close()
 
@@ -100,7 +99,8 @@ def alter_saved_proof(owned,fault):
 @pytest.mark.parametrize("key_kind",["original","new"])
 @pytest.mark.parametrize("fault",["source_missing","source_short","output_missing","output_short","output_wrong","wrong_start"])
 async def test_promoted_osv_recovery_rejects_unqualified_original_proof_after_reopen(tmp_path,key_kind,fault):
-    owned,command,original_key,original = await promoted(tmp_path)
+    owned,command,original_key,original,tools = await promoted(tmp_path)
+    original_tool_calls = tuple(tools.calls)
     alter_saved_proof(owned,fault)
     owned = reopen(owned)
     try:
@@ -110,6 +110,8 @@ async def test_promoted_osv_recovery_rejects_unqualified_original_proof_after_re
         assert tuple(owned.connection.iterdump()) == before
         assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (3,)
         assert tuple(row[0] for row in owned.connection.execute("SELECT id FROM outputs ORDER BY id")) == tuple(sorted(original.output_ids))
+        assert tuple(tools.calls) == original_tool_calls
+        assert tools.repairs == 1
     finally:
         owned.connection.close()
 
