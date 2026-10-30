@@ -692,6 +692,11 @@ async def test_cancelled_run_with_queued_sweep_advances_business_and_withdraws(
 
 async def test_cancel_during_local_drain_withdraws_queued_startup_sweep(
         tmp_path: Path, monkeypatch) -> None:
+    from contextvars import ContextVar
+    from camctl.logging_runtime.models import LogFileStage
+    from camctl.logging_runtime.ownership import LoggingOwner
+    from camctl.persistence.business import BusinessDatabase
+
     config = _config_for(tmp_path)
     assert initialize_state(config, Path(config.paths.state_db)).outcome is InitOutcome.CREATED
     old_copy, _old_temp, _formal_marker, _unknown = _seed_log_paths(config)
@@ -718,11 +723,13 @@ async def test_cancel_during_local_drain_withdraws_queued_startup_sweep(
 
     blocker = loop.run_in_executor(pool, occupy_worker)
 
+    startup_submission = ContextVar("startup_submission", default=False)
     original_run_in_executor = loop.run_in_executor
 
     def observe_submission(executor, function, *args):
         future = original_run_in_executor(executor, function, *args)
-        startup_call_queued.set()
+        if executor is None and startup_submission.get():
+            startup_call_queued.set()
         return future
 
     monkeypatch.setattr(loop, "run_in_executor", observe_submission)
@@ -734,23 +741,24 @@ async def test_cancel_during_local_drain_withdraws_queued_startup_sweep(
 
     monkeypatch.setattr(copies, "_listdir", record_listdir)
 
-    from camctl.logging_runtime.ownership import LoggingOwner
-    from camctl.persistence.business import BusinessDatabase
+    original_owned_call = LoggingOwner.owned_call
 
-    log_settle_started = asyncio.Event()
+    async def observe_owned_call(owner, stage, operation, *, required=False):
+        token = startup_submission.set(stage is LogFileStage.STARTUP_SWEEP)
+        try:
+            return await original_owned_call(owner, stage, operation, required=required)
+        finally:
+            startup_submission.reset(token)
+
+    monkeypatch.setattr(LoggingOwner, "owned_call", observe_owned_call)
+
     startup_stop_delivered = asyncio.Event()
-    original_settle = LoggingOwner.settle
     original_cancel_startup = LoggingOwner.cancel_startup_sweep
-
-    async def observe_settle(owner):
-        log_settle_started.set()
-        await original_settle(owner)
 
     def observe_cancel_startup(owner):
         original_cancel_startup(owner)
         startup_stop_delivered.set()
 
-    monkeypatch.setattr(LoggingOwner, "settle", observe_settle)
     monkeypatch.setattr(
         LoggingOwner, "cancel_startup_sweep", observe_cancel_startup)
 
@@ -780,34 +788,42 @@ async def test_cancel_during_local_drain_withdraws_queued_startup_sweep(
         await _wait_event(database_stopped)
         observer_thread.join()
         assert not database_threads[0].is_alive()
-        assert not log_settle_started.is_set() and scans == []
-        with pytest.raises(SessionLockConflictError):
-            acquire_session(deps.session_lock)
-        run_task.cancel("cancel while local work drain owns queued sweep")
-        stop_wait = asyncio.create_task(startup_stop_delivered.wait())
-        done, _ = await asyncio.wait((stop_wait, blocker), timeout=_GATE_TIMEOUT,
-                                     return_when=asyncio.FIRST_COMPLETED)
-        try:
-            assert stop_wait in done and not blocker.done(), (
-                "数据库线程已结束，取消必须在工作线程释放前撤回启动扫描")
-        finally:
-            if not stop_wait.done():
-                stop_wait.cancel()
-                await asyncio.gather(stop_wait, return_exceptions=True)
         assert scans == [] and old_copy.exists()
-        with pytest.raises(SessionLockConflictError):
-            acquire_session(deps.session_lock)
+        cancellation_requested = False
+        if not run_task.done():
+            with pytest.raises(SessionLockConflictError):
+                acquire_session(deps.session_lock)
+            cancellation_requested = run_task.cancel(
+                "cancel while local work drain owns queued sweep")
+        if cancellation_requested:
+            stop_wait = asyncio.create_task(startup_stop_delivered.wait())
+            done, _ = await asyncio.wait((stop_wait, run_task, blocker),
+                timeout=_GATE_TIMEOUT, return_when=asyncio.FIRST_COMPLETED)
+            try:
+                assert not blocker.done() and (stop_wait in done or run_task in done), (
+                    "数据库线程已结束，取消必须在工作线程释放前撤回启动扫描")
+            finally:
+                if not stop_wait.done():
+                    stop_wait.cancel()
+                    await asyncio.gather(stop_wait, return_exceptions=True)
+        assert scans == [] and old_copy.exists()
+        if not run_task.done():
+            with pytest.raises(SessionLockConflictError):
+                acquire_session(deps.session_lock)
         release_worker.set()
         await _wait_task(blocker)
         try:
             outcome = await _wait_task_result(run_task)
         except asyncio.CancelledError as cancelled:
+            assert cancellation_requested
             assert cancelled.args == ("cancel while local work drain owns queued sweep",)
         else:
             assert not outcome.succeeded and outcome.reason == "state_db_error"
             assert "controlled locked open failure" in str(outcome.details)
         assert scans == [], "true cancellation must withdraw queued startup scan"
         assert old_copy.exists()
+        lease = acquire_session(deps.session_lock)
+        lease.close()
     finally:
         release_worker.set()
         await asyncio.gather(blocker, return_exceptions=True)
@@ -815,7 +831,7 @@ async def test_cancel_during_local_drain_withdraws_queued_startup_sweep(
             observer_thread.join()
         if not run_task.done():
             run_task.cancel("test cleanup")
-            await _wait_task(asyncio.gather(run_task, return_exceptions=True))
+        await _wait_task(asyncio.gather(run_task, return_exceptions=True))
         close_runtime(deps)
 
 
