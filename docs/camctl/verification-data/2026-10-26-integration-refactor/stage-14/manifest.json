@@ -1,0 +1,2744 @@
+{
+  "schema": 1,
+  "created_utc": "2026-10-30T14:26:11+00:00",
+  "scope": "只归档 B 共享准备端口的终态证据和 root 指定的2GiB容量补验；不运行测试，不更改生产或测试源码。",
+  "workspace": {
+    "source_repo": "/opt/devcontainer/.codex/worktrees/de38/camctl",
+    "archive_worktree": "/tmp/camctl-resume-20261030/archive-stage14",
+    "branch": "docs/resume-evidence-stage14-20261030",
+    "base_head": "47682d1c3344f5b7720c7c0ac7f32278960f4761"
+  },
+  "source_snapshots": [
+    {
+      "id": "base-47682",
+      "git_head": "47682d1c3344f5b7720c7c0ac7f32278960f4761",
+      "source_fingerprint_sha256": "19afdec56f6905c44ed65a7d1f2cbba0165e4e69f93e89b502b2879c545a805e",
+      "run_ids": [
+        "baseline",
+        "baseline-boundaries",
+        "baseline-identity",
+        "baseline-bootstrap-failures",
+        "old-read-single"
+      ],
+      "exact_saved_source_files": {
+        "apps/camctl/tests/integration/capture/result_consumer_fixtures.py": "e18eccbb4521cf9259e722c797dc1739422e0eea2fff3bcbf987fbbd80f0f814",
+        "apps/camctl/tests/integration/history/test_record_segment_history.py": "e62df1d24df4bbd55b18e3dbafe42acc2d6988cc8bd279288c40527bfdd505c5"
+      },
+      "meaning": "旧侧运行收据记录的集合散列；另保存 base 下两个变更目标的精确 Git 字节。"
+    },
+    {
+      "id": "early-35ac",
+      "git_head": "47682d1c3344f5b7720c7c0ac7f32278960f4761",
+      "source_fingerprint_sha256": "35ac3e6ca3fbdb1b6104a74ef476db91e758538d64c429f84bfc0a7ccb5e4b37",
+      "run_ids": [
+        "narrow",
+        "new-boundaries",
+        "new-identity"
+      ],
+      "exact_test_source_bytes_available": false,
+      "meaning": "早期新源对照的收据散列；证据根没有该快照的目标源码字节，e652 后来源码不可替代。"
+    },
+    {
+      "id": "final-e652-source-90d",
+      "git_head_recorded_by_full_run": "47682d1c3344f5b7720c7c0ac7f32278960f4761",
+      "source_fingerprint_sha256": "90d71ff85362a9f435219b56f579bd0a9f53ee4e0aabf7c487a1f1bc4310d544",
+      "commit_containing_final_two_files": "e65200e6650effa5a71ef0cf99a9d0688d939b53",
+      "run_ids": [
+        "capture",
+        "reporting",
+        "persistence",
+        "bootstrap",
+        "history",
+        "new-read-single",
+        "receipt-probe"
+      ],
+      "exact_saved_changed_files": {
+        "apps/camctl/tests/integration/capture/result_consumer_fixtures.py": {
+          "base_sha256": "e18eccbb4521cf9259e722c797dc1739422e0eea2fff3bcbf987fbbd80f0f814",
+          "final_sha256": "3c3dc36b920fbc52b7b7da9914420e84d2c99bb2f139d616b4d7520010f9c9d9",
+          "base_bytes": 15246,
+          "final_bytes": 15870
+        },
+        "apps/camctl/tests/integration/history/test_record_segment_history.py": {
+          "base_sha256": "e62df1d24df4bbd55b18e3dbafe42acc2d6988cc8bd279288c40527bfdd505c5",
+          "final_sha256": "183793c7d7e0852770dc2207106cd827125ea8f8fff3be858a14595ed0cb55b0",
+          "base_bytes": 44476,
+          "final_bytes": 44973
+        }
+      },
+      "meaning": "五目录运行收据 HEAD 字段仍是 base，但实际集合散列为90d；最终差异与e652 Git变更相符，逐项结果不混成单次完整回归。"
+    },
+    {
+      "id": "capacity-e652",
+      "git_head": "e65200e6650effa5a71ef0cf99a9d0688d939b53",
+      "dirty": "",
+      "source_manifest_sha256": "38f1d601737dcd4b16d8de7f884cc3a04e18e77ac2d9ce190ca5f0cd7c693f3b",
+      "actual_cwd": "/tmp/camctl-resume-20261030/consumer-preparation-ports",
+      "saved_execution_sources": {
+        "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py": "9f7fa1744740da3fa7fa496eb16db0b5a61a12b2583c02a891ea6836766b4c09",
+        "apps/camctl/tests/integration/persistence/segment_capacity_worker.py": "97bf4069ce7d8478856c53084acd61fe07428973c6cfe92eabf58ad530e7ad15",
+        "scripts/run-memory-budget.py": "dd043580c0f4c177119484661a3db63e8ced746b6412d1a16288ceaead7a50d9"
+      },
+      "meaning": "容量收据中的执行工作目录为作者 worktree；目标测试、worker和启动脚本散列均由source-manifest核对到 e652 Git对象。"
+    }
+  ],
+  "source_change": {
+    "base_head": "47682d1c3344f5b7720c7c0ac7f32278960f4761",
+    "final_commit": "e65200e6650effa5a71ef0cf99a9d0688d939b53",
+    "changed_paths": [
+      "apps/camctl/tests/integration/capture/result_consumer_fixtures.py",
+      "apps/camctl/tests/integration/history/test_record_segment_history.py"
+    ],
+    "file_digests": {
+      "apps/camctl/tests/integration/capture/result_consumer_fixtures.py": {
+        "base_sha256": "e18eccbb4521cf9259e722c797dc1739422e0eea2fff3bcbf987fbbd80f0f814",
+        "final_sha256": "3c3dc36b920fbc52b7b7da9914420e84d2c99bb2f139d616b4d7520010f9c9d9",
+        "base_bytes": 15246,
+        "final_bytes": 15870
+      },
+      "apps/camctl/tests/integration/history/test_record_segment_history.py": {
+        "base_sha256": "e62df1d24df4bbd55b18e3dbafe42acc2d6988cc8bd279288c40527bfdd505c5",
+        "final_sha256": "183793c7d7e0852770dc2207106cd827125ea8f8fff3be858a14595ed0cb55b0",
+        "base_bytes": 44476,
+        "final_bytes": 44973
+      }
+    },
+    "change_diff_artifact": "preparation-ports/change.diff.gz",
+    "change_diff_source_sha256": "845d0ee3ed114ae2233714f63cf8fbe0e362801a963c34c22816b798c4b9c3bc",
+    "matches_git_diff_base_to_e652_byte_for_byte": true
+  },
+  "run_groups": [
+    {
+      "id": "baseline",
+      "label": "六项基线准备对照",
+      "source_git_head": "47682d1c3344f5b7720c7c0ac7f32278960f4761",
+      "source_snapshot_sha256": "19afdec56f6905c44ed65a7d1f2cbba0165e4e69f93e89b502b2879c545a805e",
+      "source_sha256_before": "19afdec56f6905c44ed65a7d1f2cbba0165e4e69f93e89b502b2879c545a805e",
+      "source_sha256_after": "19afdec56f6905c44ed65a7d1f2cbba0165e4e69f93e89b502b2879c545a805e",
+      "source_stable_before_after": true,
+      "pid": 26997,
+      "exit_code": 0,
+      "wall_seconds": 2.0570558780018473,
+      "pytest_tests": 6,
+      "passed": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "suite_time_seconds": 1.774,
+      "testcase_time_seconds_sum": 1.042,
+      "pytest_log_summary": "6 passed in 1.77s",
+      "target_paths_or_nodes": [
+        "/tmp/camctl-resume-20261030/evidence-preparation-ports/test_preflight.py"
+      ],
+      "failure_identities": [],
+      "receipt_artifact": "preparation-ports/baseline.json.gz",
+      "log_artifact": "preparation-ports/baseline.log.gz",
+      "junit_artifact": "preparation-ports/baseline.xml.gz"
+    },
+    {
+      "id": "narrow",
+      "label": "六项早期新源窄对照",
+      "source_git_head": "47682d1c3344f5b7720c7c0ac7f32278960f4761",
+      "source_snapshot_sha256": "35ac3e6ca3fbdb1b6104a74ef476db91e758538d64c429f84bfc0a7ccb5e4b37",
+      "source_sha256_before": "35ac3e6ca3fbdb1b6104a74ef476db91e758538d64c429f84bfc0a7ccb5e4b37",
+      "source_sha256_after": "35ac3e6ca3fbdb1b6104a74ef476db91e758538d64c429f84bfc0a7ccb5e4b37",
+      "source_stable_before_after": true,
+      "pid": 27247,
+      "exit_code": 0,
+      "wall_seconds": 2.054893958993489,
+      "pytest_tests": 6,
+      "passed": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "suite_time_seconds": 1.78,
+      "testcase_time_seconds_sum": 1.072,
+      "pytest_log_summary": "6 passed in 1.78s",
+      "target_paths_or_nodes": [
+        "/tmp/camctl-resume-20261030/evidence-preparation-ports/test_preflight.py"
+      ],
+      "failure_identities": [],
+      "receipt_artifact": "preparation-ports/narrow.json.gz",
+      "log_artifact": "preparation-ports/narrow.log.gz",
+      "junit_artifact": "preparation-ports/narrow.xml.gz"
+    },
+    {
+      "id": "baseline-boundaries",
+      "label": "31项旧源边界对照",
+      "source_git_head": "47682d1c3344f5b7720c7c0ac7f32278960f4761",
+      "source_snapshot_sha256": "19afdec56f6905c44ed65a7d1f2cbba0165e4e69f93e89b502b2879c545a805e",
+      "source_sha256_before": "19afdec56f6905c44ed65a7d1f2cbba0165e4e69f93e89b502b2879c545a805e",
+      "source_sha256_after": "19afdec56f6905c44ed65a7d1f2cbba0165e4e69f93e89b502b2879c545a805e",
+      "source_stable_before_after": true,
+      "pid": 27680,
+      "exit_code": 0,
+      "wall_seconds": 10.698377426000661,
+      "pytest_tests": 31,
+      "passed": 31,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "suite_time_seconds": 10.32,
+      "testcase_time_seconds_sum": 8.118,
+      "pytest_log_summary": "31 passed in 10.32s",
+      "target_paths_or_nodes": [
+        "apps/camctl/tests/integration/capture/test_natural_wait_retention.py::test_wait_repository_uses_same_sent_semantics_as_completion_context",
+        "apps/camctl/tests/integration/capture/test_natural_wait_source_transitions.py::test_real_stop_source_keeps_independent_wait_even_when_natural_wait_exists",
+        "apps/camctl/tests/integration/capture/test_action6_segmented_recovery.py::test_action6_complete_short_sequence_reports_confirmed_short",
+        "apps/camctl/tests/integration/capture/test_closed_result_local_consumption.py::test_closed_unconfirmed_keeps_files_without_device_access"
+      ],
+      "failure_identities": [],
+      "receipt_artifact": "preparation-ports/baseline-boundaries.json.gz",
+      "log_artifact": "preparation-ports/baseline-boundaries.log.gz",
+      "junit_artifact": "preparation-ports/baseline-boundaries.xml.gz"
+    },
+    {
+      "id": "new-boundaries",
+      "label": "31项早期新源边界对照",
+      "source_git_head": "47682d1c3344f5b7720c7c0ac7f32278960f4761",
+      "source_snapshot_sha256": "35ac3e6ca3fbdb1b6104a74ef476db91e758538d64c429f84bfc0a7ccb5e4b37",
+      "source_sha256_before": "35ac3e6ca3fbdb1b6104a74ef476db91e758538d64c429f84bfc0a7ccb5e4b37",
+      "source_sha256_after": "35ac3e6ca3fbdb1b6104a74ef476db91e758538d64c429f84bfc0a7ccb5e4b37",
+      "source_stable_before_after": true,
+      "pid": 27893,
+      "exit_code": 0,
+      "wall_seconds": 10.85585450999497,
+      "pytest_tests": 31,
+      "passed": 31,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "suite_time_seconds": 10.48,
+      "testcase_time_seconds_sum": 8.378,
+      "pytest_log_summary": "31 passed in 10.48s",
+      "target_paths_or_nodes": [
+        "apps/camctl/tests/integration/capture/test_natural_wait_retention.py::test_wait_repository_uses_same_sent_semantics_as_completion_context",
+        "apps/camctl/tests/integration/capture/test_natural_wait_source_transitions.py::test_real_stop_source_keeps_independent_wait_even_when_natural_wait_exists",
+        "apps/camctl/tests/integration/capture/test_action6_segmented_recovery.py::test_action6_complete_short_sequence_reports_confirmed_short",
+        "apps/camctl/tests/integration/capture/test_closed_result_local_consumption.py::test_closed_unconfirmed_keeps_files_without_device_access"
+      ],
+      "failure_identities": [],
+      "receipt_artifact": "preparation-ports/new-boundaries.json.gz",
+      "log_artifact": "preparation-ports/new-boundaries.log.gz",
+      "junit_artifact": "preparation-ports/new-boundaries.xml.gz"
+    },
+    {
+      "id": "baseline-identity",
+      "label": "旧源对象身份单项",
+      "source_git_head": "47682d1c3344f5b7720c7c0ac7f32278960f4761",
+      "source_snapshot_sha256": "19afdec56f6905c44ed65a7d1f2cbba0165e4e69f93e89b502b2879c545a805e",
+      "source_sha256_before": "19afdec56f6905c44ed65a7d1f2cbba0165e4e69f93e89b502b2879c545a805e",
+      "source_sha256_after": "19afdec56f6905c44ed65a7d1f2cbba0165e4e69f93e89b502b2879c545a805e",
+      "source_stable_before_after": true,
+      "pid": 27592,
+      "exit_code": 0,
+      "wall_seconds": 0.7736003440077184,
+      "pytest_tests": 1,
+      "passed": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "suite_time_seconds": 0.492,
+      "testcase_time_seconds_sum": 0.001,
+      "pytest_log_summary": "1 passed in 0.49s",
+      "target_paths_or_nodes": [
+        "/tmp/camctl-resume-20261030/evidence-preparation-ports/test_identity_probe.py"
+      ],
+      "failure_identities": [],
+      "receipt_artifact": "preparation-ports/baseline-identity.json.gz",
+      "log_artifact": "preparation-ports/baseline-identity.log.gz",
+      "junit_artifact": "preparation-ports/baseline-identity.xml.gz"
+    },
+    {
+      "id": "new-identity",
+      "label": "早期新源对象身份单项",
+      "source_git_head": "47682d1c3344f5b7720c7c0ac7f32278960f4761",
+      "source_snapshot_sha256": "35ac3e6ca3fbdb1b6104a74ef476db91e758538d64c429f84bfc0a7ccb5e4b37",
+      "source_sha256_before": "35ac3e6ca3fbdb1b6104a74ef476db91e758538d64c429f84bfc0a7ccb5e4b37",
+      "source_sha256_after": "35ac3e6ca3fbdb1b6104a74ef476db91e758538d64c429f84bfc0a7ccb5e4b37",
+      "source_stable_before_after": true,
+      "pid": 27624,
+      "exit_code": 0,
+      "wall_seconds": 0.758874391001882,
+      "pytest_tests": 1,
+      "passed": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "suite_time_seconds": 0.484,
+      "testcase_time_seconds_sum": 0.002,
+      "pytest_log_summary": "1 passed in 0.48s",
+      "target_paths_or_nodes": [
+        "/tmp/camctl-resume-20261030/evidence-preparation-ports/test_identity_probe.py"
+      ],
+      "failure_identities": [],
+      "receipt_artifact": "preparation-ports/new-identity.json.gz",
+      "log_artifact": "preparation-ports/new-identity.log.gz",
+      "junit_artifact": "preparation-ports/new-identity.xml.gz"
+    },
+    {
+      "id": "baseline-bootstrap-failures",
+      "label": "旧源 bootstrap 失败对照",
+      "source_git_head": "47682d1c3344f5b7720c7c0ac7f32278960f4761",
+      "source_snapshot_sha256": "19afdec56f6905c44ed65a7d1f2cbba0165e4e69f93e89b502b2879c545a805e",
+      "source_sha256_before": "19afdec56f6905c44ed65a7d1f2cbba0165e4e69f93e89b502b2879c545a805e",
+      "source_sha256_after": "19afdec56f6905c44ed65a7d1f2cbba0165e4e69f93e89b502b2879c545a805e",
+      "source_stable_before_after": true,
+      "pid": 34900,
+      "exit_code": 1,
+      "wall_seconds": 12.864473606008687,
+      "pytest_tests": 45,
+      "passed": 17,
+      "failures": 28,
+      "errors": 0,
+      "skipped": 0,
+      "suite_time_seconds": 12.179,
+      "testcase_time_seconds_sum": 11.619,
+      "pytest_log_summary": "28 failed, 17 passed in 12.19s",
+      "target_paths_or_nodes": [
+        "apps/camctl/tests/integration/bootstrap/test_file_fact_consumers.py",
+        "apps/camctl/tests/integration/bootstrap/test_read_discovery_default.py::test_default_internal_read_uses_session_batch_limit"
+      ],
+      "failure_identities": [
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[discovery-normal-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[discovery-residual-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[discovery-restricted-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[discovery-cancel-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[discovery-cancel-False]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[discovery-restricted_cancel-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[discovery-restricted_cancel-False]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[presence-normal-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[presence-residual-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[presence-restricted-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[presence-cancel-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[presence-cancel-False]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[presence-restricted_cancel-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[presence-restricted_cancel-False]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[ownership-normal-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[ownership-residual-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[ownership-restricted-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[ownership-cancel-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[ownership-cancel-False]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[ownership-restricted_cancel-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[ownership-restricted_cancel-False]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[completion-normal-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[completion-residual-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[completion-restricted-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[completion-cancel-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[completion-cancel-False]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[completion-restricted_cancel-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[completion-restricted_cancel-False]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        }
+      ],
+      "receipt_artifact": "preparation-ports/baseline-bootstrap-failures.json.gz",
+      "log_artifact": "preparation-ports/baseline-bootstrap-failures.log.gz",
+      "junit_artifact": "preparation-ports/baseline-bootstrap-failures.xml.gz"
+    },
+    {
+      "id": "capture",
+      "label": "e652五目录组合中的 capture 目录",
+      "source_git_head": "47682d1c3344f5b7720c7c0ac7f32278960f4761",
+      "source_snapshot_sha256": "90d71ff85362a9f435219b56f579bd0a9f53ee4e0aabf7c487a1f1bc4310d544",
+      "source_sha256_before": "90d71ff85362a9f435219b56f579bd0a9f53ee4e0aabf7c487a1f1bc4310d544",
+      "source_sha256_after": "90d71ff85362a9f435219b56f579bd0a9f53ee4e0aabf7c487a1f1bc4310d544",
+      "source_stable_before_after": true,
+      "pid": 28320,
+      "exit_code": 0,
+      "wall_seconds": 133.96768110200355,
+      "pytest_tests": 495,
+      "passed": 495,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "suite_time_seconds": 133.515,
+      "testcase_time_seconds_sum": 131.958,
+      "pytest_log_summary": "495 passed in 133.52s (0:02:13)",
+      "target_paths_or_nodes": [
+        "apps/camctl/tests/integration/capture/test_action6_control_elapsed.py",
+        "apps/camctl/tests/integration/capture/test_action6_lifecycle_recovery.py",
+        "apps/camctl/tests/integration/capture/test_action6_native_cancel_scope.py",
+        "apps/camctl/tests/integration/capture/test_action6_segmented_normal.py",
+        "apps/camctl/tests/integration/capture/test_action6_segmented_recovery.py",
+        "apps/camctl/tests/integration/capture/test_closed_result_local_consumption.py",
+        "apps/camctl/tests/integration/capture/test_emergency_error_details.py",
+        "apps/camctl/tests/integration/capture/test_natural_wait_retention.py",
+        "apps/camctl/tests/integration/capture/test_natural_wait_source_transitions.py",
+        "apps/camctl/tests/integration/capture/test_natural_wait_time_eligibility.py",
+        "apps/camctl/tests/integration/capture/test_public_capture_entry.py",
+        "apps/camctl/tests/integration/capture/test_record_file_completion_wait.py",
+        "apps/camctl/tests/integration/capture/test_result_file_metadata.py",
+        "apps/camctl/tests/integration/capture/test_result_page_history.py",
+        "apps/camctl/tests/integration/capture/test_timelapse.py",
+        "apps/camctl/tests/integration/capture/test_timelapse_host_timer.py"
+      ],
+      "failure_identities": [],
+      "receipt_artifact": "preparation-ports/capture.json.gz",
+      "log_artifact": "preparation-ports/capture.log.gz",
+      "junit_artifact": "preparation-ports/capture.xml.gz"
+    },
+    {
+      "id": "reporting",
+      "label": "e652五目录组合中的 reporting 目录",
+      "source_git_head": "47682d1c3344f5b7720c7c0ac7f32278960f4761",
+      "source_snapshot_sha256": "90d71ff85362a9f435219b56f579bd0a9f53ee4e0aabf7c487a1f1bc4310d544",
+      "source_sha256_before": "90d71ff85362a9f435219b56f579bd0a9f53ee4e0aabf7c487a1f1bc4310d544",
+      "source_sha256_after": "90d71ff85362a9f435219b56f579bd0a9f53ee4e0aabf7c487a1f1bc4310d544",
+      "source_stable_before_after": true,
+      "pid": 33369,
+      "exit_code": 0,
+      "wall_seconds": 8.818785462994128,
+      "pytest_tests": 13,
+      "passed": 13,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "suite_time_seconds": 8.129,
+      "testcase_time_seconds_sum": 7.798,
+      "pytest_log_summary": "13 passed in 8.13s",
+      "target_paths_or_nodes": [
+        "apps/camctl/tests/integration/reporting/test_emergency_error_generation.py",
+        "apps/camctl/tests/integration/reporting/test_record_segment_error_report.py",
+        "apps/camctl/tests/integration/reporting/test_result_error_generation.py",
+        "apps/camctl/tests/integration/reporting/test_video_coverage_report.py"
+      ],
+      "failure_identities": [],
+      "receipt_artifact": "preparation-ports/reporting.json.gz",
+      "log_artifact": "preparation-ports/reporting.log.gz",
+      "junit_artifact": "preparation-ports/reporting.xml.gz"
+    },
+    {
+      "id": "persistence",
+      "label": "e652五目录组合中的 persistence 目录",
+      "source_git_head": "47682d1c3344f5b7720c7c0ac7f32278960f4761",
+      "source_snapshot_sha256": "90d71ff85362a9f435219b56f579bd0a9f53ee4e0aabf7c487a1f1bc4310d544",
+      "source_sha256_before": "90d71ff85362a9f435219b56f579bd0a9f53ee4e0aabf7c487a1f1bc4310d544",
+      "source_sha256_after": "90d71ff85362a9f435219b56f579bd0a9f53ee4e0aabf7c487a1f1bc4310d544",
+      "source_stable_before_after": true,
+      "pid": 30825,
+      "exit_code": 1,
+      "wall_seconds": 172.90005251900584,
+      "pytest_tests": 473,
+      "passed": 472,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0,
+      "suite_time_seconds": 172.193,
+      "testcase_time_seconds_sum": 171.012,
+      "pytest_log_summary": "1 failed, 472 passed in 172.20s (0:02:52)",
+      "target_paths_or_nodes": [
+        "apps/camctl/tests/integration/persistence/test_page_read_cache.py",
+        "apps/camctl/tests/integration/persistence/test_segment_check_conclusions.py",
+        "apps/camctl/tests/integration/persistence/test_segment_file_pairing.py",
+        "apps/camctl/tests/integration/persistence/test_segment_file_proofs.py",
+        "apps/camctl/tests/integration/persistence/test_segment_result_batches.py",
+        "apps/camctl/tests/integration/persistence/test_segment_result_conclusion_groups.py",
+        "apps/camctl/tests/integration/persistence/test_segment_result_sets.py",
+        "apps/camctl/tests/integration/persistence/test_segment_scan_pairing.py",
+        "apps/camctl/tests/integration/persistence/test_segment_storage.py",
+        "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py"
+      ],
+      "failure_identities": [
+        {
+          "classname": "tests.integration.persistence.test_segment_transaction_batches",
+          "name": "test_fixed_batch_write_and_verification_have_bounded_residency",
+          "message": "camctl_memory.BudgetEnvironmentError: 无法创建并配置专属内存资源组：[Errno 13] Permission denied: '/sys/fs/cgroup/memory/camctl-memory-30825-338f45c47c6f4c239474926db38a1e85'"
+        }
+      ],
+      "receipt_artifact": "preparation-ports/persistence.json.gz",
+      "log_artifact": "preparation-ports/persistence.log.gz",
+      "junit_artifact": "preparation-ports/persistence.xml.gz"
+    },
+    {
+      "id": "bootstrap",
+      "label": "e652五目录组合中的 bootstrap 目录",
+      "source_git_head": "47682d1c3344f5b7720c7c0ac7f32278960f4761",
+      "source_snapshot_sha256": "90d71ff85362a9f435219b56f579bd0a9f53ee4e0aabf7c487a1f1bc4310d544",
+      "source_sha256_before": "90d71ff85362a9f435219b56f579bd0a9f53ee4e0aabf7c487a1f1bc4310d544",
+      "source_sha256_after": "90d71ff85362a9f435219b56f579bd0a9f53ee4e0aabf7c487a1f1bc4310d544",
+      "source_stable_before_after": true,
+      "pid": 33505,
+      "exit_code": 1,
+      "wall_seconds": 48.56764720300271,
+      "pytest_tests": 125,
+      "passed": 96,
+      "failures": 29,
+      "errors": 0,
+      "skipped": 0,
+      "suite_time_seconds": 47.846,
+      "testcase_time_seconds_sum": 46.489,
+      "pytest_log_summary": "29 failed, 96 passed in 47.86s",
+      "target_paths_or_nodes": [
+        "apps/camctl/tests/integration/bootstrap/test_capture_cancel_after_call.py",
+        "apps/camctl/tests/integration/bootstrap/test_file_fact_consumers.py",
+        "apps/camctl/tests/integration/bootstrap/test_media_cancel_save_order.py",
+        "apps/camctl/tests/integration/bootstrap/test_media_local_settlement.py",
+        "apps/camctl/tests/integration/bootstrap/test_media_saved_result_consumers.py",
+        "apps/camctl/tests/integration/bootstrap/test_read_default_raw_binding.py",
+        "apps/camctl/tests/integration/bootstrap/test_read_default_raw_binding_save_gate.py",
+        "apps/camctl/tests/integration/bootstrap/test_read_discovery_default.py",
+        "apps/camctl/tests/integration/bootstrap/test_recording_cancel_inflight_results.py",
+        "apps/camctl/tests/integration/bootstrap/test_recording_cancel_results_persistent.py",
+        "apps/camctl/tests/integration/bootstrap/test_recording_results_saved_consumers.py"
+      ],
+      "failure_identities": [
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[discovery-normal-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[discovery-residual-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[discovery-restricted-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[discovery-cancel-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[discovery-cancel-False]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[discovery-restricted_cancel-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[discovery-restricted_cancel-False]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[presence-normal-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[presence-residual-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[presence-restricted-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[presence-cancel-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[presence-cancel-False]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[presence-restricted_cancel-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[presence-restricted_cancel-False]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[ownership-normal-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[ownership-residual-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[ownership-restricted-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[ownership-cancel-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[ownership-cancel-False]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[ownership-restricted_cancel-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[ownership-restricted_cancel-False]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[completion-normal-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[completion-residual-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[completion-restricted-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[completion-cancel-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[completion-cancel-False]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[completion-restricted_cancel-True]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_file_fact_consumers",
+          "name": "test_default_file_consumers_confirm_original_stage_before_filters[completion-restricted_cancel-False]",
+          "message": "AssertionError: (1, None, None)\nassert (1 == 3)"
+        },
+        {
+          "classname": "tests.integration.bootstrap.test_read_discovery_default",
+          "name": "test_default_internal_read_uses_session_batch_limit",
+          "message": "AssertionError: {'error': '流程 residual 异常: 同文件已有未结束任务: file 1 任务 media_check/1/5299068bc3d500fa2c69534f495047a5', 'exception': {'type'.../camctl/src/camctl/capture/media_flow.py', 'lineno': 466, 'function': 'resume_media_saves'}, ...], 'cause': None, ...}}\nassert False\n +  where False = SessionOutcome(succeeded=False, needs_run=None, reason='state_db_error', details={'error': '流程 residual 异常: 同文件已有未结束任务...st_files/tasks.py', 'lineno': 404, 'function': '_admit'}], 'cause': None, 'context': None, 'suppress_context': False}}).succeeded"
+        }
+      ],
+      "receipt_artifact": "preparation-ports/bootstrap.json.gz",
+      "log_artifact": "preparation-ports/bootstrap.log.gz",
+      "junit_artifact": "preparation-ports/bootstrap.xml.gz"
+    },
+    {
+      "id": "history",
+      "label": "e652五目录组合中的 history 目录",
+      "source_git_head": "47682d1c3344f5b7720c7c0ac7f32278960f4761",
+      "source_snapshot_sha256": "90d71ff85362a9f435219b56f579bd0a9f53ee4e0aabf7c487a1f1bc4310d544",
+      "source_sha256_before": "90d71ff85362a9f435219b56f579bd0a9f53ee4e0aabf7c487a1f1bc4310d544",
+      "source_sha256_after": "90d71ff85362a9f435219b56f579bd0a9f53ee4e0aabf7c487a1f1bc4310d544",
+      "source_stable_before_after": true,
+      "pid": 35349,
+      "exit_code": 0,
+      "wall_seconds": 120.8766809959925,
+      "pytest_tests": 40,
+      "passed": 40,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "suite_time_seconds": 120.192,
+      "testcase_time_seconds_sum": 119.45599999999999,
+      "pytest_log_summary": "40 passed in 120.19s (0:02:00)",
+      "target_paths_or_nodes": [
+        "apps/camctl/tests/integration/history/test_operation_obtain_owner.py",
+        "apps/camctl/tests/integration/history/test_record_segment_history.py"
+      ],
+      "failure_identities": [],
+      "receipt_artifact": "preparation-ports/history.json.gz",
+      "log_artifact": "preparation-ports/history.log.gz",
+      "junit_artifact": "preparation-ports/history.xml.gz"
+    },
+    {
+      "id": "old-read-single",
+      "label": "旧源 read 单节点",
+      "source_git_head": "47682d1c3344f5b7720c7c0ac7f32278960f4761",
+      "source_snapshot_sha256": "19afdec56f6905c44ed65a7d1f2cbba0165e4e69f93e89b502b2879c545a805e",
+      "source_sha256_before": "19afdec56f6905c44ed65a7d1f2cbba0165e4e69f93e89b502b2879c545a805e",
+      "source_sha256_after": "19afdec56f6905c44ed65a7d1f2cbba0165e4e69f93e89b502b2879c545a805e",
+      "source_stable_before_after": true,
+      "pid": 37774,
+      "exit_code": 0,
+      "wall_seconds": 4.723330930995871,
+      "pytest_tests": 1,
+      "passed": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "suite_time_seconds": 4.09,
+      "testcase_time_seconds_sum": 3.913,
+      "pytest_log_summary": "1 passed in 4.09s",
+      "target_paths_or_nodes": [
+        "apps/camctl/tests/integration/bootstrap/test_read_discovery_default.py::test_default_internal_read_uses_session_batch_limit"
+      ],
+      "failure_identities": [],
+      "receipt_artifact": "preparation-ports/old-read-single.json.gz",
+      "log_artifact": "preparation-ports/old-read-single.log.gz",
+      "junit_artifact": "preparation-ports/old-read-single.xml.gz"
+    },
+    {
+      "id": "new-read-single",
+      "label": "e652 read 单节点",
+      "source_git_head": "e65200e6650effa5a71ef0cf99a9d0688d939b53",
+      "source_snapshot_sha256": "90d71ff85362a9f435219b56f579bd0a9f53ee4e0aabf7c487a1f1bc4310d544",
+      "source_sha256_before": "90d71ff85362a9f435219b56f579bd0a9f53ee4e0aabf7c487a1f1bc4310d544",
+      "source_sha256_after": "90d71ff85362a9f435219b56f579bd0a9f53ee4e0aabf7c487a1f1bc4310d544",
+      "source_stable_before_after": true,
+      "pid": 37867,
+      "exit_code": 1,
+      "wall_seconds": 1.6194852600019658,
+      "pytest_tests": 1,
+      "passed": 0,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0,
+      "suite_time_seconds": 0.96,
+      "testcase_time_seconds_sum": 0.728,
+      "pytest_log_summary": "1 failed in 0.96s",
+      "target_paths_or_nodes": [
+        "apps/camctl/tests/integration/bootstrap/test_read_discovery_default.py::test_default_internal_read_uses_session_batch_limit"
+      ],
+      "failure_identities": [
+        {
+          "classname": "tests.integration.bootstrap.test_read_discovery_default",
+          "name": "test_default_internal_read_uses_session_batch_limit",
+          "message": "AssertionError: {'error': '流程 residual 异常: 同文件已有未结束任务: file 1 任务 media_check/1/a35a80f42132a31828d884a246b2bad8', 'exception': {'type'.../camctl/src/camctl/capture/media_flow.py', 'lineno': 466, 'function': 'resume_media_saves'}, ...], 'cause': None, ...}}\nassert False\n +  where False = SessionOutcome(succeeded=False, needs_run=None, reason='state_db_error', details={'error': '流程 residual 异常: 同文件已有未结束任务...st_files/tasks.py', 'lineno': 404, 'function': '_admit'}], 'cause': None, 'context': None, 'suppress_context': False}}).succeeded"
+        }
+      ],
+      "receipt_artifact": "preparation-ports/new-read-single.json.gz",
+      "log_artifact": "preparation-ports/new-read-single.log.gz",
+      "junit_artifact": "preparation-ports/new-read-single.xml.gz"
+    },
+    {
+      "id": "receipt-probe",
+      "label": "e652 receipt probe 两项",
+      "source_git_head": "e65200e6650effa5a71ef0cf99a9d0688d939b53",
+      "source_snapshot_sha256": "90d71ff85362a9f435219b56f579bd0a9f53ee4e0aabf7c487a1f1bc4310d544",
+      "source_sha256_before": "90d71ff85362a9f435219b56f579bd0a9f53ee4e0aabf7c487a1f1bc4310d544",
+      "source_sha256_after": "90d71ff85362a9f435219b56f579bd0a9f53ee4e0aabf7c487a1f1bc4310d544",
+      "source_stable_before_after": true,
+      "pid": 37715,
+      "exit_code": 0,
+      "wall_seconds": 0.7723905720049515,
+      "pytest_tests": 2,
+      "passed": 2,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "suite_time_seconds": 0.499,
+      "testcase_time_seconds_sum": 0.003,
+      "pytest_log_summary": "2 passed in 0.50s",
+      "target_paths_or_nodes": [
+        "/tmp/camctl-resume-20261030/evidence-preparation-ports/test_receipt_probe.py"
+      ],
+      "failure_identities": [],
+      "receipt_artifact": "preparation-ports/receipt-probe.json.gz",
+      "log_artifact": "preparation-ports/receipt-probe.log.gz",
+      "junit_artifact": "preparation-ports/receipt-probe.xml.gz"
+    }
+  ],
+  "capacity_run": {
+    "run_identity": {
+      "source_git_head": "e65200e6650effa5a71ef0cf99a9d0688d939b53",
+      "dirty": "",
+      "cwd": "/tmp/camctl-resume-20261030/consumer-preparation-ports",
+      "source_manifest_sha256": "38f1d601737dcd4b16d8de7f884cc3a04e18e77ac2d9ce190ca5f0cd7c693f3b",
+      "pid": 39715,
+      "exit_code": 0,
+      "wall_seconds": 32.369610584995826
+    },
+    "result": {
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "suite_time_seconds": 31.365,
+      "testcase_time_seconds_sum": 31.142,
+      "pytest_log_summary": "1 passed in 31.36s",
+      "passed": 1
+    },
+    "leaf_budget": {
+      "budget_scope": "memory_and_swap",
+      "requested_limit": "2GiB",
+      "limit_bytes": 2147483648,
+      "combined_limit_bytes": 2147483648,
+      "peak_bytes": 36020224,
+      "combined_peak_bytes": 36020224,
+      "combined_peak_method": "memory.memsw.max_usage_in_bytes",
+      "events": {
+        "oom_kill_disable": 0,
+        "under_oom": 0,
+        "oom_kill": 0,
+        "failcnt": 0,
+        "memsw_failcnt": 0
+      },
+      "final_status": "completed",
+      "group_removed": true,
+      "returncode": 0,
+      "host_swap_bytes": 4294967296,
+      "swap_peak_bytes": null,
+      "swap_peak_method": "独立交换峰值未计量；合计峰值由 memory.memsw.max_usage_in_bytes 提供",
+      "leaf_group_path": "/sys/fs/cgroup/memory/camctl-budget-39715-d3e8693311d545f29d77e4cf95c53054/camctl-memory-39742-60e3c03504a949f7b364dbd02a8389b7"
+    },
+    "delegation_parent": {
+      "budget_scope": "memory_and_swap",
+      "requested_limit": "2GiB",
+      "exit_code": 0,
+      "removal": {
+        "path": "/sys/fs/cgroup/memory/camctl-budget-39715-d3e8693311d545f29d77e4cf95c53054",
+        "action": "--_remove",
+        "ok": true,
+        "exit_code": 0,
+        "stderr": ""
+      },
+      "groups": [
+        {
+          "role": "delegation",
+          "resource": {
+            "memory.limit_in_bytes": "9223372036854771712",
+            "memory.memsw.limit_in_bytes": "9223372036854771712",
+            "memory.max_usage_in_bytes": "36048896",
+            "memory.memsw.max_usage_in_bytes": "36048896",
+            "memory.oom_control": "oom_kill_disable 0\nunder_oom 0\noom_kill 0"
+          }
+        }
+      ],
+      "classification": "delegation_parent_only_not_the_budgeted_worker_group",
+      "interpretation": "delegation 组用于创建叶组；其限额与峰值不得作为被测子进程组资源结果。"
+    },
+    "timing_phases_seconds": {
+      "input_count": 513,
+      "batch_size": 4,
+      "preflight_seconds": 0.0028341639990685508,
+      "preparation_seconds": 16.357910113001708,
+      "budgeted_process_seconds": 13.159297752004932,
+      "parent_verification_seconds": 1.6174329089990351
+    },
+    "business_result": {
+      "input_count": 513,
+      "batch_size": 4,
+      "verified_counts": {
+        "original_count": 513,
+        "output_count": 513,
+        "scope_count": 14
+      },
+      "history_before": [
+        1576,
+        1576
+      ],
+      "history_after_write": [
+        2097,
+        2097
+      ],
+      "history_after_repeated": [
+        2097,
+        2097
+      ],
+      "write_kind": "completed",
+      "repeat_kind": "completed"
+    },
+    "source_file_sha256": {
+      "apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py": "9f7fa1744740da3fa7fa496eb16db0b5a61a12b2583c02a891ea6836766b4c09",
+      "apps/camctl/tests/integration/persistence/segment_capacity_worker.py": "97bf4069ce7d8478856c53084acd61fe07428973c6cfe92eabf58ad530e7ad15",
+      "scripts/run-memory-budget.py": "dd043580c0f4c177119484661a3db63e8ced746b6412d1a16288ceaead7a50d9"
+    },
+    "scope_limits": [
+      "仅此次513项、batch_size=4负载；不能外推任意规模。",
+      "该运行采用memory_and_swap合计预算；没有验收严格无交换能力。",
+      "launcher.json中的delegation父组数值不作为受测叶组限额或峰值。"
+    ],
+    "artifacts": {
+      "receipt.json": "b-capacity-sudo/receipt.json.gz",
+      "preflight-import.json": "b-capacity-sudo/preflight-import.json.gz",
+      "run.py": "b-capacity-sudo/run.py.gz",
+      "pytest.log": "b-capacity-sudo/pytest.log.gz",
+      "source-manifest.json": "b-capacity-sudo/source-manifest.json.gz",
+      "results.xml": "b-capacity-sudo/results.xml.gz",
+      "delegation/launcher.json": "b-capacity-sudo/delegation/launcher.json.gz",
+      "temp/test_fixed_batch_write_and_ver0/capacity-input.json": "b-capacity-sudo/temp/test_fixed_batch_write_and_ver0/capacity-input.json.gz",
+      "temp/test_fixed_batch_write_and_ver0/capacity-expected.json": "b-capacity-sudo/temp/test_fixed_batch_write_and_ver0/capacity-expected.json.gz",
+      "temp/test_fixed_batch_write_and_ver0/capacity-result.json": "b-capacity-sudo/temp/test_fixed_batch_write_and_ver0/capacity-result.json.gz",
+      "temp/test_fixed_batch_write_and_ver0/capacity-timing.json": "b-capacity-sudo/temp/test_fixed_batch_write_and_ver0/capacity-timing.json.gz",
+      "temp/test_fixed_batch_write_and_ver0/memory-budget.json": "b-capacity-sudo/temp/test_fixed_batch_write_and_ver0/memory-budget.json.gz",
+      "temp/test_fixed_batch_write_and_ver0/worker.stdout": "b-capacity-sudo/temp/test_fixed_batch_write_and_ver0/worker.stdout.gz",
+      "temp/test_fixed_batch_write_and_ver0/worker.stderr": "b-capacity-sudo/temp/test_fixed_batch_write_and_ver0/worker.stderr.gz"
+    }
+  },
+  "selected_failure_databases": [
+    {
+      "id": "old-bootstrap-discovery-normal-true",
+      "run_group": "baseline-bootstrap-failures",
+      "identity": "test_default_file_consumers_confirm_original_stage_before_filters[discovery-normal-True]",
+      "archive_path": "preparation-ports/failure-databases/old-bootstrap-discovery-normal-true.state.db.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/baseline-bootstrap-failures-tmp/test_default_file_consumers_co0/state.db",
+      "source_sha256": "b6b86a92cc03e7e202ce5038737886d0a05518efd77b5765da25fbaae2adb1c8",
+      "source_bytes": 823296,
+      "holder_check": "fuser -v returned no holder",
+      "sqlite_wal_shm_journal_present": false,
+      "lock_files_present": [
+        "state.db.admission.lock",
+        "state.db.session.lock"
+      ],
+      "copied_files": [
+        "state.db"
+      ],
+      "source_mutated": false
+    },
+    {
+      "id": "new-bootstrap-discovery-normal-true",
+      "run_group": "bootstrap",
+      "identity": "test_default_file_consumers_confirm_original_stage_before_filters[discovery-normal-True]",
+      "archive_path": "preparation-ports/failure-databases/new-bootstrap-discovery-normal-true.state.db.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/bootstrap-tmp/test_default_file_consumers_co0/state.db",
+      "source_sha256": "63b951857ccabccf7c84872dee8cd152337a5821083da31e2387bd41cea78e73",
+      "source_bytes": 823296,
+      "holder_check": "fuser -v returned no holder",
+      "sqlite_wal_shm_journal_present": false,
+      "lock_files_present": [
+        "state.db.admission.lock",
+        "state.db.session.lock"
+      ],
+      "copied_files": [
+        "state.db"
+      ],
+      "source_mutated": false
+    },
+    {
+      "id": "new-bootstrap-read-conflict",
+      "run_group": "bootstrap",
+      "identity": "test_default_internal_read_uses_session_batch_limit",
+      "archive_path": "preparation-ports/failure-databases/new-bootstrap-read-conflict.state.db.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/bootstrap-tmp/test_default_internal_read_use0/state.db",
+      "source_sha256": "0687496f59f53d5b328b3fa5d358748a6fd40dcd25a51c4c8db54bfe5dd234e5",
+      "source_bytes": 827392,
+      "holder_check": "fuser -v returned no holder",
+      "sqlite_wal_shm_journal_present": false,
+      "lock_files_present": [
+        "state.db.admission.lock",
+        "state.db.session.lock",
+        "state.db.report.lock"
+      ],
+      "copied_files": [
+        "state.db"
+      ],
+      "source_mutated": false
+    },
+    {
+      "id": "new-read-single",
+      "run_group": "new-read-single",
+      "identity": "test_default_internal_read_uses_session_batch_limit",
+      "archive_path": "preparation-ports/failure-databases/new-read-single.state.db.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/new-read-single-tmp/test_default_internal_read_use0/state.db",
+      "source_sha256": "41384827f728c067b92092272d36ecda41c3ee768af8b292ae18ac985511607d",
+      "source_bytes": 827392,
+      "holder_check": "fuser -v returned no holder",
+      "sqlite_wal_shm_journal_present": false,
+      "lock_files_present": [
+        "state.db.admission.lock",
+        "state.db.session.lock",
+        "state.db.report.lock"
+      ],
+      "copied_files": [
+        "state.db"
+      ],
+      "source_mutated": false
+    }
+  ],
+  "runtime_process_checks": [
+    {
+      "artifact": "baseline.json",
+      "pid": 26997,
+      "proc_entry_present": false
+    },
+    {
+      "artifact": "narrow.json",
+      "pid": 27247,
+      "proc_entry_present": false
+    },
+    {
+      "artifact": "baseline-boundaries.json",
+      "pid": 27680,
+      "proc_entry_present": false
+    },
+    {
+      "artifact": "new-boundaries.json",
+      "pid": 27893,
+      "proc_entry_present": false
+    },
+    {
+      "artifact": "baseline-identity.json",
+      "pid": 27592,
+      "proc_entry_present": false
+    },
+    {
+      "artifact": "new-identity.json",
+      "pid": 27624,
+      "proc_entry_present": false
+    },
+    {
+      "artifact": "baseline-bootstrap-failures.json",
+      "pid": 34900,
+      "proc_entry_present": false
+    },
+    {
+      "artifact": "bootstrap.json",
+      "pid": 33505,
+      "proc_entry_present": false
+    },
+    {
+      "artifact": "capture.json",
+      "pid": 28320,
+      "proc_entry_present": false
+    },
+    {
+      "artifact": "reporting.json",
+      "pid": 33369,
+      "proc_entry_present": false
+    },
+    {
+      "artifact": "persistence.json",
+      "pid": 30825,
+      "proc_entry_present": false
+    },
+    {
+      "artifact": "history.json",
+      "pid": 35349,
+      "proc_entry_present": false
+    },
+    {
+      "artifact": "old-read-single.json",
+      "pid": 37774,
+      "proc_entry_present": false
+    },
+    {
+      "artifact": "new-read-single.json",
+      "pid": 37867,
+      "proc_entry_present": false
+    },
+    {
+      "artifact": "receipt-probe.json",
+      "pid": 37715,
+      "proc_entry_present": false
+    }
+  ],
+  "excluded_later_scope": {
+    "source_root": "/tmp/camctl-resume-20261030/evidence-preparation-ports",
+    "excluded_artifacts": [
+      "fix-boundaries.json/log/xml",
+      "receipt-red.json/log/xml",
+      "receipt-green.json/log/xml",
+      "test_receipt_probe-stageb.py"
+    ],
+    "reason": "这些是 e652 后续源码身份/阶段记录；由 root 指示留到后续独立归档，本批不纳入或拼接。"
+  },
+  "missing_items": [
+    {
+      "item": "early 35ac exact source snapshot files",
+      "status": "not present among the submitted evidence-root top-level artifacts; only run fingerprint and receipts are preserved",
+      "handling": "marked missing; not replaced by e652 source or reconstructed from a later commit"
+    },
+    {
+      "item": "full pass test DB/temp trees and capacity DB",
+      "status": "not copied",
+      "reason": "not needed for bounded durable run records; only the four selected failed state.db files are archived"
+    },
+    {
+      "item": "SQLite WAL/SHM/journal for selected failure DBs",
+      "status": "absent at source paths when checked",
+      "handling": "no sidecar copied; zero-byte lock files were recorded but not copied"
+    }
+  ],
+  "archive": {
+    "new_gzip_format": "gzip level 9, mtime=0",
+    "gzip_payload_count": 98,
+    "raw_bytes": 4916108,
+    "compressed_bytes": 340476,
+    "json_xml_parsed_after_decompression": true,
+    "decompressed_bytes_verified": true,
+    "all_non_git_source_files_stable_during_copy": true,
+    "selected_failure_databases_have_no_active_holders": true,
+    "tests_run_by_archiver": false,
+    "production_or_test_source_modified": false
+  },
+  "payloads": [
+    {
+      "archive_path": "b-capacity-sudo/delegation/launcher.json.gz",
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/b-capacity-sudo/delegation/launcher.json",
+      "role": "root容量运行收据/输入/结果/日志",
+      "raw_bytes": 2690,
+      "raw_sha256": "36c86cad437401a8743c0a2b86fdce8b536098ef77304944e0a560324e087d9c",
+      "gzip_bytes": 791,
+      "gzip_sha256": "15166169ce13bae3624beb4f04ca703247d215ee9a60d9dbce185ad1d393d904",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 2690,
+        "mtime_ns": 1793369848456306376
+      }
+    },
+    {
+      "archive_path": "b-capacity-sudo/preflight-import.json.gz",
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/b-capacity-sudo/preflight-import.json",
+      "role": "root容量运行收据/输入/结果/日志",
+      "raw_bytes": 306,
+      "raw_sha256": "cf6fba8311f2af3d73580b2d59de541768eb0fd65e939d2790216199295e9aca",
+      "gzip_bytes": 194,
+      "gzip_sha256": "340396b213868f8c9388c379e402072868f4deea7cb7de3006d661bd43ec7723",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 306,
+        "mtime_ns": 1793369816054425628
+      }
+    },
+    {
+      "archive_path": "b-capacity-sudo/pytest.log.gz",
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/b-capacity-sudo/pytest.log",
+      "role": "root容量运行收据/输入/结果/日志",
+      "raw_bytes": 250,
+      "raw_sha256": "8dbf747e3208c05a287e62cd04abd9a549e21243bfa4804387e3e42ee00465a9",
+      "gzip_bytes": 193,
+      "gzip_sha256": "60664beab0cf7f35f62a92d3b32a6d3b723c41d3d0990f1eca7999b6183d8e48",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 250,
+        "mtime_ns": 1793369848256197513
+      }
+    },
+    {
+      "archive_path": "b-capacity-sudo/receipt.json.gz",
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/b-capacity-sudo/receipt.json",
+      "role": "root容量运行收据/输入/结果/日志",
+      "raw_bytes": 1266,
+      "raw_sha256": "57396cd125f9a6d4f4a3931a4ef42637e2775ab76746e57bc686dc082c1d6a3f",
+      "gzip_bytes": 598,
+      "gzip_sha256": "01e3fa40c014a2071cd492ca8081f7016751e1b1f9bdd06446a6c2dbee5080e2",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 1266,
+        "mtime_ns": 1793369848506333590
+      }
+    },
+    {
+      "archive_path": "b-capacity-sudo/results.xml.gz",
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/b-capacity-sudo/results.xml",
+      "role": "root容量运行收据/输入/结果/日志",
+      "raw_bytes": 420,
+      "raw_sha256": "499e034bb860e05bc20cd1cb12faae00b0de41381c60a157b943e35d078b2df7",
+      "gzip_bytes": 276,
+      "gzip_sha256": "84edf984f18632f8cac82232bd76d7ae354080d31494a1e56ba1c03d6bbc5345",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "xml",
+      "source_stat": {
+        "size_bytes": 420,
+        "mtime_ns": 1793369848196164857
+      }
+    },
+    {
+      "archive_path": "b-capacity-sudo/run.py.gz",
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/b-capacity-sudo/run.py",
+      "role": "root容量运行收据/输入/结果/日志",
+      "raw_bytes": 2826,
+      "raw_sha256": "47eef6c1752a9b796346ebeda27bac28923c232197e65e241c66b99d6f6dcffd",
+      "gzip_bytes": 1217,
+      "gzip_sha256": "5ee7b281739812746c9988ec50fa2b13380560eb607b4666993b2fc85180caa7",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 2826,
+        "mtime_ns": 1793369815201759847
+      }
+    },
+    {
+      "archive_path": "b-capacity-sudo/source-manifest.json.gz",
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/b-capacity-sudo/source-manifest.json",
+      "role": "root容量运行收据/输入/结果/日志",
+      "raw_bytes": 178726,
+      "raw_sha256": "38f1d601737dcd4b16d8de7f884cc3a04e18e77ac2d9ce190ca5f0cd7c693f3b",
+      "gzip_bytes": 63548,
+      "gzip_sha256": "5c305ce53820ae8ed13d31ab3cef035cf3d4775766752c8d3a30c4d02bee2402",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 178726,
+        "mtime_ns": 1793369816094512830
+      }
+    },
+    {
+      "archive_path": "b-capacity-sudo/temp/test_fixed_batch_write_and_ver0/capacity-expected.json.gz",
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/b-capacity-sudo/temp/test_fixed_batch_write_and_ver0/capacity-expected.json",
+      "role": "root容量运行收据/输入/结果/日志",
+      "raw_bytes": 15276,
+      "raw_sha256": "3244f21de6142774d68ee731c8ac0d4bf068abf88b2da7e8a89835a5967333f2",
+      "gzip_bytes": 2858,
+      "gzip_sha256": "74f748252dd06a2d20cc0d956ac062d23736fd0f952d3e87dafd1457ce7d56cf",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 15276,
+        "mtime_ns": 1793369833376237740
+      }
+    },
+    {
+      "archive_path": "b-capacity-sudo/temp/test_fixed_batch_write_and_ver0/capacity-input.json.gz",
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/b-capacity-sudo/temp/test_fixed_batch_write_and_ver0/capacity-input.json",
+      "role": "root容量运行收据/输入/结果/日志",
+      "raw_bytes": 969,
+      "raw_sha256": "2ec6fdf0dd224ccc15d5fc9e234f184b80588536ea2b42ab8fb1b825a0841846",
+      "gzip_bytes": 415,
+      "gzip_sha256": "e187b91bd49fcf0d904eb998c19cb4450a99ec25d0a6e8e9e0cdd72d5870dc79",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 969,
+        "mtime_ns": 1793369833376237740
+      }
+    },
+    {
+      "archive_path": "b-capacity-sudo/temp/test_fixed_batch_write_and_ver0/capacity-result.json.gz",
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/b-capacity-sudo/temp/test_fixed_batch_write_and_ver0/capacity-result.json",
+      "role": "root容量运行收据/输入/结果/日志",
+      "raw_bytes": 3563,
+      "raw_sha256": "62929f2506071347afd4bd72e256730b220511f43978c324c92e2aa462fae3eb",
+      "gzip_bytes": 911,
+      "gzip_sha256": "4bf1288f728424bbdb68a8c8ab4fd2d75f46c4d06cb0800c9d09d643a4e5c8b1",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 3563,
+        "mtime_ns": 1793369846483649632
+      }
+    },
+    {
+      "archive_path": "b-capacity-sudo/temp/test_fixed_batch_write_and_ver0/capacity-timing.json.gz",
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/b-capacity-sudo/temp/test_fixed_batch_write_and_ver0/capacity-timing.json",
+      "role": "root容量运行收据/输入/结果/日志",
+      "raw_bytes": 223,
+      "raw_sha256": "5633e57a4132a2e298bfe0b81a8818d8969b74dcc8e9e608fd9ab0b9d557eef5",
+      "gzip_bytes": 172,
+      "gzip_sha256": "edcbebb8b381cb9ef3a30a032f28c982cbdfc2e9fc5709521b68166bd3fd83ee",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 223,
+        "mtime_ns": 1793369848196164857
+      }
+    },
+    {
+      "archive_path": "b-capacity-sudo/temp/test_fixed_batch_write_and_ver0/memory-budget.json.gz",
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/b-capacity-sudo/temp/test_fixed_batch_write_and_ver0/memory-budget.json",
+      "role": "root容量运行收据/输入/结果/日志",
+      "raw_bytes": 2302,
+      "raw_sha256": "cd485786422326f55e8efb1f5e2eade2f3cf958dfffa0243c2c8e598d79da0af",
+      "gzip_bytes": 778,
+      "gzip_sha256": "1c4dec9b8299c48f9983f75fb14423863d279b993944790d13a59e1a7aebaa40",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 2302,
+        "mtime_ns": 1793369846573842148
+      }
+    },
+    {
+      "archive_path": "b-capacity-sudo/temp/test_fixed_batch_write_and_ver0/worker.stderr.gz",
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/b-capacity-sudo/temp/test_fixed_batch_write_and_ver0/worker.stderr",
+      "role": "root容量运行收据/输入/结果/日志",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzip_bytes": 20,
+      "gzip_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 0,
+        "mtime_ns": 1793369833376237740
+      }
+    },
+    {
+      "archive_path": "b-capacity-sudo/temp/test_fixed_batch_write_and_ver0/worker.stdout.gz",
+      "source": "/opt/devcontainer/.codex/worktrees/de38/camctl/.local/verification/resume-20261030/b-capacity-sudo/temp/test_fixed_batch_write_and_ver0/worker.stdout",
+      "role": "root容量运行收据/输入/结果/日志",
+      "raw_bytes": 0,
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzip_bytes": 20,
+      "gzip_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 0,
+        "mtime_ns": 1793369833376237740
+      }
+    },
+    {
+      "archive_path": "preparation-ports/activity-comparison.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/activity-comparison.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 1722,
+      "raw_sha256": "df8ce9e453cb98d0715311e2fedc47f92eb712fd7950bd0c3890ad758ef8d96c",
+      "gzip_bytes": 170,
+      "gzip_sha256": "d8a2af541941da943c7e02a155b6dd53eb2ba6983add025070328bf3da55b53c",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 1722,
+        "mtime_ns": 1793368974175840831
+      }
+    },
+    {
+      "archive_path": "preparation-ports/baseline-bootstrap-failures.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/baseline-bootstrap-failures.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 1063,
+      "raw_sha256": "a3f648e9b8ebb572062e220acaa4a24f41a936d7107750582ca79752c65ce013",
+      "gzip_bytes": 475,
+      "gzip_sha256": "5ec9fece7bf335a7bfa5afa3263e4321ad34bbdedbed48cd98db989ee03837b6",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 1063,
+        "mtime_ns": 1793369343539732060
+      }
+    },
+    {
+      "archive_path": "preparation-ports/baseline-bootstrap-failures.log.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/baseline-bootstrap-failures.log",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 117215,
+      "raw_sha256": "7aa8f27d6d36ebab41e39fe86a9cafd3a9761cc0aa181ae92055a326a5ccedb6",
+      "gzip_bytes": 3171,
+      "gzip_sha256": "ce10f54f4e005971c485b317bd0d2e0c584b19ba55e4a8fd40fcefd9a1f40f58",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 117215,
+        "mtime_ns": 1793369343390451927
+      }
+    },
+    {
+      "archive_path": "preparation-ports/baseline-bootstrap-failures.xml.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/baseline-bootstrap-failures.xml",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 121421,
+      "raw_sha256": "8f520a39969f0f9ec8152ef9718ebe322cb4c3f07fa930b809ca5bf6d0db6a58",
+      "gzip_bytes": 3539,
+      "gzip_sha256": "15b9dc2f43c0759a5186d8cf7640fdcc578d22fad0b4adb144c743b45c38e65f",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "xml",
+      "source_stat": {
+        "size_bytes": 121421,
+        "mtime_ns": 1793369343330739875
+      }
+    },
+    {
+      "archive_path": "preparation-ports/baseline-boundaries.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/baseline-boundaries.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 1433,
+      "raw_sha256": "eaf26dd2dc9955460c5fd1470c8c40348fb656e0b668f82027e2a181685fe458",
+      "gzip_bytes": 602,
+      "gzip_sha256": "9badcc86054238661211b3f5e91f1fd2f08fede713ef33bae4a2cc8eb3c9d7a0",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 1433,
+        "mtime_ns": 1793368867270151621
+      }
+    },
+    {
+      "archive_path": "preparation-ports/baseline-boundaries.log.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/baseline-boundaries.log",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 100,
+      "raw_sha256": "9ffcd6854bf6ce489ac183c565d2dff79d15de26ea6828fa568dd95bca9df61a",
+      "gzip_bytes": 53,
+      "gzip_sha256": "3ccdaf590c0edfa4d92e5629345015f0cb504355e12e829a7e3974450affe18f",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 100,
+        "mtime_ns": 1793368867090738257
+      }
+    },
+    {
+      "archive_path": "preparation-ports/baseline-boundaries.xml.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/baseline-boundaries.xml",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 6394,
+      "raw_sha256": "88a9e21193b9f3d1b17dbb30983e3e0de59747d5127fe54e7b513b32ac22ad42",
+      "gzip_bytes": 703,
+      "gzip_sha256": "79f3d860e152c8f8c12bcb859ed51126c57b305db9f895bc0730a155b3c50365",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "xml",
+      "source_stat": {
+        "size_bytes": 6394,
+        "mtime_ns": 1793368867030933802
+      }
+    },
+    {
+      "archive_path": "preparation-ports/baseline-identity.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/baseline-identity.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 932,
+      "raw_sha256": "cedcbe8c1dbeea3bc7c383af5f177783a2c7da5c33d5f7ef2a5629d7e16a4745",
+      "gzip_bytes": 401,
+      "gzip_sha256": "cde3bd543e214a7fc57281804f533962946fcf6a43097a057b662a56ae531963",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 932,
+        "mtime_ns": 1793368844417040104
+      }
+    },
+    {
+      "archive_path": "preparation-ports/baseline-identity.log.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/baseline-identity.log",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 56,
+      "raw_sha256": "57341045afa7726bcb08757ba18b98fb743ae9e20d69888873437ceb473b575d",
+      "gzip_bytes": 76,
+      "gzip_sha256": "5934f9acf4a71ac28a1292b32bf43ff5932ee16943998474132e723862f920e9",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 56,
+        "mtime_ns": 1793368844297558205
+      }
+    },
+    {
+      "archive_path": "preparation-ports/baseline-identity.xml.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/baseline-identity.xml",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 386,
+      "raw_sha256": "21245d912299575826753e390d5d60de40bd670943ae67604fadf04ff3148f85",
+      "gzip_bytes": 255,
+      "gzip_sha256": "a69cb31fe39e7d93924fae9776513cd14981e5ebbadd9043f4210e9514197978",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "xml",
+      "source_stat": {
+        "size_bytes": 386,
+        "mtime_ns": 1793368844257730907
+      }
+    },
+    {
+      "archive_path": "preparation-ports/baseline-preflight.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/baseline-preflight.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 496,
+      "raw_sha256": "99886c2e7d59f79fedd04b74b3f555421014ad4f76365da22ba2b72301fda698",
+      "gzip_bytes": 289,
+      "gzip_sha256": "e2b896b36a7344cdc85e53b5ffbef77f37505a41c9456c42ffd32f21615aa6ae",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 496,
+        "mtime_ns": 1793368757314151987
+      }
+    },
+    {
+      "archive_path": "preparation-ports/baseline.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/baseline.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 909,
+      "raw_sha256": "d6a006a248cf9758ab333a40dce84b3466204e48ea8fa03d2bdecd1c10ca2f7a",
+      "gzip_bytes": 399,
+      "gzip_sha256": "484e484d17eae88529f0fefc2444fbf5b3545d7169f6efa5eb3054a83cb1c15c",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 909,
+        "mtime_ns": 1793368759580253349
+      }
+    },
+    {
+      "archive_path": "preparation-ports/baseline.log.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/baseline.log",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 3361,
+      "raw_sha256": "bb5970601e48bc01cd0fd35c04c253e3b7e4114fcb787b52cd5627d326d2ea7a",
+      "gzip_bytes": 440,
+      "gzip_sha256": "93897d5ac9fe0dc5d0571ddc59c65a51e3cfd036ee49b6fbce935ff1dd565b80",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 3361,
+        "mtime_ns": 1793368759440921992
+      }
+    },
+    {
+      "archive_path": "preparation-ports/baseline.xml.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/baseline.xml",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 1131,
+      "raw_sha256": "35e8de1a4e8e81ee497200e41512446164c30412c8c198aeb458404fe51c7d35",
+      "gzip_bytes": 349,
+      "gzip_sha256": "9b7a1c9b6be2826f303b9092896a14b9fb4137d21e456c59049eb0737bed10bf",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "xml",
+      "source_stat": {
+        "size_bytes": 1131,
+        "mtime_ns": 1793368759401113036
+      }
+    },
+    {
+      "archive_path": "preparation-ports/bootstrap-files.txt.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/bootstrap-files.txt",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 837,
+      "raw_sha256": "ea4fadf58769e2769f4b3a96308476ab48095ae5cd7166a654e9a3b5902dbcd7",
+      "gzip_bytes": 204,
+      "gzip_sha256": "d7c0014ba0f2882bda76f65bcda07cc211fffb830ae5873c6e146ae6a6177ac7",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 837,
+        "mtime_ns": 1793368917953117471
+      }
+    },
+    {
+      "archive_path": "preparation-ports/bootstrap.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/bootstrap.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 1728,
+      "raw_sha256": "7d0080fd6bb3e4168db12ac1ceded2ae5df3f0a76ed2c0e80db0c2ea8896c0b9",
+      "gzip_bytes": 538,
+      "gzip_sha256": "7d2ab9bca1aff1ff586d95ce2a8d744f5e846e154c8c2be857744e60d5c6566c",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 1728,
+        "mtime_ns": 1793369310093258716
+      }
+    },
+    {
+      "archive_path": "preparation-ports/bootstrap.log.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/bootstrap.log",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 120125,
+      "raw_sha256": "762f3ed1d3ab83572ec2e7ffb33ee8b85590d84f87c708f4928878aafcd2483c",
+      "gzip_bytes": 4268,
+      "gzip_sha256": "6fad4fff9b57d0b1e73302eb86fae848f3d42957d4f494f1d19a052f53cd7c18",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 120125,
+        "mtime_ns": 1793369309933187912
+      }
+    },
+    {
+      "archive_path": "preparation-ports/bootstrap.xml.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/bootstrap.xml",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 139863,
+      "raw_sha256": "e2262229e8de8e0f5fe598a029c7eba99cc944c4503178fc2b5747d632f17a76",
+      "gzip_bytes": 5965,
+      "gzip_sha256": "ecb1c052661f8c6d59f3f9775b39b5d546ff5ba900ed91220e1ae6c65072061c",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "xml",
+      "source_stat": {
+        "size_bytes": 139863,
+        "mtime_ns": 1793369309853124945
+      }
+    },
+    {
+      "archive_path": "preparation-ports/boundaries-comparison.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/boundaries-comparison.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 156998,
+      "raw_sha256": "a04b05747c330feea49638612fe940717b9a4ff2fe012ef11358f2396fe6022c",
+      "gzip_bytes": 2739,
+      "gzip_sha256": "5668b2ac5b976a89b11d161a98b0d12c442222876f1d896b1c3cb27824082145",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 156998,
+        "mtime_ns": 1793368889591460538
+      }
+    },
+    {
+      "archive_path": "preparation-ports/capture-files.txt.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/capture-files.txt",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 1129,
+      "raw_sha256": "aefc360a01995144b3ac665c950168b11a55db9a4235e7b9cb7ff245074bf72c",
+      "gzip_bytes": 260,
+      "gzip_sha256": "39c66a38e8a7167d7c96ed379ce4d131cf2ae3a5eb782293a701fee99596976b",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 1129,
+        "mtime_ns": 1793368917953117471
+      }
+    },
+    {
+      "archive_path": "preparation-ports/capture.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/capture.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 2052,
+      "raw_sha256": "b102d1f3641f4e0bf48992975f4ac6c45b7f294e002089e4ff76e6b9da9e2ed5",
+      "gzip_bytes": 601,
+      "gzip_sha256": "2e88a9495cdba988997d77e824ceefd6b0dadf7389ee75aeb09cd9fd25bdf1b0",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 2052,
+        "mtime_ns": 1793369052122505156
+      }
+    },
+    {
+      "archive_path": "preparation-ports/capture.log.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/capture.log",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 592,
+      "raw_sha256": "fbde4da117d9a0d645c520f58277a07ccc621a92f7875e1eded04b619b7c38a1",
+      "gzip_bytes": 99,
+      "gzip_sha256": "083c575cdc3e35614265d475f4ca28275d0c838a1839474f49c0c86a4620f96d",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 592,
+        "mtime_ns": 1793369051903440794
+      }
+    },
+    {
+      "archive_path": "preparation-ports/capture.xml.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/capture.xml",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 94028,
+      "raw_sha256": "dd2b50f5ee23a5de36e3cb6f8f205c1cab8bcca805a7f83c33d133e476acf8b5",
+      "gzip_bytes": 7289,
+      "gzip_sha256": "1b5aa567da12e86c8af2a6154f063ae9dba936f3bcf29db106f1878639e5c7b1",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "xml",
+      "source_stat": {
+        "size_bytes": 94028,
+        "mtime_ns": 1793369051813818867
+      }
+    },
+    {
+      "archive_path": "preparation-ports/change.diff.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/change.diff",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 6354,
+      "raw_sha256": "845d0ee3ed114ae2233714f63cf8fbe0e362801a963c34c22816b798c4b9c3bc",
+      "gzip_bytes": 2007,
+      "gzip_sha256": "d0f90678945c46290e2a75fb8f6cb6c65e4ee7a27b633f5a0a65fde7e3208c5d",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 6354,
+        "mtime_ns": 1793369480078615265
+      }
+    },
+    {
+      "archive_path": "preparation-ports/comparison.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/comparison.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 18720,
+      "raw_sha256": "18846b5e79d2cadfd5e6e8806aa9ed2230f3e0bb09df483240c6ef4237aacd72",
+      "gzip_bytes": 652,
+      "gzip_sha256": "fc57624d71f00da4dba8c6c70655df957ba59c7ccbbf61f819a9605eae6bf60c",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 18720,
+        "mtime_ns": 1793368798542119345
+      }
+    },
+    {
+      "archive_path": "preparation-ports/direct-calls.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/direct-calls.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 13960,
+      "raw_sha256": "b52d3948e6412a66d870926e7394b009706637706ce957922676aa4709ccc225",
+      "gzip_bytes": 1200,
+      "gzip_sha256": "360ca81f4922024e5c09687a97c36ce6af7f1d9908e28c81b0fdbb6ce9ad41b2",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 13960,
+        "mtime_ns": 1793368905444880813
+      }
+    },
+    {
+      "archive_path": "preparation-ports/failure-databases/new-bootstrap-discovery-normal-true.state.db.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/bootstrap-tmp/test_default_file_consumers_co0/state.db",
+      "role": "28 个共同失败中的代表；e652最终组对应数据库",
+      "raw_bytes": 823296,
+      "raw_sha256": "63b951857ccabccf7c84872dee8cd152337a5821083da31e2387bd41cea78e73",
+      "gzip_bytes": 31326,
+      "gzip_sha256": "ef21e5ef3643e69775a5801633c5564b96264899efb664eb44d8ba010d278909",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 823296,
+        "mtime_ns": 1793369264016703971
+      }
+    },
+    {
+      "archive_path": "preparation-ports/failure-databases/new-bootstrap-read-conflict.state.db.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/bootstrap-tmp/test_default_internal_read_use0/state.db",
+      "role": "五目录 bootstrap 组额外失败的独立读取节点",
+      "raw_bytes": 827392,
+      "raw_sha256": "0687496f59f53d5b328b3fa5d358748a6fd40dcd25a51c4c8db54bfe5dd234e5",
+      "gzip_bytes": 33039,
+      "gzip_sha256": "79e22254ce32b6a66d35f0fbcdf5505b478e3d921a23c8e868e9f396ac39851f",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 827392,
+        "mtime_ns": 1793369302203502395
+      }
+    },
+    {
+      "archive_path": "preparation-ports/failure-databases/new-read-single.state.db.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/new-read-single-tmp/test_default_internal_read_use0/state.db",
+      "role": "新源码单节点失败数据库",
+      "raw_bytes": 827392,
+      "raw_sha256": "41384827f728c067b92092272d36ecda41c3ee768af8b292ae18ac985511607d",
+      "gzip_bytes": 33049,
+      "gzip_sha256": "06c087454f067d848ae1c4990554833fe51f1b19d661a899505ab3fe026ce3e2",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 827392,
+        "mtime_ns": 1793369679135594411
+      }
+    },
+    {
+      "archive_path": "preparation-ports/failure-databases/old-bootstrap-discovery-normal-true.state.db.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/baseline-bootstrap-failures-tmp/test_default_file_consumers_co0/state.db",
+      "role": "28 个共同失败中的代表；旧侧数据库",
+      "raw_bytes": 823296,
+      "raw_sha256": "b6b86a92cc03e7e202ce5038737886d0a05518efd77b5765da25fbaae2adb1c8",
+      "gzip_bytes": 31341,
+      "gzip_sha256": "2bac015718b5c5fe51d304c6eff51ecccee6b56edf79e90985be05c13d72b32d",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 823296,
+        "mtime_ns": 1793369331935421972
+      }
+    },
+    {
+      "archive_path": "preparation-ports/fix-capture.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/fix-capture.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 2059,
+      "raw_sha256": "2878d499845cfe01c42817f5e806a9dfb00c4e882db5d582fb22d49920479449",
+      "gzip_bytes": 602,
+      "gzip_sha256": "aa0b44edc3e45aa7f35b67d0597bf6068982240005587a176a6b4edaa9b28d7c",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 2059,
+        "mtime_ns": 1793370167200966123
+      }
+    },
+    {
+      "archive_path": "preparation-ports/fix-capture.log.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/fix-capture.log",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 592,
+      "raw_sha256": "0223bd60512812b4b6bf692f7bec8b074fbd64d31ef2e5b321ac01395f4a0bb0",
+      "gzip_bytes": 99,
+      "gzip_sha256": "7dfee10b1b9b41262d4f84a207aedafd6c1119ce259673d8866337362d4edfed",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 592,
+        "mtime_ns": 1793370166990643530
+      }
+    },
+    {
+      "archive_path": "preparation-ports/fix-capture.xml.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/fix-capture.xml",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 94028,
+      "raw_sha256": "400a33dc4830bee47c48d575574b2d7470291c81d389620f6cdd5cda075e31bb",
+      "gzip_bytes": 7283,
+      "gzip_sha256": "f0145fddc85f9ef199be62035be59c74620c14aac2f10c3990b18f2e770e9fff",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "xml",
+      "source_stat": {
+        "size_bytes": 94028,
+        "mtime_ns": 1793370166910454178
+      }
+    },
+    {
+      "archive_path": "preparation-ports/handoff.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/handoff.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 4883,
+      "raw_sha256": "e355eaa08d617221866bbfb62b7b9ad93bce5c422b72a8017e0d5965a49d0f95",
+      "gzip_bytes": 2743,
+      "gzip_sha256": "ab90b4a58547454d71602a85418f9f1d88a2c4f330d2f084041b32ee1a3842f5",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 4883,
+        "mtime_ns": 1793369502432460183
+      }
+    },
+    {
+      "archive_path": "preparation-ports/history-files.txt.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/history-files.txt",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 138,
+      "raw_sha256": "c1307228b563c41e400900f573d2546aafd55c9f553d45c23b888ef7615844ac",
+      "gzip_bytes": 96,
+      "gzip_sha256": "70d38885af992775fc906a91758a750fbb88bc50985146ffdc3b437c99c3b008",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 138,
+        "mtime_ns": 1793368917953117471
+      }
+    },
+    {
+      "archive_path": "preparation-ports/history.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/history.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 962,
+      "raw_sha256": "a80cb61574bae55f7b9acacaf6949bd4c3bda4fc853bbeebc9be8213bf1aad1c",
+      "gzip_bytes": 428,
+      "gzip_sha256": "df7f2c759e4c1eac4b6f2286c9028011067e665923cb61c143408316babfe38c",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 962,
+        "mtime_ns": 1793369476041482307
+      }
+    },
+    {
+      "archive_path": "preparation-ports/history.log.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/history.log",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 111,
+      "raw_sha256": "1b89a669061e84654b5b611dd3022cfe4157a773bbb4b82909acbb56bc86a8ce",
+      "gzip_bytes": 64,
+      "gzip_sha256": "1cea51551d9c663315fd63e33e4b9ddb110a83ba3162313f0ab1e861246beb34",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 111,
+        "mtime_ns": 1793369475882176548
+      }
+    },
+    {
+      "archive_path": "preparation-ports/history.xml.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/history.xml",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 6888,
+      "raw_sha256": "0bda4a30ebc2b08e2cc682d869093a281e54f88a78cf2cb3338f11587407c673",
+      "gzip_bytes": 1362,
+      "gzip_sha256": "f63cc1266818d03f17e8edf4aa641a6127fe837ec5cd95dc7bfd9c4db54fd853",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "xml",
+      "source_stat": {
+        "size_bytes": 6888,
+        "mtime_ns": 1793369475832392859
+      }
+    },
+    {
+      "archive_path": "preparation-ports/identity-fix.diff.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/identity-fix.diff",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 1600,
+      "raw_sha256": "cf7df293439390f921a371f7db720667ebeaac17a62262d9f260cc9943e6ff99",
+      "gzip_bytes": 654,
+      "gzip_sha256": "f736465917f9aec0917b9796152cdcddda4721219c723fda8b2f6d87f093de53",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 1600,
+        "mtime_ns": 1793370185105737313
+      }
+    },
+    {
+      "archive_path": "preparation-ports/indirect-imports.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/indirect-imports.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 9967,
+      "raw_sha256": "d2a58e67dc811830fa6a16f1d7c7e5205b0d255efd883a95391a4b7d07a39ad6",
+      "gzip_bytes": 886,
+      "gzip_sha256": "e56992b897ed54d8ae2576173267d3d7b55073c986bf6c4994a77580f849fde1",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 9967,
+        "mtime_ns": 1793369446300677260
+      }
+    },
+    {
+      "archive_path": "preparation-ports/narrow.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/narrow.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 898,
+      "raw_sha256": "2f8ba8f36940d708b8df7726b2213facc9191cac88d0d7d04603b34e78b76f93",
+      "gzip_bytes": 395,
+      "gzip_sha256": "c1f60f1415a1b42f847ad8cdf3a96df7e5ac5e057eb18b91f8f87186e1bf39ed",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 898,
+        "mtime_ns": 1793368791885199541
+      }
+    },
+    {
+      "archive_path": "preparation-ports/narrow.log.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/narrow.log",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 3361,
+      "raw_sha256": "9c052dd6fc97bd4c6d9147dc58774a69fc6289c6190f35af2a9d19cf855e3b6e",
+      "gzip_bytes": 440,
+      "gzip_sha256": "45eb8f584b86d69d2896553e594077bf57fc74044419b78bac67cd0d7cf80fc2",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 3361,
+        "mtime_ns": 1793368791754346261
+      }
+    },
+    {
+      "archive_path": "preparation-ports/narrow.xml.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/narrow.xml",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 1131,
+      "raw_sha256": "f0b64b64f64aee39aeb562d3a13acc39cfd7178976ab553fee32722dbed54fa4",
+      "gzip_bytes": 348,
+      "gzip_sha256": "255499b6a46a89f7641235cfc80aaa5dabca7d12a2270bddc04f3081903aa16b",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "xml",
+      "source_stat": {
+        "size_bytes": 1131,
+        "mtime_ns": 1793368791714083713
+      }
+    },
+    {
+      "archive_path": "preparation-ports/new-boundaries.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/new-boundaries.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 1416,
+      "raw_sha256": "6872232e75fb2bed13ef4b11c037cdff016f112ba966124a0e1371beb0bcd927",
+      "gzip_bytes": 593,
+      "gzip_sha256": "064765fb08a1e1373875683378640d83818c1bf6f6c3b504d8795f47cef3b07d",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 1416,
+        "mtime_ns": 1793368881856704077
+      }
+    },
+    {
+      "archive_path": "preparation-ports/new-boundaries.log.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/new-boundaries.log",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 100,
+      "raw_sha256": "22abc9663ded121d74b21ba582eec88c8d6ef3b6a50cda0c45875881b40cd43d",
+      "gzip_bytes": 53,
+      "gzip_sha256": "976e1b09e1d687f4893a32e549d5661a38e3802b49b463f217085dc452c15f49",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 100,
+        "mtime_ns": 1793368881675147652
+      }
+    },
+    {
+      "archive_path": "preparation-ports/new-boundaries.xml.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/new-boundaries.xml",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 6394,
+      "raw_sha256": "49d1df9c6511c673c6cb11d8b1dd576eabd960e45a3c995e8f5aca0f64cbceee",
+      "gzip_bytes": 708,
+      "gzip_sha256": "bbdd9890d336ede546659feeb14aa061838fa45a4606b346de870fb720c1c866",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "xml",
+      "source_stat": {
+        "size_bytes": 6394,
+        "mtime_ns": 1793368881614628846
+      }
+    },
+    {
+      "archive_path": "preparation-ports/new-identity.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/new-identity.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 915,
+      "raw_sha256": "bb28ed7529fc696120d56ffe7ab8589a82e97d6563931000cd8e78b9681099db",
+      "gzip_bytes": 397,
+      "gzip_sha256": "4e8699d02e0f9b5e45494a28e87dc0d93fbaab50151989f0d4ad379276d4ef6a",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 915,
+        "mtime_ns": 1793368848608458157
+      }
+    },
+    {
+      "archive_path": "preparation-ports/new-identity.log.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/new-identity.log",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 55,
+      "raw_sha256": "e19dbc227d45d5ac5c2e9a823cb372e74fc0558cbb9bc4df31b779cd3696f778",
+      "gzip_bytes": 75,
+      "gzip_sha256": "b99795ccf3dbfd047634a9f9809f4b74a382a60eea6774dae386ddb59b0aca5e",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 55,
+        "mtime_ns": 1793368848488997429
+      }
+    },
+    {
+      "archive_path": "preparation-ports/new-identity.xml.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/new-identity.xml",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 386,
+      "raw_sha256": "db04a50cf611896806e795457fba8187471c8727ffed0c7e0b138fc2b39978de",
+      "gzip_bytes": 256,
+      "gzip_sha256": "26a4ca41b369016c49f717176acfc68a5071968a7b0e905487d8b24c4c41f4b1",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "xml",
+      "source_stat": {
+        "size_bytes": 386,
+        "mtime_ns": 1793368848449177185
+      }
+    },
+    {
+      "archive_path": "preparation-ports/new-preflight.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/new-preflight.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 487,
+      "raw_sha256": "f9dc2c2fbcc343df29ad5c11821ba5bce6095dd45c17dc23fbcb568570eb0b08",
+      "gzip_bytes": 286,
+      "gzip_sha256": "6b73255fa73b8c9317456e91715d1f77ac59cd2108d2f356ed6073f04138f1e9",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 487,
+        "mtime_ns": 1793368789653438910
+      }
+    },
+    {
+      "archive_path": "preparation-ports/new-read-single.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/new-read-single.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 968,
+      "raw_sha256": "b519d17df9ae64b05a0a49214dc98ecd7d73d40e60f974a552306457eb52fe9f",
+      "gzip_bytes": 455,
+      "gzip_sha256": "30fa08bd1bc87bd22a1f8bc864d9c8efae610830f2e770d5405eaeb612e12f83",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 968,
+        "mtime_ns": 1793369679334880079
+      }
+    },
+    {
+      "archive_path": "preparation-ports/new-read-single.log.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/new-read-single.log",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 3516,
+      "raw_sha256": "9a68aa3e69738623f11b369c0405775ff4395ec9252a82406220cf0a842bf491",
+      "gzip_bytes": 1471,
+      "gzip_sha256": "0cf6d0f6191b2693fb7daf151cdecf3d43a02bf93aab718ee6faf3d38b7c92d1",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 3516,
+        "mtime_ns": 1793369679195380112
+      }
+    },
+    {
+      "archive_path": "preparation-ports/new-read-single.xml.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/new-read-single.xml",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 4186,
+      "raw_sha256": "853a238403d7c82bf91342d49472f369239ca469fc706dcc7ee0b8fdff6a56c5",
+      "gzip_bytes": 1614,
+      "gzip_sha256": "7710dc96e6232a76ea825256dc8862357ac0ec66724796fabf9524caed1c81bd",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "xml",
+      "source_stat": {
+        "size_bytes": 4186,
+        "mtime_ns": 1793369679145558692
+      }
+    },
+    {
+      "archive_path": "preparation-ports/old-read-single.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/old-read-single.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 973,
+      "raw_sha256": "898a22c2cda49ad9bd6580466951582c9ca4965eb186ef318016071f888512b8",
+      "gzip_bytes": 460,
+      "gzip_sha256": "3b401a7839f19477e4b9edd7077c4df110e1f449765d6285daea676971e6d1a6",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 973,
+        "mtime_ns": 1793369674159841662
+      }
+    },
+    {
+      "archive_path": "preparation-ports/old-read-single.log.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/old-read-single.log",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 20,
+      "raw_sha256": "3976ed85de92dda05c2246130ecae29f1298755cd3d7269d9d7201e0c7de08b6",
+      "gzip_bytes": 40,
+      "gzip_sha256": "bbcb4dc9610a7d1de0ea4b82213477eabdf5f3fa4a0c9ca9d70e0f088bbb0781",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 20,
+        "mtime_ns": 1793369674020148701
+      }
+    },
+    {
+      "archive_path": "preparation-ports/old-read-single.xml.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/old-read-single.xml",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 400,
+      "raw_sha256": "f4b1423654c58587103d5ad2208cdadcf9b453bdb3c10b43298a8ca99ecf28d6",
+      "gzip_bytes": 265,
+      "gzip_sha256": "c3d347564bbcb5d52b6d00db3324feac717eeb769580e7bda8d5ecd551f5e38d",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "xml",
+      "source_stat": {
+        "size_bytes": 400,
+        "mtime_ns": 1793369673980227760
+      }
+    },
+    {
+      "archive_path": "preparation-ports/persistence-files.txt.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/persistence-files.txt",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 724,
+      "raw_sha256": "3ce1d6ca0ec39e45ea492dd1a05346aa0ef15acd6da988a61bced48f6e7fe98d",
+      "gzip_bytes": 157,
+      "gzip_sha256": "f754e7ea422acf0b5d3355e76dc1395dac6cc6ca0c974db072480886429b75f4",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 724,
+        "mtime_ns": 1793368917953117471
+      }
+    },
+    {
+      "archive_path": "preparation-ports/persistence.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/persistence.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 1613,
+      "raw_sha256": "50249d57b064729d279a38a1a27dd49129e9725fddb18b51d229bc9d165c16a0",
+      "gzip_bytes": 495,
+      "gzip_sha256": "3687f6d61404d567dfee8247d2dafa65c12a33a7369e3f67f7ac34efd0bb92bf",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 1613,
+        "mtime_ns": 1793369228319287139
+      }
+    },
+    {
+      "archive_path": "preparation-ports/persistence.log.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/persistence.log",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 6804,
+      "raw_sha256": "5efbd11d2acae4b92ef1e276b1dd5aaa1706e0b8b01d4c14fdd8754a88a31745",
+      "gzip_bytes": 1888,
+      "gzip_sha256": "a47bfabf308b73d23d787d045622e4e0373b801ad88d39a9bbb3660f4b2ebd1c",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 6804,
+        "mtime_ns": 1793369228129957586
+      }
+    },
+    {
+      "archive_path": "preparation-ports/persistence.xml.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/persistence.xml",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 89671,
+      "raw_sha256": "f0334d97d066f550ca2d7e840aefaa683c5f32789ec82851a5aa0bb8efaaf29a",
+      "gzip_bytes": 9216,
+      "gzip_sha256": "c9aa93a86a8e46c16467b7219f245cd5765e2387bdcb1748ffc6dd6bfed8ab27",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "xml",
+      "source_stat": {
+        "size_bytes": 89671,
+        "mtime_ns": 1793369228070169307
+      }
+    },
+    {
+      "archive_path": "preparation-ports/read-budgets.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/read-budgets.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 1398,
+      "raw_sha256": "55d25669fb54418f18672af39217d686fc553c5cc0ce2c042c7d7b9fc7c643f8",
+      "gzip_bytes": 194,
+      "gzip_sha256": "dbe820e7b9c54381dc22602634de7b5f8dd8837bbbc8ca133596d91253b64b28",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 1398,
+        "mtime_ns": 1793369756860341020
+      }
+    },
+    {
+      "archive_path": "preparation-ports/read-comparison.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/read-comparison.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 852,
+      "raw_sha256": "9ec0f5da527f792f39c9d26fe41af2c6cb1ce4d074702c6b51ca0c1c6b1362ef",
+      "gzip_bytes": 624,
+      "gzip_sha256": "4cdb7a756b504a5a1021c0a4654c89430753b256ffd44dd5d8016848d7951e02",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 852,
+        "mtime_ns": 1793369728204566592
+      }
+    },
+    {
+      "archive_path": "preparation-ports/read-database-facts.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/read-database-facts.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 103305,
+      "raw_sha256": "2f947b042fd14c1edff8e40f6ba789bdd25ea554d86b15dd82b7ea866e693925",
+      "gzip_bytes": 7784,
+      "gzip_sha256": "cbf2b7b313b27506bf998bf7f07d8df302e4baa05d77275cbfc48024397f6658",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 103305,
+        "mtime_ns": 1793369697662780903
+      }
+    },
+    {
+      "archive_path": "preparation-ports/receipt-probe.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/receipt-probe.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 917,
+      "raw_sha256": "a2431c75837872e591f59d89dd6ef20fcb6b417be57ded34f5ecf82b7c5dcccb",
+      "gzip_bytes": 398,
+      "gzip_sha256": "a62d412b869c63b70a1cd1752820f01798112513f56716011608930e3480c029",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 917,
+        "mtime_ns": 1793369665644424674
+      }
+    },
+    {
+      "archive_path": "preparation-ports/receipt-probe.log.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/receipt-probe.log",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 21,
+      "raw_sha256": "6feedabcd4bb442f8f762c6e753ac386b1818b2800293e6875093e023614152d",
+      "gzip_bytes": 41,
+      "gzip_sha256": "8f660f5a18dbe4b64610ffda12d1980d53b69a1b87744f3472d359d794adef8f",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 21,
+        "mtime_ns": 1793369665513834282
+      }
+    },
+    {
+      "archive_path": "preparation-ports/receipt-probe.xml.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/receipt-probe.xml",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 541,
+      "raw_sha256": "0338ded931b877bc274054b30f5f4504083262d3df4e1966bc55b7bb66af1f56",
+      "gzip_bytes": 280,
+      "gzip_sha256": "ddcc0fc2b53c626cb4c3a8488e9b6a200beff4491c396a01b8ecc2995e477ca0",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "xml",
+      "source_stat": {
+        "size_bytes": 541,
+        "mtime_ns": 1793369665483698040
+      }
+    },
+    {
+      "archive_path": "preparation-ports/reporting-files.txt.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/reporting-files.txt",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 293,
+      "raw_sha256": "b3e291efd217305adfb4a9a7527a56d1cd9be25ca51cf88e6eafd2034a5b26ae",
+      "gzip_bytes": 119,
+      "gzip_sha256": "765089e0e70a86940978661f7ab18758d03e7c93dcc0060aacc4870c8cd94958",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 293,
+        "mtime_ns": 1793368917953117471
+      }
+    },
+    {
+      "archive_path": "preparation-ports/reporting.json.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/reporting.json",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 1135,
+      "raw_sha256": "22d535e752defd5720bc4dbde1beb0dc21cc3ea74157326e42776c17583d8234",
+      "gzip_bytes": 448,
+      "gzip_sha256": "f41b26cb3285e342d215ba3469a31896c354ff598d08e06aeb5d308da9c04296",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "json",
+      "source_stat": {
+        "size_bytes": 1135,
+        "mtime_ns": 1793369258019072222
+      }
+    },
+    {
+      "archive_path": "preparation-ports/reporting.log.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/reporting.log",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 99,
+      "raw_sha256": "c2b7a25ea0018015d8497980269b5ec83b9256930f5be484c9ae219a59bb25d0",
+      "gzip_bytes": 52,
+      "gzip_sha256": "3df99070fd950603f9e3de6e333c3589cf6719ffe5731d80dbe3256ded522b8c",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 99,
+        "mtime_ns": 1793369257849605905
+      }
+    },
+    {
+      "archive_path": "preparation-ports/reporting.xml.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/reporting.xml",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 3024,
+      "raw_sha256": "b37e791dcb7f9856fc1442059240a3ed45b6817b3b49f7c373ba8a59ac60bdad",
+      "gzip_bytes": 652,
+      "gzip_sha256": "c578cca9ca1f55a46a931f8f19fd6a258608c3e08b5cf7001bbfbec704358a95",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": "xml",
+      "source_stat": {
+        "size_bytes": 3024,
+        "mtime_ns": 1793369257789794124
+      }
+    },
+    {
+      "archive_path": "preparation-ports/run-baseline-multi.py.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/run-baseline-multi.py",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 1702,
+      "raw_sha256": "e4940bc5bd039234638b4039e2795b36d70417ea859c5b02bfb94e1c94a03317",
+      "gzip_bytes": 827,
+      "gzip_sha256": "fff1509505a60d62162cbb76bafb0269146338840afd77c21f29d81a26ef03b9",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 1702,
+        "mtime_ns": 1793368856483971180
+      }
+    },
+    {
+      "archive_path": "preparation-ports/run-baseline.py.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/run-baseline.py",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 1704,
+      "raw_sha256": "2c997036e5e2d228b2accd4dc118599d950816283418b5b8e46020c542701293",
+      "gzip_bytes": 824,
+      "gzip_sha256": "852dd7f9f677a35762357b6d4144b99ea93d2be4cba54a69d1c66d792ec72499",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 1704,
+        "mtime_ns": 1793368757403751532
+      }
+    },
+    {
+      "archive_path": "preparation-ports/run-multi.py.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/run-multi.py",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 1699,
+      "raw_sha256": "65fd34abfe43a2a8af2568cbe695669155aea37fcccbb1b4c969bb50943aaa20",
+      "gzip_bytes": 819,
+      "gzip_sha256": "f1ff317945d5a71fd91895f578aa1a790454c13a55a121eebe92bac0d9566aa4",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 1699,
+        "mtime_ns": 1793368856483971180
+      }
+    },
+    {
+      "archive_path": "preparation-ports/run.py.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/run.py",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 1701,
+      "raw_sha256": "8631e0a83f99929ef9c60ef09b510012aab98f3a58cab92502d8644308b8713f",
+      "gzip_bytes": 817,
+      "gzip_sha256": "2014c900307175325fe20836b477a8dabd95fdb28210965eba37a7cd9bc0a4ba",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 1701,
+        "mtime_ns": 1793368789743008735
+      }
+    },
+    {
+      "archive_path": "preparation-ports/test_identity_probe.py.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/test_identity_probe.py",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 691,
+      "raw_sha256": "c2fca677237f527400ec4089c17fdcf8e0c6745441888ff3ccae6a1db39f91fb",
+      "gzip_bytes": 397,
+      "gzip_sha256": "75d4e33f7815f5b4b8f9c72c3ee2078b21430cfee6ff8cabf5c1900ea1f9b483",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 691,
+        "mtime_ns": 1793368843540809141
+      }
+    },
+    {
+      "archive_path": "preparation-ports/test_preflight.py.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/test_preflight.py",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 4228,
+      "raw_sha256": "ff3bdc1e31492c52f128b0e6474712a5a7d7fc588fd82e94b94a1179a65c83ed",
+      "gzip_bytes": 1416,
+      "gzip_sha256": "239c79b044c1173e025caf753f5332d14ed96d59326e72bb3493086bfb9e8462",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 4228,
+        "mtime_ns": 1793368757383840521
+      }
+    },
+    {
+      "archive_path": "preparation-ports/test_receipt_probe.py.gz",
+      "source": "/tmp/camctl-resume-20261030/evidence-preparation-ports/test_receipt_probe.py",
+      "role": "e652范围直接证据文件",
+      "raw_bytes": 1767,
+      "raw_sha256": "331331a54d6e50d172022c50261d34864ea3d1cd33c5abc208713f2b1a3fa2ce",
+      "gzip_bytes": 743,
+      "gzip_sha256": "9de5fe7526c6d3c1456d649c7f2a78062f978bfb769dd1ea565f72b8385c3184",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": {
+        "size_bytes": 1767,
+        "mtime_ns": 1793370003564688423
+      }
+    },
+    {
+      "archive_path": "sources/base-47682d1c/apps/camctl/tests/integration/capture/result_consumer_fixtures.py.gz",
+      "source": "git show 47682d1c3344f5b7720c7c0ac7f32278960f4761:apps/camctl/tests/integration/capture/result_consumer_fixtures.py",
+      "role": "基线目标测试源",
+      "raw_bytes": 15246,
+      "raw_sha256": "e18eccbb4521cf9259e722c797dc1739422e0eea2fff3bcbf987fbbd80f0f814",
+      "gzip_bytes": 4693,
+      "gzip_sha256": "a3075ef754c48dd1f5177112e2b520589364055b89f7f8fdd32759d42cb5cb04",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": null
+    },
+    {
+      "archive_path": "sources/base-47682d1c/apps/camctl/tests/integration/history/test_record_segment_history.py.gz",
+      "source": "git show 47682d1c3344f5b7720c7c0ac7f32278960f4761:apps/camctl/tests/integration/history/test_record_segment_history.py",
+      "role": "基线目标测试源",
+      "raw_bytes": 44476,
+      "raw_sha256": "e62df1d24df4bbd55b18e3dbafe42acc2d6988cc8bd279288c40527bfdd505c5",
+      "gzip_bytes": 9806,
+      "gzip_sha256": "cd33b1a3fba53562940879b22c01dad2e0ff59c0b0920b6ef2309b466388f579",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": null
+    },
+    {
+      "archive_path": "sources/capacity-e65200e6/apps/camctl/tests/integration/persistence/segment_capacity_worker.py.gz",
+      "source": "git show e65200e6650effa5a71ef0cf99a9d0688d939b53:apps/camctl/tests/integration/persistence/segment_capacity_worker.py",
+      "role": "root容量执行器源码",
+      "raw_bytes": 5897,
+      "raw_sha256": "97bf4069ce7d8478856c53084acd61fe07428973c6cfe92eabf58ad530e7ad15",
+      "gzip_bytes": 2080,
+      "gzip_sha256": "7538f7ba616d80a26801878c9d8cac7d99765b755c923546c8c8c3a595af75a1",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": null
+    },
+    {
+      "archive_path": "sources/capacity-e65200e6/apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py.gz",
+      "source": "git show e65200e6650effa5a71ef0cf99a9d0688d939b53:apps/camctl/tests/integration/persistence/test_segment_transaction_batches.py",
+      "role": "root容量执行器源码",
+      "raw_bytes": 81378,
+      "raw_sha256": "9f7fa1744740da3fa7fa496eb16db0b5a61a12b2583c02a891ea6836766b4c09",
+      "gzip_bytes": 16565,
+      "gzip_sha256": "33e70956c60f5e7dc35623e7999f4969c29384309ab259ea3f79daba24389fd1",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": null
+    },
+    {
+      "archive_path": "sources/capacity-e65200e6/scripts/run-memory-budget.py.gz",
+      "source": "git show e65200e6650effa5a71ef0cf99a9d0688d939b53:scripts/run-memory-budget.py",
+      "role": "root容量执行器源码",
+      "raw_bytes": 14747,
+      "raw_sha256": "dd043580c0f4c177119484661a3db63e8ced746b6412d1a16288ceaead7a50d9",
+      "gzip_bytes": 4709,
+      "gzip_sha256": "4d082d9309983ae7db16b6f115e7b16c775f199e833eabf8bb5be95ce441a70d",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": null
+    },
+    {
+      "archive_path": "sources/e65200e6/apps/camctl/tests/integration/capture/result_consumer_fixtures.py.gz",
+      "source": "git show e65200e6650effa5a71ef0cf99a9d0688d939b53:apps/camctl/tests/integration/capture/result_consumer_fixtures.py",
+      "role": "e652最终目标测试源",
+      "raw_bytes": 15870,
+      "raw_sha256": "3c3dc36b920fbc52b7b7da9914420e84d2c99bb2f139d616b4d7520010f9c9d9",
+      "gzip_bytes": 4908,
+      "gzip_sha256": "924cccd7e17b3b5d065b4069afcb05a0bfce5beb079595e3f148b274fce19a53",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": null
+    },
+    {
+      "archive_path": "sources/e65200e6/apps/camctl/tests/integration/history/test_record_segment_history.py.gz",
+      "source": "git show e65200e6650effa5a71ef0cf99a9d0688d939b53:apps/camctl/tests/integration/history/test_record_segment_history.py",
+      "role": "e652最终目标测试源",
+      "raw_bytes": 44973,
+      "raw_sha256": "183793c7d7e0852770dc2207106cd827125ea8f8fff3be858a14595ed0cb55b0",
+      "gzip_bytes": 9961,
+      "gzip_sha256": "64981b7c74f48b452970ca269a0ce38a34b0fc9f2f172f408afb02bbcf71a66c",
+      "gzip_mtime_seconds": 0,
+      "decompressed_bytes_match_source": true,
+      "structured_parse": null,
+      "source_stat": null
+    }
+  ],
+  "summary": {
+    "preparation_root_top_level_artifacts": 73,
+    "run_group_count": 15,
+    "capacity_run_count": 1,
+    "capacity_test_passed": 1,
+    "selected_failure_database_count": 4,
+    "source_snapshot_file_count": 7,
+    "gzip_payload_count": 98,
+    "raw_bytes": 4916108,
+    "compressed_bytes": 340476
+  }
+}
