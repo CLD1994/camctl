@@ -489,7 +489,8 @@ class SegmentInputCase:
         return row
 
 
-async def segment_input_case(directory, resources, monkeypatch, values, *, mode="default", partial=False):
+async def segment_input_case(directory, resources, monkeypatch, values, *, mode="default", partial=False,
+                             early_waiters=(20, 21)):
     from types import SimpleNamespace
     from datetime import datetime, timezone
     from camctl.bootstrap.capture_assembly import execution_wait_config, session_capture_assembly
@@ -620,5 +621,5 @@ async def segment_input_case(directory, resources, monkeypatch, values, *, mode=
     world.obtain_factory = session_obtain_assembly(devices=obtain_devices, drivers=DriverRegistry((entry,)),
         staging=Path(world.cfg.paths.staging), ready=Path(world.cfg.paths.ready), processing=Path(world.cfg.paths.processing),
         segment_size=4, occurred_at=lambda: world.wall[0], monotonic_ns=lambda: world.mono[0], file_executor=world.executor)
-    world.early = [await world.add_waiter(identity, mode) for identity in (20, 21)]
+    world.early = [await world.add_waiter(identity, mode) for identity in early_waiters]
     return world
