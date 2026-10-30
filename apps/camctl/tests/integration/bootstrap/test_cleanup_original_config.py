@@ -8,7 +8,7 @@ from decimal import Decimal
 import pytest
 
 from camctl.operations.attempts import AttemptIntent, AttemptTarget, OperationKind
-from camctl.operations.recovery import RecoveryBoundary
+from camctl.operations.recovery import RecoveryBoundary, recovery_registry
 from camctl.outputs.cleanup_flow import advance_cleanup, delete_source_file
 from camctl.persistence.models import DbOutcomeKind
 
@@ -33,7 +33,7 @@ async def _lost_operation(world, operation):
     from camctl.persistence.repositories.outputs import OutputsRepository
     item_id, ticket, horizon = _lost_intent(world, "delete")
     if operation == "query":
-        evidence = (await _factory(world)(world.owned)).recovery_evidence_for(world.binding, "delete")
+        evidence = recovery_registry(world.entry, "delete")
         actual = CallOutcome(status=AttemptStatus.UNKNOWN, effect=EffectState.UNKNOWN, error=ErrorValue("result_not_saved", "recovery"),
             settlement=Settlement(SettlementBasis.ASSUMED, EvidenceValue("adb_foreground_recovery", 1, {})))
         finish = AttemptFinish(ticket, validate_outcome(ticket, actual, evidence), _NOW,
@@ -153,7 +153,7 @@ async def test_already_saved_missing_wait_is_diagnosed_without_rewriting_or_repl
     from camctl.persistence.repositories.operations import OperationRepository
     actual = CallOutcome(status=AttemptStatus.UNKNOWN, effect=EffectState.UNKNOWN, error=ErrorValue("result_not_saved", "recovery"),
         settlement=Settlement(SettlementBasis.ASSUMED, EvidenceValue("adb_foreground_recovery", 1, {})))
-    finish = AttemptFinish(ticket, validate_outcome(ticket, actual, (await _factory(world)(world.owned)).recovery_evidence_for(world.binding, operation)),
+    finish = AttemptFinish(ticket, validate_outcome(ticket, actual, recovery_registry(world.entry, operation)),
         _NOW, retry_wait=False, recovery_max_event_id=horizon)
     saved = (OutputsRepository().finish_cleanup_attempt(finish, new_operation_key(), world.owned)
         if operation == "delete" else OperationRepository().finish_attempt(finish, new_operation_key(), world.owned))

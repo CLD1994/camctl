@@ -25,7 +25,7 @@ from camctl.devices.evidence import EvidenceContract, EvidenceRegistry
 from camctl.operations.attempts import AttemptConfig
 from camctl.operations.models import AttemptStatus, SettlementBasis
 from camctl.operations.process import LocalExit, RawToolOutcome
-from camctl.operations.recovery import RecoveryBoundary
+from camctl.operations.recovery import RecoveryBoundary, recovery_registry
 from camctl.outputs.cleanup_flow import (
     advance_cleanup, delete_source_file,
 )
@@ -184,23 +184,22 @@ def _factory(world, **kwargs):
 
 @pytest.mark.parametrize("operation", ["query", "delete"])
 @pytest.mark.parametrize("world", ["dji-osmo360-ii", "dji-action6"], indirect=True)
-async def test_registered_osmo_recovery_is_consumed_by_formal_assembly(world, operation):
-    runtime = await _factory(world)(world.owned)
-    evidence = runtime.recovery_evidence_for(world.binding, operation)
+async def test_registered_osmo_recovery_registry_preserves_operation_contract(world, operation):
+    evidence = recovery_registry(world.entry, operation)
     assert evidence is not None
     template = evidence.contract("adb_foreground_recovery", 1)
     assert template.operation == operation and template.fields == frozenset()
     assert template.identity_field is None
     assert evidence.contract(operation + "_returned", 1) is world.entry.evidence.contract(operation + "_returned", 1)
     assert evidence.contract(operation + "_foreground_recovery", 1).fields == frozenset({"terminate_grace_s"})
-    assert runtime.recovery_evidence_for(world.binding, "digest") is None
+    assert recovery_registry(world.entry, "digest") is None
     assert world.entry.declaration.file_query_supported and world.entry.declaration.delete_supported
     assert not world.entry.declaration.query_supported
 
 
 @pytest.mark.parametrize("operation", ["query", "delete"])
 @pytest.mark.parametrize("missing", ["authorization", "template", "body", "identity"])
-async def test_formal_recovery_keeps_missing_or_invalid_registration_blocked(world, operation, missing):
+async def test_recovery_registry_rejects_missing_or_invalid_registration(world, operation, missing):
     entry = world.entry
     if missing == "authorization":
         entry = replace(entry, declaration=replace(entry.declaration, adb_foreground_recovery_operations=frozenset()))
@@ -211,14 +210,11 @@ async def test_formal_recovery_keeps_missing_or_invalid_registration_blocked(wor
             "adb_foreground_recovery", 1, operation, frozenset({"terminate_grace_s"})
             if missing == "body" else frozenset({"cleanup_item_id"}),
             identity_field=None if missing == "body" else "cleanup_item_id")))
-    world.registry = DriverRegistry((entry, world.registry.entry("dji-action6"),
-                                     world.registry.entry("hasselblad_cfv100c")))
-    runtime = await _factory(world)(world.owned)
     if missing in ("body", "identity"):
         with pytest.raises(ValueError, match="空正文"):
-            runtime.recovery_evidence_for(BINDING, operation)
+            recovery_registry(entry, operation)
     else:
-        assert runtime.recovery_evidence_for(BINDING, operation) is None
+        assert recovery_registry(entry, operation) is None
 
 
 @pytest.mark.parametrize("output_id", [701, 702, 703, 704, 705])
