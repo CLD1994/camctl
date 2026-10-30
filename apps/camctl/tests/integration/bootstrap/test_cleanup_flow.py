@@ -252,14 +252,25 @@ def _cleanup_plan(request_id: str, params: dict) -> dict:
 
 
 def _run_session(deps, cfg, driver: _CleanupDriver, results) -> asyncio.Task:
-    if deps.work_files is None:
-        from camctl.bootstrap.work_file_assembly import WorkFileRuntime
-        from camctl.outputs.work_files import WorkFileLimits
+    from camctl.host_files.tasks import FileTaskExecutor
+    from camctl.outputs.work_files import WorkFileContext, WorkFileLimits, clean_work_files
+    from camctl.persistence.repositories.outputs import OutputsRepository
+    from camctl.session.supervision import Supervisor
 
-        deps.work_files = WorkFileRuntime(
-            staging=Path(cfg.paths.staging),
-            limits=WorkFileLimits(batch_size=100, limit_per_run=100),
-        )
+    supervisor = Supervisor()
+    file_executor = FileTaskExecutor(supervisor)
+    work = None
+
+    async def maintain(context):
+        nonlocal work
+        if work is None:
+            work = WorkFileContext(
+                repository=OutputsRepository(), database=context.database,
+                staging=Path(cfg.paths.staging), occurred_at=context.clock.utc_micros(),
+                limits=WorkFileLimits(batch_size=100, limit_per_run=100),
+                executor=file_executor)
+        await clean_work_files(work)
+
     registry = _registry(driver)
     cleanup = cleanup_flow(session_cleanup_assembly(
         devices=cfg.devices,
@@ -267,27 +278,33 @@ def _run_session(deps, cfg, driver: _CleanupDriver, results) -> asyncio.Task:
         max_delete_attempts=cfg.cleanup.max_delete_attempts,
         max_query_attempts=cfg.cleanup.max_query_attempts,
         staging=Path(cfg.paths.staging),
-        file_executor=deps.work_files.executor,
+        file_executor=file_executor,
     ))
-    return asyncio.create_task(execute_command(
-        deps, None,
-        flows={
-            "scheduling": capture_flow(session_capture_assembly(
-                devices=cfg.devices,
-                drivers=registry,
-                results=results,
-                staging=Path(cfg.paths.staging),
-                file_executor=deps.work_files.executor,
-                wait_config=lambda params: CaptureWaitConfig(
-                    target_duration_ms=1_000, driver_margin_ms=0),
-            )),
-            "cleanup": cleanup,
-            "work_files": deps.work_files.flow,
-            "cancel": cancel_flow(ready=Path(cfg.paths.ready),
-                                  processing=Path(cfg.paths.processing)),
-        },
-        poll_interval_s=0.1,
-    ))
+    async def run():
+        try:
+            return await execute_command(
+                deps, None,
+                flows={
+                    "scheduling": capture_flow(session_capture_assembly(
+                        devices=cfg.devices,
+                        drivers=registry,
+                        results=results,
+                        staging=Path(cfg.paths.staging),
+                        file_executor=file_executor,
+                        wait_config=lambda params: CaptureWaitConfig(
+                            target_duration_ms=1_000, driver_margin_ms=0),
+                    )),
+                    "cleanup": cleanup,
+                    "work_files": maintain,
+                    "cancel": cancel_flow(ready=Path(cfg.paths.ready),
+                                          processing=Path(cfg.paths.processing)),
+                },
+                poll_interval_s=0.1,
+            )
+        finally:
+            await supervisor.drain_required()
+
+    return asyncio.create_task(run())
 
 
 async def _run_photo_session(tmp_path: Path, cfg, catalog=_Catalog):
