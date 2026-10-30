@@ -22,6 +22,7 @@ from .test_capture_contract import _NOW
 from .test_record_file_completion_wait import (
     _completed_result,
     _result_port,
+    _result_setup,
 )
 from ..outputs.test_segment_default_scope import _obtain
 from ..support.result_cases import CaseClock
@@ -50,11 +51,12 @@ pytestmark = pytest.mark.asyncio
 async def test_action6_native_cancel_defaults_to_all_qualified_videos_and_photo(
     tmp_path, video_identities
 ):
+    result_port, evidence = _result_setup()
     clock = CaseClock(_NOW, 5_000_000_000)
     stopper = create_autospec(StopDriver, instance=True)
     owned, runtime, action_id, handler = await consumer_world(
         tmp_path, "timelapse", catalog=Action6NativeCatalog(0), start=False, clock=clock,
-        runtime_options={"stopper": stopper},
+        runtime_options={"stopper": stopper, "results": result_port, "evidence": evidence},
     )
     try:
         (activity_id,) = owned.connection.execute(
@@ -99,7 +101,7 @@ async def test_action6_native_cancel_defaults_to_all_qualified_videos_and_photo(
                 completion=completion,
             )
 
-        driver = _result_port(runtime, read)
+        driver = _result_port(result_port, evidence, read)
         await capture_handler(handler)(action_id, runtime)
 
         assert (await runtime.action(action_id))["status"] == 6

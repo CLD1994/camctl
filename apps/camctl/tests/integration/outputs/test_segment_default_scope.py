@@ -34,7 +34,6 @@ from ..capture.test_record_segment_scope_recovery import (
     SegmentWaitCatalog,
 )
 from ..capture.test_record_file_completion_wait import (
-    _result_port,
     _completed_result,
     _stop_context,
 )

@@ -73,11 +73,20 @@ def _completion(context, **changes):
         "completed": True, **changes}
 
 
-def _result_port(runtime, read):
+def _result_setup():
+    from ..support.result_cases import ResultPort
+    from .test_capture_contract import ResultsDouble
+
+    evidence = RESULT_EVIDENCE.with_contract(RESULT_PAGE_CONTRACT)
+    for name in ("results_returned", "adb_foreground_recovery"):
+        evidence = evidence.with_contract(_REGISTRY.contract(name, 1))
+    return ResultPort(ResultsDouble({})), evidence
+
+
+def _result_port(port, evidence, read):
     driver = create_autospec(ResultDriver, instance=True)
     driver.list_results.side_effect = read
-    runtime.evidence = _REGISTRY
-    runtime.results = DriverResultListing(driver, _BINDING, _REGISTRY)
+    port.delegate = DriverResultListing(driver, _BINDING, evidence)
     return driver
 
 

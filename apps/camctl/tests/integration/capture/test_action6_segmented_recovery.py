@@ -44,6 +44,7 @@ from .test_segment_inspections import _ReadDriver
 from .test_record_file_completion_wait import (
     _completed_result,
     _result_port,
+    _result_setup,
     _stop_context,
 )
 from ..outputs.test_segment_default_scope import _obtain
@@ -132,9 +133,10 @@ async def _overrun_recording(
     stopper = create_autospec(StopDriver, instance=True)
     stopper.stop.side_effect = lambda request: DeviceCallResult.from_outcome(
         returned("stop", "stop_confirmed", request.ticket.target_id))
+    result_port, evidence = _result_setup()
     owned, runtime, action_id, handler = await consumer_world(
         tmp_path, "record", catalog=catalog, start=False,
-        runtime_options={"wall_us": lambda: wall[0], "monotonic_ns": lambda: mono[0],
+        runtime_options={"results": result_port, "evidence": evidence, "wall_us": lambda: wall[0], "monotonic_ns": lambda: mono[0],
             "stopper": stopper},
     )
     (activity_id,) = owned.connection.execute(
@@ -155,7 +157,7 @@ async def _overrun_recording(
     wall[0], mono[0] = _NOW + 80_000_000, 85_000_000_000
     tools = (await _attach_media(runtime, owned, tmp_path, values,
                                  occurred_at=lambda: _NOW + 80_000_000))
-    return owned, runtime, action_id, handler, tools
+    return owned, runtime, action_id, handler, tools, result_port, evidence
 
 
 def _entries(count: int, *, photo: bool = False):
@@ -176,7 +178,7 @@ def _entries(count: int, *, photo: bool = False):
     return sorted(entries, key=lambda entry: entry["identity"])
 
 
-async def _publish_ordinary_result(runtime, owned, action_id, handler, entries):
+async def _publish_ordinary_result(runtime, owned, action_id, handler, entries, result_port, evidence):
     context = _stop_context(owned, action_id)
 
     async def read(request, batch):
@@ -184,7 +186,7 @@ async def _publish_ordinary_result(runtime, owned, action_id, handler, entries):
             request.ticket, context, entries=entries, finalized=True
         )
 
-    driver = _result_port(runtime, read)
+    driver = _result_port(result_port, evidence, read)
     await capture_handler(handler)(action_id, runtime)
     driver.list_results.assert_awaited_once()
 
@@ -237,12 +239,12 @@ class _Action6TaskScopeCatalog(Action6RecordCatalog):
 
 
 async def test_action6_overrun_measures_only_the_prefix_needed_to_reach_target(tmp_path):
-    owned, runtime, action_id, handler, tools = await _overrun_recording(
+    owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
         tmp_path, (Decimal("18"), Decimal("27"), Decimal("22"), Decimal("40"))
     )
     try:
         await _publish_ordinary_result(
-            runtime, owned, action_id, handler, _entries(4)
+            runtime, owned, action_id, handler, _entries(4), result_port, evidence
         )
 
         await _assert_saved_decision(
@@ -275,13 +277,13 @@ async def test_action6_overrun_measures_only_the_prefix_needed_to_reach_target(t
 async def test_action6_unknown_third_probe_keeps_reliable_control_success_and_two_file_prefix(
     tmp_path,
 ):
-    owned, runtime, action_id, handler, tools = await _overrun_recording(
+    owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
         tmp_path,
         (Decimal("18"), Decimal("27"), RuntimeError("ffprobe unavailable"), Decimal("40")),
     )
     try:
         await _publish_ordinary_result(
-            runtime, owned, action_id, handler, _entries(4)
+            runtime, owned, action_id, handler, _entries(4), result_port, evidence
         )
 
         await _assert_saved_decision(
@@ -314,12 +316,12 @@ async def test_action6_unknown_third_probe_keeps_reliable_control_success_and_tw
 
 
 async def test_action6_complete_short_sequence_reports_confirmed_short(tmp_path):
-    owned, runtime, action_id, handler, tools = await _overrun_recording(
+    owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
         tmp_path, (Decimal("18"), Decimal("20"), Decimal("12"), Decimal("40"))
     )
     try:
         await _publish_ordinary_result(
-            runtime, owned, action_id, handler, _entries(3)
+            runtime, owned, action_id, handler, _entries(3), result_port, evidence
         )
         ref = SegmentRepository().read_active_set(action_id, owned)
         assert ref is not None
@@ -343,7 +345,7 @@ async def test_action6_complete_short_sequence_reports_confirmed_short(tmp_path)
 
 
 async def test_action6_unknown_start_saves_unknown_scope_header(tmp_path):
-    owned, runtime, action_id, handler, tools = await _overrun_recording(
+    owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
         tmp_path,
         (Decimal("18"), Decimal("27"), Decimal("22"), Decimal("40")),
         catalog=_Action6TaskScopeCatalog(),
@@ -351,7 +353,7 @@ async def test_action6_unknown_start_saves_unknown_scope_header(tmp_path):
     )
     try:
         await _publish_ordinary_result(
-            runtime, owned, action_id, handler, _entries(4)
+            runtime, owned, action_id, handler, _entries(4), result_port, evidence
         )
         ref = SegmentRepository().read_active_set(action_id, owned)
         assert ref is not None
@@ -381,13 +383,13 @@ async def test_action6_unknown_start_saves_unknown_scope_header(tmp_path):
 
 
 async def test_action6_first_probe_unknown_keeps_known_start_as_empty_scope(tmp_path):
-    owned, runtime, action_id, handler, tools = await _overrun_recording(
+    owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
         tmp_path,
         (RuntimeError("ffprobe unavailable"), Decimal("27"), Decimal("22")),
     )
     try:
         await _publish_ordinary_result(
-            runtime, owned, action_id, handler, _entries(3)
+            runtime, owned, action_id, handler, _entries(3), result_port, evidence
         )
         ref = SegmentRepository().read_active_set(action_id, owned)
         assert ref is not None
@@ -459,12 +461,13 @@ async def test_action6_native_recovery_reports_actual_frame_coverage(
     from camctl.capture.timelapse import CaptureWaitConfig
 
     wall, mono = [_NOW], [5_000_000_000]
+    result_port, evidence = _result_setup()
     owned, runtime, action_id, handler = await consumer_world(
         tmp_path,
         "timelapse",
         catalog=_Action6Native151Catalog(0),
         start=False,
-        runtime_options={"wall_us": lambda: wall[0], "monotonic_ns": lambda: mono[0],
+        runtime_options={"results": result_port, "evidence": evidence, "wall_us": lambda: wall[0], "monotonic_ns": lambda: mono[0],
             "wait_config": lambda action: CaptureWaitConfig(300_000, 200, 0, 0)},
     )
     try:
@@ -491,7 +494,7 @@ async def test_action6_native_recovery_reports_actual_frame_coverage(
                 )
             )
 
-        driver = _result_port(runtime, read)
+        driver = _result_port(result_port, evidence, read)
         wall[0] = _NOW + 300_200_000
         mono[0] += 300_200_000_000
 
@@ -555,12 +558,13 @@ async def _native_action6_recovery_with_unknown_video_scope(
     from camctl.capture.timelapse import CaptureWaitConfig
 
     wall, mono = [_NOW], [5_000_000_000]
+    result_port, evidence = _result_setup()
     owned, runtime, action_id, handler = await consumer_world(
         tmp_path,
         "timelapse",
         catalog=_Action6Native151Catalog(0),
         start=False,
-        runtime_options={"wall_us": lambda: wall[0], "monotonic_ns": lambda: mono[0],
+        runtime_options={"results": result_port, "evidence": evidence, "wall_us": lambda: wall[0], "monotonic_ns": lambda: mono[0],
             "wait_config": lambda action: CaptureWaitConfig(300_000, 200, 0, 0),
             "check_config": AttemptConfig(1, Decimal("1"), Decimal(0))},
     )
@@ -587,7 +591,7 @@ async def _native_action6_recovery_with_unknown_video_scope(
             _actual(request.ticket, entries=entries, finalized=True)
         )
 
-    driver = _result_port(runtime, read)
+    driver = _result_port(result_port, evidence, read)
     wall[0] = _NOW + 300_200_000
     mono[0] += 300_200_000_000
     from camctl.capture import action6_completion

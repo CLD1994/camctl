@@ -53,7 +53,7 @@ async def _cold_runtime(runtime, owned, driver, *, now, resources):
 async def test_action6_cold_recovery_decodes_saved_budget_and_continues_same_copy(
     tmp_path, monkeypatch, capture_resources,
 ):
-    owned, runtime, action_id, handler, tools = await _overrun_recording(
+    owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
         tmp_path, (Decimal("70"),)
     )
     first_driver = _ReadDriver(_CONTENT, fail_after=4)
@@ -65,7 +65,7 @@ async def test_action6_cold_recovery_decodes_saved_budget_and_continues_same_cop
     )
     try:
         await _publish_ordinary_result(
-            runtime, owned, action_id, handler, _entries(1)
+            runtime, owned, action_id, handler, _entries(1), result_port, evidence
         )
         assert first_driver.offsets == [0]
 

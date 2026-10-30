@@ -42,11 +42,11 @@ async def test_late_duplicate_preserves_reached_prefix_without_probing_after_tar
         _video(7), _video(8), _video(9),
         _video(10), _video(10, timestamp="20261022100100"),
     ])
-    owned, runtime, action_id, handler, tools = await _overrun_recording(
+    owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
         tmp_path, (Decimal("18"), Decimal("27"), Decimal("22"), Decimal("40"))
     )
     try:
-        await _publish_ordinary_result(runtime, owned, action_id, handler, entries)
+        await _publish_ordinary_result(runtime, owned, action_id, handler, entries, result_port, evidence)
 
         repository = SegmentRepository()
         ref = repository.read_active_set(action_id, owned)
@@ -75,11 +75,11 @@ async def test_duplicate_at_video_start_keeps_unknown_scope_and_does_not_probe(t
     entries = _sorted([
         _video(7), _video(7, timestamp="20261022100100"), _video(8),
     ])
-    owned, runtime, action_id, handler, tools = await _overrun_recording(
+    owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
         tmp_path, (Decimal("18"), Decimal("27"), Decimal("22"))
     )
     try:
-        await _publish_ordinary_result(runtime, owned, action_id, handler, entries)
+        await _publish_ordinary_result(runtime, owned, action_id, handler, entries, result_port, evidence)
 
         repository = SegmentRepository()
         ref = repository.read_active_set(action_id, owned)
@@ -120,12 +120,12 @@ async def test_duplicate_split_across_member_pages_keeps_only_prior_video_prefix
         _photo(1), _photo(2), _video(1), _video(2),
         _video(2, timestamp="20261022100100"), _video(3),
     ]
-    owned, runtime, action_id, handler, tools = await _overrun_recording(
+    owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
         tmp_path, (Decimal("0.1"), Decimal("18"), Decimal("27"))
     )
     try:
         await _publish_ordinary_result(
-            runtime, owned, action_id, handler, _sorted(entries)
+            runtime, owned, action_id, handler, _sorted(entries), result_port, evidence
         )
 
         repository = SegmentRepository()

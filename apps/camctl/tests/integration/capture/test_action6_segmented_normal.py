@@ -23,6 +23,7 @@ from .test_native_segment_completion import NativeSegmentCatalog
 from .test_record_file_completion_wait import (
     _completed_result,
     _result_port,
+    _result_setup,
     _stop_context,
 )
 from .test_record_segment_scope_recovery import SegmentWaitCatalog
@@ -123,7 +124,8 @@ async def _stopped_action6_record(tmp_path, *, runtime_options=None):
     stopper.stop.side_effect = lambda request: DeviceCallResult.from_outcome(
         returned("stop", "stop_confirmed", request.ticket.target_id))
     options = {} if runtime_options is None else dict(runtime_options)
-    options.update(stopper=stopper, wall_us=lambda: wall[0], monotonic_ns=lambda: mono[0])
+    result_port, evidence = _result_setup()
+    options.update(results=result_port, evidence=evidence, stopper=stopper, wall_us=lambda: wall[0], monotonic_ns=lambda: mono[0])
     owned, runtime, action_id, handler = await consumer_world(
         tmp_path, "record", catalog=Action6RecordCatalog(), start=False,
         runtime_options=options,
@@ -141,7 +143,7 @@ async def _stopped_action6_record(tmp_path, *, runtime_options=None):
     assert owned.connection.execute(
         "SELECT activity_state FROM device_activities WHERE id=?", (activity,)).fetchone() == (3,)
     wall[0], mono[0] = _NOW + 17_000_000, 22_000_000_000
-    return owned, runtime, action_id, handler, stopper
+    return owned, runtime, action_id, handler, stopper, result_port, evidence
 
 
 @pytest.mark.parametrize("explicit_error", [False, True])
@@ -152,7 +154,7 @@ async def test_action6_partial_result_exhaustion_finishes_without_another_device
     from camctl.devices.bindings import DeviceBinding
     from camctl.devices.directory import DirectoryCursor
 
-    owned, runtime, action_id, handler, stopper = await _stopped_action6_record(
+    owned, runtime, action_id, handler, stopper, result_port, evidence = await _stopped_action6_record(
         tmp_path, runtime_options={"check_config": AttemptConfig(3, Decimal("1"), Decimal(0))})
     try:
         context = _stop_context(owned, action_id)
@@ -171,7 +173,7 @@ async def test_action6_partial_result_exhaustion_finishes_without_another_device
                 error=ErrorValue("adb_metadata_failed", "device_file_access", {
                     "reason": "metadata_response_invalid"}) if explicit_error else None)
 
-        driver = _result_port(runtime, read)
+        driver = _result_port(result_port, evidence, read)
         for _ in range(4):
             await capture_handler(handler)(action_id, runtime)
 
@@ -198,7 +200,7 @@ async def test_action6_partial_result_exhaustion_finishes_without_another_device
 async def test_action6_ordinary_normal_publishes_all_mp4_lrf_and_photo_without_media(
     tmp_path,
 ):
-    owned, runtime, action_id, handler, stopper = await _stopped_action6_record(tmp_path)
+    owned, runtime, action_id, handler, stopper, result_port, evidence = await _stopped_action6_record(tmp_path)
     try:
         context = _stop_context(owned, action_id)
         entries = [
@@ -218,7 +220,7 @@ async def test_action6_ordinary_normal_publishes_all_mp4_lrf_and_photo_without_m
                 request.ticket, context, entries=entries, finalized=True
             )
 
-        driver = _result_port(runtime, read)
+        driver = _result_port(result_port, evidence, read)
         await capture_handler(handler)(action_id, runtime)
 
         assert (await runtime.action(action_id))["status"] == 3
@@ -256,9 +258,10 @@ async def test_action6_native_normal_publishes_all_video_and_required_photo_sepa
     tmp_path,
 ):
     wall, mono = [_NOW], [5_000_000_000]
+    result_port, evidence = _result_setup()
     owned, runtime, action_id, handler = await consumer_world(
         tmp_path, "timelapse", catalog=Action6NativeCatalog(0), start=False,
-        runtime_options={"wall_us": lambda: wall[0], "monotonic_ns": lambda: mono[0],
+        runtime_options={"results": result_port, "evidence": evidence, "wall_us": lambda: wall[0], "monotonic_ns": lambda: mono[0],
             "wait_config": lambda action: CaptureWaitConfig(1000, 200, 0, 0),
             "check_config": AttemptConfig(1, Decimal("1"), Decimal(0))},
     )
@@ -281,7 +284,7 @@ async def test_action6_native_normal_publishes_all_video_and_required_photo_sepa
                 _actual(request.ticket, entries=entries, finalized=True)
             )
 
-        driver = _result_port(runtime, read)
+        driver = _result_port(result_port, evidence, read)
         wall[0] = _NOW + 1_200_000
         mono[0] += 1_200_000_000
         await capture_handler(handler)(action_id, runtime)

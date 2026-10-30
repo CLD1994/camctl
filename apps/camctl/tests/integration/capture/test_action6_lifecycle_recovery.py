@@ -18,6 +18,7 @@ from camctl.operations.models import ErrorValue
 from camctl.persistence.models import DbOutcomeKind
 from camctl.persistence.repositories.segments import SegmentRepository
 
+from .test_record_file_completion_wait import _result_port, _result_setup
 from .result_consumer_fixtures import consumer_world
 from .test_action6_segmented_recovery import (
     _Action6Native151Catalog,
@@ -38,7 +39,7 @@ pytestmark = pytest.mark.asyncio
 async def test_action6_ordinary_cancel_publishes_canceled_segment_result_without_outputs(
     tmp_path,
 ):
-    owned, runtime, action_id, handler, _ = await _overrun_recording(
+    owned, runtime, action_id, handler, _, result_port, evidence = await _overrun_recording(
         tmp_path, (Decimal("18"), Decimal("27"), Decimal("22"))
     )
     try:
@@ -193,7 +194,7 @@ async def test_action6_stop_budget_exhaustion_publishes_unconfirmed_without_rele
 async def test_action6_binding_failure_uses_external_segment_terminal(tmp_path):
     from types import SimpleNamespace
 
-    owned, runtime, action_id, _handler, _tools = await _overrun_recording(
+    owned, runtime, action_id, _handler, _tools, result_port, evidence = await _overrun_recording(
         tmp_path, (Decimal("18"), Decimal("27"), Decimal("22"))
     )
     try:
@@ -219,10 +220,12 @@ async def test_action6_binding_failure_uses_external_segment_terminal(tmp_path):
 async def test_action6_native_required_photo_failure_reaches_recovery_through_real_handler(
     tmp_path,
 ):
+    result_port, evidence = _result_setup()
     clock = CaseClock(_NOW, 5_000_000_000)
     media_clock = CaseClock(_NOW, 5_000_000_000)
     owned, runtime, action_id, handler = await consumer_world(
-        tmp_path, "timelapse", catalog=_Action6Native151Catalog(0), start=False, clock=clock
+        tmp_path, "timelapse", catalog=_Action6Native151Catalog(0), start=False, clock=clock,
+        runtime_options={"results": result_port, "evidence": evidence}
     )
     try:
         (activity_id,) = owned.connection.execute(
@@ -234,7 +237,6 @@ async def test_action6_native_required_photo_failure_reaches_recovery_through_re
         assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
 
         from camctl.capture.timelapse import CaptureWaitConfig
-        from .test_record_file_completion_wait import _result_port
         from .test_result_page_history import _actual
 
         await capture_handler(handler)(action_id, runtime)
@@ -250,7 +252,7 @@ async def test_action6_native_required_photo_failure_reaches_recovery_through_re
                 _actual(request.ticket, entries=_entries(4), finalized=True)
             )
 
-        driver = _result_port(runtime, read)
+        driver = _result_port(result_port, evidence, read)
         clock.wall = _NOW + 300_200_000
         clock.monotonic += 300_200_000_000
         await capture_handler(handler)(action_id, runtime)
@@ -287,7 +289,7 @@ async def test_action6_pending_inspection_waits_for_full_session_then_cancels_wi
     from camctl.persistence.repositories.segment_inspections import read_inspection_for_member
     from .test_segment_inspections import _CONTENT, _ReadDriver
 
-    owned, runtime, action_id, handler, tools = await _overrun_recording(
+    owned, runtime, action_id, handler, tools, result_port, evidence = await _overrun_recording(
         tmp_path, (Decimal("18"), Decimal("27"), Decimal("22"))
     )
     try:
@@ -295,7 +297,7 @@ async def test_action6_pending_inspection_waits_for_full_session_then_cancels_wi
             await capture_database(owned), _ReadDriver(_CONTENT, fail_after=4), ticket=None,
         )
         runtime.media.segment_size = 4
-        await _publish_ordinary_result(runtime, owned, action_id, handler, _entries(3))
+        await _publish_ordinary_result(runtime, owned, action_id, handler, _entries(3), result_port, evidence)
 
         facts = read_inspection_for_member(action_id, 1, owned)
         assert facts.inspection is not None
@@ -354,11 +356,12 @@ async def test_action6_pending_inspection_waits_for_full_session_then_cancels_wi
 async def test_action6_native_cancel_retains_qualified_videos_and_required_photo(
     tmp_path,
 ):
+    result_port, evidence = _result_setup()
     clock = CaseClock(_NOW, 5_000_000_000)
     stopper = create_autospec(StopDriver, instance=True)
     owned, runtime, action_id, handler = await consumer_world(
         tmp_path, "timelapse", catalog=Action6NativeCatalog(0), start=False, clock=clock,
-        runtime_options={"stopper": stopper},
+        runtime_options={"stopper": stopper, "results": result_port, "evidence": evidence},
     )
     try:
         (activity_id,) = owned.connection.execute(
@@ -368,7 +371,7 @@ async def test_action6_native_cancel_retains_qualified_videos_and_required_photo
             BaselineFixSave(activity_id, 0, 0, _NOW), new_operation_key(), owned
         )
         assert fixed.kind is DbOutcomeKind.COMPLETED, fixed.error
-        from .test_record_file_completion_wait import _completed_result, _result_port
+        from .test_record_file_completion_wait import _completed_result
 
         await capture_handler(handler)(action_id, runtime)
         clock.wall = _NOW + 100_000
@@ -395,7 +398,7 @@ async def test_action6_native_cancel_retains_qualified_videos_and_required_photo
                 completion=completion,
             )
 
-        driver = _result_port(runtime, read)
+        driver = _result_port(result_port, evidence, read)
         await capture_handler(handler)(action_id, runtime)
 
         assert (await runtime.action(action_id))["status"] == 6

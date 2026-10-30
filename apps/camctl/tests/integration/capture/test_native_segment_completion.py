@@ -29,7 +29,6 @@ from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
 from .result_consumer_fixtures import consumer_world
 from .test_natural_wait_time_eligibility import SmallNativeCatalog
 from .test_capture_contract import _NOW, _runtime
-from .test_record_file_completion_wait import _result_port
 from .test_record_file_completion_wait import _REGISTRY
 from .test_result_page_history import _actual
 from .test_cancel_timelapse_exhaustion_files import _apply_public_cancel

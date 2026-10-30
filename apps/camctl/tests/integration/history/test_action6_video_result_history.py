@@ -187,7 +187,7 @@ def _generate_at_h(tmp_path, report, *, strategy, batch_size, name):
 async def test_action6_fixed_h_survives_obtain_delete_and_inspection_cleanup(
     tmp_path, monkeypatch, capture_resources
 ):
-    owned, capture_runtime, action_id, handler, _tools = await _overrun_recording(
+    owned, capture_runtime, action_id, handler, _tools, result_port, evidence = await _overrun_recording(
         tmp_path, (Decimal("18"),)
     )
     try:
@@ -199,7 +199,7 @@ async def test_action6_fixed_h_survives_obtain_delete_and_inspection_cleanup(
         snapshot_boundary = await _save_history_snapshot(history, action_id)
 
         await _publish_ordinary_result(
-            capture_runtime, owned, action_id, handler, _entries(1)
+            capture_runtime, owned, action_id, handler, _entries(1), result_port, evidence
         )
         from camctl.persistence.repositories.segment_selections import (
             FixSegmentSelection,

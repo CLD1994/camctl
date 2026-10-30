@@ -21,6 +21,7 @@ from ..support.capture import capture_runtime
 from .test_record_file_completion_wait import (
     _completed_result,
     _result_port,
+    _result_setup,
     _stop_context,
 )
 
@@ -36,9 +37,10 @@ async def test_action6_recording_handler_persists_current_session_elapsed_and_in
     stopper = create_autospec(StopDriver, instance=True)
     stopper.stop.side_effect = lambda request: DeviceCallResult.from_outcome(
         returned("stop", "stop_confirmed", request.ticket.target_id))
+    result_port, evidence = _result_setup()
     owned, runtime, action_id, handler = await consumer_world(
         tmp_path, "record", catalog=catalog, start=False,
-        runtime_options={"wall_us": lambda: clock["wall_us"],
+        runtime_options={"results": result_port, "evidence": evidence, "wall_us": lambda: clock["wall_us"],
             "monotonic_ns": lambda: clock["monotonic_ns"], "stopper": stopper,
             "devices": {"cam-1": {"driver": "camctl-adb",
                 "recording": {"repair_margin_s": Decimal("2")}}}},
@@ -60,7 +62,7 @@ async def test_action6_recording_handler_persists_current_session_elapsed_and_in
             finalized=True,
         )
 
-    result_driver = _result_port(runtime, read_results)
+    result_driver = _result_port(result_port, evidence, read_results)
     tools = (await _attach_media(
         runtime,
         owned,
