@@ -117,6 +117,21 @@ HBF-02 的未知保存核实要求使用独立只读连接；当前代码新开�
 
 清理原返回恢复还揭示一处测试入口选择错误：单项删除入口保存原 DELETE 结果后，会继续判断新 QUERY；原目标只要求在当前设备已移除时完成原结果交接且不新派发。改从正式清理轮次进入后，先完成本地交接，再独立判断新调用，原票据、键、超时与间隔均保留。前次失败记录保留为测试诊断，不列为生产缺陷。
 
+清理诊断五文件在协调分支 `76e07abd` 上完整验证为 54 项通过，pytest 22.47 秒、入口墙钟 24.610 秒，受测文件摘要在运行期间没有变化。来源缺席的四类非法事件，现通过 H1 静态守卫验证来源及字段关系；公开仓储的六类更改申请继续验证原键拒绝、完整回滚与再次重送。两者分别说明验证责任，不把静态校验称为任意内部计划的写事务验收。另两项直接填入内部附带保存责任的测试仍保留，处理方式待讨论。
+
+### 恢复诊断轮的耗时集中点
+
+以下只统计 `290f4ad3` 的 14 目录诊断轮，包含当时的失败，不是当前源码的全量结果。单项时间为 pytest 的准备、call 与收场合计；测试体内建库和生成来源仍包含在 call 中，不能将其视为纯业务执行时间。
+
+| 单项测试 | 实测总耗时 | 需要继续拆分的实际工作 |
+| --- | --- | --- |
+| `history/test_record_segment_history.py::test_large_growth_crosses_page_and_disk_cache_capacity` | 101.60 秒 | 分别准备 256／2048 成员，恢复分页历史并生成快照；读取期间同时启用 Python 分配追踪和每条 SQLite 指令的 Python 计数回调。 |
+| `history/test_report_selection.py::test_large_window_releases_overflow_once_and_keyset_pages_do_not_rescan_window` | 52.65 秒 | 经真实受理生成 4200 项来源，再检查报告候选、分页、溢出释放及 SQL 代价；目前的总时间没有区分来源准备与选择查询。 |
+| `persistence/test_segment_scan_pairing.py::test_actual_pair_save_guard_and_verify_do_not_replay_unrelated_pages[False]` | 29.18 秒 | 实际保存、守卫与原键核实，同一单项包含准备和观察成本。 |
+| `persistence/test_segment_transaction_batches.py::test_fixed_batch_write_and_verification_have_bounded_residency` | 28.41 秒 | 513 项固定批量及受限进程核对；入口时间包括组外准备、预算组建立及收场，业务阶段须读其预算收据。 |
+
+输出、历史、持久化三个目录的任务墙钟分别为 390.63、324.98、267.86 秒，合计占这轮任务墙钟的约 76%。这是优先调查顺序，不能据此将时间归给 SQL，也不能删除规模或观察断言。下一步对昂贵场景分别计量来源准备、正式操作、诊断观察与关闭，并核对私有缓存或任意增长阈值是否属于正式目标；现有验收条件在讨论前保持。
+
 ### 2026-10-27：暂停交接
 
 本轮按用户要求暂停。协调分支为 `fix/integration-failures-20261025`，收尾前代码为 `425b76ef`；收尾不集成下表提交，不启动新的回归。生产代码保持原基线。各隔离分支和工作区保留；[暂停证据清单](verification-data/2026-10-26-integration-refactor/pause-20261027/manifest.json)记录 12 个工作区身份、26 份归档的补丁或交接材料及摘要。收尾核对没有本任务遗留测试进程。
