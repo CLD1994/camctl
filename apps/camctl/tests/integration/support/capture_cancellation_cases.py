@@ -188,7 +188,7 @@ async def cancellation_world(directory, resources, *, finite=True, startup=None,
                              handler="camera_timelapse", start=True, canceled=True,
                              check_attempts=3, stop_attempts=3, output_scope=None, record_wait_s=None, record_rules=None,
                              independent_activity=False, stop_timeout_s=Decimal("1"), stop_retry_s=Decimal("0"),
-                             check_timeout_s=Decimal("10"), check_retry_s=Decimal("3")):
+                             check_timeout_s=Decimal("10"), check_retry_s=Decimal("3"), max_delay_ms=1000):
     world = CancellationWorld(resources)
     try:
         world.catalog = CancellationCatalog(finite=finite, startup=startup, extra_rules=extra_rules, output_scope=output_scope, record_wait_s=record_wait_s, record_rules=record_rules)
@@ -205,13 +205,14 @@ async def cancellation_world(directory, resources, *, finite=True, startup=None,
         actions = [{"name": "报告", "type": "report_status", "params": {"scope": "full"}}] if independent_activity else []
         actions.append({"name": "拍摄", "type": handler, "device_id": "cam-1",
                 "scheduled_at": instant, "params": {"type": "timelapse" if handler == "camera_timelapse" else "video"},
-                "policy": {"max_delay_ms": 5000}})
+                "policy": {"max_delay_ms": max_delay_ms}})
         result = await accept_input(ParsedInput("capture.json", {"request_id": "1", "created_at": instant,
             "name": "取消来源", "actions": actions}),
             AcceptanceContext(CommandMode.RUN, world.catalog, AcceptanceRepository(),
                 clock=SimpleNamespace(utc_micros=lambda: _NOW)), new_operation_key(), world.database)
         assert result.plan_id is not None, result
         world.action_id, = world.owned.connection.execute("SELECT id FROM actions WHERE type IN (2,3)").fetchone()
+        assert world.owned.connection.execute("SELECT max_delay_ms FROM actions WHERE id=?", (world.action_id,)).fetchone() == (max_delay_ms,)
         repository = SchedulingRepository()
         for method, request in ((repository.observe_window, ObserveWindowRequest(world.action_id, _NOW, _NOW)),
                 (repository.start_action, StartActionRequest(world.action_id, _NOW, _NOW))):
@@ -225,7 +226,11 @@ async def cancellation_world(directory, resources, *, finite=True, startup=None,
         if start:
             await world.advance()
         if canceled:
-            await world.cancel()
+            world.wall[0] += 100_000 if finite else 0
+            try:
+                await world.cancel()
+            finally:
+                world.wall[0] = _NOW
         return world
     except BaseException as error:
         try:

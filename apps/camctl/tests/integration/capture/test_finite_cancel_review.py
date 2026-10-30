@@ -77,7 +77,10 @@ async def test_normal_record_set_finalization_allows_only_explicit_optional_prev
     from ..support.capture_cancellation_cases import cancellation_world
     from .test_record_file_completion_wait import _completed_result
     from camctl.devices.evidence import DeviceObservation
-    world = await cancellation_world(tmp_path, capture_resources, handler='camera_record', canceled=False, record_wait_s=30, record_rules=({'kind': 'video', 'format_id': 'osv', 'min_count': 1, 'exact_count': 1, 'require_pairing': False, 'min_size_bytes': 1},))
+    world = await cancellation_world(tmp_path, capture_resources, handler='camera_record', canceled=False,
+        max_delay_ms=5000, check_timeout_s=Decimal('1.25'), check_retry_s=Decimal('2'),
+        stop_timeout_s=Decimal('10'), stop_retry_s=Decimal('3'), record_wait_s=30,
+        record_rules=({'kind': 'video', 'format_id': 'osv', 'min_count': 1, 'exact_count': 1, 'require_pairing': False, 'min_size_bytes': 1},))
     async def stop(request):
         return DeviceCallResult((DeviceObservation('stop_confirmed', 1, {'activity_id': request.ticket.target_id}),), None)
     async def read(request, batch):
@@ -142,6 +145,21 @@ async def test_required_preview_gaps_remain_blocked_in_all_completion_entries(tm
     try:
         receipt = await store_result_end(world, finalized=True)
         assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+        from camctl.persistence.repositories.capture import CaptureRepository
+        first_ticket, current_ticket = world.actual_result_calls
+        first = CaptureRepository().read_last_result_page(first_ticket, world.owned)
+        current = world.result_page
+        assert first_ticket != current_ticket and current.ref.ticket == current_ticket
+        assert first.page.outcome.error is not None and current.page.outcome.error is None
+        assert current.page.scan_complete and current.page.set_finalized
+        assert first.file_ids == current.file_ids and len(current.file_ids) == 1
+        file_id = current.file_ids[0][1]
+        assert world.owned.connection.execute(
+            'SELECT source_action_id,completion_state,size_bytes FROM device_files WHERE id=?',
+            (file_id,)).fetchone() == (world.action_id, 3, 50)
+        assert world.owned.connection.execute(
+            'SELECT attempts_used,max_attempts_used,timeout_s_json,retry_interval_s_json FROM operation_runs WHERE id=?',
+            (current_ticket.run_id,)).fetchone() == (2, 3, '10', '3')
         request = finite.FiniteCancelEndSave(world.action_id, world.result_page.ref, world.wall[0])
         before = tuple(world.owned.connection.iterdump())
         if entry == 'qualification':

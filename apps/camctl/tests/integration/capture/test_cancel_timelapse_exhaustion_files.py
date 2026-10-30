@@ -65,7 +65,8 @@ class SavedBoundary(Exception):
 async def _canceled_exhausted_world(tmp_path, capture_resources, monkeypatch, *, kind="photo", complete=True, empty=False, later_failed=False):
     world = await cancellation_world(tmp_path, capture_resources, finite=False, canceled=False,
         independent_activity=True, check_attempts=2 if later_failed else 1,
-        check_timeout_s=Decimal('1.25'), check_retry_s=Decimal('0'))
+        check_timeout_s=Decimal('1.25'), check_retry_s=Decimal('0'), max_delay_ms=5000,
+        stop_timeout_s=Decimal('10'), stop_retry_s=Decimal('3'))
     assert world.action_id != world.activity_id
     name, media = {"photo": ("retained-photo.jpg", "image/jpeg"), "video": ("retained-video.mp4", "video/mp4")}[kind]
     entry = {"identity": f"retained-{kind}", "kind": kind, "complete": complete,
@@ -84,7 +85,8 @@ async def _canceled_exhausted_world(tmp_path, capture_resources, monkeypatch, *,
                 EvidenceValue("results_returned", 1, {})), observations=(DeviceObservation(
                     "result_files_listed", 1, {"activity_id": str(world.activity_id), "entries": entries}),)))
     world.ports.result_script = read
-    world.elapse(700_000_000)
+    await world.reopen()
+    world.wall[0] += 700_000_000
     await world.advance()
     run_id, status, used, retry = world.owned.connection.execute(
         "SELECT id,status,attempts_used,retry_wait_required FROM operation_runs WHERE responsibility_key=?",
@@ -110,9 +112,9 @@ async def _canceled_exhausted_world(tmp_path, capture_resources, monkeypatch, *,
         assert status == 3 and json.loads(raw)["observations"] == []
         assert json.loads(error) == {"code": "transport_timeout", "stage": "transport", "details": {"received_bytes": 23}}
     assert world.owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (0,)
-    world.elapse(10)
+    world.wall[0] += 10
     await world.cancel()
-    world.elapse(10)
+    world.wall[0] += 10
     async def stop(request):
         return DeviceCallResult((DeviceObservation("stop_confirmed", 1, {"activity_id": str(world.activity_id)}),), None)
     world.ports.stop_script = stop
@@ -167,7 +169,7 @@ async def _exercise_exhaustion(tmp_path, capture_resources, monkeypatch, partiti
             assert world.owned.connection.execute("SELECT status FROM actions WHERE id=?", (world.action_id,)).fetchone() == (2,)
             assert world.owned.connection.execute("SELECT COUNT(*) FROM outputs").fetchone() == (0,)
             already_saved = partition in ("post_unknown", "noholder_reopen")
-            world.elapse(5_000_000)
+            world.wall[0] += 5_000_000
             await world.reopen(cold=partition == "noholder_reopen")
             connection = world.owned.connection
             assert (saved_transaction_events(connection, key) is not None) is already_saved
