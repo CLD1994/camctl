@@ -259,15 +259,31 @@ def _submit_many(owned, count, request_id):
     assert result.value.plan_disposition is PlanDisposition.REGISTERED, result.value
 
 
+def _same_readonly_database(database, uri, path):
+    """只匹配该状态库的只读 SQLite URI，接受等价的 URI 编码与参数顺序。"""
+    import os
+    from urllib.parse import parse_qs, unquote, urlsplit
+
+    if not uri:
+        return False
+    raw = os.fsdecode(database)
+    parts = urlsplit(raw)
+    if parts.scheme != 'file' or parts.netloc not in ('', 'localhost'):
+        return False
+    if parse_qs(parts.query).get('mode') != ['ro']:
+        return False
+    try:
+        return os.path.samefile(unquote(parts.path), path)
+    except (FileNotFoundError, OSError):
+        return False
+
+
 class _QueryProbe:
-    """在目标状态库的只读 SQLite 连接上观察分页与资源收场。"""
+    """在目标状态库的业务短读连接上观察分页与资源收场。"""
     def __init__(self, repository, monkeypatch):
         import sqlite3
         import weakref
         path = repository.path.resolve()
-        stat = path.stat()
-        identity = (stat.st_dev, stat.st_ino)
-        target_uri = f"{path.as_uri()}?mode=ro"
         original_connect = sqlite3.connect
         self.steps = 0
         self.connections = []
@@ -283,33 +299,51 @@ class _QueryProbe:
 
         class ObservedConnection(sqlite3.Connection):
             def execute(self, sql, *args, **kwargs):
-                if sql == 'BEGIN' and not hasattr(self, '_probe_attached'):
-                    # 状态库打开及结构核验完成后，才开始观察业务短读。
+                was_in_transaction = self.in_transaction
+                reads = set()
+                statement = [None]
+                observed = getattr(self, '_probe_attached', False)
+                if observed:
+                    def authorize(action, table, column, _database, _source):
+                        if action == sqlite3.SQLITE_READ:
+                            reads.add((table, column))
+                        return sqlite3.SQLITE_OK
+                    self.set_authorizer(authorize)
+                    self.set_trace_callback(lambda value: statement.__setitem__(0, value))
+                try:
+                    cursor = super().execute(sql, *args, **kwargs)
+                finally:
+                    if observed:
+                        self.set_authorizer(None)
+                if not observed and not was_in_transaction and self.in_transaction:
+                    # 状态库完成结构核验后，在业务读事务的边界开始观测。
                     self._probe_attached = True
+                    self._probe_kind = None
                     probe.connections.append(self)
-                    candidate_query = [False]
-                    def trace(statement):
-                        candidate_query[0] = statement.startswith('SELECT ') and 'FROM report_entity_changes c INDEXED BY report_changes_by_sequence' in statement
-                        if 'report_entity_changes' in statement:
-                            probe.sql.append(statement)
                     def row_factory(cursor, row):
                         value = sqlite3.Row(cursor, row)
-                        if candidate_query[0]:
+                        if self._probe_kind == 'candidate':
                             value = Record(value)
                             probe.candidates.append(weakref.ref(value))
                         return value
                     def advance():
                         probe.steps += 100
                         return 0
-                    self.set_trace_callback(trace)
                     self.set_progress_handler(advance, 100)
                     self.row_factory = row_factory
-                return super().execute(sql, *args, **kwargs)
+                elif observed:
+                    columns = cursor.description or ()
+                    touches_changes = any(table == 'report_entity_changes' for table, _ in reads)
+                    kind = ('candidate' if touches_changes and len(columns) == 2 else
+                            'page' if touches_changes and len(columns) == 1 else None)
+                    self._probe_kind = kind
+                    if kind is not None:
+                        assert statement[0] is not None
+                        probe.sql.append((kind, statement[0]))
+                return cursor
 
         def connect(database, *args, **kwargs):
-            if database == target_uri and kwargs.get('uri') is True:
-                current = path.stat()
-                assert (current.st_dev, current.st_ino) == identity
+            if _same_readonly_database(database, kwargs.get('uri'), path):
                 assert 'factory' not in kwargs
                 kwargs['factory'] = ObservedConnection
             return original_connect(database, *args, **kwargs)
@@ -362,9 +396,9 @@ async def test_large_window_releases_overflow_once_and_keyset_pages_do_not_resca
             cursor = page.next_cursor
         assert actual == list(range(4, 4204))
         assert _read(selection, 'action', 3) == [4204, 4205, 4206]
-        candidate_sql = [sql for sql in probe.sql if 'FROM report_entity_changes c INDEXED BY report_changes_by_sequence' in sql]
+        candidate_sql = [sql for kind, sql in probe.sql if kind == 'candidate']
         assert len(candidate_sql) == 2  # 固定窗口的 plan/action 各一次，跨父对象不重查。
-        page_sql = [sql for sql in probe.sql if sql.startswith('SELECT r')]
+        page_sql = [sql for kind, sql in probe.sql if kind == 'page']
         assert all(' IN (' not in sql for sql in page_sql)
         assert max(vm_pages) < preflight_steps // 8
         from contextlib import closing
@@ -394,7 +428,7 @@ async def test_large_window_releases_overflow_once_and_keyset_pages_do_not_resca
     with repository.open_report_selection(sparse) as selection:
         assert _read(selection, 'action', 3) == [4204, 4205, 4206]
         assert _read(selection, 'action', 2) == []
-        assert all(not sql.startswith('SELECT r') for sql in probe.sql)
+        assert all(kind != 'page' for kind, _ in probe.sql)
     print({'sparse_vm_steps': probe.steps, 'sparse_candidates': len(probe.sql)})
     assert probe.steps < preflight_steps // 8
     probe.sql.clear()
@@ -402,7 +436,7 @@ async def test_large_window_releases_overflow_once_and_keyset_pages_do_not_resca
     with repository.open_report_selection(replace(request, to_wm=early_sparse_wm)) as selection:
         assert _read(selection, 'action', 1) == [1, 2, 3]
         assert _read(selection, 'action', 2) == []
-        assert all(not sql.startswith('SELECT r') for sql in probe.sql)
+        assert all(kind != 'page' for kind, _ in probe.sql)
     print({'early_sparse_vm_steps': probe.steps})
     assert probe.steps < preflight_steps // 8
 
@@ -457,20 +491,46 @@ async def test_read_failure_and_database_replacement_close_bound_session(finishe
     repository = HistoryRepository(path / 'state.db')
     with repository.open_report_selection(request) as selection:
         cursor = selection.read_page('plan').next_cursor
-        other = path / 'replacement.db'
-        _create_valid_database(other)
-        repository.path = other
-        with pytest.raises(ConsistencyError):
-            selection.read_page('plan', cursor=cursor)
-        assert selection._cache == {}
-    repository = HistoryRepository(path / 'state.db')
-    with repository.open_report_selection(request) as selection:
-        cursor = selection.read_page('plan').next_cursor
-        def failed_connection():
-            raise OSError('read page failure')
-        monkeypatch.setattr(repository, '_connect', failed_connection)
-        with pytest.raises(OSError):
-            selection.read_page('plan', cursor=cursor)
+        import sqlite3
+        original_connect = sqlite3.connect
+        attempts = []
+        def failed_connection(database, *args, **kwargs):
+            if _same_readonly_database(database, kwargs.get('uri'), repository.path):
+                attempts.append(database)
+                raise OSError('read page failure')
+            return original_connect(database, *args, **kwargs)
+        with monkeypatch.context() as patch:
+            patch.setattr(sqlite3, 'connect', failed_connection)
+            with pytest.raises(OSError, match='read page failure'):
+                selection.read_page('plan', cursor=cursor)
+        assert len(attempts) == 1
         assert selection._cache == {}
         with pytest.raises(ConsistencyError):
             selection.read_page('plan')
+
+    # 继续使用原会话和游标，将同一路径替换为另一个完整状态库。
+    from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing
+    import os
+    state_path = path / 'state.db'
+    replacement_path = path / 'replacement.db'
+    _create_valid_database(replacement_path)
+    replacement = open_existing(replacement_path, DbOpenMode.EXISTING_RW, DbConfig())
+    replacement_id = replacement.metadata.instance_id
+    assert replacement_id != owned.metadata.instance_id
+    replacement_checkpoint = replacement.connection.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()
+    assert replacement_checkpoint == (0, 0, 0)
+    replacement.connection.close()
+    with repository.open_report_selection(request) as selection:
+        cursor = selection.read_page('plan').next_cursor
+        checkpoint = owned.connection.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()
+        assert checkpoint == (0, 0, 0)
+        owned.connection.close()
+        for database in (state_path, replacement_path):
+            assert not database.with_name(database.name + '-wal').exists()
+            assert not database.with_name(database.name + '-shm').exists()
+        os.replace(replacement_path, state_path)
+        with pytest.raises(ConsistencyError):
+            selection.read_page('plan', cursor=cursor)
+        assert selection._cache == {}
+        with pytest.raises(ConsistencyError):
+            selection.read_page('plan', cursor=cursor)
