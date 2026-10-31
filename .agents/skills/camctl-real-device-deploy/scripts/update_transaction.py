@@ -49,6 +49,15 @@ def classify_record(record):
             or set(output_identity) != {'dev', 'ino', 'uid', 'gid'}
             or any(type(value) is not int or value < 0 for value in output_identity.values())):
         raise ValueError('更新输出目录身份无效')
+    owners = record.get('temporary_owners')
+    owner_keys = {'namespace', 'staging', 'db_temp', 'client_temp'}
+    if not isinstance(owners, dict) or set(owners) != owner_keys:
+        raise ValueError('事务临时对象创建身份无效')
+    for values in owners.values():
+        if (not isinstance(values, list) or any(not isinstance(item, dict)
+                or set(item) != {'uid', 'gid'}
+                or any(type(value) is not int or value < 0 for value in item.values()) for item in values)):
+            raise ValueError('事务临时对象创建身份无效')
     locks = record.get('lock_paths')
     if (not isinstance(locks, list) or len(locks) != 2
             or any(not isinstance(path, str) or not Path(path).is_absolute() for path in locks)
@@ -73,7 +82,9 @@ def classify_record(record):
                 or not re.fullmatch('[0-9a-f]{64}', record['db_sha256'])
                 or not valid_file_metadata(record.get('db_meta'))
                 or not isinstance(record['env_manifest'].get(''), dict)
-                or record['env_manifest'].get('', {}).get('kind') != 'dir'):
+                or record['env_manifest'].get('', {}).get('kind') != 'dir'
+                or any(type(record['env_manifest'][''].get(key)) is not int
+                       or record['env_manifest'][''][key] < 0 for key in ('uid', 'gid'))):
             raise ValueError('更新记录恢复材料不完整')
     client = record.get('client')
     if 'client' in record:
@@ -103,11 +114,15 @@ def validate_record_target(record, target):
     if (client is not None and record['mutation_intent'] and client['present']
             and Path(client['backup']) != output / 'client-capabilities.backup'):
         raise ValueError('能力文件备份与更新记录目录不一致')
-    if client is not None and Path(client['configured_path']).resolve() != Path(client['path']):
-        raise ValueError('能力文件路径与更新记录不一致')
     client_path = Path(client['path']) if client is not None else None
     if record.get('temporary') != temporary_paths(target, output, Path(record['state_db']), client_path):
         raise ValueError('更新记录临时路径与事务身份不一致')
+
+
+def validate_active_record(record):
+    client = record.get('client')
+    if client is not None and Path(client['configured_path']).resolve() != Path(client['path']):
+        raise ValueError('能力文件路径与更新记录不一致')
 
 
 def temporary_paths(target, output, db, client):
@@ -126,6 +141,17 @@ def directory_identity(path):
     if not stat.S_ISDIR(info.st_mode):
         raise ValueError('更新输出不是普通目录: ' + str(path))
     return {'dev': info.st_dev, 'ino': info.st_ino, 'uid': info.st_uid, 'gid': info.st_gid}
+
+
+def creation_identity(parent):
+    info = parent.stat()
+    return {'uid': os.geteuid(), 'gid': info.st_gid if info.st_mode & stat.S_ISGID else os.getegid()}
+
+
+def owner_allowed(info, creators, original=None):
+    identity = {'uid': info.st_uid, 'gid': info.st_gid}
+    return identity in creators or (original is not None and identity == {
+        'uid': original['uid'], 'gid': original['gid']})
 
 
 def sync_dir(path):
@@ -191,7 +217,7 @@ def verify_database_snapshot(path, expected, verify_integrity):
 
 
 def validate_paths(target, original, client_data, output, bindings, *, before_lock=False,
-                   recovery=False, temporary=None):
+                   recovery=False, temporary=None, extra_control_files=()):
     """核对保留对象与整个事务的写入、搬移及清理范围。"""
     env = target / 'venv'
     updates = target / 'updates'
@@ -263,6 +289,22 @@ def validate_paths(target, original, client_data, output, bindings, *, before_lo
     protected_ids = set(present)
     effects = set()
 
+    def tree_identity(path, allow_dangling):
+        info = path.lstat()
+        if not stat.S_ISLNK(info.st_mode):
+            return info.st_dev, info.st_ino
+        os.readlink(path)
+        try:
+            info = path.stat()
+        except FileNotFoundError:
+            if not allow_dangling:
+                raise
+            resolved = path.resolve()
+            if any(overlaps(resolved, item) for item in [*protected, *media]):
+                raise ValueError('未完成链接指向保留对象: ' + str(path))
+            return None
+        return info.st_dev, info.st_ino
+
     def add_tree(root, allow_missing=False):
         try:
             identity(root, required=not allow_missing)
@@ -274,10 +316,9 @@ def validate_paths(target, original, client_data, output, bindings, *, before_lo
                                                 onerror=lambda error: (_ for _ in ()).throw(error)):
             for name in (*names, *files):
                 path = Path(directory) / name
-                info = path.lstat()
-                if stat.S_ISLNK(info.st_mode):
-                    info = path.stat()
-                value = (info.st_dev, info.st_ino)
+                value = tree_identity(path, allow_dangling=recovery)
+                if value is None:
+                    continue
                 if value in protected_ids:
                     raise ValueError('保留对象与更新目录内文件共享身份')
                 effects.add(value)
@@ -286,7 +327,7 @@ def validate_paths(target, original, client_data, output, bindings, *, before_lo
     add_tree(namespace, allow_missing=True)
     effect_candidates = [updates / 'pending.json', output / 'update.log', output / 'journal.json',
                          output / 'receipt.json', Path(str(db) + '-wal'), Path(str(db) + '-shm'),
-                         db_temp, db_probe, client_temp, client_probe]
+                         db_temp, db_probe, client_temp, client_probe, *extra_control_files]
     for path in (item for item in effect_candidates if item is not None):
         value = identity(path)
         if value is not None:
@@ -305,10 +346,8 @@ def validate_paths(target, original, client_data, output, bindings, *, before_lo
                                                     onerror=lambda error: (_ for _ in ()).throw(error)):
                 for name in (*names, *files):
                     path = Path(directory) / name
-                    info = path.lstat()
-                    if stat.S_ISLNK(info.st_mode):
-                        info = path.stat()
-                    if (info.st_dev, info.st_ino) == client_id:
+                    value = tree_identity(path, allow_dangling=recovery and path.is_relative_to(output))
+                    if value == client_id:
                         raise ValueError('能力文件与更新控制材料为同一对象')
     for root in media:
         identity(root, required=True)
@@ -316,10 +355,8 @@ def validate_paths(target, original, client_data, output, bindings, *, before_lo
                                                 onerror=lambda error: (_ for _ in ()).throw(error)):
             for name in (*names, *files):
                 path = Path(directory) / name
-                info = path.lstat()
-                if stat.S_ISLNK(info.st_mode):
-                    info = path.stat()
-                if (info.st_dev, info.st_ino) in effects:
+                value = tree_identity(path, allow_dangling=False)
+                if value in effects:
                     raise ValueError('绑定目录内容与更新文件共享身份')
     if not recovery:
         for path in [output, namespace, db_temp, db_probe, client_temp, client_probe]:
@@ -458,16 +495,19 @@ def backup_environment(source, destination):
     return copied
 
 
-def replace_file(source, destination, temp):
+def replace_file(source, destination, temp, record, kind, register_owner):
     try:
         info = temp.lstat()
     except FileNotFoundError:
         pass
     else:
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_nlink != 1:
+        original = record['db_meta'] if kind == 'db_temp' else record['client']['meta']
+        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                or not owner_allowed(info, record['temporary_owners'][kind], original)):
             raise ValueError('事务临时文件归属无法核实: ' + str(temp))
         temp.unlink()
         sync_dir(temp.parent)
+    register_owner(kind, temp.parent)
     with source.open('rb') as src, temp.open('xb') as dst:
         shutil.copyfileobj(src, dst)
     info = source.stat()
@@ -478,13 +518,16 @@ def replace_file(source, destination, temp):
     sync_dir(destination.parent)
 
 
-def owned_namespace(path):
+def owned_namespace(path, record, register_owner):
     try:
+        info = path.lstat()
+    except FileNotFoundError:
+        register_owner('namespace', path.parent)
         path.mkdir(mode=0o700)
         sync_dir(path.parent)
-    except FileExistsError:
-        info = path.lstat()
-        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
+    else:
+        if (not stat.S_ISDIR(info.st_mode)
+                or not owner_allowed(info, record['temporary_owners']['namespace'])):
             raise ValueError('事务临时目录归属无法核实: ' + str(path))
 
 
@@ -499,13 +542,14 @@ def make_directories(path):
         sync_dir(directory.parent)
 
 
-def recover(record, verify_integrity):
+def recover(record, verify_integrity, register_owner):
     """使用保留的完整备份幂等恢复；无修改意图时不覆盖原环境。"""
     state = classify_record(record)
     if state is JournalState.PREPARING:
         return
     if state is not JournalState.UPDATING:
         raise ValueError('终态更新记录不能再次恢复')
+    validate_active_record(record)
     original = record['original']
     if digest(Path(original['config'])) != original['config_sha256']:
         raise ValueError('原配置与更新记录不一致')
@@ -520,20 +564,28 @@ def recover(record, verify_integrity):
     metadata = original['deployment']['metadata']
     verify_database_snapshot(db_backup, metadata, verify_integrity)
     namespace = Path(record['temporary']['env_namespace'])
-    owned_namespace(namespace)
+    owned_namespace(namespace, record, register_owner)
     staging = namespace / 'staging'
-    if not env.exists() or manifest(env) != expected_env:
+    try:
+        env_info = env.lstat()
+    except FileNotFoundError:
+        env_info = None
+    if env_info is not None and not stat.S_ISDIR(env_info.st_mode):
+        raise ValueError('原环境路径不是目录，不能覆盖')
+    if env_info is None or manifest(env) != expected_env:
         if staging.exists():
             info = staging.lstat()
-            if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
+            if (not stat.S_ISDIR(info.st_mode)
+                    or not owner_allowed(info, record['temporary_owners']['staging'], expected_env[''])):
                 raise ValueError('恢复副本归属无法核实')
             shutil.rmtree(staging)
             sync_dir(staging.parent)
+        register_owner('staging', namespace)
         copy_environment(env_backup, staging)
         if manifest(staging, sync=True) != expected_env:
             raise ValueError('恢复的 Python 环境无法核实')
         sync_dir(staging.parent)
-        if env.exists():
+        if env_info is not None:
             displaced = Path(tempfile.mkdtemp(prefix='displaced-', dir=namespace))
             sync_dir(namespace)
             os.replace(env, displaced)
@@ -549,7 +601,7 @@ def recover(record, verify_integrity):
         if sidecar.exists():
             sidecar.unlink()
     sync_dir(db.parent)
-    replace_file(db_backup, db, Path(record['temporary']['db_temp']))
+    replace_file(db_backup, db, Path(record['temporary']['db_temp']), record, 'db_temp', register_owner)
     assert_file(db, record['db_sha256'], record['db_meta'])
     verify_database_snapshot(db, metadata, verify_integrity)
     client = record.get('client')
@@ -560,7 +612,8 @@ def recover(record, verify_integrity):
         if client['present']:
             backup = Path(client['backup'])
             assert_file(backup, client['sha256'], client['meta'])
-            replace_file(backup, path, Path(record['temporary']['client_temp']))
+            replace_file(backup, path, Path(record['temporary']['client_temp']), record,
+                         'client_temp', register_owner)
             assert_file(path, client['sha256'], client['meta'])
         elif path.exists():
             path.unlink()

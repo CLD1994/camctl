@@ -334,6 +334,7 @@ class UpdateTests(unittest.TestCase):
                 patch.object(transaction, 'classify_record', return_value=states.UPDATING, create=True), \
                 patch.object(transaction, 'JournalState', states, create=True), \
                 patch.object(transaction, 'validate_record_target', create=True), \
+                patch.object(transaction, 'validate_active_record', create=True), \
                 patch.object(transaction, 'directory_identity', return_value={'ino': 1}, create=True), \
                 patch.object(transaction, 'validate_paths', create=True) as validate, \
                 patch.object(transaction, 'recover', side_effect=lambda *args: order.append('recover'), create=True), \
@@ -360,6 +361,7 @@ class UpdateTests(unittest.TestCase):
                 patch.object(transaction, 'classify_record', return_value=states.UPDATING, create=True), \
                 patch.object(transaction, 'JournalState', states, create=True), \
                 patch.object(transaction, 'validate_record_target', create=True), \
+                patch.object(transaction, 'validate_active_record', create=True), \
                 patch.object(transaction, 'directory_identity', return_value={'ino': 1}, create=True), \
                 patch.object(transaction, 'validate_paths', create=True), \
                 patch.object(transaction, 'recover', side_effect=ValueError('restore failed'), create=True), \
@@ -367,6 +369,36 @@ class UpdateTests(unittest.TestCase):
             self.assertEqual(update.main(), 1)
         old_ops.save.assert_not_called()
         self.assertEqual(old_ops.save_recovery_failure.call_args.args[0]['diagnostics'][0]['stage'], 'recover_pending')
+
+    def test_terminal_record_does_not_consult_obsolete_deployment(self):
+        for state_name in ('COMMITTED', 'ROLLED_BACK'):
+            with self.subTest(state=state_name):
+                record = {'output': '/target/updates/old', 'output_identity': {'ino': 1},
+                          'original': {'deployment': {'metadata': {}}},
+                          'client': {'configured_path': '/obsolete/link/device-capabilities.json'}}
+                states = SimpleNamespace(UPDATING=object(), COMMITTED=object(), ROLLED_BACK=object())
+                new_ops = Mock()
+                new_ops.preflight.side_effect = ValueError('current preflight reached')
+                with patch.multiple(sys, argv=['update-camctl.py', '--target', '/target', '--config', '/new/config'],
+                                    prefix='/base', base_prefix='/base', stderr=io.StringIO(), path=list(sys.path)), \
+                        patch.object(Path, 'is_dir', return_value=True), patch.object(Path, 'is_file', return_value=True), \
+                        patch.object(Path, 'lstat', return_value=SimpleNamespace(st_mode=0o100600)), \
+                        patch.object(Path, 'read_text', return_value=json.dumps(record)), \
+                        patch.object(update.shutil, 'which', return_value='/tools/uv'), \
+                        patch.object(transaction.Locks, 'acquire_directory'), \
+                        patch.object(transaction, 'classify_record', return_value=getattr(states, state_name), create=True), \
+                        patch.object(transaction, 'JournalState', states, create=True), \
+                        patch.object(transaction, 'validate_record_target', create=True), \
+                        patch.object(transaction, 'directory_identity', return_value={'ino': 1}, create=True), \
+                        patch.object(transaction, 'validate_active_record', create=True) as active, \
+                        patch.object(transaction, 'validate_paths', create=True) as old_layout, \
+                        patch.object(transaction, 'sync_file', create=True), \
+                        patch.object(transaction, 'sync_dir'), \
+                        patch.object(update, 'UpdateOperations', return_value=new_ops):
+                    self.assertEqual(update.main(), 1)
+                new_ops.preflight.assert_called_once()
+                active.assert_not_called()
+                old_layout.assert_not_called()
 
     def test_rollback_uses_persisted_record_after_reacquiring_locks(self):
         ops = update.UpdateOperations(Path('/bundle'), Path('/target'), None, Path('/target/updates/id'))
@@ -380,6 +412,7 @@ class UpdateTests(unittest.TestCase):
         ops.read_pending = Mock(return_value=(formal, actual_state))
         states = SimpleNamespace(UPDATING=actual_state, ROLLED_BACK=SimpleNamespace(value='rolled_back'))
         with patch.object(transaction, 'JournalState', states, create=True), \
+                patch.object(transaction, 'validate_active_record', create=True), \
                 patch.object(transaction, 'validate_paths', create=True), \
                 patch.object(transaction, 'recover', create=True) as recover, \
                 patch.object(transaction, 'atomic_json', create=True):
@@ -400,6 +433,36 @@ class UpdateTests(unittest.TestCase):
                 patch.object(transaction, 'JournalState', states, create=True):
             with self.assertRaises(ValueError):
                 ops.read_pending()
+
+    def test_persisted_new_creator_does_not_conflict_with_unchanged_core(self):
+        ops = update.UpdateOperations(Path('/bundle'), Path('/target'), None, Path('/target/updates/id'))
+        base = {'output': '/target/updates/id', 'output_identity': {'ino': 1}, 'env': '/target/venv',
+                'env_backup': '/target/updates/id/venv.backup', 'state_db': '/db/state',
+                'db_backup': '/target/updates/id/state.backup.db', 'lock_paths': ['/db/a', '/db/b'],
+                'controller': '/python', 'original': {}, 'temporary': {}, 'state': 'updating',
+                'temporary_owners': {'staging': [{'uid': 0, 'gid': 0}]}}
+        ops.record = base
+        formal = dict(base, temporary_owners={'staging': [{'uid': 0, 'gid': 0}, {'uid': 1000, 'gid': 1000}]})
+        states = SimpleNamespace(PREPARING=object())
+        with patch.object(Path, 'read_text', return_value=json.dumps(formal)), \
+                patch.object(transaction, 'classify_record', return_value=object(), create=True), \
+                patch.object(transaction, 'validate_record_target', create=True), \
+                patch.object(transaction, 'directory_identity', return_value={'ino': 1}, create=True), \
+                patch.object(transaction, 'JournalState', states, create=True):
+            actual, _ = ops.read_pending()
+        self.assertEqual(actual['temporary_owners']['staging'], formal['temporary_owners']['staging'])
+
+    def test_uncertain_creator_record_publication_retains_formal_facts(self):
+        ops = update.UpdateOperations(Path('/bundle'), Path('/target'), None, Path('/target/updates/id'))
+        ops.record = {'temporary_owners': {'staging': []}}
+        formal = {'temporary_owners': {'staging': [{'uid': 0, 'gid': 0}]}}
+        ops.read_pending = Mock(return_value=(formal, object()))
+        with patch.object(transaction, 'creation_identity', return_value={'uid': 0, 'gid': 0}, create=True), \
+                patch.object(transaction, 'atomic_json', side_effect=OSError('sync failed'), create=True), \
+                patch.object(transaction, 'sync_file', create=True), patch.object(transaction, 'sync_dir'):
+            with self.assertRaises(OSError):
+                ops.register_owner('staging', Path('/parent'))
+        self.assertEqual(ops.record, formal)
 
     def test_failure_diagnostic_keeps_cause_and_facts_after_unlock(self):
         ops = Mock()

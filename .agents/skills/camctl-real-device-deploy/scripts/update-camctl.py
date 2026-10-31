@@ -274,7 +274,7 @@ class UpdateOperations:
         finally:
             owned.connection.close()
 
-    def check_paths(self, original, *, before_lock=False, recovery=False):
+    def check_paths(self, original, *, before_lock=False, recovery=False, extra_control_files=()):
         temporary = None
         if recovery and hasattr(self, 'record'):
             metadata = self.record['original']['deployment']['metadata']
@@ -283,7 +283,8 @@ class UpdateOperations:
         else:
             bindings = [self.config.paths.staging, self.config.paths.ready, self.config.paths.processing]
         return transaction.validate_paths(self.target, original, self.client_data, self.output, bindings,
-                                          before_lock=before_lock, recovery=recovery, temporary=temporary)
+                                          before_lock=before_lock, recovery=recovery, temporary=temporary,
+                                          extra_control_files=extra_control_files)
 
     def backup(self, receipt):
         original = receipt['original']
@@ -298,7 +299,8 @@ class UpdateOperations:
                        'lock_paths': original['lock_paths'],
                        'original': original, 'controller': sys.executable,
                        'output': str(self.output), 'output_identity': transaction.directory_identity(self.output),
-                       'temporary': temporary}
+                       'temporary': temporary,
+                       'temporary_owners': {name: [] for name in ('namespace', 'staging', 'db_temp', 'client_temp')}}
         if self.client_data is not None:
             configured_path = self.client_data / 'device-capabilities.json'
             if configured_path.is_symlink() and not configured_path.exists():
@@ -310,7 +312,7 @@ class UpdateOperations:
             self.record['client'] = item
         transaction.atomic_json(self.pending, self.record)
         namespace = Path(temporary['env_namespace'])
-        transaction.owned_namespace(namespace)
+        transaction.owned_namespace(namespace, self.record, self.register_owner)
         self.record['env_manifest'] = transaction.backup_environment(self.target / 'venv', env_backup)
         self.record['db_meta'] = transaction.file_metadata(self.state_db)
         transaction.backup_database(self.state_db, db_backup)
@@ -320,13 +322,15 @@ class UpdateOperations:
                                              verify_maintenance_integrity)
         transaction.assert_file(db_backup, self.record['db_sha256'], self.record['db_meta'])
         probe = namespace / 'staging'
+        self.register_owner('staging', namespace)
         transaction.copy_environment(env_backup, probe)
         if transaction.manifest(probe, sync=True) != self.record['env_manifest']:
             raise ValueError('无法保留恢复环境的元信息')
         shutil.rmtree(probe)
         transaction.sync_dir(probe.parent)
         probe_db = Path(temporary['db_probe'])
-        transaction.replace_file(db_backup, probe_db, Path(temporary['db_temp']))
+        transaction.replace_file(db_backup, probe_db, Path(temporary['db_temp']),
+                                 self.record, 'db_temp', self.register_owner)
         transaction.assert_file(probe_db, self.record['db_sha256'], self.record['db_meta'])
         probe_db.unlink()
         transaction.sync_dir(probe_db.parent)
@@ -345,7 +349,8 @@ class UpdateOperations:
                 item.update(backup=str(backup), sha256=transaction.digest(backup))
                 transaction.assert_file(backup, item['sha256'], item['meta'])
                 probe_client = Path(temporary['client_probe'])
-                transaction.replace_file(backup, probe_client, Path(temporary['client_temp']))
+                transaction.replace_file(backup, probe_client, Path(temporary['client_temp']),
+                                         self.record, 'client_temp', self.register_owner)
                 transaction.assert_file(probe_client, item['sha256'], item['meta'])
                 probe_client.unlink()
                 transaction.sync_dir(probe_client.parent)
@@ -363,13 +368,15 @@ class UpdateOperations:
         current, state = self.read_pending()
         if state is not transaction.JournalState.UPDATING:
             raise ValueError('更新记录已经变化，不能按旧记录回滚')
+        transaction.validate_active_record(current)
         metadata = current['original']['deployment']['metadata']
         bindings = [metadata['staging_path'], metadata['ready_path'], metadata['processing_path']]
         client = current.get('client')
         client_data = Path(client['configured_path']).parent if client is not None else None
         transaction.validate_paths(self.target, current['original'], client_data, self.output, bindings,
                                    recovery=True, temporary=current['temporary'])
-        transaction.recover(current, verify_maintenance_integrity)
+        self.record = current
+        transaction.recover(current, verify_maintenance_integrity, self.register_owner)
         current['state'] = transaction.JournalState.ROLLED_BACK.value
         try:
             transaction.atomic_json(self.pending, current)
@@ -391,16 +398,44 @@ class UpdateOperations:
             if record[key] != self.record[key]:
                 raise ValueError('持久更新记录身份不一致: ' + key)
         if state is not transaction.JournalState.PREPARING:
-            if {k: v for k, v in record.items() if k != 'state'} != {
-                    k: v for k, v in self.record.items() if k != 'state'}:
+            if {k: v for k, v in record.items() if k not in ('state', 'temporary_owners')} != {
+                    k: v for k, v in self.record.items() if k not in ('state', 'temporary_owners')}:
                 raise ValueError('持久更新记录材料不一致')
+        for kind, owners in self.record['temporary_owners'].items():
+            if any(owner not in record['temporary_owners'][kind] for owner in owners):
+                raise ValueError('持久更新记录缺少已确认创建身份: ' + kind)
         return record, state
 
     def confirm_pending(self):
-        _, state = self.read_pending()
+        record, state = self.read_pending()
         transaction.sync_file(self.pending)
         transaction.sync_dir(self.pending.parent)
+        self.record.clear()
+        self.record.update(record)
         return state.value
+
+    def register_owner(self, kind, parent):
+        identity = transaction.creation_identity(parent)
+        if identity in self.record['temporary_owners'][kind]:
+            return
+        proposed = dict(self.record)
+        proposed['temporary_owners'] = {key: list(values) for key, values in
+                                        self.record['temporary_owners'].items()}
+        proposed['temporary_owners'][kind].append(identity)
+        try:
+            transaction.atomic_json(self.pending, proposed)
+        except Exception as error:
+            try:
+                actual, _ = self.read_pending()
+                transaction.sync_file(self.pending)
+                transaction.sync_dir(self.pending.parent)
+                self.record.clear()
+                self.record.update(actual)
+            except Exception as confirm_error:
+                raise ExceptionGroup('创建身份发布及确认均失败', [error, confirm_error])
+            raise
+        self.record.clear()
+        self.record.update(proposed)
 
     def commit(self):
         committed = dict(self.record, state=transaction.JournalState.COMMITTED.value)
@@ -433,7 +468,8 @@ class UpdateOperations:
             if sidecar.exists():
                 sidecar.unlink()
         transaction.sync_dir(self.state_db.parent)
-        transaction.replace_file(copy, self.state_db, Path(self.record['temporary']['db_temp']))
+        transaction.replace_file(copy, self.state_db, Path(self.record['temporary']['db_temp']),
+                                 self.record, 'db_temp', self.register_owner)
         if transaction.file_metadata(self.state_db) != self.record['db_meta']:
             raise ValueError('发布后的数据库元信息发生变化')
         receipt['new_deployment'] = {'state_db': str(self.state_db), 'metadata': metadata}
@@ -541,6 +577,7 @@ def main():
     target_locks = transaction.Locks()
     operations = None
     evidence = None
+    archive_record = None
     stage = 'update_lock'
     try:
         target_locks.acquire_directory(args.target)
@@ -558,26 +595,28 @@ def main():
             transaction.validate_record_target(record, args.target)
             if transaction.directory_identity(Path(record['output'])) != record['output_identity']:
                 raise ValueError('更新输出目录身份已变化')
-            original = record['original']
-            metadata = original['deployment']['metadata']
-            bindings = [metadata['staging_path'], metadata['ready_path'], metadata['processing_path']]
-            client = record.get('client')
-            client_data = Path(client['configured_path']).parent if client is not None else None
-            transaction.validate_paths(args.target, original, client_data, Path(record['output']), bindings,
-                                       before_lock=True, recovery=True, temporary=record['temporary'])
-            evidence = Path(record['output'])
-            operations = UpdateOperations(Path(__file__).resolve().parent, args.target, None, evidence)
-            operations.update_locks = target_locks
             if state in (transaction.JournalState.COMMITTED, transaction.JournalState.ROLLED_BACK):
                 transaction.sync_file(pending)
                 transaction.sync_dir(pending.parent)
             else:
+                transaction.validate_active_record(record)
+                original = record['original']
+                metadata = original['deployment']['metadata']
+                bindings = [metadata['staging_path'], metadata['ready_path'], metadata['processing_path']]
+                client = record.get('client')
+                client_data = Path(client['configured_path']).parent if client is not None else None
+                transaction.validate_paths(args.target, original, client_data, Path(record['output']), bindings,
+                                           before_lock=True, recovery=True, temporary=record['temporary'])
+                evidence = Path(record['output'])
+                operations = UpdateOperations(Path(__file__).resolve().parent, args.target, None, evidence)
+                operations.update_locks = target_locks
+                operations.record = record
                 operations.db_locks.database(record['lock_paths'])
                 recovery_error = None
                 try:
                     transaction.validate_paths(args.target, original, client_data, evidence, bindings,
                                                recovery=True, temporary=record['temporary'])
-                    transaction.recover(record, verify_maintenance_integrity)
+                    transaction.recover(record, verify_maintenance_integrity, operations.register_owner)
                     record['state'] = transaction.JournalState.ROLLED_BACK.value
                     transaction.atomic_json(pending, record)
                 except Exception as error:
@@ -590,17 +629,17 @@ def main():
                     raise
                 if recovery_error is not None:
                     raise recovery_error
-            archive = evidence / 'journal.json'
+            archive_record = (record, Path(record['output']) / 'journal.json')
             try:
-                archive_info = archive.lstat()
+                archive_info = archive_record[1].lstat()
             except FileNotFoundError:
                 archive_info = None
             if archive_info is not None:
                 import stat
-                if not stat.S_ISREG(archive_info.st_mode) or json.loads(archive.read_text(encoding='utf-8')) != record:
+                if (not stat.S_ISREG(archive_info.st_mode)
+                        or json.loads(archive_record[1].read_text(encoding='utf-8')) != record):
                     raise ValueError('既有更新记录归档无法核实')
-            else:
-                transaction.atomic_json(archive, record)
+                archive_record = None
         stage = 'environment'
         python = args.target / 'venv/bin/python'
         if not python.is_file() or shutil.which('uv') is None:
@@ -614,7 +653,11 @@ def main():
         stage = 'preflight'
         original = operations.preflight()
         stage = 'check_paths_before_effects'
-        operations.check_paths(original, before_lock=True)
+        archive_files = (archive_record[1],) if archive_record is not None else ()
+        operations.check_paths(original, before_lock=True, extra_control_files=archive_files)
+        if archive_record is not None:
+            record, archive = archive_record
+            transaction.atomic_json(archive, record)
         updates.mkdir(parents=True, exist_ok=True)
         transaction.sync_dir(args.target)
         output.mkdir()
