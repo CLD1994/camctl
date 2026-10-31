@@ -289,7 +289,7 @@ def validate_paths(target, original, client_data, output, bindings, *, before_lo
     protected_ids = set(present)
     effects = set()
 
-    def tree_identity(path, allow_dangling):
+    def tree_identity(path):
         info = path.lstat()
         if not stat.S_ISLNK(info.st_mode):
             return info.st_dev, info.st_ino
@@ -297,11 +297,7 @@ def validate_paths(target, original, client_data, output, bindings, *, before_lo
         try:
             info = path.stat()
         except FileNotFoundError:
-            if not allow_dangling:
-                raise
-            resolved = path.resolve()
-            if any(overlaps(resolved, item) for item in [*protected, *media]):
-                raise ValueError('未完成链接指向保留对象: ' + str(path))
+            # 明确不存在的链接目标没有可与现存文件比较的 inode。
             return None
         return info.st_dev, info.st_ino
 
@@ -316,7 +312,7 @@ def validate_paths(target, original, client_data, output, bindings, *, before_lo
                                                 onerror=lambda error: (_ for _ in ()).throw(error)):
             for name in (*names, *files):
                 path = Path(directory) / name
-                value = tree_identity(path, allow_dangling=recovery)
+                value = tree_identity(path)
                 if value is None:
                     continue
                 if value in protected_ids:
@@ -346,7 +342,7 @@ def validate_paths(target, original, client_data, output, bindings, *, before_lo
                                                     onerror=lambda error: (_ for _ in ()).throw(error)):
                 for name in (*names, *files):
                     path = Path(directory) / name
-                    value = tree_identity(path, allow_dangling=recovery and path.is_relative_to(output))
+                    value = tree_identity(path)
                     if value == client_id:
                         raise ValueError('能力文件与更新控制材料为同一对象')
     for root in media:
@@ -355,7 +351,7 @@ def validate_paths(target, original, client_data, output, bindings, *, before_lo
                                                 onerror=lambda error: (_ for _ in ()).throw(error)):
             for name in (*names, *files):
                 path = Path(directory) / name
-                value = tree_identity(path, allow_dangling=False)
+                value = tree_identity(path)
                 if value in effects:
                     raise ValueError('绑定目录内容与更新文件共享身份')
     if not recovery:

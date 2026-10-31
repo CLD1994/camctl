@@ -319,6 +319,40 @@ class PathIdentityTests(unittest.TestCase):
                     self.check(None, aliases, walk, recovery=True, links={link: 'partial-target'},
                                errors={link: PermissionError('unreadable')})
 
+    def test_prior_preparing_backup_dangling_link_does_not_block_existing_capability(self):
+        link = '/target/updates/old/venv.backup/bin/python'
+        walk = {'/target/updates': [('/target/updates/old/venv.backup/bin', [], ['python'])]}
+        self.ids['/target/updates'] = (8, 1)
+        self.ids['/client/device-capabilities.json'] = (8, 2)
+        with patch.object(Path, 'unlink') as unlink, patch.object(transaction.shutil, 'rmtree') as rmtree:
+            self.check(Path('/client'), walk=walk, links={link: 'missing-python'})
+        unlink.assert_not_called()
+        rmtree.assert_not_called()
+
+    def test_new_capability_final_check_and_rollback_tolerate_prior_dangling_link(self):
+        link = '/target/updates/old/venv.backup/bin/python'
+        walk = {'/target/updates': [('/target/updates/old/venv.backup/bin', [], ['python'])]}
+        self.ids['/target/updates'] = (8, 1)
+        self.check(Path('/client'), walk=walk, links={link: 'missing-python'})
+        self.ids['/client/device-capabilities.json'] = (8, 2)
+        for stage in ('final', 'rollback'):
+            with self.subTest(stage=stage):
+                self.check(Path('/client'), walk=walk, recovery=True, links={link: 'missing-python'})
+
+    def test_media_dangling_link_skips_only_missing_target_identity(self):
+        link = '/media/staging/orphan'
+        walk = {'/media/staging': [('/media/staging', [], ['orphan'])]}
+        self.check(None, walk=walk, links={link: 'missing-media'})
+        with self.assertRaises(PermissionError):
+            self.check(None, walk=walk, links={link: 'missing-media'},
+                       errors={link: PermissionError('unreadable')})
+        self.ids[link] = self.ids['/db/state']
+        with self.assertRaises(ValueError):
+            self.check(None, walk=walk, links={link: 'state'})
+        del self.ids['/media/staging']
+        with self.assertRaises(ValueError):
+            self.check(None)
+
 
 if __name__ == '__main__':
     unittest.main()
