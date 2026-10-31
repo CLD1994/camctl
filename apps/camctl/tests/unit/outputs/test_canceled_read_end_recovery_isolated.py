@@ -133,10 +133,8 @@ class CanceledRecoveryTests(unittest.TestCase):
         rows[:] = [original, original]
         self.assertFalse(check(connection, 5))
 
-    def test_discovery_uses_only_saved_original_end_for_device_and_host(self):
-        async def run(source, saved, assembly):
-            ticket = SimpleNamespace(target_id="9")
-            end = object()
+    def test_canceled_discovery_delegates_device_and_host_recovery_without_requiring_end(self):
+        async def run(source, assembly):
             calls = []
             class Discovery:
                 async def rows(self, database, kind, now, query, **kwargs):
@@ -147,23 +145,21 @@ class CanceledRecoveryTests(unittest.TestCase):
             discovery = Discovery()
             flow = SimpleNamespace(discovery=discovery, database=Database(), devices=assembly,
                 recovery_evidence_for=None, pending_read_ends={})
-            async def resume(current, held, original, evidence):
-                calls.append((held.ticket, held.end, evidence))
-            namespace = {"unfinished_read_end": lambda owned, copy_id: (ticket, (ticket, end, 100, None)) if saved else (ticket, None),
-                "HeldReadEnd": lambda ticket, end, occurred_at, **kwargs: SimpleNamespace(ticket=ticket, end=end, **kwargs),
-                "_LOCAL_READ_EVIDENCE": "local", "_resume_canceled_delivery_end": resume,
+            async def resume(current, copy_id, evidence, save):
+                calls.append((copy_id, evidence, save))
+            save = object()
+            namespace = {"settle_canceled_read": resume,
+                "_LOCAL_READ_EVIDENCE": "local", "_save_read_result_and_settle": save,
                 "_original_read_evidence": lambda runtime, device, driver: "device" if device in runtime.devices else None,
                 "DeviceBinding": lambda *args: args, "ConsistencyError": ValueError}
             await load("_settle_canceled_read_ends", namespace)(flow, 100)
             self.assertIn("a.cancel_requested=1", discovery.query)
-            self.assertIn("c.read_end_event_id IS NOT NULL", discovery.query)
-            return calls, ticket, end
-        calls, ticket, end = asyncio.run(run(None, True, {}))
-        self.assertEqual(calls, [(ticket, end, "local")])
-        calls, ticket, end = asyncio.run(run(15, True, {"camera": SimpleNamespace(evidence="device")}))
-        self.assertEqual(calls, [(ticket, end, "device")])
-        self.assertEqual(asyncio.run(run(None, False, {}))[0], [])
-        self.assertEqual(asyncio.run(run(15, True, {}))[0], [])
+            self.assertNotIn("c.read_end_event_id IS NOT NULL", discovery.query)
+            return calls, save
+        for source, assembly, evidence in ((None, {}, "local"),
+                (15, {"camera": SimpleNamespace(evidence="device")}, "device"), (15, {}, None)):
+            calls, save = asyncio.run(run(source, assembly))
+            self.assertEqual(calls, [(9, evidence, save)])
 
     def test_file_owner_rechecks_end_and_cancel_before_saving(self):
         async def run(valid, canceled):

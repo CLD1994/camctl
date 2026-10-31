@@ -381,7 +381,7 @@ class InternalColdResumeTests(unittest.IsolatedAsyncioTestCase):
                 await namespace["_resume_bound_local_read"](runtime, {"id": 6, "cancel_requested": 0},
                     9, Ticket(attempt_id=2), saved)
 
-    async def test_canceled_inspection_settles_saved_original_inside_file_ownership(self):
+    async def test_canceled_inspection_uses_shared_read_settlement(self):
         tree = ast.parse(INSPECTIONS_SOURCE.read_text())
         function = next(node for node in tree.body if isinstance(node, ast.AsyncFunctionDef)
                         and node.name == "_settle_canceled_inspection_end")
@@ -389,34 +389,17 @@ class InternalColdResumeTests(unittest.IsolatedAsyncioTestCase):
         exec(compile(ast.fix_missing_locations(ast.Module(body=[function], type_ignores=[])),
                      str(INSPECTIONS_SOURCE), "exec"), namespace)
         calls = []
-        ticket, end = Ticket(), End(True, 0, None)
         read = ModuleType("camctl.outputs.read_attempts")
-        read.HeldReadEnd = lambda ticket, end, occurred_at, evidence: SimpleNamespace(ticket=ticket, end=end)
-        read.running_read_ticket = lambda owned, copy_id: (ticket, 4)
-        async def canceled(flow, ticket, evidence):
-            calls.append(("result", ticket))
-            return "pending"
-        async def owned(flow, copy_id, body):
-            calls.append(("owned", copy_id))
-            await body(None)
-        read.canceled_complete_read_result, read.run_owned_read = canceled, owned
-        repository = ModuleType("camctl.persistence.repositories.read_end")
-        saved = [ticket, end, 5, None]
-        repository.load_read_end = lambda *args: saved
+        async def shared(flow, copy_id, evidence, save):
+            calls.append((flow, copy_id, evidence, save))
+        read.settle_canceled_read = shared
         media = ModuleType("camctl.capture.media_flow")
-        async def settle(flow, pending): calls.append(("save", pending))
+        async def settle(flow, pending): raise AssertionError("由共同入口持有和保存原结果")
         media._save_internal_read_and_settle = settle
-        class Database:
-            async def read(self, callback): return callback(object())
-        flow = SimpleNamespace(database=Database(), evidence="evidence", pending_read_ends={})
-        with patch.dict(sys.modules, {read.__name__: read, repository.__name__: repository, media.__name__: media}):
+        flow = SimpleNamespace(evidence="evidence")
+        with patch.dict(sys.modules, {read.__name__: read, media.__name__: media}):
             await namespace["_settle_canceled_inspection_end"](flow, 9)
-            self.assertEqual(calls, [("owned", 9), ("result", ticket), ("save", "pending")])
-            calls.clear()
-            saved[0] = Ticket(attempt_id=2)
-            with self.assertRaises(ValueError):
-                await namespace["_settle_canceled_inspection_end"](flow, 9)
-            self.assertEqual(calls, [("owned", 9)])
+        self.assertEqual(calls, [(flow, 9, "evidence", settle)])
 
 
 class MissingConfigVerificationTests(unittest.IsolatedAsyncioTestCase):
@@ -440,8 +423,10 @@ class MissingConfigVerificationTests(unittest.IsolatedAsyncioTestCase):
         def decide(facts):
             self.assertEqual(facts.max_recopies, 0)
             return SimpleNamespace(outcome="matched")
+        async def execute(callback, *args):
+            return callback(*args)
         enum = SimpleNamespace(MISMATCHED=4, MATCHED=3, FAILED=6, SOURCE_CHECKSUM_UNAVAILABLE=5)
-        namespace = {"asyncio": asyncio, "FileRef": lambda **kwargs: object(),
+        namespace = {"asyncio": SimpleNamespace(to_thread=execute), "FileRef": lambda **kwargs: object(),
             "hash_target": lambda *args: SimpleNamespace(error=None, digest=hashes[0]),
             "SourceChecksumSupport": SimpleNamespace(SUPPORTED="supported"),
             "_VERIFICATION": enum, "VerificationSave": lambda **kwargs: SimpleNamespace(**kwargs),
@@ -458,7 +443,7 @@ class MissingConfigVerificationTests(unittest.IsolatedAsyncioTestCase):
         facts = SimpleNamespace(target=SimpleNamespace(file_id=20, purpose="output", relative_path="name"),
             source_sha256="source", source_support="supported", source_size=10, committed_bytes=10,
             recopies_used=0)
-        context = SimpleNamespace(roots=SimpleNamespace(staging="staging"), max_recopies=None,
+        context = SimpleNamespace(roots=SimpleNamespace(staging="staging"), max_recopies=None, allow_recopy=True,
             occurred_at=5, repository=SimpleNamespace(save_verification=object()), database=Database())
         with self.assertRaises(CompletionError) as result:
             await namespace["_verify_and_finish"](9, context, facts)

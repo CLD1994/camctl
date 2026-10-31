@@ -114,6 +114,9 @@ _LOCAL_READ_EVIDENCE = EvidenceRegistry(contracts=(
     EvidenceContract(
         type="read_returned", version=1, operation="read",
         fields=frozenset()),
+    EvidenceContract(
+        type="local_read_recovery", version=1, operation="read",
+        fields=frozenset()),
 ))
 
 
@@ -1154,8 +1157,8 @@ async def _settle_ready_read_ends(runtime: ObtainRuntime, now: int) -> None:
 
 
 async def _settle_canceled_read_ends(runtime: ObtainRuntime, now: int) -> None:
-    """重启后按原完整结束与原票据完成已取消交付的读取结果。"""
-    from camctl.outputs.read_attempts import HeldReadEnd, unfinished_read_end
+    """按原实际结束或冷恢复边界完成已取消交付的读取结果。"""
+    from camctl.outputs.read_attempts import settle_canceled_read
 
     page = await runtime.discovery.rows(runtime.database, "canceled_read_ends", now,
         "SELECT c.id,c.source_device_file_id,ob.device_id,ob.driver_id"
@@ -1165,31 +1168,13 @@ async def _settle_canceled_read_ends(runtime: ObtainRuntime, now: int) -> None:
         " LEFT JOIN device_files df ON df.id=c.source_device_file_id"
         " LEFT JOIN actions ob ON ob.id=df.observer_action_id"
         " WHERE a.status=2 AND a.cancel_requested=1 AND d.status IN (1,2,3)"
-        " AND r.status IN (1,2) AND c.read_end_event_id IS NOT NULL", identity="c.id")
+        " AND r.status IN (1,2)", identity="c.id")
     for copy_id, source_id, device_id, driver_id in page.items:
-        saved = await runtime.database.read(lambda owned: unfinished_read_end(owned, copy_id))
-        if saved is None or saved[1] is None:
-            continue
-        ticket, (saved_ticket, end, occurred_at, _slot) = saved
-        if ticket != saved_ticket:
-            raise ConsistencyError("取消交付的原读取票据与完整结束不一致")
         if source_id is None:
             evidence = _LOCAL_READ_EVIDENCE
         else:
             evidence = _original_read_evidence(runtime, device_id, driver_id)
-            if evidence is None:
-                continue
-        held = runtime.pending_read_ends.get(copy_id)
-        if held is None:
-            held = HeldReadEnd(ticket, end, occurred_at,
-                resume=lambda current, value, original=runtime, registry=evidence:
-                    _resume_canceled_delivery_end(current, value, original, registry),
-                evidence=evidence)
-            runtime.pending_read_ends[copy_id] = held
-        elif held.ticket != ticket or held.end != end:
-            raise ConsistencyError("取消交付的读取结束与原拥有者不一致")
-
-        await _resume_canceled_delivery_end(runtime, held, runtime, evidence)
+        await settle_canceled_read(runtime, copy_id, evidence, _save_read_result_and_settle)
 
 
 async def _resume_canceled_delivery_end(current, held, original_runtime, evidence):
@@ -1464,6 +1449,7 @@ async def _copy_delivery(
                          preparation_settlement=settlement)
     result = None
     execution_error = None
+    reliable_complete = False
     try:
         if prepared.decision.outcome is ResumeOutcome.VERIFY:
             from camctl.capture.input_copy import confirm_read_at_full_offset
@@ -1473,10 +1459,12 @@ async def _copy_delivery(
             step = await copies.transfer(
                 facts["id"], session, runtime.segment_size)
             if step.plan.outcome is SegmentOutcome.ALL_COMMITTED:
+                reliable_complete = True
                 break
             if step.saved is None:
                 raise ConsistencyError(
                     "段推进未携带保存事实，拷贝端口契约不一致")
+            reliable_complete = step.saved.committed_bytes == state.source_size
             if step.saved.disposition is SegmentSaveDisposition.SKIPPED:
                 result = InputStep(
                     InputPhase.OWNER_SKIPPED, copy_id=facts["id"],
@@ -1496,10 +1484,15 @@ async def _copy_delivery(
         end = await stop_read_session(session, original_error=original_error)
         if on_read_end is not None:
             import inspect
-            saved = on_read_end(end, session.position() == state.source_size, state)
+            # EOF 是源返回；完整结束的持久化还要求副本进度可靠提交。
+            saved = on_read_end(end, reliable_complete, state)
             if inspect.isawaitable(saved):
                 await settle_required(saved)
     if result is not None:
+        if result.phase is InputPhase.OWNER_SKIPPED and end.error not in (None, "stopped"):
+            return replace(result, phase=InputPhase.SEGMENT_FAILED, error=RuntimeError(end.error),
+                           source_failed=True, read_end=end, stop_requested=True,
+                           content_complete=session.position() == state.source_size)
         return replace(result, read_end=end, stop_requested=True, content_complete=session.position() == state.source_size)
     if end.error is not None:
         return InputStep(InputPhase.SEGMENT_FAILED, copy_id=facts["id"], read_end=end,
@@ -2106,6 +2099,16 @@ async def _finish_local_attempt_phase(
     if (_photo_pending_copy_save(runtime, facts["id"])
             and await runtime.database.read(lambda owned: _is_photo_cache_source(owned.connection, facts))):
         raise ConsistencyError("照片缓存原读取或拷贝保存尚未可靠确认")
+    from camctl.outputs.read_attempts import stopped_read_result, canceled_complete_read_result
+
+    stopped = stopped_read_result(runtime, ticket, step, _LOCAL_READ_EVIDENCE, runtime.occurred_at())
+    if stopped is not None:
+        await _save_read_result_and_settle(runtime, stopped, facts)
+        return
+    completed_cancel = await canceled_complete_read_result(runtime, ticket, _LOCAL_READ_EVIDENCE)
+    if completed_cancel is not None:
+        await _save_read_result_and_settle(runtime, completed_cancel, facts)
+        return
     if (step.phase is InputPhase.COMPLETION_FAILED
             and getattr(step.error, "stage", None) == "source_binding_unavailable"
             and await runtime.database.read(lambda owned: _is_photo_cache_source(owned.connection, facts))):

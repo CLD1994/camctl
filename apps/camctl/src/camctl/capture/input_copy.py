@@ -240,6 +240,7 @@ async def obtain_recording_input(context: InputContext) -> InputStep:
                          preparation_settlement=settlement)
     result = None
     execution_error = None
+    reliable_complete = False
     try:
         if prepared.decision.outcome is ResumeOutcome.VERIFY:
             await confirm_read_at_full_offset(session)
@@ -247,10 +248,12 @@ async def obtain_recording_input(context: InputContext) -> InputStep:
             step = await context.copies.transfer(
                 copy_id, session, context.segment_size)
             if step.plan.outcome is SegmentOutcome.ALL_COMMITTED:
+                reliable_complete = True
                 break
             if step.saved is None:
                 raise ConsistencyError(
                     "段推进未携带保存事实，拷贝端口契约不一致")
+            reliable_complete = step.saved.committed_bytes == facts.source_size
             if step.saved.disposition is SegmentSaveDisposition.SKIPPED:
                 result = InputStep(
                     InputPhase.OWNER_SKIPPED, copy_id=copy_id,
@@ -268,11 +271,16 @@ async def obtain_recording_input(context: InputContext) -> InputStep:
         end = await stop_read_session(session, original_error=original_error)
         if context.on_read_end is not None:
             import inspect
-            saved = context.on_read_end(end, session.position() == facts.source_size)
+            # 源已读到末尾时，取消仍可使最后一段保存跳过。
+            saved = context.on_read_end(end, reliable_complete)
             if inspect.isawaitable(saved):
                 from camctl.persistence.business import settle_required
                 await settle_required(saved)
     if result is not None:
+        if result.phase is InputPhase.OWNER_SKIPPED and end.error not in (None, "stopped"):
+            return replace(result, phase=InputPhase.SEGMENT_FAILED, error=RuntimeError(end.error),
+                           source_failed=True, read_end=end, stop_requested=True,
+                           content_complete=session.position() == facts.source_size)
         return replace(result, read_end=end, stop_requested=True, content_complete=session.position() == facts.source_size)
     if end.error is not None:
         return InputStep(InputPhase.SEGMENT_FAILED, copy_id=copy_id, read_end=end,

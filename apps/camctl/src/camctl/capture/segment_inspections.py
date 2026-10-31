@@ -290,7 +290,7 @@ async def settle_terminal_inspection_read_slot(flow: MediaFlow, copy_id: int,
             inspection_id, slot_device_id, run_status, retry_wait_required, inspection_state, canceled, end_id = row[0]
             if inspection_state == int(_INSPECTION_STATE.PENDING) or canceled != 1:
                 raise ConsistencyError("分段检查原读取结果保存后的取消资格不一致")
-    if canceled == 1 and run_status == int(_RUN_STATUS["ACTIVE"]) and end_id is not None:
+    if canceled == 1 and run_status == int(_RUN_STATUS["ACTIVE"]):
         await _settle_canceled_inspection_end(flow, copy_id)
         row = await flow.database.read(lambda owned: owned.connection.execute(*query).fetchall(), description="读取拍摄直接事实")
         if len(row) != 1:
@@ -318,31 +318,10 @@ async def settle_terminal_inspection_read_slot(flow: MediaFlow, copy_id: int,
 
 
 async def _settle_canceled_inspection_end(flow, copy_id):
-    from camctl.outputs.read_attempts import (HeldReadEnd, canceled_complete_read_result,
-                                              running_read_ticket, run_owned_read)
-    from camctl.persistence.repositories.read_end import load_read_end
+    from camctl.outputs.read_attempts import settle_canceled_read
     from camctl.capture.media_flow import _save_internal_read_and_settle
 
-    async def settle(_control):
-        def current(owned):
-            original = running_read_ticket(owned, copy_id)
-            return None if original is None else (original[0], load_read_end(copy_id, owned))
-        result = await flow.database.read(current)
-        if result is None or result[1] is None:
-            return
-        ticket, saved = result
-        if ticket != saved[0]:
-            raise ConsistencyError("取消检查的读取结束与原票据不一致")
-        held = flow.pending_read_ends.get(copy_id)
-        if held is not None and (held.ticket != ticket or held.end != saved[1]):
-            raise ConsistencyError("取消检查的读取结束与原拥有者不一致")
-        if held is None:
-            flow.pending_read_ends[copy_id] = HeldReadEnd(ticket, saved[1], saved[2], evidence=flow.evidence)
-        pending = await canceled_complete_read_result(flow, ticket, flow.evidence)
-        if pending is not None:
-            await _save_internal_read_and_settle(flow, pending)
-
-    await run_owned_read(flow, copy_id, settle)
+    await settle_canceled_read(flow, copy_id, flow.evidence, _save_internal_read_and_settle)
 
 
 async def settle_terminal_inspection_slots_for_action(flow: MediaFlow, action_id: int,
@@ -378,7 +357,7 @@ async def settle_terminal_inspection_slots_for_action(flow: MediaFlow, action_id
             " JOIN actions a ON a.id=s.action_id"
             " JOIN operation_runs r ON r.copy_id=c.id AND r.kind=3"
             " WHERE s.action_id=? AND s.state!=? AND (c.slot_device_id IS NOT NULL"
-            " OR (c.read_end_event_id IS NOT NULL AND r.status=2 AND a.cancel_requested=1))"
+            " OR (r.status=2 AND a.cancel_requested=1))"
             " AND (s.id>? OR (s.id=? AND c.id>?))"
             " ORDER BY s.id,c.id LIMIT ?",
             (action_id, int(_INSPECTION_STATE.PENDING), after_inspection_id,

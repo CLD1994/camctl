@@ -233,6 +233,81 @@ async def prepare_prevented_read_result(runtime, ticket, prevented, evidence):
         runtime.occurred_at(), run_finish=RunFinish(RunOutcome.CANCELED)))
 
 
+async def settle_canceled_read(runtime, copy_id, evidence, save_and_settle):
+    """沿原结果或冷恢复依据结束已取消读取；不打开源或补造完整进度。"""
+    files = await read_one(runtime.database,
+        "SELECT c.target_file_id,c.source_intermediate_file_id FROM file_copies c"
+        " JOIN operation_runs r ON r.copy_id=c.id AND r.kind=3"
+        " JOIN actions a ON a.id=r.action_id WHERE c.id=? AND a.cancel_requested=1",
+        (copy_id,))
+    if files is None:
+        return False
+    executor = getattr(runtime, "file_executor", None)
+    if executor is not None and any(file_id in executor.unfinished_files()
+                                    for file_id in files if file_id is not None):
+        return False
+
+    async def finish(_control):
+        current_evidence = evidence
+        # 原结果及原业务申请优先，不能用冷恢复覆盖本会话已取得的返回。
+        for pending in tuple(runtime.pending_read_results.values()):
+            ticket = pending.ticket if isinstance(pending, PendingStoppedRead) else pending.finish.ticket
+            if int(ticket.target_id) == copy_id:
+                await save_and_settle(runtime, pending, retry=True)
+                return await runtime.database.read(lambda owned: running_read_ticket(owned, copy_id)) is None
+        if any(identity[0] == copy_id for identity in runtime.pending_read_business):
+            return False
+        original = await runtime.database.read(lambda owned: unfinished_read_end(owned, copy_id))
+        if original is None:
+            return True
+        ticket, saved = original
+        if saved is not None:
+            if current_evidence is None:
+                record_read_diagnostic(runtime, RecoveryBlockedReason.EVIDENCE_UNAVAILABLE, ticket)
+                return False
+            if saved[0] != ticket:
+                raise ConsistencyError("取消读取的完整结束与原票据不一致")
+            held = runtime.pending_read_ends.get(copy_id)
+            if held is not None and (held.ticket != ticket or held.end != saved[1]):
+                raise ConsistencyError("取消读取的完整结束与原拥有者不一致")
+            resume = lambda current, value: settle_canceled_read(
+                current, copy_id, current_evidence, save_and_settle)
+            if held is None:
+                runtime.pending_read_ends[copy_id] = HeldReadEnd(
+                    ticket, saved[1], saved[2], resume=resume, evidence=current_evidence)
+            elif held.resume is None:
+                runtime.pending_read_ends[copy_id] = replace(held, resume=resume)
+            pending = await canceled_complete_read_result(runtime, ticket, current_evidence)
+        else:
+            if copy_id in runtime.pending_read_ends:
+                return False
+            source = await read_one(runtime.database,
+                "SELECT c.source_device_file_id,ob.device_id,ob.driver_id FROM file_copies c"
+                " LEFT JOIN device_files f ON f.id=c.source_device_file_id"
+                " LEFT JOIN actions ob ON ob.id=f.observer_action_id WHERE c.id=?", (copy_id,))
+            if source is None:
+                raise ConsistencyError("取消读取缺少原来源归属")
+            if source[0] is not None:
+                from camctl.devices.bindings import DeviceBinding
+                lookup = runtime.recovery_evidence_for
+                if lookup is None:
+                    record_read_diagnostic(runtime, RecoveryBlockedReason.MISSING_EVIDENCE_LOOKUP, ticket)
+                    return False
+                # 原驱动的恢复模板必须绑定 read，不能借用 delete 等操作的契约。
+                current_evidence = lookup(DeviceBinding(source[1], source[2]), "read")
+            if current_evidence is None:
+                record_read_diagnostic(runtime, RecoveryBlockedReason.EVIDENCE_UNAVAILABLE, ticket)
+                return False
+            pending = await prepare_prevented_read_result(runtime, ticket,
+                ReadDispatchPrevented("canceled_before_dispatch", canceled=True), current_evidence)
+        if pending is None:
+            return False
+        await save_and_settle(runtime, pending)
+        return await runtime.database.read(lambda owned: running_read_ticket(owned, copy_id)) is None
+
+    return await run_owned_read(runtime, copy_id, finish)
+
+
 @dataclass(frozen=True)
 class PendingReadResult:
     """实际读取结束后持有的原结果和完整提交身份。"""
@@ -616,7 +691,7 @@ async def held_binding_read_result(runtime, copy_id, binding_result, business):
 
 @dataclass(frozen=True)
 class PendingStoppedRead:
-    """源实际停止后，先持有原观察，再读取所属业务取消事实。"""
+    """拥有者停止推进后，先持有真实源返回，再读取业务取消事实。"""
 
     ticket: AttemptTicket
     step: object
@@ -648,8 +723,16 @@ def controlled_read_stop(step):
 
 
 def stopped_read_result(runtime, ticket, step, evidence, occurred_at):
-    if (step.source_failed or step.read_end is None or step.read_end.error != "stopped"
-            or not step.stop_requested or step.content_complete):
+    from camctl.capture.input_copy import InputPhase
+
+    end = step.read_end
+    if (step.source_failed or end is None or end.stopped is not True
+            or not step.stop_requested):
+        return None
+    partial_stop = end.error == "stopped"
+    owner_skipped = (step.phase is InputPhase.OWNER_SKIPPED and end.error is None
+                     and step.error is None)
+    if not (partial_stop or owner_skipped):
         return None
     identity = (ticket.run_id, ticket.attempt_id)
     if identity in runtime.pending_read_results:
@@ -667,20 +750,24 @@ def stopped_read_result(runtime, ticket, step, evidence, occurred_at):
 
 async def _prepare_stopped_read(runtime, pending):
     ticket = pending.ticket
-    row = await read_one(runtime.database, "SELECT a.cancel_requested,c.source_size FROM operation_runs r JOIN actions a ON a.id=r.action_id"
+    row = await read_one(runtime.database, "SELECT a.cancel_requested,c.source_size,r.status FROM operation_runs r JOIN actions a ON a.id=r.action_id"
         " JOIN file_copies c ON c.id=r.copy_id WHERE r.id=? AND c.id=?", (ticket.run_id, int(ticket.target_id)))
     if row is None or row[0] not in (0, 1):
         raise ConsistencyError("实际停止观察的原读取归属或取消事实不可解释")
-    if row[0] == 0:
+    run_active = row[2] in (1, 2)
+    if row[0] == 0 and run_active:
         runtime.continuing_read_tickets[int(ticket.target_id)] = ReadContinuation(
             ticket, False, pending.step, pending.occurred_at, pending.key, pending.evidence)
         del runtime.pending_read_results[(ticket.run_id, ticket.attempt_id)]
         return None
-    outcome = CallOutcome(status=AttemptStatus.UNKNOWN, effect=EffectState.UNKNOWN,
-        error=ErrorValue("read_stopped", "read"),
+    # 取消可跳过主机末段提交，但不能将已经正常到达 EOF 的源返回改写成读取停止。
+    succeeded = pending.step.content_complete and pending.step.read_end.error is None
+    outcome = CallOutcome(status=AttemptStatus.SUCCEEDED if succeeded else AttemptStatus.UNKNOWN,
+        effect=EffectState.UNKNOWN,
+        error=None if succeeded else ErrorValue("read_stopped", "read"),
         settlement=Settlement(SettlementBasis.OBSERVED, EvidenceValue("read_returned", 1, {})))
     prepared = PendingReadResult(AttemptFinish(ticket, validate_outcome(ticket, outcome, pending.evidence),
-        pending.occurred_at, run_finish=RunFinish(RunOutcome.CANCELED)), pending.key,
+        pending.occurred_at, run_finish=RunFinish(RunOutcome.CANCELED) if run_active else None), pending.key,
         result_save=pending.result_save, settlement=pending.settlement, diagnostic=pending.diagnostic)
     runtime.pending_read_results[(ticket.run_id, ticket.attempt_id)] = prepared
     return prepared

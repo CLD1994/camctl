@@ -944,13 +944,17 @@ async def _finish_internal_read_result(flow, ticket, step, *, max_attempts, diag
 
 def internal_read_scope(database, operations, *, pending_read_results, pending_read_business,
                         pending_read_ends, continuing_read_tickets, pending_segment_inspection_results,
-                        occurred_at=None, file_executor=None, evidence=None):
+                        occurred_at=None, file_executor=None, evidence=None,
+                        recovery_boundary=RecoveryBoundary.UNCONFIRMED, recovery_max_event_id=None,
+                        recovery_evidence_for=None, roots=None, on_recovery_diagnostic=None):
     """共享内部 READ 与检查保存的实际拥有者及其待核实容器。"""
     return SimpleNamespace(database=database, operations=operations, occurred_at=occurred_at,
         pending_read_results=pending_read_results, pending_read_business=pending_read_business,
         pending_read_ends=pending_read_ends, continuing_read_tickets=continuing_read_tickets,
         pending_segment_inspection_results=pending_segment_inspection_results,
-        file_executor=file_executor, evidence=evidence)
+        file_executor=file_executor, evidence=evidence, recovery_boundary=recovery_boundary,
+        recovery_max_event_id=recovery_max_event_id, recovery_evidence_for=recovery_evidence_for,
+        roots=roots, on_recovery_diagnostic=on_recovery_diagnostic, last_recovery_diagnostic=None)
 
 
 async def resume_prepared_internal_reads(

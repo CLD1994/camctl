@@ -23,6 +23,7 @@ class StripImports(ast.NodeTransformer):
 
 
 def load(path, name, namespace):
+    namespace.setdefault("closing", closing)
     tree = ast.parse(path.read_text())
     node = next(n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and n.name == name)
     module = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), StripImports().visit(node)], type_ignores=[])
@@ -34,6 +35,11 @@ class Cursor:
     def __init__(self, rows): self.rows = rows
     def fetchone(self): return self.rows[0] if self.rows else None
     def close(self): pass
+
+
+def no_running_read():
+    return SimpleNamespace(connection=SimpleNamespace(
+        execute=lambda sql, args: SimpleNamespace(fetchall=lambda: [], close=lambda: None)))
 
 
 class ProcessingCancelTests(unittest.TestCase):
@@ -162,7 +168,7 @@ class ProcessingCancelTests(unittest.TestCase):
             trace = []
             current = (9, 20, "camera", ready)
             class Database:
-                async def read(self, callback): return callback(object())
+                async def read(self, callback): return callback(no_running_read())
             executor = SimpleNamespace(unfinished_files=lambda: (20,) if busy else ())
             result = SimpleNamespace(ticket=SimpleNamespace(target_id="9"))
             flow = SimpleNamespace(database=Database(), file_executor=executor, occurred_at=lambda: 25,
@@ -207,7 +213,7 @@ class ProcessingCancelTests(unittest.TestCase):
                 "SlotOutcome": SimpleNamespace(RELEASED="released", ALREADY_RELEASED="already")}
             self.assertTrue(await load(CANCELED, "settle_canceled_processing_read", ns)(flow, 4))
             self.assertEqual(calls, [("original-release-key", prior.request, True)])
-        async def call(callback): return callback(object())
+        async def call(callback): return callback(no_running_read())
         asyncio.run(run())
 
 

@@ -4099,11 +4099,21 @@ async def _advance_record_start(runtime, action, attempt) -> bool:
 def _read_result_scope(runtime):
     from camctl.capture.media_flow import internal_read_scope
 
-    return internal_read_scope(runtime.database, runtime.operations, occurred_at=runtime.wall_us,
+    def recovery_diagnostic(value):
+        runtime.last_recovery_diagnostic = value
+        if runtime.on_recovery_diagnostic is not None:
+            runtime.on_recovery_diagnostic(value)
+
+    scope = internal_read_scope(runtime.database, runtime.operations, occurred_at=runtime.wall_us,
         pending_read_results=runtime.pending_read_results, pending_read_business=runtime.pending_read_business,
         pending_read_ends=runtime.pending_read_ends, continuing_read_tickets=runtime.continuing_read_tickets,
         pending_segment_inspection_results=runtime.pending_segment_inspection_results,
-        file_executor=runtime.file_executor, evidence=runtime.evidence)
+        file_executor=runtime.file_executor, evidence=runtime.evidence,
+        recovery_boundary=runtime.recovery_boundary, recovery_max_event_id=runtime.recovery_max_event_id,
+        recovery_evidence_for=runtime.recovery_evidence_for, roots=runtime.roots,
+        on_recovery_diagnostic=recovery_diagnostic)
+    scope.last_recovery_diagnostic = runtime.last_recovery_diagnostic
+    return scope
 
 
 async def _resume_internal_read_results(runtime):
