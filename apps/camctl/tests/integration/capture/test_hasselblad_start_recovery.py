@@ -9,6 +9,8 @@ import pytest
 
 from camctl.capture.handlers import capture_handler
 from camctl.devices.drivers.hasselblad.driver import HasselbladDriver
+from camctl.devices.drivers.hasselblad.configuration import read_camera_config
+from camctl.devices.drivers.hasselblad.identity import CameraIdentity
 from camctl.devices.drivers.registry import DriverRegistry
 from camctl.host_files.models import BoundDirectories
 from camctl.operations.models import AttemptTicket
@@ -84,14 +86,17 @@ def _ticket(owned):
     return AttemptTicket(attempt, "control", str(activity), responsibility, run_id)
 
 
-def _grant(owned, clock):
+def _grant(owned, clock, cfg):
     from camctl.persistence.repositories.host_capture import HostCaptureRepository
     prepared = HostCaptureRepository().prepare_host_photo(1, clock[0], new_operation_key(), owned)
     assert prepared.kind is DbOutcomeKind.COMPLETED, prepared.error
     row = owned.connection.execute("SELECT scheduled_at,max_delay_ms FROM actions WHERE id=1").fetchone()
+    camera = read_camera_config(cfg.devices["cam-1"])
+    identity = CameraIdentity(camera.serial, camera.product_id)
     receipt = SchedulingRepository().grant_start(GrantRequest("cam-1", 1,
         LaunchWindow(row[0], row[0] + row[1] * 1000), clock[0],
-        AttemptConfig(3, Decimal("10")), clock[0]), new_operation_key(), owned)
+        AttemptConfig(3, Decimal("10")), clock[0], current_identity=identity),
+        new_operation_key(), owned)
     assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
     assert receipt.value.outcome is GrantOutcome.GRANTED
     return receipt.value.ticket
@@ -193,7 +198,7 @@ async def test_missing_control_result_requires_original_reliable_recovery_bounda
             await interrupt_after_focus(transport, runtime)
             ticket = _ticket(owned)
         else:
-            ticket = _grant(owned, clock)
+            ticket = _grant(owned, clock, cfg)
         original_calls = tuple(transport.calls)
         recovery = await resume(cfg, owned, driver, clock,
             boundary=RecoveryBoundary.UNCONFIRMED if condition == "boundary" else RecoveryBoundary.HOST_LOCAL_SETTLED,
@@ -256,8 +261,10 @@ async def test_unknown_control_recovery_retains_original_request_key(tmp_path, i
             await interrupt_after_focus(transport, runtime)
             ticket = _ticket(owned)
         else:
-            ticket = _grant(owned, clock)
+            ticket = _grant(owned, clock, cfg)
         original_calls = tuple(transport.calls)
+        original_attempts = tuple(owned.connection.execute(
+            "SELECT id,run_id FROM operation_attempts ORDER BY id"))
         repository = Unknown()
         recovery = await resume(cfg, owned, driver, clock, repository=repository)
         with pytest.raises(ConsistencyError):
@@ -268,6 +275,9 @@ async def test_unknown_control_recovery_retains_original_request_key(tmp_path, i
         await capture_handler("camera_take_photo")(1, await baseline_case_for().view())
         assert owned.connection.execute("SELECT COUNT(*) FROM history_transactions WHERE operation_key=?", (key,)).fetchone() == (1,)
         assert _ticket(owned) == ticket and tuple(transport.calls) == original_calls
-        assert owned.connection.execute("SELECT COUNT(*) FROM operation_attempts").fetchone() == (1,)
+        assert tuple(owned.connection.execute(
+            "SELECT id,run_id FROM operation_attempts ORDER BY id")) == original_attempts
+        assert owned.connection.execute(
+            "SELECT COUNT(*) FROM operation_attempts WHERE run_id=?", (ticket.run_id,)).fetchone() == (1,)
     finally:
         owned.connection.close()
