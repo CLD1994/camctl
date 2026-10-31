@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import packageMetadata from "../../package.json" with { type: "json" };
 import { Application } from "./application";
 import { Files } from "./files";
 import { createHttpApp } from "./http";
@@ -17,6 +18,7 @@ const server = createHttpApp(application, files, requests).listen(
   port,
   host,
   () => {
+    console.log(`camctl 客户端版本：${packageMetadata.version}`);
     console.log(`camctl 客户端：http://localhost:${port}`);
     console.log(`持久化目录：${directory}`);
   },

@@ -1,0 +1,6 @@
+#ifndef CAMCTL_HOST_VERSION_H
+#define CAMCTL_HOST_VERSION_H
+
+#define CAMCTL_HOST_VERSION "1.1.0"
+
+#endif

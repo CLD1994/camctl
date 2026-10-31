@@ -6,6 +6,7 @@
 #include "config.h"
 #include "diagnostic.h"
 #include "input.h"
+#include "host_version.h"
 #include "process.h"
 #include "scheduler.h"
 #include <errno.h>
@@ -571,6 +572,7 @@ int camctl_host_init(const camctl_host_config *config, const char *initial) {
     }
     instance = h;
     registrations.initialized = true;
+    host_log(&h->logger, "camctl_host version=%s", CAMCTL_HOST_VERSION);
     pthread_mutex_unlock(&instance_mutex);
     return 0;
 callback_cond:

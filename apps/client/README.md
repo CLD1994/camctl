@@ -9,4 +9,6 @@
 
 在本目录执行 `npm ci`、`npm run build`、`npm test`。启动前用 `CAMCTL_DATA_DIR` 明确指定数据目录，再执行 `npm start`；完整命令见运行说明。`src/shared` 是客户端内部共享代码，公共机器协议从根 `protocol` 读取。
 
+客户端版本由 `package.json` 定义，服务成功监听后在启动日志中记录一次版本。
+
 更新报告类型：在本目录执行 `node --import tsx src/domain/generate-report-types.ts`。Docker 构建使用仓库根上下文：`docker build -f apps/client/Dockerfile .`（在仓库根执行）。
