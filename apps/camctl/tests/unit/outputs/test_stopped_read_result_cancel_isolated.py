@@ -533,3 +533,35 @@ def test_terminal_run_saves_actual_attempt_without_changing_run(
     assert outcome.settlement.basis is SettlementBasis.OBSERVED
     assert prepared.preserved_run_terminal and runtime.continuing_read_tickets == {}
     assert runtime.database.saved == [(finish, 'original-key', 'original-key')]
+
+
+@pytest.mark.parametrize('already_held', [False, True])
+def test_saved_read_end_resumes_after_cancel_lookup_failure(subject, monkeypatch, already_held):
+    ticket = AttemptTicket(1, 'read', '9', 'read/9', 4)
+    end = NS(stopped=True, error=None, bytes_read=10)
+    runtime, _, evidence, save, calls, _ = recovery_setup(
+        subject, monkeypatch, saved_end=(ticket, end, 42, None))
+    if already_held:
+        runtime.pending_read_ends[9] = subject.HeldReadEnd(ticket, end, 42, evidence=evidence)
+    read_one = subject.read_one
+    failure = RuntimeError('cancel fact unavailable')
+    async def fail_cancel_lookup(database, sql, params):
+        if 'a.cancel_requested,r.status' in sql:
+            raise failure
+        return await read_one(database, sql, params)
+    monkeypatch.setattr(subject, 'read_one', fail_cancel_lookup)
+    with pytest.raises(RuntimeError) as caught:
+        asyncio.run(subject.settle_canceled_read(runtime, 9, evidence, save))
+    assert caught.value is failure and not calls and not runtime.database.saved
+    held = runtime.pending_read_ends[9]
+    assert held.ticket == ticket and held.end is end and held.occurred_at == 42
+    assert held.evidence is evidence and callable(held.resume)
+    monkeypatch.setattr(subject, 'read_one', read_one)
+    assert asyncio.run(held.resume(runtime, held)) is True
+    [(finish, _, _)] = runtime.database.saved
+    outcome = finish.outcome.outcome
+    assert finish.ticket == ticket and finish.run_finish.status is RunOutcome.CANCELED
+    assert outcome.status is AttemptStatus.SUCCEEDED and outcome.error is None
+    assert outcome.settlement.basis is SettlementBasis.OBSERVED
+    assert outcome.settlement.evidence.type == 'read_returned'
+    assert held.ticket == ticket and held.end is end and held.occurred_at == 42
