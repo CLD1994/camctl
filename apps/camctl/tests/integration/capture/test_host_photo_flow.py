@@ -43,6 +43,8 @@ from camctl.contracts.schemas import validate_document
 from camctl.contracts.values import ConsistencyError, new_operation_key
 from camctl.devices.bindings import BindingResult, BindingStatus, DeviceBinding
 from camctl.devices.catalog import DriverDefinitions, build_catalog
+from camctl.devices.drivers.hasselblad.configuration import read_camera_config
+from camctl.devices.drivers.hasselblad.identity import CameraIdentity
 from camctl.devices.drivers.hasselblad.definitions import (
     DRIVER_ID,
     driver_definition,
@@ -109,6 +111,7 @@ from camctl.reporting.policy import (
 pytestmark = pytest.mark.asyncio
 
 _NOW = 1_750_000_000_000_000
+_CAMERA_IDENTITY = CameraIdentity("SERIAL-1", 10)
 _ORIGINAL = b"II*\x00hasselblad-raw"
 _PREVIEW = JPEG_IMAGE + b"preview"
 _JPEG_ORIGINAL = JPEG_IMAGE + b"jpeg-original"
@@ -201,6 +204,9 @@ class _PhotoDriver:
             _step_fact(name)
             for name in ("list", "info", "drive_mode_single", "capture_format", "capture")
         ]
+        steps[-1]["camera_identity"] = {
+            "serial": _CAMERA_IDENTITY.serial, "product_id": _CAMERA_IDENTITY.product_id,
+        }
         steps[-1]["camera_locator"] = {
             "status": "path",
             "camera_path": "/mnt/media/DCIM/B9996039.3FR",
@@ -271,7 +277,7 @@ class _ManagedCaptureTransport:
         if command == "list":
             output = b"vid=0x2756 pid=0x000a  bus=  1 addr= 23\n"
         elif command == "info":
-            output = b"serial : SERIAL-1\nfirmware : v4.1.0\n"
+            output = f"serial : {_CAMERA_IDENTITY.serial}\nfirmware : v4.1.0\n".encode()
         elif command == "set":
             output = b""
         elif command == "capture":
@@ -325,9 +331,15 @@ def _config(home: Path, *, storage="host"):
         },
         "devices": {"cam-1": {
             "kind": "camera", "driver": DRIVER_ID,
-            "hasselblad": {"executable": "/usr/bin/hb_cli", "serial": "SERIAL-1", "output_storage": storage},
+            "hasselblad": {"executable": "/usr/bin/hb_cli", "serial": _CAMERA_IDENTITY.serial,
+                           "product_id": _CAMERA_IDENTITY.product_id, "output_storage": storage},
         }},
     }, ConfigDefaults())
+
+
+def _configured_identity(cfg):
+    camera = read_camera_config(cfg.devices["cam-1"])
+    return CameraIdentity(camera.serial, camera.product_id)
 
 
 def _input_time() -> str:
@@ -371,7 +383,7 @@ async def _cancel_through_service(owned, runtime, cancel_action_id=2):
 
     metadata = runtime.database.metadata
     flow = cancel_flow(ready=Path(metadata.ready_path), processing=Path(metadata.processing_path),
-        start_entries=runtime.start_entries)
+        staging=Path(metadata.staging_path), start_entries=runtime.start_entries)
     await flow(SimpleNamespace(database=runtime.database,
         clock=SimpleNamespace(utc_micros=runtime.wall_us)))
     return tuple(row[0] for row in owned.connection.execute(
@@ -425,10 +437,11 @@ async def _world(tmp_path: Path, *, driver: _PhotoDriver | None = None,
     scheduled = SchedulingRepository()
     for save, request in ((
         (scheduled.observe_window, ObserveWindowRequest(1, _NOW, _NOW)),
-        (scheduled.start_action, StartActionRequest(1, _NOW, _NOW)),
+        (scheduled.start_action, StartActionRequest(1, _NOW, _NOW, expected_identity=_configured_identity(cfg))),
     ) if start_first else ()):
         receipt = save(request, new_operation_key(), owned)
-        assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
+        if receipt.kind is not DbOutcomeKind.COMPLETED:
+            raise AssertionError(receipt.error)
     clock = wall if wall is not None else [_NOW]
     registry = DriverRegistry((_entry(selected_driver, evidence),))
     runtime = await capture_runtime(database, driver=selected_driver,
@@ -469,11 +482,27 @@ def _accept_and_start_second_host_photo(cfg, owned):
     scheduled = SchedulingRepository()
     for save, request in (
         (scheduled.observe_window, ObserveWindowRequest(action_id, _NOW, _NOW)),
-        (scheduled.start_action, StartActionRequest(action_id, _NOW, _NOW)),
+        (scheduled.start_action, StartActionRequest(action_id, _NOW, _NOW, expected_identity=_configured_identity(cfg))),
     ):
         receipt = save(request, new_operation_key(), owned)
         assert receipt.kind is DbOutcomeKind.COMPLETED, receipt.error
     return action_id
+
+
+async def test_start_without_fixed_hasselblad_identity_rejects_before_activity(tmp_path):
+    _cfg, owned, driver, _runtime, _clock = await _world(tmp_path, start_first=False)
+    try:
+        repository = SchedulingRepository()
+        observed = repository.observe_window(ObserveWindowRequest(1, _NOW, _NOW), new_operation_key(), owned)
+        assert observed.kind is DbOutcomeKind.COMPLETED, observed.error
+        receipt = repository.start_action(StartActionRequest(1, _NOW, _NOW), new_operation_key(), owned)
+        assert receipt.kind is DbOutcomeKind.ROLLED_BACK
+        assert isinstance(receipt.error, ConsistencyError)
+        assert owned.connection.execute("SELECT COUNT(*) FROM device_activities").fetchone() == (0,)
+        assert owned.connection.execute("SELECT status FROM actions WHERE id=1").fetchone() == (1,)
+        assert driver.requests == []
+    finally:
+        owned.connection.close()
 
 
 async def test_host_photo_uses_saved_task_and_real_assembly_to_register_pair(tmp_path):
@@ -485,6 +514,10 @@ async def test_host_photo_uses_saved_task_and_real_assembly_to_register_pair(tmp
         assert runtime.results is None
         assert runtime.roots.staging == Path(cfg.paths.staging)
         assert runtime.host_capture is not None
+        fixed, resource_key = owned.connection.execute(
+            "SELECT expected_identity_json,resource_key FROM device_activities WHERE action_id=1").fetchone()
+        assert json.loads(fixed) == {"serial": _CAMERA_IDENTITY.serial, "product_id": _CAMERA_IDENTITY.product_id}
+        assert resource_key == _CAMERA_IDENTITY.resource_key
 
         await capture_handler("camera_take_photo")(1, runtime)
 
