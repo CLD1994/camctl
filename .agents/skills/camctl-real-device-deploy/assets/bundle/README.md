@@ -2,6 +2,8 @@
 
 本包包含嵌入式 Linux 主机上的 camctl、C 接入模块 camctl_host、终端演示 host-demo，以及个人电脑上的客户端。版本、源码摘要、能力说明来源和实际验证结果见 `RELEASE.json`；文件摘要见 `SHA256SUMS`。
 
+三个组件独立编号，`RELEASE.json.components` 记录本包的实际组合。安装后可用 `<target>/venv/bin/camctl --version` 查询实际 Python 包版本，无须配置或连接设备；各组件在自己的启动日志中记录版本。Python 启动版本 INFO 不受普通日志等级过滤或 INFO 采样影响，队列满时交付 stderr；机器结果输出保持原格式。
+
 ## 组件怎样协作
 
 | 组件 | 运行位置与职责 | 配置入口 |

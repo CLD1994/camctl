@@ -1,5 +1,7 @@
 # 运行日志
 
+组件启动时的版本记录及其等级过滤、采样例外见[启动版本记录](versioning-and-updates.md#启动版本记录)。
+
 [返回设计总览](README.md) · [请求受理与会话](protocol-session.md) · [阅读路线](reading-guide.md)
 
 本专题定义普通运行日志的保留与通道故障处理，并提供日志副本交付的入口。camctl 自身与第三方日志共用[按级别接纳的策略](../camctl/logging-runtime.md#日志异步投递入口与有界队列)，自身重要日志满载时异步等待，第三方同步重要日志立即向 stderr 降级。CLI 的 stdout 结果、stderr 诊断及退出状态由[进程结果协议](cli-commands.md#stdout-与退出状态)定义。

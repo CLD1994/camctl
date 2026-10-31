@@ -24,6 +24,23 @@ encoder_spec.loader.exec_module(encoder)
 
 
 class UpdateTests(unittest.TestCase):
+    def test_failed_diagnostic_channels_preserve_original_result_and_final_receipt(self):
+        for failed_method in ('write', 'flush'):
+            with self.subTest(failed_method=failed_method):
+                ops = Mock()
+                ops.preflight.return_value = {'state_db': '/state.db'}
+                ops.install.side_effect = ValueError('original install failure')
+                ops.record_diagnostics.side_effect = OSError('log unavailable')
+                stream = Mock(spec=['write', 'flush'])
+                getattr(stream, failed_method).side_effect = BrokenPipeError('stderr unavailable')
+                with patch.object(sys, 'stderr', stream):
+                    result = update.perform_update(ops)
+                self.assertEqual(result['status'], 'failed')
+                self.assertIn('original install failure', result['error'])
+                self.assertEqual(result['stderr_error']['stage'], 'diagnostic_stderr')
+                ops.unlock.assert_called_once()
+                self.assertEqual(ops.mock_calls[-1][0], 'save')
+
     def test_config_path_defaults_to_target_or_uses_explicit_path(self):
         target = Path('/target')
         default = update.UpdateOperations(Path('/bundle'), target, None, Path('/output'))

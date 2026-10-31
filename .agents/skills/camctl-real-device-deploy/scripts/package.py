@@ -219,6 +219,8 @@ def main():
             'python': sys.version.split()[0],
             'validation': {'status': 'pending'},
         }
+        release['tools']['pip'] = subprocess.check_output(
+            [venv / 'bin/python', '-m', 'pip', '--version'], text=True).splitlines()[0]
         write_json(bundle / 'source-manifest.json', manifest)
         write_json(bundle / 'RELEASE.json', release)
         write_checksums(bundle)

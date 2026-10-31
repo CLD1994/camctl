@@ -97,8 +97,12 @@ def perform_update(ops):
         except Exception as error:
             failure = freeze_exception(error, 'diagnostic_log')
             receipt['log_error'] = failure
-            print(json.dumps({'diagnostics': diagnostics, 'log_error': failure},
-                             ensure_ascii=False, default=repr), file=sys.stderr)
+            try:
+                print(json.dumps({'diagnostics': diagnostics, 'log_error': failure},
+                                 ensure_ascii=False, default=repr), file=sys.stderr)
+                sys.stderr.flush()
+            except Exception as stderr_error:
+                receipt['stderr_error'] = freeze_exception(stderr_error, 'diagnostic_stderr')
 
     deliver(receipt['diagnostics'])
     try:
@@ -266,7 +270,8 @@ def main():
     if receipt['status'] != 'updated_stopped':
         consequence = ('Python 环境可能已改变' if receipt['environment_may_have_changed']
                        else '尚未开始修改 Python 环境')
-        print('更新失败：' + str(receipt.get('error', receipt.get('unlock_error'))) +
+        reason = receipt.get('error') or receipt.get('unlock_error') or receipt.get('receipt_error')
+        print('更新失败：' + str(reason) +
               '；' + consequence + '，请查看收据。', file=sys.stderr)
         return 1
     print('更新完成，host 保持停止；请按原入口恢复。')
