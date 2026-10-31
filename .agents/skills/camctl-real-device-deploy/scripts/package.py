@@ -136,7 +136,8 @@ def main():
         bundle = output / BUNDLE_NAME
         shutil.copytree(skill / 'assets/bundle', bundle)
         write_configuration_docs(source, bundle)
-        for name in ('install-host.py', 'update-camctl.py', 'bundle_support.py', 'deploy_support.py', 'camera_discovery.py'):
+        for name in ('install-host.py', 'update-camctl.py', 'update-worker.py', 'update_transaction.py',
+                     'bundle_support.py', 'deploy_support.py', 'camera_discovery.py'):
             shutil.copyfile(skill / 'scripts' / name, bundle / name)
         dist = bundle / 'camctl'
         dist.mkdir()

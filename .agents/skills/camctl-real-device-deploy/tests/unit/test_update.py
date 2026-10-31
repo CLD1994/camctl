@@ -1,5 +1,6 @@
 """更新入口在隔离 I/O 边界下的行为。"""
 import builtins
+import argparse
 import contextlib
 import linecache
 import hashlib
@@ -13,17 +14,54 @@ import unittest
 from unittest.mock import Mock, patch
 
 SCRIPTS = Path(__file__).absolute().parents[2] / 'scripts'
-sys.path.insert(0, str(SCRIPTS))
+bundle_support = ModuleType('bundle_support')
+bundle_support.current_target = Mock()
+bundle_support.verify_checksums = Mock()
+bundle_support.wheel_target_manifest = Mock()
+deploy_support = ModuleType('deploy_support')
+def absolute_path(value):
+    path = Path(value)
+    if not path.is_absolute() or '\0' in value:
+        raise argparse.ArgumentTypeError('需要绝对路径')
+    return path
+deploy_support.absolute_path = absolute_path
+transaction = ModuleType('update_transaction')
+class Locks:
+    def __init__(self):
+        self.fds = []
+    def acquire(self, path):
+        raise AssertionError('未隔离的锁获取')
+    def database(self, path):
+        raise AssertionError('未隔离的数据库锁获取')
+    def close(self):
+        pass
+transaction.Locks = Locks
+transaction.sync_dir = Mock(side_effect=AssertionError('未隔离的目录同步'))
 spec = importlib.util.spec_from_file_location('update_camctl', SCRIPTS / 'update-camctl.py')
 update = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(update)
+with patch.dict(sys.modules, {'bundle_support': bundle_support, 'deploy_support': deploy_support,
+                              'update_transaction': transaction}), \
+        patch.object(sys, 'dont_write_bytecode', True):
+    spec.loader.exec_module(update)
 encoder_spec = importlib.util.spec_from_file_location('error_diagnostics_under_test',
     Path(__file__).absolute().parents[5] / 'apps/camctl/src/camctl/operations/error_diagnostics.py')
 encoder = importlib.util.module_from_spec(encoder_spec)
 encoder_spec.loader.exec_module(encoder)
 
 
+@patch.object(Path, 'home', new=lambda: Path('/home/unit-user'))
 class UpdateTests(unittest.TestCase):
+    def setUp(self):
+        patcher = patch.dict(sys.modules, {'camctl.operations.error_diagnostics': encoder})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        environment = patch.dict(update.os.environ, {}, clear=True)
+        environment.start()
+        self.addCleanup(environment.stop)
+        random_id = patch.object(update.uuid, 'uuid4', return_value=SimpleNamespace(hex='update-id'))
+        random_id.start()
+        self.addCleanup(random_id.stop)
+
     def test_failed_diagnostic_channels_preserve_original_result_and_final_receipt(self):
         for failed_method in ('write', 'flush'):
             with self.subTest(failed_method=failed_method):
@@ -40,6 +78,55 @@ class UpdateTests(unittest.TestCase):
                 self.assertEqual(result['stderr_error']['stage'], 'diagnostic_stderr')
                 ops.unlock.assert_called_once()
                 self.assertEqual(ops.mock_calls[-1][0], 'save')
+
+    def test_install_failure_rolls_back_before_unlock_and_diagnostics(self):
+        ops = Mock()
+        ops.preflight.return_value = {'state_db': '/state.db'}
+        ops.install.side_effect = ValueError('install failed')
+        result = update.perform_update(ops)
+        self.assertEqual(result['rollback'], 'verified')
+        calls = [item[0] for item in ops.mock_calls]
+        self.assertLess(calls.index('backup'), calls.index('mark_intent'))
+        self.assertLess(calls.index('mark_intent'), calls.index('install'))
+        self.assertLess(calls.index('rollback'), calls.index('unlock'))
+        self.assertLess(calls.index('unlock'), calls.index('record_diagnostics'))
+
+    def test_rollback_failure_preserves_both_errors(self):
+        ops = Mock()
+        ops.preflight.return_value = {'state_db': '/state.db'}
+        ops.install.side_effect = ValueError('original failure')
+        ops.rollback.side_effect = OSError(5, 'restore failure')
+        result = update.perform_update(ops)
+        self.assertEqual(result['rollback'], 'failed')
+        self.assertEqual([item['stage'] for item in result['diagnostics']], ['install', 'rollback'])
+        self.assertEqual(result['diagnostics'][1]['errno'], 5)
+
+    def test_backup_failure_does_not_restore_or_install(self):
+        ops = Mock()
+        ops.preflight.return_value = {'state_db': '/state.db'}
+        ops.backup.side_effect = OSError('backup failed')
+        result = update.perform_update(ops)
+        self.assertEqual(result['status'], 'failed')
+        ops.mark_intent.assert_not_called()
+        ops.install.assert_not_called()
+        ops.rollback.assert_not_called()
+
+    def test_uncertain_commit_is_not_reversed(self):
+        ops = Mock()
+        ops.preflight.return_value = {'state_db': '/state.db'}
+        ops.commit.side_effect = OSError('commit result unknown')
+        result = update.perform_update(ops)
+        self.assertEqual(result['rollback'], 'commit_unknown')
+        ops.rollback.assert_not_called()
+
+    def test_late_receipt_failure_does_not_reverse_committed_update(self):
+        ops = Mock()
+        ops.preflight.return_value = {'state_db': '/state.db'}
+        ops.save.side_effect = [None, None, OSError('receipt failed')]
+        result = update.perform_update(ops)
+        self.assertEqual(result['status'], 'updated_stopped')
+        self.assertEqual(result['diagnostics'][-1]['stage'], 'save_final_receipt')
+        ops.rollback.assert_not_called()
 
     def test_config_path_defaults_to_target_or_uses_explicit_path(self):
         target = Path('/target')
@@ -60,8 +147,6 @@ class UpdateTests(unittest.TestCase):
         application.ConfigAdapter = Mock(return_value=adapter)
         locks = ModuleType('camctl.session.locks')
         locks.lock_file_paths = Mock(return_value=(Path('/session.lock'), Path('/admission.lock')))
-        locks.acquire_session = Mock(return_value=Mock())
-        locks.acquire_admission = Mock(return_value=Mock())
         archive = Mock()
         archive.namelist.return_value = ['camctl/deployment.py', 'camctl-2.dist-info/METADATA']
         archive.read.return_value = b'Name: camctl\nVersion: 2.0\n\n'
@@ -77,7 +162,8 @@ class UpdateTests(unittest.TestCase):
                 patch.object(Path, 'glob', autospec=True, side_effect=lambda path, pattern: iter([wheel])), \
                 patch.object(Path, 'resolve', autospec=True, side_effect=lambda path: path), \
                 patch.object(update.zipfile, 'ZipFile') as zip_file, \
-                patch.object(update.importlib.metadata, 'version', return_value='1.0'):
+                patch.object(update.importlib.metadata, 'version', return_value='1.0'), \
+                patch.object(ops.db_locks, 'database') as acquire_database:
             zip_file.return_value.__enter__.return_value = archive
             original = ops.preflight()
             ops.lock(original)
@@ -85,12 +171,14 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(original['config'], str(config_path))
         self.assertEqual(original['state_db'], '/outside/state.db')
         locks.lock_file_paths.assert_called_once_with(Path('/outside/state.db'))
-        locks.acquire_session.assert_called_once_with(Path('/session.lock'))
-        locks.acquire_admission.assert_called_once_with(Path('/admission.lock'))
+        acquire_database.assert_called_once_with(['/session.lock', '/admission.lock'])
 
     def test_main_passes_explicit_config_to_update(self):
         argv = ['update-camctl.py', '--target', '/target', '--config', '/etc/camctl/config.toml']
-        with patch.object(sys, 'argv', argv), patch.object(sys, 'executable', '/target/venv/bin/python'), \
+        with patch.object(sys, 'argv', argv), patch.object(sys, 'executable', '/usr/bin/python3.11'), \
+                patch.object(sys, 'prefix', '/base'), patch.object(sys, 'base_prefix', '/base'), \
+                patch.object(sys, 'path', list(sys.path)), patch.object(Path, 'exists', return_value=False), \
+                patch.object(update.transaction, 'sync_dir'), patch.object(update.transaction.Locks, 'acquire'), \
                 patch.object(Path, 'is_dir', return_value=True), patch.object(Path, 'is_file', return_value=True), \
                 patch.object(Path, 'resolve', autospec=True, side_effect=lambda path: path), \
                 patch.object(Path, 'mkdir'), patch.object(Path, 'touch'), \
@@ -177,7 +265,7 @@ class UpdateTests(unittest.TestCase):
         ops = Mock()
         ops.preflight.return_value = {'state_db': '/state.db'}
         ops.install.side_effect = ValueError('install failed')
-        ops.save.side_effect = [None, None, None, OSError(28, 'receipt full')]
+        ops.save.side_effect = [None, None, OSError(28, 'receipt full')]
         with patch.dict(sys.modules, {'camctl.operations.error_diagnostics': encoder}):
             receipt = update.perform_update(ops)
         self.assertEqual([item['stage'] for item in receipt['diagnostics']], ['install', 'save_final_receipt'])
@@ -265,7 +353,7 @@ class UpdateTests(unittest.TestCase):
         ops.expected_version = '2.0'
         identity = {'state_db': '/state.db', 'metadata': {'instance_id': 'original'}}
         ops.run = Mock(side_effect=['2.0\n', json.dumps(identity), ''])
-        receipt = {'original': {'deployment': identity,
+        receipt = {'new_deployment': identity, 'original': {'deployment': identity,
             'config_sha256': hashlib.sha256(b'config').hexdigest()}}
         with patch.object(Path, 'read_bytes', return_value=b'config'):
             ops.check_new(receipt)
