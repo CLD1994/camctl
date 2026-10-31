@@ -157,7 +157,8 @@ class CancellationWorld:
         return self.owned.connection.execute("SELECT id FROM actions WHERE plan_id=? AND type=6", (result.plan_id,)).fetchone()[0]
 
     async def settle_cancel(self):
-        await cancel_flow(ready=Path(self.cfg.paths.ready), processing=Path(self.cfg.paths.processing),
+        await cancel_flow(staging=Path(self.cfg.paths.staging),
+            ready=Path(self.cfg.paths.ready), processing=Path(self.cfg.paths.processing),
             start_entries=self.runtime.start_entries)(SimpleNamespace(database=self.database,
                 clock=SimpleNamespace(utc_micros=lambda: self.wall[0])))
 

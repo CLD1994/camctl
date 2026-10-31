@@ -64,7 +64,8 @@ async def request_cancel(runtime, action_id, wall, catalog):
             clock=SimpleNamespace(utc_micros=lambda: wall)), new_operation_key(), runtime.database)
     assert accepted.plan_id is not None, accepted
     metadata = runtime.database.metadata
-    await cancel_flow(ready=Path(metadata.ready_path), processing=Path(metadata.processing_path),
+    await cancel_flow(staging=Path(metadata.staging_path),
+        ready=Path(metadata.ready_path), processing=Path(metadata.processing_path),
         start_entries=runtime.start_entries)(SimpleNamespace(database=runtime.database,
             clock=SimpleNamespace(utc_micros=lambda: wall)))
 

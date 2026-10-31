@@ -224,7 +224,8 @@ class RecordingCase:
         await self.accept({'request_id': '2', 'created_at': instant, 'name': '取消原拍摄',
             'actions': [{'name': '取消', 'type': 'cancel_task',
                 'params': {'target': {'action_instance_id': '1'}}}]})
-        await cancel_flow(ready=Path(self.config.paths.ready), processing=Path(self.config.paths.processing))(
+        await cancel_flow(staging=Path(self.config.paths.staging),
+            ready=Path(self.config.paths.ready), processing=Path(self.config.paths.processing))(
             SimpleNamespace(database=self.database, clock=SimpleNamespace(utc_micros=lambda: self.wall[0])))
         assert self.row('SELECT status,cancel_requested FROM actions WHERE id=1') == (2, 1)
 

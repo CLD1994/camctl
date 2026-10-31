@@ -78,7 +78,8 @@ async def test_real_session_applies_cancel_before_device_call_returns(tmp_path, 
         max_query_attempts=1, staging=Path(cfg.paths.staging)), state_db_errors=True)
     deps = build_runtime(CommandMode.RUN, cfg, catalog=_Catalog())
     flows = {
-        'cancel': cancel_flow(ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing)),
+        'cancel': cancel_flow(staging=Path(cfg.paths.staging),
+            ready=Path(cfg.paths.ready), processing=Path(cfg.paths.processing)),
         'cleanup': cleanup}
     if entry == 'direct':
         from camctl.bootstrap.application import query_work_facts

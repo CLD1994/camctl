@@ -278,7 +278,8 @@ async def stop_case(tmp_path, consumer):
                 "actions": [{"name": "取消", "type": "cancel_task",
                     "params": {"target": {"action_instance_id": str(world.action_id)}}}]},
                 SimpleNamespace(utc_micros=lambda: world.wall[0] + 1))
-            await cancel_flow(ready=Path(world.config.paths.ready), processing=Path(world.config.paths.processing))(
+            await cancel_flow(staging=Path(world.config.paths.staging),
+                ready=Path(world.config.paths.ready), processing=Path(world.config.paths.processing))(
                 SimpleNamespace(database=world.database, clock=SimpleNamespace(utc_micros=lambda: world.wall[0] + 1)))
         world.wall[0] += 5_000_000
         world.mono[0] += 5_000_000_000

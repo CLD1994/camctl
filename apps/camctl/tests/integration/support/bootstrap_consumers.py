@@ -278,7 +278,8 @@ class ConsumerWorld:
 
         factory = self.new_factory(restricted=entrance.startswith("restricted"), drivers=drivers)
         if entrance.endswith("cancel"):
-            flow = cancel_flow(ready=Path(self.config.paths.ready),
+            flow = cancel_flow(staging=Path(self.config.paths.staging),
+                ready=Path(self.config.paths.ready),
                 processing=Path(self.config.paths.processing),
                 unscheduled_only=entrance.startswith("restricted"),
                 resume_capture_completions=completions, resume_media_results=media,
@@ -377,7 +378,8 @@ async def apply_cancellation(world, terminal):
     if terminal is None:
         assert world.owned.connection.execute("SELECT status,cancel_requested FROM actions WHERE id=1").fetchone() == (2, 0)
         return origin
-    await cancel_flow(ready=Path(world.config.paths.ready),
+    await cancel_flow(staging=Path(world.config.paths.staging),
+        ready=Path(world.config.paths.ready),
         processing=Path(world.config.paths.processing))(
             SimpleNamespace(database=world.database, clock=SimpleNamespace(utc_micros=lambda: _NOW + 10)))
     from camctl.persistence.repositories.capture import CaptureRepository, FinishCanceledCapture

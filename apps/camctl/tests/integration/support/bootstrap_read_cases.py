@@ -441,7 +441,8 @@ class SegmentInputCase:
             "actions": [{"name": "取消", "type": "cancel_task",
                 "params": {"target": {"action_instance_id": str(action_id)}}}]},
             SimpleNamespace(utc_micros=lambda: self.wall[0]))
-        await cancel_flow(ready=Path(self.cfg.paths.ready), processing=Path(self.cfg.paths.processing))(
+        await cancel_flow(staging=Path(self.cfg.paths.staging),
+            ready=Path(self.cfg.paths.ready), processing=Path(self.cfg.paths.processing))(
             SimpleNamespace(database=self.database, clock=SimpleNamespace(utc_micros=lambda: self.wall[0])))
         if not settle:
             return

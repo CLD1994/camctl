@@ -305,7 +305,8 @@ async def test_reliable_natural_page_recovers_original_source_without_process_ca
             new_operation_key(), runtime.database)
         assert accepted.plan_id is not None, accepted
         metadata = runtime.database.metadata
-        await cancel_flow(ready=Path(metadata.ready_path), processing=Path(metadata.processing_path),
+        await cancel_flow(staging=Path(metadata.staging_path),
+            ready=Path(metadata.ready_path), processing=Path(metadata.processing_path),
             start_entries=runtime.start_entries)(SimpleNamespace(database=runtime.database,
                 clock=SimpleNamespace(utc_micros=lambda: wall[0])))
 
@@ -357,7 +358,8 @@ async def test_reliable_natural_page_recovers_original_source_without_process_ca
         # 可靠末页保留了完整实际返回，恢复仍沿原SUCCEEDED，而非补做设备调用。
         assert owned.connection.execute('SELECT status,error_json FROM operation_attempts WHERE run_id=?', (ticket.run_id,)).fetchone() == (2, None)
         metadata = database.metadata
-        await cancel_flow(ready=Path(metadata.ready_path), processing=Path(metadata.processing_path),
+        await cancel_flow(staging=Path(metadata.staging_path),
+            ready=Path(metadata.ready_path), processing=Path(metadata.processing_path),
             start_entries=resumed.start_entries)(SimpleNamespace(database=database,
                 clock=SimpleNamespace(utc_micros=lambda: wall[0])))
         assert owned.connection.execute('SELECT status FROM actions WHERE type=6').fetchone() == (

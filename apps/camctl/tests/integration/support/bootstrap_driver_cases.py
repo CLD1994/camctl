@@ -43,7 +43,8 @@ async def request_driver_cancel(owned, action_id, occurred_at, catalog):
         AcceptanceContext(CommandMode.RUN, catalog, AcceptanceRepository(),
             clock=SimpleNamespace(utc_micros=lambda: occurred_at)), new_operation_key(), database)
     assert accepted.plan_id is not None, accepted
-    await cancel_flow(ready=Path(database.metadata.ready_path),
+    await cancel_flow(staging=Path(database.metadata.staging_path),
+        ready=Path(database.metadata.ready_path),
         processing=Path(database.metadata.processing_path))(SimpleNamespace(database=database,
             clock=SimpleNamespace(utc_micros=lambda: occurred_at)))
 

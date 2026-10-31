@@ -103,7 +103,7 @@ async def apply_host_cleanup_cancel(config, owned, context):
         AcceptanceContext(CommandMode.RUN, Catalog(), AcceptanceRepository(), clock=context.clock),
         new_operation_key(), context.database)
     assert accepted.plan_id is not None, accepted
-    await cancel_flow(ready=Path(config.paths.ready),
+    await cancel_flow(staging=Path(config.paths.staging), ready=Path(config.paths.ready),
         processing=Path(config.paths.processing))(context)
 
 

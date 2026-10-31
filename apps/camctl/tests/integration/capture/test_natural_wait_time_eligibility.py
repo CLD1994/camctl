@@ -53,7 +53,8 @@ class SmallNativeCatalog(NativeWaitCatalog):
 
 async def _progress_cancel(runtime, wall):
     metadata = runtime.database.metadata
-    await cancel_flow(ready=Path(metadata.ready_path), processing=Path(metadata.processing_path),
+    await cancel_flow(staging=Path(metadata.staging_path),
+        ready=Path(metadata.ready_path), processing=Path(metadata.processing_path),
         start_entries=runtime.start_entries)(SimpleNamespace(database=runtime.database,
             clock=SimpleNamespace(utc_micros=lambda: wall[0])))
 
