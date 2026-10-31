@@ -38,7 +38,7 @@ class GatedFileWriter:
             self.entered.set()
             if not self.release.wait(10):
                 raise TimeoutError("测试没有释放日志消费者")
-        return self.file_channel.write_record(record).completion()
+        return self.file_channel.write_record(record).completion
 
 
 async def full_channel(tmp_path):
