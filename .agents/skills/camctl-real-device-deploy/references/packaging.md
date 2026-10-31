@@ -27,6 +27,8 @@ camctl-deploy/
   SHA256SUMS
   install-host.py
   update-camctl.py
+  update-worker.py
+  update_transaction.py
   bundle_support.py
   deploy_support.py
   camera_discovery.py
