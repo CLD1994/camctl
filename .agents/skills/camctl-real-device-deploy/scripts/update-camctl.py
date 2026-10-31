@@ -17,6 +17,9 @@ import sys
 import uuid
 import zipfile
 
+# 每次启动或重新执行时，先阻止导入在包内写入缓存。
+sys.dont_write_bytecode = True
+
 from bundle_support import current_target, verify_checksums, wheel_target_manifest
 
 
