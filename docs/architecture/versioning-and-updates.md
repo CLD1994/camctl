@@ -31,9 +31,9 @@ C 接入模块在日志建立后、其他工作线程启动前记录一次已编
 
 ## 停机离线更新 Python 包
 
-首次安装使用部署包的 `install-host.py`；已有部署使用随包 Python 更新入口。两者职责分别由[部署 skill](../../.agents/skills/camctl-real-device-deploy/SKILL.md)和[完整部署包契约](../../.agents/skills/camctl-real-device-deploy/references/packaging.md)维护。更新入口、命令参数及文件清单由随包脚本和 README 维护，不在本页复制完整清单。
+首次安装使用部署包的 `install-host.py`；已有部署由 camctl 自身的维护能力更新，C 主程序通过 `camctl_host.h` 的更新接口调用。更新实现和稳定恢复引导由 camctl wheel 提供，Python 专用更新包交付 wheel、离线依赖和元数据。组件归属、稳定入口、主程序生命周期及公共结果边界由[更新接入规格](software-update-interface.md)定义；部署工具调用组件能力。首次安装交付仍由[部署 skill](../../.agents/skills/camctl-real-device-deploy/SKILL.md)和[完整部署包契约](../../.agents/skills/camctl-real-device-deploy/references/packaging.md)维护。
 
-更新前，操作者停止接收新任务并等待 host、camctl 及其原有子进程结束。更新器先串行化同一环境的更新，再取得原状态库的稳定会话锁和接纳锁，持有到更新可靠完成或回滚结束；锁不能代替操作者停止 host。更新器不终止其他进程，不自动恢复主程序运行。
+主程序通过更新接口停止接收新任务并等待本模块的普通工作与原有子进程结束；其他独立实例仍由操作者停止。更新器先串行化同一环境的更新，再取得原状态库的稳定会话锁和接纳锁，持有到更新可靠完成或回滚结束。更新器不终止其他实例，不自动恢复主程序运行。
 
 离线更新面向已有的 Linux Python 3.11 虚拟环境和 uv。构建机联网取得两种 Linux 目标架构的锁定依赖 wheel，并随包记录及校验。目标机安装使用本地 wheel，禁止访问软件源；不能把构建机的原生依赖误当作 ARM64 安装物。新建部署在缺少 Python 解释器或其他组件工具时仍须满足首次部署前提，不能把 Python 包离线更新解释为整机所有依赖均可离线安装。
 
