@@ -92,5 +92,45 @@ class DeploymentInspectionTests(unittest.TestCase):
         connection.close.assert_called_once()
 
 
+class DeploymentMigrationTests(unittest.TestCase):
+    def test_copy_accepts_baseline_and_rejects_unsupported_formats(self):
+        config = SimpleNamespace(paths=SimpleNamespace(staging='/s', ready='/r', processing='/p'),
+            database=SimpleNamespace(busy_timeout_ms=100))
+        app = ModuleType('camctl.bootstrap.application')
+        app.ConfigAdapter = Mock(return_value=SimpleNamespace(load=Mock(return_value=config)))
+        runtime = ModuleType('camctl.persistence.runtime')
+        runtime.DbConfig = Mock()
+        runtime.DbOpenMode = SimpleNamespace(EXISTING_RO=object())
+        runtime._FORMAT_VERSIONS = SimpleNamespace(V9=9)
+        runtime.CURRENT_FORMAT_VERSION = 9
+        runtime.verify_directory_binding = Mock()
+        connection = Mock()
+        runtime.open_existing = Mock(return_value=SimpleNamespace(connection=connection, metadata=Metadata('x', 9)))
+        with patch.dict(sys.modules, {'camctl.bootstrap.application': app, 'camctl.persistence.runtime': runtime}), \
+                patch.object(Path, 'is_file', return_value=True):
+            self.assertEqual(deployment.migrate_copy(Path('/config'), Path('/copy')), {'instance_id': 'x', 'format_version': 9})
+            runtime.open_existing.return_value.metadata = Metadata('x', 8)
+            with self.assertRaises(ValueError):
+                deployment.migrate_copy(Path('/config'), Path('/copy'))
+        self.assertEqual(connection.close.call_count, 2)
+
+    def test_copy_rejects_missing_path_to_current_format(self):
+        config = SimpleNamespace(paths=SimpleNamespace(staging='/s', ready='/r', processing='/p'),
+            database=SimpleNamespace(busy_timeout_ms=100))
+        app = ModuleType('camctl.bootstrap.application')
+        app.ConfigAdapter = Mock(return_value=SimpleNamespace(load=Mock(return_value=config)))
+        runtime = ModuleType('camctl.persistence.runtime')
+        runtime.DbConfig = Mock()
+        runtime.DbOpenMode = SimpleNamespace(EXISTING_RO=object())
+        runtime._FORMAT_VERSIONS = SimpleNamespace(V9=9)
+        runtime.CURRENT_FORMAT_VERSION = 10
+        runtime.verify_directory_binding = Mock()
+        runtime.open_existing = Mock(return_value=SimpleNamespace(connection=Mock(), metadata=Metadata('x', 9)))
+        with patch.dict(sys.modules, {'camctl.bootstrap.application': app, 'camctl.persistence.runtime': runtime}), \
+                patch.object(Path, 'is_file', return_value=True):
+            with self.assertRaises(ValueError):
+                deployment.migrate_copy(Path('/config'), Path('/copy'))
+
+
 if __name__ == '__main__':
     unittest.main()
