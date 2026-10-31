@@ -18,6 +18,7 @@ from pathlib import Path
 import shlex
 import shutil
 import subprocess
+import traceback
 import uuid
 import zipfile
 
@@ -25,31 +26,88 @@ from bundle_support import current_target, verify_checksums, wheel_target_manife
 from deploy_support import absolute_path
 
 
+def freeze_exception(error, stage):
+    """冻结异常；旧发行物不可导入时保留标准异常链和编码器故障。"""
+    try:
+        from camctl.operations.error_diagnostics import exception_diagnostic
+        diagnostic = exception_diagnostic(error)
+    except Exception as encoder_error:
+        def convert(item):
+            if item is None:
+                return None
+            result = {'type': f'{item.exc_type.__module__}.{item.exc_type.__qualname__}',
+                      'message': str(item),
+                      'traceback': [{'filename': frame.filename, 'lineno': frame.lineno,
+                                     'function': frame.name} for frame in item.stack],
+                      'cause': convert(item.__cause__), 'context': convert(item.__context__),
+                      'suppress_context': item.__suppress_context__}
+            if item.exceptions is not None:
+                result['exceptions'] = [convert(child) for child in item.exceptions]
+            if item.__notes__ is not None:
+                result['notes'] = list(item.__notes__)
+            return result
+        diagnostic = convert(traceback.TracebackException.from_exception(error, lookup_lines=False))
+        diagnostic['encoder_error'] = convert(traceback.TracebackException.from_exception(
+            encoder_error, lookup_lines=False))
+    diagnostic['stage'] = stage
+    return diagnostic
+
+
 def perform_update(ops):
-    """在更新期间保持两把锁，并保存每一步的实际结果。"""
-    receipt = {'status': 'checking', 'steps': [], 'environment_may_have_changed': False}
+    """冻结错误事实，先释放锁，再交付诊断和最终收据。"""
+    receipt = {'status': 'checking', 'steps': [], 'environment_may_have_changed': False,
+               'diagnostics': []}
     locked = False
+    stage = 'preflight'
     try:
         receipt['original'] = ops.preflight()
+        stage = 'save_original'
         ops.save(receipt)
+        stage = 'lock'
         ops.lock(receipt['original'])
         locked = True
+        stage = 'check_original'
         ops.check_original(receipt['original'])
+        stage = 'save_original_check'
         ops.save(receipt)
         receipt['environment_may_have_changed'] = True
+        stage = 'save_install_intent'
         ops.save(receipt)
+        stage = 'install'
         ops.install(receipt)
+        stage = 'check_new'
         ops.check_new(receipt)
         receipt['status'] = 'updated_stopped'
     except Exception as error:
         receipt.update(status='failed', error=f'{type(error).__name__}: {error}')
+        receipt['diagnostics'].append(freeze_exception(error, stage))
     finally:
         if locked:
             try:
                 ops.unlock()
             except Exception as error:
                 receipt.update(status='failed', unlock_error=f'{type(error).__name__}: {error}')
+                receipt['diagnostics'].append(freeze_exception(error, 'unlock'))
+
+    def deliver(diagnostics):
+        if not diagnostics:
+            return
+        try:
+            ops.record_diagnostics(diagnostics)
+        except Exception as error:
+            failure = freeze_exception(error, 'diagnostic_log')
+            receipt['log_error'] = failure
+            print(json.dumps({'diagnostics': diagnostics, 'log_error': failure},
+                             ensure_ascii=False, default=repr), file=sys.stderr)
+
+    deliver(receipt['diagnostics'])
+    try:
         ops.save(receipt)
+    except Exception as error:
+        receipt.update(status='failed', receipt_error=f'{type(error).__name__}: {error}')
+        diagnostic = freeze_exception(error, 'save_final_receipt')
+        receipt['diagnostics'].append(diagnostic)
+        deliver([diagnostic])
     return receipt
 
 
@@ -61,6 +119,11 @@ class UpdateOperations:
         self.environment = {k: v for k, v in os.environ.items() if k not in
                             ('PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV')}
         self.leases = []
+
+    def record_diagnostics(self, diagnostics):
+        with (self.output / 'update.log').open('a', encoding='utf-8') as log:
+            for diagnostic in diagnostics:
+                log.write(json.dumps(diagnostic, ensure_ascii=False, default=repr) + '\n')
 
     def save(self, receipt):
         (self.output / 'receipt.json').write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + '\n')

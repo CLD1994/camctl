@@ -1,5 +1,8 @@
 """只读部署检查的公共协作者边界。"""
+import contextlib
 from dataclasses import dataclass
+import io
+import json
 import importlib.util
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -7,7 +10,7 @@ import sys
 import unittest
 from unittest.mock import Mock, patch
 
-SOURCE = Path(__file__).resolve().parents[5] / 'apps/camctl/src/camctl/deployment.py'
+SOURCE = Path(__file__).absolute().parents[5] / 'apps/camctl/src/camctl/deployment.py'
 spec = importlib.util.spec_from_file_location('deployment_under_test', SOURCE)
 deployment = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(deployment)
@@ -44,6 +47,31 @@ class DeploymentInspectionTests(unittest.TestCase):
         runtime.open_existing.assert_called_once_with(Path('/state.db'), readonly, {'busy_timeout_ms': 9000})
         runtime.verify_directory_binding.assert_called_once_with(metadata, '/stage', '/ready', '/processing')
         connection.close.assert_called_once()
+
+    def test_main_sends_full_cause_to_stderr_without_stdout(self):
+        encoder_spec = importlib.util.spec_from_file_location('error_diagnostics_for_deployment',
+            Path(__file__).absolute().parents[5] / 'apps/camctl/src/camctl/operations/error_diagnostics.py')
+        encoder = importlib.util.module_from_spec(encoder_spec)
+        encoder_spec.loader.exec_module(encoder)
+        try:
+            try:
+                raise OSError(5, 'database failure')
+            except OSError as cause:
+                raise ValueError('inspection failed') from cause
+        except ValueError as error:
+            original = error
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with patch.dict(sys.modules, {'camctl.operations.error_diagnostics': encoder}), \
+                patch.object(sys, 'argv', ['deployment', '--config', '/config.toml']), \
+                patch.object(deployment, 'inspect_deployment', side_effect=original), \
+                contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as result:
+                deployment.main()
+        self.assertEqual(result.exception.code, 1)
+        self.assertEqual(stdout.getvalue(), '')
+        diagnostic = json.loads(stderr.getvalue())
+        self.assertEqual(diagnostic['message'], 'inspection failed')
+        self.assertEqual(diagnostic['cause']['errno'], 5)
 
     def test_binding_failure_closes_connection(self):
         connection = Mock()

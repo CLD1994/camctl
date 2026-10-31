@@ -34,7 +34,8 @@ def main() -> int:
     try:
         print(json.dumps(inspect_deployment(args.config), ensure_ascii=False, sort_keys=True))
     except Exception as error:
-        parser.exit(1, f'部署只读检查失败: {type(error).__name__}: {error}\n')
+        from camctl.operations.error_diagnostics import exception_diagnostic
+        parser.exit(1, json.dumps(exception_diagnostic(error), ensure_ascii=False, default=repr) + '\n')
     return 0
 
 

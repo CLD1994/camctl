@@ -1,5 +1,7 @@
 """更新入口在隔离 I/O 边界下的行为。"""
+import builtins
 import contextlib
+import linecache
 import hashlib
 import io
 import importlib.util
@@ -15,6 +17,10 @@ sys.path.insert(0, str(SCRIPTS))
 spec = importlib.util.spec_from_file_location('update_camctl', SCRIPTS / 'update-camctl.py')
 update = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(update)
+encoder_spec = importlib.util.spec_from_file_location('error_diagnostics_under_test',
+    Path(__file__).absolute().parents[5] / 'apps/camctl/src/camctl/operations/error_diagnostics.py')
+encoder = importlib.util.module_from_spec(encoder_spec)
+encoder_spec.loader.exec_module(encoder)
 
 
 class UpdateTests(unittest.TestCase):
@@ -83,6 +89,105 @@ class UpdateTests(unittest.TestCase):
             with self.assertRaises(SystemExit) as exit_info:
                 update.main()
         self.assertEqual(exit_info.exception.code, 2)
+
+    def test_failure_diagnostic_keeps_cause_and_facts_after_unlock(self):
+        ops = Mock()
+        ops.preflight.return_value = {'state_db': '/state.db'}
+        try:
+            try:
+                raise OSError(13, 'denied')
+            except OSError as cause:
+                error = RuntimeError('lock failed')
+                encoder.attach_diagnostic_facts(error, {'lock': {'operation': 'unlock', 'path': '/state.lock'}})
+                raise error from cause
+        except RuntimeError as caught:
+            ops.install.side_effect = caught
+        with patch.dict(sys.modules, {'camctl.operations.error_diagnostics': encoder}):
+            receipt = update.perform_update(ops)
+        diagnostic = receipt['diagnostics'][0]
+        self.assertEqual(diagnostic['cause']['errno'], 13)
+        self.assertEqual(diagnostic['diagnostic_facts']['lock']['path'], '/state.lock')
+        calls = [item[0] for item in ops.mock_calls]
+        self.assertLess(calls.index('unlock'), calls.index('record_diagnostics'))
+        self.assertEqual(ops.record_diagnostics.call_args.args[0], receipt['diagnostics'])
+
+    def test_log_write_failure_delivers_original_and_write_error_to_stderr(self):
+        ops = Mock()
+        ops.preflight.side_effect = ValueError('original error')
+        ops.record_diagnostics.side_effect = OSError(28, 'disk full')
+        stderr = io.StringIO()
+        with patch.dict(sys.modules, {'camctl.operations.error_diagnostics': encoder}), \
+                contextlib.redirect_stderr(stderr):
+            receipt = update.perform_update(ops)
+        delivered = json.loads(stderr.getvalue())
+        self.assertEqual(delivered['diagnostics'][0]['message'], 'original error')
+        self.assertEqual(delivered['log_error']['errno'], 28)
+        self.assertEqual(receipt['log_error']['errno'], 28)
+
+    def test_main_and_unlock_errors_are_reported_separately(self):
+        ops = Mock()
+        ops.preflight.return_value = {'state_db': '/state.db'}
+        ops.install.side_effect = ValueError('install error')
+        ops.unlock.side_effect = OSError(5, 'unlock error')
+        with patch.dict(sys.modules, {'camctl.operations.error_diagnostics': encoder}):
+            receipt = update.perform_update(ops)
+        self.assertEqual([item['stage'] for item in receipt['diagnostics']], ['install', 'unlock'])
+        self.assertEqual(receipt['diagnostics'][0]['message'], 'install error')
+        self.assertEqual(receipt['diagnostics'][1]['errno'], 5)
+        self.assertEqual(ops.record_diagnostics.call_args.args[0], receipt['diagnostics'])
+
+    def test_missing_encoder_preserves_cause_group_and_import_failure(self):
+        original_import = builtins.__import__
+        def missing_encoder(name, *args, **kwargs):
+            if name == 'camctl.operations.error_diagnostics':
+                raise ModuleNotFoundError('missing camctl encoder')
+            return original_import(name, *args, **kwargs)
+        try:
+            try:
+                raise ValueError('inner')
+            except ValueError as cause:
+                raise ExceptionGroup('group', [RuntimeError('child')]) from cause
+        except ExceptionGroup as error:
+            with patch('builtins.__import__', side_effect=missing_encoder), \
+                    patch.object(linecache, 'getline', side_effect=AssertionError('unexpected source read')):
+                diagnostic = update.freeze_exception(error, 'preflight')
+        self.assertEqual(diagnostic['cause']['message'], 'inner')
+        self.assertEqual(diagnostic['exceptions'][0]['message'], 'child')
+        self.assertEqual(diagnostic['encoder_error']['message'], 'missing camctl encoder')
+        self.assertEqual(diagnostic['stage'], 'preflight')
+
+    def test_final_receipt_failure_does_not_skip_original_diagnostic(self):
+        ops = Mock()
+        ops.preflight.return_value = {'state_db': '/state.db'}
+        ops.install.side_effect = ValueError('install failed')
+        ops.save.side_effect = [None, None, None, OSError(28, 'receipt full')]
+        with patch.dict(sys.modules, {'camctl.operations.error_diagnostics': encoder}):
+            receipt = update.perform_update(ops)
+        self.assertEqual([item['stage'] for item in receipt['diagnostics']], ['install', 'save_final_receipt'])
+        self.assertEqual(ops.record_diagnostics.call_count, 2)
+        self.assertEqual(ops.record_diagnostics.call_args_list[0].args[0][0]['message'], 'install failed')
+        self.assertEqual(ops.record_diagnostics.call_args_list[1].args[0][0]['errno'], 28)
+
+    def test_preflight_error_reaches_actual_log_consumer(self):
+        ops = update.UpdateOperations(Path('/bundle'), Path('/target'), None, Path('/output'))
+        ops.preflight = Mock(side_effect=ValueError('delivery invalid'))
+        ops.save = Mock()
+        stream = io.StringIO()
+        with patch.dict(sys.modules, {'camctl.operations.error_diagnostics': encoder}), \
+                patch.object(Path, 'open', return_value=contextlib.nullcontext(stream)):
+            receipt = update.perform_update(ops)
+        delivered = json.loads(stream.getvalue())
+        self.assertEqual(delivered, receipt['diagnostics'][0])
+        self.assertEqual(delivered['stage'], 'preflight')
+        self.assertEqual(delivered['message'], 'delivery invalid')
+
+    def test_record_diagnostics_writes_json_to_log(self):
+        ops = update.UpdateOperations(Path('/bundle'), Path('/target'), None, Path('/output'))
+        stream = io.StringIO()
+        diagnostic = {'type': 'ValueError', 'message': 'original'}
+        with patch.object(Path, 'open', return_value=contextlib.nullcontext(stream)):
+            ops.record_diagnostics([diagnostic])
+        self.assertEqual(json.loads(stream.getvalue()), diagnostic)
 
     def test_lock_conflict_prevents_installation(self):
         ops = Mock()
