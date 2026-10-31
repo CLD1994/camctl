@@ -59,6 +59,7 @@ class RecoveryBlockedReason(Enum):
     MISSING_HORIZON = 'missing_horizon'
     INTENT_OUTSIDE_HORIZON = 'intent_outside_horizon'
     EVIDENCE_UNAVAILABLE = 'evidence_unavailable'
+    MISSING_EVIDENCE_LOOKUP = 'missing_evidence_lookup'
 
 
 @dataclass(frozen=True)
@@ -75,6 +76,12 @@ class AttemptTicket:
     target_id: str
     responsibility_key: str
     run_id: int
+
+
+@dataclass(frozen=True)
+class DeviceBinding:
+    device_id: str
+    driver_id: str
 
 
 @dataclass(frozen=True)
@@ -134,6 +141,13 @@ def subject(monkeypatch):
     def error_value(code, domain): return NS(code=code, domain=domain)
     def call_outcome(**kwargs): return NS(**{'error': None, **kwargs})
     def finish(status): return NS(status=status, error=None)
+    def validate_outcome(ticket, outcome, evidence):
+        if outcome.settlement.basis is SettlementBasis.ASSUMED:
+            item = outcome.settlement.evidence
+            contract = evidence.contract(item.type, item.version)
+            if contract.operation != ticket.operation:
+                raise ValueError('恢复证据操作与原票据不一致')
+        return NS(outcome=outcome)
     modules = [
         module('camctl.capture.recovery', RecoveryBoundary=RecoveryBoundary, RecoveryBlockedReason=RecoveryBlockedReason, RecoveryDiagnostic=RecoveryDiagnostic),
         module('camctl.capture.input_copy', InputPhase=InputPhase, InputStep=InputStep),
@@ -145,13 +159,14 @@ def subject(monkeypatch):
                CallOutcome=call_outcome, EffectState=EffectState, ErrorValue=error_value,
                EvidenceValue=EvidenceValue, Settlement=lambda basis, evidence: NS(basis=basis, evidence=evidence),
                SettlementBasis=SettlementBasis),
-        module('camctl.operations.validation', validate_outcome=lambda ticket, outcome, evidence: NS(outcome=outcome)),
+        module('camctl.operations.validation', validate_outcome=validate_outcome),
         module('camctl.operations.error_diagnostics', exception_diagnostic=lambda error: None),
         module('camctl.persistence.models', DbOutcomeKind=DbOutcomeKind,
                db_failure=lambda cls, message, outcome: cls(message), db_outcome_for=lambda error: None),
         module('camctl.persistence.business', SharedSave=SharedSave, settle_required=object),
         module('camctl.outputs.database_reads', read_one=object),
         module('camctl.devices.evidence', EvidenceError=type('EvidenceError', (Exception,), {}), EvidenceContract=object),
+        module('camctl.devices.bindings', DeviceBinding=DeviceBinding),
         module('camctl.logging_runtime.diagnostics', DiagnosticState=type('DiagnosticState', (), {}),
                diagnostic_state_for=lambda error: None, record_call_outcome=lambda *args, **kwargs: None,
                record_error=lambda *args, **kwargs: None),
@@ -201,6 +216,7 @@ def step(*, complete, error, phase=InputPhase.OWNER_SKIPPED, source_failed=False
 @pytest.mark.parametrize('complete,end_error,status,code', [
     (True, None, AttemptStatus.SUCCEEDED, None),
     (False, 'stopped', AttemptStatus.UNKNOWN, 'read_stopped'),
+    (True, 'stopped', AttemptStatus.UNKNOWN, 'read_stopped'),
     (False, None, AttemptStatus.UNKNOWN, 'read_stopped'),
 ])
 def test_cancel_keeps_actual_read_outcome(subject, monkeypatch, complete, end_error, status, code):
@@ -261,13 +277,14 @@ def test_source_error_is_not_reclassified_as_controlled_stop(subject, monkeypatc
 
 class EvidenceRegistry:
     """只声明驱动实际支持的冷恢复依据。"""
-    def __init__(self, supported=('local_read_recovery',)):
+    def __init__(self, supported=('local_read_recovery',), operation='read'):
         self.supported = supported
+        self.operation = operation
 
     def contract(self, name, version):
         if name not in self.supported or version != 1:
             raise sys.modules['camctl.devices.evidence'].EvidenceError(name)
-        return NS(type=name, version=version, operation='read', fields=frozenset())
+        return NS(type=name, version=version, operation=self.operation, fields=frozenset())
 
 
 class Cursor:
@@ -302,7 +319,7 @@ class RecoveryDatabase:
 
 
 def recovery_setup(subject, monkeypatch, *, saved_end=None, download_active=False,
-                   outcomes=(DbOutcomeKind.COMPLETED,)):
+                   source=(None, None, None), outcomes=(DbOutcomeKind.COMPLETED,)):
     database = RecoveryDatabase(outcomes)
     ticket = AttemptTicket(1, 'read', '9', 'read/9', 4)
     diagnostics = []
@@ -310,7 +327,7 @@ def recovery_setup(subject, monkeypatch, *, saved_end=None, download_active=Fals
         pending_read_ends={}, pending_read_business={}, file_executor=None,
         operations=NS(finish_attempt=lambda finish, key, owned: (finish, key)),
         occurred_at=lambda: 999, recovery_boundary=RecoveryBoundary.CONFIRMED,
-        recovery_max_event_id=10, last_recovery_diagnostic=None,
+        recovery_max_event_id=10, recovery_evidence_for=None, last_recovery_diagnostic=None,
         on_recovery_diagnostic=diagnostics.append)
     monkeypatch.setitem(sys.modules, 'camctl.persistence.repositories.read_end',
         module('camctl.persistence.repositories.read_end', load_read_end=lambda copy_id, owned: saved_end))
@@ -320,6 +337,9 @@ def recovery_setup(subject, monkeypatch, *, saved_end=None, download_active=Fals
         if 'target_file_id,c.source_intermediate_file_id' in sql:
             assert params == (9,)
             return (701, 702)
+        if 'c.source_device_file_id,ob.device_id,ob.driver_id' in sql:
+            assert params == (9,)
+            return source
         assert 'a.cancel_requested,r.status' in sql and params == (4, 9)
         return (1, 2)
     monkeypatch.setattr(subject, 'read_one', read_one)
@@ -418,3 +438,74 @@ def test_unknown_cold_save_retries_original_pending_result(subject, monkeypatch)
     assert first == second and first[1:] == ('original-key', 'original-key')
     assert first[0].ticket == ticket and first[0].occurred_at == 999
     assert first[0].outcome.outcome.error.code == 'result_not_saved'
+
+
+def test_device_cold_recovery_rebinds_original_driver_to_read(subject, monkeypatch):
+    runtime, ticket, _, save, _, _ = recovery_setup(subject, monkeypatch,
+        source=(11, 'camera-1', 'adb-driver'))
+    # 同名驱动模板属于 delete；只有通过绑定并指定 read 才能用于原读取。
+    delete_template = EvidenceRegistry(('adb_foreground_recovery',), operation='delete')
+    read_registry = EvidenceRegistry(('adb_foreground_recovery',), operation='read')
+    lookups = []
+    def lookup(binding, operation):
+        lookups.append((binding, operation))
+        return read_registry
+    runtime.recovery_evidence_for = lookup
+    assert asyncio.run(subject.settle_canceled_read(runtime, 9, delete_template, save)) is True
+    assert lookups == [(DeviceBinding('camera-1', 'adb-driver'), 'read')]
+    [(finish, _, _)] = runtime.database.saved
+    outcome = finish.outcome.outcome
+    assert finish.ticket == ticket and finish.run_finish.status is RunOutcome.CANCELED
+    assert outcome.status is AttemptStatus.UNKNOWN and outcome.error.code == 'result_not_saved'
+    assert outcome.settlement.evidence.type == 'adb_foreground_recovery'
+    assert read_registry.contract(outcome.settlement.evidence.type, 1).operation == 'read'
+
+
+def test_device_cold_recovery_requires_original_binding_lookup(subject, monkeypatch):
+    runtime, ticket, _, save, calls, diagnostics = recovery_setup(subject, monkeypatch,
+        source=(11, 'camera-1', 'adb-driver'))
+    delete_template = EvidenceRegistry(('adb_foreground_recovery',), operation='delete')
+    assert asyncio.run(subject.settle_canceled_read(runtime, 9, delete_template, save)) is False
+    assert diagnostics == [RecoveryDiagnostic(RecoveryBlockedReason.MISSING_EVIDENCE_LOOKUP,
+                                               ticket.run_id, ticket.attempt_id)]
+    assert not calls and not runtime.database.saved and not runtime.pending_read_results
+
+
+def test_device_cold_recovery_rejects_wrong_operation_registry(subject, monkeypatch):
+    runtime, _, _, save, calls, _ = recovery_setup(subject, monkeypatch,
+        source=(11, 'camera-1', 'adb-driver'))
+    wrong = EvidenceRegistry(('adb_foreground_recovery',), operation='delete')
+    runtime.recovery_evidence_for = lambda binding, operation: wrong
+    with pytest.raises(ValueError, match='操作与原票据不一致'):
+        asyncio.run(subject.settle_canceled_read(runtime, 9, wrong, save))
+    assert not calls and not runtime.database.saved
+
+
+def test_stopped_with_local_error_retains_error_diagnostic(subject, monkeypatch):
+    runtime, ticket = setup(subject, monkeypatch, 1)
+    actual = OSError('target sync failed')
+    recorded = []
+    monkeypatch.setattr(subject, 'record_error', lambda error, **kwargs: recorded.append(error))
+    observed = step(complete=False, error='stopped', phase=InputPhase.SEGMENT_FAILED,
+                    exception=actual)
+    pending = subject.stopped_read_result(runtime, ticket, observed, object(), 42)
+    assert recorded == [actual] and pending.step.error is actual
+    prepared = asyncio.run(subject.save_read_result(runtime, pending))
+    assert prepared.finish.outcome.outcome.status is AttemptStatus.UNKNOWN
+    assert prepared.finish.outcome.outcome.error.code == 'read_stopped'
+
+
+def test_device_binding_without_read_registry_retains_recovery_diagnostic(subject, monkeypatch):
+    runtime, ticket, _, save, calls, diagnostics = recovery_setup(subject, monkeypatch,
+        source=(11, 'camera-1', 'adb-driver'))
+    lookups = []
+    def lookup(binding, operation):
+        lookups.append((binding, operation))
+        return None
+    runtime.recovery_evidence_for = lookup
+    assert asyncio.run(subject.settle_canceled_read(runtime, 9,
+        EvidenceRegistry(('adb_foreground_recovery',), operation='delete'), save)) is False
+    assert lookups == [(DeviceBinding('camera-1', 'adb-driver'), 'read')]
+    assert diagnostics == [RecoveryDiagnostic(RecoveryBlockedReason.EVIDENCE_UNAVAILABLE,
+                                               ticket.run_id, ticket.attempt_id)]
+    assert not calls and not runtime.database.saved

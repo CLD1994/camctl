@@ -186,3 +186,12 @@ def test_source_error_preserves_original_facts(subject, position):
     assert result.error is error and result.source_failed
     assert result.content_complete is (position == 10)
     assert not copies.completed and observations == [(result.read_end, False)]
+
+
+def test_owner_skip_at_source_end_preserves_late_source_error(subject):
+    result, copies, observations = obtain(subject, 'skip', 10, 'failed')
+    assert result.phase is subject.InputPhase.SEGMENT_FAILED
+    assert result.source_failed and isinstance(result.error, RuntimeError)
+    assert result.error.args == ('failed',) and result.read_end.error == 'failed'
+    assert result.content_complete and not copies.completed
+    assert copies.facts.committed_bytes == 0 and observations == [(result.read_end, False)]
