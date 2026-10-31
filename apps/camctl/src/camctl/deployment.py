@@ -14,6 +14,7 @@ MIGRATIONS = {}
 def migrate_copy(config_path: Path, state_db: Path) -> dict:
     """在独立副本上应用已登记迁移，返回核验后的数据库身份。"""
     from camctl.bootstrap.application import ConfigAdapter
+    from camctl.persistence.maintenance_integrity import verify_maintenance_integrity
     from camctl.persistence.runtime import (
         CURRENT_FORMAT_VERSION, _FORMAT_VERSIONS, DbConfig, DbOpenMode,
         open_existing, verify_directory_binding,
@@ -27,6 +28,7 @@ def migrate_copy(config_path: Path, state_db: Path) -> dict:
     options = DbConfig(busy_timeout_ms=config.database.busy_timeout_ms)
     owned = open_existing(state_db, DbOpenMode.EXISTING_RO, options)
     try:
+        verify_maintenance_integrity(owned.connection)
         verify_directory_binding(owned.metadata, config.paths.staging, config.paths.ready,
                                  config.paths.processing)
         identity = asdict(owned.metadata)
@@ -53,6 +55,7 @@ def migrate_copy(config_path: Path, state_db: Path) -> dict:
         migrate(state_db, identity)
         owned = open_existing(state_db, DbOpenMode.EXISTING_RO, options)
         try:
+            verify_maintenance_integrity(owned.connection)
             verify_directory_binding(owned.metadata, config.paths.staging, config.paths.ready,
                                      config.paths.processing)
             actual = asdict(owned.metadata)
@@ -67,6 +70,7 @@ def migrate_copy(config_path: Path, state_db: Path) -> dict:
 
 def inspect_deployment(config_path: Path) -> dict:
     from camctl.bootstrap.application import ConfigAdapter
+    from camctl.persistence.maintenance_integrity import verify_maintenance_integrity
     from camctl.persistence.runtime import DbConfig, DbOpenMode, open_existing, verify_directory_binding
 
     if not config_path.is_file():
@@ -78,6 +82,7 @@ def inspect_deployment(config_path: Path) -> dict:
     owned = open_existing(state_db, DbOpenMode.EXISTING_RO,
                           DbConfig(busy_timeout_ms=config.database.busy_timeout_ms))
     try:
+        verify_maintenance_integrity(owned.connection)
         verify_directory_binding(owned.metadata, config.paths.staging, config.paths.ready,
                                  config.paths.processing)
         return {'state_db': str(state_db), 'metadata': asdict(owned.metadata)}

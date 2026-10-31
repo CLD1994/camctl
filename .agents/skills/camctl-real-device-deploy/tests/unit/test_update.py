@@ -37,10 +37,12 @@ class Locks:
         pass
 transaction.Locks = Locks
 transaction.sync_dir = Mock(side_effect=AssertionError('未隔离的目录同步'))
+integrity = ModuleType('maintenance_integrity')
+integrity.verify_maintenance_integrity = Mock()
 spec = importlib.util.spec_from_file_location('update_camctl', SCRIPTS / 'update-camctl.py')
 update = importlib.util.module_from_spec(spec)
 with patch.dict(sys.modules, {'bundle_support': bundle_support, 'deploy_support': deploy_support,
-                              'update_transaction': transaction}), \
+                              'update_transaction': transaction, 'maintenance_integrity': integrity}), \
         patch.object(sys, 'dont_write_bytecode', True):
     spec.loader.exec_module(update)
 encoder_spec = importlib.util.spec_from_file_location('error_diagnostics_under_test',
@@ -61,6 +63,9 @@ class UpdateTests(unittest.TestCase):
         random_id = patch.object(update.uuid, 'uuid4', return_value=SimpleNamespace(hex='update-id'))
         random_id.start()
         self.addCleanup(random_id.stop)
+        paths = patch.object(Path, 'resolve', new=lambda path, *args, **kwargs: path)
+        paths.start()
+        self.addCleanup(paths.stop)
 
     def test_failed_diagnostic_channels_preserve_original_result_and_final_receipt(self):
         for failed_method in ('write', 'flush'):
@@ -111,13 +116,45 @@ class UpdateTests(unittest.TestCase):
         ops.install.assert_not_called()
         ops.rollback.assert_not_called()
 
-    def test_uncertain_commit_is_not_reversed(self):
+    def test_commit_visible_and_synced_reports_success_with_original_error(self):
         ops = Mock()
         ops.preflight.return_value = {'state_db': '/state.db'}
         ops.commit.side_effect = OSError('commit result unknown')
+        ops.confirm_pending.return_value = 'committed'
+        result = update.perform_update(ops)
+        self.assertEqual(result['status'], 'updated_stopped')
+        self.assertEqual(result['diagnostics'][0]['stage'], 'commit')
+        ops.rollback.assert_not_called()
+
+    def test_commit_still_updating_is_rolled_back(self):
+        ops = Mock()
+        ops.preflight.return_value = {'state_db': '/state.db'}
+        ops.commit.side_effect = OSError('commit failed')
+        ops.confirm_pending.return_value = 'updating'
+        result = update.perform_update(ops)
+        self.assertEqual(result['rollback'], 'verified')
+        ops.rollback.assert_called_once()
+
+    def test_commit_cannot_be_confirmed_keeps_pending(self):
+        ops = Mock()
+        ops.preflight.return_value = {'state_db': '/state.db'}
+        ops.commit.side_effect = OSError('commit failed')
+        ops.confirm_pending.side_effect = OSError('sync failed')
         result = update.perform_update(ops)
         self.assertEqual(result['rollback'], 'commit_unknown')
+        self.assertEqual([item['stage'] for item in result['diagnostics']], ['commit', 'confirm_pending'])
         ops.rollback.assert_not_called()
+
+    def test_intent_write_failure_uses_persisted_state(self):
+        for state, expected in [('preparing', False), ('updating', True)]:
+            with self.subTest(state=state):
+                ops = Mock()
+                ops.preflight.return_value = {'state_db': '/state.db'}
+                ops.mark_intent.side_effect = OSError('intent write failed')
+                ops.confirm_pending.return_value = state
+                update.perform_update(ops)
+                self.assertEqual(ops.rollback.called, expected)
+                ops.install.assert_not_called()
 
     def test_late_receipt_failure_does_not_reverse_committed_update(self):
         ops = Mock()
@@ -148,8 +185,10 @@ class UpdateTests(unittest.TestCase):
         locks = ModuleType('camctl.session.locks')
         locks.lock_file_paths = Mock(return_value=(Path('/session.lock'), Path('/admission.lock')))
         archive = Mock()
-        archive.namelist.return_value = ['camctl/deployment.py', 'camctl-2.dist-info/METADATA']
-        archive.read.return_value = b'Name: camctl\nVersion: 2.0\n\n'
+        archive.namelist.return_value = ['camctl/deployment.py', 'camctl-2.dist-info/METADATA',
+                                         'camctl/persistence/maintenance_integrity.py']
+        archive.read.side_effect = lambda name: (b'Name: camctl\nVersion: 2.0\n\n'
+                                                  if name.endswith('/METADATA') else b'original')
         release = {'components': {'camctl': '2.0'}, 'source_sha256': 'source',
                    'wheel_targets': {'x86_64': {'files': ['dependency.whl']}}}
         wheel = Path('/bundle/camctl/camctl-2.0.whl')
@@ -194,6 +233,85 @@ class UpdateTests(unittest.TestCase):
             with self.assertRaises(SystemExit) as exit_info:
                 update.main()
         self.assertEqual(exit_info.exception.code, 2)
+
+    def test_main_lock_failure_reports_stage_error_and_evidence(self):
+        stderr = Mock(spec=['write', 'flush'])
+        with patch.object(sys, 'argv', ['update-camctl.py', '--target', '/target']), \
+                patch.object(sys, 'prefix', '/base'), patch.object(sys, 'base_prefix', '/base'), \
+                patch.object(sys, 'stderr', stderr), patch.object(Path, 'is_dir', return_value=True), \
+                patch.object(Path, 'mkdir'), patch.object(Path, 'touch'), \
+                patch.object(update.transaction, 'sync_dir'), \
+                patch.object(update.transaction.Locks, 'acquire', side_effect=OSError(5, 'lock failure')), \
+                patch.object(update.UpdateOperations, 'record_diagnostics'), \
+                patch.object(update.UpdateOperations, 'save') as save:
+            self.assertEqual(update.main(), 1)
+        message = stderr.write.call_args.args[0]
+        self.assertIn('update_lock', message)
+        self.assertIn('lock failure', message)
+        self.assertIn('/target/updates/update-id', message)
+        self.assertEqual(save.call_args.args[0]['diagnostics'][0]['errno'], 5)
+
+    def test_main_stderr_failure_preserves_original_and_output_error(self):
+        for method in ('write', 'flush'):
+            with self.subTest(method=method):
+                stderr = Mock(spec=['write', 'flush'])
+                getattr(stderr, method).side_effect = BrokenPipeError('stderr failed')
+                with patch.object(sys, 'argv', ['update-camctl.py', '--target', '/target']), \
+                        patch.object(sys, 'prefix', '/base'), patch.object(sys, 'base_prefix', '/base'), \
+                        patch.object(sys, 'stderr', stderr), patch.object(Path, 'is_dir', return_value=True), \
+                        patch.object(Path, 'mkdir'), patch.object(Path, 'touch'), \
+                        patch.object(update.transaction, 'sync_dir'), \
+                        patch.object(update.transaction.Locks, 'acquire', side_effect=OSError(5, 'lock failure')), \
+                        patch.object(update.UpdateOperations, 'record_diagnostics'), \
+                        patch.object(update.UpdateOperations, 'save') as save:
+                    self.assertEqual(update.main(), 1)
+                receipt = save.call_args.args[0]
+                self.assertEqual(receipt['diagnostics'][0]['errno'], 5)
+                self.assertEqual(receipt['outer_stderr_error']['stage'], 'outer_stderr')
+
+    def test_invalid_pending_record_blocks_new_update_at_entry(self):
+        with patch.object(sys, 'argv', ['update-camctl.py', '--target', '/target']), \
+                patch.object(sys, 'prefix', '/base'), patch.object(sys, 'base_prefix', '/base'), \
+                patch.object(sys, 'stderr', io.StringIO()), patch.object(Path, 'is_dir', return_value=True), \
+                patch.object(Path, 'exists', return_value=True), patch.object(Path, 'read_text', return_value='{}'), \
+                patch.object(Path, 'mkdir'), patch.object(Path, 'touch'), \
+                patch.object(update.transaction, 'sync_dir'), \
+                patch.object(update.transaction.Locks, 'acquire'), \
+                patch.object(update.transaction, 'classify_record', create=True,
+                             side_effect=ValueError('invalid journal')), \
+                patch.object(update.UpdateOperations, 'record_diagnostics'), \
+                patch.object(update.UpdateOperations, 'save'), \
+                patch.object(update, 'perform_update') as perform:
+            self.assertEqual(update.main(), 1)
+        perform.assert_not_called()
+
+    def test_rollback_uses_persisted_record_after_reacquiring_locks(self):
+        ops = update.UpdateOperations(Path('/bundle'), Path('/target'), None, Path('/target/updates/id'))
+        ops.record = {'lock_paths': ['/db/session', '/db/admission']}
+        ops.update_locks = Mock()
+        ops.db_locks = Mock()
+        actual_state = object()
+        formal = {'state': 'updating', 'other': 'persisted'}
+        ops.read_pending = Mock(return_value=(formal, actual_state))
+        states = SimpleNamespace(UPDATING=actual_state, ROLLED_BACK=SimpleNamespace(value='rolled_back'))
+        with patch.object(transaction, 'JournalState', states, create=True), \
+                patch.object(transaction, 'recover', create=True) as recover, \
+                patch.object(transaction, 'atomic_json', create=True):
+            ops.rollback()
+        self.assertIs(recover.call_args.args[0], formal)
+        self.assertEqual(formal['state'], 'rolled_back')
+        ops.update_locks.acquire.assert_called_once_with(Path('/target/updates/update.lock'))
+
+    def test_persisted_record_from_another_update_cannot_be_consumed(self):
+        ops = update.UpdateOperations(Path('/bundle'), Path('/target'), None, Path('/target/updates/id'))
+        ops.record = {'output': '/target/updates/id'}
+        states = SimpleNamespace(PREPARING=object())
+        with patch.object(Path, 'read_text', return_value=json.dumps({'output': '/target/updates/other'})), \
+                patch.object(transaction, 'classify_record', return_value=object(), create=True), \
+                patch.object(transaction, 'validate_record_target', create=True), \
+                patch.object(transaction, 'JournalState', states, create=True):
+            with self.assertRaises(ValueError):
+                ops.read_pending()
 
     def test_failure_diagnostic_keeps_cause_and_facts_after_unlock(self):
         ops = Mock()

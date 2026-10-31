@@ -24,6 +24,12 @@ class Metadata:
 
 @patch.object(Path, 'home', new=lambda: Path('/home/unit-user'))
 class DeploymentInspectionTests(unittest.TestCase):
+    def setUp(self):
+        module = ModuleType('camctl.persistence.maintenance_integrity')
+        module.verify_maintenance_integrity = Mock()
+        patcher = patch.dict(sys.modules, {'camctl.persistence.maintenance_integrity': module})
+        patcher.start()
+        self.addCleanup(patcher.stop)
     def test_reads_existing_database_and_checks_binding_then_closes(self):
         connection = Mock()
         metadata = Metadata('original', 9)
@@ -95,6 +101,12 @@ class DeploymentInspectionTests(unittest.TestCase):
 
 @patch.object(Path, 'home', new=lambda: Path('/home/unit-user'))
 class DeploymentMigrationTests(unittest.TestCase):
+    def setUp(self):
+        module = ModuleType('camctl.persistence.maintenance_integrity')
+        module.verify_maintenance_integrity = Mock()
+        patcher = patch.dict(sys.modules, {'camctl.persistence.maintenance_integrity': module})
+        patcher.start()
+        self.addCleanup(patcher.stop)
     def test_copy_cannot_be_original_database_even_via_an_alias(self):
         config = SimpleNamespace(paths=SimpleNamespace(state_db='/state.db'))
         app = ModuleType('camctl.bootstrap.application')
@@ -111,6 +123,27 @@ class DeploymentMigrationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 deployment.migrate_copy(Path('/config'), Path('/alias'))
         runtime.open_existing.assert_not_called()
+
+    def test_copy_rejects_integrity_failure_and_closes_connection(self):
+        config = SimpleNamespace(paths=SimpleNamespace(state_db='/state.db', staging='/s', ready='/r', processing='/p'),
+                                 database=SimpleNamespace(busy_timeout_ms=100))
+        app = ModuleType('camctl.bootstrap.application')
+        app.ConfigAdapter = Mock(return_value=SimpleNamespace(load=Mock(return_value=config)))
+        runtime = ModuleType('camctl.persistence.runtime')
+        runtime.DbConfig = Mock()
+        runtime.DbOpenMode = SimpleNamespace(EXISTING_RO=object())
+        runtime._FORMAT_VERSIONS = SimpleNamespace(V9=9)
+        runtime.CURRENT_FORMAT_VERSION = 9
+        runtime.verify_directory_binding = Mock()
+        connection = Mock()
+        runtime.open_existing = Mock(return_value=SimpleNamespace(connection=connection, metadata=Metadata('x', 9)))
+        integrity = sys.modules['camctl.persistence.maintenance_integrity']
+        integrity.verify_maintenance_integrity.side_effect = ValueError('foreign key failure')
+        with patch.dict(sys.modules, {'camctl.bootstrap.application': app, 'camctl.persistence.runtime': runtime}), \
+                patch.object(Path, 'is_file', return_value=True), patch.object(Path, 'samefile', return_value=False):
+            with self.assertRaises(ValueError):
+                deployment.migrate_copy(Path('/config'), Path('/copy'))
+        connection.close.assert_called_once()
 
     def test_copy_accepts_baseline_and_rejects_unsupported_formats(self):
         config = SimpleNamespace(paths=SimpleNamespace(state_db='/state.db', staging='/s', ready='/r', processing='/p'),
