@@ -1245,8 +1245,17 @@ async def test_jpeg_photo_keeps_both_roles_and_distinct_content(tmp_path, storag
         source_table = "intermediate_files" if storage == "host" else "device_files"
         source_column = "intermediate_file_id" if storage == "host" else "device_file_id"
         rows = owned.connection.execute(f"SELECT o.kind,o.media_type,f.size_bytes,f.sha256 FROM outputs o JOIN {source_table} f ON f.id=o.{source_column} ORDER BY o.kind").fetchall()
-        assert rows == [(1, "image/jpeg", len(_JPEG_ORIGINAL), hashlib.sha256(_JPEG_ORIGINAL).hexdigest()),
-                        (3, "image/jpeg", len(_PREVIEW), hashlib.sha256(_PREVIEW).hexdigest())]
+        if storage == "host":
+            assert rows == [(1, "image/jpeg", len(_JPEG_ORIGINAL), hashlib.sha256(_JPEG_ORIGINAL).hexdigest()),
+                            (3, "image/jpeg", len(_PREVIEW), hashlib.sha256(_PREVIEW).hexdigest())]
+        else:
+            assert rows == [(1, None, None, None), (3, None, None, None)]
+            sources = owned.connection.execute(
+                "SELECT f.id,f.identity_key,f.locator_json FROM outputs o "
+                "JOIN device_files f ON f.id=o.device_file_id ORDER BY o.kind").fetchall()
+            assert len(sources) == 2 and sources[0][0] != sources[1][0]
+            assert sources[0][1] != sources[1][1]
+            assert [json.loads(row[2])["variant"] for row in sources] == ["original", "thumbnail"]
         paths = [Path(cfg.paths.staging) / value[0] for value in owned.connection.execute("SELECT relative_path FROM intermediate_files ORDER BY id")]
         assert [path.read_bytes() for path in paths] == [_JPEG_ORIGINAL, _PREVIEW]
         assert [path.parent.name for path in paths] == ["capture-originals", "capture-previews"]
