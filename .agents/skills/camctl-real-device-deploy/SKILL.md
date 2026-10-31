@@ -111,4 +111,4 @@ python3 install-host.py \
 
 ## 停机更新已有 camctl
 
-完整部署包中的 `update-camctl.py --target /absolute/path` 在原虚拟环境执行离线更新。先停止 host 和全部 CLI，保留旧部署包；目标机须已有 Python 3.11 和 uv。更新过程校验交付内容、保持原状态库的会话锁和接纳锁，并用新发行物只读核验原配置与数据库绑定。失败保留日志与收据，原环境可能已改变，不自动回滚或迁移数据库。能力说明保存在更新产物；仅显式传入 `--client-data` 才同步。具体操作与恢复边界见随包 README 和[打包契约](references/packaging.md)。
+完整部署包中的 `update-camctl.py --target /absolute/path` 在原虚拟环境执行离线更新。先停止 host 和全部 CLI，保留旧部署包，将完整新包解压到新的空目录；更新所用包目录须未安装客户端依赖、未运行客户端。目标机须已有 Python 3.11 和 uv；原配置不在 `<target>/config.toml` 时用 `--config` 指定原配置的绝对路径。更新过程校验交付内容、保持原状态库的会话锁和接纳锁，并用新发行物只读核验原配置与数据库绑定。失败保留日志与收据，原环境可能已改变，不自动回滚或迁移数据库。能力说明保存在更新产物；仅显式传入 `--client-data` 才同步。具体操作与恢复边界见随包 README 和[打包契约](references/packaging.md)。

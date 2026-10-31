@@ -1,4 +1,5 @@
 """随包 Python 入口导入本地模块前禁止产生缓存。"""
+import __future__
 import builtins
 import importlib.util
 from pathlib import Path
@@ -6,7 +7,7 @@ import sys
 import unittest
 from unittest.mock import patch
 
-SCRIPTS = Path(__file__).resolve().parents[2] / 'scripts'
+SCRIPTS = Path(__file__).absolute().parents[2] / 'scripts'
 
 
 class LocalImportObserved(Exception):
@@ -23,6 +24,10 @@ class BundleEntrypointTests(unittest.TestCase):
         observed = []
 
         def intercept(name, *args, **kwargs):
+            if name in ('sys', '__future__'):
+                return sys.modules[name]
+            if not sys.dont_write_bytecode:
+                raise AssertionError('禁用缓存前导入了模块: ' + name)
             if name == local_module:
                 observed.append(sys.dont_write_bytecode)
                 raise LocalImportObserved

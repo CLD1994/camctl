@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 """在新的 Linux 目录安装测试实例；保留全部已有部署。"""
+import sys
+
+# 随包模块必须在不改变完整文件清单的情况下导入。
+sys.dont_write_bytecode = True
+
 import argparse
 import json
 import os
@@ -7,11 +12,7 @@ from pathlib import Path
 import shlex
 import shutil
 import subprocess
-import sys
 import tarfile
-
-# 随包模块必须在不改变完整文件清单的情况下导入。
-sys.dont_write_bytecode = True
 
 def main():
     from deploy_support import absolute_path, add_path_arguments, path_overrides

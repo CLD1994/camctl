@@ -2,6 +2,11 @@
 """停止 host 和全部 CLI 后，离线更新原部署中的 camctl。"""
 from __future__ import annotations
 
+import sys
+
+# 每次启动或重新执行时，先阻止导入在包内写入缓存。
+sys.dont_write_bytecode = True
+
 import argparse
 from email.parser import BytesParser
 from dataclasses import asdict
@@ -13,14 +18,11 @@ from pathlib import Path
 import shlex
 import shutil
 import subprocess
-import sys
 import uuid
 import zipfile
 
-# 每次启动或重新执行时，先阻止导入在包内写入缓存。
-sys.dont_write_bytecode = True
-
 from bundle_support import current_target, verify_checksums, wheel_target_manifest
+from deploy_support import absolute_path
 
 
 def perform_update(ops):
@@ -52,10 +54,10 @@ def perform_update(ops):
 
 
 class UpdateOperations:
-    def __init__(self, bundle, target, client_data, output):
+    def __init__(self, bundle, target, client_data, output, *, config_path=None):
         self.bundle, self.target, self.client_data, self.output = bundle, target, client_data, output
         self.python = target / 'venv/bin/python'
-        self.config_path = target / 'config.toml'
+        self.config_path = config_path if config_path is not None else target / 'config.toml'
         self.environment = {k: v for k, v in os.environ.items() if k not in
                             ('PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV')}
         self.leases = []
@@ -176,6 +178,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--target', required=True, type=Path)
     parser.add_argument('--client-data', type=Path)
+    parser.add_argument('--config', type=absolute_path, help='原配置文件的绝对路径；默认 <target>/config.toml')
     args = parser.parse_args()
     if not args.target.is_absolute() or not args.target.is_dir():
         parser.error('--target 必须是已存在的绝对目录')
@@ -193,7 +196,9 @@ def main():
     output = args.target / 'updates' / uuid.uuid4().hex
     output.mkdir(parents=True)
     (output / 'update.log').touch()
-    receipt = perform_update(UpdateOperations(Path(__file__).resolve().parent, args.target, args.client_data, output))
+    operations = UpdateOperations(Path(__file__).resolve().parent, args.target, args.client_data, output,
+                                  config_path=args.config)
+    receipt = perform_update(operations)
     print('更新收据和日志目录：' + str(output))
     if receipt['status'] != 'updated_stopped':
         consequence = ('Python 环境可能已改变' if receipt['environment_may_have_changed']
