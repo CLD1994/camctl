@@ -844,16 +844,16 @@ async def save_read_result(runtime, pending, *, retry=False):
                     prepared = replace(prepared, finish=replace(prepared.finish, run_finish=RunFinish(RunOutcome.CANCELED)), business=None)
             elif result.run_status is not RunStatus.FAILED:
                 raise ConsistencyError("绑定读取结果回执缺少已保存的流程处置")
-            identity = (prepared.finish.ticket.run_id, prepared.finish.ticket.attempt_id)
-            if runtime.pending_read_results.get(identity) is pending:
-                runtime.pending_read_results[identity] = prepared
+            prepared_identity = (prepared.finish.ticket.run_id, prepared.finish.ticket.attempt_id)
+            if runtime.pending_read_results.get(prepared_identity) is pending:
+                runtime.pending_read_results[prepared_identity] = prepared
             if result.run_status is RunStatus.FAILED and prepared.business is not None:
                 _record_read_business_error(prepared.business)
         if result.run_was_terminal or result.disposition is FinishDisposition.ALREADY_ENDED:
             prepared = replace(prepared, preserved_run_terminal=True)
-            identity = (prepared.finish.ticket.run_id, prepared.finish.ticket.attempt_id)
-            if runtime.pending_read_results.get(identity) is pending:
-                runtime.pending_read_results[identity] = prepared
+            prepared_identity = (prepared.finish.ticket.run_id, prepared.finish.ticket.attempt_id)
+            if runtime.pending_read_results.get(prepared_identity) is pending:
+                runtime.pending_read_results[prepared_identity] = prepared
         if control_error is not None:
             raise control_error
         return prepared
