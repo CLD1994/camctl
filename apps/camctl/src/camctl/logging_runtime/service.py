@@ -34,6 +34,7 @@ class LogRecord:
     source: LogSource = LogSource.COROUTINE
     fallback: Callable[[str], bool | None] | None = field(default=None, compare=False, repr=False)
     structured: bool = field(default=False, compare=False, repr=False)
+    startup: bool = field(default=False, compare=False, repr=False)
     _logged_at_utc: str = field(default_factory=utc_now, init=False, compare=False, repr=False)
     _pid: int = field(default_factory=getpid, init=False, compare=False, repr=False)
 
@@ -123,7 +124,7 @@ class _AdmissionQueue(janus.Queue):
         """登记与取出补位共用 Janus 接纳锁，后来者不能抢占空位。"""
         with self._sync_mutex:
             record = item.record
-            if _level_rank(record.level) < _level_rank(self.level):
+            if not record.startup and _level_rank(record.level) < _level_rank(self.level):
                 kind = AdmissionKind.FILTERED_OUT
             elif self._is_shutdown:
                 kind = AdmissionKind.CHANNEL_FAILED
@@ -132,7 +133,9 @@ class _AdmissionQueue(janus.Queue):
                     item.failure_deferred = True
                     self.failed_pending.append(item)
             elif self._qsize() >= self.maxsize:
-                if record.level is LogLevel.ERROR:
+                if record.startup:
+                    kind = AdmissionKind.FALLBACK_STDERR
+                elif record.level is LogLevel.ERROR:
                     kind = (AdmissionKind.WAITING if (allow_overflow and record.source is LogSource.COROUTINE)
                             else AdmissionKind.FALLBACK_STDERR)
                     if kind is AdmissionKind.WAITING:
@@ -176,7 +179,7 @@ class _AdmissionQueue(janus.Queue):
         if isinstance(item, _QueuedRecord):
             record = item.record
             depth = self._qsize()
-            if (record.level is LogLevel.INFO and self.low <= depth < self.high
+            if (not record.startup and record.level is LogLevel.INFO and self.low <= depth < self.high
                     and item.sample_value is None):
                 item.sample_value = (self.random_source.random() if self.random_source
                                      else random.random())
@@ -186,6 +189,7 @@ class _AdmissionQueue(janus.Queue):
                 queue_capacity=self.maxsize, sample_value=item.sample_value or 0.0,
                 sample_probability_hint=self.probability,
                 filtered_out=_level_rank(record.level) < _level_rank(self.level),
+                startup=record.startup,
             ))
             if decision.kind is not AdmissionKind.ACCEPTED:
                 raise _Rejected(decision)
@@ -236,7 +240,7 @@ class LogChannel:
         return AdmissionResult(AdmissionDecision(kind, record.level), self._queue.sync_q.qsize())
 
     def _filtered(self, record):
-        return _level_rank(record.level) < _level_rank(self._level)
+        return not record.startup and _level_rank(record.level) < _level_rank(self._level)
 
     def _begin_producer(self):
         with self._lock:
@@ -536,7 +540,7 @@ class LogChannel:
                 self._pending.pop(entry.pending_id, None)
 
     def _fallback_entry(self, entry):
-        if entry is None or entry.record.level is not LogLevel.ERROR:
+        if entry is None or (entry.record.level is not LogLevel.ERROR and not entry.record.startup):
             return False
         with entry.fallback_lock:
             if entry.fallback_written is None:

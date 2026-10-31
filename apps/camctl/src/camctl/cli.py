@@ -18,6 +18,7 @@ from typing import Any, Mapping, Sequence, TextIO
 
 from camctl.contracts.schemas import SchemaRuleError, SchemaValidationError, validate_document
 from camctl.session.outcome import SessionOutcome
+from camctl.version import installed_version
 
 __all__ = [
     "Command",
@@ -29,8 +30,6 @@ __all__ = [
     "main",
     "parse_command",
 ]
-
-VERSION = "0.1.0"
 
 _CAPABILITIES_SCHEMA = "protocol/capabilities.schema.json"
 
@@ -223,7 +222,7 @@ def main(
         raise
     try:
         if command.kind is CommandKind.VERSION:
-            out.write(VERSION + "\n")
+            out.write(installed_version() + "\n")
             return 0
         if command.kind is CommandKind.DESCRIBE:
             return _run_describe(command, out, err)
@@ -408,6 +407,7 @@ def _run_describe(command: Command, out: TextIO, err: TextIO) -> int:
     from camctl.bootstrap.config import ConfigError
     from camctl.logging_runtime.one_shot import stderr_logging
     from camctl.logging_runtime.events import measure_stage
+    from camctl.logging_runtime.startup import record_startup
 
     try:
         from camctl.devices.catalog import build_catalog, default_driver_definitions
@@ -417,6 +417,7 @@ def _run_describe(command: Command, out: TextIO, err: TextIO) -> int:
         config = adapter.load(_config_arg(command))
         with stderr_logging(config.log, err, command_name="describe",
                 on_error=lambda stage, error: _diagnose_error(err, stage, error)):
+            record_startup()
             with measure_stage("describe"):
                 register_builtin_drivers(config)
                 catalog = build_catalog(config, default_driver_definitions())
@@ -434,6 +435,7 @@ def _run_init(command: Command, out: TextIO, err: TextIO) -> int:
     from camctl.bootstrap.config import ConfigError
     from camctl.logging_runtime.one_shot import stderr_logging
     from camctl.logging_runtime.events import measure_stage, record_event
+    from camctl.logging_runtime.startup import record_startup
     from camctl.persistence.initialization import (
         InitOutcome,
         initialize_state,
@@ -444,6 +446,7 @@ def _run_init(command: Command, out: TextIO, err: TextIO) -> int:
         config = adapter.load(_config_arg(command))
         with stderr_logging(config.log, err, command_name="init",
                 on_error=lambda stage, error: _diagnose_error(err, stage, error)):
+            record_startup()
             with measure_stage("initialization"):
                 result = initialize_state(config, adapter.state_db_path(config),
                     upgrade_software_recovery=command.upgrade_software_recovery,

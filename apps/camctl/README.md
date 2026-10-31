@@ -6,6 +6,8 @@
 
 开发与测试使用部署指定的 Python 3.11。先核对虚拟环境解释器版本；不匹配时通过 uv 创建对应版本的非项目级虚拟环境。环境与测试分工见[软件验证](../../docs/camctl/verification.md#python-环境)，业务和部署契约见[设计入口](../../docs/camctl/README.md)。
 
+`camctl --version` 输出当前安装的发行版本。`run`、`submit`、`init` 和 `describe` 在日志通道建立后各记录一次启动版本；日志文件或队列不可用时尝试通过 stderr 交付。
+
 技术选型、模块边界和接口契约见[实现规格](../../docs/camctl/implementation.md)。实施前须完成其中列明的设计事项。
 
 部署配置的全部字段、默认值、合法范围及主程序路径对应关系见[配置项参考](../../docs/camctl/configuration-reference.md)；首次安装和联调步骤见[部署样例](../../docs/architecture/deployment-example.md)。

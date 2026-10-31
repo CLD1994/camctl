@@ -1114,7 +1114,7 @@ async def execute_command(
     """为本命令及原业务子任务装配共同诊断目标和第三方路由。"""
     from camctl.logging_runtime.diagnostics import error_diagnostics_context, flush_diagnostics
     from camctl.logging_runtime.standard_logging import install_standard_logging
-    from camctl.logging_runtime import get_logger
+    from camctl.logging_runtime.startup import record_startup
 
     channel = None if deps.log_runtime is None else deps.log_runtime.channel
     fallback = lambda message: _write_stderr_diagnostic(deps, message)
@@ -1132,8 +1132,7 @@ async def execute_command(
         try:
             if channel is not None:
                 installation = install_standard_logging(channel, fallback)
-            get_logger(__name__).info("开始执行 %s 命令", deps.mode.value,
-                extra={"stage": "command", "event": "started"})
+            record_startup()
             return await _execute_command(
                 deps, source, flows=flows, restricted_flows=restricted_flows,
                 wake=wake, poll_interval_s=poll_interval_s, finish_command=finish_command,

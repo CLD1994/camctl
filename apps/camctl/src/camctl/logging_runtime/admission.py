@@ -57,6 +57,7 @@ class AdmissionInput:
     sample_probability_hint: float = 0.1
     filtered_out: bool = False
     channel_failed: bool = False
+    startup: bool = False
 
 
 @dataclass(frozen=True)
@@ -78,15 +79,19 @@ def decide_admission(log_input: AdmissionInput) -> AdmissionDecision:
     """
     if log_input.channel_failed:
         return AdmissionDecision(AdmissionKind.CHANNEL_FAILED, log_input.level)
-    if log_input.filtered_out:
+    if log_input.filtered_out and not log_input.startup:
         return AdmissionDecision(AdmissionKind.FILTERED_OUT, log_input.level)
     level = log_input.level
     if log_input.queue_depth >= log_input.queue_capacity:
+        if log_input.startup:
+            return AdmissionDecision(AdmissionKind.FALLBACK_STDERR, level)
         if level is LogLevel.ERROR:
             kind = (AdmissionKind.WAITING if log_input.source is LogSource.COROUTINE
                     else AdmissionKind.FALLBACK_STDERR)
             return AdmissionDecision(kind, level)
         return AdmissionDecision(AdmissionKind.DROPPED, level)
+    if log_input.startup:
+        return AdmissionDecision(AdmissionKind.ACCEPTED, level)
     if level in (LogLevel.WARNING, LogLevel.ERROR):
         return AdmissionDecision(AdmissionKind.ACCEPTED, level)
     queue = log_input.queue_depth
